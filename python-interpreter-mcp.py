@@ -223,6 +223,7 @@ import json
 import os
 import pathlib
 import socket
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -245,6 +246,17 @@ import pydantic
 
 # Local imports
 from mcp_utils import DualLogger
+
+
+# Custom exceptions for auto-installation
+class PackageInstallationError(Exception):
+    """Raised when auto-installation of a package fails."""
+    pass
+
+
+class MaxInstallAttemptsError(Exception):
+    """Raised when maximum installation attempts are exceeded."""
+    pass
 
 
 class BaseModel(pydantic.BaseModel):
@@ -433,6 +445,15 @@ class ServerState:
 # Constants
 CHARACTER_LIMIT = 25_000
 
+# Import name to PyPI package name mappings for common mismatches
+IMPORT_TO_PACKAGE_MAP = {
+    'aws_cdk': 'aws-cdk-lib',
+    'bs4': 'beautifulsoup4',
+    'PIL': 'pillow',
+    'psycopg2': 'psycopg2-binary',
+    'yaml': 'PyYAML',
+}
+
 
 class LoggerProtocol(typing.Protocol):
     """Protocol for logger - allows service to be MCP-agnostic."""
@@ -554,7 +575,7 @@ def register_tools(service: PythonInterpreterService) -> None:
         ),
     )
     async def execute(code: str, ctx: mcp.server.fastmcp.Context) -> ExecuteResult:
-        """Execute Python code in persistent scope. Variables persist across calls."""
+        """Execute Python code in persistent scope with auto-installation of missing packages. Variables persist across calls."""
         logger = DualLogger(ctx)
         return await service.execute(code, logger)
 
@@ -694,52 +715,154 @@ def _detect_expression(code: str) -> tuple[bool, str | None]:
         return False, None
 
 
-def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
-    """Execute code in provided scope. Returns output string."""
-    # Capture stdout/stderr
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-    sys.stdout = io.StringIO()
-    sys.stderr = io.StringIO()
+def _install_package(import_name: str) -> str:
+    """
+    Auto-install a missing package using uv pip install.
+
+    Args:
+        import_name: Name of the module that failed to import
+
+    Returns:
+        Success message with installation details
+
+    Raises:
+        PackageInstallationError: If installation fails for any reason
+    """
+    # Map import name to package name (e.g., 'PIL' -> 'pillow')
+    package_name = IMPORT_TO_PACKAGE_MAP.get(import_name, import_name)
 
     try:
-        # Detect if last line is expression
-        is_expr, last_line = _detect_expression(code)
+        # Use sys.executable to ensure we install into the current venv
+        result = subprocess.run(
+            ['uv', 'pip', 'install', '--python', sys.executable, package_name],
+            capture_output=True,
+            text=True,
+            timeout=60  # 60 second timeout for installation
+        )
+    except subprocess.TimeoutExpired:
+        raise PackageInstallationError(f"Timeout (>60s) while installing {package_name}")
 
-        if is_expr and last_line:
-            # Execute everything except last line, then eval last line
-            lines = code.splitlines()
-            code_without_last = '\n'.join(lines[:-1])
-
-            if code_without_last.strip():
-                exec(code_without_last, scope_globals)
-
-            result = eval(last_line, scope_globals)
-
-            # Get any print output
-            stdout_value = sys.stdout.getvalue()
-            stderr_value = sys.stderr.getvalue()
-
-            # Return print output if any, otherwise repr of result
-            if stdout_value or stderr_value:
-                return (stdout_value + stderr_value).rstrip()
-            else:
-                return repr(result) if result is not None else ""
+    if result.returncode == 0:
+        # Include stdout for transparency about what was installed
+        details = result.stdout.strip() if result.stdout.strip() else "No output"
+        if import_name != package_name:
+            return f"✓ Auto-installed {package_name} (for import {import_name})\n{details}"
         else:
-            # Pure statements, just exec
-            exec(code, scope_globals)
+            return f"✓ Auto-installed {package_name}\n{details}"
+    else:
+        stderr = result.stderr.strip() if result.stderr else "No error details"
+        raise PackageInstallationError(f"Failed to install {package_name}\n{stderr}")
+   
 
-            stdout_value = sys.stdout.getvalue()
-            stderr_value = sys.stderr.getvalue()
-            return (stdout_value + stderr_value).rstrip()
+def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
+    """
+    Execute code in provided scope. Auto-installs missing packages.
 
-    except Exception:
-        # Return formatted exception
-        return traceback.format_exc()
-    finally:
-        # Restore stdout/stderr
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
+    Args:
+        code: Python code to execute
+        scope_globals: Global scope dictionary for execution
+
+    Returns:
+        Output string from successful execution
+
+    Raises:
+        PackageInstallationError: If package installation fails
+        MaxInstallAttemptsError: If max installation attempts exceeded
+        Exception: Any exception from user code execution
+    """
+    max_install_attempts = 3
+    successfully_installed = set()
+    failed_installs = set()
+
+    while True:
+        # Capture stdout/stderr
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+
+        try:
+            # Detect if last line is expression
+            is_expr, last_line = _detect_expression(code)
+
+            if is_expr and last_line:
+                # Execute everything except last line, then eval last line
+                lines = code.splitlines()
+                code_without_last = '\n'.join(lines[:-1])
+
+                if code_without_last.strip():
+                    exec(code_without_last, scope_globals)
+
+                result = eval(last_line, scope_globals)
+
+                # Get any print output
+                stdout_value = sys.stdout.getvalue()
+                stderr_value = sys.stderr.getvalue()
+
+                # Return print output if any, otherwise repr of result
+                if stdout_value or stderr_value:
+                    return (stdout_value + stderr_value).rstrip()
+                else:
+                    return repr(result) if result is not None else ""
+            else:
+                # Pure statements, just exec
+                exec(code, scope_globals)
+
+                stdout_value = sys.stdout.getvalue()
+                stderr_value = sys.stderr.getvalue()
+                return (stdout_value + stderr_value).rstrip()
+
+        except ModuleNotFoundError as e:
+            # Extract module name from error
+            module_name = e.name
+
+            # Determine if we should attempt auto-install
+            total_attempts = len(successfully_installed) + len(failed_installs)
+            should_attempt = (
+                module_name and
+                module_name not in successfully_installed and
+                module_name not in failed_installs and
+                total_attempts < max_install_attempts
+            )
+
+            if should_attempt:
+                try:
+                    # Attempt auto-install
+                    message = _install_package(module_name)
+                    successfully_installed.add(module_name)
+
+                    # Print install message so user sees it
+                    print(message, file=sys.stderr)
+
+                    # Retry execution after successful install
+                    continue
+
+                except PackageInstallationError as install_error:
+                    failed_installs.add(module_name)
+                    # Re-raise with context
+                    raise PackageInstallationError(
+                        f"{install_error}\n\nOriginal import error: {e}"
+                    ) from e
+            else:
+                # Cannot or should not retry
+                if total_attempts >= max_install_attempts:
+                    raise MaxInstallAttemptsError(
+                        f"Maximum installation attempts ({max_install_attempts}) exceeded.\n"
+                        f"Successfully installed: {successfully_installed}\n"
+                        f"Failed: {failed_installs}"
+                    ) from e
+                elif module_name in failed_installs:
+                    raise PackageInstallationError(
+                        f"Package '{module_name}' already failed to install"
+                    ) from e
+                else:
+                    # No module name or other issue - re-raise original
+                    raise
+
+        finally:
+            # Always restore stdout/stderr
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
 
 def main() -> None:
