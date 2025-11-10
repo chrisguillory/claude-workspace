@@ -1,0 +1,752 @@
+#!/usr/bin/env python3
+# /// script
+# dependencies = [
+#   "attrs",
+#   "fastapi",
+#   "fastmcp>=2.12.5",
+#   "pandas",
+#   "pydantic",
+#   "uvicorn",
+# ]
+# ///
+"""
+Python Interpreter MCP Server
+
+Provides a persistent Python execution environment accessible via MCP tools. Code, variables,
+imports, and functions persist across tool calls for stateful computation.
+
+Architecture:
+    Claude Code ──[stdio/JSON-RPC]──> python-interpreter-mcp.py
+                                       ├── FastMCP (main, stdio)
+                                       └── FastAPI (background, Unix socket)
+                                                ▲
+                                                │ HTTP POST /execute
+                                                │
+    Bash heredoc ──[stdin]──> python-interpreter-client.py ───┘
+                              (auto-discovers socket via process tree)
+
+    Unix Socket (auto-discovery):
+    └── /tmp/python-interpreter-{claude_pid}.sock
+
+    Temp Directory (lifespan-managed):
+    └── /tmp/tmpXXXXXX/
+        ├── output_20250108_143022.txt  # Large outputs saved here
+        └── output_20250108_143507.txt
+
+Tools:
+    - execute: Execute Python code in persistent scope
+    - reset: Clear all variables and reset to fresh state
+    - list_vars: List currently defined variables
+
+    (MCP exposes as: mcp__python-interpreter__execute, etc.)
+
+Features:
+    - Persistent scope across executions
+    - Auto-detects and returns expression values
+    - Captures stdout/stderr
+    - Returns full tracebacks on errors
+    - Large outputs saved to temp files (>25,000 chars)
+    - HTTP bridge for beautiful heredoc syntax with python-interpreter-client.py
+
+Security:
+    WARNING: This server executes arbitrary Python code. Only use with trusted input.
+    The execution scope is isolated from MCP internals but has full Python capabilities.
+
+Use Cases:
+    - Data analysis and computation
+    - Prototyping algorithms
+    - Testing Python code snippets
+    - Multi-step calculations that build on previous results
+    - ASCII art and text formatting
+
+Setup:
+    claude mcp add --transport stdio python-interpreter -- uv run --script "$PROJECT_ROOT/scratch/mcp/python-interpreter-mcp.py"
+
+Example Session:
+    1. execute("import math; pi_squared = math.pi ** 2")  # Returns: ""
+    2. execute("pi_squared")  # Returns: "9.869604401089358"
+    3. list_vars()  # Returns: "math, pi_squared"
+    4. reset()  # Returns: "Scope reset - all variables cleared (2 items removed)"
+
+HTTP Bridge Usage (recommended for multiline code):
+    uv run --script python-interpreter-client.py <<'PY'
+    import pandas as pd
+    print(pd.__version__)
+    PY
+
+    The client automatically discovers the Unix socket by walking the process tree
+    to find Claude's PID. No manual configuration needed!
+
+=== Detailed Tool Documentation ===
+
+EXECUTE TOOL:
+    Executes arbitrary Python code in an isolated persistent scope. Variables, imports,
+    functions, and classes persist across calls, enabling multi-step computations.
+
+    Behavior:
+        - Variables persist across calls (stateful)
+        - Imports remain available after first import
+        - Captures both stdout and stderr
+        - Scope is isolated from MCP server internals
+        - Last expression is auto-evaluated (no need to print)
+        - Returns print output if code prints
+        - Returns repr() of last expression if code ends with expression
+        - Returns empty string if pure statements with no output
+        - Returns full exception traceback if code fails
+        - Truncates output if exceeds 25,000 characters
+
+    Security:
+        WARNING: Executes arbitrary Python code with full language capabilities.
+        Only use with trusted input. Code has access to:
+        - All Python built-ins (open, exec, eval, import, etc.)
+        - File system access
+        - Network access
+        - System calls
+
+        Code does NOT have access to:
+        - MCP server internals (_user_scope is separate)
+        - Other MCP tool implementations
+
+    Examples:
+        execute("x = 5")
+        # Returns: ""
+
+        execute("x * 2")
+        # Returns: "10"
+
+        execute("print(f'x = {x}')")
+        # Returns: "x = 5"
+
+        execute("import math\\nmath.pi")
+        # Returns: "3.141592653589793"
+
+        execute("1/0")
+        # Returns: "Traceback (most recent call last):\\n  ...\\nZeroDivisionError: division by zero"
+
+        execute("big = list(range(100000))\\nbig")
+        # Returns: "[0, 1, 2, ... [TRUNCATED - Output exceeded 25000 character limit] ..."
+
+    Use When:
+        - Performing multi-step calculations
+        - Data analysis requiring state
+        - Testing code snippets
+        - Prototyping algorithms
+        - Generating formatted text (ASCII art, tables, etc.)
+
+    Avoid When:
+        - No state needed between calls (use one-shot scripts instead)
+        - Untrusted code execution required
+        - Production workloads (use proper Python environment)
+
+RESET TOOL:
+    Clears all variables, imports, and functions from persistent Python scope. Resets
+    the interpreter to a fresh state without restarting the MCP server.
+
+    Behavior:
+        - Clears entire _user_scope dictionary
+        - Does not restart the MCP server
+        - Idempotent (safe to call multiple times)
+        - Cannot be undone (destructive operation)
+        - Returns count of items removed
+
+    All state is destroyed including:
+        - Variables (x, my_list, etc.)
+        - Imports (math, pandas, etc.)
+        - Functions and classes you defined
+        - Any other objects in the namespace
+
+    Examples:
+        execute("x = 5; y = 10")
+        list_vars()  # Returns: "x, y"
+        reset()  # Returns: "Scope reset - all variables cleared (2 items removed)"
+        list_vars()  # Returns: "No variables defined"
+
+    Use When:
+        - Starting a new unrelated computation
+        - Cleaning up after experiments
+        - Freeing memory from large objects
+        - Ensuring fresh state for testing
+
+    Avoid When:
+        - You need to preserve any variables
+        - Mid-computation (will lose all state)
+
+LIST_VARS TOOL:
+    Lists all user-defined variables in persistent Python scope. Returns alphabetically
+    sorted names of all variables, functions, classes, and imports currently defined.
+
+    Behavior:
+        - Filters out Python builtins (names starting with '__')
+        - Returns only user-defined names
+        - Alphabetically sorted for readability
+        - Read-only (does not modify scope)
+        - Idempotent (same result until scope changes)
+
+    Examples:
+        execute("x = 5; y = 10; z = 15")
+        list_vars()  # Returns: "x, y, z"
+
+        execute("import math")
+        list_vars()  # Returns: "math, x, y, z"
+
+        execute("def my_func(): pass")
+        list_vars()  # Returns: "math, my_func, x, y, z"
+
+        reset()
+        list_vars()  # Returns: "No variables defined"
+
+    Use When:
+        - Debugging to see what's in scope
+        - Checking if variables are defined
+        - Inspecting state before/after operations
+        - Verifying imports succeeded
+
+    Avoid When:
+        - Needing detailed type or value information (use execute with repr/type instead)
+        - Trying to get builtin names (those are filtered out)
+"""
+
+from __future__ import annotations
+
+# Import Strategy:
+# Using absolute imports (import X) for libraries with multiple used types/functions
+# to make it explicit which library provides what, improving readability when
+# coupling multiple frameworks (MCP, FastAPI, Pydantic, asyncio, socket, etc.)
+
+import ast
+import asyncio
+import contextlib
+import datetime
+import functools
+import io
+import json
+import os
+import pathlib
+import socket
+import sys
+import tempfile
+import textwrap
+import traceback
+import typing
+
+# Third-party imports
+import attrs
+
+# MCP imports
+import mcp.types
+import mcp.server.fastmcp
+
+# FastAPI imports
+import fastapi
+import uvicorn
+
+# Pydantic imports
+import pydantic
+
+# Local imports
+from mcp_utils import DualLogger
+
+
+class BaseModel(pydantic.BaseModel):
+    """Base model with strict validation - no extra fields, all fields required unless Optional."""
+    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
+
+
+class ExecuteCodeInput(BaseModel):
+    """Input model for execute tool."""
+    code: str = pydantic.Field(
+        description="Python code to execute (can be multi-line)",
+        min_length=1,
+        max_length=100_000,
+    )
+
+
+class ResetScopeInput(BaseModel):
+    """Input model for reset tool."""
+    pass
+
+
+class ListVarsInput(BaseModel):
+    """Input model for list_vars tool."""
+    pass
+
+
+class TruncationInfo(pydantic.BaseModel):
+    """Information about truncated output."""
+    file_path: str
+    original_size: int
+    truncated_at: int
+
+
+class InstanceMetadata(pydantic.BaseModel):
+    """Metadata about a running MCP server instance."""
+    pid: int
+    parent_pid: int
+    port: int
+    timestamp: str
+
+
+@attrs.define
+class ClaudeContext:
+    """Context information about the Claude Code session."""
+    claude_pid: int
+    project_dir: pathlib.Path
+    socket_path: pathlib.Path
+
+
+@functools.cache
+def _find_claude_context() -> ClaudeContext:
+    """Find Claude process and extract its context (PID, project directory)."""
+    import subprocess
+
+    current = os.getppid()
+
+    for _ in range(20):  # Depth limit
+        result = subprocess.run(
+            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            capture_output=True,
+            text=True
+        )
+
+        if not result.stdout.strip():
+            break
+
+        parts = result.stdout.strip().split(None, 1)
+        ppid = int(parts[0])
+        comm = parts[1] if len(parts) > 1 else ''
+
+        # Check if this is Claude
+        if 'claude' in comm.lower():
+            # Get Claude's CWD using lsof
+            result = subprocess.run(
+                ['lsof', '-p', str(current), '-a', '-d', 'cwd'],
+                capture_output=True,
+                text=True
+            )
+
+            cwd = None
+            for line in result.stdout.split('\n'):
+                if 'cwd' in line:
+                    parts = line.split()
+                    if len(parts) >= 9:
+                        cwd = pathlib.Path(' '.join(parts[8:]))
+                        break
+
+            if not cwd:
+                raise RuntimeError(f"Found Claude process (PID {current}) but could not determine CWD")
+
+            # Verify by checking if Claude has .claude/ files open that match the CWD
+            result = subprocess.run(
+                ['lsof', '-p', str(current)],
+                capture_output=True,
+                text=True
+            )
+
+            claude_files = []
+            for line in result.stdout.split('\n'):
+                if '.claude' in line:
+                    # Extract the full path from lsof output
+                    parts = line.split()
+                    if len(parts) >= 9:
+                        file_path = ' '.join(parts[8:])
+                        claude_files.append(file_path)
+
+            if not claude_files:
+                raise RuntimeError(
+                    f"Found Claude process (PID {current}) with CWD {cwd}, "
+                    f"but no .claude/ files are open - may not be a Claude project"
+                )
+
+            # Verify at least one .claude file is parented to the CWD
+            cwd_str = str(cwd)
+            matching_files = [f for f in claude_files if f.startswith(cwd_str)]
+
+            if not matching_files:
+                raise RuntimeError(
+                    f"Found Claude process (PID {current}) with CWD {cwd}, "
+                    f"but .claude/ files open are not parented to this directory:\n"
+                    f"  Open files: {claude_files}\n"
+                    f"  Expected parent: {cwd_str}"
+                )
+
+            # Compute socket path based on Claude PID
+            socket_path = pathlib.Path(f'/tmp/python-interpreter-{current}.sock')
+
+            return ClaudeContext(
+                claude_pid=current,
+                project_dir=cwd,
+                socket_path=socket_path
+            )
+
+        if ppid == 0:
+            break
+
+        current = ppid
+
+    raise RuntimeError("Not running under Claude Code - could not find Claude process in process tree")
+
+
+class ServerState:
+    """Container for all server state - initialized once at startup, never Optional."""
+
+    @classmethod
+    async def create(cls) -> typing.Self:
+        """Factory method to create and initialize server state - fails fast if anything goes wrong."""
+        # Find Claude context (PID, project directory) by walking process tree
+        claude_context = _find_claude_context()
+        print(f'Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}')
+
+        # Initialize temp directory for large outputs
+        temp_dir = tempfile.TemporaryDirectory()
+        output_dir = pathlib.Path(temp_dir.name)
+        print(f'Temp directory for large outputs: {output_dir}')
+
+        # Remove stale socket if it exists
+        if claude_context.socket_path.exists():
+            claude_context.socket_path.unlink()
+
+        print(f'Unix socket path: {claude_context.socket_path}')
+
+        return cls(
+            temp_dir=temp_dir,
+            output_dir=output_dir,
+            socket_path=claude_context.socket_path,
+            project_dir=claude_context.project_dir,
+        )
+
+    def __init__(
+        self,
+        temp_dir: tempfile.TemporaryDirectory,
+        output_dir: pathlib.Path,
+        socket_path: pathlib.Path,
+        project_dir: pathlib.Path,
+    ) -> None:
+        self.temp_dir = temp_dir
+        self.output_dir = output_dir
+        self.socket_path = socket_path
+        self.project_dir = project_dir
+
+        # Python execution scope - persists across executions
+        self.scope_globals: dict[str, typing.Any] = {}
+
+
+# Constants
+CHARACTER_LIMIT = 25_000
+
+
+class LoggerProtocol(typing.Protocol):
+    """Protocol for logger - allows service to be MCP-agnostic."""
+    async def info(self, message: str) -> None: ...
+    async def warning(self, message: str) -> None: ...
+    async def error(self, message: str) -> None: ...
+
+
+class ExecuteResult(pydantic.BaseModel):
+    """Result from executing Python code."""
+    truncation_info: TruncationInfo | None = None
+    result: str
+
+
+class PythonInterpreterService:
+    """Python interpreter service - protocol-agnostic, pure domain logic."""
+
+    def __init__(self, state: ServerState) -> None:
+        self.state = state  # Non-Optional - guaranteed by constructor
+
+    async def execute(self, code: str, logger: LoggerProtocol) -> ExecuteResult:
+        """Execute Python code in persistent scope."""
+        await logger.info(f'Executing Python code ({len(code)} chars)')
+
+        try:
+            result, truncation_info = self._execute_with_file_handling(code)
+
+            if truncation_info:
+                await logger.warning(f'Output truncated: {truncation_info.original_size} chars exceeds limit of {truncation_info.truncated_at}')
+                await logger.info(f'Full output saved to: {truncation_info.file_path}')
+
+            await logger.info(f'Execution complete - output length: {len(result)} chars')
+            return ExecuteResult(truncation_info=truncation_info, result=result)
+
+        except Exception as e:
+            await logger.warning(f'Execution failed: {type(e).__name__}: {e}')
+            raise
+
+    async def reset(self, logger: LoggerProtocol) -> str:
+        """Clear all variables from persistent scope."""
+        await logger.info('Resetting Python interpreter scope')
+
+        var_count = len([k for k in self.state.scope_globals.keys() if not k.startswith('__')])
+        self.state.scope_globals.clear()
+
+        await logger.info(f'Scope reset complete - cleared {var_count} variables')
+        return f"Scope reset - all variables cleared ({var_count} items removed)"
+
+    async def list_vars(self, logger: LoggerProtocol) -> str:
+        """List all user-defined variables in persistent scope."""
+        await logger.info('Listing Python interpreter variables')
+
+        if not self.state.scope_globals:
+            await logger.info('No variables in scope')
+            return "No variables defined"
+
+        # Filter out builtins like __name__, __doc__, etc
+        user_vars = [name for name in self.state.scope_globals.keys() if not name.startswith('__')]
+
+        if not user_vars:
+            await logger.info('No user variables in scope (only builtins)')
+            return "No variables defined"
+
+        await logger.info(f'Found {len(user_vars)} variables in scope')
+        return ", ".join(sorted(user_vars))
+
+    def _execute_with_file_handling(self, code: str) -> tuple[str, TruncationInfo | None]:
+        """Execute code and handle large output by saving to temp file."""
+        # Execute the code
+        result = _execute_code(code, self.state.scope_globals)
+
+        # Check if output exceeds limit
+        if len(result) > CHARACTER_LIMIT:
+            # Generate unique filename with timestamp
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"output_{timestamp}.txt"
+            file_path = self.state.output_dir / filename
+
+            # Write full output to file
+            file_path.write_text(result, encoding='utf-8')
+
+            # Create truncation info
+            truncation_info = TruncationInfo(
+                file_path=str(file_path),
+                original_size=len(result),
+                truncated_at=CHARACTER_LIMIT
+            )
+
+            # Return truncated result
+            return result[:CHARACTER_LIMIT], truncation_info
+
+        # Output fits in limit
+        return result, None
+
+
+class SimpleLogger:
+    """Simple logger for HTTP endpoint - logs to stdout."""
+
+    async def info(self, message: str) -> None:
+        print(f"INFO: {message}")
+
+    async def warning(self, message: str) -> None:
+        print(f"WARNING: {message}")
+
+    async def error(self, message: str) -> None:
+        print(f"ERROR: {message}")
+
+
+def register_tools(service: PythonInterpreterService) -> None:
+    """Register service methods as MCP tools via closures."""
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Execute Python Code',
+            destructiveHint=False,
+            idempotentHint=False,
+            readOnlyHint=False,
+            openWorldHint=False
+        ),
+    )
+    async def execute(code: str, ctx: mcp.server.fastmcp.Context) -> ExecuteResult:
+        """Execute Python code in persistent scope. Variables persist across calls."""
+        logger = DualLogger(ctx)
+        return await service.execute(code, logger)
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Reset Python Scope',
+            destructiveHint=True,
+            idempotentHint=True,
+            readOnlyHint=False,
+            openWorldHint=False
+        ),
+        structured_output=False
+    )
+    async def reset(ctx: mcp.server.fastmcp.Context) -> str:
+        """Clear all variables, imports, and functions from persistent scope."""
+        logger = DualLogger(ctx)
+        return await service.reset(logger)
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='List Python Variables',
+            destructiveHint=False,
+            idempotentHint=True,
+            readOnlyHint=True,
+            openWorldHint=False
+        ),
+        structured_output=False
+    )
+    async def list_vars(ctx: mcp.server.fastmcp.Context) -> str:
+        """List all user-defined variables in persistent scope."""
+        logger = DualLogger(ctx)
+        return await service.list_vars(logger)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(server_instance: mcp.server.fastmcp.FastMCP) -> typing.AsyncIterator[None]:
+    """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
+    state = await ServerState.create()
+    service = PythonInterpreterService(state)
+    register_tools(service)
+
+    # Store service on fastapi_app for HTTP endpoint access (standard FastAPI pattern)
+    fastapi_app.state.service = service
+
+    # Start FastAPI in background on Unix socket
+    config = uvicorn.Config(fastapi_app, uds=state.socket_path.as_posix(), log_level='warning')
+    uvicorn_server = uvicorn.Server(config)
+    asyncio.create_task(uvicorn_server.serve())
+
+    print(f'✓ Server initialized')
+    print(f'  Output directory: {state.output_dir}')
+    print(f'  Unix socket: {state.socket_path}')
+
+    # Server is ready - yield control back to FastMCP
+    yield
+
+    # SHUTDOWN: Cleanup after all requests complete
+    state.temp_dir.cleanup()
+    if state.socket_path.exists():
+        state.socket_path.unlink()
+    print('✓ Server cleanup complete')
+
+
+# Create FastMCP server with lifespan
+server = mcp.server.fastmcp.FastMCP('python-interpreter', lifespan=lifespan)
+
+# Create FastAPI app for HTTP bridge
+fastapi_app = fastapi.FastAPI(title="Python Interpreter HTTP Bridge")
+
+
+class ExecuteRequest(pydantic.BaseModel):
+    """Request body for HTTP execute endpoint."""
+    code: str
+
+
+# Dependency functions (standard FastAPI pattern)
+def get_interpreter_service(request: fastapi.Request) -> PythonInterpreterService:
+    """Retrieve service from app.state."""
+    return request.app.state.service
+
+
+def get_simple_logger() -> SimpleLogger:
+    """Create logger instance."""
+    return SimpleLogger()
+
+
+@fastapi_app.post("/execute")
+async def http_execute(
+    request: ExecuteRequest,
+    service: PythonInterpreterService = fastapi.Depends(get_interpreter_service),
+    logger: SimpleLogger = fastapi.Depends(get_simple_logger)
+) -> dict[str, str]:
+    """HTTP endpoint for executing Python code.
+
+    This allows beautiful heredoc syntax via python-interpreter-client.py:
+        uv run --script python-interpreter-client.py <<'PY'
+        import pandas as pd
+        print(pd.__version__)
+        PY
+
+    The client auto-discovers this endpoint via Unix socket.
+
+    Args:
+        request: Request body containing code to execute
+        service: Injected Python interpreter service
+        logger: Injected logger instance
+
+    Returns:
+        JSON response with result field (may contain truncation info)
+    """
+    result = await service.execute(request.code, logger)
+
+    # Format response with truncation info if needed
+    if result.truncation_info:
+        separator = '=' * 50
+        formatted_result = f"{result.result}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {result.truncation_info.original_size:,} chars\n# Full output: {result.truncation_info.file_path}\n{separator}"
+        return {"result": formatted_result}
+
+    return {"result": result.result}
+
+
+# Helper functions for code execution
+def _detect_expression(code: str) -> tuple[bool, str | None]:
+    """Detect if last line is an expression. Returns (is_expr, last_line)."""
+    try:
+        tree = ast.parse(code)
+        if not tree.body:
+            return False, None
+
+        last_node = tree.body[-1]
+        if isinstance(last_node, ast.Expr):
+            # Last statement is an expression
+            last_line = ast.unparse(last_node.value)
+            return True, last_line
+        return False, None
+    except SyntaxError:
+        return False, None
+
+
+def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
+    """Execute code in provided scope. Returns output string."""
+    # Capture stdout/stderr
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    sys.stdout = io.StringIO()
+    sys.stderr = io.StringIO()
+
+    try:
+        # Detect if last line is expression
+        is_expr, last_line = _detect_expression(code)
+
+        if is_expr and last_line:
+            # Execute everything except last line, then eval last line
+            lines = code.splitlines()
+            code_without_last = '\n'.join(lines[:-1])
+
+            if code_without_last.strip():
+                exec(code_without_last, scope_globals)
+
+            result = eval(last_line, scope_globals)
+
+            # Get any print output
+            stdout_value = sys.stdout.getvalue()
+            stderr_value = sys.stderr.getvalue()
+
+            # Return print output if any, otherwise repr of result
+            if stdout_value or stderr_value:
+                return (stdout_value + stderr_value).rstrip()
+            else:
+                return repr(result) if result is not None else ""
+        else:
+            # Pure statements, just exec
+            exec(code, scope_globals)
+
+            stdout_value = sys.stdout.getvalue()
+            stderr_value = sys.stderr.getvalue()
+            return (stdout_value + stderr_value).rstrip()
+
+    except Exception:
+        # Return formatted exception
+        return traceback.format_exc()
+    finally:
+        # Restore stdout/stderr
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+
+
+def main() -> None:
+    """Main entry point for the Python Interpreter MCP server."""
+    print('Starting Python Interpreter MCP server')
+    server.run()
+
+
+if __name__ == '__main__':
+    main()
