@@ -498,11 +498,16 @@ class ServerState:
 CHARACTER_LIMIT = 25_000
 
 # Import name to PyPI package name mappings for common mismatches
+# Philosophy: Explicit curated list (secure) vs dynamic lookup (complex/risky)
 IMPORT_TO_PACKAGE_MAP = {
     'aws_cdk': 'aws-cdk-lib',
     'bs4': 'beautifulsoup4',
+    'dateutil': 'python-dateutil',
+    'OpenSSL': 'pyOpenSSL',
     'PIL': 'pillow',
     'psycopg2': 'psycopg2-binary',
+    'skimage': 'scikit-image',
+    'sklearn': 'scikit-learn',
     'yaml': 'PyYAML',
 }
 
