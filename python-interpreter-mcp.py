@@ -69,7 +69,7 @@ Example Session:
     4. reset()  # Returns: "Scope reset - all variables cleared (2 items removed)"
 
 HTTP Bridge Usage (recommended for multiline code):
-    uv run --script python-interpreter-client.py <<'PY'
+    ~/mcps/python-interpreter-client.py <<'PY'
     import pandas as pd
     print(pd.__version__)
     PY
@@ -575,7 +575,16 @@ def register_tools(service: PythonInterpreterService) -> None:
         ),
     )
     async def execute(code: str, ctx: mcp.server.fastmcp.Context) -> ExecuteResult:
-        """Execute Python code in persistent scope with auto-installation of missing packages. Variables persist across calls."""
+        """Execute Python code in persistent scope with auto-installation of missing packages. Variables persist across calls.
+
+        IMPORTANT: For better user experience, you should typically use the Bash client instead:
+            ~/mcps/python-interpreter-client.py <<'PY'
+            import tiktoken
+            tokens = tiktoken.get_encoding("cl100k_base").encode("Strawberry")
+            print(f"Token count: {len(tokens)}")
+            PY
+
+        Only use this MCP tool directly if the user explicitly requests it or you need structured ExecuteResult output."""
         logger = DualLogger(ctx)
         return await service.execute(code, logger)
 
@@ -671,7 +680,7 @@ async def http_execute(
     """HTTP endpoint for executing Python code.
 
     This allows beautiful heredoc syntax via python-interpreter-client.py:
-        uv run --script python-interpreter-client.py <<'PY'
+        ~/mcps/python-interpreter-client.py <<'PY'
         import pandas as pd
         print(pd.__version__)
         PY
