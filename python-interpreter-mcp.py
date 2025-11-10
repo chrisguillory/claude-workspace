@@ -218,6 +218,7 @@ import asyncio
 import contextlib
 import datetime
 import functools
+import glob
 import io
 import json
 import os
@@ -229,6 +230,7 @@ import tempfile
 import textwrap
 import traceback
 import typing
+import uuid
 
 # Third-party imports
 import attrs
@@ -298,12 +300,52 @@ class InstanceMetadata(pydantic.BaseModel):
     timestamp: str
 
 
+
+
 @attrs.define
 class ClaudeContext:
     """Context information about the Claude Code session."""
     claude_pid: int
     project_dir: pathlib.Path
     socket_path: pathlib.Path
+
+
+def _discover_session_id(session_marker: str) -> str:
+    """Discover Claude Code session ID via self-referential marker search in debug logs.
+
+    Workaround for lack of official session discovery API. Claude Code's stdio transport
+    provides no session context to MCP servers. The /status command exists for interactive
+    use, and the Agent SDK exposes session_id, but CLI MCP servers have no API.
+
+    Related: https://github.com/anthropics/claude-code/issues/1335
+             https://github.com/anthropics/claude-code/issues/1407
+             https://github.com/anthropics/claude-code/issues/5262
+
+    Args:
+        session_marker: Unique marker string to search for in debug logs
+
+    Returns:
+        Session ID (UUID string)
+
+    Raises:
+        RuntimeError: If debug directory doesn't exist or session ID cannot be found
+    """
+    debug_dir = pathlib.Path.home() / '.claude' / 'debug'
+    if not debug_dir.exists():
+        raise RuntimeError(f"Claude debug directory not found: {debug_dir}")
+
+    result = subprocess.run(
+        ['rg', '-l', '--fixed-strings', '--glob', '!latest', session_marker, debug_dir.as_posix()],
+        capture_output=True,
+        text=True,
+        timeout=2
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise RuntimeError(f"Could not find session marker in any debug log files in {debug_dir}")
+
+    # rg found the marker - extract session ID from first matching file
+    first_match = result.stdout.strip().split('\n')[0]
+    return pathlib.Path(first_match).stem
 
 
 @functools.cache
@@ -404,6 +446,13 @@ class ServerState:
     @classmethod
     async def create(cls) -> typing.Self:
         """Factory method to create and initialize server state - fails fast if anything goes wrong."""
+        # Discover session ID via self-referential marker search
+        session_marker = f"SESSION_MARKER_{uuid.uuid4()}"
+        print(session_marker, file=sys.stderr, flush=True)
+
+        session_id = _discover_session_id(session_marker)
+        print(f'✓ Discovered session ID: {session_id}', file=sys.stderr, flush=True)
+
         # Find Claude context (PID, project directory) by walking process tree
         claude_context = _find_claude_context()
         print(f'Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}')
@@ -420,6 +469,7 @@ class ServerState:
         print(f'Unix socket path: {claude_context.socket_path}')
 
         return cls(
+            session_id=session_id,
             temp_dir=temp_dir,
             output_dir=output_dir,
             socket_path=claude_context.socket_path,
@@ -428,11 +478,13 @@ class ServerState:
 
     def __init__(
         self,
+        session_id: str,
         temp_dir: tempfile.TemporaryDirectory,
         output_dir: pathlib.Path,
         socket_path: pathlib.Path,
         project_dir: pathlib.Path,
     ) -> None:
+        self.session_id = session_id
         self.temp_dir = temp_dir
         self.output_dir = output_dir
         self.socket_path = socket_path
@@ -519,6 +571,11 @@ class PythonInterpreterService:
 
         await logger.info(f'Found {len(user_vars)} variables in scope')
         return ", ".join(sorted(user_vars))
+
+    async def get_session_id(self, logger: LoggerProtocol) -> str:
+        """Get the Claude Code session ID."""
+        await logger.info('Getting session ID')
+        return self.state.session_id
 
     def _execute_with_file_handling(self, code: str) -> tuple[str, TruncationInfo | None]:
         """Execute code and handle large output by saving to temp file."""
@@ -617,6 +674,21 @@ def register_tools(service: PythonInterpreterService) -> None:
         """List all user-defined variables in persistent scope."""
         logger = DualLogger(ctx)
         return await service.list_vars(logger)
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Get Session ID',
+            destructiveHint=False,
+            idempotentHint=True,
+            readOnlyHint=True,
+            openWorldHint=False
+        ),
+        structured_output=False
+    )
+    async def get_session_id(ctx: mcp.server.fastmcp.Context) -> str:
+        """Get the Claude Code session ID (UUID)."""
+        logger = DualLogger(ctx)
+        return await service.get_session_id(logger)
 
 
 @contextlib.asynccontextmanager
