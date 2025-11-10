@@ -1,0 +1,99 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = ["httpx"]
+# ///
+"""
+HTTP client for python-interpreter MCP server.
+
+Connects to the MCP server via Unix socket.
+
+Usage Examples:
+
+1. Simple expression:
+   $ uv run --script python-interpreter-client.py <<'PY'
+   import pandas as pd
+   print(pd.__version())
+   PY
+
+   OUTPUT:
+   2.1.4
+
+2. Large output (gets truncated):
+   $ uv run --script python-interpreter-client.py <<'PY'
+   print('x' * 30000)
+   PY
+
+   OUTPUT:
+   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx... [25,000 chars shown]
+
+   ==================================================
+   # OUTPUT TRUNCATED
+   # Original size: 30,000 chars
+   # Full output: /tmp/tmpXYZ123/output_20250108_143022.txt
+   ==================================================
+"""
+import os
+import pathlib
+import sys
+
+import httpx
+
+
+def get_socket_path() -> pathlib.Path:
+    """Get Unix socket path by finding Claude PID in process tree."""
+    import subprocess
+
+    current = os.getppid()
+
+    for _ in range(20):  # Depth limit
+        result = subprocess.run(
+            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            capture_output=True,
+            text=True
+        )
+
+        if not result.stdout.strip():
+            break
+
+        parts = result.stdout.strip().split(None, 1)
+        ppid = int(parts[0])
+        comm = parts[1] if len(parts) > 1 else ''
+
+        # Check if this is Claude
+        if 'claude' in comm.lower():
+            return pathlib.Path(f'/tmp/python-interpreter-{current}.sock')
+
+        if ppid == 0:
+            break
+
+        current = ppid
+
+    raise RuntimeError("Could not find Claude process in process tree")
+
+
+def main():
+    # Read code from stdin
+    code = sys.stdin.read()
+    if not code.strip():
+        print("Error: No code provided on stdin", file=sys.stderr)
+        sys.exit(1)
+
+    # Get socket path
+    socket_path = get_socket_path()
+
+    # Connect via Unix socket
+    transport = httpx.HTTPTransport(uds=socket_path.as_posix())
+    with httpx.Client(transport=transport, timeout=30.0) as client:
+        response = client.post(
+            "http://localhost/execute",
+            json={"code": code}
+        )
+        response.raise_for_status()
+
+        # Print result
+        result = response.json()["result"]
+        print(result)
+
+
+if __name__ == '__main__':
+    main()
