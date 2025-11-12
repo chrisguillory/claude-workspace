@@ -60,7 +60,7 @@ Use Cases:
     - ASCII art and text formatting
 
 Setup:
-    claude mcp add --transport stdio python-interpreter -- uv run --script "$PROJECT_ROOT/scratch/mcp/python-interpreter-mcp.py"
+    claude mcp add --transport stdio python-interpreter -- uv run --script "$(git rev-parse --show-toplevel)/python-interpreter-mcp.py"
 
 Example Session:
     1. execute("import math; pi_squared = math.pi ** 2")  # Returns: ""
