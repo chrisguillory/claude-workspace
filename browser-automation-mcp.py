@@ -13,7 +13,7 @@
 # Architecture: Runs locally via uv --script (not Docker) for visible browser monitoring.
 #
 # Setup:
-#   claude mcp add --transport stdio browser-automation -- uv run --script "$PROJECT_ROOT/dev/browser-automation-mcp.py"
+#   claude mcp add --transport stdio browser-automation -- uv run --script "$(git rev-parse --show-toplevel)/browser-automation-mcp.py"
 
 from __future__ import annotations
 
