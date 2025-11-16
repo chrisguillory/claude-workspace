@@ -14,7 +14,7 @@
 # Uses Selenium with CDP stealth injection to bypass Cloudflare bot detection.
 #
 # Setup:
-#   claude mcp add --transport stdio selenium-browser-automation -- uv run --script "$PROJECT_ROOT/dev/selenium-browser-automation-mcp.py"
+#   claude mcp add --transport stdio selenium-browser-automation -- uv run --script "$(git rev-parse --show-toplevel)/mcp/selenium-browser-automation/server.py"
 
 from __future__ import annotations
 

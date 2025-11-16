@@ -16,7 +16,7 @@ Provides a persistent Python execution environment accessible via MCP tools. Cod
 imports, and functions persist across tool calls for stateful computation.
 
 Architecture:
-    Claude Code ──[stdio/JSON-RPC]──> python-interpreter-mcp.py
+    Claude Code ──[stdio/JSON-RPC]──> mcp/python-interpreter/server.py
                                        ├── FastMCP (main, stdio)
                                        └── FastAPI (background, Unix socket)
                                                 ▲
@@ -60,7 +60,7 @@ Use Cases:
     - ASCII art and text formatting
 
 Setup:
-    claude mcp add --transport stdio python-interpreter -- uv run --script "$(git rev-parse --show-toplevel)/python-interpreter-mcp.py"
+    claude mcp add --transport stdio python-interpreter -- uv run --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/server.py"
 
 Example Session:
     1. execute("import math; pi_squared = math.pi ** 2")  # Returns: ""
@@ -247,7 +247,7 @@ import uvicorn
 import pydantic
 
 # Local imports
-from mcp_utils import DualLogger
+from utils import DualLogger
 
 
 # Custom exceptions for auto-installation

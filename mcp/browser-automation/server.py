@@ -13,7 +13,7 @@
 # Architecture: Runs locally via uv --script (not Docker) for visible browser monitoring.
 #
 # Setup:
-#   claude mcp add --transport stdio browser-automation -- uv run --script "$(git rev-parse --show-toplevel)/browser-automation-mcp.py"
+#   claude mcp add --transport stdio browser-automation -- uv run --script "$(git rev-parse --show-toplevel)/mcp/browser-automation/server.py"
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ import fastmcp.exceptions
 import yaml
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from mcp_utils import DualLogger
+from utils import DualLogger
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 from pydantic import BaseModel
 
