@@ -60,7 +60,7 @@ Use Cases:
     - ASCII art and text formatting
 
 Setup:
-    claude mcp add --transport stdio python-interpreter -- uv run --script "$PROJECT_ROOT/scratch/mcp/python-interpreter-mcp.py"
+    claude mcp add --transport stdio python-interpreter -- uv run --script "$(git rev-parse --show-toplevel)/python-interpreter-mcp.py"
 
 Example Session:
     1. execute("import math; pi_squared = math.pi ** 2")  # Returns: ""
@@ -402,7 +402,7 @@ def _find_claude_context() -> ClaudeContext:
                     # Extract the full path from lsof output
                     parts = line.split()
                     if len(parts) >= 9:
-                        file_path = ' '.join(parts[8:])
+                        file_path = pathlib.Path(' '.join(parts[8:]))
                         claude_files.append(file_path)
 
             if not claude_files:
@@ -411,16 +411,16 @@ def _find_claude_context() -> ClaudeContext:
                     f"but no .claude/ files are open - may not be a Claude project"
                 )
 
-            # Verify at least one .claude file is parented to the CWD
-            cwd_str = str(cwd)
-            matching_files = [f for f in claude_files if f.startswith(cwd_str)]
+            # Verify at least one .claude file is in ~/.claude/ directory
+            claude_dir = pathlib.Path('~/.claude').expanduser()
+            matching_files = [f for f in claude_files if f.is_relative_to(claude_dir)]
 
             if not matching_files:
                 raise RuntimeError(
                     f"Found Claude process (PID {current}) with CWD {cwd}, "
-                    f"but .claude/ files open are not parented to this directory:\n"
+                    f"but .claude/ files open are not in ~/.claude/ directory:\n"
                     f"  Open files: {claude_files}\n"
-                    f"  Expected parent: {cwd_str}"
+                    f"  Expected to find files in: {claude_dir}"
                 )
 
             # Compute socket path based on Claude PID
