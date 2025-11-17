@@ -1,0 +1,433 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# dependencies = [
+#   "pydantic>=2.0.0",
+#   "psutil",
+# ]
+# ///
+"""Session lifecycle tracking utility for Claude Code sessions."""
+
+from __future__ import annotations
+
+import json
+import tempfile
+from pathlib import Path
+from datetime import datetime, UTC
+from typing import Sequence
+import pydantic
+import psutil
+from filelock import FileLock
+
+from local_lib.types import JsonDatetime, SessionSource, SessionState
+
+
+__all__ = [
+    "SessionManager",
+    "SessionDatabase",
+    "Session",
+    "SessionMetadata",
+]
+
+
+class BaseModel(pydantic.BaseModel):
+    """Base model with strict validation - no extra fields, all fields required unless Optional."""
+
+    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+
+
+class SessionDatabase(BaseModel):
+    """Container for all tracked sessions."""
+
+    sessions: Sequence[Session] = []
+
+
+class Session(BaseModel):
+    """Claude Code session."""
+
+    # Identity
+    session_id: str
+
+    # Current status
+    state: SessionState
+
+    # Location
+    project_dir: str  # cwd from hook (same as project root)
+    transcript_path: str  # Path to session JSONL file
+
+    # Origin
+    source: SessionSource
+
+    # Detailed information
+    metadata: SessionMetadata
+
+
+class SessionMetadata(BaseModel):
+    """Derived session information."""
+
+    claude_pid: int  # Found via process tree walking
+    started_at: JsonDatetime  # When SessionStart fired
+    ended_at: JsonDatetime | None = None  # When SessionEnd fired
+    parent_id: str | None = None  # Extracted from transcript file
+    crash_detected_at: JsonDatetime | None = None  # When crash detected
+
+
+class SessionManager:
+    """Manages sessions with Unit of Work pattern and file locking.
+
+    Provides atomic session operations with exclusive file locking to prevent
+    race conditions. All changes are loaded once on entry and saved once on exit.
+
+    Usage:
+        with SessionManager(project_dir) as manager:
+            manager.start_session(...)
+            manager.detect_crashed_sessions()
+    """
+
+    def __init__(self, cwd: str):
+        self.cwd = cwd
+        self.db_path = get_sessions_file(cwd)
+        self.lock_path = Path(cwd) / "sessions.json.lock"
+        self._db: SessionDatabase | None = None
+        self._lock: FileLock | None = None
+
+    def __enter__(self) -> SessionManager:
+        """Acquire exclusive lock and load sessions once."""
+        self._lock = FileLock(self.lock_path)
+        self._lock.acquire()
+        self._db = load_sessions(self.cwd)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> bool:
+        """Save on success, rollback on error, always release lock."""
+        try:
+            if exc_type is None and self._db is not None:
+                save_sessions(self.cwd, self._db)
+        finally:
+            if self._lock:
+                self._lock.release()
+            self._db = None
+        return False
+
+    def start_session(
+        self,
+        session_id: str,
+        transcript_path: str,
+        source: SessionSource,
+        claude_pid: int,
+        parent_id: str | None,
+    ) -> None:
+        """Start a new session or restart an exited/completed/crashed session.
+
+        Args:
+            session_id: Session UUID
+            transcript_path: Path to session JSONL file
+            source: Session source (startup, resume, compact, clear)
+            claude_pid: Claude process PID
+            parent_id: Parent conversation UUID if available
+        """
+        if self._db is None:
+            raise RuntimeError("SessionManager must be used within 'with' context")
+
+        # Check if session already exists - if so, restart it with new metadata
+        for existing_session in self._db.sessions:
+            if existing_session.session_id == session_id:
+                # Create new session with updated fields (always update when start_session is called)
+                restarted_session = Session(
+                    session_id=existing_session.session_id,
+                    project_dir=existing_session.project_dir,
+                    transcript_path=existing_session.transcript_path,
+                    source=source,  # Updated to new source (e.g., "resume")
+                    state="active",
+                    metadata=SessionMetadata(
+                        claude_pid=claude_pid,
+                        started_at=datetime.now(UTC).astimezone(),
+                        ended_at=None,
+                        crash_detected_at=None,
+                        parent_id=parent_id
+                        if parent_id is not None
+                        else existing_session.metadata.parent_id,
+                    ),
+                )
+                # Replace in sessions list
+                self._db.sessions = [
+                    restarted_session if s.session_id == session_id else s
+                    for s in self._db.sessions
+                ]
+                return
+
+        # Create new session if doesn't exist
+        new_session = Session(
+            session_id=session_id,
+            project_dir=self.cwd,
+            transcript_path=transcript_path,
+            source=source,
+            state="active",
+            metadata=SessionMetadata(
+                claude_pid=claude_pid,
+                started_at=datetime.now(UTC).astimezone(),
+                parent_id=parent_id,
+            ),
+        )
+
+        # Append to sessions
+        self._db.sessions = [*self._db.sessions, new_session]
+
+    def end_session(self, session_id: str) -> None:
+        """Mark a session as exited.
+
+        Args:
+            session_id: Session UUID to end
+        """
+        if self._db is None:
+            raise RuntimeError("SessionManager must be used within 'with' context")
+
+        # Find session and create updated version
+        for existing_session in self._db.sessions:
+            if existing_session.session_id == session_id:
+                # Create new session with exited state
+                exited_session = Session(
+                    session_id=existing_session.session_id,
+                    project_dir=existing_session.project_dir,
+                    transcript_path=existing_session.transcript_path,
+                    source=existing_session.source,
+                    state="exited",
+                    metadata=SessionMetadata(
+                        claude_pid=existing_session.metadata.claude_pid,
+                        started_at=existing_session.metadata.started_at,
+                        ended_at=datetime.now(UTC).astimezone(),
+                        parent_id=existing_session.metadata.parent_id,
+                        crash_detected_at=existing_session.metadata.crash_detected_at,
+                    ),
+                )
+                # Replace in sessions list
+                self._db.sessions = [
+                    exited_session if s.session_id == session_id else s
+                    for s in self._db.sessions
+                ]
+                return
+
+    def detect_crashed_sessions(self) -> Sequence[str]:
+        """Check all active sessions and mark crashed if PID is dead.
+
+        Returns:
+            Sequence of crashed session IDs
+        """
+        if self._db is None:
+            raise RuntimeError("SessionManager must be used within 'with' context")
+
+        crashed_ids: list[str] = []
+        updated_sessions: list[Session] = []
+
+        for session in self._db.sessions:
+            if session.state != "active":
+                updated_sessions.append(session)
+                continue
+
+            if not psutil.pid_exists(session.metadata.claude_pid):
+                # Create new session with crashed state
+                crashed_session = Session(
+                    session_id=session.session_id,
+                    project_dir=session.project_dir,
+                    transcript_path=session.transcript_path,
+                    source=session.source,
+                    state="crashed",
+                    metadata=SessionMetadata(
+                        claude_pid=session.metadata.claude_pid,
+                        started_at=session.metadata.started_at,
+                        ended_at=session.metadata.ended_at,
+                        parent_id=session.metadata.parent_id,
+                        crash_detected_at=datetime.now(UTC).astimezone(),
+                    ),
+                )
+                updated_sessions.append(crashed_session)
+                crashed_ids.append(session.session_id)
+            else:
+                updated_sessions.append(session)
+
+        self._db.sessions = updated_sessions
+        return crashed_ids
+
+
+# Deprecated: Old functional API - use SessionManager instead
+def add_session(
+    cwd: str,
+    session_id: str,
+    transcript_path: str,
+    source: SessionSource,
+    claude_pid: int,
+    parent_id: str | None,
+) -> None:
+    """Add a new session to tracking.
+
+    Args:
+        cwd: Current working directory path (project root)
+        session_id: Session UUID
+        transcript_path: Path to session JSONL file
+        source: Session source
+        claude_pid: Claude process PID
+        parent_id: Parent conversation UUID if available
+    """
+    db = load_sessions(cwd)
+
+    # Check if session already exists
+    for session in db.sessions:
+        if session.session_id == session_id:
+            return
+
+    # Create new session with metadata
+    new_session = Session(
+        session_id=session_id,
+        project_dir=cwd,
+        transcript_path=transcript_path,
+        source=source,
+        state="active",
+        metadata=SessionMetadata(
+            claude_pid=claude_pid,
+            started_at=datetime.now(UTC).astimezone(),
+            parent_id=parent_id,
+        ),
+    )
+
+    db.sessions = [*db.sessions, new_session]
+    save_sessions(cwd, db)
+
+
+def end_session(cwd: str, session_id: str) -> None:
+    """Mark a session as exited.
+
+    Args:
+        cwd: Current working directory path
+        session_id: Session UUID to end
+    """
+    db = load_sessions(cwd)
+
+    # Find and update session
+    for session in db.sessions:
+        if session.session_id == session_id:
+            session.state = "exited"
+            session.metadata.ended_at = datetime.now(UTC).astimezone()
+            break
+
+    save_sessions(cwd, db)
+
+
+def get_active_sessions(cwd: str) -> Sequence[Session]:
+    """Get all active sessions.
+
+    Args:
+        cwd: Current working directory path
+
+    Returns:
+        Sequence of active Session objects
+    """
+    db = load_sessions(cwd)
+    return [s for s in db.sessions if s.state == "active"]
+
+
+def get_exited_sessions(cwd: str) -> Sequence[Session]:
+    """Get all exited sessions.
+
+    Args:
+        cwd: Current working directory path
+
+    Returns:
+        Sequence of exited Session objects
+    """
+    db = load_sessions(cwd)
+    return [s for s in db.sessions if s.state == "exited"]
+
+
+def get_crashed_sessions(cwd: str) -> Sequence[Session]:
+    """Get all crashed sessions.
+
+    Args:
+        cwd: Current working directory path
+
+    Returns:
+        Sequence of crashed Session objects
+    """
+    db = load_sessions(cwd)
+    return [s for s in db.sessions if s.state == "crashed"]
+
+
+def detect_crashed_sessions(cwd: str) -> Sequence[str]:
+    """Check all active sessions and mark crashed if PID is dead.
+
+    Uses psutil.pid_exists() which is O(1) per check (microseconds to low milliseconds).
+    Efficient enough to check hundreds of PIDs without noticeably blocking execution.
+
+    Args:
+        cwd: Current working directory path
+
+    Returns:
+        Sequence of crashed session IDs
+    """
+    db = load_sessions(cwd)
+    crashed_ids: list[str] = []
+
+    for session in db.sessions:
+        if session.state != "active":
+            continue
+
+        # psutil.pid_exists() is fast - O(1) syscall, not scanning all processes
+        if not psutil.pid_exists(session.metadata.claude_pid):
+            session.state = "crashed"
+            session.metadata.crash_detected_at = datetime.now(UTC).astimezone()
+            crashed_ids.append(session.session_id)
+
+    if crashed_ids:
+        save_sessions(cwd, db)
+
+    return crashed_ids
+
+
+# Private helper functions (not in __all__)
+def get_sessions_file(cwd: str) -> Path:
+    """Get path to sessions.json file."""
+    return Path(cwd) / "sessions.json"
+
+
+def load_sessions(cwd: str) -> SessionDatabase:
+    """Load sessions from sessions.json file.
+
+    Args:
+        cwd: Current working directory path
+
+    Returns:
+        SessionDatabase with all tracked sessions
+    """
+    sessions_file = get_sessions_file(cwd)
+
+    if not sessions_file.exists():
+        return SessionDatabase(sessions=[])
+
+    with open(sessions_file, "r") as f:
+        data = json.load(f)
+        return SessionDatabase.model_validate(data)
+
+
+def save_sessions(cwd: str, db: SessionDatabase) -> None:
+    """Save sessions to sessions.json file using atomic write.
+
+    Uses temp file + rename for atomic operation to prevent corruption.
+
+    Args:
+        cwd: Current working directory path
+        db: SessionDatabase to save
+    """
+    sessions_file = get_sessions_file(cwd)
+
+    # Write to temp file in same directory (required for atomic rename)
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=sessions_file.parent, delete=False, suffix=".tmp"
+    ) as f:
+        temp_path = Path(f.name)
+        json.dump(db.model_dump(mode="json", exclude_none=True), f, indent=2)
+
+    # Atomic rename
+    temp_path.replace(sessions_file)

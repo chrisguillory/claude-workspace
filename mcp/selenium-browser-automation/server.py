@@ -59,7 +59,7 @@ class PrintLogger:
 
     async def info(self, message: str):
         """Log info message to stderr."""
-        print(f'[selenium-browser-automation] {message}', file=sys.stderr)
+        print(f"[selenium-browser-automation] {message}", file=sys.stderr)
 
 
 """
@@ -135,9 +135,9 @@ class BrowserState:
         capture_temp_dir = tempfile.TemporaryDirectory()
         capture_dir = Path(capture_temp_dir.name)
 
-        print('[BrowserState] Temp directories initialized', file=sys.stderr)
-        print(f'  Screenshots: {screenshot_dir}', file=sys.stderr)
-        print(f'  Captures: {capture_dir}', file=sys.stderr)
+        print("[BrowserState] Temp directories initialized", file=sys.stderr)
+        print(f"  Screenshots: {screenshot_dir}", file=sys.stderr)
+        print(f"  Captures: {capture_dir}", file=sys.stderr)
 
         return cls(
             driver=None,
@@ -151,8 +151,10 @@ class BrowserState:
 
     def __init__(
         self,
-        driver: webdriver.Chrome | None,  # None = lazy initialization (created on first use)
-        current_profile: str | None,  # None = no profile selected (temporary profile mode)
+        driver: webdriver.Chrome
+        | None,  # None = lazy initialization (created on first use)
+        current_profile: str
+        | None,  # None = no profile selected (temporary profile mode)
         temp_dir: tempfile.TemporaryDirectory,
         screenshot_dir: Path,
         capture_temp_dir: tempfile.TemporaryDirectory,
@@ -170,6 +172,7 @@ class BrowserState:
 
 class LoggerProtocol(typing.Protocol):
     """Protocol for logger - allows service to be MCP-agnostic."""
+
     async def info(self, message: str) -> None: ...
 
 
@@ -212,15 +215,15 @@ class BrowserService:
 
         # CRITICAL: Stealth configuration to bypass Cloudflare bot detection
         opts = Options()
-        opts.add_argument('--disable-blink-features=AutomationControlled')
-        opts.add_argument('--window-size=1920,1080')
-        opts.add_experimental_option('excludeSwitches', ['enable-automation'])
-        opts.add_experimental_option('useAutomationExtension', False)
+        opts.add_argument("--disable-blink-features=AutomationControlled")
+        opts.add_argument("--window-size=1920,1080")
+        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+        opts.add_experimental_option("useAutomationExtension", False)
         opts.add_experimental_option(
-            'prefs',
+            "prefs",
             {
-                'credentials_enable_service': False,
-                'profile.password_manager_enabled': False,
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
             },
         )
 
@@ -231,13 +234,13 @@ class BrowserService:
 
             if not profile_path.exists():
                 raise fastmcp.exceptions.ValidationError(
-                    f'Chrome profile not found: {profile}\n'
-                    f'Use list_chrome_profiles() to see available profiles'
+                    f"Chrome profile not found: {profile}\n"
+                    f"Use list_chrome_profiles() to see available profiles"
                 )
 
-            opts.add_argument(f'--user-data-dir={chrome_base}')
-            opts.add_argument(f'--profile-directory={profile}')
-            print(f'[browser] Using Chrome profile: {profile}', file=sys.stderr)
+            opts.add_argument(f"--user-data-dir={chrome_base}")
+            opts.add_argument(f"--profile-directory={profile}")
+            print(f"[browser] Using Chrome profile: {profile}", file=sys.stderr)
 
         # Initialize driver in thread pool (blocking operation)
         self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
@@ -247,9 +250,9 @@ class BrowserService:
         # This is what makes Selenium bypass Cloudflare where Playwright fails
         await asyncio.to_thread(
             self.state.driver.execute_cdp_cmd,
-            'Page.addScriptToEvaluateOnNewDocument',
+            "Page.addScriptToEvaluateOnNewDocument",
             {
-                'source': """
+                "source": """
                     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                     window.navigator.chrome = { runtime: {} };
                     Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
@@ -266,11 +269,17 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title='Navigate to URL', destructiveHint=False, idempotentHint=True, openWorldHint=True
+            title="Navigate to URL",
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
         )
     )
     async def navigate(
-        url: str, fresh_browser: bool = False, profile: str | None = None, ctx: Context | None = None
+        url: str,
+        fresh_browser: bool = False,
+        profile: str | None = None,
+        ctx: Context | None = None,
     ) -> NavigationResult:
         """Navigate to URL using Selenium with CDP stealth injection.
 
@@ -285,11 +294,15 @@ def register_tools(service: BrowserService) -> None:
 
         Note: Resource capture not implemented in Selenium version (complex, requires network interception)
         """
-        if not url.startswith(('http://', 'https://')):
-            raise fastmcp.exceptions.ValidationError('URL must start with http:// or https://')
+        if not url.startswith(("http://", "https://")):
+            raise fastmcp.exceptions.ValidationError(
+                "URL must start with http:// or https://"
+            )
 
         print(
-            f'[navigate] Navigating to {url}' + (' (fresh browser)' if fresh_browser else ''), file=sys.stderr
+            f"[navigate] Navigating to {url}"
+            + (" (fresh browser)" if fresh_browser else ""),
+            file=sys.stderr,
         )
 
         if fresh_browser:
@@ -300,13 +313,20 @@ def register_tools(service: BrowserService) -> None:
         # Navigate (blocking operation)
         await asyncio.to_thread(driver.get, url)
 
-        print(f'[navigate] Successfully navigated to {driver.current_url}', file=sys.stderr)
+        print(
+            f"[navigate] Successfully navigated to {driver.current_url}",
+            file=sys.stderr,
+        )
 
         return NavigationResult(current_url=driver.current_url, title=driver.title)
 
-    @mcp.tool(annotations=ToolAnnotations(title='Get Page Content', readOnlyHint=True, openWorldHint=True))
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Get Page Content", readOnlyHint=True, openWorldHint=True
+        )
+    )
     async def get_page_content(
-        format: Literal['text', 'html', 'markdown'],
+        format: Literal["text", "html", "markdown"],
         ctx: Context,
         selector: str | None = None,
         limit: int | None = None,
@@ -329,37 +349,46 @@ def register_tools(service: BrowserService) -> None:
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Extracting as {format}' + (f' with selector "{selector}"' if selector else ''))
+        await logger.info(
+            f"Extracting as {format}"
+            + (f' with selector "{selector}"' if selector else "")
+        )
 
         if selector:
             # Extract specific elements
-            elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, selector)
+            elements = await asyncio.to_thread(
+                driver.find_elements, By.CSS_SELECTOR, selector
+            )
             count = len(elements)
 
             actual_limit = min(count, limit) if limit is not None else count
 
             html_parts = []
             for i in range(actual_limit):
-                html = await asyncio.to_thread(driver.execute_script, 'return arguments[0].outerHTML;', elements[i])
+                html = await asyncio.to_thread(
+                    driver.execute_script, "return arguments[0].outerHTML;", elements[i]
+                )
                 html_parts.append(html)
 
-            await logger.info(f'Matched {len(html_parts)} elements')
-            return '\n'.join(html_parts)
+            await logger.info(f"Matched {len(html_parts)} elements")
+            return "\n".join(html_parts)
 
         # Full page extraction
-        if format == 'text':
-            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, 'body')
+        if format == "text":
+            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, "body")
             content = await asyncio.to_thread(lambda: body.text)
             return content
-        elif format == 'html':
+        elif format == "html":
             content = await asyncio.to_thread(lambda: driver.page_source)
             return content
-        elif format == 'markdown':
-            raise fastmcp.exceptions.ValidationError('Markdown format not yet implemented')
+        elif format == "markdown":
+            raise fastmcp.exceptions.ValidationError(
+                "Markdown format not yet implemented"
+            )
         else:
-            raise fastmcp.exceptions.ValidationError(f'Unknown format: {format}')
+            raise fastmcp.exceptions.ValidationError(f"Unknown format: {format}")
 
-    @mcp.tool(annotations=ToolAnnotations(title='Take Screenshot', readOnlyHint=True))
+    @mcp.tool(annotations=ToolAnnotations(title="Take Screenshot", readOnlyHint=True))
     async def screenshot(filename: str, ctx: Context, full_page: bool = False) -> str:
         """Take screenshot (viewport or full-page). Saves to temp directory with auto-cleanup on exit.
 
@@ -380,31 +409,41 @@ def register_tools(service: BrowserService) -> None:
         screenshot_path = service.state.screenshot_dir / filename
 
         if full_page:
-            await logger.info(f'Taking full-page screenshot: {filename}')
+            await logger.info(f"Taking full-page screenshot: {filename}")
             try:
                 # Use CDP to capture full page
                 result = await asyncio.to_thread(
-                    driver.execute_cdp_cmd, 'Page.captureScreenshot', {'captureBeyondViewport': True}
+                    driver.execute_cdp_cmd,
+                    "Page.captureScreenshot",
+                    {"captureBeyondViewport": True},
                 )
 
-                if 'data' in result:
+                if "data" in result:
                     # Result contains base64-encoded PNG
-                    screenshot_data = base64.b64decode(result['data'])
+                    screenshot_data = base64.b64decode(result["data"])
                     screenshot_path.write_bytes(screenshot_data)
-                    await logger.info(f'Full-page screenshot saved to {screenshot_path}')
+                    await logger.info(
+                        f"Full-page screenshot saved to {screenshot_path}"
+                    )
                     return str(screenshot_path)
                 else:
-                    await logger.info('CDP capture returned no data, falling back to viewport')
+                    await logger.info(
+                        "CDP capture returned no data, falling back to viewport"
+                    )
             except Exception as e:
-                await logger.info(f'CDP capture failed ({e}), falling back to viewport')
+                await logger.info(f"CDP capture failed ({e}), falling back to viewport")
 
         # Viewport screenshot (default or fallback)
-        await logger.info(f'Taking viewport screenshot: {filename}')
+        await logger.info(f"Taking viewport screenshot: {filename}")
         await asyncio.to_thread(driver.save_screenshot, str(screenshot_path))
-        await logger.info(f'Screenshot saved to {screenshot_path}')
+        await logger.info(f"Screenshot saved to {screenshot_path}")
         return str(screenshot_path)
 
-    @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Download Specific Resource", readOnlyHint=False, idempotentHint=False
+        )
+    )
     async def download_resource(url: str, output_filename: str) -> dict:
         """Download specific resource using httpx with cookies from current browser session.
 
@@ -423,23 +462,25 @@ def register_tools(service: BrowserService) -> None:
 
         Errors: Raises ToolError if browser not initialized, response status >= 400, or network failure.
         """
-        if not url.startswith(('http://', 'https://')):
-            raise fastmcp.exceptions.ValidationError('URL must start with http:// or https://')
+        if not url.startswith(("http://", "https://")):
+            raise fastmcp.exceptions.ValidationError(
+                "URL must start with http:// or https://"
+            )
 
         driver = await service.get_browser()
 
         if driver is None:
             raise fastmcp.exceptions.ToolError(
-                'Browser not initialized. Call navigate() first to establish browser session.'
+                "Browser not initialized. Call navigate() first to establish browser session."
             )
 
-        print(f'[download_resource] Downloading: {url}', file=sys.stderr)
+        print(f"[download_resource] Downloading: {url}", file=sys.stderr)
 
         # Get cookies from driver to maintain session
         selenium_cookies = await asyncio.to_thread(driver.get_cookies)
 
         # Convert Selenium cookies to httpx format
-        cookies = {cookie['name']: cookie['value'] for cookie in selenium_cookies}
+        cookies = {cookie["name"]: cookie["value"] for cookie in selenium_cookies}
 
         # Download using httpx with session cookies
         async with httpx.AsyncClient() as client:
@@ -447,34 +488,43 @@ def register_tools(service: BrowserService) -> None:
 
         # Check response status
         if response.status_code >= 400:
-            raise fastmcp.exceptions.ToolError(f'Download failed with status {response.status_code}: {url}')
+            raise fastmcp.exceptions.ToolError(
+                f"Download failed with status {response.status_code}: {url}"
+            )
 
         # Get response body
         body = response.content
 
         # Sanitize filename (prevent path traversal, handle special chars)
-        safe_filename = ''.join(c if c.isalnum() or c in '.-_' else '_' for c in output_filename)
-        if not safe_filename or safe_filename.startswith('.'):
-            safe_filename = 'resource_' + safe_filename
+        safe_filename = "".join(
+            c if c.isalnum() or c in ".-_" else "_" for c in output_filename
+        )
+        if not safe_filename or safe_filename.startswith("."):
+            safe_filename = "resource_" + safe_filename
 
         # Save to screenshot temp directory
         save_path = service.state.screenshot_dir / safe_filename
         save_path.write_bytes(body)
 
         result = {
-            'path': str(save_path),
-            'size_bytes': len(body),
-            'content_type': response.headers.get('content-type', 'unknown'),
-            'status': response.status_code,
-            'url': url,
+            "path": str(save_path),
+            "size_bytes": len(body),
+            "content_type": response.headers.get("content-type", "unknown"),
+            "status": response.status_code,
+            "url": url,
         }
 
-        print(f'[download_resource] Downloaded {len(body)} bytes to {save_path}', file=sys.stderr)
+        print(
+            f"[download_resource] Downloaded {len(body)} bytes to {save_path}",
+            file=sys.stderr,
+        )
 
         return result
 
-    @mcp.tool(annotations=ToolAnnotations(title='Get ARIA Snapshot', readOnlyHint=True))
-    async def get_aria_snapshot(selector: str, include_urls: bool = False, timeout: int = 1000) -> str:
+    @mcp.tool(annotations=ToolAnnotations(title="Get ARIA Snapshot", readOnlyHint=True))
+    async def get_aria_snapshot(
+        selector: str, include_urls: bool = False, timeout: int = 1000
+    ) -> str:
         """Get semantic page structure as ARIA tree via JavaScript accessible name computation.
 
         Uses JavaScript to compute accessible names per WAI-ARIA spec and build accessibility tree.
@@ -685,30 +735,32 @@ def register_tools(service: BrowserService) -> None:
         """
 
         # Execute script and get snapshot data
-        snapshot_data = await asyncio.to_thread(driver.execute_script, aria_script, selector, include_urls)
+        snapshot_data = await asyncio.to_thread(
+            driver.execute_script, aria_script, selector, include_urls
+        )
 
         # Convert to Playwright-compatible YAML format using custom serializer
         def serialize_aria_snapshot(node, indent=0):
             """Custom serializer matching Playwright's ARIA snapshot YAML format."""
             if node is None:
-                return ''
+                return ""
 
             lines = []
-            prefix = ' ' * indent + '- '
+            prefix = " " * indent + "- "
 
             # Handle text nodes
-            if node.get('type') == 'text':
-                content = node.get('content', '').replace('\n', ' ')
-                lines.append(f'{prefix}text: {content}')
-                return '\n'.join(lines)
+            if node.get("type") == "text":
+                content = node.get("content", "").replace("\n", " ")
+                lines.append(f"{prefix}text: {content}")
+                return "\n".join(lines)
 
             # Handle element nodes
-            role = node.get('role', 'generic')
-            name = node.get('name', '')
-            children = node.get('children', [])
+            role = node.get("role", "generic")
+            name = node.get("name", "")
+            children = node.get("children", [])
 
             # Build node header in Playwright format: role "name" [attrs]:
-            header = f'{prefix}{role}'
+            header = f"{prefix}{role}"
 
             if name:
                 # Escape quotes in name
@@ -717,19 +769,19 @@ def register_tools(service: BrowserService) -> None:
 
             # Add attributes in brackets
             attrs = []
-            if 'level' in node:
-                attrs.append(f'level={node["level"]}')
-            if node.get('checked'):
-                attrs.append('checked')
-            if node.get('disabled'):
-                attrs.append('disabled')
+            if "level" in node:
+                attrs.append(f"level={node['level']}")
+            if node.get("checked"):
+                attrs.append("checked")
+            if node.get("disabled"):
+                attrs.append("disabled")
 
             if attrs:
-                header += f' [{", ".join(attrs)}]'
+                header += f" [{', '.join(attrs)}]"
 
             # Add colon if has children
             if children:
-                header += ':'
+                header += ":"
 
             lines.append(header)
 
@@ -740,13 +792,19 @@ def register_tools(service: BrowserService) -> None:
                     if child_output:
                         lines.append(child_output)
 
-            return '\n'.join(lines)
+            return "\n".join(lines)
 
         return serialize_aria_snapshot(snapshot_data)
 
-    @mcp.tool(annotations=ToolAnnotations(title='Get Interactive Elements', readOnlyHint=True))
+    @mcp.tool(
+        annotations=ToolAnnotations(title="Get Interactive Elements", readOnlyHint=True)
+    )
     async def get_interactive_elements(
-        selector_scope: str, text_contains: str | None, tag_filter: list[str] | None, limit: int | None, ctx: Context
+        selector_scope: str,
+        text_contains: str | None,
+        tag_filter: list[str] | None,
+        limit: int | None,
+        ctx: Context,
     ) -> list[InteractiveElement]:
         """Get clickable elements with optional filters for targeted extraction.
 
@@ -766,7 +824,7 @@ def register_tools(service: BrowserService) -> None:
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Finding interactive elements in scope: {selector_scope}')
+        await logger.info(f"Finding interactive elements in scope: {selector_scope}")
 
         # Prepare filter values for JS
         text_filter_lower = text_contains.lower() if text_contains else None
@@ -826,18 +884,22 @@ def register_tools(service: BrowserService) -> None:
             return results;
             """,
             {
-                'scopeSelector': selector_scope,
-                'textFilter': text_filter_lower,
-                'tagFilter': tag_filter_upper,
-                'maxLimit': limit,
+                "scopeSelector": selector_scope,
+                "textFilter": text_filter_lower,
+                "tagFilter": tag_filter_upper,
+                "maxLimit": limit,
             },
         )
 
-        await logger.info(f'Found {len(elements)} interactive elements (filtered)')
+        await logger.info(f"Found {len(elements)} interactive elements (filtered)")
         return [InteractiveElement(**el) for el in elements]
 
-    @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
-    async def get_focusable_elements(only_tabbable: bool, ctx: Context) -> list[FocusableElement]:
+    @mcp.tool(
+        annotations=ToolAnnotations(title="Get Focusable Elements", readOnlyHint=True)
+    )
+    async def get_focusable_elements(
+        only_tabbable: bool, ctx: Context
+    ) -> list[FocusableElement]:
         """Get keyboard-navigable elements sorted by tab order.
 
         Args:
@@ -851,7 +913,7 @@ def register_tools(service: BrowserService) -> None:
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Finding focusable elements (only_tabbable={only_tabbable})')
+        await logger.info(f"Finding focusable elements (only_tabbable={only_tabbable})")
 
         min_tab_index = 0 if only_tabbable else -1
 
@@ -895,14 +957,23 @@ def register_tools(service: BrowserService) -> None:
                 return a.tab_index - b.tab_index;
             });
             """,
-            {'minTabIndex': min_tab_index},
+            {"minTabIndex": min_tab_index},
         )
 
-        await logger.info(f'Found {len(elements)} focusable elements')
+        await logger.info(f"Found {len(elements)} focusable elements")
         return [FocusableElement(**el) for el in elements]
 
-    @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))
-    async def click(selector: str, ctx: Context, wait_for_network: bool = False, network_timeout: int = 10000):
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Click Element", destructiveHint=False, idempotentHint=False
+        )
+    )
+    async def click(
+        selector: str,
+        ctx: Context,
+        wait_for_network: bool = False,
+        network_timeout: int = 10000,
+    ):
         """Click element. Auto-waits for element to be visible and clickable.
 
         Args:
@@ -917,11 +988,15 @@ def register_tools(service: BrowserService) -> None:
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Clicking element: {selector}' + (' (with delay)' if wait_for_network else ''))
+        await logger.info(
+            f"Clicking element: {selector}"
+            + (" (with delay)" if wait_for_network else "")
+        )
 
         # Wait for element to be clickable (up to 10 seconds)
         element = await asyncio.to_thread(
-            WebDriverWait(driver, 10).until, EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+            WebDriverWait(driver, 10).until,
+            EC.element_to_be_clickable((By.CSS_SELECTOR, selector)),
         )
 
         # Click element
@@ -929,13 +1004,17 @@ def register_tools(service: BrowserService) -> None:
 
         if wait_for_network:
             delay_sec = network_timeout / 1000
-            await logger.info(f'Waiting {delay_sec}s for content to load')
+            await logger.info(f"Waiting {delay_sec}s for content to load")
             await asyncio.sleep(delay_sec)
-            await logger.info('Delay complete')
+            await logger.info("Delay complete")
 
-        await logger.info('Click successful')
+        await logger.info("Click successful")
 
-    @mcp.tool(annotations=ToolAnnotations(title='Wait for Network Idle', readOnlyHint=True, idempotentHint=True))
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Wait for Network Idle", readOnlyHint=True, idempotentHint=True
+        )
+    )
     async def wait_for_network_idle(ctx: Context, timeout: int = 10000):
         """Wait for network activity to settle after clicks or dynamic content loads.
 
@@ -993,7 +1072,7 @@ def register_tools(service: BrowserService) -> None:
         """
 
         await asyncio.to_thread(driver.execute_script, setup_script)
-        await logger.info('Network monitor injected')
+        await logger.info("Network monitor injected")
 
         # Step 2: Poll for idle state (500ms threshold)
         check_script = """
@@ -1011,25 +1090,33 @@ def register_tools(service: BrowserService) -> None:
         while time.time() - start_time < timeout_s:
             status = await asyncio.to_thread(driver.execute_script, check_script)
 
-            if status['activeRequests'] == 0:
-                if status['lastRequestTime'] is None:
+            if status["activeRequests"] == 0:
+                if status["lastRequestTime"] is None:
                     # No requests made yet - check elapsed time since monitoring started
                     elapsed = time.time() - start_time
                     if elapsed >= idle_threshold_ms / 1000:
-                        await logger.info('Network idle (no requests made)')
+                        await logger.info("Network idle (no requests made)")
                         return
                 else:
                     # Check time since last request completed
-                    elapsed_since_last = status['currentTime'] - status['lastRequestTime']
+                    elapsed_since_last = (
+                        status["currentTime"] - status["lastRequestTime"]
+                    )
                     if elapsed_since_last >= idle_threshold_ms:
-                        await logger.info(f'Network idle after {elapsed_since_last / 1000:.2f}s')
+                        await logger.info(
+                            f"Network idle after {elapsed_since_last / 1000:.2f}s"
+                        )
                         return
 
             await asyncio.sleep(0.05)  # Poll every 50ms
 
-        await logger.info(f'Network idle timeout after {timeout_s}s')
+        await logger.info(f"Network idle timeout after {timeout_s}s")
 
-    @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Press Keyboard Key", destructiveHint=False, idempotentHint=False
+        )
+    )
     async def press_key(key: str, ctx: Context):
         """Press a keyboard key or key combination.
 
@@ -1053,37 +1140,41 @@ def register_tools(service: BrowserService) -> None:
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Pressing key: {key}')
+        await logger.info(f"Pressing key: {key}")
 
         # Map common key names to Selenium Keys
         # Handle key combinations (e.g., "CONTROL+A")
-        if '+' in key:
-            parts = key.split('+')
+        if "+" in key:
+            parts = key.split("+")
             keys_combo = []
             for part in parts:
-                key_attr = part.upper().replace(' ', '_')
+                key_attr = part.upper().replace(" ", "_")
                 if hasattr(Keys, key_attr):
                     keys_combo.append(getattr(Keys, key_attr))
                 else:
                     keys_combo.append(part)
 
             # Send key combination
-            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, 'body')
+            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, "body")
             await asyncio.to_thread(body.send_keys, *keys_combo)
         else:
             # Single key
-            key_attr = key.upper().replace(' ', '_')
+            key_attr = key.upper().replace(" ", "_")
             if hasattr(Keys, key_attr):
                 key_value = getattr(Keys, key_attr)
             else:
                 key_value = key
 
-            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, 'body')
+            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, "body")
             await asyncio.to_thread(body.send_keys, key_value)
 
-        await logger.info('Key press successful')
+        await logger.info("Key press successful")
 
-    @mcp.tool(annotations=ToolAnnotations(title='Type Text', destructiveHint=False, idempotentHint=False))
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Type Text", destructiveHint=False, idempotentHint=False
+        )
+    )
     async def type_text(text: str, ctx: Context, delay_ms: int = 0):
         """Type text character by character with optional delay between keystrokes.
 
@@ -1102,9 +1193,14 @@ def register_tools(service: BrowserService) -> None:
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Typing text: "{text}"' + (f' with {delay_ms}ms delay' if delay_ms > 0 else ''))
+        await logger.info(
+            f'Typing text: "{text}"'
+            + (f" with {delay_ms}ms delay" if delay_ms > 0 else "")
+        )
 
-        active_element = await asyncio.to_thread(lambda: driver.switch_to.active_element)
+        active_element = await asyncio.to_thread(
+            lambda: driver.switch_to.active_element
+        )
 
         if delay_ms > 0:
             # Type with delay between characters
@@ -1115,12 +1211,16 @@ def register_tools(service: BrowserService) -> None:
             # Type all at once
             await asyncio.to_thread(active_element.send_keys, text)
 
-        await logger.info('Text typing successful')
+        await logger.info("Text typing successful")
 
     @mcp.tool(
-        annotations=ToolAnnotations(title='List Chrome Profiles', readOnlyHint=True, idempotentHint=True)
+        annotations=ToolAnnotations(
+            title="List Chrome Profiles", readOnlyHint=True, idempotentHint=True
+        )
     )
-    async def list_chrome_profiles(verbose: bool = False, ctx: Context | None = None) -> ChromeProfilesResult:
+    async def list_chrome_profiles(
+        verbose: bool = False, ctx: Context | None = None
+    ) -> ChromeProfilesResult:
         """List all Chrome profiles with metadata.
 
         Args:
@@ -1139,13 +1239,13 @@ def register_tools(service: BrowserService) -> None:
         """
         if ctx:
             logger = PrintLogger(ctx)
-            await logger.info(f'Listing Chrome profiles (verbose={verbose})')
+            await logger.info(f"Listing Chrome profiles (verbose={verbose})")
 
         # Call module function
         result = await asyncio.to_thread(list_all_profiles, verbose=verbose)
 
         if ctx:
-            await logger.info(f'Found {result.total_count} profiles')
+            await logger.info(f"Found {result.total_count} profiles")
 
         return result
 
@@ -1157,9 +1257,9 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     service = BrowserService(state)
     register_tools(service)
 
-    print('✓ Browser service initialized', file=sys.stderr)
-    print(f'  Screenshot directory: {state.screenshot_dir}', file=sys.stderr)
-    print(f'  Capture directory: {state.capture_dir}', file=sys.stderr)
+    print("✓ Browser service initialized", file=sys.stderr)
+    print(f"  Screenshot directory: {state.screenshot_dir}", file=sys.stderr)
+    print(f"  Capture directory: {state.capture_dir}", file=sys.stderr)
 
     yield
 
@@ -1168,13 +1268,16 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
         await asyncio.to_thread(state.driver.quit)
     state.temp_dir.cleanup()
     state.capture_temp_dir.cleanup()
-    print('✓ Server cleanup complete', file=sys.stderr)
+    print("✓ Server cleanup complete", file=sys.stderr)
 
 
-mcp = FastMCP('selenium-browser-automation', lifespan=lifespan)
+mcp = FastMCP("selenium-browser-automation", lifespan=lifespan)
 
 
-if __name__ == '__main__':
-    print('Starting Selenium Browser Automation MCP server', file=sys.stderr)
-    print('Note: This server uses CDP stealth injection to bypass bot detection', file=sys.stderr)
+if __name__ == "__main__":
+    print("Starting Selenium Browser Automation MCP server", file=sys.stderr)
+    print(
+        "Note: This server uses CDP stealth injection to bypass bot detection",
+        file=sys.stderr,
+    )
     mcp.run()

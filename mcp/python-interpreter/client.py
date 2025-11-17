@@ -32,6 +32,7 @@ Usage Examples:
    # Full output: /tmp/tmpXYZ123/output_20250108_143022.txt
    ==================================================
 """
+
 import os
 import pathlib
 import sys
@@ -47,9 +48,9 @@ def get_socket_path() -> pathlib.Path:
 
     for _ in range(20):  # Depth limit
         result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            ["ps", "-p", str(current), "-o", "ppid=,comm="],
             capture_output=True,
-            text=True
+            text=True,
         )
 
         if not result.stdout.strip():
@@ -57,11 +58,11 @@ def get_socket_path() -> pathlib.Path:
 
         parts = result.stdout.strip().split(None, 1)
         ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
+        comm = parts[1] if len(parts) > 1 else ""
 
         # Check if this is Claude
-        if 'claude' in comm.lower():
-            return pathlib.Path(f'/tmp/python-interpreter-{current}.sock')
+        if "claude" in comm.lower():
+            return pathlib.Path(f"/tmp/python-interpreter-{current}.sock")
 
         if ppid == 0:
             break
@@ -84,10 +85,7 @@ def main():
     # Connect via Unix socket
     transport = httpx.HTTPTransport(uds=socket_path.as_posix())
     with httpx.Client(transport=transport, timeout=30.0) as client:
-        response = client.post(
-            "http://localhost/execute",
-            json={"code": code}
-        )
+        response = client.post("http://localhost/execute", json={"code": code})
         response.raise_for_status()
 
         # Print result
@@ -95,5 +93,5 @@ def main():
         print(result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
