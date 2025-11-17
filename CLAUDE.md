@@ -48,9 +48,40 @@ Simple, readable, maintainable, explicit. Fail-fast on misconfiguration. Single 
 | **Avoid Premature Optimization**              | Optimize when data shows need                       |
 | **Principle of least surprise**               | Code should behave as expected                      |
 | **Bubble exceptions**                         | Don't swallow errors, let them propagate            |
+| **Trust event authority**                     | Don't second-guess events with defensive validation |
 | **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available |
 | **Assertions only in tests/**                | Application code raises exceptions explicitly       |
 | **DI via closures**                           | FastMCP pattern for dependency injection           |
+
+### Exception Handling
+
+**Bubble exceptions up** - Never swallow errors with try/except that returns defaults. Let exceptions propagate to appropriate handlers.
+
+```python
+# ❌ Anti-pattern: Swallowing exceptions
+def get_config() -> dict:
+    try:
+        return load_config()
+    except Exception:
+        return {}  # Hides configuration errors
+
+# ✅ Correct: Let exceptions bubble
+def get_config() -> dict:
+    return load_config()  # Caller decides how to handle errors
+```
+
+**Trust event authority** - When receiving events, trust they represent what they claim. Fix incorrect events at their source, not with defensive validation in handlers:
+
+```python
+# ❌ Anti-pattern: Defensive validation of events
+def handle_session_end(session_id: str):
+    if not is_session_still_active(session_id):  # Stale check
+        return  # Defensive complexity
+
+# ✅ Correct: Trust the event
+def handle_session_end(session_id: str):
+    mark_session_ended(session_id)  # Event fired = session ended
+```
 
 ## Python Specifics
 
@@ -73,34 +104,31 @@ class BaseModel(pydantic.BaseModel):
 - Full type checker coverage, not redundant hints
 - Hint function signatures and class attributes; skip where inferrable
 
-### Python Idioms
+### Type Aliases and Encapsulation
 
-- Use `datetime.now(UTC)` not `.utcnow()`
-- Async-first libraries when available (aioboto3, asyncpg)
-- Assertions only in `tests/` - application code raises exceptions explicitly
-- DI via closures for MCP servers (FastMCP pattern)
-
-### Type Aliases with Literals
-
-**Use Python 3.12+ `type` keyword for type aliases** - particularly for Literal types with specific allowed values:
+**Use Python 3.12+ `type` keyword for type aliases** - particularly for Literal types and reusable field specifications:
 
 ```python
 # local_lib/types.py
-from typing import Literal
+from typing import Literal, Annotated
+from datetime import datetime
+from pydantic import Field
 
 type SessionSource = Literal["startup", "resume", "compact"]
-type SessionState = Literal["started", "ended", "crashed"]
+type SessionState = Literal["active", "exited", "completed", "crashed"]
+type JsonDatetime = Annotated[datetime, Field(strict=False)]  # JSON-serializable datetime
 ```
 
 **Centralize shared types** in `local-lib/local_lib/types.py` for reuse across files:
 
 ```python
 # session_tracker.py
-from local_lib.types import SessionSource, SessionState
+from local_lib.types import SessionSource, SessionState, JsonDatetime
 
 class Session(BaseModel):
     source: SessionSource  # Not str - enforces specific values
     state: SessionState
+    started_at: JsonDatetime  # Reusable type encapsulation
 ```
 
 **Benefits:**
@@ -108,6 +136,69 @@ class Session(BaseModel):
 - Single source of truth: Change allowed values in one place
 - Self-documenting: No need for comments listing valid values
 - Pydantic validation: Runtime enforcement of literal values
+- DRY: Type encapsulation prevents Field() repetition
+
+### Data Model Design
+
+**Separate orthogonal concerns** - State (current status) and source (origin/history) are independent dimensions:
+
+```python
+# ✅ Correct: Orthogonal fields
+class Session(BaseModel):
+    state: SessionState  # active, exited, completed, crashed
+    source: SessionSource  # startup, resume, compact
+
+# ❌ Anti-pattern: Conflated concerns
+class Session(BaseModel):
+    status: Literal["startup_active", "resume_ended", ...]  # Mixes two concepts
+```
+
+**Order fields for readability** - Identity → Status → Location → Details:
+
+```python
+class Session(BaseModel):
+    # Identity
+    id: str
+
+    # Status
+    state: SessionState
+    source: SessionSource
+
+    # Location
+    project_dir: Path
+
+    # Details
+    started_at: JsonDatetime
+    metadata: dict[str, Any]
+```
+
+### Module Organization
+
+**Public-first file structure** with explicit API boundaries:
+
+```python
+"""Module docstring."""
+
+from __future__ import annotations  # Enable forward references
+
+# Explicit public API
+__all__ = ["Session", "SessionDatabase", "load_sessions"]
+
+# High-level abstractions first (top-down ordering)
+class SessionDatabase(BaseModel):
+    sessions: Sequence[Session] = []
+
+class Session(BaseModel):
+    metadata: SessionMetadata
+
+# Public functions
+def load_sessions() -> SessionDatabase:
+    ...
+
+# Private helper functions (not in __all__)
+def _validate_path(path: Path) -> None:
+    ...
+```
 
 ### Immutable Types in Annotations
 
@@ -138,27 +229,12 @@ def get_users() -> Sequence[User]:
     return users  # list satisfies Sequence
 ```
 
-### Top-Down Ordering
+### Python Idioms
 
-**Define classes in top-down order** - high-level abstractions first, then dependencies. Use `from __future__ import annotations` for forward references:
-
-```python
-from __future__ import annotations
-
-# High-level container first
-class SessionDatabase(BaseModel):
-    sessions: Sequence[Session] = []
-
-# Main entity second
-class Session(BaseModel):
-    metadata: SessionMetadata
-
-# Supporting detail last
-class SessionMetadata(BaseModel):
-    started_at: datetime
-```
-
-This mirrors how humans read code: start with the "what" (high-level purpose), then the "how" (implementation details).
+- Use `datetime.now(UTC)` not `.utcnow()`
+- Async-first libraries when available (aioboto3, asyncpg)
+- Assertions only in `tests/` - application code raises exceptions explicitly
+- DI via closures for MCP servers (FastMCP pattern)
 
 ### Scripting
 
@@ -200,6 +276,18 @@ If hooks auto-fix files (isort, ruff format), re-stage and run again until clean
 ### Directory-Specific Tooling
 
 Check README files before using directory-specific tooling (migrations, scripts, deployments, etc.) for required environment variables, usage patterns, or workflow requirements.
+
+### Path Documentation
+
+Use `$(git rev-parse --show-toplevel)` for repo-relative paths in examples:
+
+```bash
+# ✅ Portable path reference
+cd "$(git rev-parse --show-toplevel)/mcp/python-interpreter"
+
+# ❌ Hardcoded absolute path
+cd /Users/chris/claude-workspace/mcp/python-interpreter
+```
 
 ## GitHub & PR Management
 
@@ -256,6 +344,7 @@ Document **what's in the PR, not the journey**. Focus on deliverables and result
 │   └── selenium-browser-automation/
 ├── local-lib/                  # Shared library code
 │   └── local_lib/             # Python package
+│       ├── types.py           # Shared type aliases
 │       ├── session_tracker.py
 │       └── utils.py
 ├── commands/                   # Custom slash commands
@@ -274,6 +363,7 @@ local-lib/                  # Project root
 ├── pyproject.toml         # Package metadata (requires hatchling, depends on fastmcp)
 └── local_lib/             # Python package (importable as "local_lib")
     ├── __init__.py
+    ├── types.py           # Shared type aliases and annotations
     ├── utils.py           # DualLogger and shared utilities
     └── session_tracker.py
 ```
@@ -307,9 +397,9 @@ Related code (server + client) stays together, not split into separate directori
 Sessions are tracked via hooks with the following lifecycle:
 1. **SessionStart**: Captures session_id, parent_id, project_dir, claude_pid
 2. **Live state**: Session active, tracked in sessions.json
-3. **SessionEnd**: Marks session as ended with reason and timestamp
+3. **SessionEnd**: Marks session as exited/completed/crashed with reason and timestamp
 
-Session data model enforces strict typing via Pydantic BaseModel pattern.
+Session data model enforces strict typing via Pydantic BaseModel pattern with orthogonal state/source fields.
 
 ## Patterns
 
@@ -377,7 +467,7 @@ MCP servers are registered in `~/.claude.json`:
 
 ### Adding Shared Utilities
 
-Add to `local-lib/local_lib/` directory. All MCP servers can import them.
+Add to `local-lib/local_lib/` directory. All MCP servers can import them. Follow public-first organization with explicit `__all__` exports.
 
 ## Testing
 
@@ -394,4 +484,3 @@ Should successfully import `local_lib` and start the server.
 - [ ] Set up pre-commit hooks infrastructure (ruff, isort, mypy for type checking)
 - [ ] Consider bringing over docs/ structure from underwriting-api (testing-strategy.md, assertions.md, dependency-injection.md)
 - [ ] Migrate remaining untyped dicts to strict Pydantic models
-- [ ] Session tracking: Rename session states to use domain language

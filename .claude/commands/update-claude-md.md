@@ -1,7 +1,7 @@
 ---
 description: "Updates CLAUDE.md using multi-phase workflow: analyze current state, draft updates (Sonnet), invoke claude-md-architect agent (Opus) for complete refactoring, compare both versions, synthesize final result"
 argument-hint: <patterns/principles/changes to incorporate>
-allowed-tools: Read, Task, AskUserQuestion, Bash(git branch:*), Bash(git log:*), Bash(git status:*)
+allowed-tools: Read, Write, Task, AskUserQuestion, Bash(git branch:*), Bash(git log:*), Bash(git status:*)
 disable-model-invocation: false
 ---
 
@@ -154,7 +154,7 @@ Now compare YOUR draft (Phase 2) vs the AGENT's version (Phase 3).
 
 ---
 
-## PHASE 5: SYNTHESIS & PRESENTATION
+## PHASE 5: SYNTHESIS & FILE UPDATE
 
 Create the FINAL version by combining the best elements from both drafts.
 
@@ -173,29 +173,27 @@ Create the FINAL version by combining the best elements from both drafts.
 4. Prefer explicit over implicit
 5. Follow "terse but complete" principle
 
-**Present to user:**
+**Actions:**
 
-1. **Summary of changes:**
+1. **Present summary of changes:**
    - What was added
    - What was restructured
    - What was removed (if anything)
    - Key improvements
 
-2. **The complete new CLAUDE.md:**
-   - Show in a code block for easy copying
-   - Formatted and ready to use
-
-3. **Synthesis note:**
+2. **Synthesis note:**
    - "Combined Sonnet draft + Opus refactoring"
    - Brief note on which elements came from where
    - Any decisions made when approaches differed
 
-4. **Next steps:**
-   - User can review the diff manually
-   - User can apply changes if satisfied
-   - User can request adjustments
+3. **Write the file:**
+   - Use the Write tool to update CLAUDE.md with the synthesized content
+   - This will replace the existing file with the new version
 
-**Important:** Do NOT write the file directly. Present the content for user review and approval.
+4. **Confirm completion:**
+   - Report that CLAUDE.md has been updated
+   - Suggest running `git diff CLAUDE.md` to review changes
+   - File is ready to commit if satisfied
 
 ---
 
