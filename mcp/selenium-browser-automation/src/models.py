@@ -8,7 +8,7 @@ import pydantic
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
 
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
+    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
 
 
 class ChromeProfileEssential(BaseModel):
@@ -99,7 +99,9 @@ class ChromeInfoCacheEntry(BaseModel):
     enterprise_label: str | None = None
     has_multiple_account_names: bool | None = None
     managed_user_id: str | None = None
-    signin_with_credential_provider: bool | None = pydantic.Field(None, alias='signin.with_credential_provider')
+    signin_with_credential_provider: bool | None = pydantic.Field(
+        None, alias="signin.with_credential_provider"
+    )
 
 
 class ChromeLocalStateProfile(BaseModel):

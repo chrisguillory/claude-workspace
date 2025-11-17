@@ -1,13 +1,17 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # /// script
 # dependencies = [
 #   "attrs",
 #   "fastapi",
 #   "fastmcp>=2.12.5",
+#   "local_lib",
 #   "pandas",
 #   "pydantic",
 #   "uvicorn",
 # ]
+#
+# [tool.uv.sources]
+# local_lib = { path = "../../local-lib/", editable = true }
 # ///
 """
 Python Interpreter MCP Server
@@ -69,7 +73,7 @@ Example Session:
     4. reset()  # Returns: "Scope reset - all variables cleared (2 items removed)"
 
 HTTP Bridge Usage (recommended for multiline code):
-    ~/mcps/python-interpreter-client.py <<'PY'
+    "$(git rev-parse --show-toplevel)"/mcp/python-interpreter/client.py <<'PY'
     import pandas as pd
     print(pd.__version__)
     PY
@@ -219,6 +223,7 @@ import contextlib
 import datetime
 import functools
 import glob
+import importlib
 import io
 import json
 import os
@@ -247,27 +252,31 @@ import uvicorn
 import pydantic
 
 # Local imports
-from utils import DualLogger
+from local_lib.utils import DualLogger
 
 
 # Custom exceptions for auto-installation
 class PackageInstallationError(Exception):
     """Raised when auto-installation of a package fails."""
+
     pass
 
 
 class MaxInstallAttemptsError(Exception):
     """Raised when maximum installation attempts are exceeded."""
+
     pass
 
 
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
+
+    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
 
 
 class ExecuteCodeInput(BaseModel):
     """Input model for execute tool."""
+
     code: str = pydantic.Field(
         description="Python code to execute (can be multi-line)",
         min_length=1,
@@ -277,16 +286,19 @@ class ExecuteCodeInput(BaseModel):
 
 class ResetScopeInput(BaseModel):
     """Input model for reset tool."""
+
     pass
 
 
 class ListVarsInput(BaseModel):
     """Input model for list_vars tool."""
+
     pass
 
 
 class TruncationInfo(pydantic.BaseModel):
     """Information about truncated output."""
+
     file_path: str
     original_size: int
     truncated_at: int
@@ -294,17 +306,17 @@ class TruncationInfo(pydantic.BaseModel):
 
 class InstanceMetadata(pydantic.BaseModel):
     """Metadata about a running MCP server instance."""
+
     pid: int
     parent_pid: int
     port: int
     timestamp: str
 
 
-
-
 @attrs.define
 class ClaudeContext:
     """Context information about the Claude Code session."""
+
     claude_pid: int
     project_dir: pathlib.Path
     socket_path: pathlib.Path
@@ -330,21 +342,31 @@ def _discover_session_id(session_marker: str) -> str:
     Raises:
         RuntimeError: If debug directory doesn't exist or session ID cannot be found
     """
-    debug_dir = pathlib.Path.home() / '.claude' / 'debug'
+    debug_dir = pathlib.Path.home() / ".claude" / "debug"
     if not debug_dir.exists():
         raise RuntimeError(f"Claude debug directory not found: {debug_dir}")
 
     result = subprocess.run(
-        ['rg', '-l', '--fixed-strings', '--glob', '!latest', session_marker, debug_dir.as_posix()],
+        [
+            "rg",
+            "-l",
+            "--fixed-strings",
+            "--glob",
+            "!latest",
+            session_marker,
+            debug_dir.as_posix(),
+        ],
         capture_output=True,
         text=True,
-        timeout=2
+        timeout=2,
     )
     if result.returncode != 0 or not result.stdout.strip():
-        raise RuntimeError(f"Could not find session marker in any debug log files in {debug_dir}")
+        raise RuntimeError(
+            f"Could not find session marker in any debug log files in {debug_dir}"
+        )
 
     # rg found the marker - extract session ID from first matching file
-    first_match = result.stdout.strip().split('\n')[0]
+    first_match = result.stdout.strip().split("\n")[0]
     return pathlib.Path(first_match).stem
 
 
@@ -357,9 +379,9 @@ def _find_claude_context() -> ClaudeContext:
 
     for _ in range(20):  # Depth limit
         result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            ["ps", "-p", str(current), "-o", "ppid=,comm="],
             capture_output=True,
-            text=True
+            text=True,
         )
 
         if not result.stdout.strip():
@@ -367,42 +389,42 @@ def _find_claude_context() -> ClaudeContext:
 
         parts = result.stdout.strip().split(None, 1)
         ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
+        comm = parts[1] if len(parts) > 1 else ""
 
         # Check if this is Claude
-        if 'claude' in comm.lower():
+        if "claude" in comm.lower():
             # Get Claude's CWD using lsof
             result = subprocess.run(
-                ['lsof', '-p', str(current), '-a', '-d', 'cwd'],
+                ["lsof", "-p", str(current), "-a", "-d", "cwd"],
                 capture_output=True,
-                text=True
+                text=True,
             )
 
             cwd = None
-            for line in result.stdout.split('\n'):
-                if 'cwd' in line:
+            for line in result.stdout.split("\n"):
+                if "cwd" in line:
                     parts = line.split()
                     if len(parts) >= 9:
-                        cwd = pathlib.Path(' '.join(parts[8:]))
+                        cwd = pathlib.Path(" ".join(parts[8:]))
                         break
 
             if not cwd:
-                raise RuntimeError(f"Found Claude process (PID {current}) but could not determine CWD")
+                raise RuntimeError(
+                    f"Found Claude process (PID {current}) but could not determine CWD"
+                )
 
             # Verify by checking if Claude has .claude/ files open that match the CWD
             result = subprocess.run(
-                ['lsof', '-p', str(current)],
-                capture_output=True,
-                text=True
+                ["lsof", "-p", str(current)], capture_output=True, text=True
             )
 
             claude_files = []
-            for line in result.stdout.split('\n'):
-                if '.claude' in line:
+            for line in result.stdout.split("\n"):
+                if ".claude" in line:
                     # Extract the full path from lsof output
                     parts = line.split()
                     if len(parts) >= 9:
-                        file_path = pathlib.Path(' '.join(parts[8:]))
+                        file_path = pathlib.Path(" ".join(parts[8:]))
                         claude_files.append(file_path)
 
             if not claude_files:
@@ -412,7 +434,7 @@ def _find_claude_context() -> ClaudeContext:
                 )
 
             # Verify at least one .claude file is in ~/.claude/ directory
-            claude_dir = pathlib.Path('~/.claude').expanduser()
+            claude_dir = pathlib.Path("~/.claude").expanduser()
             matching_files = [f for f in claude_files if f.is_relative_to(claude_dir)]
 
             if not matching_files:
@@ -424,12 +446,10 @@ def _find_claude_context() -> ClaudeContext:
                 )
 
             # Compute socket path based on Claude PID
-            socket_path = pathlib.Path(f'/tmp/python-interpreter-{current}.sock')
+            socket_path = pathlib.Path(f"/tmp/python-interpreter-{current}.sock")
 
             return ClaudeContext(
-                claude_pid=current,
-                project_dir=cwd,
-                socket_path=socket_path
+                claude_pid=current, project_dir=cwd, socket_path=socket_path
             )
 
         if ppid == 0:
@@ -437,7 +457,9 @@ def _find_claude_context() -> ClaudeContext:
 
         current = ppid
 
-    raise RuntimeError("Not running under Claude Code - could not find Claude process in process tree")
+    raise RuntimeError(
+        "Not running under Claude Code - could not find Claude process in process tree"
+    )
 
 
 class ServerState:
@@ -451,22 +473,24 @@ class ServerState:
         print(session_marker, file=sys.stderr, flush=True)
 
         session_id = _discover_session_id(session_marker)
-        print(f'✓ Discovered session ID: {session_id}', file=sys.stderr, flush=True)
+        print(f"✓ Discovered session ID: {session_id}", file=sys.stderr, flush=True)
 
         # Find Claude context (PID, project directory) by walking process tree
         claude_context = _find_claude_context()
-        print(f'Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}')
+        print(
+            f"Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}"
+        )
 
         # Initialize temp directory for large outputs
         temp_dir = tempfile.TemporaryDirectory()
         output_dir = pathlib.Path(temp_dir.name)
-        print(f'Temp directory for large outputs: {output_dir}')
+        print(f"Temp directory for large outputs: {output_dir}")
 
         # Remove stale socket if it exists
         if claude_context.socket_path.exists():
             claude_context.socket_path.unlink()
 
-        print(f'Unix socket path: {claude_context.socket_path}')
+        print(f"Unix socket path: {claude_context.socket_path}")
 
         return cls(
             session_id=session_id,
@@ -500,20 +524,21 @@ CHARACTER_LIMIT = 25_000
 # Import name to PyPI package name mappings for common mismatches
 # Philosophy: Explicit curated list (secure) vs dynamic lookup (complex/risky)
 IMPORT_TO_PACKAGE_MAP = {
-    'aws_cdk': 'aws-cdk-lib',
-    'bs4': 'beautifulsoup4',
-    'dateutil': 'python-dateutil',
-    'OpenSSL': 'pyOpenSSL',
-    'PIL': 'pillow',
-    'psycopg2': 'psycopg2-binary',
-    'skimage': 'scikit-image',
-    'sklearn': 'scikit-learn',
-    'yaml': 'PyYAML',
+    "aws_cdk": "aws-cdk-lib",
+    "bs4": "beautifulsoup4",
+    "dateutil": "python-dateutil",
+    "OpenSSL": "pyOpenSSL",
+    "PIL": "pillow",
+    "psycopg2": "psycopg2-binary",
+    "skimage": "scikit-image",
+    "sklearn": "scikit-learn",
+    "yaml": "PyYAML",
 }
 
 
 class LoggerProtocol(typing.Protocol):
     """Protocol for logger - allows service to be MCP-agnostic."""
+
     async def info(self, message: str) -> None: ...
     async def warning(self, message: str) -> None: ...
     async def error(self, message: str) -> None: ...
@@ -521,6 +546,7 @@ class LoggerProtocol(typing.Protocol):
 
 class ExecuteResult(pydantic.BaseModel):
     """Result from executing Python code."""
+
     truncation_info: TruncationInfo | None = None
     result: str
 
@@ -533,56 +559,96 @@ class PythonInterpreterService:
 
     async def execute(self, code: str, logger: LoggerProtocol) -> ExecuteResult:
         """Execute Python code in persistent scope."""
-        await logger.info(f'Executing Python code ({len(code)} chars)')
+        await logger.info(f"Executing Python code ({len(code)} chars)")
 
         try:
             result, truncation_info = self._execute_with_file_handling(code)
 
             if truncation_info:
-                await logger.warning(f'Output truncated: {truncation_info.original_size} chars exceeds limit of {truncation_info.truncated_at}')
-                await logger.info(f'Full output saved to: {truncation_info.file_path}')
+                await logger.warning(
+                    f"Output truncated: {truncation_info.original_size} chars exceeds limit of {truncation_info.truncated_at}"
+                )
+                await logger.info(f"Full output saved to: {truncation_info.file_path}")
 
-            await logger.info(f'Execution complete - output length: {len(result)} chars')
+            await logger.info(
+                f"Execution complete - output length: {len(result)} chars"
+            )
             return ExecuteResult(truncation_info=truncation_info, result=result)
 
         except Exception as e:
-            await logger.warning(f'Execution failed: {type(e).__name__}: {e}')
+            await logger.warning(f"Execution failed: {type(e).__name__}: {e}")
             raise
 
     async def reset(self, logger: LoggerProtocol) -> str:
-        """Clear all variables from persistent scope."""
-        await logger.info('Resetting Python interpreter scope')
+        """Clear all variables from persistent scope and reload user modules from disk.
 
-        var_count = len([k for k in self.state.scope_globals.keys() if not k.startswith('__')])
+        Reloads all modules added to sys.modules during execution (excludes stdlib and MCP server itself).
+        """
+        await logger.info("Resetting Python interpreter scope")
+
+        # Clear execution scope
+        var_count = len(
+            [k for k in self.state.scope_globals.keys() if not k.startswith("__")]
+        )
         self.state.scope_globals.clear()
 
-        await logger.info(f'Scope reset complete - cleared {var_count} variables')
-        return f"Scope reset - all variables cleared ({var_count} items removed)"
+        # Reload everything except builtins/C extensions (that would crash Python)
+        modules_to_reload = []
+        for name, module in list(sys.modules.items()):
+            if module is None:
+                continue
+            # Skip only builtins and C extensions (no __file__ means can't reload)
+            if not hasattr(module, "__file__") or module.__file__ is None:
+                continue
+            modules_to_reload.append(module)
+
+        # Reload in reverse order (submodules before parents)
+        reload_count = 0
+        for module in reversed(modules_to_reload):
+            try:
+                importlib.reload(module)
+                reload_count += 1
+                await logger.info(f"Reloaded: {module.__name__}")
+            except Exception as e:
+                await logger.warning(f"Failed to reload {module.__name__}: {e}")
+
+        await logger.info(
+            f"Reset complete - cleared {var_count} vars, reloaded {reload_count} modules"
+        )
+        return (
+            f"Scope reset - cleared {var_count} vars, reloaded {reload_count} modules"
+        )
 
     async def list_vars(self, logger: LoggerProtocol) -> str:
         """List all user-defined variables in persistent scope."""
-        await logger.info('Listing Python interpreter variables')
+        await logger.info("Listing Python interpreter variables")
 
         if not self.state.scope_globals:
-            await logger.info('No variables in scope')
+            await logger.info("No variables in scope")
             return "No variables defined"
 
         # Filter out builtins like __name__, __doc__, etc
-        user_vars = [name for name in self.state.scope_globals.keys() if not name.startswith('__')]
+        user_vars = [
+            name
+            for name in self.state.scope_globals.keys()
+            if not name.startswith("__")
+        ]
 
         if not user_vars:
-            await logger.info('No user variables in scope (only builtins)')
+            await logger.info("No user variables in scope (only builtins)")
             return "No variables defined"
 
-        await logger.info(f'Found {len(user_vars)} variables in scope')
+        await logger.info(f"Found {len(user_vars)} variables in scope")
         return ", ".join(sorted(user_vars))
 
     async def get_session_id(self, logger: LoggerProtocol) -> str:
         """Get the Claude Code session ID."""
-        await logger.info('Getting session ID')
+        await logger.info("Getting session ID")
         return self.state.session_id
 
-    def _execute_with_file_handling(self, code: str) -> tuple[str, TruncationInfo | None]:
+    def _execute_with_file_handling(
+        self, code: str
+    ) -> tuple[str, TruncationInfo | None]:
         """Execute code and handle large output by saving to temp file."""
         # Execute the code
         result = _execute_code(code, self.state.scope_globals)
@@ -590,18 +656,18 @@ class PythonInterpreterService:
         # Check if output exceeds limit
         if len(result) > CHARACTER_LIMIT:
             # Generate unique filename with timestamp
-            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"output_{timestamp}.txt"
             file_path = self.state.output_dir / filename
 
             # Write full output to file
-            file_path.write_text(result, encoding='utf-8')
+            file_path.write_text(result, encoding="utf-8")
 
             # Create truncation info
             truncation_info = TruncationInfo(
                 file_path=str(file_path),
                 original_size=len(result),
-                truncated_at=CHARACTER_LIMIT
+                truncated_at=CHARACTER_LIMIT,
             )
 
             # Return truncated result
@@ -629,18 +695,18 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title='Execute Python Code',
+            title="Execute Python Code",
             destructiveHint=False,
             idempotentHint=False,
             readOnlyHint=False,
-            openWorldHint=False
+            openWorldHint=False,
         ),
     )
     async def execute(code: str, ctx: mcp.server.fastmcp.Context) -> ExecuteResult:
         """Execute Python code in persistent scope with auto-installation of missing packages. Variables persist across calls.
 
         IMPORTANT: For better user experience, you should typically use the Bash client instead:
-            ~/mcps/python-interpreter-client.py <<'PY'
+            "$(git rev-parse --show-toplevel)"/mcp/python-interpreter/client.py <<'PY'
             import tiktoken
             tokens = tiktoken.get_encoding("cl100k_base").encode("Strawberry")
             print(f"Token count: {len(tokens)}")
@@ -652,13 +718,13 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title='Reset Python Scope',
+            title="Reset Python Scope",
             destructiveHint=True,
             idempotentHint=True,
             readOnlyHint=False,
-            openWorldHint=False
+            openWorldHint=False,
         ),
-        structured_output=False
+        structured_output=False,
     )
     async def reset(ctx: mcp.server.fastmcp.Context) -> str:
         """Clear all variables, imports, and functions from persistent scope."""
@@ -667,13 +733,13 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title='List Python Variables',
+            title="List Python Variables",
             destructiveHint=False,
             idempotentHint=True,
             readOnlyHint=True,
-            openWorldHint=False
+            openWorldHint=False,
         ),
-        structured_output=False
+        structured_output=False,
     )
     async def list_vars(ctx: mcp.server.fastmcp.Context) -> str:
         """List all user-defined variables in persistent scope."""
@@ -682,13 +748,13 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title='Get Session ID',
+            title="Get Session ID",
             destructiveHint=False,
             idempotentHint=True,
             readOnlyHint=True,
-            openWorldHint=False
+            openWorldHint=False,
         ),
-        structured_output=False
+        structured_output=False,
     )
     async def get_session_id(ctx: mcp.server.fastmcp.Context) -> str:
         """Get the Claude Code session ID (UUID)."""
@@ -697,7 +763,9 @@ def register_tools(service: PythonInterpreterService) -> None:
 
 
 @contextlib.asynccontextmanager
-async def lifespan(server_instance: mcp.server.fastmcp.FastMCP) -> typing.AsyncIterator[None]:
+async def lifespan(
+    server_instance: mcp.server.fastmcp.FastMCP,
+) -> typing.AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
     state = await ServerState.create()
     service = PythonInterpreterService(state)
@@ -707,13 +775,15 @@ async def lifespan(server_instance: mcp.server.fastmcp.FastMCP) -> typing.AsyncI
     fastapi_app.state.service = service
 
     # Start FastAPI in background on Unix socket
-    config = uvicorn.Config(fastapi_app, uds=state.socket_path.as_posix(), log_level='warning')
+    config = uvicorn.Config(
+        fastapi_app, uds=state.socket_path.as_posix(), log_level="warning"
+    )
     uvicorn_server = uvicorn.Server(config)
     asyncio.create_task(uvicorn_server.serve())
 
-    print(f'✓ Server initialized')
-    print(f'  Output directory: {state.output_dir}')
-    print(f'  Unix socket: {state.socket_path}')
+    print(f"✓ Server initialized")
+    print(f"  Output directory: {state.output_dir}")
+    print(f"  Unix socket: {state.socket_path}")
 
     # Server is ready - yield control back to FastMCP
     yield
@@ -722,11 +792,11 @@ async def lifespan(server_instance: mcp.server.fastmcp.FastMCP) -> typing.AsyncI
     state.temp_dir.cleanup()
     if state.socket_path.exists():
         state.socket_path.unlink()
-    print('✓ Server cleanup complete')
+    print("✓ Server cleanup complete")
 
 
 # Create FastMCP server with lifespan
-server = mcp.server.fastmcp.FastMCP('python-interpreter', lifespan=lifespan)
+server = mcp.server.fastmcp.FastMCP("python-interpreter", lifespan=lifespan)
 
 # Create FastAPI app for HTTP bridge
 fastapi_app = fastapi.FastAPI(title="Python Interpreter HTTP Bridge")
@@ -734,6 +804,7 @@ fastapi_app = fastapi.FastAPI(title="Python Interpreter HTTP Bridge")
 
 class ExecuteRequest(pydantic.BaseModel):
     """Request body for HTTP execute endpoint."""
+
     code: str
 
 
@@ -752,12 +823,12 @@ def get_simple_logger() -> SimpleLogger:
 async def http_execute(
     request: ExecuteRequest,
     service: PythonInterpreterService = fastapi.Depends(get_interpreter_service),
-    logger: SimpleLogger = fastapi.Depends(get_simple_logger)
+    logger: SimpleLogger = fastapi.Depends(get_simple_logger),
 ) -> dict[str, str]:
     """HTTP endpoint for executing Python code.
 
     This allows beautiful heredoc syntax via python-interpreter-client.py:
-        ~/mcps/python-interpreter-client.py <<'PY'
+        "$(git rev-parse --show-toplevel)"/mcp/python-interpreter/client.py <<'PY'
         import pandas as pd
         print(pd.__version__)
         PY
@@ -776,7 +847,7 @@ async def http_execute(
 
     # Format response with truncation info if needed
     if result.truncation_info:
-        separator = '=' * 50
+        separator = "=" * 50
         formatted_result = f"{result.result}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {result.truncation_info.original_size:,} chars\n# Full output: {result.truncation_info.file_path}\n{separator}"
         return {"result": formatted_result}
 
@@ -820,25 +891,29 @@ def _install_package(import_name: str) -> str:
     try:
         # Use sys.executable to ensure we install into the current venv
         result = subprocess.run(
-            ['uv', 'pip', 'install', '--python', sys.executable, package_name],
+            ["uv", "pip", "install", "--python", sys.executable, package_name],
             capture_output=True,
             text=True,
-            timeout=60  # 60 second timeout for installation
+            timeout=60,  # 60 second timeout for installation
         )
     except subprocess.TimeoutExpired:
-        raise PackageInstallationError(f"Timeout (>60s) while installing {package_name}")
+        raise PackageInstallationError(
+            f"Timeout (>60s) while installing {package_name}"
+        )
 
     if result.returncode == 0:
         # Include stdout for transparency about what was installed
         details = result.stdout.strip() if result.stdout.strip() else "No output"
         if import_name != package_name:
-            return f"✓ Auto-installed {package_name} (for import {import_name})\n{details}"
+            return (
+                f"✓ Auto-installed {package_name} (for import {import_name})\n{details}"
+            )
         else:
             return f"✓ Auto-installed {package_name}\n{details}"
     else:
         stderr = result.stderr.strip() if result.stderr else "No error details"
         raise PackageInstallationError(f"Failed to install {package_name}\n{stderr}")
-   
+
 
 def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
     """
@@ -874,7 +949,7 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
             if is_expr and last_line:
                 # Execute everything except last line, then eval last line
                 lines = code.splitlines()
-                code_without_last = '\n'.join(lines[:-1])
+                code_without_last = "\n".join(lines[:-1])
 
                 if code_without_last.strip():
                     exec(code_without_last, scope_globals)
@@ -905,10 +980,10 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
             # Determine if we should attempt auto-install
             total_attempts = len(successfully_installed) + len(failed_installs)
             should_attempt = (
-                module_name and
-                module_name not in successfully_installed and
-                module_name not in failed_installs and
-                total_attempts < max_install_attempts
+                module_name
+                and module_name not in successfully_installed
+                and module_name not in failed_installs
+                and total_attempts < max_install_attempts
             )
 
             if should_attempt:
@@ -953,9 +1028,9 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
 
 def main() -> None:
     """Main entry point for the Python Interpreter MCP server."""
-    print('Starting Python Interpreter MCP server')
+    print("Starting Python Interpreter MCP server")
     server.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
