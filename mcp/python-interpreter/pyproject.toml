@@ -1,0 +1,20 @@
+[project]
+name = "python-interpreter-mcp"
+version = "0.1.0"
+description = "Python Interpreter MCP Server - Persistent Python execution environment"
+requires-python = ">=3.11"
+dependencies = [
+    "attrs",
+    "fastapi",
+    "fastmcp>=2.12.5",
+    "pandas",
+    "pydantic",
+    "uvicorn",
+]
+
+[project.scripts]
+server = "server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

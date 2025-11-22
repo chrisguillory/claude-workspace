@@ -4,14 +4,10 @@
 #   "attrs",
 #   "fastapi",
 #   "fastmcp>=2.12.5",
-#   "local_lib",
 #   "pandas",
 #   "pydantic",
 #   "uvicorn",
 # ]
-#
-# [tool.uv.sources]
-# local_lib = { path = "../../local-lib/", editable = true }
 # ///
 """
 Python Interpreter MCP Server
@@ -251,8 +247,29 @@ import uvicorn
 # Pydantic imports
 import pydantic
 
-# Local imports
-from local_lib.utils import DualLogger
+# Vendored utilities (removed local_lib dependency)
+class DualLogger:
+    """Logs messages to both stdout and MCP client context."""
+
+    def __init__(self, ctx):
+        from datetime import datetime
+        self.ctx = ctx
+        self._datetime = datetime
+
+    def _timestamp(self) -> str:
+        return self._datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    async def info(self, msg: str):
+        print(f"[{self._timestamp()}] [INFO] {msg}")
+        await self.ctx.info(msg)
+
+    async def debug(self, msg: str):
+        print(f"[{self._timestamp()}] [DEBUG] {msg}")
+        await self.ctx.debug(msg)
+
+    async def error(self, msg: str):
+        print(f"[{self._timestamp()}] [ERROR] {msg}")
+        await self.ctx.error(msg)
 
 
 # Custom exceptions for auto-installation
