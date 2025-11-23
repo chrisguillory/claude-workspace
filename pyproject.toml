@@ -16,8 +16,9 @@ package = false
 members = [
     "local-lib",
     "mcp/python-interpreter",
-    "mcp/browser-automation",
-    "mcp/selenium-browser-automation",
+    # TODO: Add these once they have pyproject.toml:
+    # "mcp/browser-automation",
+    # "mcp/selenium-browser-automation",
     # "hooks" - decide later if hooks should be workspace member or stay inline
 ]
 
