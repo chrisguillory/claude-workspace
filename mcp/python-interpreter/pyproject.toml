@@ -21,6 +21,10 @@ server = "server:main"
 # Remote uvx installations use the git URL; local development uses workspace (faster, sees live changes).
 local-lib = { workspace = true }
 
+[tool.hatch.build]
+# Files to include in distribution package
+include = ["client.py", "server.py"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
