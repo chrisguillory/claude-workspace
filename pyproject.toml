@@ -1,0 +1,26 @@
+[project]
+name = "claude-workspace"
+version = "0.1.0"
+requires-python = ">=3.13"
+readme = "README.md"
+
+# Empty dependencies at root - each workspace member has its own
+dependencies = []
+
+[tool.uv]
+# Root package is not installable - it's just a workspace container
+package = false
+
+[tool.uv.workspace]
+# Workspace members - each must have its own pyproject.toml
+members = [
+    "local-lib",
+    "mcp/python-interpreter",
+    "mcp/browser-automation",
+    "mcp/selenium-browser-automation",
+    # "hooks" - decide later if hooks should be workspace member or stay inline
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
