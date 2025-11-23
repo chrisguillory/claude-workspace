@@ -247,29 +247,8 @@ import uvicorn
 # Pydantic imports
 import pydantic
 
-# Vendored utilities (removed local_lib dependency)
-class DualLogger:
-    """Logs messages to both stdout and MCP client context."""
-
-    def __init__(self, ctx):
-        from datetime import datetime
-        self.ctx = ctx
-        self._datetime = datetime
-
-    def _timestamp(self) -> str:
-        return self._datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    async def info(self, msg: str):
-        print(f"[{self._timestamp()}] [INFO] {msg}")
-        await self.ctx.info(msg)
-
-    async def debug(self, msg: str):
-        print(f"[{self._timestamp()}] [DEBUG] {msg}")
-        await self.ctx.debug(msg)
-
-    async def error(self, msg: str):
-        print(f"[{self._timestamp()}] [ERROR] {msg}")
-        await self.ctx.error(msg)
+# Local library imports
+from local_lib.utils import DualLogger, humanize_seconds
 
 
 # Custom exceptions for auto-installation
@@ -485,6 +464,9 @@ class ServerState:
     @classmethod
     async def create(cls) -> typing.Self:
         """Factory method to create and initialize server state - fails fast if anything goes wrong."""
+        # Capture server start time
+        started_at = datetime.datetime.now(datetime.UTC)
+
         # Discover session ID via self-referential marker search
         session_marker = f"SESSION_MARKER_{uuid.uuid4()}"
         print(session_marker, file=sys.stderr, flush=True)
@@ -497,6 +479,19 @@ class ServerState:
         print(
             f"Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}"
         )
+
+        # Compute transcript path using session tracker pattern
+        # Normalize project dir to create safe directory name
+        # Note: Claude Code creates the transcript file before starting MCP servers,
+        # so this path should always exist. strict=True validates this assumption.
+        project_name = str(claude_context.project_dir).replace("/", "-")
+        transcript_path = (
+            pathlib.Path.home()
+            / ".claude"
+            / "projects"
+            / project_name
+            / f"{session_id}.jsonl"
+        ).resolve(strict=True)
 
         # Initialize temp directory for large outputs
         temp_dir = tempfile.TemporaryDirectory()
@@ -511,25 +506,39 @@ class ServerState:
 
         return cls(
             session_id=session_id,
-            temp_dir=temp_dir,
-            output_dir=output_dir,
-            socket_path=claude_context.socket_path,
+            started_at=started_at,
             project_dir=claude_context.project_dir,
+            socket_path=claude_context.socket_path,
+            transcript_path=transcript_path,
+            output_dir=output_dir,
+            temp_dir=temp_dir,
+            claude_pid=claude_context.claude_pid,
         )
 
     def __init__(
         self,
         session_id: str,
-        temp_dir: tempfile.TemporaryDirectory,
-        output_dir: pathlib.Path,
-        socket_path: pathlib.Path,
+        started_at: datetime.datetime,
         project_dir: pathlib.Path,
+        socket_path: pathlib.Path,
+        transcript_path: pathlib.Path,
+        output_dir: pathlib.Path,
+        temp_dir: tempfile.TemporaryDirectory,
+        claude_pid: int,
     ) -> None:
+        # Identity
         self.session_id = session_id
-        self.temp_dir = temp_dir
-        self.output_dir = output_dir
-        self.socket_path = socket_path
+        self.started_at = started_at
+
+        # Path configuration
         self.project_dir = project_dir
+        self.socket_path = socket_path
+        self.transcript_path = transcript_path
+        self.output_dir = output_dir
+
+        # Resources
+        self.temp_dir = temp_dir
+        self.claude_pid = claude_pid
 
         # Python execution scope - persists across executions
         self.scope_globals: dict[str, typing.Any] = {}
@@ -566,6 +575,19 @@ class ExecuteResult(pydantic.BaseModel):
 
     truncation_info: TruncationInfo | None = None
     result: str
+
+
+class SessionInfo(pydantic.BaseModel):
+    """Session and server metadata."""
+
+    session_id: str
+    project_dir: str
+    socket_path: str
+    transcript_path: str
+    output_dir: str
+    claude_pid: int
+    started_at: datetime.datetime  # Pydantic auto-serializes to ISO 8601
+    uptime: str  # Human-readable duration
 
 
 class PythonInterpreterService:
@@ -658,10 +680,24 @@ class PythonInterpreterService:
         await logger.info(f"Found {len(user_vars)} variables in scope")
         return ", ".join(sorted(user_vars))
 
-    async def get_session_id(self, logger: LoggerProtocol) -> str:
-        """Get the Claude Code session ID."""
-        await logger.info("Getting session ID")
-        return self.state.session_id
+    async def get_session_info(self, logger: LoggerProtocol) -> SessionInfo:
+        """Get comprehensive session and server metadata."""
+        await logger.info("Getting session info")
+
+        # Calculate uptime
+        uptime_seconds = (datetime.datetime.now(datetime.UTC) - self.state.started_at).total_seconds()
+        uptime = humanize_seconds(uptime_seconds)
+
+        return SessionInfo(
+            session_id=self.state.session_id,
+            project_dir=str(self.state.project_dir),
+            socket_path=str(self.state.socket_path),
+            transcript_path=str(self.state.transcript_path),
+            output_dir=str(self.state.output_dir),
+            claude_pid=self.state.claude_pid,
+            started_at=self.state.started_at,
+            uptime=uptime,
+        )
 
     def _execute_with_file_handling(
         self, code: str
@@ -765,18 +801,17 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title="Get Session ID",
+            title="Get Session Info",
             destructiveHint=False,
             idempotentHint=True,
             readOnlyHint=True,
             openWorldHint=False,
         ),
-        structured_output=False,
     )
-    async def get_session_id(ctx: mcp.server.fastmcp.Context) -> str:
-        """Get the Claude Code session ID (UUID)."""
+    async def get_session_info(ctx: mcp.server.fastmcp.Context) -> SessionInfo:
+        """Get comprehensive session and server metadata including session ID, paths, PID, start time, and uptime."""
         logger = DualLogger(ctx)
-        return await service.get_session_id(logger)
+        return await service.get_session_info(logger)
 
 
 @contextlib.asynccontextmanager

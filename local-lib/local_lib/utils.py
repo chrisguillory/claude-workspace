@@ -49,3 +49,34 @@ class Timer:
     def elapsed_ms(self) -> int:
         """Return elapsed time in milliseconds."""
         return int(self.elapsed() * 1000)
+
+
+def humanize_seconds(seconds: float) -> str:
+    """Convert seconds to human-readable duration with abbreviated units.
+
+    Uses terse but complete format following Unix conventions:
+    - 45 sec
+    - 1.5 min
+    - 2.5 hr
+    - 3d
+
+    Args:
+        seconds: Duration in seconds
+
+    Returns:
+        Human-readable duration string with abbreviated unit
+    """
+    intervals = [
+        ('d', 86400),    # days
+        ('hr', 3600),    # hours
+        ('min', 60),     # minutes
+        ('sec', 1)       # seconds
+    ]
+
+    for unit, count in intervals:
+        if seconds >= count:
+            value = seconds / count
+            value_str = f"{value:.1f}".rstrip('0').rstrip('.')
+            return f"{value_str} {unit}"
+
+    return "0 sec"
