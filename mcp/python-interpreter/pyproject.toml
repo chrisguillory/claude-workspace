@@ -7,7 +7,7 @@ dependencies = [
     "attrs",
     "fastapi",
     "fastmcp>=2.12.5",
-    "local-lib",
+    "local-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=local-lib",
     "pandas",
     "pydantic",
     "uvicorn",
@@ -17,7 +17,9 @@ dependencies = [
 server = "server:main"
 
 [tool.uv.sources]
-local-lib = { git = "https://github.com/chrisguillory/claude-workspace.git", subdirectory = "local-lib" }
+# Local development override: workspace reference takes precedence over git URL in dependencies.
+# Remote uvx installations use the git URL; local development uses workspace (faster, sees live changes).
+local-lib = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
