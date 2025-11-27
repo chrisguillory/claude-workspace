@@ -342,11 +342,12 @@ async def _discover_session_id(session_marker: str) -> str:
     if not debug_dir.exists():
         raise RuntimeError(f"Claude debug directory not found: {debug_dir}")
 
-    # Retry up to 5 times to handle race condition where log hasn't flushed yet
+    # Retry up to 10 times to handle race condition where log hasn't flushed yet
+    # Claude Code buffers log writes, so we need longer waits (200ms × 10 = ~2s max)
     print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Starting session discovery for marker: {session_marker}", file=sys.stderr, flush=True)
 
-    for attempt in range(5):
-        print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Attempt {attempt + 1}/5", file=sys.stderr, flush=True)
+    for attempt in range(20):
+        print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Attempt {attempt + 1}/20", file=sys.stderr, flush=True)
 
         result = subprocess.run(
             [
@@ -373,13 +374,13 @@ async def _discover_session_id(session_marker: str) -> str:
             return session_id
 
         # Not found yet - wait briefly before retrying (except on last attempt)
-        if attempt < 4:
+        if attempt < 19:
             print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Not found, sleeping 50ms before retry", file=sys.stderr, flush=True)
             await asyncio.sleep(0.05)
 
-    print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] FAILED after 5 attempts", file=sys.stderr, flush=True)
+    print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] FAILED after 20 attempts", file=sys.stderr, flush=True)
     raise RuntimeError(
-        f"Could not find session marker in any debug log files in {debug_dir} after 5 attempts"
+        f"Could not find session marker in any debug log files in {debug_dir} after 20 attempts"
     )
 
 
