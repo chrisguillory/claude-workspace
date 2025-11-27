@@ -348,7 +348,7 @@ def _discover_session_id(session_marker: str) -> str:
             "-l",
             "--fixed-strings",
             "--glob",
-            "!latest",
+            "*.txt",
             session_marker,
             debug_dir.as_posix(),
         ],

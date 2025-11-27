@@ -29,3 +29,11 @@ claude-workspace/
 ├── CLAUDE.md                   # Coding standards
 └── README.md
 ```
+
+## Installing MCP Servers
+
+### [Python Interpreter MCP](mcp/python-interpreter)
+
+```bash
+claude mcp add --scope user python-interpreter -- uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter server
+```
