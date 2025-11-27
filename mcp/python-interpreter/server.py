@@ -318,7 +318,7 @@ class ClaudeContext:
     socket_path: pathlib.Path
 
 
-def _discover_session_id(session_marker: str) -> str:
+async def _discover_session_id(session_marker: str) -> str:
     """Discover Claude Code session ID via self-referential marker search in debug logs.
 
     Workaround for lack of official session discovery API. Claude Code's stdio transport
@@ -336,34 +336,41 @@ def _discover_session_id(session_marker: str) -> str:
         Session ID (UUID string)
 
     Raises:
-        RuntimeError: If debug directory doesn't exist or session ID cannot be found
+        RuntimeError: If debug directory doesn't exist or session ID cannot be found after retries
     """
     debug_dir = pathlib.Path.home() / ".claude" / "debug"
     if not debug_dir.exists():
         raise RuntimeError(f"Claude debug directory not found: {debug_dir}")
 
-    result = subprocess.run(
-        [
-            "rg",
-            "-l",
-            "--fixed-strings",
-            "--glob",
-            "*.txt",
-            session_marker,
-            debug_dir.as_posix(),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=2,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
-        raise RuntimeError(
-            f"Could not find session marker in any debug log files in {debug_dir}"
+    # Retry up to 5 times to handle race condition where log hasn't flushed yet
+    for attempt in range(5):
+        result = subprocess.run(
+            [
+                "rg",
+                "-l",
+                "--fixed-strings",
+                "--glob",
+                "*.txt",
+                session_marker,
+                debug_dir.as_posix(),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
 
-    # rg found the marker - extract session ID from first matching file
-    first_match = result.stdout.strip().split("\n")[0]
-    return pathlib.Path(first_match).stem
+        if result.returncode == 0 and result.stdout.strip():
+            # rg found the marker - extract session ID from first matching file
+            first_match = result.stdout.strip().split("\n")[0]
+            return pathlib.Path(first_match).stem
+
+        # Not found yet - wait briefly before retrying (except on last attempt)
+        if attempt < 4:
+            await asyncio.sleep(0.05)
+
+    raise RuntimeError(
+        f"Could not find session marker in any debug log files in {debug_dir} after 5 attempts"
+    )
 
 
 @functools.cache
@@ -471,7 +478,7 @@ class ServerState:
         session_marker = f"SESSION_MARKER_{uuid.uuid4()}"
         print(session_marker, file=sys.stderr, flush=True)
 
-        session_id = _discover_session_id(session_marker)
+        session_id = await _discover_session_id(session_marker)
         print(f"✓ Discovered session ID: {session_id}", file=sys.stderr, flush=True)
 
         # Find Claude context (PID, project directory) by walking process tree
