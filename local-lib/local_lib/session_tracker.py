@@ -29,6 +29,11 @@ __all__ = [
 ]
 
 
+# Path configuration
+SESSIONS_PATH = Path("~/.claude-workspace/sessions.json").expanduser()
+LOCK_PATH = Path("~/.claude-workspace/.sessions.json.lock").expanduser()
+
+
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
 
@@ -86,7 +91,7 @@ class SessionManager:
     def __init__(self, cwd: str):
         self.cwd = cwd
         self.db_path = get_sessions_file(cwd)
-        self.lock_path = Path(cwd) / "sessions.json.lock"
+        self.lock_path = LOCK_PATH
         self._db: SessionDatabase | None = None
         self._lock: FileLock | None = None
 
@@ -388,8 +393,9 @@ def detect_crashed_sessions(cwd: str) -> Sequence[str]:
 
 # Private helper functions (not in __all__)
 def get_sessions_file(cwd: str) -> Path:
-    """Get path to sessions.json file."""
-    return Path(cwd) / "sessions.json"
+    """Get path to sessions.json file - centralized in ~/.claude-workspace/."""
+    SESSIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    return SESSIONS_PATH
 
 
 def load_sessions(cwd: str) -> SessionDatabase:
