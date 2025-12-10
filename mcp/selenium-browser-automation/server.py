@@ -1,20 +1,15 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# dependencies = [
-#   "fastmcp>=2.12.5",
-#   "selenium",
-#   "httpx",
-#   "pyyaml",
-# ]
-# ///
-#
-# Selenium Browser Automation MCP Server
-#
-# Architecture: Runs locally via uv --script (not Docker) for visible browser monitoring.
-# Uses Selenium with CDP stealth injection to bypass Cloudflare bot detection.
-#
-# Setup:
-#   claude mcp add --transport stdio selenium-browser-automation -- uv run --script "$(git rev-parse --show-toplevel)/mcp/selenium-browser-automation/server.py"
+#!/usr/bin/env python3
+"""
+Selenium Browser Automation MCP Server
+
+CDP stealth injection to bypass Cloudflare bot detection.
+
+Install:
+    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation server
+
+Architecture: Runs locally (not Docker) for visible browser monitoring.
+Uses Selenium with CDP stealth injection where Playwright fails.
+"""
 
 from __future__ import annotations
 
@@ -2079,10 +2074,15 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
 mcp = FastMCP("selenium-browser-automation", lifespan=lifespan)
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for uvx installation."""
     print("Starting Selenium Browser Automation MCP server", file=sys.stderr)
     print(
         "Note: This server uses CDP stealth injection to bypass bot detection",
         file=sys.stderr,
     )
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

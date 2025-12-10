@@ -33,10 +33,80 @@ claude-workspace/
 
 ## Installing MCP Servers
 
+All MCP servers can be installed globally (user scope) via `uvx` from GitHub:
+
 ### [Python Interpreter MCP](mcp/python-interpreter)
 
+Persistent Python execution environment with variable retention across calls.
+
 ```bash
-claude mcp add --scope user python-interpreter -- uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter server
+# From GitHub (recommended)
+claude mcp add --scope user python-interpreter -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter server
+
+# From local clone
+claude mcp add --scope user python-interpreter -t stdio -- uv run --script ~/claude-workspace/mcp/python-interpreter/server.py
+```
+
+### [Browser Automation MCP](mcp/browser-automation)
+
+Playwright-based browser control with stealth mode for web automation.
+
+```bash
+# From GitHub (recommended)
+claude mcp add --scope user browser-automation -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation server
+
+# From local clone
+claude mcp add --scope user browser-automation -t stdio -- uv run --script ~/claude-workspace/mcp/browser-automation/server.py
+```
+
+**Note:** Requires Playwright browsers. After installation, run: `playwright install chromium`
+
+### [Selenium Browser Automation MCP](mcp/selenium-browser-automation)
+
+Selenium with CDP stealth injection to bypass Cloudflare bot detection.
+
+```bash
+# From GitHub (recommended)
+claude mcp add --scope user selenium-browser-automation -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation server
+
+# From local clone
+claude mcp add --scope user selenium-browser-automation -t stdio -- uv run --script ~/claude-workspace/mcp/selenium-browser-automation/server.py
+```
+
+**Note:** Requires Chrome/Chromium installed on the system.
+
+### Local Development
+
+For local development with live code changes, use workspace mode from the repo root:
+
+```bash
+cd ~/claude-workspace
+uv run -p python-interpreter-mcp server
+uv run -p browser-automation-mcp server
+uv run -p selenium-browser-automation-mcp server
+```
+
+### Dependency Resolution and Reproducibility
+
+This repo includes a `uv.lock` file, but whether it's used depends on your install method:
+
+| Install Method | Uses uv.lock | Dependency Versions |
+|----------------|--------------|---------------------|
+| `uv sync` / `uv run` (local clone) | Yes | Exact (fully reproducible) |
+| `uvx --from git+...` (remote) | No | Resolved fresh from constraints |
+
+**Why uvx ignores lock files:** This is an architectural limitation, not a bug. `uvx` installs from wheels, and wheels cannot contain lock files. The [Astral team has acknowledged this](https://github.com/astral-sh/uv/issues/13410) and is exploring solutions like `uvx --locked`, but none exist yet.
+
+**uvx caching behavior:** Dependencies are cached per Git commit SHA. The *first* install of a given commit resolves fresh from PyPI; subsequent runs reuse the cached resolution. Use `--refresh` to force re-resolution.
+
+**What varies:** With `uvx`, source code is deterministic (same commit = same code), but dependency versions may differ over time as new releases satisfy constraints (e.g., `fastmcp>=2.12.5` might resolve to 2.12.5 today, 2.13.0 next month).
+
+**For full reproducibility:** Clone the repo and use the lock file:
+```bash
+git clone https://github.com/chrisguillory/claude-workspace.git
+cd claude-workspace
+uv sync
+uv run -p browser-automation-mcp server
 ```
 
 ## Hook Installation
