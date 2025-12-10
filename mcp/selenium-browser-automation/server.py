@@ -113,6 +113,15 @@ class ResourceCapture(BaseModel):
     errors: list[dict]
 
 
+class HARExportResult(BaseModel):
+    """Result of HAR export operation."""
+    path: str
+    entry_count: int
+    size_bytes: int
+    has_errors: bool = False
+    errors: list[str] = []
+
+
 class NavigationResult(BaseModel):
     current_url: str
     title: str
@@ -188,6 +197,9 @@ class BrowserState:
         self.network_capture_start_time: float | None = None
         self.network_events: list[dict] = []  # Collected CDP events
         self.network_resource_filter: list[str] | None = None  # Optional resource type filter
+        # HAR capture state (requires goog:loggingPrefs - more overhead than network capture)
+        self.har_capture_enabled = False
+        self.har_performance_logs: list[dict] = []  # Accumulated performance logs
 
 
 class LoggerProtocol(typing.Protocol):
@@ -246,6 +258,9 @@ class BrowserService:
                 "profile.password_manager_enabled": False,
             },
         )
+        # Enable performance logging for HAR export (captures Network.* events)
+        opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+        opts.add_experimental_option("perfLoggingPrefs", {"enableNetwork": True})
 
         # Add profile if specified
         if profile:
@@ -1583,13 +1598,14 @@ Returns:
                 "note": "Already capturing",
             }
 
-        # Enable CDP Network domain for monitoring
+        # Enable CDP Network domain with large buffers for HAR export
+        # Per Perplexity research: Chrome can handle 50MB/resource, 100MB total
         await asyncio.to_thread(
             driver.execute_cdp_cmd,
             "Network.enable",
             {
-                "maxTotalBufferSize": 10 * 1024 * 1024,  # 10MB
-                "maxResourceBufferSize": 5 * 1024 * 1024,  # 5MB per resource
+                "maxTotalBufferSize": 100 * 1024 * 1024,  # 100MB total
+                "maxResourceBufferSize": 50 * 1024 * 1024,  # 50MB per resource
             },
         )
 
@@ -1780,6 +1796,263 @@ Returns:
             )
 
         return result
+
+    @mcp.tool(
+        description="""Export captured network traffic to HAR 1.2 file.
+
+Exports full HTTP transaction details (headers, status codes, timing) to HAR format
+for analysis in Chrome DevTools or other tools.
+
+IMPORTANT: Performance logging must be enabled (it is by default). Call after
+navigating and interacting with pages to capture their network traffic.
+
+Args:
+    filename: Output filename (required, e.g., "api-calls.har")
+    include_response_bodies: If True, fetch response bodies for JSON/text (default False)
+    max_body_size_mb: Max response body size to fetch in MB (default 10, max 50)
+
+Returns:
+    HARExportResult with path to saved file and entry count
+
+Workflow:
+    1. navigate(url) - load page
+    2. [interact with page]
+    3. export_har("capture.har") - export network data
+    4. Read the HAR file or import into Chrome DevTools"""
+    )
+    async def export_har(
+        ctx: Context,
+        filename: str,
+        include_response_bodies: bool = False,
+        max_body_size_mb: int = 10,
+    ) -> HARExportResult:
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        await logger.info(f"Exporting HAR to {filename}")
+        errors: list[str] = []
+
+        # Get performance logs (clears buffer - only one export per session)
+        try:
+            logs = await asyncio.to_thread(driver.get_log, "performance")
+        except Exception as e:
+            errors.append(f"Failed to get performance logs: {e}")
+            logs = []
+
+        if not logs:
+            await logger.info("No performance logs available")
+            har_path = service.state.capture_dir / filename
+            empty_har = {
+                "log": {
+                    "version": "1.2",
+                    "creator": {"name": "selenium-browser-automation", "version": "1.0"},
+                    "entries": [],
+                }
+            }
+            har_path.write_text(json.dumps(empty_har, indent=2))
+            return HARExportResult(
+                path=str(har_path),
+                entry_count=0,
+                size_bytes=len(json.dumps(empty_har)),
+                has_errors=True,
+                errors=["No performance logs available. Navigate to pages first."],
+            )
+
+        # Parse and filter Network.* events
+        transactions: dict[str, dict] = {}
+        for entry in logs:
+            try:
+                log_data = json.loads(entry["message"])
+                message = log_data.get("message", {})
+                method = message.get("method", "")
+                params = message.get("params", {})
+
+                if not method.startswith("Network."):
+                    continue
+
+                request_id = params.get("requestId")
+                if not request_id:
+                    continue
+
+                if method == "Network.requestWillBeSent":
+                    req = params.get("request", {})
+                    transactions[request_id] = {
+                        "request": req,
+                        "wall_time": params.get("wallTime"),
+                        "timestamp": params.get("timestamp"),
+                        "initiator": params.get("initiator"),
+                    }
+
+                elif method == "Network.responseReceived":
+                    if request_id in transactions:
+                        resp = params.get("response", {})
+                        transactions[request_id]["response"] = resp
+                        transactions[request_id]["resource_type"] = params.get("type")
+
+                elif method == "Network.loadingFinished":
+                    if request_id in transactions:
+                        transactions[request_id]["encoded_data_length"] = params.get(
+                            "encodedDataLength", 0
+                        )
+                        transactions[request_id]["complete"] = True
+
+            except (json.JSONDecodeError, KeyError) as e:
+                continue
+
+        # Convert transactions to HAR entries
+        har_entries = []
+        from datetime import datetime, timezone
+
+        for request_id, txn in transactions.items():
+            if "response" not in txn:
+                continue  # Skip incomplete transactions
+
+            req = txn.get("request", {})
+            resp = txn.get("response", {})
+            timing = resp.get("timing", {})
+
+            # Convert wallTime (seconds since epoch) to ISO 8601
+            wall_time = txn.get("wall_time")
+            if wall_time:
+                dt = datetime.fromtimestamp(wall_time, tz=timezone.utc)
+                started_datetime = dt.isoformat().replace("+00:00", "Z")
+            else:
+                started_datetime = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+            # Convert headers dict to HAR array format
+            def headers_to_har(headers_dict):
+                if not headers_dict:
+                    return []
+                return [{"name": k, "value": str(v)} for k, v in headers_dict.items()]
+
+            # Parse query string from URL
+            def parse_query_string(url):
+                from urllib.parse import urlparse, parse_qs
+                parsed = urlparse(url)
+                query_params = parse_qs(parsed.query)
+                result = []
+                for name, values in query_params.items():
+                    for value in values:
+                        result.append({"name": name, "value": value})
+                return result
+
+            # Convert CDP timing to HAR timing (duration in ms)
+            def convert_timing(timing_obj):
+                def safe_duration(start_key, end_key):
+                    start = timing_obj.get(start_key)
+                    end = timing_obj.get(end_key)
+                    if start is not None and end is not None and start >= 0 and end >= 0:
+                        return max(0, end - start)
+                    return -1
+
+                return {
+                    "blocked": -1,  # Not directly available
+                    "dns": safe_duration("dnsStart", "dnsEnd"),
+                    "connect": safe_duration("connectStart", "connectEnd"),
+                    "ssl": safe_duration("sslStart", "sslEnd"),
+                    "send": safe_duration("sendStart", "sendEnd"),
+                    "wait": safe_duration("sendEnd", "receiveHeadersEnd"),
+                    "receive": 0,  # Would need loadingFinished timing
+                }
+
+            har_timing = convert_timing(timing)
+
+            # Calculate total time
+            total_time = sum(v for v in har_timing.values() if v >= 0)
+
+            har_entry = {
+                "startedDateTime": started_datetime,
+                "time": total_time,
+                "request": {
+                    "method": req.get("method", "GET"),
+                    "url": req.get("url", ""),
+                    "httpVersion": resp.get("protocol", "HTTP/1.1"),
+                    "headers": headers_to_har(req.get("headers", {})),
+                    "queryString": parse_query_string(req.get("url", "")),
+                    "cookies": [],  # Would need to parse from headers
+                    "headersSize": -1,
+                    "bodySize": len(req.get("postData", "")) if req.get("postData") else 0,
+                },
+                "response": {
+                    "status": resp.get("status", 0),
+                    "statusText": resp.get("statusText", ""),
+                    "httpVersion": resp.get("protocol", "HTTP/1.1"),
+                    "headers": headers_to_har(resp.get("headers", {})),
+                    "cookies": [],
+                    "content": {
+                        "size": resp.get("encodedDataLength", 0),
+                        "mimeType": resp.get("mimeType", ""),
+                    },
+                    "redirectURL": "",
+                    "headersSize": -1,
+                    "bodySize": txn.get("encoded_data_length", -1),
+                },
+                "cache": {},
+                "timings": har_timing,
+                "serverIPAddress": resp.get("remoteIPAddress", ""),
+                "connection": resp.get("connectionId", ""),
+            }
+
+            # Add POST data if present
+            if req.get("postData"):
+                har_entry["request"]["postData"] = {
+                    "mimeType": req.get("headers", {}).get("Content-Type", ""),
+                    "text": req.get("postData"),
+                }
+
+            # Fetch response body if requested (configurable size limit)
+            if include_response_bodies:
+                mime_type = resp.get("mimeType", "")
+                body_size = txn.get("encoded_data_length", 0)
+                max_body_bytes = min(max_body_size_mb, 50) * 1024 * 1024  # Cap at 50MB
+                should_fetch = (
+                    body_size < max_body_bytes
+                    and (
+                        "json" in mime_type
+                        or "text" in mime_type
+                        or "xml" in mime_type
+                        or "javascript" in mime_type
+                    )
+                )
+                if should_fetch:
+                    try:
+                        body_result = await asyncio.to_thread(
+                            driver.execute_cdp_cmd,
+                            "Network.getResponseBody",
+                            {"requestId": request_id},
+                        )
+                        if body_result.get("body"):
+                            har_entry["response"]["content"]["text"] = body_result["body"]
+                            if body_result.get("base64Encoded"):
+                                har_entry["response"]["content"]["encoding"] = "base64"
+                    except Exception:
+                        pass  # Body may not be available after the fact
+
+            har_entries.append(har_entry)
+
+        # Build HAR structure
+        har = {
+            "log": {
+                "version": "1.2",
+                "creator": {"name": "selenium-browser-automation", "version": "1.0"},
+                "entries": har_entries,
+            }
+        }
+
+        # Save to file
+        har_path = service.state.capture_dir / filename
+        har_json = json.dumps(har, indent=2)
+        har_path.write_text(har_json)
+
+        await logger.info(f"Exported {len(har_entries)} entries to {har_path}")
+
+        return HARExportResult(
+            path=str(har_path),
+            entry_count=len(har_entries),
+            size_bytes=len(har_json),
+            has_errors=len(errors) > 0,
+            errors=errors,
+        )
 
 
 @asynccontextmanager
