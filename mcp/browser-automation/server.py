@@ -1,23 +1,14 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# dependencies = [
-#   "fastmcp>=2.12.5",
-#   "local_lib",
-#   "playwright",
-#   "playwright-stealth",
-#   "pyyaml",
-# ]
-#
-# [tool.uv.sources]
-# local_lib = { path = "../../local-lib/", editable = true }
-# ///
-#
-# Browser Automation MCP Server
-#
-# Architecture: Runs locally via uv --script (not Docker) for visible browser monitoring.
-#
-# Setup:
-#   claude mcp add --transport stdio browser-automation -- uv run --script "$(git rev-parse --show-toplevel)/mcp/browser-automation/server.py"
+#!/usr/bin/env python3
+"""
+Browser Automation MCP Server
+
+Playwright-based browser control with stealth mode for Claude Code.
+
+Install:
+    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation server
+
+Architecture: Runs locally (not Docker) for visible browser monitoring.
+"""
 
 from __future__ import annotations
 
@@ -857,6 +848,11 @@ async def type_text(text: str, ctx: Context, delay_ms: int = 0):
     await logger.info("Text typing successful")
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for uvx installation."""
     print("Starting Browser Automation MCP server")
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()
