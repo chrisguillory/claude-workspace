@@ -62,21 +62,55 @@ claude mcp add --transport stdio selenium-browser-automation -- \
 6. capture_web_vitals()             # Get Core Web Vitals
 ```
 
+### Planned Capabilities
+
+Features with complete implementation designs, ready for development.
+
+#### CPU Profiler
+
+**Status:** Implementation design complete
+
+Captures JavaScript execution using CDP Profiler, exporting `.cpuprofile` format compatible with DevTools.
+
+**Key capabilities:**
+- Hot function detection (functions consuming >1% execution time)
+- React pattern recognition (render methods, hooks, reconciliation)
+- Flame graph export for DevTools import
+
+**When to use:** Network timings look fine but UI is sluggish during interaction.
+
+**Technical approach:** CDP `Profiler.enable` → `setSamplingInterval` → `start`/`stop` → analyze and export `.cpuprofile`
+
+#### Tracing & Timeline
+
+**Status:** Implementation design complete
+
+Full DevTools-style performance traces with long task detection and timeline analysis.
+
+**Key capabilities:**
+- Long task detection (>50ms main thread blocking)
+- Total Blocking Time (TBT) calculation
+- GC pause and layout thrashing detection
+- FCP/LCP extraction from trace events
+- Export to `chrome://tracing` or DevTools Performance panel
+
+**When to use:** Deep performance investigations requiring precise timing relationships between rendering, scripting, and network.
+
+**Technical approach:** CDP `Tracing.start` with `transferMode: "ReturnAsStream"` (works around Selenium's event listener limitations) → category presets (minimal/standard/comprehensive) → trace JSON export
+
+---
+
 ### What DevTools Has That We Don't (Yet)
 
-Future capabilities we could add:
+Ideas without implementation plans:
 
 1. **Console errors/warnings** - JS exceptions, React errors, deprecation warnings. Useful for debugging but potentially noisy.
 
-2. **HTTP status codes** - Our Resource Timing API doesn't expose 4xx/5xx errors. Would require always-on CDP logging (has overhead).
+2. **HTTP status codes** - Resource Timing API doesn't expose 4xx/5xx errors. Would require always-on CDP logging (has overhead).
 
 3. **Request/response bodies** - Actual API payloads. Heavy, specialized use case.
 
 4. **Memory profiling** - Heap snapshots, memory leak detection. Specialized debugging.
-
-5. **CPU profiling** - Flame graphs, long task detection. Performance deep-dives.
-
-For most performance investigations, network timings + Core Web Vitals are sufficient to identify bottlenecks.
 
 ## Tool Reference
 
