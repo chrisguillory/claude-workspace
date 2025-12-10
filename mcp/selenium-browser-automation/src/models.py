@@ -1,6 +1,8 @@
-"""Pydantic models for Chrome profile metadata."""
+"""Pydantic models for Selenium browser automation MCP server."""
 
 from __future__ import annotations
+
+from typing import Literal
 
 import pydantic
 
@@ -182,3 +184,119 @@ class ChromeLocalState(BaseModel):
 
     # Additional state
     was: dict | None = None
+
+
+# =============================================================================
+# Core Web Vitals Models
+# =============================================================================
+
+MetricRating = Literal["good", "needs-improvement", "poor"]
+
+
+class WebVitalMetric(pydantic.BaseModel):
+    """Base model for Web Vital metrics - allows extra fields from JS."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    name: str
+    value: float  # milliseconds for timing, unitless for CLS
+    rating: MetricRating
+
+
+class FCPMetric(WebVitalMetric):
+    """First Contentful Paint metric."""
+
+    name: Literal["FCP"] = "FCP"
+
+
+class LCPMetric(WebVitalMetric):
+    """Largest Contentful Paint metric with element details."""
+
+    name: Literal["LCP"] = "LCP"
+    size: int | None = None  # Pixels
+    element_id: str | None = None
+    url: str | None = None
+
+
+class TTFBPhases(pydantic.BaseModel):
+    """TTFB timing phase breakdown."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    dns: float = 0
+    tcp: float = 0
+    request: float = 0
+
+
+class TTFBMetric(WebVitalMetric):
+    """Time to First Byte with phase breakdown."""
+
+    name: Literal["TTFB"] = "TTFB"
+    phases: TTFBPhases | None = None
+
+
+class LayoutShiftSource(pydantic.BaseModel):
+    """Source element that caused layout shift."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    node: str | None = None
+
+
+class LayoutShiftEntry(pydantic.BaseModel):
+    """Individual layout shift entry."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    value: float
+    time: float
+    sources: list[LayoutShiftSource] = []
+
+
+class CLSMetric(WebVitalMetric):
+    """Cumulative Layout Shift with session entries."""
+
+    name: Literal["CLS"] = "CLS"
+    entries: list[LayoutShiftEntry] = []
+
+
+class INPDetails(pydantic.BaseModel):
+    """INP interaction phase breakdown."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    duration: float
+    name: str
+    start_time: float
+    input_delay: float
+    processing_time: float
+    presentation_delay: float
+
+
+class INPMetric(WebVitalMetric):
+    """Interaction to Next Paint metric."""
+
+    name: Literal["INP"] = "INP"
+    details: INPDetails | None = None
+
+
+class CoreWebVitals(pydantic.BaseModel):
+    """Complete Core Web Vitals report."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    url: str
+    timestamp: float  # Unix timestamp when captured
+
+    # Core metrics
+    lcp: LCPMetric | None = None
+    cls: CLSMetric | None = None
+    inp: INPMetric | None = None
+
+    # Supplementary metrics
+    fcp: FCPMetric | None = None
+    ttfb: TTFBMetric | None = None
+
+    # Metadata
+    collection_duration_ms: float
+    errors: list[str] = []
