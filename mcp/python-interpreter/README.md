@@ -15,8 +15,10 @@ claude mcp add --scope user python-interpreter -- uvx --from \
 ### Local development
 
 ```bash
-claude mcp add --scope user python-interpreter -- uv run --script \
-  $(git rev-parse --show-toplevel)/mcp/python-interpreter/server.py
+# From within the claude-workspace repo:
+claude mcp add --scope user python-interpreter -- uv run \
+  --project "$(git rev-parse --show-toplevel)/mcp/python-interpreter" \
+  --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/server.py"
 ```
 
 ## Tools

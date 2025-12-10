@@ -44,7 +44,9 @@ Persistent Python execution environment with variable retention across calls.
 claude mcp add --scope user python-interpreter -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter server
 
 # From local clone
-claude mcp add --scope user python-interpreter -t stdio -- uv run --script ~/claude-workspace/mcp/python-interpreter/server.py
+claude mcp add --scope user python-interpreter -- uv run \
+  --project ~/claude-workspace/mcp/python-interpreter \
+  --script ~/claude-workspace/mcp/python-interpreter/server.py
 ```
 
 ### [Browser Automation MCP](mcp/browser-automation)
@@ -56,7 +58,9 @@ Playwright-based browser control with stealth mode for web automation.
 claude mcp add --scope user browser-automation -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation server
 
 # From local clone
-claude mcp add --scope user browser-automation -t stdio -- uv run --script ~/claude-workspace/mcp/browser-automation/server.py
+claude mcp add --scope user browser-automation -- uv run \
+  --project ~/claude-workspace/mcp/browser-automation \
+  --script ~/claude-workspace/mcp/browser-automation/server.py
 ```
 
 **Note:** Requires Playwright browsers. After installation, run: `playwright install chromium`
@@ -70,7 +74,9 @@ Selenium with CDP stealth injection to bypass Cloudflare bot detection.
 claude mcp add --scope user selenium-browser-automation -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation server
 
 # From local clone
-claude mcp add --scope user selenium-browser-automation -t stdio -- uv run --script ~/claude-workspace/mcp/selenium-browser-automation/server.py
+claude mcp add --scope user selenium-browser-automation -- uv run \
+  --project ~/claude-workspace/mcp/selenium-browser-automation \
+  --script ~/claude-workspace/mcp/selenium-browser-automation/server.py
 ```
 
 **Note:** Requires Chrome/Chromium installed on the system.
