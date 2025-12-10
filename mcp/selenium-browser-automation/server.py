@@ -47,7 +47,19 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 # Local imports
 from src.chrome_profiles import list_all_profiles, get_chrome_base_path
-from src.models import ChromeProfilesResult
+from src.models import (
+    ChromeProfilesResult,
+    CoreWebVitals,
+    FCPMetric,
+    LCPMetric,
+    TTFBMetric,
+    TTFBPhases,
+    CLSMetric,
+    LayoutShiftEntry,
+    LayoutShiftSource,
+    INPMetric,
+    INPDetails,
+)
 
 
 class PrintLogger:
@@ -1248,6 +1260,250 @@ def register_tools(service: BrowserService) -> None:
             await logger.info(f"Found {result.total_count} profiles")
 
         return result
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Capture Core Web Vitals",
+            readOnlyHint=True,
+            idempotentHint=True,
+        )
+    )
+    async def capture_web_vitals(
+        ctx: Context,
+        timeout_ms: int = 5000,
+    ) -> CoreWebVitals:
+        """Capture Core Web Vitals (LCP, CLS, INP, FCP, TTFB) for current page.
+
+        Uses JavaScript Performance APIs to collect metrics post-navigation.
+        Must be called after navigate().
+
+        Args:
+            ctx: MCP context
+            timeout_ms: Max wait time for metrics in milliseconds (default 5000)
+
+        Returns:
+            CoreWebVitals with all available metrics and ratings
+
+        Core Web Vitals (2025):
+        - LCP (Largest Contentful Paint): ≤2.5s good, >4.0s poor
+        - INP (Interaction to Next Paint): ≤200ms good, >500ms poor
+        - CLS (Cumulative Layout Shift): <0.1 good, >0.25 poor
+
+        Supplementary:
+        - FCP (First Contentful Paint): ≤1.8s good, >3.0s poor
+        - TTFB (Time to First Byte): ≤0.8s good, >1.8s poor
+
+        Note: INP requires user interaction to measure. LCP may not be final
+              until user interacts with the page.
+        """
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        start_time = time.time()
+        current_url = driver.current_url
+
+        await logger.info(f"Capturing Core Web Vitals for {current_url}")
+
+        # JavaScript to collect all Web Vitals using Performance APIs
+        # Uses buffered: true to capture metrics that occurred before script runs
+        script = """
+        var callback = arguments[arguments.length - 1];
+        var timeoutMs = arguments[0];
+
+        (async function collectWebVitals() {
+            var results = { fcp: null, lcp: null, ttfb: null, cls: null, inp: null };
+
+            // FCP - immediate from paint entries
+            try {
+                var fcpEntry = performance.getEntriesByName('first-contentful-paint', 'paint')[0];
+                if (fcpEntry) {
+                    results.fcp = {
+                        name: 'FCP',
+                        value: fcpEntry.startTime,
+                        rating: fcpEntry.startTime <= 1800 ? 'good' : fcpEntry.startTime <= 3000 ? 'needs-improvement' : 'poor'
+                    };
+                }
+            } catch (e) { results.fcp = { error: e.toString() }; }
+
+            // TTFB - immediate from navigation timing
+            try {
+                var navEntries = performance.getEntriesByType('navigation');
+                var navEntry = navEntries[0];
+                if (navEntry) {
+                    results.ttfb = {
+                        name: 'TTFB',
+                        value: navEntry.responseStart,
+                        rating: navEntry.responseStart <= 800 ? 'good' : navEntry.responseStart <= 1800 ? 'needs-improvement' : 'poor',
+                        phases: {
+                            dns: navEntry.domainLookupEnd - navEntry.domainLookupStart,
+                            tcp: navEntry.connectEnd - navEntry.connectStart,
+                            request: navEntry.responseStart - navEntry.requestStart
+                        }
+                    };
+                }
+            } catch (e) { results.ttfb = { error: e.toString() }; }
+
+            // LCP - use PerformanceObserver with buffered flag
+            try {
+                results.lcp = await new Promise(function(resolve) {
+                    var lastEntry = null;
+                    var observer = new PerformanceObserver(function(list) {
+                        var entries = list.getEntries();
+                        lastEntry = entries[entries.length - 1];
+                    });
+                    observer.observe({ type: 'largest-contentful-paint', buffered: true });
+                    setTimeout(function() {
+                        observer.disconnect();
+                        if (lastEntry) {
+                            resolve({
+                                name: 'LCP',
+                                value: lastEntry.startTime,
+                                size: lastEntry.size,
+                                element_id: lastEntry.id || null,
+                                url: lastEntry.url || null,
+                                rating: lastEntry.startTime <= 2500 ? 'good' : lastEntry.startTime <= 4000 ? 'needs-improvement' : 'poor'
+                            });
+                        } else { resolve(null); }
+                    }, Math.min(timeoutMs, 3000));
+                });
+            } catch (e) { results.lcp = { error: e.toString() }; }
+
+            // CLS - collect layout shifts
+            try {
+                results.cls = await new Promise(function(resolve) {
+                    var sessionValue = 0;
+                    var sessionEntries = [];
+                    var observer = new PerformanceObserver(function(list) {
+                        var entries = list.getEntries();
+                        for (var i = 0; i < entries.length; i++) {
+                            var entry = entries[i];
+                            if (!entry.hadRecentInput) {
+                                sessionValue += entry.value;
+                                var sources = [];
+                                if (entry.sources) {
+                                    for (var j = 0; j < entry.sources.length; j++) {
+                                        var s = entry.sources[j];
+                                        sources.push({
+                                            node: s.node ? s.node.tagName : null
+                                        });
+                                    }
+                                }
+                                sessionEntries.push({
+                                    value: entry.value,
+                                    time: entry.startTime,
+                                    sources: sources
+                                });
+                            }
+                        }
+                    });
+                    observer.observe({ type: 'layout-shift', buffered: true });
+                    setTimeout(function() {
+                        observer.disconnect();
+                        resolve({
+                            name: 'CLS',
+                            value: sessionValue,
+                            rating: sessionValue <= 0.1 ? 'good' : sessionValue <= 0.25 ? 'needs-improvement' : 'poor',
+                            entries: sessionEntries
+                        });
+                    }, Math.min(timeoutMs, 2000));
+                });
+            } catch (e) { results.cls = { error: e.toString() }; }
+
+            // INP - collect event timing (requires user interaction)
+            try {
+                results.inp = await new Promise(function(resolve) {
+                    var worstInteraction = null;
+                    var observer = new PerformanceObserver(function(list) {
+                        var entries = list.getEntries();
+                        for (var i = 0; i < entries.length; i++) {
+                            var entry = entries[i];
+                            if (!worstInteraction || entry.duration > worstInteraction.duration) {
+                                worstInteraction = {
+                                    duration: entry.duration,
+                                    name: entry.name,
+                                    start_time: entry.startTime,
+                                    input_delay: entry.processingStart - entry.startTime,
+                                    processing_time: entry.processingEnd - entry.processingStart,
+                                    presentation_delay: entry.duration - (entry.processingEnd - entry.startTime)
+                                };
+                            }
+                        }
+                    });
+                    observer.observe({ type: 'event', durationThreshold: 40, buffered: true });
+                    setTimeout(function() {
+                        observer.disconnect();
+                        if (worstInteraction) {
+                            resolve({
+                                name: 'INP',
+                                value: worstInteraction.duration,
+                                rating: worstInteraction.duration <= 200 ? 'good' : worstInteraction.duration <= 500 ? 'needs-improvement' : 'poor',
+                                details: worstInteraction
+                            });
+                        } else { resolve(null); }
+                    }, Math.min(timeoutMs, 1000));
+                });
+            } catch (e) { results.inp = { error: e.toString() }; }
+
+            return results;
+        })().then(callback).catch(function(err) { callback({ error: err.toString() }); });
+        """
+
+        errors = []
+        try:
+            # Use execute_async_script for Promise-based collection
+            results = await asyncio.to_thread(
+                driver.execute_async_script,
+                script,
+                timeout_ms,
+            )
+        except Exception as e:
+            await logger.info(f"Web Vitals collection failed: {e}")
+            errors.append(f"Script execution failed: {e}")
+            results = {}
+
+        collection_duration = (time.time() - start_time) * 1000
+
+        # Parse results into Pydantic models
+        def parse_metric(data, model_cls):
+            if not data:
+                return None
+            if isinstance(data, dict) and "error" in data:
+                errors.append(f"{data.get('name', 'Unknown')}: {data['error']}")
+                return None
+            try:
+                return model_cls(**data)
+            except Exception as e:
+                errors.append(f"Failed to parse {model_cls.__name__}: {e}")
+                return None
+
+        vitals = CoreWebVitals(
+            url=current_url,
+            timestamp=time.time(),
+            fcp=parse_metric(results.get("fcp") if results else None, FCPMetric),
+            lcp=parse_metric(results.get("lcp") if results else None, LCPMetric),
+            ttfb=parse_metric(results.get("ttfb") if results else None, TTFBMetric),
+            cls=parse_metric(results.get("cls") if results else None, CLSMetric),
+            inp=parse_metric(results.get("inp") if results else None, INPMetric),
+            collection_duration_ms=collection_duration,
+            errors=errors,
+        )
+
+        # Log summary
+        metrics_found = []
+        if vitals.fcp:
+            metrics_found.append(f"FCP={vitals.fcp.value:.0f}ms ({vitals.fcp.rating})")
+        if vitals.lcp:
+            metrics_found.append(f"LCP={vitals.lcp.value:.0f}ms ({vitals.lcp.rating})")
+        if vitals.ttfb:
+            metrics_found.append(f"TTFB={vitals.ttfb.value:.0f}ms ({vitals.ttfb.rating})")
+        if vitals.cls:
+            metrics_found.append(f"CLS={vitals.cls.value:.3f} ({vitals.cls.rating})")
+        if vitals.inp:
+            metrics_found.append(f"INP={vitals.inp.value:.0f}ms ({vitals.inp.rating})")
+
+        await logger.info(f"Web Vitals captured in {collection_duration:.0f}ms: {', '.join(metrics_found) or 'none'}")
+
+        return vitals
 
 
 @asynccontextmanager
