@@ -59,6 +59,9 @@ from src.models import (
     LayoutShiftSource,
     INPMetric,
     INPDetails,
+    NetworkCapture,
+    NetworkRequest,
+    RequestTiming,
 )
 
 
@@ -180,6 +183,11 @@ class BrowserState:
         self.capture_temp_dir = capture_temp_dir
         self.capture_dir = capture_dir
         self.capture_counter = capture_counter
+        # Network capture state (CDP-based on-demand capture)
+        self.network_capture_enabled = False
+        self.network_capture_start_time: float | None = None
+        self.network_events: list[dict] = []  # Collected CDP events
+        self.network_resource_filter: list[str] | None = None  # Optional resource type filter
 
 
 class LoggerProtocol(typing.Protocol):
@@ -293,18 +301,26 @@ def register_tools(service: BrowserService) -> None:
         profile: str | None = None,
         ctx: Context | None = None,
     ) -> NavigationResult:
-        """Navigate to URL using Selenium with CDP stealth injection.
+        """Load a URL and establish browser session. Entry point for all browser automation.
+
+        After navigation completes, call get_aria_snapshot('body') to understand page structure
+        before interacting with elements.
 
         Args:
             url: Full URL (http:// or https://)
-            fresh_browser: If True, tear down and recreate browser for clean session (no cache/cookies)
-            profile: Chrome profile directory (e.g., "Default", "Profile 1"). If None, uses temporary profile.
-            ctx: MCP context
+            fresh_browser: If True, creates clean session (no cache/cookies)
+            profile: Chrome profile directory for authenticated sessions (e.g., "Default")
 
         Returns:
             NavigationResult with current_url and title
 
-        Note: Resource capture not implemented in Selenium version (complex, requires network interception)
+        Next steps:
+            1. get_aria_snapshot('body') - understand page structure
+            2. get_interactive_elements() - find specific elements to click
+            3. click(selector) - interact with elements
+
+        For performance investigation:
+            Call start_network_capture() BEFORE navigate() to measure page load timing.
         """
         if not url.startswith(("http://", "https://")):
             raise fastmcp.exceptions.ValidationError(
@@ -343,20 +359,31 @@ def register_tools(service: BrowserService) -> None:
         selector: str | None = None,
         limit: int | None = None,
     ) -> str:
-        """Extract page content. Prefer "text" over "html" for efficiency.
+        """Extract readable text or HTML content from the page.
+
+        Use when you need the actual text content (not just structure). Start with
+        get_aria_snapshot() to understand page structure, then use this to extract
+        specific content.
 
         Args:
-            format: Output format
-                - "text": Plain text (recommended)
-                - "html": Raw HTML (large, use sparingly)
-                - "markdown": Not yet implemented
-            ctx: MCP context
-            selector: CSS selector to limit extraction (e.g., 'img', 'main', '.content')
-                When provided, returns matching elements instead of full page
-            limit: Max number of elements to return when using selector (None = all matches)
+            format: 'text' (recommended), 'html' (verbose), or 'markdown' (not implemented)
+            selector: CSS selector to scope extraction (e.g., 'main', '.article')
+            limit: Max elements when using selector
 
         Returns:
-            Page content as string. When selector is used, returns outer HTML of matched elements.
+            Page content as string in requested format
+
+        Use cases:
+            - Reading article or paragraph content
+            - Extracting data from tables
+            - Getting form field values
+
+        Workflow:
+            1. get_aria_snapshot() - understand structure
+            2. Identify content area from ARIA tree
+            3. get_page_content(selector=area) - extract it
+
+        Tip: Use selector and limit to scope extraction and reduce token usage.
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
@@ -402,18 +429,23 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(title="Take Screenshot", readOnlyHint=True))
     async def screenshot(filename: str, ctx: Context, full_page: bool = False) -> str:
-        """Take screenshot (viewport or full-page). Saves to temp directory with auto-cleanup on exit.
+        """Capture visual screenshot for verification and debugging.
+
+        Use cases:
+            - Verify visual appearance after taking actions
+            - Debug layout or styling issues
+            - Read text rendered in images (not in DOM)
+            - Confirm visual state when structure is correct but appearance needs checking
 
         Args:
-            filename: Name for screenshot file (e.g., "homepage.png")
+            filename: Output filename (e.g., "checkout-page.png")
             ctx: MCP context
-            full_page: If True, capture entire scrollable page using CDP (Chrome only). Default False.
+            full_page: True for entire scrollable page, False for viewport only
 
         Returns:
-            Absolute path to temp file (use Read tool to view image)
+            Absolute path to saved screenshot (use Read tool to view)
 
-        Note: full_page=True uses CDP Page.captureScreenshot with captureBeyondViewport.
-              Falls back to viewport-only if CDP fails.
+        Note: Requires vision processing. full_page=True uses CDP Page.captureScreenshot.
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
@@ -535,20 +567,26 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(title="Get ARIA Snapshot", readOnlyHint=True))
     async def get_aria_snapshot(
-        selector: str, include_urls: bool = False, timeout: int = 1000
+        selector: str, include_urls: bool = False
     ) -> str:
-        """Get semantic page structure as ARIA tree via JavaScript accessible name computation.
+        """Understand page structure and find elements. PRIMARY tool for page comprehension.
 
-        Uses JavaScript to compute accessible names per WAI-ARIA spec and build accessibility tree.
-        91% compression vs raw HTML.
+        Returns semantic accessibility tree with roles, names, and hierarchy. Use immediately
+        after navigate() or any action that changes page content. Provides complete structural
+        understanding with 91% token compression vs HTML.
 
         Args:
-            selector: CSS selector (e.g., 'body' for full page, '.wizard' for subset)
-            include_urls: Include URL fields in output (default False saves ~25-30% tokens)
-            timeout: Timeout in milliseconds (unused - kept for compatibility)
+            selector: CSS selector scope ('body' for full page, 'form' for specific sections)
+            include_urls: Include href values (default False saves tokens)
 
         Returns:
-            YAML string with ARIA roles, names, and hierarchy (URLs filtered by default)
+            YAML with ARIA roles, accessible names, element hierarchy, and states
+
+        Workflow:
+            1. Call this after navigate() to understand available elements
+            2. Use returned structure to identify elements of interest
+            3. Call get_interactive_elements() if you need CSS selectors for clicking
+            4. Call get_page_content() if you need actual text content
         """
         driver = await service.get_browser()
 
@@ -986,16 +1024,21 @@ def register_tools(service: BrowserService) -> None:
         wait_for_network: bool = False,
         network_timeout: int = 10000,
     ):
-        """Click element. Auto-waits for element to be visible and clickable.
+        """Click an element. Auto-waits for visibility and clickability.
+
+        Use selector from get_interactive_elements(). For dynamic content that loads after
+        clicking, use wait_for_network_idle() afterward instead of wait_for_network parameter.
 
         Args:
-            selector: CSS selector from get_interactive_elements() or get_focusable_elements()
-            ctx: MCP context
-            wait_for_network: If True, adds fixed delay after clicking (default False)
-            network_timeout: Delay in ms after click (default 10000ms)
+            selector: CSS selector from get_interactive_elements()
+            wait_for_network: Add fixed delay after click (use wait_for_network_idle() instead)
+            network_timeout: Delay duration in ms
 
-        Note: Selenium lacks native network idle detection. wait_for_network adds fixed delay.
-              Set wait_for_network=True for navigation clicks that trigger dynamic content.
+        Workflow:
+            1. get_interactive_elements(text_contains='Submit') - get selector
+            2. click(selector) - perform click
+            3. wait_for_network_idle() - wait for dynamic content
+            4. get_aria_snapshot() - understand new page state
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
@@ -1504,6 +1547,239 @@ def register_tools(service: BrowserService) -> None:
         await logger.info(f"Web Vitals captured in {collection_duration:.0f}ms: {', '.join(metrics_found) or 'none'}")
 
         return vitals
+
+
+    @mcp.tool(
+        description="""Enable network timing capture via CDP.
+
+Call this before navigate() or click() to capture network requests.
+Then call get_network_timings() to retrieve the captured data.
+
+Example workflow:
+1. start_network_capture()
+2. navigate(url)
+3. click(selector)  # optional - more requests captured
+4. get_network_timings()  # returns all requests with timing
+
+Args:
+    resource_types: Optional filter (e.g., ["fetch", "xmlhttprequest"]).
+                   If None, captures all resource types.
+
+Returns:
+    Status dict with enabled state and capture start timestamp."""
+    )
+    async def start_network_capture(
+        ctx: Context,
+        resource_types: list[str] | None = None,
+    ) -> dict:
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        if service.state.network_capture_enabled:
+            await logger.info("Network capture already enabled")
+            return {
+                "enabled": True,
+                "capturing_since": service.state.network_capture_start_time,
+                "note": "Already capturing",
+            }
+
+        # Enable CDP Network domain for monitoring
+        await asyncio.to_thread(
+            driver.execute_cdp_cmd,
+            "Network.enable",
+            {
+                "maxTotalBufferSize": 10 * 1024 * 1024,  # 10MB
+                "maxResourceBufferSize": 5 * 1024 * 1024,  # 5MB per resource
+            },
+        )
+
+        # Clear any existing performance entries for clean capture
+        await asyncio.to_thread(
+            driver.execute_script,
+            "performance.clearResourceTimings();",
+        )
+
+        # Update state
+        service.state.network_capture_enabled = True
+        service.state.network_capture_start_time = time.time()
+        service.state.network_events = []
+        service.state.network_resource_filter = (
+            [t.lower() for t in resource_types] if resource_types else None
+        )
+
+        await logger.info(
+            f"Network capture enabled"
+            + (f" (filtering: {resource_types})" if resource_types else "")
+        )
+
+        return {
+            "enabled": True,
+            "capturing_since": service.state.network_capture_start_time,
+            "resource_filter": resource_types,
+        }
+
+    @mcp.tool(
+        description="""Retrieve captured network timing data.
+
+Returns all network requests since start_network_capture() was called,
+with detailed timing breakdown for each request. Useful for identifying
+slow API calls and network bottlenecks.
+
+Args:
+    clear: If True (default), clears captured data after retrieval.
+    min_duration_ms: Only include requests slower than this threshold (0 = all).
+
+Returns:
+    NetworkCapture with requests, timing breakdown, and summary statistics
+    including slowest requests and breakdown by resource type."""
+    )
+    async def get_network_timings(
+        ctx: Context,
+        clear: bool = True,
+        min_duration_ms: int = 0,
+    ) -> NetworkCapture:
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        start_time = time.time()
+        current_url = driver.current_url
+
+        if not service.state.network_capture_enabled:
+            await logger.info("Network capture not enabled - returning empty result")
+            return NetworkCapture(
+                url=current_url,
+                timestamp=time.time(),
+                requests=[],
+                total_requests=0,
+                total_size_bytes=0,
+                total_time_ms=0,
+                errors=["Network capture not enabled. Call start_network_capture() first."],
+            )
+
+        # Collect resource timing via JavaScript Performance API
+        # This captures all network requests with detailed timing breakdown
+        script = """
+        var entries = performance.getEntriesByType('resource');
+        return entries.map(function(r) {
+            return {
+                url: r.name,
+                method: 'GET',
+                resource_type: r.initiatorType,
+                started_at: r.startTime,
+                duration_ms: r.duration,
+                encoded_data_length: r.transferSize || 0,
+                timing: {
+                    blocked: Math.max(0, r.fetchStart - r.startTime),
+                    dns: Math.max(0, r.domainLookupEnd - r.domainLookupStart),
+                    connect: Math.max(0, r.connectEnd - r.connectStart),
+                    ssl: r.secureConnectionStart > 0 ? Math.max(0, r.connectEnd - r.secureConnectionStart) : 0,
+                    send: Math.max(0, r.requestStart - r.connectEnd),
+                    wait: Math.max(0, r.responseStart - r.requestStart),
+                    receive: Math.max(0, r.responseEnd - r.responseStart)
+                }
+            };
+        });
+        """
+
+        raw_entries = await asyncio.to_thread(driver.execute_script, script)
+
+        # Apply resource type filter if set
+        resource_filter = service.state.network_resource_filter
+        if resource_filter:
+            raw_entries = [
+                e for e in raw_entries
+                if e.get("resource_type", "").lower() in resource_filter
+            ]
+
+        # Filter by min_duration_ms
+        if min_duration_ms > 0:
+            raw_entries = [
+                e for e in raw_entries if e.get("duration_ms", 0) >= min_duration_ms
+            ]
+
+        # Convert to NetworkRequest models
+        requests = []
+        total_size = 0
+        for i, entry in enumerate(raw_entries):
+            timing_data = entry.get("timing", {})
+            req = NetworkRequest(
+                request_id=str(i),
+                url=entry.get("url", ""),
+                method=entry.get("method", "GET"),
+                resource_type=entry.get("resource_type"),
+                encoded_data_length=entry.get("encoded_data_length", 0),
+                started_at=entry.get("started_at", 0),
+                duration_ms=entry.get("duration_ms"),
+                timing=RequestTiming(
+                    blocked=timing_data.get("blocked", 0),
+                    dns=timing_data.get("dns", 0),
+                    connect=timing_data.get("connect", 0),
+                    ssl=timing_data.get("ssl", 0),
+                    send=timing_data.get("send", 0),
+                    wait=timing_data.get("wait", 0),
+                    receive=timing_data.get("receive", 0),
+                )
+                if timing_data
+                else None,
+            )
+            requests.append(req)
+            total_size += entry.get("encoded_data_length", 0)
+
+        # Sort by duration (slowest first) for summary
+        sorted_by_duration = sorted(
+            requests, key=lambda r: r.duration_ms or 0, reverse=True
+        )
+        slowest = [
+            {"url": r.url, "duration_ms": r.duration_ms, "type": r.resource_type}
+            for r in sorted_by_duration[:10]
+        ]
+
+        # Count by resource type
+        type_counts: dict[str, int] = {}
+        for r in requests:
+            t = r.resource_type or "other"
+            type_counts[t] = type_counts.get(t, 0) + 1
+
+        # Calculate total time (longest request duration)
+        total_time = max((r.duration_ms or 0) for r in requests) if requests else 0
+
+        # Clear resource timing buffer if requested
+        if clear:
+            await asyncio.to_thread(
+                driver.execute_script,
+                "performance.clearResourceTimings();",
+            )
+
+        collection_duration = (time.time() - start_time) * 1000
+
+        result = NetworkCapture(
+            url=current_url,
+            timestamp=time.time(),
+            requests=requests,
+            total_requests=len(requests),
+            total_size_bytes=total_size,
+            total_time_ms=total_time,
+            slowest_requests=slowest,
+            requests_by_type=type_counts,
+            errors=[],
+        )
+
+        # Log summary
+        if slowest:
+            slowest_url = slowest[0]["url"]
+            # Truncate URL for logging
+            if len(slowest_url) > 60:
+                slowest_url = slowest_url[:57] + "..."
+            await logger.info(
+                f"Captured {len(requests)} requests in {collection_duration:.0f}ms, "
+                f"slowest: {slowest[0]['duration_ms']:.0f}ms ({slowest_url})"
+            )
+        else:
+            await logger.info(
+                f"Captured {len(requests)} requests in {collection_duration:.0f}ms"
+            )
+
+        return result
 
 
 @asynccontextmanager
