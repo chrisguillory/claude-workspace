@@ -22,9 +22,10 @@ import tempfile
 import time
 import typing
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 # Third-Party Libraries
 import fastmcp.exceptions
@@ -39,6 +40,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import WebDriverException
 
 # Local imports
 from src.chrome_profiles import list_all_profiles, get_chrome_base_path
@@ -192,9 +194,6 @@ class BrowserState:
         self.network_capture_start_time: float | None = None
         self.network_events: list[dict] = []  # Collected CDP events
         self.network_resource_filter: list[str] | None = None  # Optional resource type filter
-        # HAR capture state (requires goog:loggingPrefs - more overhead than network capture)
-        self.har_capture_enabled = False
-        self.har_performance_logs: list[dict] = []  # Accumulated performance logs
 
 
 class LoggerProtocol(typing.Protocol):
@@ -215,8 +214,13 @@ class BrowserService:
             await asyncio.to_thread(self.state.driver.quit)
             self.state.driver = None
         self.state.current_profile = None
+        # Reset network capture state
+        self.state.network_capture_enabled = False
+        self.state.network_capture_start_time = None
+        self.state.network_events = []
+        self.state.network_resource_filter = None
 
-    async def get_browser(self, profile: str | None = None) -> webdriver.Chrome:
+    async def get_browser(self, profile: str | None = None, enable_har_capture: bool = False) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
         Args:
@@ -253,9 +257,12 @@ class BrowserService:
                 "profile.password_manager_enabled": False,
             },
         )
-        # Enable performance logging for HAR export (captures Network.* events)
-        opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
-        opts.add_experimental_option("perfLoggingPrefs", {"enableNetwork": True})
+        # Performance logging for HAR export (opt-in due to overhead)
+        # When enabled, Chrome continuously buffers Network.* events which adds
+        # CPU, memory, and data transfer overhead even when export_har() isn't called.
+        if enable_har_capture:
+            opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+            opts.add_experimental_option("perfLoggingPrefs", {"enableNetwork": True})
 
         # Add profile if specified
         if profile:
@@ -309,6 +316,7 @@ def register_tools(service: BrowserService) -> None:
         url: str,
         fresh_browser: bool = False,
         profile: str | None = None,
+        enable_har_capture: bool = False,
         ctx: Context | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -320,6 +328,8 @@ def register_tools(service: BrowserService) -> None:
             url: Full URL (http:// or https://)
             fresh_browser: If True, creates clean session (no cache/cookies)
             profile: Chrome profile directory for authenticated sessions (e.g., "Default")
+            enable_har_capture: If True, enables performance logging for HAR export.
+                               Requires fresh_browser=True (adds overhead, must be set at browser init).
 
         Returns:
             NavigationResult with current_url and title
@@ -337,16 +347,22 @@ def register_tools(service: BrowserService) -> None:
                 "URL must start with http:// or https://"
             )
 
+        if enable_har_capture and not fresh_browser:
+            raise fastmcp.exceptions.ValidationError(
+                "enable_har_capture requires fresh_browser=True (performance logging must be set at browser init)"
+            )
+
         print(
             f"[navigate] Navigating to {url}"
-            + (" (fresh browser)" if fresh_browser else ""),
+            + (" (fresh browser)" if fresh_browser else "")
+            + (" (HAR capture enabled)" if enable_har_capture else ""),
             file=sys.stderr,
         )
 
         if fresh_browser:
             await service.close_browser()
 
-        driver = await service.get_browser(profile=profile)
+        driver = await service.get_browser(profile=profile, enable_har_capture=enable_har_capture)
 
         # Navigate (blocking operation)
         await asyncio.to_thread(driver.get, url)
@@ -1798,8 +1814,8 @@ Returns:
 Exports full HTTP transaction details (headers, status codes, timing) to HAR format
 for analysis in Chrome DevTools or other tools.
 
-IMPORTANT: Performance logging must be enabled (it is by default). Call after
-navigating and interacting with pages to capture their network traffic.
+IMPORTANT: HAR capture must be enabled via navigate(enable_har_capture=True, fresh_browser=True).
+This is opt-in due to performance overhead from Chrome's performance logging.
 
 Args:
     filename: Output filename (required, e.g., "api-calls.har")
@@ -1810,7 +1826,7 @@ Returns:
     HARExportResult with path to saved file and entry count
 
 Workflow:
-    1. navigate(url) - load page
+    1. navigate(url, fresh_browser=True, enable_har_capture=True) - enable HAR capture
     2. [interact with page]
     3. export_har("capture.har") - export network data
     4. Read the HAR file or import into Chrome DevTools"""
@@ -1827,10 +1843,10 @@ Workflow:
         await logger.info(f"Exporting HAR to {filename}")
         errors: list[str] = []
 
-        # Get performance logs (clears buffer - only one export per session)
+        # Get performance logs (clears buffer - subsequent calls return only newer entries)
         try:
             logs = await asyncio.to_thread(driver.get_log, "performance")
-        except Exception as e:
+        except WebDriverException as e:
             errors.append(f"Failed to get performance logs: {e}")
             logs = []
 
@@ -1896,7 +1912,6 @@ Workflow:
 
         # Convert transactions to HAR entries
         har_entries = []
-        from datetime import datetime, timezone
 
         for request_id, txn in transactions.items():
             if "response" not in txn:
@@ -1922,7 +1937,6 @@ Workflow:
 
             # Parse query string from URL
             def parse_query_string(url):
-                from urllib.parse import urlparse, parse_qs
                 parsed = urlparse(url)
                 query_params = parse_qs(parsed.query)
                 result = []
@@ -1999,7 +2013,7 @@ Workflow:
             if include_response_bodies:
                 mime_type = resp.get("mimeType", "")
                 body_size = txn.get("encoded_data_length", 0)
-                max_body_bytes = min(max_body_size_mb, 50) * 1024 * 1024  # Cap at 50MB
+                max_body_bytes = max(1, min(max_body_size_mb, 50)) * 1024 * 1024  # 1-50MB
                 should_fetch = (
                     body_size < max_body_bytes
                     and (

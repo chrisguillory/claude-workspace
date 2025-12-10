@@ -117,7 +117,7 @@ Ideas without implementation plans:
 ## Tool Reference
 
 ### Navigation & Content
-- `navigate(url, fresh_browser?, profile?)` - Load URL with optional Chrome profile
+- `navigate(url, fresh_browser?, profile?, enable_har_capture?)` - Load URL with optional Chrome profile
 - `get_page_content(format, selector?, limit?)` - Extract text/HTML
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
 - `screenshot(filename, full_page?)` - Capture viewport or full page
@@ -134,6 +134,7 @@ Ideas without implementation plans:
 - `capture_web_vitals(timeout_ms?)` - Core Web Vitals metrics
 - `start_network_capture(resource_types?)` - Enable network timing capture
 - `get_network_timings(clear?, min_duration_ms?)` - Retrieve captured timings
+- `export_har(filename, include_response_bodies?, max_body_size_mb?)` - Export to HAR file (requires `enable_har_capture=True` on navigate)
 
 ### Utilities
 - `download_resource(url, output_filename)` - Download with session cookies
