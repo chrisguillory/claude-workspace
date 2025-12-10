@@ -1,0 +1,26 @@
+[project]
+name = "selenium-browser-automation-mcp"
+version = "0.1.0"
+description = "Selenium Browser Automation MCP Server - CDP stealth injection for Cloudflare bypass"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=2.12.5",
+    "httpx",
+    "pydantic>=2.0.0",
+    "pyyaml",
+    "selenium",
+]
+
+[project.scripts]
+server = "server:main"
+
+[tool.hatch.build]
+# CRITICAL: Must include src/ directory for local module imports
+include = ["server.py", "src/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
