@@ -342,9 +342,9 @@ def register_tools(service: BrowserService) -> None:
         For performance investigation:
             Call start_network_capture() BEFORE navigate() to measure page load timing.
         """
-        if not url.startswith(("http://", "https://")):
+        if not url.startswith(("http://", "https://", "file://")):
             raise fastmcp.exceptions.ValidationError(
-                "URL must start with http:// or https://"
+                "URL must start with http://, https://, or file://"
             )
 
         if enable_har_capture and not fresh_browser:
@@ -532,9 +532,9 @@ def register_tools(service: BrowserService) -> None:
 
         Errors: Raises ToolError if browser not initialized, response status >= 400, or network failure.
         """
-        if not url.startswith(("http://", "https://")):
+        if not url.startswith(("http://", "https://", "file://")):
             raise fastmcp.exceptions.ValidationError(
-                "URL must start with http:// or https://"
+                "URL must start with http://, https://, or file://"
             )
 
         driver = await service.get_browser()
