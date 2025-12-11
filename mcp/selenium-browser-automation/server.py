@@ -22,9 +22,10 @@ import tempfile
 import time
 import typing
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 # Third-Party Libraries
 import fastmcp.exceptions
@@ -39,10 +40,26 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import WebDriverException
 
 # Local imports
 from src.chrome_profiles import list_all_profiles, get_chrome_base_path
-from src.models import ChromeProfilesResult
+from src.models import (
+    ChromeProfilesResult,
+    CoreWebVitals,
+    FCPMetric,
+    LCPMetric,
+    TTFBMetric,
+    TTFBPhases,
+    CLSMetric,
+    LayoutShiftEntry,
+    LayoutShiftSource,
+    INPMetric,
+    INPDetails,
+    NetworkCapture,
+    NetworkRequest,
+    RequestTiming,
+)
 
 
 class PrintLogger:
@@ -91,6 +108,15 @@ class ResourceCapture(BaseModel):
     total_size_mb: float
     resource_count: int
     errors: list[dict]
+
+
+class HARExportResult(BaseModel):
+    """Result of HAR export operation."""
+    path: str
+    entry_count: int
+    size_bytes: int
+    has_errors: bool = False
+    errors: list[str] = []
 
 
 class NavigationResult(BaseModel):
@@ -163,6 +189,11 @@ class BrowserState:
         self.capture_temp_dir = capture_temp_dir
         self.capture_dir = capture_dir
         self.capture_counter = capture_counter
+        # Network capture state (CDP-based on-demand capture)
+        self.network_capture_enabled = False
+        self.network_capture_start_time: float | None = None
+        self.network_events: list[dict] = []  # Collected CDP events
+        self.network_resource_filter: list[str] | None = None  # Optional resource type filter
 
 
 class LoggerProtocol(typing.Protocol):
@@ -183,8 +214,13 @@ class BrowserService:
             await asyncio.to_thread(self.state.driver.quit)
             self.state.driver = None
         self.state.current_profile = None
+        # Reset network capture state
+        self.state.network_capture_enabled = False
+        self.state.network_capture_start_time = None
+        self.state.network_events = []
+        self.state.network_resource_filter = None
 
-    async def get_browser(self, profile: str | None = None) -> webdriver.Chrome:
+    async def get_browser(self, profile: str | None = None, enable_har_capture: bool = False) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
         Args:
@@ -221,6 +257,12 @@ class BrowserService:
                 "profile.password_manager_enabled": False,
             },
         )
+        # Performance logging for HAR export (opt-in due to overhead)
+        # When enabled, Chrome continuously buffers Network.* events which adds
+        # CPU, memory, and data transfer overhead even when export_har() isn't called.
+        if enable_har_capture:
+            opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+            opts.add_experimental_option("perfLoggingPrefs", {"enableNetwork": True})
 
         # Add profile if specified
         if profile:
@@ -274,36 +316,53 @@ def register_tools(service: BrowserService) -> None:
         url: str,
         fresh_browser: bool = False,
         profile: str | None = None,
+        enable_har_capture: bool = False,
         ctx: Context | None = None,
     ) -> NavigationResult:
-        """Navigate to URL using Selenium with CDP stealth injection.
+        """Load a URL and establish browser session. Entry point for all browser automation.
+
+        After navigation completes, call get_aria_snapshot('body') to understand page structure
+        before interacting with elements.
 
         Args:
             url: Full URL (http:// or https://)
-            fresh_browser: If True, tear down and recreate browser for clean session (no cache/cookies)
-            profile: Chrome profile directory (e.g., "Default", "Profile 1"). If None, uses temporary profile.
-            ctx: MCP context
+            fresh_browser: If True, creates clean session (no cache/cookies)
+            profile: Chrome profile directory for authenticated sessions (e.g., "Default")
+            enable_har_capture: If True, enables performance logging for HAR export.
+                               Requires fresh_browser=True (adds overhead, must be set at browser init).
 
         Returns:
             NavigationResult with current_url and title
 
-        Note: Resource capture not implemented in Selenium version (complex, requires network interception)
+        Next steps:
+            1. get_aria_snapshot('body') - understand page structure
+            2. get_interactive_elements() - find specific elements to click
+            3. click(selector) - interact with elements
+
+        For performance investigation:
+            Call start_network_capture() BEFORE navigate() to measure page load timing.
         """
         if not url.startswith(("http://", "https://")):
             raise fastmcp.exceptions.ValidationError(
                 "URL must start with http:// or https://"
             )
 
+        if enable_har_capture and not fresh_browser:
+            raise fastmcp.exceptions.ValidationError(
+                "enable_har_capture requires fresh_browser=True (performance logging must be set at browser init)"
+            )
+
         print(
             f"[navigate] Navigating to {url}"
-            + (" (fresh browser)" if fresh_browser else ""),
+            + (" (fresh browser)" if fresh_browser else "")
+            + (" (HAR capture enabled)" if enable_har_capture else ""),
             file=sys.stderr,
         )
 
         if fresh_browser:
             await service.close_browser()
 
-        driver = await service.get_browser(profile=profile)
+        driver = await service.get_browser(profile=profile, enable_har_capture=enable_har_capture)
 
         # Navigate (blocking operation)
         await asyncio.to_thread(driver.get, url)
@@ -326,20 +385,31 @@ def register_tools(service: BrowserService) -> None:
         selector: str | None = None,
         limit: int | None = None,
     ) -> str:
-        """Extract page content. Prefer "text" over "html" for efficiency.
+        """Extract readable text or HTML content from the page.
+
+        Use when you need the actual text content (not just structure). Start with
+        get_aria_snapshot() to understand page structure, then use this to extract
+        specific content.
 
         Args:
-            format: Output format
-                - "text": Plain text (recommended)
-                - "html": Raw HTML (large, use sparingly)
-                - "markdown": Not yet implemented
-            ctx: MCP context
-            selector: CSS selector to limit extraction (e.g., 'img', 'main', '.content')
-                When provided, returns matching elements instead of full page
-            limit: Max number of elements to return when using selector (None = all matches)
+            format: 'text' (recommended), 'html' (verbose), or 'markdown' (not implemented)
+            selector: CSS selector to scope extraction (e.g., 'main', '.article')
+            limit: Max elements when using selector
 
         Returns:
-            Page content as string. When selector is used, returns outer HTML of matched elements.
+            Page content as string in requested format
+
+        Use cases:
+            - Reading article or paragraph content
+            - Extracting data from tables
+            - Getting form field values
+
+        Workflow:
+            1. get_aria_snapshot() - understand structure
+            2. Identify content area from ARIA tree
+            3. get_page_content(selector=area) - extract it
+
+        Tip: Use selector and limit to scope extraction and reduce token usage.
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
@@ -385,18 +455,23 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(title="Take Screenshot", readOnlyHint=True))
     async def screenshot(filename: str, ctx: Context, full_page: bool = False) -> str:
-        """Take screenshot (viewport or full-page). Saves to temp directory with auto-cleanup on exit.
+        """Capture visual screenshot for verification and debugging.
+
+        Use cases:
+            - Verify visual appearance after taking actions
+            - Debug layout or styling issues
+            - Read text rendered in images (not in DOM)
+            - Confirm visual state when structure is correct but appearance needs checking
 
         Args:
-            filename: Name for screenshot file (e.g., "homepage.png")
+            filename: Output filename (e.g., "checkout-page.png")
             ctx: MCP context
-            full_page: If True, capture entire scrollable page using CDP (Chrome only). Default False.
+            full_page: True for entire scrollable page, False for viewport only
 
         Returns:
-            Absolute path to temp file (use Read tool to view image)
+            Absolute path to saved screenshot (use Read tool to view)
 
-        Note: full_page=True uses CDP Page.captureScreenshot with captureBeyondViewport.
-              Falls back to viewport-only if CDP fails.
+        Note: Requires vision processing. full_page=True uses CDP Page.captureScreenshot.
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
@@ -518,20 +593,26 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(title="Get ARIA Snapshot", readOnlyHint=True))
     async def get_aria_snapshot(
-        selector: str, include_urls: bool = False, timeout: int = 1000
+        selector: str, include_urls: bool = False
     ) -> str:
-        """Get semantic page structure as ARIA tree via JavaScript accessible name computation.
+        """Understand page structure and find elements. PRIMARY tool for page comprehension.
 
-        Uses JavaScript to compute accessible names per WAI-ARIA spec and build accessibility tree.
-        91% compression vs raw HTML.
+        Returns semantic accessibility tree with roles, names, and hierarchy. Use immediately
+        after navigate() or any action that changes page content. Provides complete structural
+        understanding with 91% token compression vs HTML.
 
         Args:
-            selector: CSS selector (e.g., 'body' for full page, '.wizard' for subset)
-            include_urls: Include URL fields in output (default False saves ~25-30% tokens)
-            timeout: Timeout in milliseconds (unused - kept for compatibility)
+            selector: CSS selector scope ('body' for full page, 'form' for specific sections)
+            include_urls: Include href values (default False saves tokens)
 
         Returns:
-            YAML string with ARIA roles, names, and hierarchy (URLs filtered by default)
+            YAML with ARIA roles, accessible names, element hierarchy, and states
+
+        Workflow:
+            1. Call this after navigate() to understand available elements
+            2. Use returned structure to identify elements of interest
+            3. Call get_interactive_elements() if you need CSS selectors for clicking
+            4. Call get_page_content() if you need actual text content
         """
         driver = await service.get_browser()
 
@@ -969,16 +1050,21 @@ def register_tools(service: BrowserService) -> None:
         wait_for_network: bool = False,
         network_timeout: int = 10000,
     ):
-        """Click element. Auto-waits for element to be visible and clickable.
+        """Click an element. Auto-waits for visibility and clickability.
+
+        Use selector from get_interactive_elements(). For dynamic content that loads after
+        clicking, use wait_for_network_idle() afterward instead of wait_for_network parameter.
 
         Args:
-            selector: CSS selector from get_interactive_elements() or get_focusable_elements()
-            ctx: MCP context
-            wait_for_network: If True, adds fixed delay after clicking (default False)
-            network_timeout: Delay in ms after click (default 10000ms)
+            selector: CSS selector from get_interactive_elements()
+            wait_for_network: Add fixed delay after click (use wait_for_network_idle() instead)
+            network_timeout: Delay duration in ms
 
-        Note: Selenium lacks native network idle detection. wait_for_network adds fixed delay.
-              Set wait_for_network=True for navigation clicks that trigger dynamic content.
+        Workflow:
+            1. get_interactive_elements(text_contains='Submit') - get selector
+            2. click(selector) - perform click
+            3. wait_for_network_idle() - wait for dynamic content
+            4. get_aria_snapshot() - understand new page state
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
@@ -1243,6 +1329,739 @@ def register_tools(service: BrowserService) -> None:
             await logger.info(f"Found {result.total_count} profiles")
 
         return result
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Capture Core Web Vitals",
+            readOnlyHint=True,
+            idempotentHint=True,
+        )
+    )
+    async def capture_web_vitals(
+        ctx: Context,
+        timeout_ms: int = 5000,
+    ) -> CoreWebVitals:
+        """Capture Core Web Vitals (LCP, CLS, INP, FCP, TTFB) for current page.
+
+        Uses JavaScript Performance APIs to collect metrics post-navigation.
+        Must be called after navigate().
+
+        Args:
+            ctx: MCP context
+            timeout_ms: Max wait time for metrics in milliseconds (default 5000)
+
+        Returns:
+            CoreWebVitals with all available metrics and ratings
+
+        Core Web Vitals (2025):
+        - LCP (Largest Contentful Paint): ≤2.5s good, >4.0s poor
+        - INP (Interaction to Next Paint): ≤200ms good, >500ms poor
+        - CLS (Cumulative Layout Shift): <0.1 good, >0.25 poor
+
+        Supplementary:
+        - FCP (First Contentful Paint): ≤1.8s good, >3.0s poor
+        - TTFB (Time to First Byte): ≤0.8s good, >1.8s poor
+
+        Note: INP requires user interaction to measure. LCP may not be final
+              until user interacts with the page.
+        """
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        start_time = time.time()
+        current_url = driver.current_url
+
+        await logger.info(f"Capturing Core Web Vitals for {current_url}")
+
+        # JavaScript to collect all Web Vitals using Performance APIs
+        # Uses buffered: true to capture metrics that occurred before script runs
+        script = """
+        var callback = arguments[arguments.length - 1];
+        var timeoutMs = arguments[0];
+
+        (async function collectWebVitals() {
+            var results = { fcp: null, lcp: null, ttfb: null, cls: null, inp: null };
+
+            // FCP - immediate from paint entries
+            try {
+                var fcpEntry = performance.getEntriesByName('first-contentful-paint', 'paint')[0];
+                if (fcpEntry) {
+                    results.fcp = {
+                        name: 'FCP',
+                        value: fcpEntry.startTime,
+                        rating: fcpEntry.startTime <= 1800 ? 'good' : fcpEntry.startTime <= 3000 ? 'needs-improvement' : 'poor'
+                    };
+                }
+            } catch (e) { results.fcp = { error: e.toString() }; }
+
+            // TTFB - immediate from navigation timing
+            try {
+                var navEntries = performance.getEntriesByType('navigation');
+                var navEntry = navEntries[0];
+                if (navEntry) {
+                    results.ttfb = {
+                        name: 'TTFB',
+                        value: navEntry.responseStart,
+                        rating: navEntry.responseStart <= 800 ? 'good' : navEntry.responseStart <= 1800 ? 'needs-improvement' : 'poor',
+                        phases: {
+                            dns: navEntry.domainLookupEnd - navEntry.domainLookupStart,
+                            tcp: navEntry.connectEnd - navEntry.connectStart,
+                            request: navEntry.responseStart - navEntry.requestStart
+                        }
+                    };
+                }
+            } catch (e) { results.ttfb = { error: e.toString() }; }
+
+            // LCP - use PerformanceObserver with buffered flag
+            try {
+                results.lcp = await new Promise(function(resolve) {
+                    var lastEntry = null;
+                    var observer = new PerformanceObserver(function(list) {
+                        var entries = list.getEntries();
+                        lastEntry = entries[entries.length - 1];
+                    });
+                    observer.observe({ type: 'largest-contentful-paint', buffered: true });
+                    setTimeout(function() {
+                        observer.disconnect();
+                        if (lastEntry) {
+                            resolve({
+                                name: 'LCP',
+                                value: lastEntry.startTime,
+                                size: lastEntry.size,
+                                element_id: lastEntry.id || null,
+                                url: lastEntry.url || null,
+                                rating: lastEntry.startTime <= 2500 ? 'good' : lastEntry.startTime <= 4000 ? 'needs-improvement' : 'poor'
+                            });
+                        } else { resolve(null); }
+                    }, Math.min(timeoutMs, 3000));
+                });
+            } catch (e) { results.lcp = { error: e.toString() }; }
+
+            // CLS - collect layout shifts
+            try {
+                results.cls = await new Promise(function(resolve) {
+                    var sessionValue = 0;
+                    var sessionEntries = [];
+                    var observer = new PerformanceObserver(function(list) {
+                        var entries = list.getEntries();
+                        for (var i = 0; i < entries.length; i++) {
+                            var entry = entries[i];
+                            if (!entry.hadRecentInput) {
+                                sessionValue += entry.value;
+                                var sources = [];
+                                if (entry.sources) {
+                                    for (var j = 0; j < entry.sources.length; j++) {
+                                        var s = entry.sources[j];
+                                        sources.push({
+                                            node: s.node ? s.node.tagName : null
+                                        });
+                                    }
+                                }
+                                sessionEntries.push({
+                                    value: entry.value,
+                                    time: entry.startTime,
+                                    sources: sources
+                                });
+                            }
+                        }
+                    });
+                    observer.observe({ type: 'layout-shift', buffered: true });
+                    setTimeout(function() {
+                        observer.disconnect();
+                        resolve({
+                            name: 'CLS',
+                            value: sessionValue,
+                            rating: sessionValue <= 0.1 ? 'good' : sessionValue <= 0.25 ? 'needs-improvement' : 'poor',
+                            entries: sessionEntries
+                        });
+                    }, Math.min(timeoutMs, 2000));
+                });
+            } catch (e) { results.cls = { error: e.toString() }; }
+
+            // INP - collect event timing (requires user interaction)
+            try {
+                results.inp = await new Promise(function(resolve) {
+                    var worstInteraction = null;
+                    var observer = new PerformanceObserver(function(list) {
+                        var entries = list.getEntries();
+                        for (var i = 0; i < entries.length; i++) {
+                            var entry = entries[i];
+                            if (!worstInteraction || entry.duration > worstInteraction.duration) {
+                                worstInteraction = {
+                                    duration: entry.duration,
+                                    name: entry.name,
+                                    start_time: entry.startTime,
+                                    input_delay: entry.processingStart - entry.startTime,
+                                    processing_time: entry.processingEnd - entry.processingStart,
+                                    presentation_delay: entry.duration - (entry.processingEnd - entry.startTime)
+                                };
+                            }
+                        }
+                    });
+                    observer.observe({ type: 'event', durationThreshold: 40, buffered: true });
+                    setTimeout(function() {
+                        observer.disconnect();
+                        if (worstInteraction) {
+                            resolve({
+                                name: 'INP',
+                                value: worstInteraction.duration,
+                                rating: worstInteraction.duration <= 200 ? 'good' : worstInteraction.duration <= 500 ? 'needs-improvement' : 'poor',
+                                details: worstInteraction
+                            });
+                        } else { resolve(null); }
+                    }, Math.min(timeoutMs, 1000));
+                });
+            } catch (e) { results.inp = { error: e.toString() }; }
+
+            return results;
+        })().then(callback).catch(function(err) { callback({ error: err.toString() }); });
+        """
+
+        errors = []
+        try:
+            # Use execute_async_script for Promise-based collection
+            results = await asyncio.to_thread(
+                driver.execute_async_script,
+                script,
+                timeout_ms,
+            )
+        except Exception as e:
+            await logger.info(f"Web Vitals collection failed: {e}")
+            errors.append(f"Script execution failed: {e}")
+            results = {}
+
+        collection_duration = (time.time() - start_time) * 1000
+
+        # Parse results into Pydantic models
+        def parse_metric(data, model_cls):
+            if not data:
+                return None
+            if isinstance(data, dict) and "error" in data:
+                errors.append(f"{data.get('name', 'Unknown')}: {data['error']}")
+                return None
+            try:
+                return model_cls(**data)
+            except Exception as e:
+                errors.append(f"Failed to parse {model_cls.__name__}: {e}")
+                return None
+
+        vitals = CoreWebVitals(
+            url=current_url,
+            timestamp=time.time(),
+            fcp=parse_metric(results.get("fcp") if results else None, FCPMetric),
+            lcp=parse_metric(results.get("lcp") if results else None, LCPMetric),
+            ttfb=parse_metric(results.get("ttfb") if results else None, TTFBMetric),
+            cls=parse_metric(results.get("cls") if results else None, CLSMetric),
+            inp=parse_metric(results.get("inp") if results else None, INPMetric),
+            collection_duration_ms=collection_duration,
+            errors=errors,
+        )
+
+        # Log summary
+        metrics_found = []
+        if vitals.fcp:
+            metrics_found.append(f"FCP={vitals.fcp.value:.0f}ms ({vitals.fcp.rating})")
+        if vitals.lcp:
+            metrics_found.append(f"LCP={vitals.lcp.value:.0f}ms ({vitals.lcp.rating})")
+        if vitals.ttfb:
+            metrics_found.append(f"TTFB={vitals.ttfb.value:.0f}ms ({vitals.ttfb.rating})")
+        if vitals.cls:
+            metrics_found.append(f"CLS={vitals.cls.value:.3f} ({vitals.cls.rating})")
+        if vitals.inp:
+            metrics_found.append(f"INP={vitals.inp.value:.0f}ms ({vitals.inp.rating})")
+
+        await logger.info(f"Web Vitals captured in {collection_duration:.0f}ms: {', '.join(metrics_found) or 'none'}")
+
+        return vitals
+
+
+    @mcp.tool(
+        description="""Enable network timing capture via CDP.
+
+Call this before navigate() or click() to capture network requests.
+Then call get_network_timings() to retrieve the captured data.
+
+Example workflow:
+1. start_network_capture()
+2. navigate(url)
+3. click(selector)  # optional - more requests captured
+4. get_network_timings()  # returns all requests with timing
+
+Args:
+    resource_types: Optional filter (e.g., ["fetch", "xmlhttprequest"]).
+                   If None, captures all resource types.
+
+Returns:
+    Status dict with enabled state and capture start timestamp."""
+    )
+    async def start_network_capture(
+        ctx: Context,
+        resource_types: list[str] | None = None,
+    ) -> dict:
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        if service.state.network_capture_enabled:
+            await logger.info("Network capture already enabled")
+            return {
+                "enabled": True,
+                "capturing_since": service.state.network_capture_start_time,
+                "note": "Already capturing",
+            }
+
+        # Enable CDP Network domain with large buffers for HAR export
+        # Per Perplexity research: Chrome can handle 50MB/resource, 100MB total
+        await asyncio.to_thread(
+            driver.execute_cdp_cmd,
+            "Network.enable",
+            {
+                "maxTotalBufferSize": 100 * 1024 * 1024,  # 100MB total
+                "maxResourceBufferSize": 50 * 1024 * 1024,  # 50MB per resource
+            },
+        )
+
+        # Clear any existing performance entries for clean capture
+        await asyncio.to_thread(
+            driver.execute_script,
+            "performance.clearResourceTimings();",
+        )
+
+        # Update state
+        service.state.network_capture_enabled = True
+        service.state.network_capture_start_time = time.time()
+        service.state.network_events = []
+        service.state.network_resource_filter = (
+            [t.lower() for t in resource_types] if resource_types else None
+        )
+
+        await logger.info(
+            f"Network capture enabled"
+            + (f" (filtering: {resource_types})" if resource_types else "")
+        )
+
+        return {
+            "enabled": True,
+            "capturing_since": service.state.network_capture_start_time,
+            "resource_filter": resource_types,
+        }
+
+    @mcp.tool(
+        description="""Retrieve captured network timing data.
+
+Returns all network requests since start_network_capture() was called,
+with detailed timing breakdown for each request. Useful for identifying
+slow API calls and network bottlenecks.
+
+Args:
+    clear: If True (default), clears captured data after retrieval.
+    min_duration_ms: Only include requests slower than this threshold (0 = all).
+
+Returns:
+    NetworkCapture with requests, timing breakdown, and summary statistics
+    including slowest requests and breakdown by resource type."""
+    )
+    async def get_network_timings(
+        ctx: Context,
+        clear: bool = True,
+        min_duration_ms: int = 0,
+    ) -> NetworkCapture:
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        start_time = time.time()
+        current_url = driver.current_url
+
+        if not service.state.network_capture_enabled:
+            await logger.info("Network capture not enabled - returning empty result")
+            return NetworkCapture(
+                url=current_url,
+                timestamp=time.time(),
+                requests=[],
+                total_requests=0,
+                total_size_bytes=0,
+                total_time_ms=0,
+                errors=["Network capture not enabled. Call start_network_capture() first."],
+            )
+
+        # Collect resource timing via JavaScript Performance API
+        # This captures all network requests with detailed timing breakdown
+        script = """
+        var entries = performance.getEntriesByType('resource');
+        return entries.map(function(r) {
+            return {
+                url: r.name,
+                method: 'GET',
+                resource_type: r.initiatorType,
+                started_at: r.startTime,
+                duration_ms: r.duration,
+                encoded_data_length: r.transferSize || 0,
+                timing: {
+                    blocked: Math.max(0, r.fetchStart - r.startTime),
+                    dns: Math.max(0, r.domainLookupEnd - r.domainLookupStart),
+                    connect: Math.max(0, r.connectEnd - r.connectStart),
+                    ssl: r.secureConnectionStart > 0 ? Math.max(0, r.connectEnd - r.secureConnectionStart) : 0,
+                    send: Math.max(0, r.requestStart - r.connectEnd),
+                    wait: Math.max(0, r.responseStart - r.requestStart),
+                    receive: Math.max(0, r.responseEnd - r.responseStart)
+                }
+            };
+        });
+        """
+
+        raw_entries = await asyncio.to_thread(driver.execute_script, script)
+
+        # Apply resource type filter if set
+        resource_filter = service.state.network_resource_filter
+        if resource_filter:
+            raw_entries = [
+                e for e in raw_entries
+                if e.get("resource_type", "").lower() in resource_filter
+            ]
+
+        # Filter by min_duration_ms
+        if min_duration_ms > 0:
+            raw_entries = [
+                e for e in raw_entries if e.get("duration_ms", 0) >= min_duration_ms
+            ]
+
+        # Convert to NetworkRequest models
+        requests = []
+        total_size = 0
+        for i, entry in enumerate(raw_entries):
+            timing_data = entry.get("timing", {})
+            req = NetworkRequest(
+                request_id=str(i),
+                url=entry.get("url", ""),
+                method=entry.get("method", "GET"),
+                resource_type=entry.get("resource_type"),
+                encoded_data_length=entry.get("encoded_data_length", 0),
+                started_at=entry.get("started_at", 0),
+                duration_ms=entry.get("duration_ms"),
+                timing=RequestTiming(
+                    blocked=timing_data.get("blocked", 0),
+                    dns=timing_data.get("dns", 0),
+                    connect=timing_data.get("connect", 0),
+                    ssl=timing_data.get("ssl", 0),
+                    send=timing_data.get("send", 0),
+                    wait=timing_data.get("wait", 0),
+                    receive=timing_data.get("receive", 0),
+                )
+                if timing_data
+                else None,
+            )
+            requests.append(req)
+            total_size += entry.get("encoded_data_length", 0)
+
+        # Sort by duration (slowest first) for summary
+        sorted_by_duration = sorted(
+            requests, key=lambda r: r.duration_ms or 0, reverse=True
+        )
+        slowest = [
+            {"url": r.url, "duration_ms": r.duration_ms, "type": r.resource_type}
+            for r in sorted_by_duration[:10]
+        ]
+
+        # Count by resource type
+        type_counts: dict[str, int] = {}
+        for r in requests:
+            t = r.resource_type or "other"
+            type_counts[t] = type_counts.get(t, 0) + 1
+
+        # Calculate total time (longest request duration)
+        total_time = max((r.duration_ms or 0) for r in requests) if requests else 0
+
+        # Clear resource timing buffer if requested
+        if clear:
+            await asyncio.to_thread(
+                driver.execute_script,
+                "performance.clearResourceTimings();",
+            )
+
+        collection_duration = (time.time() - start_time) * 1000
+
+        result = NetworkCapture(
+            url=current_url,
+            timestamp=time.time(),
+            requests=requests,
+            total_requests=len(requests),
+            total_size_bytes=total_size,
+            total_time_ms=total_time,
+            slowest_requests=slowest,
+            requests_by_type=type_counts,
+            errors=[],
+        )
+
+        # Log summary
+        if slowest:
+            slowest_url = slowest[0]["url"]
+            # Truncate URL for logging
+            if len(slowest_url) > 60:
+                slowest_url = slowest_url[:57] + "..."
+            await logger.info(
+                f"Captured {len(requests)} requests in {collection_duration:.0f}ms, "
+                f"slowest: {slowest[0]['duration_ms']:.0f}ms ({slowest_url})"
+            )
+        else:
+            await logger.info(
+                f"Captured {len(requests)} requests in {collection_duration:.0f}ms"
+            )
+
+        return result
+
+    @mcp.tool(
+        description="""Export captured network traffic to HAR 1.2 file.
+
+Exports full HTTP transaction details (headers, status codes, timing) to HAR format
+for analysis in Chrome DevTools or other tools.
+
+IMPORTANT: HAR capture must be enabled via navigate(enable_har_capture=True, fresh_browser=True).
+This is opt-in due to performance overhead from Chrome's performance logging.
+
+Args:
+    filename: Output filename (required, e.g., "api-calls.har")
+    include_response_bodies: If True, fetch response bodies for JSON/text (default False)
+    max_body_size_mb: Max response body size to fetch in MB (default 10, max 50)
+
+Returns:
+    HARExportResult with path to saved file and entry count
+
+Workflow:
+    1. navigate(url, fresh_browser=True, enable_har_capture=True) - enable HAR capture
+    2. [interact with page]
+    3. export_har("capture.har") - export network data
+    4. Read the HAR file or import into Chrome DevTools"""
+    )
+    async def export_har(
+        ctx: Context,
+        filename: str,
+        include_response_bodies: bool = False,
+        max_body_size_mb: int = 10,
+    ) -> HARExportResult:
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        await logger.info(f"Exporting HAR to {filename}")
+        errors: list[str] = []
+
+        # Get performance logs (clears buffer - subsequent calls return only newer entries)
+        try:
+            logs = await asyncio.to_thread(driver.get_log, "performance")
+        except WebDriverException as e:
+            errors.append(f"Failed to get performance logs: {e}")
+            logs = []
+
+        if not logs:
+            await logger.info("No performance logs available")
+            har_path = service.state.capture_dir / filename
+            empty_har = {
+                "log": {
+                    "version": "1.2",
+                    "creator": {"name": "selenium-browser-automation", "version": "1.0"},
+                    "entries": [],
+                }
+            }
+            har_path.write_text(json.dumps(empty_har, indent=2))
+            return HARExportResult(
+                path=str(har_path),
+                entry_count=0,
+                size_bytes=len(json.dumps(empty_har)),
+                has_errors=True,
+                errors=["No performance logs available. Navigate to pages first."],
+            )
+
+        # Parse and filter Network.* events
+        transactions: dict[str, dict] = {}
+        for entry in logs:
+            try:
+                log_data = json.loads(entry["message"])
+                message = log_data.get("message", {})
+                method = message.get("method", "")
+                params = message.get("params", {})
+
+                if not method.startswith("Network."):
+                    continue
+
+                request_id = params.get("requestId")
+                if not request_id:
+                    continue
+
+                if method == "Network.requestWillBeSent":
+                    req = params.get("request", {})
+                    transactions[request_id] = {
+                        "request": req,
+                        "wall_time": params.get("wallTime"),
+                        "timestamp": params.get("timestamp"),
+                        "initiator": params.get("initiator"),
+                    }
+
+                elif method == "Network.responseReceived":
+                    if request_id in transactions:
+                        resp = params.get("response", {})
+                        transactions[request_id]["response"] = resp
+                        transactions[request_id]["resource_type"] = params.get("type")
+
+                elif method == "Network.loadingFinished":
+                    if request_id in transactions:
+                        transactions[request_id]["encoded_data_length"] = params.get(
+                            "encodedDataLength", 0
+                        )
+                        transactions[request_id]["complete"] = True
+
+            except (json.JSONDecodeError, KeyError) as e:
+                continue
+
+        # Convert transactions to HAR entries
+        har_entries = []
+
+        for request_id, txn in transactions.items():
+            if "response" not in txn:
+                continue  # Skip incomplete transactions
+
+            req = txn.get("request", {})
+            resp = txn.get("response", {})
+            timing = resp.get("timing", {})
+
+            # Convert wallTime (seconds since epoch) to ISO 8601
+            wall_time = txn.get("wall_time")
+            if wall_time:
+                dt = datetime.fromtimestamp(wall_time, tz=timezone.utc)
+                started_datetime = dt.isoformat().replace("+00:00", "Z")
+            else:
+                started_datetime = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+            # Convert headers dict to HAR array format
+            def headers_to_har(headers_dict):
+                if not headers_dict:
+                    return []
+                return [{"name": k, "value": str(v)} for k, v in headers_dict.items()]
+
+            # Parse query string from URL
+            def parse_query_string(url):
+                parsed = urlparse(url)
+                query_params = parse_qs(parsed.query)
+                result = []
+                for name, values in query_params.items():
+                    for value in values:
+                        result.append({"name": name, "value": value})
+                return result
+
+            # Convert CDP timing to HAR timing (duration in ms)
+            def convert_timing(timing_obj):
+                def safe_duration(start_key, end_key):
+                    start = timing_obj.get(start_key)
+                    end = timing_obj.get(end_key)
+                    if start is not None and end is not None and start >= 0 and end >= 0:
+                        return max(0, end - start)
+                    return -1
+
+                return {
+                    "blocked": -1,  # Not directly available
+                    "dns": safe_duration("dnsStart", "dnsEnd"),
+                    "connect": safe_duration("connectStart", "connectEnd"),
+                    "ssl": safe_duration("sslStart", "sslEnd"),
+                    "send": safe_duration("sendStart", "sendEnd"),
+                    "wait": safe_duration("sendEnd", "receiveHeadersEnd"),
+                    "receive": 0,  # Would need loadingFinished timing
+                }
+
+            har_timing = convert_timing(timing)
+
+            # Calculate total time
+            total_time = sum(v for v in har_timing.values() if v >= 0)
+
+            har_entry = {
+                "startedDateTime": started_datetime,
+                "time": total_time,
+                "request": {
+                    "method": req.get("method", "GET"),
+                    "url": req.get("url", ""),
+                    "httpVersion": resp.get("protocol", "HTTP/1.1"),
+                    "headers": headers_to_har(req.get("headers", {})),
+                    "queryString": parse_query_string(req.get("url", "")),
+                    "cookies": [],  # Would need to parse from headers
+                    "headersSize": -1,
+                    "bodySize": len(req.get("postData", "")) if req.get("postData") else 0,
+                },
+                "response": {
+                    "status": resp.get("status", 0),
+                    "statusText": resp.get("statusText", ""),
+                    "httpVersion": resp.get("protocol", "HTTP/1.1"),
+                    "headers": headers_to_har(resp.get("headers", {})),
+                    "cookies": [],
+                    "content": {
+                        "size": resp.get("encodedDataLength", 0),
+                        "mimeType": resp.get("mimeType", ""),
+                    },
+                    "redirectURL": "",
+                    "headersSize": -1,
+                    "bodySize": txn.get("encoded_data_length", -1),
+                },
+                "cache": {},
+                "timings": har_timing,
+                "serverIPAddress": resp.get("remoteIPAddress", ""),
+                "connection": resp.get("connectionId", ""),
+            }
+
+            # Add POST data if present
+            if req.get("postData"):
+                har_entry["request"]["postData"] = {
+                    "mimeType": req.get("headers", {}).get("Content-Type", ""),
+                    "text": req.get("postData"),
+                }
+
+            # Fetch response body if requested (configurable size limit)
+            if include_response_bodies:
+                mime_type = resp.get("mimeType", "")
+                body_size = txn.get("encoded_data_length", 0)
+                max_body_bytes = max(1, min(max_body_size_mb, 50)) * 1024 * 1024  # 1-50MB
+                should_fetch = (
+                    body_size < max_body_bytes
+                    and (
+                        "json" in mime_type
+                        or "text" in mime_type
+                        or "xml" in mime_type
+                        or "javascript" in mime_type
+                    )
+                )
+                if should_fetch:
+                    try:
+                        body_result = await asyncio.to_thread(
+                            driver.execute_cdp_cmd,
+                            "Network.getResponseBody",
+                            {"requestId": request_id},
+                        )
+                        if body_result.get("body"):
+                            har_entry["response"]["content"]["text"] = body_result["body"]
+                            if body_result.get("base64Encoded"):
+                                har_entry["response"]["content"]["encoding"] = "base64"
+                    except Exception:
+                        pass  # Body may not be available after the fact
+
+            har_entries.append(har_entry)
+
+        # Build HAR structure
+        har = {
+            "log": {
+                "version": "1.2",
+                "creator": {"name": "selenium-browser-automation", "version": "1.0"},
+                "entries": har_entries,
+            }
+        }
+
+        # Save to file
+        har_path = service.state.capture_dir / filename
+        har_json = json.dumps(har, indent=2)
+        har_path.write_text(har_json)
+
+        await logger.info(f"Exported {len(har_entries)} entries to {har_path}")
+
+        return HARExportResult(
+            path=str(har_path),
+            entry_count=len(har_entries),
+            size_bytes=len(har_json),
+            has_errors=len(errors) > 0,
+            errors=errors,
+        )
 
 
 @asynccontextmanager
