@@ -1,6 +1,8 @@
-"""Pydantic models for Chrome profile metadata."""
+"""Pydantic models for Selenium browser automation MCP server."""
 
 from __future__ import annotations
+
+from typing import Literal
 
 import pydantic
 
@@ -182,3 +184,192 @@ class ChromeLocalState(BaseModel):
 
     # Additional state
     was: dict | None = None
+
+
+# =============================================================================
+# Core Web Vitals Models
+# =============================================================================
+
+MetricRating = Literal["good", "needs-improvement", "poor"]
+
+
+class WebVitalMetric(pydantic.BaseModel):
+    """Base model for Web Vital metrics - allows extra fields from JS."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    name: str
+    value: float  # milliseconds for timing, unitless for CLS
+    rating: MetricRating
+
+
+class FCPMetric(WebVitalMetric):
+    """First Contentful Paint metric."""
+
+    name: Literal["FCP"] = "FCP"
+
+
+class LCPMetric(WebVitalMetric):
+    """Largest Contentful Paint metric with element details."""
+
+    name: Literal["LCP"] = "LCP"
+    size: int | None = None  # Pixels
+    element_id: str | None = None
+    url: str | None = None
+
+
+class TTFBPhases(pydantic.BaseModel):
+    """TTFB timing phase breakdown."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    dns: float = 0
+    tcp: float = 0
+    request: float = 0
+
+
+class TTFBMetric(WebVitalMetric):
+    """Time to First Byte with phase breakdown."""
+
+    name: Literal["TTFB"] = "TTFB"
+    phases: TTFBPhases | None = None
+
+
+class LayoutShiftSource(pydantic.BaseModel):
+    """Source element that caused layout shift."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    node: str | None = None
+
+
+class LayoutShiftEntry(pydantic.BaseModel):
+    """Individual layout shift entry."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    value: float
+    time: float
+    sources: list[LayoutShiftSource] = []
+
+
+class CLSMetric(WebVitalMetric):
+    """Cumulative Layout Shift with session entries."""
+
+    name: Literal["CLS"] = "CLS"
+    entries: list[LayoutShiftEntry] = []
+
+
+class INPDetails(pydantic.BaseModel):
+    """INP interaction phase breakdown."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    duration: float
+    name: str
+    start_time: float
+    input_delay: float
+    processing_time: float
+    presentation_delay: float
+
+
+class INPMetric(WebVitalMetric):
+    """Interaction to Next Paint metric."""
+
+    name: Literal["INP"] = "INP"
+    details: INPDetails | None = None
+
+
+class CoreWebVitals(pydantic.BaseModel):
+    """Complete Core Web Vitals report."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    url: str
+    timestamp: float  # Unix timestamp when captured
+
+    # Core metrics
+    lcp: LCPMetric | None = None
+    cls: CLSMetric | None = None
+    inp: INPMetric | None = None
+
+    # Supplementary metrics
+    fcp: FCPMetric | None = None
+    ttfb: TTFBMetric | None = None
+
+    # Metadata
+    collection_duration_ms: float
+    errors: list[str] = []
+
+
+# =============================================================================
+# Network Timing / HAR Models
+# =============================================================================
+
+
+class RequestTiming(pydantic.BaseModel):
+    """CDP ResourceTiming converted to milliseconds."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    blocked: float = 0
+    dns: float = 0
+    connect: float = 0
+    ssl: float = 0
+    send: float = 0
+    wait: float = 0  # TTFB for this request
+    receive: float = 0
+
+    @property
+    def total(self) -> float:
+        """Total request time in milliseconds."""
+        return (
+            self.blocked
+            + self.dns
+            + self.connect
+            + self.ssl
+            + self.send
+            + self.wait
+            + self.receive
+        )
+
+
+class NetworkRequest(pydantic.BaseModel):
+    """Individual network request with timing data."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    request_id: str
+    url: str
+    method: str
+    resource_type: str | None = None
+    status: int | None = None
+    status_text: str | None = None
+    mime_type: str | None = None
+    timing: RequestTiming | None = None
+    request_headers: dict[str, str] = {}
+    response_headers: dict[str, str] = {}
+    encoded_data_length: int = 0
+    started_at: float = 0  # Wall time
+    finished_at: float | None = None
+    duration_ms: float | None = None  # Computed total duration
+    error: str | None = None
+
+
+class NetworkCapture(pydantic.BaseModel):
+    """Complete network capture result."""
+
+    model_config = pydantic.ConfigDict(extra="ignore")
+
+    url: str
+    timestamp: float
+    requests: list[NetworkRequest]
+    total_requests: int
+    total_size_bytes: int
+    total_time_ms: float
+
+    # Summary statistics
+    slowest_requests: list[dict] = []  # [{url, duration_ms, status}]
+    requests_by_type: dict[str, int] = {}  # {document: 1, xhr: 5, ...}
+
+    errors: list[str] = []
