@@ -140,6 +140,95 @@ Ideas without implementation plans:
 - `download_resource(url, output_filename)` - Download with session cookies
 - `list_chrome_profiles(verbose?)` - Available Chrome profiles
 
+### Proxy (Rate Limit Bypass)
+- `configure_proxy(host, port, username, password)` - Configure authenticated proxy via mitmproxy
+- `clear_proxy()` - Stop proxy and return to direct connection
+
+## Authenticated Proxy Support
+
+Bypass IP-based rate limiting using residential proxies (e.g., Bright Data).
+
+### Quick Start
+
+```python
+# 1. Configure proxy (starts mitmproxy subprocess)
+configure_proxy(
+    host="brd.superproxy.io",
+    port=33335,
+    username="brd-customer-XXXXX-zone-residential-country-us",
+    password="YOUR_PASSWORD"
+)
+
+# 2. Navigate - requests now go through proxy
+navigate("https://api.ipify.org")  # Shows proxy IP, not your real IP
+
+# 3. For IP rotation, use fresh_browser=True
+navigate(url, fresh_browser=True)  # Forces new IP from proxy pool
+
+# 4. Clean up when done
+clear_proxy()
+```
+
+### Why mitmproxy? (Chrome Extensions Don't Work)
+
+We extensively tested Chrome extension-based proxy authentication and discovered it **fundamentally cannot work reliably**:
+
+| Approach | Result | Why It Fails |
+|----------|--------|--------------|
+| Manifest V3 extension | ❌ Auth dialog appears | Service worker not ready when auth challenge occurs |
+| Manifest V2 extension | ❌ Auth dialog appears | Race condition: auth fires before extension loads |
+| Selenium Wire | ❌ Broken | Deprecated, incompatible with Python 3.13 |
+| **mitmproxy** | ✅ Works | Handles auth at proxy layer, not browser |
+
+**The solution**: mitmproxy runs locally on `localhost:8080`. Chrome connects to it without authentication. mitmproxy forwards requests to the upstream proxy (Bright Data) with credentials.
+
+```
+Chrome → localhost:8080 (mitmproxy) → brd.superproxy.io:33335 (Bright Data)
+         [no auth needed]              [mitmproxy handles auth]
+```
+
+### IP Rotation Behavior
+
+| Scenario | IP Behavior |
+|----------|-------------|
+| Same browser session | Same IP (connection reuse) |
+| `fresh_browser=True` | **New IP** from proxy pool |
+| New `configure_proxy()` call | New IP (restarts mitmproxy) |
+
+### Rate Limit Bypass Pattern
+
+For sites with aggressive rate limiting (e.g., government record searches):
+
+```python
+for item in items_to_search:
+    # Each iteration gets fresh browser = new IP
+    navigate(search_url, fresh_browser=True)
+
+    # Perform search
+    click(input_selector)
+    type_text(search_term)
+    click(submit_selector)
+    wait_for_network_idle()
+
+    # Extract results
+    results = get_page_content(format="text")
+
+    # Human-like delay between searches
+    time.sleep(random.uniform(2, 5))
+```
+
+### Requirements
+
+- **mitmproxy**: Install with `brew install mitmproxy` (macOS) or `pip install mitmproxy`
+- **Proxy credentials**: Bright Data or similar residential proxy service
+
+### Bright Data Specifics
+
+- Default port: `33335` (HTTP) or `22228` (SOCKS5)
+- Username format: `brd-customer-{ID}-zone-{ZONE}-country-{CC}`
+- Country codes: `us`, `gb`, `de`, etc.
+- Session stickiness: Add `-session-{ID}` to username for sticky sessions
+
 ## Architecture
 
 - **CDP Stealth Injection**: Bypasses Cloudflare where Playwright fails
