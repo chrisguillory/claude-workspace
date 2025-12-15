@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import subprocess
 import sys
 import tempfile
 import time
@@ -194,6 +195,9 @@ class BrowserState:
         self.network_capture_start_time: float | None = None
         self.network_events: list[dict] = []  # Collected CDP events
         self.network_resource_filter: list[str] | None = None  # Optional resource type filter
+        # Proxy configuration for authenticated proxies
+        self.proxy_config: dict[str, str] | None = None  # {host, port, username, password}
+        self.mitmproxy_process: subprocess.Popen | None = None  # Local mitmproxy for upstream auth
 
 
 class LoggerProtocol(typing.Protocol):
@@ -263,6 +267,13 @@ class BrowserService:
         if enable_har_capture:
             opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
             opts.add_experimental_option("perfLoggingPrefs", {"enableNetwork": True})
+
+        # Apply proxy configuration if mitmproxy is running
+        # mitmproxy handles upstream authentication, Chrome just connects to local proxy
+        if self.state.proxy_config and self.state.mitmproxy_process:
+            opts.add_argument('--proxy-server=http://127.0.0.1:8080')
+            opts.add_argument('--ignore-certificate-errors')  # mitmproxy uses self-signed certs
+            print(f"[browser] Using local mitmproxy -> {self.state.proxy_config['host']}:{self.state.proxy_config['port']}", file=sys.stderr)
 
         # Add profile if specified
         if profile:
@@ -2063,6 +2074,171 @@ Workflow:
             errors=errors,
         )
 
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Configure Proxy",
+            destructiveHint=False,
+            idempotentHint=False,
+        )
+    )
+    async def configure_proxy(
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        ctx: Context | None = None,
+    ) -> dict:
+        """Configure authenticated HTTP proxy for bypassing IP-based rate limiting.
+
+        Starts a local mitmproxy instance that handles authentication with the
+        upstream proxy. Chrome connects to the local mitmproxy (no auth needed),
+        and mitmproxy forwards requests with credentials to Bright Data.
+
+        Architecture:
+            Chrome → localhost:8080 (mitmproxy) → upstream proxy (Bright Data)
+                     [no auth needed]              [mitmproxy handles auth]
+
+        IP Rotation Behavior:
+            - Same browser session = same IP (connection reuse)
+            - navigate(url, fresh_browser=True) = NEW IP from proxy pool
+            - Calling configure_proxy() again = new IP (restarts mitmproxy)
+
+        Rate Limit Bypass Pattern:
+            For sites with aggressive rate limiting, use fresh_browser=True
+            on each navigate() call to get a new IP for each request.
+
+        Args:
+            host: Proxy host (e.g., brd.superproxy.io)
+            port: Proxy port (e.g., 33335 for HTTP, 22228 for SOCKS5)
+            username: Proxy username (Bright Data format: brd-customer-{ID}-zone-{ZONE}-country-{CC})
+            password: Proxy password
+
+        Returns:
+            Status dict confirming proxy configuration
+
+        Requires:
+            mitmproxy must be installed: brew install mitmproxy (macOS) or pip install mitmproxy
+
+        Example:
+            configure_proxy(
+                host="brd.superproxy.io",
+                port=33335,
+                username="brd-customer-hl_87cafc8d-zone-residential-country-us",
+                password="YOUR_PASSWORD"
+            )
+            navigate("https://api.ipify.org")  # Shows proxy IP, not your real IP
+            navigate(url, fresh_browser=True)  # Gets NEW IP from proxy pool
+        """
+        if ctx:
+            logger = PrintLogger(ctx)
+            await logger.info(f"Configuring proxy via mitmproxy: {host}:{port}")
+
+        # Close existing browser and mitmproxy
+        await service.close_browser()
+
+        # Stop any existing mitmproxy process
+        if service.state.mitmproxy_process:
+            service.state.mitmproxy_process.terminate()
+            try:
+                service.state.mitmproxy_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                service.state.mitmproxy_process.kill()
+            service.state.mitmproxy_process = None
+
+        # Store proxy config
+        service.state.proxy_config = {
+            'host': host,
+            'port': str(port),
+            'username': username,
+            'password': password,
+        }
+
+        # Start mitmproxy with upstream authentication
+        # mitmproxy handles auth with Bright Data, Chrome connects to localhost:8080
+        upstream_url = f"http://{host}:{port}"
+        upstream_auth = f"{username}:{password}"
+
+        try:
+            service.state.mitmproxy_process = subprocess.Popen(
+                [
+                    'mitmdump',
+                    '--mode', f'upstream:{upstream_url}',
+                    '--upstream-auth', upstream_auth,
+                    '--listen-host', '127.0.0.1',
+                    '--listen-port', '8080',
+                    '--ssl-insecure',  # Accept upstream proxy's certs
+                    '--quiet',  # Reduce log noise
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            # Give mitmproxy time to start
+            await asyncio.sleep(2)
+
+            # Check if process is still running
+            if service.state.mitmproxy_process.poll() is not None:
+                stderr = service.state.mitmproxy_process.stderr.read().decode() if service.state.mitmproxy_process.stderr else ""
+                raise RuntimeError(f"mitmproxy failed to start: {stderr}")
+
+            if ctx:
+                await logger.info("mitmproxy started on localhost:8080")
+
+        except FileNotFoundError:
+            service.state.proxy_config = None
+            raise fastmcp.exceptions.ToolError(
+                "mitmproxy not found. Install with: pip install mitmproxy"
+            )
+        except Exception as e:
+            service.state.proxy_config = None
+            if service.state.mitmproxy_process:
+                service.state.mitmproxy_process.kill()
+                service.state.mitmproxy_process = None
+            raise fastmcp.exceptions.ToolError(f"Failed to start mitmproxy: {e}")
+
+        return {
+            "status": "proxy_configured",
+            "host": host,
+            "port": port,
+            "note": "Browser will use this proxy on next navigate()"
+        }
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Clear Proxy",
+            destructiveHint=False,
+            idempotentHint=True,
+        )
+    )
+    async def clear_proxy(ctx: Context | None = None) -> dict:
+        """Clear proxy configuration and return to direct connection.
+
+        Stops the mitmproxy subprocess and clears proxy settings.
+
+        Returns:
+            Status dict confirming proxy cleared
+        """
+        if ctx:
+            logger = PrintLogger(ctx)
+            await logger.info("Clearing proxy configuration")
+
+        # Close browser first
+        await service.close_browser()
+
+        # Stop mitmproxy process
+        if service.state.mitmproxy_process:
+            service.state.mitmproxy_process.terminate()
+            try:
+                service.state.mitmproxy_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                service.state.mitmproxy_process.kill()
+            service.state.mitmproxy_process = None
+            if ctx:
+                await logger.info("mitmproxy stopped")
+
+        service.state.proxy_config = None
+
+        return {"status": "proxy_cleared"}
+
 
 @asynccontextmanager
 async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
@@ -2080,6 +2256,12 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     # SHUTDOWN: Cleanup after all requests complete
     if state.driver:
         await asyncio.to_thread(state.driver.quit)
+    if state.mitmproxy_process:
+        state.mitmproxy_process.terminate()
+        try:
+            state.mitmproxy_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            state.mitmproxy_process.kill()
     state.temp_dir.cleanup()
     state.capture_temp_dir.cleanup()
     print("✓ Server cleanup complete", file=sys.stderr)
