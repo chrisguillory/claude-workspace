@@ -579,8 +579,8 @@ def register_tools(service: BrowserService) -> None:
 
             // Smart extraction mode
             if (requestedSelector === 'auto') {
-                // Priority 1: Try <main> element
-                const main = document.querySelector('main');
+                // Priority 1: Try <main> element or [role="main"]
+                const main = document.querySelector('main, [role="main"]');
                 if (main) {
                     const mainText = extractFromElement(main);
                     if (mainText.length >= SMART_THRESHOLD) {
@@ -588,7 +588,7 @@ def register_tools(service: BrowserService) -> None:
                             text: mainText,
                             title: document.title || '',
                             url: window.location.href,
-                            sourceElement: 'main',
+                            sourceElement: main.tagName.toLowerCase() === 'main' ? 'main' : '[role="main"]',
                             characterCount: mainText.length,
                             isSmartExtraction: true,
                             fallbackUsed: false,
