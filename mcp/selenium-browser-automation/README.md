@@ -260,7 +260,7 @@ Ideas without implementation plans:
 
 ### Navigation & Content
 - `navigate(url, fresh_browser?, profile?, enable_har_capture?)` - Load URL with optional Chrome profile
-- `get_page_text(selector?)` - Smart content extraction with semantic element priority (see below)
+- `get_page_text(selector?, include_images?)` - Smart content extraction with semantic element priority (see below)
 - `get_page_content(format, selector?, limit?)` - Extract text/HTML (legacy: use `get_page_text` for text)
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
 - `screenshot(filename, full_page?)` - Capture viewport or full page
@@ -292,6 +292,14 @@ result.smart_info.body_character_count  # Total body chars for coverage calc
 ```python
 get_page_text(selector="body")     # Full page (no smart_info)
 get_page_text(selector=".content") # Specific element (no smart_info)
+```
+
+**Image alt text (`include_images=True`):**
+
+```python
+get_page_text(include_images=True)
+# Output includes: [Image: A chart showing Q3 revenue growth]
+# Images without alt: [Image: (no alt)]
 ```
 
 **Extraction features:**

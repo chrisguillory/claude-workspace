@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -416,6 +417,7 @@ def register_tools(service: BrowserService) -> None:
     async def get_page_text(
         ctx: Context,
         selector: str = "auto",
+        include_images: bool = False,
     ) -> PageTextResult:
         """Extract all text content from page, including hidden content.
 
@@ -428,6 +430,10 @@ def register_tools(service: BrowserService) -> None:
         **Explicit extraction:**
         Use `selector='body'` for full page content, or any CSS selector
         for specific elements.
+
+        **Image alt text (include_images):**
+        When True, includes image descriptions inline as `[Image: alt text]`.
+        Images without alt text appear as `[Image: (no alt)]`.
 
         **Transparency metadata (auto mode only):**
         For selector='auto', response includes `smart_info` with:
@@ -451,6 +457,7 @@ def register_tools(service: BrowserService) -> None:
                       - 'body' - full page
                       - 'main' - main content area
                       - 'article' - article content
+            include_images: Include image alt text as [Image: description]
 
         Returns:
             PageTextResult with text, metadata, and transparency fields
@@ -462,8 +469,8 @@ def register_tools(service: BrowserService) -> None:
             # Full page extraction (explicit)
             result = get_page_text(selector="body")
 
-            # Specific element
-            result = get_page_text(selector="article.post-content")
+            # Include image descriptions
+            result = get_page_text(include_images=True)
 
         Notes:
             - For HTML source, use get_page_html() instead
@@ -498,6 +505,16 @@ def register_tools(service: BrowserService) -> None:
                     if (node.nodeType === Node.ELEMENT_NODE) {
                         const tagName = node.tagName;
                         if (SKIP_ELEMENTS.has(tagName)) return;
+
+                        // Handle IMG elements - emit marker with alt text
+                        if (tagName === 'IMG') {
+                            const alt = node.getAttribute('alt');
+                            const marker = alt && alt.trim()
+                                ? '__IMG_ALT__' + alt.trim() + '__END_IMG__'
+                                : '__IMG_ALT__(no alt)__END_IMG__';
+                            parts.push({text: marker, pre: false});
+                            return;  // IMG has no children to walk
+                        }
 
                         const isPre = PREFORMATTED_ELEMENTS.has(tagName) ||
                             (window.getComputedStyle &&
@@ -658,7 +675,16 @@ def register_tools(service: BrowserService) -> None:
         title = result.get('title', 'Untitled')
         url = result.get('url', '')
         text = result.get('text', '')
-        char_count = result.get('characterCount', 0)
+
+        # Handle image markers based on include_images parameter
+        if include_images:
+            # Convert markers to [Image: alt text] format
+            text = re.sub(r'__IMG_ALT__(.+?)__END_IMG__', r'[Image: \1]', text)
+        else:
+            # Remove all image markers
+            text = re.sub(r'__IMG_ALT__.+?__END_IMG__', '', text)
+
+        char_count = len(text)  # Recalculate after marker processing
 
         # Handle empty extraction
         if not text:
