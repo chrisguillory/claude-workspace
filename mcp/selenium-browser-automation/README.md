@@ -117,6 +117,44 @@ Complete comparison testing of all example files with both SMCP and CiC:
 
 3. **SMCP transparency enables debugging**: Coverage ratios (50-58%) immediately show when extraction is partial.
 
+### ARIA Snapshot Comparison (`get_aria_snapshot` vs `read_page`)
+
+Comprehensive testing (2025-12-23) of accessibility tree extraction:
+
+| Feature                        | SMCP `get_aria_snapshot` |    CiC `read_page`    | Notes                                   |
+|--------------------------------|:------------------------:|:---------------------:|-----------------------------------------|
+| **Reference IDs**              |            ❌             | ✅ (ref_1, ref_2, ...) | CiC advantage - enables click(ref)      |
+| **aria-hidden exclusion**      |         ❌ (BUG)          |     ❌ (SAME BUG)      | **P0**: Both show aria-hidden content   |
+| **Explicit ARIA roles**        |            ✅             |           ✅           | dialog, tablist, menu, etc.             |
+| **Named landmarks**            |            ✅             |           ✅           | `navigation "Main nav"`                 |
+| **Interactive filter**         |            ❌             |           ✅           | CiC: `filter="interactive"`             |
+| **expanded/selected/pressed**  |            ❌             |           ❌           | Neither tracks ARIA states              |
+| **valuenow/valuemin/valuemax** |            ❌             |           ❌           | Neither shows slider values             |
+| **Native `<details>`**         |    → generic (wrong)     |   → generic (wrong)   | Should be `group`                       |
+| **Native `<progress>`**        |    → generic (wrong)     |   → generic (wrong)   | Should be `progressbar`                 |
+| **Native `<meter>`**           |    → generic (wrong)     |   → generic (wrong)   | Should be `meter`                       |
+| **Native `<dl>/<dt>/<dd>`**    |    → generic (wrong)     |   → generic (wrong)   | Should be term/definition               |
+| **Header inside article**      |     → banner (wrong)     |   → banner (wrong)    | Should be `generic` (context-sensitive) |
+| **Section without name**       |     → region (wrong)     |   → region (wrong)    | Should be `generic` (context-sensitive) |
+| **aria-live attributes**       |            ❌             |           ❌           | Neither shows polite/assertive          |
+
+**Key Finding**: Both implementations have identical native role mapping and context-sensitive role gaps. The P0 aria-hidden bug exists in both.
+
+### `get_aria_snapshot` Roadmap
+
+Prioritized implementation plan based on Phase 6-7 testing:
+
+| Priority | Issue                         | Impact                                    | Test File                  |
+|:--------:|-------------------------------|-------------------------------------------|----------------------------|
+|  **P0**  | aria-hidden content appearing | Security/privacy - exposes hidden content | `aria-states.html` Test 11 |
+|  **P1**  | No reference IDs              | Can't target elements for click/input     | Chrome comparison          |
+|  **P1**  | Missing ARIA states           | Can't detect expanded/collapsed/selected  | `aria-states.html`         |
+|  **P2**  | Native role mapping gaps      | details/progress/meter show as generic    | `role-mapping.html`        |
+|  **P2**  | Context-sensitive roles       | header inside article still shows banner  | `context-roles.html`       |
+|  **P2**  | Value attributes              | No valuenow/valuemin/valuemax for sliders | `aria-values.html`         |
+|  **P2**  | Live region attributes        | No aria-live/atomic/relevant              | `live-regions.html`        |
+|  **P3**  | Interactive filter            | CiC has filter="interactive" option       | Feature gap                |
+
 ### Philosophy Comparison
 
 | Aspect                  | SMCP                       | CiC                           |
