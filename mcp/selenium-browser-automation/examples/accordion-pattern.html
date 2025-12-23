@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Accordion Pattern</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #1a1a1a; border-bottom: 3px solid #673ab7; padding-bottom: 10px; }
+    .intro { background: #ede7f6; padding: 15px; border-left: 4px solid #673ab7; margin: 20px 0; }
+
+    /* Accordion styles */
+    .accordion {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .accordion-section {
+      border-bottom: 1px solid #eee;
+    }
+    .accordion-section:last-child {
+      border-bottom: none;
+    }
+    .accordion-header {
+      background: #f5f5f5;
+      padding: 15px 20px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+      color: #333;
+    }
+    .accordion-header:hover {
+      background: #ede7f6;
+    }
+    .accordion-icon {
+      color: #673ab7;
+      font-size: 20px;
+    }
+    .accordion-content {
+      padding: 20px;
+      background: white;
+    }
+    .accordion-content.collapsed {
+      display: none;
+    }
+    .accordion-content.expanded {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: accordion-pattern.html
+PURPOSE: Test extraction of collapsed accordion content (display:none sections)
+TECHNICAL: Real-world FAQ/accordion pattern where only one section is expanded
+TEST COUNT: 5 FAQ sections (1 expanded, 4 collapsed)
+EXPECTED RESULT: ALL section content should be extracted regardless of state
+UPDATED: 2025-12-22
+================================================================================
+-->
+
+  <h1>Accordion Pattern Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that <code>get_page_text()</code> extracts content from collapsed accordion sections.</p>
+    <p><strong>Real-world pattern:</strong> FAQ pages typically show one section expanded and others collapsed with <code>display: none</code>.</p>
+    <p><strong>Expected:</strong> ALL section content should appear in extracted text, regardless of expanded/collapsed state.</p>
+  </div>
+
+  <h2>Frequently Asked Questions</h2>
+
+  <div class="accordion">
+
+    <!-- SECTION 1: EXPANDED -->
+    <div class="accordion-section">
+      <div class="accordion-header">
+        <span>What is text extraction?</span>
+        <span class="accordion-icon">-</span>
+      </div>
+      <div class="accordion-content expanded">
+        <p>Accordion Test 1 passed: Text extraction is the process of pulling text content from web pages. This section is EXPANDED and visible to users. Our extraction should capture this content.</p>
+        <p>Text extraction can use different methods:</p>
+        <ul>
+          <li><strong>innerText</strong> - Only visible text</li>
+          <li><strong>textContent</strong> - All DOM text including hidden</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION 2: COLLAPSED -->
+    <div class="accordion-section">
+      <div class="accordion-header">
+        <span>Why does hidden content matter?</span>
+        <span class="accordion-icon">+</span>
+      </div>
+      <div class="accordion-content collapsed">
+        <p>Accordion Test 2 passed: Hidden content matters because modern web pages often hide content for UI purposes but the information is still valuable. This section is COLLAPSED with display:none.</p>
+        <p>Examples of hidden but important content:</p>
+        <ul>
+          <li>Modal dialogs with detailed descriptions</li>
+          <li>Accordion FAQ sections (like this one!)</li>
+          <li>Tab panels that aren't currently active</li>
+          <li>Dropdown menus</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION 3: COLLAPSED -->
+    <div class="accordion-section">
+      <div class="accordion-header">
+        <span>How does Shadow DOM work?</span>
+        <span class="accordion-icon">+</span>
+      </div>
+      <div class="accordion-content collapsed">
+        <p>Accordion Test 3 passed: Shadow DOM is a web standard that allows encapsulation of HTML and CSS. This section is also COLLAPSED but should still be extracted.</p>
+        <p>Shadow DOM features:</p>
+        <ul>
+          <li>Style encapsulation - styles don't leak in or out</li>
+          <li>DOM encapsulation - elements are hidden from parent document</li>
+          <li>Used by web components and many UI libraries</li>
+          <li>Requires explicit traversal with node.shadowRoot</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION 4: COLLAPSED -->
+    <div class="accordion-section">
+      <div class="accordion-header">
+        <span>What about whitespace normalization?</span>
+        <span class="accordion-icon">+</span>
+      </div>
+      <div class="accordion-content collapsed">
+        <p>Accordion Test 4 passed: Whitespace normalization ensures extracted text is readable. This section tests our extraction of COLLAPSED content.</p>
+        <p>Normalization rules:</p>
+        <ul>
+          <li>Multiple spaces collapse to single space</li>
+          <li>Block elements create line breaks</li>
+          <li>PRE/CODE blocks preserve exact formatting</li>
+          <li>Inline elements don't create breaks</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION 5: COLLAPSED -->
+    <div class="accordion-section">
+      <div class="accordion-header">
+        <span>Can I test with multiple tools?</span>
+        <span class="accordion-icon">+</span>
+      </div>
+      <div class="accordion-content collapsed">
+        <p>Accordion Test 5 passed: Yes! These tests work with multiple extraction tools. This is the final COLLAPSED section.</p>
+        <p>Supported tools:</p>
+        <ul>
+          <li>Selenium MCP - get_page_text()</li>
+          <li>Claude in Chrome - get_page_text()</li>
+          <li>Native browser - document.body.textContent</li>
+        </ul>
+        <p>Compare outputs to find differences between implementations.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+    <p>After running <code>get_page_text()</code>, verify the output contains:</p>
+    <ul>
+      <li>"Accordion Test 1 passed" - expanded section (visible)</li>
+      <li>"Accordion Test 2 passed" - collapsed section (hidden)</li>
+      <li>"Accordion Test 3 passed" - collapsed section (hidden)</li>
+      <li>"Accordion Test 4 passed" - collapsed section (hidden)</li>
+      <li>"Accordion Test 5 passed" - collapsed section (hidden)</li>
+    </ul>
+    <p><strong>Key validation:</strong> Tests 2-5 are in collapsed (display:none) sections. If they're missing, hidden content extraction is broken.</p>
+  </footer>
+
+</body>
+</html>

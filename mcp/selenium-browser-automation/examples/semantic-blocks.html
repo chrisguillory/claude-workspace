@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Semantic Block Structure</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #1a1a1a; border-bottom: 3px solid #2196f3; padding-bottom: 10px; }
+    .intro { background: #e3f2fd; padding: 15px; border-left: 4px solid #2196f3; margin: 20px 0; }
+    .test-case { background: white; border: 1px solid #ddd; border-radius: 8px; margin: 20px 0; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .test-case h2 { color: #333; font-size: 20px; margin-top: 0; }
+    .expected { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 12px; margin: 15px 0; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; }
+    .actual { background: #f9f9f9; border: 1px dashed #999; padding: 15px; margin: 15px 0; }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f5f5f5; }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: semantic-blocks.html
+PURPOSE: Validate block vs inline element handling for line breaks
+TECHNICAL: Tests BLOCK_ELEMENTS set in DOM walking function
+TEST COUNT: 6 semantic structure scenarios
+EXPECTED RESULT: Block elements create breaks, inline elements don't
+UPDATED: 2025-12-22
+================================================================================
+-->
+
+  <h1>Semantic Block Structure Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that <code>get_page_text()</code> correctly handles block vs inline elements.</p>
+    <p><strong>Block elements:</strong> Create line breaks (H1-H6, P, DIV, SECTION, etc.)</p>
+    <p><strong>Inline elements:</strong> No breaks (SPAN, A, STRONG, EM, etc.)</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: Headings (H1-H6)                                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>Test 1: Headings</h2>
+
+    <div class="expected">Expected: Each heading on separate line</div>
+
+    <div class="actual">
+      <h1>Semantic Test 1 passed: Heading 1</h1>
+      <h2>Heading 2</h2>
+      <h3>Heading 3</h3>
+      <h4>Heading 4</h4>
+      <h5>Heading 5</h5>
+      <h6>Heading 6</h6>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: Paragraphs                                                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>Test 2: Paragraphs</h2>
+
+    <div class="expected">Expected: Paragraphs separated by line breaks</div>
+
+    <div class="actual">
+      <p>Semantic Test 2 passed: First paragraph content.</p>
+      <p>Second paragraph content.</p>
+      <p>Third paragraph content.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: DIV vs SPAN                                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>Test 3: DIV vs SPAN</h2>
+
+    <div class="expected">Expected: DIVs create breaks, SPANs don't</div>
+
+    <div class="actual">
+      <div>Semantic Test 3 passed: DIV block 1</div>
+      <div>DIV block 2</div>
+      <p><span>SPAN inline 1</span> <span>SPAN inline 2</span> <span>SPAN inline 3</span></p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Semantic HTML5 Elements                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>Test 4: Semantic HTML5 Elements</h2>
+
+    <div class="expected">Expected: SECTION, ARTICLE, HEADER, FOOTER create breaks</div>
+
+    <div class="actual">
+      <header>Semantic Test 4 passed: Header content</header>
+      <article>Article content</article>
+      <section>Section content</section>
+      <footer>Footer content</footer>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: BR Elements                                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>Test 5: BR Elements</h2>
+
+    <div class="expected">Expected: BR creates single line break</div>
+
+    <div class="actual">
+      <p>Semantic Test 5 passed: Line 1<br>Line 2<br>Line 3</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: Table Structure                                               -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>Test 6: Table Structure</h2>
+
+    <div class="expected">Expected: Table rows and cells with appropriate breaks</div>
+
+    <div class="actual">
+      <p>Semantic Test 6 passed: Table below:</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Header 1</th>
+            <th>Header 2</th>
+            <th>Header 3</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Row 1 Cell 1</td>
+            <td>Row 1 Cell 2</td>
+            <td>Row 1 Cell 3</td>
+          </tr>
+          <tr>
+            <td>Row 2 Cell 1</td>
+            <td>Row 2 Cell 2</td>
+            <td>Row 2 Cell 3</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+    <ul>
+      <li>"Semantic Test 1 passed" - headings</li>
+      <li>"Semantic Test 2 passed" - paragraphs</li>
+      <li>"Semantic Test 3 passed" - DIV vs SPAN</li>
+      <li>"Semantic Test 4 passed" - HTML5 semantic elements</li>
+      <li>"Semantic Test 5 passed" - BR elements</li>
+      <li>"Semantic Test 6 passed" - tables</li>
+    </ul>
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Shadow DOM Extraction</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #9c27b0;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #f3e5f5;
+      padding: 15px;
+      border-left: 4px solid #9c27b0;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+    }
+
+    .expected {
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .component-wrapper {
+      background: #fafafa;
+      border: 2px dashed #9c27b0;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 4px;
+    }
+
+    .component-wrapper::before {
+      content: "Web Component (Shadow DOM)";
+      display: block;
+      font-size: 12px;
+      color: #9c27b0;
+      margin-bottom: 10px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: shadow-dom.html
+PURPOSE: Validate Shadow DOM traversal in textContent extraction
+TECHNICAL: Tests node.shadowRoot recursion in DOM walking function
+TEST COUNT: 5 web component patterns
+EXPECTED RESULT: All shadow root content should appear in output
+CAVEAT: Closed shadow roots (mode:'closed') cannot be traversed (browser security)
+UPDATED: 2025-12-22
+================================================================================
+-->
+
+  <h1>Shadow DOM Extraction Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that <code>get_page_text()</code> traverses Shadow DOM boundaries.</p>
+    <p><strong>Technical:</strong> Standard DOM methods don't cross shadow boundaries. Our implementation explicitly checks <code>node.shadowRoot</code> and recursively walks shadow trees.</p>
+    <p><strong>Expected:</strong> All content inside open shadow roots should appear in extracted text.</p>
+    <p><strong>Limitation:</strong> Closed shadow roots (<code>mode: 'closed'</code>) are not traversable due to browser security.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: Simple Open Shadow Root                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>Test 1: Simple Open Shadow Root</h2>
+
+    <div class="expected">
+      "Simple Component Test" AND "Shadow DOM Test 1 passed: This is content inside an open shadow root"
+    </div>
+
+    <div class="component-wrapper">
+      <p>Light DOM: Simple Component Test</p>
+      <simple-component></simple-component>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: Nested Shadow Roots (Shadow within Shadow)                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>Test 2: Nested Shadow Roots</h2>
+
+    <div class="expected">
+      "Nested Component Test" AND "Outer shadow content" AND "Shadow DOM Test 2 passed: Inner shadow content (nested)"
+    </div>
+
+    <div class="component-wrapper">
+      <p>Light DOM: Nested Component Test</p>
+      <nested-component></nested-component>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: Slotted Content (Light DOM Projection)                        -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>Test 3: Slotted Content</h2>
+
+    <div class="expected">
+      "Slotted Component Test" AND "Shadow DOM Test 3 passed: This is slotted light DOM content" AND "Shadow wrapper template content"
+    </div>
+
+    <div class="component-wrapper">
+      <p>Light DOM: Slotted Component Test</p>
+      <slotted-component>
+        <span>Shadow DOM Test 3 passed: This is slotted light DOM content projected into the shadow root.</span>
+      </slotted-component>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Hidden Content Inside Shadow DOM                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>Test 4: Hidden Content Inside Shadow DOM</h2>
+
+    <div class="expected">
+      "Hidden Shadow Test" AND "Shadow DOM Test 4 passed: This is hidden content (display:none) inside a shadow root"
+    </div>
+
+    <div class="component-wrapper">
+      <p>Light DOM: Hidden Shadow Test</p>
+      <hidden-shadow-component></hidden-shadow-component>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: Multiple Shadow Hosts on Same Page                            -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>Test 5: Multiple Shadow Hosts</h2>
+
+    <div class="expected">
+      "Multiple Components Test" AND "Shadow DOM Test 5a passed: First component" AND "Shadow DOM Test 5b passed: Second component" AND "Shadow DOM Test 5c passed: Third component"
+    </div>
+
+    <div class="component-wrapper">
+      <p>Light DOM: Multiple Components Test</p>
+      <multi-component data-id="a"></multi-component>
+      <multi-component data-id="b"></multi-component>
+      <multi-component data-id="c"></multi-component>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- WEB COMPONENT DEFINITIONS                                             -->
+  <!-- ===================================================================== -->
+
+  <script>
+    // Test 1: Simple Open Shadow Root
+    class SimpleComponent extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({mode: 'open'});
+        shadow.innerHTML = `
+          <style>
+            .shadow-content {
+              background: #e1bee7;
+              padding: 10px;
+              border-radius: 4px;
+              margin: 10px 0;
+            }
+          </style>
+          <div class="shadow-content">
+            <p>Shadow DOM Test 1 passed: This is content inside an open shadow root. Shadow DOM encapsulates styles and structure, but textContent should still traverse this boundary.</p>
+          </div>
+        `;
+      }
+    }
+    customElements.define('simple-component', SimpleComponent);
+
+    // Test 2: Nested Shadow Roots
+    class NestedComponent extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({mode: 'open'});
+        shadow.innerHTML = `
+          <style>
+            .outer {
+              background: #ce93d8;
+              padding: 10px;
+              border-radius: 4px;
+              margin: 10px 0;
+            }
+          </style>
+          <div class="outer">
+            <p>Outer shadow content (level 1)</p>
+            <inner-component></inner-component>
+          </div>
+        `;
+      }
+    }
+
+    class InnerComponent extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({mode: 'open'});
+        shadow.innerHTML = `
+          <style>
+            .inner {
+              background: #ab47bc;
+              color: white;
+              padding: 10px;
+              border-radius: 4px;
+              margin: 10px 0;
+            }
+          </style>
+          <div class="inner">
+            <p>Shadow DOM Test 2 passed: Inner shadow content (nested - level 2). This validates recursive shadow root traversal.</p>
+          </div>
+        `;
+      }
+    }
+    customElements.define('nested-component', NestedComponent);
+    customElements.define('inner-component', InnerComponent);
+
+    // Test 3: Slotted Content
+    class SlottedComponent extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({mode: 'open'});
+        shadow.innerHTML = `
+          <style>
+            .wrapper {
+              background: #e1bee7;
+              padding: 10px;
+              border-radius: 4px;
+              margin: 10px 0;
+            }
+            ::slotted(span) {
+              color: #7b1fa2;
+              font-weight: bold;
+            }
+          </style>
+          <div class="wrapper">
+            <p>Shadow wrapper template content</p>
+            <slot></slot>
+            <p>Content after slot</p>
+          </div>
+        `;
+      }
+    }
+    customElements.define('slotted-component', SlottedComponent);
+
+    // Test 4: Hidden Content Inside Shadow DOM
+    class HiddenShadowComponent extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({mode: 'open'});
+        shadow.innerHTML = `
+          <style>
+            .visible { background: #e1bee7; padding: 10px; border-radius: 4px; margin: 10px 0; }
+            .hidden { display: none; }
+          </style>
+          <div class="visible">
+            <p>Visible shadow content</p>
+            <div class="hidden">
+              <p>Shadow DOM Test 4 passed: This is hidden content (display:none) inside a shadow root. Tests that hidden content extraction works within shadow boundaries.</p>
+            </div>
+          </div>
+        `;
+      }
+    }
+    customElements.define('hidden-shadow-component', HiddenShadowComponent);
+
+    // Test 5: Multiple Shadow Hosts
+    class MultiComponent extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({mode: 'open'});
+        const id = this.getAttribute('data-id');
+        shadow.innerHTML = `
+          <style>
+            .multi { background: #ce93d8; padding: 10px; border-radius: 4px; margin: 10px 0; }
+          </style>
+          <div class="multi">
+            <p>Shadow DOM Test 5${id} passed: ${id === 'a' ? 'First' : id === 'b' ? 'Second' : 'Third'} component content in shadow root.</p>
+          </div>
+        `;
+      }
+    }
+    customElements.define('multi-component', MultiComponent);
+  </script>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+    <p>After running <code>get_page_text()</code>, verify output contains:</p>
+    <ul>
+      <li>"Shadow DOM Test 1 passed" - simple open shadow root</li>
+      <li>"Shadow DOM Test 2 passed" - nested shadow roots</li>
+      <li>"Shadow DOM Test 3 passed" - slotted content</li>
+      <li>"Shadow DOM Test 4 passed" - hidden content in shadow</li>
+      <li>"Shadow DOM Test 5a passed" - first multi-component</li>
+      <li>"Shadow DOM Test 5b passed" - second multi-component</li>
+      <li>"Shadow DOM Test 5c passed" - third multi-component</li>
+    </ul>
+    <p><strong>Success Criteria:</strong> All 7 validation strings should appear.</p>
+  </footer>
+
+</body>
+</html>

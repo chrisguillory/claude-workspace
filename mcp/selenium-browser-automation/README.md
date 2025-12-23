@@ -11,6 +11,91 @@ claude mcp add --scope user selenium-browser-automation -- \
   --script "$(git rev-parse --show-toplevel)/mcp/selenium-browser-automation/server.py"
 ```
 
+## Comparison with Claude in Chrome
+
+This server is designed to match or exceed the capabilities of Anthropic's official
+[Claude in Chrome extension](docs/claude-in-chrome.md). We iterate faster than official
+releases, so gaps should be addressed proactively.
+
+> **Legend**: CiC = Claude in Chrome (Anthropic's extension) · SMCP = Selenium MCP (this server)
+>
+> **Type codes**: 1:1 = direct equivalent · 1:N = one CiC maps to multiple SMCP · 1:2 = one CiC requires two SMCP calls · Gap = CiC has it, SMCP doesn't · SMCP-only = SMCP has it, CiC doesn't · UI/Arch = not applicable (UI feature or architectural difference)
+
+### Feature Summary
+
+| Capability                       |      CiC      |   SMCP   | Notes                                             |
+|----------------------------------|:-------------:|:--------:|---------------------------------------------------|
+| Text extraction (hidden content) |       ✓       |    ✓     | `get_page_text()` uses textContent (parity)       |
+| JavaScript execution             |       ✓       | **Gap**  | P1: Chrome can run ad-hoc JS for debugging        |
+| Console log access               |       ✓       | **Gap**  | P1: Chrome reads `console.log/error/warn`         |
+| Core Web Vitals                  |       -       |    ✓     | **Advantage**: LCP, CLS, INP, FCP, TTFB           |
+| HAR export                       |       -       |    ✓     | **Advantage**: Full network traffic logging       |
+| Proxy/IP rotation                |       -       |    ✓     | **Advantage**: Rate limit bypass                  |
+| Network timing details           |     Basic     |    ✓     | **Advantage**: DNS, connect, TLS breakdown        |
+| Chrome profiles                  | Via extension |    ✓     | **Advantage**: Direct profile access              |
+| GIF recording                    |       ✓       | **Gap**  | P3: Low priority                                  |
+| Natural language find            |       ✓       |    -     | Chrome's `find` tool uses semantic matching       |
+
+### CiC Advantages (Gaps to Close)
+
+Capabilities where Claude in Chrome exceeds us:
+
+| Capability                | What CiC Provides                                          | Priority |
+|---------------------------|------------------------------------------------------------|:--------:|
+| ~~**Text Extraction**~~   | ~~Captures all text including hidden content~~ ✅ CLOSED   |  ~~P0~~  |
+| **ARIA Whitespace**       | Properly normalized accessible names                       |    P0    |
+| **JavaScript Execution**  | Run ad-hoc JS for debugging (`javascript_tool`)            |    P1    |
+| **Console Log Access**    | Read browser console (`read_console_messages`)             |    P1    |
+| **Form Input**            | Set form values by element reference                       |    P2    |
+| **Window Resize**         | Set browser dimensions for responsive testing              |    P2    |
+| **GIF Recording**         | Record interactions as animated GIF                        |    P3    |
+| **Natural Language Find** | Find elements by semantic description                      |    -     |
+
+### SMCP Advantages
+
+Capabilities where we exceed Claude in Chrome:
+
+| Capability                  | What It Provides                                   | Use Case                                         |
+|-----------------------------|----------------------------------------------------|--------------------------------------------------|
+| **Core Web Vitals**         | LCP, CLS, INP, FCP, TTFB with ratings              | Performance auditing, identifying slow pages     |
+| **HAR Export**              | Full network traffic in DevTools-compatible format | Deep network debugging, API analysis             |
+| **Detailed Network Timing** | DNS, connect, TLS, TTFB breakdown per request      | Identifying slow requests, bottleneck analysis   |
+| **Proxy/IP Rotation**       | Authenticated proxies via mitmproxy                | Bypass rate limiting, geographic testing         |
+| **Chrome Profiles**         | Direct access to saved browser profiles            | Authenticated sessions without re-login          |
+| **CDP Stealth**             | Bypass Cloudflare bot detection                    | Scrape protected sites where official tools fail |
+
+### Tool Mapping
+
+How CiC tools map to SMCP tools:
+
+| CiC Tool(s)             | SMCP Tool(s)                                    |   Type    | Notes                                                                    |
+|-------------------------|-------------------------------------------------|:---------:|--------------------------------------------------------------------------|
+| `navigate`              | `navigate`                                      |    1:1    | SMCP adds `fresh_browser`, `profile`, `enable_har_capture` params        |
+| `get_page_text`         | `get_page_text`                                 |    1:1    | Both use textContent (all text including hidden) ✅                      |
+| `read_page`             | `get_aria_snapshot`                             |    1:1    | CiC returns ref-based tree; SMCP returns YAML tree                       |
+| `find`                  | -                                               |    Gap    | CiC uses natural language; SMCP alternative: `get_interactive_elements`  |
+| `computer`              | `click`, `press_key`, `type_text`, `screenshot` |   1:N     | CiC unified tool; SMCP gaps: scroll, hover, zoom, drag, wait             |
+| `form_input`            | -                                               |    Gap    | P2: Set form values by element reference ID from `read_page`             |
+| `javascript_tool`       | -                                               |    Gap    | P1: Execute arbitrary JavaScript in page context for debugging           |
+| `read_console_messages` | -                                               |    Gap    | P1: Read console.log/error/warn messages with pattern filtering          |
+| `read_network_requests` | `start_network_capture` + `get_network_timings` |    1:2    | CiC single call; SMCP 2-step (enable capture, then retrieve with detailed DNS/connect/TLS/TTFB breakdown) |
+| `resize_window`         | -                                               |    Gap    | P2: Set browser window dimensions for responsive testing                 |
+| `gif_creator`           | -                                               |    Gap    | P3: Record browser interactions as animated GIF                          |
+| `upload_image`          | -                                               |    Gap    | Upload screenshot to file input or drag-drop target                       |
+| `update_plan`           | N/A                                             |    UI     | CiC user approval flow; SMCP doesn't need (different permission model)   |
+| `shortcuts_*`           | N/A                                             |    UI     | CiC extension shortcuts; not applicable to SMCP                          |
+| `tabs_*`                | N/A                                             |   Arch    | CiC manages tab groups; SMCP uses single browser with shared session     |
+| -                       | `get_interactive_elements`                      | SMCP-only | Find clickable elements by CSS selector or text content                  |
+| -                       | `get_focusable_elements`                        | SMCP-only | Get keyboard-navigable elements sorted by tab order                      |
+| -                       | `wait_for_network_idle`                         | SMCP-only | Wait for network activity to settle after navigation or clicks           |
+| -                       | `capture_web_vitals`                            | SMCP-only | LCP, CLS, INP, FCP, TTFB with good/needs-improvement/poor ratings        |
+| -                       | `export_har`                                    | SMCP-only | Export network traffic to HAR 1.2 format for DevTools analysis           |
+| -                       | `configure_proxy`, `clear_proxy`                | SMCP-only | Configure/clear authenticated proxy via mitmproxy for IP rotation        |
+| -                       | `download_resource`                             | SMCP-only | Download files using browser session cookies (bypasses bot detection)    |
+| -                       | `list_chrome_profiles`                          | SMCP-only | List available Chrome profiles with name, email, directory metadata      |
+
+See [docs/claude-in-chrome.md](docs/claude-in-chrome.md) for complete Claude in Chrome tool reference.
+
 ## Navigation Best Practices
 
 **Prefer ARIA snapshots over screenshots for understanding page structure:**
@@ -106,7 +191,7 @@ Full DevTools-style performance traces with long task detection and timeline ana
 
 Ideas without implementation plans:
 
-1. **Console errors/warnings** - JS exceptions, React errors, deprecation warnings. Useful for debugging but potentially noisy.
+1. **Console errors/warnings** - JS exceptions, React errors, deprecation warnings. Useful for debugging but potentially noisy. (Also a [Claude in Chrome parity item](#comparison-with-claude-in-chrome) at P1 priority.)
 
 2. **HTTP status codes** - Resource Timing API doesn't expose 4xx/5xx errors. Would require always-on CDP logging (has overhead).
 
@@ -118,7 +203,8 @@ Ideas without implementation plans:
 
 ### Navigation & Content
 - `navigate(url, fresh_browser?, profile?, enable_har_capture?)` - Load URL with optional Chrome profile
-- `get_page_content(format, selector?, limit?)` - Extract text/HTML
+- `get_page_text(selector?)` - Extract all text including hidden content (textContent-based)
+- `get_page_content(format, selector?, limit?)` - Extract text/HTML (legacy: use `get_page_text` for text)
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
 - `screenshot(filename, full_page?)` - Capture viewport or full page
 
@@ -231,7 +317,42 @@ for item in items_to_search:
 
 ## Architecture
 
-- **CDP Stealth Injection**: Bypasses Cloudflare where Playwright fails
-- **Shared Session**: All requests share cookies/auth state
-- **Lazy Browser Init**: Browser created on first navigation
-- **Temp File Cleanup**: Auto-cleanup on shutdown
+### Browser Model
+
+Unlike Claude in Chrome (which manages multiple tabs per conversation), this server uses a **single browser instance** with shared state:
+
+```
+Selenium MCP Server
+├── Browser Instance (single, lazy-initialized)
+│   ├── CDP Connection
+│   └── Session State (cookies, localStorage)
+├── Proxy Layer (optional)
+│   └── mitmproxy → upstream proxy
+└── Temp Files (auto-cleanup on shutdown)
+```
+
+**Why single browser?** Simplicity and session sharing. All tool calls share the same cookies and authentication state, which is ideal for workflows that require login persistence.
+
+### CDP Stealth Injection
+
+**Problem**: Modern bot detection (Cloudflare, DataDome) fingerprints automation by detecting WebDriver properties, CDP artifacts, and missing browser features.
+
+**Solution**: We inject JavaScript via CDP *before* page load to mask automation signals. This works where Playwright's stealth plugins fail because:
+- Injection happens at the CDP level, not via browser extensions
+- Scripts execute before any page JavaScript runs
+- We patch `navigator.webdriver`, `window.chrome`, and other fingerprinting targets
+
+### Session Management
+
+| Aspect             | Behavior                                                     |
+|--------------------|--------------------------------------------------------------|
+| Cookie persistence | Maintained across all tool calls                             |
+| Fresh session      | `navigate(url, fresh_browser=True)` starts clean             |
+| Profile loading    | `navigate(url, profile="Default")` uses saved Chrome profile |
+
+### Why Not Playwright?
+
+We chose Selenium over Playwright for this MCP server because:
+1. **CDP stealth works better** - Our injection approach bypasses detection that blocks Playwright
+2. **Chrome profile support** - Native access to saved browser profiles for authenticated sessions
+3. **mitmproxy integration** - Cleaner proxy authentication than Playwright's approach
