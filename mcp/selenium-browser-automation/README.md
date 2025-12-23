@@ -101,13 +101,13 @@ Complete comparison testing of all example files with both SMCP and CiC:
 
 ### Real-World Site Testing (2025-12-23)
 
-| Site | SMCP | CiC | Winner | Notes |
-|------|------|-----|:------:|-------|
-| nytimes.com | ✅ `main`, 13,050 chars, 50% | ⚠️ `main`, HTML/JS leak | **SMCP** | CiC leaks `<img>` tags and inline JS |
-| bbc.com | ✅ `main`, 11,915 chars, 54% | ✅ `article`, ~11,500 chars | Tie | Both clean, different source element |
-| amazon.com | ✅ `body` fallback, 10,057 chars | ❌ **FAILED** | **SMCP** | CiC error: "body too large" |
-| docs.python.org | ⚠️ `body` fallback, 3,974 chars | ✅ `div`, ~1,200 chars | CiC | CiC found focused content div |
-| usa.gov | ✅ `main`, 3,010 chars, 58% | ⚠️ `main`, CSS leak | **SMCP** | CiC leaks ~1,500 chars of CSS |
+| Site            | SMCP                            | CiC                        |  Winner  | Notes                                     |
+|-----------------|---------------------------------|----------------------------|:--------:|-------------------------------------------|
+| nytimes.com     | ✅ `main`, 13,050 chars, 50%     | ⚠️ `main`, HTML/JS leak    | **SMCP** | CiC leaks `<img>` tags and inline JS      |
+| bbc.com         | ✅ `main`, 11,915 chars, 54%     | ✅ `article`, ~11,500 chars |   Tie    | Both clean, different source element      |
+| amazon.com      | ✅ `body` fallback, 10,057 chars | ❌ **FAILED**               | **SMCP** | CiC error: "body too large"               |
+| docs.python.org | ✅ `[role="main"]`, 1,155 chars  | ✅ `div`, ~1,200 chars      |   Tie    | Both find focused content (SMCP improved) |
+| usa.gov         | ✅ `main`, 3,010 chars, 58%      | ⚠️ `main`, CSS leak        | **SMCP** | CiC leaks ~1,500 chars of CSS             |
 
 **Key Findings:**
 
@@ -115,9 +115,7 @@ Complete comparison testing of all example files with both SMCP and CiC:
 
 2. **CiC leaks CSS**: On usa.gov, CiC output starts with ~1,500 characters of inline CSS media queries before actual content.
 
-3. **CiC can find focused content divs**: On docs.python.org, CiC found a cleaner content `<div>` while SMCP fell back to body. Potential SMCP improvement area.
-
-4. **SMCP transparency enables debugging**: Coverage ratios (50-58%) immediately show when extraction is partial.
+3. **SMCP transparency enables debugging**: Coverage ratios (50-58%) immediately show when extraction is partial.
 
 ### Philosophy Comparison
 
@@ -290,7 +288,7 @@ Ideas without implementation plans:
 **Default behavior (`selector='auto'`):**
 
 Smart extraction focuses on main content by trying semantic elements in priority order:
-1. `<main>` element (if >500 characters)
+1. `<main>` or `[role="main"]` (if >500 characters)
 2. `<article>` element (if >500 characters)
 3. Falls back to `<body>`
 
