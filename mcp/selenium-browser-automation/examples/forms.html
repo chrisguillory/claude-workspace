@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Form Element Extraction</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #2196f3;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #e3f2fd;
+      padding: 15px;
+      border-left: 4px solid #2196f3;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+    }
+
+    .expected {
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .technical-note {
+      background: #fff3e0;
+      border-left: 4px solid #ff9800;
+      padding: 12px;
+      margin: 15px 0;
+      font-size: 13px;
+    }
+
+    .form-demo {
+      background: #fafafa;
+      border: 1px dashed #ccc;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 4px;
+    }
+
+    label {
+      display: block;
+      margin: 10px 0 5px 0;
+      font-weight: 500;
+    }
+
+    input, select, textarea, button {
+      margin: 5px 0;
+      padding: 8px;
+      font-size: 14px;
+    }
+
+    input[type="text"], input[type="email"], textarea, select {
+      width: 300px;
+      max-width: 100%;
+    }
+
+    fieldset {
+      margin: 15px 0;
+      padding: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    legend {
+      padding: 0 10px;
+      font-weight: bold;
+    }
+
+    .hidden-description {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: forms.html
+PURPOSE: Test form element text extraction behavior
+KEY PRINCIPLE: Extract static content (labels, descriptions), NOT user state (values)
+EXTRACTION METHOD: textContent captures text nodes, NOT attribute values
+
+SHOULD EXTRACT:
+- Label text (explicit <label for=""> and implicit wrapping)
+- Fieldset legends
+- Button text
+- Select option text
+- Output element content
+- Hidden descriptions via aria-describedby
+
+SHOULD NOT EXTRACT:
+- Input values (they're attributes, not text nodes)
+- Textarea values (user state)
+- Placeholder text (it's an attribute, not rendered text node)
+
+UPDATED: 2025-12-23
+================================================================================
+-->
+
+  <h1>Form Element Extraction Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that form element text extraction captures static content (labels, descriptions) but not user state (input values).</p>
+    <p><strong>Technical:</strong> <code>textContent</code> returns text node children. Input elements don't have text children - their content is in the <code>value</code> attribute.</p>
+    <p><strong>Accessibility:</strong> Screen readers announce labels, not input values, when navigating forms. Our extraction follows this principle.</p>
+  </div>
+
+  <form>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 1: Explicit Label (label[for])                                   -->
+    <!-- ===================================================================== -->
+
+    <section id="test-1" class="test-case">
+      <h2>Test 1: Explicit Label</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> The <code>&lt;label for="id"&gt;</code> element creates an explicit association.
+        The label text is a text node and should be extracted.
+        The input value is an attribute, not a text node.
+      </div>
+
+      <div class="expected">
+        "Forms Test 1 passed: Name field label" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="name-field">Forms Test 1 passed: Name field label</label>
+        <input type="text" id="name-field" value="INPUT_VALUE_SHOULD_NOT_APPEAR_1">
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 2: Implicit Label (wrapping)                                     -->
+    <!-- ===================================================================== -->
+
+    <section id="test-2" class="test-case">
+      <h2>Test 2: Implicit Label (Wrapping)</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> When a label wraps an input, the label text is still a text node.
+        The input's value remains an attribute.
+      </div>
+
+      <div class="expected">
+        "Forms Test 2 passed: Email field label" should appear
+      </div>
+
+      <div class="form-demo">
+        <label>
+          Forms Test 2 passed: Email field label
+          <input type="email" value="INPUT_VALUE_SHOULD_NOT_APPEAR_2@example.com">
+        </label>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 3: Fieldset with Legend                                          -->
+    <!-- ===================================================================== -->
+
+    <section id="test-3" class="test-case">
+      <h2>Test 3: Fieldset with Legend</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> The <code>&lt;legend&gt;</code> element provides a caption for fieldsets.
+        Legend text is a text node and should be extracted.
+      </div>
+
+      <div class="expected">
+        "Forms Test 3 passed: Contact preferences legend" should appear
+      </div>
+
+      <div class="form-demo">
+        <fieldset>
+          <legend>Forms Test 3 passed: Contact preferences legend</legend>
+          <label>
+            <input type="radio" name="contact" value="email"> Email
+          </label>
+          <label>
+            <input type="radio" name="contact" value="phone"> Phone
+          </label>
+        </fieldset>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 4: Button Text                                                   -->
+    <!-- ===================================================================== -->
+
+    <section id="test-4" class="test-case">
+      <h2>Test 4: Button Text</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> Button element content is a text node.
+        All button types should have their text content extracted.
+      </div>
+
+      <div class="expected">
+        "Forms Test 4a passed: Submit button" AND "Forms Test 4b passed: Regular button" should appear
+      </div>
+
+      <div class="form-demo">
+        <button type="submit">Forms Test 4a passed: Submit button</button>
+        <button type="button">Forms Test 4b passed: Regular button</button>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 5: Select Options                                                -->
+    <!-- ===================================================================== -->
+
+    <section id="test-5" class="test-case">
+      <h2>Test 5: Select Options</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> Option text is text node content.
+        All options should be extracted, not just the selected one.
+        (textContent returns ALL text nodes within the select)
+      </div>
+
+      <div class="expected">
+        "Forms Test 5a passed: Option one" AND "Forms Test 5b passed: Option two" AND "Forms Test 5c passed: Option three" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="country-select">Country:</label>
+        <select id="country-select">
+          <option value="1">Forms Test 5a passed: Option one</option>
+          <option value="2" selected>Forms Test 5b passed: Option two</option>
+          <option value="3">Forms Test 5c passed: Option three</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 6: Optgroup Labels                                               -->
+    <!-- ===================================================================== -->
+
+    <section id="test-6" class="test-case">
+      <h2>Test 6: Optgroup Labels</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> Optgroup labels are attributes, not text nodes.
+        However, the option text within groups IS text node content.
+      </div>
+
+      <div class="expected">
+        "Forms Test 6a passed: Grouped option A" AND "Forms Test 6b passed: Grouped option B" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="grouped-select">Grouped Options:</label>
+        <select id="grouped-select">
+          <optgroup label="Group One (this label is an attribute)">
+            <option>Forms Test 6a passed: Grouped option A</option>
+          </optgroup>
+          <optgroup label="Group Two">
+            <option>Forms Test 6b passed: Grouped option B</option>
+          </optgroup>
+        </select>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 7: Textarea (Initial Content)                                    -->
+    <!-- ===================================================================== -->
+
+    <section id="test-7" class="test-case">
+      <h2>Test 7: Textarea Initial Content</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> Unlike inputs, textarea content IS text node content (between opening and closing tags).
+        Initial content should be extracted. However, this represents pre-filled content, similar to default values.
+      </div>
+
+      <div class="expected">
+        "Forms Test 7 passed: This is textarea initial content" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="bio-textarea">Biography:</label>
+        <textarea id="bio-textarea" rows="3">Forms Test 7 passed: This is textarea initial content that exists as a text node.</textarea>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 8: Output Element                                                -->
+    <!-- ===================================================================== -->
+
+    <section id="test-8" class="test-case">
+      <h2>Test 8: Output Element</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> The <code>&lt;output&gt;</code> element displays calculation results.
+        Its content is text node content and should be extracted.
+        Output has implicit <code>role="status"</code> (aria-live region).
+      </div>
+
+      <div class="expected">
+        "Forms Test 8 passed: Calculation result 42" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="calc-output">Result:</label>
+        <output id="calc-output">Forms Test 8 passed: Calculation result 42</output>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 9: Hidden Description (aria-describedby)                         -->
+    <!-- ===================================================================== -->
+
+    <section id="test-9" class="test-case">
+      <h2>Test 9: Hidden Description (aria-describedby)</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> aria-describedby can point to hidden elements.
+        Screen readers still announce these descriptions. Our extraction should include
+        the hidden description text since it's meaningful content.
+      </div>
+
+      <div class="expected">
+        "Forms Test 9 passed: This hidden description should be extracted" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="password-field">Password:</label>
+        <input type="password" id="password-field" aria-describedby="password-help">
+        <p id="password-help" class="hidden-description">
+          Forms Test 9 passed: This hidden description should be extracted because it provides meaningful context via aria-describedby.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 10: Error Message (Hidden)                                       -->
+    <!-- ===================================================================== -->
+
+    <section id="test-10" class="test-case">
+      <h2>Test 10: Error Message</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> Form error messages are often hidden until validation fails.
+        They're typically associated via aria-describedby. Since we extract hidden content,
+        error messages should appear in extraction.
+      </div>
+
+      <div class="expected">
+        "Forms Test 10 passed: This field is required error message" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="required-field">Required Field:</label>
+        <input type="text" id="required-field" aria-describedby="error-msg">
+        <p id="error-msg" style="display: none; color: red;">
+          Forms Test 10 passed: This field is required error message
+        </p>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 11: Datalist Options                                             -->
+    <!-- ===================================================================== -->
+
+    <section id="test-11" class="test-case">
+      <h2>Test 11: Datalist Options</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> Datalist provides autocomplete suggestions.
+        The option text IS text node content (similar to select options).
+        These suggestions should be extracted.
+      </div>
+
+      <div class="expected">
+        "Forms Test 11a passed: Suggestion one" AND "Forms Test 11b passed: Suggestion two" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="search-input">Search:</label>
+        <input type="text" id="search-input" list="suggestions">
+        <datalist id="suggestions">
+          <option value="suggestion1">Forms Test 11a passed: Suggestion one</option>
+          <option value="suggestion2">Forms Test 11b passed: Suggestion two</option>
+        </datalist>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TEST 12: Placeholder (Should NOT Appear)                              -->
+    <!-- ===================================================================== -->
+
+    <section id="test-12" class="test-case">
+      <h2>Test 12: Placeholder Text</h2>
+
+      <div class="technical-note">
+        <strong>Technical:</strong> Placeholder text is an ATTRIBUTE, not a text node.
+        <code>textContent</code> does NOT capture attribute values.
+        This test validates placeholder is correctly excluded.
+      </div>
+
+      <div class="expected">
+        "Forms Test 12 passed: This label appears" should appear
+      </div>
+
+      <div class="form-demo">
+        <label for="placeholder-demo">Forms Test 12 passed: This label appears</label>
+        <input type="text" id="placeholder-demo" placeholder="PLACEHOLDER_SHOULD_NOT_APPEAR: Enter your name">
+        <p><small>The placeholder "PLACEHOLDER_SHOULD_NOT_APPEAR" should NOT be in extraction</small></p>
+      </div>
+    </section>
+
+  </form>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+
+    <h3 style="color: #2e7d32;">Should APPEAR in extraction:</h3>
+    <ul>
+      <li>"Forms Test 1 passed" - explicit label text</li>
+      <li>"Forms Test 2 passed" - implicit (wrapping) label text</li>
+      <li>"Forms Test 3 passed" - fieldset legend text</li>
+      <li>"Forms Test 4a passed" + "Forms Test 4b passed" - button text</li>
+      <li>"Forms Test 5a/5b/5c passed" - all select options</li>
+      <li>"Forms Test 6a passed" + "Forms Test 6b passed" - grouped options</li>
+      <li>"Forms Test 7 passed" - textarea initial content</li>
+      <li>"Forms Test 8 passed" - output element content</li>
+      <li>"Forms Test 9 passed" - hidden aria-describedby text</li>
+      <li>"Forms Test 10 passed" - hidden error message</li>
+      <li>"Forms Test 11a passed" + "Forms Test 11b passed" - datalist options</li>
+      <li>"Forms Test 12 passed" - label text (not placeholder)</li>
+    </ul>
+
+    <h3 style="color: #c62828;">Should NOT appear in extraction:</h3>
+    <ul>
+      <li>"INPUT_VALUE_SHOULD_NOT_APPEAR_1" - input value attribute</li>
+      <li>"INPUT_VALUE_SHOULD_NOT_APPEAR_2@example.com" - email input value</li>
+      <li>"PLACEHOLDER_SHOULD_NOT_APPEAR" - placeholder attribute text</li>
+    </ul>
+
+    <p><strong>Success Criteria:</strong> All 15 "Forms Test N passed" markers present, NO "SHOULD_NOT_APPEAR" markers present.</p>
+  </footer>
+
+</body>
+</html>

@@ -179,7 +179,7 @@ See [docs/claude-in-chrome.md](docs/claude-in-chrome.md) for complete Claude in 
 |------|----------|----------|
 | Find interactive elements | `get_aria_snapshot(selector="body")` | `screenshot()` |
 | Locate buttons/links | `get_interactive_elements(selector_scope="body", ...)` | `screenshot()` |
-| Understand page layout | `get_aria_snapshot()` | `get_page_content(format="html")` |
+| Understand page layout | `get_aria_snapshot()` | `get_page_html()` |
 | Debug visual issues | `screenshot()` | - |
 | Verify visual state | `screenshot()` | - |
 
@@ -279,7 +279,7 @@ Ideas without implementation plans:
 ### Navigation & Content
 - `navigate(url, fresh_browser?, profile?, enable_har_capture?)` - Load URL with optional Chrome profile
 - `get_page_text(selector?, include_images?)` - Smart content extraction with semantic element priority (see below)
-- `get_page_content(format, selector?, limit?)` - Extract text/HTML (legacy: use `get_page_text` for text)
+- `get_page_html(selector?, limit?)` - Extract raw HTML source or specific elements
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
 - `screenshot(filename, full_page?)` - Capture viewport or full page
 
@@ -415,7 +415,7 @@ for item in items_to_search:
     wait_for_network_idle()
 
     # Extract results
-    results = get_page_content(format="text")
+    results = get_page_text()
 
     # Human-like delay between searches
     time.sleep(random.uniform(2, 5))

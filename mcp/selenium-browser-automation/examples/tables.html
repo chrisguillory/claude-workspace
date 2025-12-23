@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Table Structure Extraction</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #4caf50;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #e8f5e9;
+      padding: 15px;
+      border-left: 4px solid #4caf50;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+    }
+
+    .expected {
+      background: #e3f2fd;
+      border-left: 4px solid #2196f3;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .technical-note {
+      background: #fff3e0;
+      border-left: 4px solid #ff9800;
+      padding: 12px;
+      margin: 15px 0;
+      font-size: 13px;
+    }
+
+    table {
+      border-collapse: collapse;
+      margin: 15px 0;
+      width: 100%;
+      max-width: 600px;
+    }
+
+    th, td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: left;
+    }
+
+    th {
+      background: #f0f0f0;
+      font-weight: bold;
+    }
+
+    caption {
+      caption-side: top;
+      font-weight: bold;
+      padding: 10px;
+      text-align: left;
+      background: #e8f5e9;
+    }
+
+    tfoot {
+      background: #f5f5f5;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: tables.html
+PURPOSE: Test table element text extraction and structure preservation
+EXTRACTION METHOD: textContent captures all text nodes in document order
+KEY CONSIDERATION: Tables lose semantic structure when linearized to plain text
+
+SHOULD EXTRACT:
+- Caption text
+- Header cells (th)
+- Data cells (td)
+- Hidden rows/cells (textContent-based extraction)
+- All text in thead/tbody/tfoot
+
+LINEARIZATION: Content is extracted in DOM order (top-to-bottom, left-to-right)
+
+UPDATED: 2025-12-23
+================================================================================
+-->
+
+  <h1>Table Structure Extraction Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that table content is extracted correctly, including captions, headers, data cells, and hidden content.</p>
+    <p><strong>Technical:</strong> <code>textContent</code> returns all text nodes in document order. Table structure (rows, columns) becomes linearized text.</p>
+    <p><strong>Key Test:</strong> Hidden table rows (display:none) should still be extracted since we use textContent-based extraction.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: Simple Table with Caption                                     -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>Test 1: Simple Table with Caption</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> The <code>&lt;caption&gt;</code> element provides a title for the table.
+      It should be extracted first, before any cell content.
+    </div>
+
+    <div class="expected">
+      "Tables Test 1 Caption: Monthly Sales Data" AND "Tables Test 1a: January" AND "Tables Test 1b: 1000" should appear
+    </div>
+
+    <table>
+      <caption>Tables Test 1 Caption: Monthly Sales Data</caption>
+      <thead>
+        <tr>
+          <th>Tables Test 1a: January</th>
+          <th>Tables Test 1b: February</th>
+          <th>Tables Test 1c: March</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Tables Test 1d: 1000</td>
+          <td>Tables Test 1e: 1200</td>
+          <td>Tables Test 1f: 1100</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: Table with thead/tbody/tfoot                                  -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>Test 2: Table with thead/tbody/tfoot</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> The <code>&lt;tfoot&gt;</code> element provides footer content.
+      In DOM order, tfoot content appears after tbody even if written before in HTML.
+    </div>
+
+    <div class="expected">
+      "Tables Test 2 Header" AND "Tables Test 2 Body" AND "Tables Test 2 Footer" should appear
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Tables Test 2 Header: Product</th>
+          <th>Tables Test 2 Header: Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Tables Test 2 Body: Widget A</td>
+          <td>Tables Test 2 Body: $25.00</td>
+        </tr>
+        <tr>
+          <td>Tables Test 2 Body: Widget B</td>
+          <td>Tables Test 2 Body: $35.00</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Tables Test 2 Footer: Total</td>
+          <td>Tables Test 2 Footer: $60.00</td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: Hidden Table Row (display:none)                               -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>Test 3: Hidden Table Row</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> Hidden rows with <code>display:none</code> should still be extracted.
+      This is the key advantage of textContent over innerText - it captures ALL DOM text.
+    </div>
+
+    <div class="expected">
+      "Tables Test 3 Visible: Row one" AND "Tables Test 3 Hidden: Secret row data" should appear
+    </div>
+
+    <table>
+      <tr>
+        <td>Tables Test 3 Visible: Row one is visible</td>
+      </tr>
+      <tr style="display: none;">
+        <td>Tables Test 3 Hidden: Secret row data that should be extracted</td>
+      </tr>
+      <tr>
+        <td>Tables Test 3 Visible: Row three is visible</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Hidden Table Cells                                            -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>Test 4: Hidden Table Cells</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> Individual cells can be hidden while the row is visible.
+      Hidden cell content should still be extracted.
+    </div>
+
+    <div class="expected">
+      "Tables Test 4 Visible: Cell A" AND "Tables Test 4 Hidden: Secret cell data" should appear
+    </div>
+
+    <table>
+      <tr>
+        <td>Tables Test 4 Visible: Cell A</td>
+        <td style="display: none;">Tables Test 4 Hidden: Secret cell data</td>
+        <td>Tables Test 4 Visible: Cell C</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: Colspan (Merged Columns)                                      -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>Test 5: Colspan (Merged Columns)</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> A cell with <code>colspan</code> spans multiple columns visually.
+      In textContent extraction, it appears once (not repeated for each spanned column).
+    </div>
+
+    <div class="expected">
+      "Tables Test 5 Spanning: Header spans three columns" should appear ONCE
+    </div>
+
+    <table>
+      <tr>
+        <th colspan="3">Tables Test 5 Spanning: Header spans three columns</th>
+      </tr>
+      <tr>
+        <td>Tables Test 5a: Col 1</td>
+        <td>Tables Test 5b: Col 2</td>
+        <td>Tables Test 5c: Col 3</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: Rowspan (Merged Rows)                                         -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>Test 6: Rowspan (Merged Rows)</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> A cell with <code>rowspan</code> spans multiple rows visually.
+      In textContent, it appears once in DOM order (not repeated for each spanned row).
+    </div>
+
+    <div class="expected">
+      "Tables Test 6 Spanning: Cell spans two rows" should appear ONCE
+    </div>
+
+    <table>
+      <tr>
+        <td rowspan="2">Tables Test 6 Spanning: Cell spans two rows</td>
+        <td>Tables Test 6a: Row 1 Col 2</td>
+      </tr>
+      <tr>
+        <td>Tables Test 6b: Row 2 Col 2</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 7: Complex Table (Both colspan and rowspan)                      -->
+  <!-- ===================================================================== -->
+
+  <section id="test-7" class="test-case">
+    <h2>Test 7: Complex Table (colspan + rowspan)</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> Tables with both colspan and rowspan create matrix-like structures.
+      textContent linearizes in DOM order. Screen readers struggle with these - our extraction does too.
+    </div>
+
+    <div class="expected">
+      "Tables Test 7 Title" AND all cell markers (7a through 7f) should appear
+    </div>
+
+    <table>
+      <caption>Tables Test 7 Title: Complex Schedule</caption>
+      <tr>
+        <th>Time</th>
+        <th colspan="2">Tables Test 7a: Morning Sessions</th>
+      </tr>
+      <tr>
+        <td rowspan="2">Tables Test 7b: 9:00 - 12:00</td>
+        <td>Tables Test 7c: Workshop A</td>
+        <td>Tables Test 7d: Workshop B</td>
+      </tr>
+      <tr>
+        <td colspan="2">Tables Test 7e: Combined lunch break</td>
+      </tr>
+      <tr>
+        <td>Tables Test 7f: 1:00 - 5:00</td>
+        <td colspan="2">Tables Test 7g: Afternoon plenary</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 8: Nested Table                                                  -->
+  <!-- ===================================================================== -->
+
+  <section id="test-8" class="test-case">
+    <h2>Test 8: Nested Table</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> Tables can be nested inside cells. The inner table content
+      appears in DOM order within the outer cell's content.
+    </div>
+
+    <div class="expected">
+      "Tables Test 8 Outer" AND "Tables Test 8 Inner" should appear
+    </div>
+
+    <table>
+      <tr>
+        <td>Tables Test 8 Outer: Cell with nested table</td>
+        <td>
+          <table style="border: 2px solid #4caf50;">
+            <tr>
+              <td>Tables Test 8 Inner: Nested cell A</td>
+              <td>Tables Test 8 Inner: Nested cell B</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 9: Empty Cells                                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-9" class="test-case">
+    <h2>Test 9: Empty Cells</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> Empty cells have no text content. They don't contribute
+      to textContent output but don't cause errors either.
+    </div>
+
+    <div class="expected">
+      "Tables Test 9a: Filled cell" AND "Tables Test 9c: Another filled cell" should appear.
+      Empty cells produce no output (but no errors).
+    </div>
+
+    <table>
+      <tr>
+        <td>Tables Test 9a: Filled cell</td>
+        <td></td><!-- Empty cell -->
+        <td>Tables Test 9c: Another filled cell</td>
+      </tr>
+      <tr>
+        <td></td><!-- Empty cell -->
+        <td>Tables Test 9e: Center filled</td>
+        <td></td><!-- Empty cell -->
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 10: Table with scope Attributes                                  -->
+  <!-- ===================================================================== -->
+
+  <section id="test-10" class="test-case">
+    <h2>Test 10: Table with scope Attributes</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> The <code>scope</code> attribute (row/col) is metadata for accessibility.
+      It doesn't affect textContent extraction - only the cell text is captured.
+    </div>
+
+    <div class="expected">
+      All "Tables Test 10" markers should appear. Scope attributes are ignored in extraction.
+    </div>
+
+    <table>
+      <tr>
+        <th scope="col">Tables Test 10a: Name</th>
+        <th scope="col">Tables Test 10b: Age</th>
+        <th scope="col">Tables Test 10c: City</th>
+      </tr>
+      <tr>
+        <th scope="row">Tables Test 10d: Alice</th>
+        <td>Tables Test 10e: 30</td>
+        <td>Tables Test 10f: NYC</td>
+      </tr>
+      <tr>
+        <th scope="row">Tables Test 10g: Bob</th>
+        <td>Tables Test 10h: 25</td>
+        <td>Tables Test 10i: LA</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 11: Data Table with Headers Attribute                            -->
+  <!-- ===================================================================== -->
+
+  <section id="test-11" class="test-case">
+    <h2>Test 11: Headers Attribute (Complex Association)</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> The <code>headers</code> attribute creates explicit cell-to-header
+      associations for accessibility. This is metadata only - textContent ignores it.
+    </div>
+
+    <div class="expected">
+      "Tables Test 11 Q1" AND "Tables Test 11 Q2" AND product/revenue markers should appear
+    </div>
+
+    <table>
+      <tr>
+        <th id="blank"></th>
+        <th id="q1">Tables Test 11 Q1</th>
+        <th id="q2">Tables Test 11 Q2</th>
+      </tr>
+      <tr>
+        <th id="widgets" headers="blank">Tables Test 11 Widgets</th>
+        <td headers="widgets q1">Tables Test 11 W-Q1: $1000</td>
+        <td headers="widgets q2">Tables Test 11 W-Q2: $1200</td>
+      </tr>
+      <tr>
+        <th id="gadgets" headers="blank">Tables Test 11 Gadgets</th>
+        <td headers="gadgets q1">Tables Test 11 G-Q1: $800</td>
+        <td headers="gadgets q2">Tables Test 11 G-Q2: $950</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+
+    <h3 style="color: #2e7d32;">All of these should APPEAR in extraction:</h3>
+    <ul>
+      <li>"Tables Test 1 Caption" + all Test 1 cell markers (1a-1f)</li>
+      <li>"Tables Test 2 Header" + "Tables Test 2 Body" + "Tables Test 2 Footer"</li>
+      <li>"Tables Test 3 Visible" + "Tables Test 3 Hidden" (hidden row extracted!)</li>
+      <li>"Tables Test 4 Visible" + "Tables Test 4 Hidden" (hidden cell extracted!)</li>
+      <li>"Tables Test 5 Spanning" (appears once, not three times)</li>
+      <li>"Tables Test 6 Spanning" (appears once, not twice)</li>
+      <li>"Tables Test 7 Title" + all Test 7 cell markers (7a-7g)</li>
+      <li>"Tables Test 8 Outer" + "Tables Test 8 Inner" (nested tables)</li>
+      <li>"Tables Test 9a" + "Tables Test 9c" + "Tables Test 9e" (empty cells produce nothing)</li>
+      <li>All "Tables Test 10" markers (scope attributes ignored)</li>
+      <li>All "Tables Test 11" markers (headers attribute ignored)</li>
+    </ul>
+
+    <h3>Key Validations:</h3>
+    <ul>
+      <li><strong>Hidden Content:</strong> Tests 3 and 4 validate hidden rows/cells ARE extracted</li>
+      <li><strong>Colspan/Rowspan:</strong> Tests 5, 6, 7 validate merged cells appear ONCE</li>
+      <li><strong>Caption:</strong> Test 1 validates caption appears (typically first)</li>
+      <li><strong>Structure Sections:</strong> Test 2 validates thead/tbody/tfoot all extracted</li>
+    </ul>
+
+    <p><strong>Success Criteria:</strong> All "Tables Test N" markers present. Hidden content (Tests 3, 4) included.</p>
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Context-Sensitive Roles</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #009688;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #e0f2f1;
+      padding: 15px;
+      border-left: 4px solid #009688;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 18px;
+      margin-top: 0;
+    }
+
+    .expected {
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .demo {
+      background: #fafafa;
+      border: 1px dashed #ccc;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 4px;
+    }
+
+    header, footer, nav, aside, main, article, section {
+      border: 1px solid #e0e0e0;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+    }
+
+    header { background: #e3f2fd; }
+    footer { background: #fce4ec; }
+    nav { background: #f3e5f5; }
+    aside { background: #fff3e0; }
+    main { background: #e8f5e9; }
+    article { background: #fffde7; }
+    section { background: #f5f5f5; }
+
+    .section-label {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: context-roles.html
+PURPOSE: Test context-sensitive role mapping for get_aria_snapshot
+VALIDATES: header/footer scoping, section naming, anchor href, img alt
+
+EXPECTED BEHAVIOR:
+- header/footer only get banner/contentinfo role at page level (not inside article/section)
+- section only gets region role if it has an accessible name
+- anchor only gets link role if it has href
+- img only gets img role if it has alt (otherwise presentation)
+
+UPDATED: 2025-12-23
+================================================================================
+-->
+
+  <h1>Context-Sensitive Role Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that context-sensitive roles are correctly determined.</p>
+    <p><strong>Key insight:</strong> Some HTML elements have different roles depending on their context or attributes.</p>
+    <p><strong>These tests validate future enhancements</strong> - current implementation may not pass all tests.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: Header at Page Level (banner)                                 -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>Test 1: Header at Page Level</h2>
+
+    <div class="expected">
+      Context Roles Test 1 passed: Page-level header should have role="banner"
+    </div>
+
+    <div class="demo">
+      <div class="section-label">This header is at page level (direct child of body or generic container):</div>
+      <header>
+        <h3>Context Roles Test 1a passed: Site header (should be banner)</h3>
+        <nav>
+          <a href="#">Home</a> |
+          <a href="#">About</a> |
+          <a href="#">Contact</a>
+        </nav>
+      </header>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: Header Inside Article (NOT banner)                            -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>Test 2: Header Inside Article</h2>
+
+    <div class="expected">
+      Context Roles Test 2 passed: Header inside article should NOT be banner (just generic)
+    </div>
+
+    <div class="demo">
+      <article>
+        <div class="section-label">This header is inside an article:</div>
+        <header>
+          <h3>Context Roles Test 2a passed: Article header (NOT banner)</h3>
+          <p>Published: Dec 23, 2025</p>
+        </header>
+        <p>Context Roles Test 2b passed: Article content.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: Footer at Page Level (contentinfo)                            -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>Test 3: Footer at Page Level</h2>
+
+    <div class="expected">
+      Context Roles Test 3 passed: Page-level footer should have role="contentinfo"
+    </div>
+
+    <div class="demo">
+      <div class="section-label">This footer is at page level:</div>
+      <footer>
+        <p>Context Roles Test 3a passed: Site footer (should be contentinfo)</p>
+        <p>&copy; 2025 Example Corp</p>
+      </footer>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Footer Inside Section (NOT contentinfo)                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>Test 4: Footer Inside Section</h2>
+
+    <div class="expected">
+      Context Roles Test 4 passed: Footer inside section should NOT be contentinfo
+    </div>
+
+    <div class="demo">
+      <section aria-label="Blog post">
+        <h3>Blog Post Title</h3>
+        <p>Content of the blog post...</p>
+        <footer>
+          <p>Context Roles Test 4a passed: Section footer (NOT contentinfo)</p>
+          <p>Posted by: John Doe</p>
+        </footer>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: Section WITH Accessible Name (region)                         -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>Test 5: Section with Accessible Name</h2>
+
+    <div class="expected">
+      Context Roles Test 5 passed: Section with aria-label/aria-labelledby gets role="region"
+    </div>
+
+    <div class="demo">
+      <section aria-label="Context Roles Test 5a passed: Named section (is region)">
+        <p>This section has an aria-label, so it should be a region landmark.</p>
+      </section>
+
+      <section aria-labelledby="sec-heading">
+        <h3 id="sec-heading">Context Roles Test 5b passed: Section with heading reference</h3>
+        <p>This section is labeled by its heading via aria-labelledby.</p>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: Section WITHOUT Accessible Name (NOT region)                  -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>Test 6: Section without Accessible Name</h2>
+
+    <div class="expected">
+      Context Roles Test 6 passed: Section without accessible name should NOT be region (generic)
+    </div>
+
+    <div class="demo">
+      <section>
+        <h3>Unnamed Section</h3>
+        <p>Context Roles Test 6a passed: This section has no aria-label, should be generic.</p>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 7: Anchor WITH href (link)                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-7" class="test-case">
+    <h2>Test 7: Anchor with href</h2>
+
+    <div class="expected">
+      Context Roles Test 7 passed: Anchor with href should have role="link"
+    </div>
+
+    <div class="demo">
+      <p>
+        <a href="https://example.com">Context Roles Test 7a passed: Link with href (is link)</a>
+      </p>
+      <p>
+        <a href="#internal">Context Roles Test 7b passed: Internal link (is link)</a>
+      </p>
+      <p>
+        <a href="">Context Roles Test 7c passed: Empty href (still link)</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 8: Anchor WITHOUT href (NOT link)                                -->
+  <!-- ===================================================================== -->
+
+  <section id="test-8" class="test-case">
+    <h2>Test 8: Anchor without href</h2>
+
+    <div class="expected">
+      Context Roles Test 8 passed: Anchor without href should NOT be link (generic)
+    </div>
+
+    <div class="demo">
+      <p>
+        <a id="anchor-target">Context Roles Test 8a passed: Anchor without href (NOT link)</a>
+      </p>
+      <p>
+        <a name="old-style-anchor">Context Roles Test 8b passed: Named anchor (NOT link)</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 9: Image WITH alt (img)                                          -->
+  <!-- ===================================================================== -->
+
+  <section id="test-9" class="test-case">
+    <h2>Test 9: Image with alt Text</h2>
+
+    <div class="expected">
+      Context Roles Test 9 passed: Image with alt should have role="img" and name from alt
+    </div>
+
+    <div class="demo">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect fill='%23ccc' width='100' height='100'/%3E%3C/svg%3E"
+           alt="Context Roles Test 9a passed: Meaningful image"
+           width="100" height="100">
+
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect fill='%23ddd' width='100' height='100'/%3E%3C/svg%3E"
+           alt="Context Roles Test 9b passed: Another image with alt"
+           width="100" height="100">
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 10: Image WITHOUT alt or with empty alt (presentation)           -->
+  <!-- ===================================================================== -->
+
+  <section id="test-10" class="test-case">
+    <h2>Test 10: Image without alt or empty alt</h2>
+
+    <div class="expected">
+      Context Roles Test 10 passed: Image with empty/missing alt should be presentation (no role)
+    </div>
+
+    <div class="demo">
+      <p>Context Roles Test 10a passed: Images below should be treated as decorative:</p>
+
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='50' height='50'%3E%3Crect fill='%23e0e0e0' width='50' height='50'/%3E%3C/svg%3E"
+           alt=""
+           width="50" height="50">
+      <!-- Empty alt = decorative -->
+
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='50' height='50'%3E%3Crect fill='%23f0f0f0' width='50' height='50'/%3E%3C/svg%3E"
+           role="presentation"
+           width="50" height="50">
+      <!-- Explicit presentation role -->
+
+      <p>Context Roles Test 10b passed: Text after decorative images</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 11: Form WITH Accessible Name (form landmark)                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-11" class="test-case">
+    <h2>Test 11: Form with Accessible Name</h2>
+
+    <div class="expected">
+      Context Roles Test 11 passed: Form with name should be form landmark
+    </div>
+
+    <div class="demo">
+      <form aria-label="Context Roles Test 11a passed: Contact form (is landmark)">
+        <label for="email">Email:</label>
+        <input type="email" id="email">
+        <button type="submit">Submit</button>
+      </form>
+
+      <form aria-labelledby="form-title">
+        <h3 id="form-title">Context Roles Test 11b passed: Registration form</h3>
+        <label for="username">Username:</label>
+        <input type="text" id="username">
+      </form>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 12: Form WITHOUT Accessible Name (NOT landmark)                  -->
+  <!-- ===================================================================== -->
+
+  <section id="test-12" class="test-case">
+    <h2>Test 12: Form without Accessible Name</h2>
+
+    <div class="expected">
+      Context Roles Test 12 passed: Form without name should NOT be a landmark
+    </div>
+
+    <div class="demo">
+      <form>
+        <p>Context Roles Test 12a passed: This form has no accessible name</p>
+        <label for="search-input">Search:</label>
+        <input type="text" id="search-input">
+        <button type="submit">Go</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 13: Aside at Different Levels                                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-13" class="test-case">
+    <h2>Test 13: Aside Element (always complementary)</h2>
+
+    <div class="expected">
+      Context Roles Test 13 passed: Aside is always complementary regardless of context
+    </div>
+
+    <div class="demo">
+      <aside aria-label="Context Roles Test 13a passed: Page sidebar">
+        <p>This aside is at page level.</p>
+      </aside>
+
+      <article>
+        <h3>Article Title</h3>
+        <p>Article content...</p>
+        <aside aria-label="Context Roles Test 13b passed: Article sidebar">
+          <p>Related content within article (still complementary).</p>
+        </aside>
+      </article>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 14: Main Element (always main)                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-14" class="test-case">
+    <h2>Test 14: Main Element</h2>
+
+    <div class="expected">
+      Context Roles Test 14 passed: main element always has role="main"
+    </div>
+
+    <div class="demo">
+      <main aria-label="Context Roles Test 14a passed: Primary content">
+        <p>This is the main content area.</p>
+      </main>
+
+      <!-- Note: Multiple main elements is invalid HTML but testing anyway -->
+      <div role="main" aria-label="Context Roles Test 14b passed: Explicit main role">
+        <p>Explicit main role via attribute.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 15: Fieldset/Legend                                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-15" class="test-case">
+    <h2>Test 15: Fieldset and Legend</h2>
+
+    <div class="expected">
+      Context Roles Test 15 passed: Fieldset should have role="group", legend provides name
+    </div>
+
+    <div class="demo">
+      <fieldset>
+        <legend>Context Roles Test 15a passed: Personal Information</legend>
+        <label for="fname">First name:</label>
+        <input type="text" id="fname">
+        <label for="lname">Last name:</label>
+        <input type="text" id="lname">
+      </fieldset>
+
+      <fieldset disabled>
+        <legend>Context Roles Test 15b passed: Disabled fieldset</legend>
+        <input type="text" placeholder="This is disabled">
+      </fieldset>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+
+    <h3 style="color: #2e7d32;">Context-sensitive role mappings:</h3>
+    <table style="width: 100%; border-collapse: collapse;">
+      <tr style="background: #e0e0e0;">
+        <th style="padding: 8px; text-align: left;">Element</th>
+        <th style="padding: 8px; text-align: left;">Context</th>
+        <th style="padding: 8px; text-align: left;">Expected Role</th>
+      </tr>
+      <tr>
+        <td style="padding: 8px;">header</td>
+        <td style="padding: 8px;">Page level</td>
+        <td style="padding: 8px;">banner</td>
+      </tr>
+      <tr style="background: #f5f5f5;">
+        <td style="padding: 8px;">header</td>
+        <td style="padding: 8px;">Inside article/section</td>
+        <td style="padding: 8px;">generic (no landmark)</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px;">footer</td>
+        <td style="padding: 8px;">Page level</td>
+        <td style="padding: 8px;">contentinfo</td>
+      </tr>
+      <tr style="background: #f5f5f5;">
+        <td style="padding: 8px;">footer</td>
+        <td style="padding: 8px;">Inside article/section</td>
+        <td style="padding: 8px;">generic (no landmark)</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px;">section</td>
+        <td style="padding: 8px;">Has accessible name</td>
+        <td style="padding: 8px;">region</td>
+      </tr>
+      <tr style="background: #f5f5f5;">
+        <td style="padding: 8px;">section</td>
+        <td style="padding: 8px;">No accessible name</td>
+        <td style="padding: 8px;">generic</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px;">a</td>
+        <td style="padding: 8px;">Has href</td>
+        <td style="padding: 8px;">link</td>
+      </tr>
+      <tr style="background: #f5f5f5;">
+        <td style="padding: 8px;">a</td>
+        <td style="padding: 8px;">No href</td>
+        <td style="padding: 8px;">generic</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px;">img</td>
+        <td style="padding: 8px;">Has non-empty alt</td>
+        <td style="padding: 8px;">img</td>
+      </tr>
+      <tr style="background: #f5f5f5;">
+        <td style="padding: 8px;">img</td>
+        <td style="padding: 8px;">Empty/no alt</td>
+        <td style="padding: 8px;">presentation (hidden)</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px;">form</td>
+        <td style="padding: 8px;">Has accessible name</td>
+        <td style="padding: 8px;">form (landmark)</td>
+      </tr>
+      <tr style="background: #f5f5f5;">
+        <td style="padding: 8px;">form</td>
+        <td style="padding: 8px;">No accessible name</td>
+        <td style="padding: 8px;">form (not landmark)</td>
+      </tr>
+    </table>
+
+    <p><strong>Success Criteria:</strong> All "Context Roles Test N" markers present with correct contextual role assignment.</p>
+  </footer>
+
+</body>
+</html>

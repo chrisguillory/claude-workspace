@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: ARIA Value Attributes</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #ff5722;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #fbe9e7;
+      padding: 15px;
+      border-left: 4px solid #ff5722;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 18px;
+      margin-top: 0;
+    }
+
+    .expected {
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .demo {
+      background: #fafafa;
+      border: 1px dashed #ccc;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 4px;
+    }
+
+    /* Custom slider styling */
+    .custom-slider {
+      width: 100%;
+      height: 8px;
+      background: #ddd;
+      border-radius: 4px;
+      position: relative;
+      margin: 20px 0;
+    }
+
+    .slider-thumb {
+      width: 20px;
+      height: 20px;
+      background: #2196f3;
+      border-radius: 50%;
+      position: absolute;
+      top: -6px;
+      cursor: pointer;
+    }
+
+    .slider-track {
+      height: 100%;
+      background: #2196f3;
+      border-radius: 4px;
+    }
+
+    /* Native range input */
+    input[type="range"] {
+      width: 100%;
+      margin: 10px 0;
+    }
+
+    /* Progress bar styling */
+    .progress-container {
+      width: 100%;
+      height: 24px;
+      background: #e0e0e0;
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #4caf50, #8bc34a);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+      font-size: 12px;
+    }
+
+    /* Meter styling */
+    meter {
+      width: 100%;
+      height: 24px;
+    }
+
+    /* Spinbutton styling */
+    .spinbutton {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .spinbutton input {
+      width: 80px;
+      text-align: center;
+      font-size: 18px;
+      padding: 8px;
+    }
+
+    .spinbutton button {
+      width: 40px;
+      height: 40px;
+      font-size: 20px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: aria-values.html
+PURPOSE: Test ARIA value attribute extraction for get_aria_snapshot
+VALIDATES: valuenow, valuemin, valuemax, valuetext for sliders, progress, meters
+
+EXPECTED BEHAVIOR:
+- Value attributes should appear in snapshot output
+- Native HTML equivalents (range, progress, meter) should map to ARIA values
+- valuetext should override numeric display when present
+
+UPDATED: 2025-12-23
+================================================================================
+-->
+
+  <h1>ARIA Value Attributes Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that ARIA value attributes are correctly extracted by get_aria_snapshot.</p>
+    <p><strong>Key attributes:</strong> valuenow, valuemin, valuemax, valuetext</p>
+    <p><strong>These tests validate future enhancements</strong> - current implementation may not pass all tests.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: Custom Slider with ARIA                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>Test 1: Custom Slider (ARIA role="slider")</h2>
+
+    <div class="expected">
+      ARIA Values Test 1 passed: Should show valuenow=50, valuemin=0, valuemax=100
+    </div>
+
+    <div class="demo">
+      <label id="slider1-label">ARIA Values Test 1a passed: Volume control</label>
+      <div class="custom-slider">
+        <div class="slider-track" style="width: 50%;"></div>
+        <div class="slider-thumb"
+             role="slider"
+             aria-labelledby="slider1-label"
+             aria-valuenow="50"
+             aria-valuemin="0"
+             aria-valuemax="100"
+             tabindex="0"
+             style="left: calc(50% - 10px);">
+        </div>
+      </div>
+      <p>Current value: 50</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: Slider with valuetext                                         -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>Test 2: Slider with valuetext</h2>
+
+    <div class="expected">
+      ARIA Values Test 2 passed: Should show valuetext="Medium" instead of numeric value
+    </div>
+
+    <div class="demo">
+      <label id="slider2-label">ARIA Values Test 2a passed: Priority level</label>
+      <div class="custom-slider">
+        <div class="slider-track" style="width: 50%;"></div>
+        <div class="slider-thumb"
+             role="slider"
+             aria-labelledby="slider2-label"
+             aria-valuenow="2"
+             aria-valuemin="1"
+             aria-valuemax="3"
+             aria-valuetext="Medium"
+             tabindex="0"
+             style="left: calc(50% - 10px);">
+        </div>
+      </div>
+      <p>Priority: Medium (2 of 3)</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: Native Range Input                                            -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>Test 3: Native Range Input</h2>
+
+    <div class="expected">
+      ARIA Values Test 3 passed: Native range should map to slider role with value attributes
+    </div>
+
+    <div class="demo">
+      <label for="native-range">ARIA Values Test 3a passed: Brightness</label>
+      <input type="range"
+             id="native-range"
+             min="0"
+             max="100"
+             value="75"
+             step="5">
+      <p>Brightness: 75%</p>
+
+      <label for="native-range-custom">ARIA Values Test 3b passed: Temperature</label>
+      <input type="range"
+             id="native-range-custom"
+             min="60"
+             max="90"
+             value="72"
+             step="1">
+      <p>Temperature: 72°F</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: ARIA Progressbar                                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>Test 4: ARIA Progressbar</h2>
+
+    <div class="expected">
+      ARIA Values Test 4 passed: Should show valuenow with progress percentage
+    </div>
+
+    <div class="demo">
+      <label id="progress1-label">ARIA Values Test 4a passed: File upload progress</label>
+      <div class="progress-container"
+           role="progressbar"
+           aria-labelledby="progress1-label"
+           aria-valuenow="65"
+           aria-valuemin="0"
+           aria-valuemax="100">
+        <div class="progress-bar" style="width: 65%;">65%</div>
+      </div>
+
+      <label id="progress2-label">ARIA Values Test 4b passed: Indeterminate progress</label>
+      <div class="progress-container"
+           role="progressbar"
+           aria-labelledby="progress2-label"
+           aria-valuemin="0"
+           aria-valuemax="100">
+        <!-- No aria-valuenow = indeterminate -->
+        <div class="progress-bar" style="width: 100%; background: repeating-linear-gradient(90deg, #4caf50, #4caf50 10px, #8bc34a 10px, #8bc34a 20px);">
+          Loading...
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: Native Progress Element                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>Test 5: Native Progress Element</h2>
+
+    <div class="expected">
+      ARIA Values Test 5 passed: Native progress should map to progressbar role
+    </div>
+
+    <div class="demo">
+      <label for="native-progress">ARIA Values Test 5a passed: Download progress</label>
+      <progress id="native-progress" value="42" max="100">42%</progress>
+      <p>Downloaded: 42 of 100 MB</p>
+
+      <label for="native-progress-indeterminate">ARIA Values Test 5b passed: Indeterminate</label>
+      <progress id="native-progress-indeterminate">Loading...</progress>
+      <p>Processing...</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: Native Meter Element                                          -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>Test 6: Native Meter Element</h2>
+
+    <div class="expected">
+      ARIA Values Test 6 passed: Meter should show value, min, max, low, high, optimum
+    </div>
+
+    <div class="demo">
+      <label for="meter-disk">ARIA Values Test 6a passed: Disk usage</label>
+      <meter id="meter-disk"
+             value="0.7"
+             min="0"
+             max="1"
+             low="0.3"
+             high="0.8"
+             optimum="0.5">
+        70% used
+      </meter>
+      <p>Disk usage: 70% (Warning: High)</p>
+
+      <label for="meter-battery">ARIA Values Test 6b passed: Battery level</label>
+      <meter id="meter-battery"
+             value="0.25"
+             min="0"
+             max="1"
+             low="0.2"
+             high="0.8"
+             optimum="1">
+        25% remaining
+      </meter>
+      <p>Battery: 25% (Low)</p>
+
+      <label for="meter-score">ARIA Values Test 6c passed: Test score</label>
+      <meter id="meter-score"
+             value="85"
+             min="0"
+             max="100"
+             low="50"
+             high="80"
+             optimum="100">
+        85/100
+      </meter>
+      <p>Score: 85/100 (Good)</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 7: Spinbutton                                                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-7" class="test-case">
+    <h2>Test 7: Spinbutton (Number Input)</h2>
+
+    <div class="expected">
+      ARIA Values Test 7 passed: Should show valuenow for spinbutton role
+    </div>
+
+    <div class="demo">
+      <label id="spin1-label">ARIA Values Test 7a passed: Quantity selector</label>
+      <div class="spinbutton">
+        <button aria-label="Decrease">−</button>
+        <input type="text"
+               role="spinbutton"
+               aria-labelledby="spin1-label"
+               aria-valuenow="3"
+               aria-valuemin="1"
+               aria-valuemax="10"
+               value="3"
+               readonly>
+        <button aria-label="Increase">+</button>
+      </div>
+
+      <label for="native-number">ARIA Values Test 7b passed: Native number input</label>
+      <input type="number"
+             id="native-number"
+             min="0"
+             max="100"
+             step="5"
+             value="25">
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 8: Scrollbar                                                     -->
+  <!-- ===================================================================== -->
+
+  <section id="test-8" class="test-case">
+    <h2>Test 8: Custom Scrollbar</h2>
+
+    <div class="expected">
+      ARIA Values Test 8 passed: Scrollbar should show orientation and value
+    </div>
+
+    <div class="demo">
+      <div style="position: relative; height: 200px; border: 1px solid #ccc; overflow: hidden;">
+        <div style="padding: 10px;">
+          <p>ARIA Values Test 8a passed: Scrollable content area</p>
+          <p>Lorem ipsum dolor sit amet...</p>
+          <p>More content here...</p>
+        </div>
+        <div role="scrollbar"
+             aria-controls="scroll-content"
+             aria-orientation="vertical"
+             aria-valuenow="25"
+             aria-valuemin="0"
+             aria-valuemax="100"
+             tabindex="0"
+             style="position: absolute; right: 0; top: 0; width: 16px; height: 100%; background: #e0e0e0;">
+          <div style="width: 100%; height: 25%; background: #9e9e9e; border-radius: 8px;"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 9: Multi-thumb Slider (Range)                                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-9" class="test-case">
+    <h2>Test 9: Multi-thumb Slider (Price Range)</h2>
+
+    <div class="expected">
+      ARIA Values Test 9 passed: Two sliders with different values
+    </div>
+
+    <div class="demo">
+      <p id="range-label">ARIA Values Test 9a passed: Price range filter</p>
+      <div class="custom-slider" style="margin: 30px 0;">
+        <div class="slider-track" style="width: 60%; margin-left: 20%;"></div>
+        <div class="slider-thumb"
+             role="slider"
+             aria-label="Minimum price"
+             aria-valuenow="20"
+             aria-valuemin="0"
+             aria-valuemax="100"
+             aria-valuetext="$20"
+             tabindex="0"
+             style="left: calc(20% - 10px);">
+        </div>
+        <div class="slider-thumb"
+             role="slider"
+             aria-label="Maximum price"
+             aria-valuenow="80"
+             aria-valuemin="0"
+             aria-valuemax="100"
+             aria-valuetext="$80"
+             tabindex="0"
+             style="left: calc(80% - 10px); background: #f44336;">
+        </div>
+      </div>
+      <p>Selected range: $20 - $80</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 10: Value with Decimal Precision                                 -->
+  <!-- ===================================================================== -->
+
+  <section id="test-10" class="test-case">
+    <h2>Test 10: Decimal Value Precision</h2>
+
+    <div class="expected">
+      ARIA Values Test 10 passed: Should preserve decimal precision in values
+    </div>
+
+    <div class="demo">
+      <label id="decimal-label">ARIA Values Test 10a passed: Fine adjustment</label>
+      <div class="custom-slider">
+        <div class="slider-track" style="width: 33.33%;"></div>
+        <div class="slider-thumb"
+             role="slider"
+             aria-labelledby="decimal-label"
+             aria-valuenow="3.14159"
+             aria-valuemin="0.00"
+             aria-valuemax="10.00"
+             tabindex="0"
+             style="left: calc(33.33% - 10px);">
+        </div>
+      </div>
+      <p>Value: 3.14159</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+
+    <h3 style="color: #2e7d32;">Should APPEAR with value attributes:</h3>
+    <ul>
+      <li>"ARIA Values Test 1a" - slider with valuenow=50, valuemin=0, valuemax=100</li>
+      <li>"ARIA Values Test 2a" - slider with valuetext="Medium"</li>
+      <li>"ARIA Values Test 3a/3b" - native range inputs with value attributes</li>
+      <li>"ARIA Values Test 4a" - progressbar with valuenow=65</li>
+      <li>"ARIA Values Test 4b" - indeterminate progressbar (no valuenow)</li>
+      <li>"ARIA Values Test 5a/5b" - native progress elements</li>
+      <li>"ARIA Values Test 6a/6b/6c" - meter elements with low/high/optimum</li>
+      <li>"ARIA Values Test 7a/7b" - spinbutton with valuenow</li>
+      <li>"ARIA Values Test 8a" - scrollbar with orientation and value</li>
+      <li>"ARIA Values Test 9a" - multi-thumb sliders with valuetext</li>
+      <li>"ARIA Values Test 10a" - decimal precision preserved</li>
+    </ul>
+
+    <p><strong>Success Criteria:</strong> All value markers present with correct numeric/text values.</p>
+  </footer>
+
+</body>
+</html>
