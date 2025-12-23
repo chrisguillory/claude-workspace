@@ -144,6 +144,27 @@ class FocusableElement(BaseModel):
     classes: str
 
 
+class SmartExtractionInfo(BaseModel):
+    """Metadata about smart extraction decisions. Only present for selector='auto'."""
+
+    fallback_used: bool  # True if no suitable main/article found, fell back to body
+    body_character_count: int  # Total body chars for coverage: character_count/body_character_count
+
+
+class PageTextResult(BaseModel):
+    """Result of text extraction operation."""
+
+    # Core content (always present)
+    title: str
+    url: str
+    text: str
+    character_count: int
+    source_element: str  # What was extracted: "main", "article", "body", or CSS selector
+
+    # Smart extraction transparency (only present for selector='auto')
+    smart_info: SmartExtractionInfo | None = None
+
+
 class BrowserState:
     """Container for all browser state - initialized once at startup, never Optional."""
 
@@ -394,49 +415,55 @@ def register_tools(service: BrowserService) -> None:
     )
     async def get_page_text(
         ctx: Context,
-        selector: str = "body",
-    ) -> str:
+        selector: str = "auto",
+    ) -> PageTextResult:
         """Extract all text content from page, including hidden content.
 
-        Uses textContent-based extraction that captures:
-        - Hidden modal/dialog content (display:none, visibility:hidden)
-        - Collapsed accordion content
-        - Inactive tab panel content
-        - Content with aria-hidden="true"
-        - Shadow DOM content (web components)
+        **Default behavior (selector='auto'):**
+        Smart extraction tries semantic elements in priority order:
+        1. `<main>` element (if >500 chars)
+        2. `<article>` element (if >500 chars)
+        3. Falls back to `<body>`
+
+        **Explicit extraction:**
+        Use `selector='body'` for full page content, or any CSS selector
+        for specific elements.
+
+        **Transparency metadata (auto mode only):**
+        For selector='auto', response includes `smart_info` with:
+        - fallback_used: True if no suitable main/article found, fell back to body
+        - body_character_count: Total body chars for coverage calculation
+
+        Coverage ratio: `character_count / smart_info.body_character_count`
+
+        For explicit selectors, `smart_info` is None (not applicable).
 
         The extraction automatically:
         - Filters out script, style, template, and other non-content elements
         - Normalizes whitespace while preserving paragraph structure
-        - Preserves exact whitespace in pre/code blocks
         - Traverses into Shadow DOM components
+        - Preserves whitespace in PRE/CODE/TEXTAREA elements
 
         Args:
-            selector: CSS selector to scope extraction (default: 'body')
+            selector: 'auto' (default, smart extraction) or CSS selector
                       Common values:
-                      - 'body' - full page (default)
+                      - 'auto' - smart extraction (default)
+                      - 'body' - full page
                       - 'main' - main content area
                       - 'article' - article content
-                      - '.content' - specific class
 
         Returns:
-            Formatted text with metadata header:
-
-            Title: Page Title
-            URL: https://example.com
-            Source: <selector>
-            ---
-            [extracted text content]
+            PageTextResult with text, metadata, and transparency fields
 
         Examples:
-            # Full page extraction
-            text = get_page_text()
+            # Smart extraction (default)
+            result = get_page_text()
 
-            # Main content only (excludes nav, footer)
-            text = get_page_text(selector="main")
+            # Full page extraction (explicit)
+            result = get_page_text(selector="body")
 
-            # Specific article
-            text = get_page_text(selector="article.post-content")
+            # Specific element
+            result = get_page_text(selector="article.post-content")
 
         Notes:
             - For HTML source, use get_page_html() instead
@@ -448,41 +475,21 @@ def register_tools(service: BrowserService) -> None:
 
         await logger.info(f"Extracting text from '{selector}'")
 
-        # JavaScript extraction function
+        # JavaScript extraction function with smart extraction support
         extraction_script = '''
-        function extractAllText(rootSelector) {
-            const root = document.querySelector(rootSelector);
-            if (!root) {
-                return {
-                    error: 'Selector not found: ' + rootSelector,
-                    title: document.title || '',
-                    url: window.location.href
-                };
-            }
-
+        function extractFromElement(root) {
             const SKIP_ELEMENTS = new Set([
                 'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS',
                 'IFRAME', 'OBJECT', 'EMBED', 'AUDIO', 'VIDEO', 'MAP', 'HEAD'
             ]);
-
-            const BLOCK_ELEMENTS = new Set([
-                'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-                'P', 'DIV', 'BLOCKQUOTE', 'ADDRESS',
-                'LI', 'DT', 'DD', 'OL', 'UL', 'DL',
-                'TR', 'TH', 'TD', 'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'CAPTION',
-                'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'NAV', 'MAIN', 'ASIDE',
-                'PRE', 'HR', 'FIGURE', 'FIGCAPTION', 'DETAILS', 'SUMMARY',
-                'FORM', 'FIELDSET', 'LEGEND', 'OUTPUT', 'BR'
-            ]);
-
-            const PREFORMATTED = new Set(['PRE', 'CODE', 'TEXTAREA', 'XMP', 'LISTING']);
+            const PREFORMATTED_ELEMENTS = new Set(['PRE', 'CODE', 'TEXTAREA']);
 
             const parts = [];
-            let lastWasBlock = true;
             let depth = 0;
+            let inPreformatted = 0;
             const MAX_DEPTH = 100;
 
-            function walk(node, preserveWhitespace) {
+            function walk(node) {
                 if (!node) return;
                 depth++;
                 if (depth > MAX_DEPTH) { depth--; return; }
@@ -492,62 +499,34 @@ def register_tools(service: BrowserService) -> None:
                         const tagName = node.tagName;
                         if (SKIP_ELEMENTS.has(tagName)) return;
 
-                        const isBlock = BLOCK_ELEMENTS.has(tagName);
-                        const shouldPreserve = preserveWhitespace || PREFORMATTED.has(tagName);
+                        const isPre = PREFORMATTED_ELEMENTS.has(tagName) ||
+                            (window.getComputedStyle &&
+                             ['pre', 'pre-wrap', 'pre-line'].includes(
+                                 window.getComputedStyle(node).whiteSpace));
 
-                        if (isBlock && parts.length > 0 && !lastWasBlock) {
-                            parts.push('\\n');
-                            lastWasBlock = true;
-                        }
-
-                        if (tagName === 'BR') {
-                            parts.push('\\n');
-                            lastWasBlock = true;
-                            return;
-                        }
+                        if (isPre) inPreformatted++;
 
                         if (node.shadowRoot) {
                             for (const child of node.shadowRoot.childNodes) {
-                                walk(child, shouldPreserve);
+                                walk(child);
                             }
                         }
 
                         for (const child of node.childNodes) {
-                            walk(child, shouldPreserve);
+                            walk(child);
                         }
 
-                        if (isBlock && parts.length > 0) {
-                            const lastPart = parts[parts.length - 1];
-                            if (lastPart && lastPart !== '\\n') {
-                                parts.push('\\n');
-                                lastWasBlock = true;
-                            }
-                        }
+                        if (isPre) inPreformatted--;
                     }
                     else if (node.nodeType === Node.TEXT_NODE) {
-                        let text = node.textContent;
-
-                        if (preserveWhitespace) {
-                            if (text) {
-                                parts.push(text);
-                                lastWasBlock = false;
-                            }
-                        } else {
-                            text = text.replace(/[\\s\\n\\r\\t\\u00A0]+/g, ' ');
-                            if (text && text !== ' ') {
-                                parts.push(text);
-                                lastWasBlock = false;
-                            } else if (text === ' ' && parts.length > 0) {
-                                const lastPart = parts[parts.length - 1];
-                                if (lastPart && !lastPart.endsWith(' ') && !lastPart.endsWith('\\n')) {
-                                    parts.push(' ');
-                                }
-                            }
+                        const text = node.textContent;
+                        if (text) {
+                            parts.push({text, pre: inPreformatted > 0});
                         }
                     }
                     else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
                         for (const child of node.childNodes) {
-                            walk(child, preserveWhitespace);
+                            walk(child);
                         }
                     }
                 } finally {
@@ -555,27 +534,102 @@ def register_tools(service: BrowserService) -> None:
                 }
             }
 
-            walk(root, false);
+            walk(root);
 
-            let result = parts.join('');
-            result = result.replace(/\\n{3,}/g, '\\n\\n');
-            result = result.replace(/ {2,}/g, ' ');
-            result = result.replace(/ *\\n */g, '\\n');
-            result = result.split('\\n').map(line => line.trim()).join('\\n');
-            result = result.replace(/\\n{3,}/g, '\\n\\n');
+            let result = '';
+            for (const part of parts) {
+                if (part.pre) {
+                    result += part.text;
+                } else {
+                    result += part.text.replace(/[\\s\\n\\r\\t\\u00A0]+/g, ' ');
+                }
+            }
             result = result.trim();
 
             const MAX_SIZE = 5 * 1024 * 1024;
             if (result.length > MAX_SIZE) {
-                result = result.substring(0, MAX_SIZE) + '\\n\\n[Content truncated at 5MB limit]';
+                result = result.substring(0, MAX_SIZE) + ' [Content truncated at 5MB limit]';
             }
 
+            return result;
+        }
+
+        function extractAllText(requestedSelector) {
+            const SMART_THRESHOLD = 500;  // Min chars for smart extraction to use an element
+
+            // Calculate body character count for coverage calculation
+            const bodyCharCount = extractFromElement(document.body).length;
+
+            // Smart extraction mode
+            if (requestedSelector === 'auto') {
+                // Priority 1: Try <main> element
+                const main = document.querySelector('main');
+                if (main) {
+                    const mainText = extractFromElement(main);
+                    if (mainText.length >= SMART_THRESHOLD) {
+                        return {
+                            text: mainText,
+                            title: document.title || '',
+                            url: window.location.href,
+                            sourceElement: 'main',
+                            characterCount: mainText.length,
+                            isSmartExtraction: true,
+                            fallbackUsed: false,
+                            bodyCharacterCount: bodyCharCount
+                        };
+                    }
+                }
+
+                // Priority 2: Try <article> element
+                const article = document.querySelector('article');
+                if (article) {
+                    const articleText = extractFromElement(article);
+                    if (articleText.length >= SMART_THRESHOLD) {
+                        return {
+                            text: articleText,
+                            title: document.title || '',
+                            url: window.location.href,
+                            sourceElement: 'article',
+                            characterCount: articleText.length,
+                            isSmartExtraction: true,
+                            fallbackUsed: false,
+                            bodyCharacterCount: bodyCharCount
+                        };
+                    }
+                }
+
+                // Fallback: Use body
+                const bodyText = extractFromElement(document.body);
+                return {
+                    text: bodyText,
+                    title: document.title || '',
+                    url: window.location.href,
+                    sourceElement: 'body',
+                    characterCount: bodyText.length,
+                    isSmartExtraction: true,
+                    fallbackUsed: true,
+                    bodyCharacterCount: bodyCharCount
+                };
+            }
+
+            // Explicit selector mode
+            const root = document.querySelector(requestedSelector);
+            if (!root) {
+                return {
+                    error: 'Selector not found: ' + requestedSelector,
+                    title: document.title || '',
+                    url: window.location.href
+                };
+            }
+
+            const text = extractFromElement(root);
             return {
-                text: result,
+                text: text,
                 title: document.title || '',
                 url: window.location.href,
-                sourceSelector: rootSelector,
-                characterCount: result.length
+                sourceElement: requestedSelector,
+                characterCount: text.length,
+                isSmartExtraction: false
             };
         }
 
@@ -610,12 +664,27 @@ def register_tools(service: BrowserService) -> None:
         if not text:
             text = "[No text content found in selected element]"
 
-        # Format output with metadata header (Chrome-style)
-        output = f"Title: {title}\nURL: {url}\nSource: <{selector}>\n---\n{text}"
+        # Get actual source element (may differ from selector in auto mode)
+        source_element = result.get('sourceElement', selector)
 
-        await logger.info(f"Extracted {char_count:,} characters from '{selector}'")
+        # Build smart_info only for auto mode
+        smart_info = None
+        if result.get('isSmartExtraction'):
+            smart_info = SmartExtractionInfo(
+                fallback_used=result.get('fallbackUsed', False),
+                body_character_count=result.get('bodyCharacterCount', 0),
+            )
 
-        return output
+        await logger.info(f"Extracted {char_count:,} characters from <{source_element}>")
+
+        return PageTextResult(
+            title=title,
+            url=url,
+            source_element=source_element,
+            text=text,
+            character_count=char_count,
+            smart_info=smart_info,
+        )
 
     @mcp.tool(
         annotations=ToolAnnotations(

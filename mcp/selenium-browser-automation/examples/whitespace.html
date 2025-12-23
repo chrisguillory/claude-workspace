@@ -196,6 +196,27 @@ List item 3"</div>
     </div>
   </section>
 
+  <!-- ===================================================================== -->
+  <!-- TEST 9: Adjacent Inline Elements (No Artificial Spaces)               -->
+  <!-- ===================================================================== -->
+
+  <section id="test-9" class="test-case">
+    <h2>Test 9: Adjacent Inline Elements</h2>
+
+    <div class="expected">Expected: NO artificial spaces added between adjacent elements:
+- "HelloWorld" (not "Hello World")
+- "innerText." (not "innerText .")
+- "price:$100" (not "price: $100")</div>
+
+    <div class="actual">
+      <!-- Critical edge case: no whitespace in source between elements -->
+      <p>Whitespace Test 9 passed:</p>
+      <p>Hello<strong>World</strong> - adjacent inline with no source whitespace</p>
+      <p>The <code>innerText</code>. method - code followed by punctuation</p>
+      <p>price:<span class="amount">$100</span> - colon followed by span</p>
+    </div>
+  </section>
+
   <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
     <h2>Validation Checklist</h2>
     <ul>
@@ -207,6 +228,7 @@ List item 3"</div>
       <li>"Whitespace Test 6 passed" - list item breaks</li>
       <li>"Whitespace Test 7 passed" - inline elements</li>
       <li>"Whitespace Test 8 passed" - CJK text preserved</li>
+      <li>"Whitespace Test 9 passed" - no artificial spaces between adjacent elements</li>
     </ul>
   </footer>
 
