@@ -17,6 +17,8 @@ This server is designed to match or exceed the capabilities of Anthropic's offic
 [Claude in Chrome extension](docs/claude-in-chrome.md). We iterate faster than official
 releases, so gaps should be addressed proactively.
 
+> **Tested against:** Claude in Chrome v1.0.36 (2025-12-23)
+
 > **Legend**: CiC = Claude in Chrome (Anthropic's extension) · SMCP = Selenium MCP (this server)
 >
 > **Type codes**: 1:1 = direct equivalent · 1:N = one CiC maps to multiple SMCP · 1:2 = one CiC requires two SMCP calls · Gap = CiC has it, SMCP doesn't · SMCP-only = SMCP has it, CiC doesn't · UI/Arch = not applicable (UI feature or architectural difference)
@@ -25,7 +27,9 @@ releases, so gaps should be addressed proactively.
 
 | Capability                       |      CiC      |   SMCP   | Notes                                             |
 |----------------------------------|:-------------:|:--------:|---------------------------------------------------|
-| Text extraction (hidden content) |       ✓       |    ✓     | `get_page_text()` uses textContent (parity)       |
+| Text extraction (hidden content) |       ✓       |    ✓     | Both extract display:none, visibility:hidden, etc |
+| Text extraction (Shadow DOM)     |       -       |    ✓     | **Advantage**: Traverses web component shadows    |
+| Text extraction (filtering)      |       -       |    ✓     | **Advantage**: Filters SCRIPT/STYLE noise         |
 | JavaScript execution             |       ✓       | **Gap**  | P1: Chrome can run ad-hoc JS for debugging        |
 | Console log access               |       ✓       | **Gap**  | P1: Chrome reads `console.log/error/warn`         |
 | Core Web Vitals                  |       -       |    ✓     | **Advantage**: LCP, CLS, INP, FCP, TTFB           |
@@ -57,12 +61,65 @@ Capabilities where we exceed Claude in Chrome:
 
 | Capability                  | What It Provides                                   | Use Case                                         |
 |-----------------------------|----------------------------------------------------|--------------------------------------------------|
+| **Shadow DOM Traversal**    | Extracts text from web component shadow roots      | Modern sites using custom elements               |
+| **SCRIPT/STYLE Filtering**  | Removes non-content elements from text extraction  | Clean AI-readable output without code noise      |
+| **PRE/CODE Preservation**   | Exact whitespace in preformatted blocks            | Code extraction, config files, ASCII art         |
+| **Smart Extraction**        | main > article > body with 500-char threshold      | Better element selection than article-only       |
+| **Transparency Metadata**   | `source_element`, `fallback_used`, coverage ratio  | Detect silent partial extraction failures        |
 | **Core Web Vitals**         | LCP, CLS, INP, FCP, TTFB with ratings              | Performance auditing, identifying slow pages     |
 | **HAR Export**              | Full network traffic in DevTools-compatible format | Deep network debugging, API analysis             |
 | **Detailed Network Timing** | DNS, connect, TLS, TTFB breakdown per request      | Identifying slow requests, bottleneck analysis   |
 | **Proxy/IP Rotation**       | Authenticated proxies via mitmproxy                | Bypass rate limiting, geographic testing         |
 | **Chrome Profiles**         | Direct access to saved browser profiles            | Authenticated sessions without re-login          |
 | **CDP Stealth**             | Bypass Cloudflare bot detection                    | Scrape protected sites where official tools fail |
+
+### Test Results (2025-12-23)
+
+Complete comparison testing of all example files with both SMCP and CiC:
+
+| Test File              |  SMCP   |    CiC     |  Winner  | Evidence                                    |
+|------------------------|:-------:|:----------:|:--------:|---------------------------------------------|
+| accordion-pattern.html |  ✅ 5/5  |   ✅ 5/5    |   Tie    | Both extract hidden accordion content       |
+| hidden-content.html    | ✅ 12/12 |  ✅ 12/12   |   Tie    | Both extract all CSS-hidden content         |
+| kitchen-sink.html      | ✅ 16/16 | ⚠️ 16/16*  | **SMCP** | CiC: SCRIPT leaked, no Shadow DOM traversal |
+| marriott-modals.html   |  ✅ 4/4  |   ✅ 4/4    |   Tie    | Both extract modal hidden content           |
+| preformatted.html      |  ✅ 5/5  |  ⚠️ 5/5*   | **SMCP** | CiC normalizes `const    x` → `const x`     |
+| semantic-blocks.html   |  ✅ 6/6  |   ❌ 0/6    | **SMCP** | CiC extracted only `<article>` (2 words)    |
+| shadow-dom.html        |  ✅ 7/7  |  ⚠️ 7/7*   | **SMCP** | CiC markers from SCRIPT, not shadow DOM     |
+| threshold-test.html    | ✅ main  | ⚠️ article | **SMCP** | CiC: 11% coverage vs SMCP: 74% coverage     |
+| whitespace.html        |  ✅ 9/9  |   ✅ 9/9    |   Tie    | Both normalize whitespace correctly         |
+
+\* Markers appear but with quality issues (SCRIPT leak, wrong source, normalized whitespace)
+
+**Key Failures Observed:**
+
+1. **semantic-blocks.html**: CiC found `<article>` in Test 4 and extracted ONLY "Article content" (2 words), missing 1500+ chars of actual test content. This is silent partial extraction.
+
+2. **threshold-test.html**: Page has `<main>` containing `<article>`. CiC extracted nested article (~200 chars, 11% coverage). SMCP extracted main (1363 chars, 74% coverage).
+
+3. **shadow-dom.html**: CiC test markers appear from SCRIPT source code (the JavaScript defining web components), NOT from actual shadow DOM traversal.
+
+### Philosophy Comparison
+
+| Aspect                  | SMCP                       | CiC                           |
+|-------------------------|----------------------------|-------------------------------|
+| **Extraction priority** | main > article > body      | article-first (any article)   |
+| **Size threshold**      | 500 chars minimum          | None (extracts tiny articles) |
+| **SCRIPT/STYLE**        | Filtered out               | Included in output            |
+| **Shadow DOM**          | Traversed (open roots)     | Not traversed                 |
+| **PRE/CODE whitespace** | Preserved exactly          | Normalized                    |
+| **Transparency**        | `smart_info` with coverage | None (silent extraction)      |
+| **Failure mode**        | Graceful fallback to body  | Silent partial extraction     |
+
+**Design Rationale:**
+
+SMCP prioritizes **transparency over magic**. When smart extraction selects a subset of the page:
+- `source_element` tells you what was extracted
+- `fallback_used` indicates if main/article weren't suitable
+- `body_character_count` enables coverage calculation
+- Caller can detect if extraction was unexpectedly small
+
+CiC uses **implicit smart extraction** without metadata. If it finds any `<article>`, it extracts just that content regardless of size. The caller has no way to know content was silently truncated.
 
 ### Tool Mapping
 
@@ -71,7 +128,7 @@ How CiC tools map to SMCP tools:
 | CiC Tool(s)             | SMCP Tool(s)                                    |   Type    | Notes                                                                    |
 |-------------------------|-------------------------------------------------|:---------:|--------------------------------------------------------------------------|
 | `navigate`              | `navigate`                                      |    1:1    | SMCP adds `fresh_browser`, `profile`, `enable_har_capture` params        |
-| `get_page_text`         | `get_page_text`                                 |    1:1    | Both use textContent (all text including hidden) ✅                      |
+| `get_page_text`         | `get_page_text`                                 |  Exceeds  | SMCP adds: Shadow DOM traversal, SCRIPT/STYLE filtering, structured output |
 | `read_page`             | `get_aria_snapshot`                             |    1:1    | CiC returns ref-based tree; SMCP returns YAML tree                       |
 | `find`                  | -                                               |    Gap    | CiC uses natural language; SMCP alternative: `get_interactive_elements`  |
 | `computer`              | `click`, `press_key`, `type_text`, `screenshot` |   1:N     | CiC unified tool; SMCP gaps: scroll, hover, zoom, drag, wait             |
@@ -203,10 +260,45 @@ Ideas without implementation plans:
 
 ### Navigation & Content
 - `navigate(url, fresh_browser?, profile?, enable_har_capture?)` - Load URL with optional Chrome profile
-- `get_page_text(selector?)` - Extract all text including hidden content (textContent-based)
+- `get_page_text(selector?)` - Smart content extraction with semantic element priority (see below)
 - `get_page_content(format, selector?, limit?)` - Extract text/HTML (legacy: use `get_page_text` for text)
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
 - `screenshot(filename, full_page?)` - Capture viewport or full page
+
+### Smart Extraction (`get_page_text`)
+
+**Default behavior (`selector='auto'`):**
+
+Smart extraction focuses on main content by trying semantic elements in priority order:
+1. `<main>` element (if >500 characters)
+2. `<article>` element (if >500 characters)
+3. Falls back to `<body>`
+
+This typically captures 80-90% of meaningful content while excluding navigation, sidebars, and footers.
+
+**Transparency metadata (auto mode only):**
+
+```python
+result = get_page_text()  # Uses smart extraction
+
+result.source_element      # "main", "article", or "body"
+result.smart_info.fallback_used       # True if no main/article found
+result.smart_info.body_character_count  # Total body chars for coverage calc
+# Coverage ratio: result.character_count / result.smart_info.body_character_count
+```
+
+**Explicit extraction:**
+
+```python
+get_page_text(selector="body")     # Full page (no smart_info)
+get_page_text(selector=".content") # Specific element (no smart_info)
+```
+
+**Extraction features:**
+- Traverses Shadow DOM components
+- Filters SCRIPT/STYLE/TEMPLATE noise
+- Preserves whitespace in PRE/CODE/TEXTAREA
+- Normalizes whitespace elsewhere
 
 ### Interaction
 - `get_interactive_elements(selector_scope, text_contains?, tag_filter?, limit?)` - Find clickable elements

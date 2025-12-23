@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Extraction Threshold Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; }
+        h1 { color: #333; }
+        .test-section { border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 4px; }
+        .test-section h2 { margin-top: 0; color: #555; }
+        .count { font-size: 12px; color: #888; font-style: italic; }
+        nav, footer { background: #f5f5f5; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <nav>Navigation: Home | About | Contact | Services | Portfolio | Blog</nav>
+
+    <h1>Smart Extraction Threshold Test</h1>
+    <p class="count">This page tests the 500-character threshold for smart extraction.</p>
+
+    <!-- Test Case: Main element with > 500 chars -->
+    <main id="main-content">
+        <h2>Main Content Area</h2>
+
+        <p>This is the main content area of the page. It contains substantial text that exceeds
+        the 500 character threshold, which means smart extraction should select this element
+        as the source. The smart extraction algorithm prioritizes semantic elements in this order:
+        main, then article, then body as a fallback.</p>
+
+        <p>When the main element contains at least 500 characters of text content, it should be
+        selected as the extraction source. This provides focused content extraction that excludes
+        navigation, footers, sidebars, and other peripheral content that typically appears in
+        the body but outside the main content area.</p>
+
+        <p>The threshold of 500 characters was chosen to filter out very small main elements
+        that might just contain a heading or a short placeholder. A substantial main element
+        should contain meaningful content that justifies extracting from it rather than the
+        full body.</p>
+
+        <!-- Nested article inside main - main should still be selected first -->
+        <article id="nested-article">
+            <h3>Article Within Main</h3>
+            <p>This article is nested inside the main element. Since main is checked first
+            and has sufficient content, smart extraction should return the main element's
+            content, which includes this nested article text as well.</p>
+        </article>
+
+        <section id="additional-section">
+            <h3>Additional Content Section</h3>
+            <p>This section provides additional padding to ensure the main element clearly
+            exceeds the 500 character threshold. The total character count of the main
+            element should be significantly higher than the threshold.</p>
+        </section>
+    </main>
+
+    <!-- Sidebar content (outside main, should be excluded in smart extraction) -->
+    <aside id="sidebar">
+        <h3>Sidebar Content</h3>
+        <p>This sidebar content is outside the main element. When smart extraction selects
+        the main element, this sidebar content should NOT be included in the extracted text.</p>
+        <ul>
+            <li>Related Link 1</li>
+            <li>Related Link 2</li>
+            <li>Related Link 3</li>
+        </ul>
+    </aside>
+
+    <footer>
+        Footer: Copyright 2024 | Privacy Policy | Terms of Service | Cookie Settings
+    </footer>
+
+    <!-- Validation data for testing -->
+    <script>
+        // Expected behavior:
+        // - selector='auto' should extract from <main> (>500 chars)
+        // - smart_info.fallback_used should be false
+        // - smart_info.body_character_count should be > character_count
+        // - source_element should be "main"
+        //
+        // Character counts (approximate):
+        // - Main content: ~1800 characters
+        // - Sidebar: ~300 characters
+        // - Body total: ~2200 characters
+        // - Coverage ratio: ~82%
+    </script>
+</body>
+</html>

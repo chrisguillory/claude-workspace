@@ -20,6 +20,7 @@ Each file contains specific patterns with "Test N passed" validation markers.
 | `marriott-modals.html` | 4 modal dialogs | Hidden benefit descriptions (original bug pattern) | Benefit description text |
 | `accordion-pattern.html` | 5 FAQ sections | Collapsed/expanded sections with display:none | Section content text |
 | `kitchen-sink.html` | All patterns combined | Comprehensive regression test | All markers from above |
+| `threshold-test.html` | Smart extraction threshold | 500-char threshold for main/article selection | source_element, smart_info fields |
 
 ---
 
@@ -44,17 +45,6 @@ Each file contains specific patterns with "Test N passed" validation markers.
 - Different validation approach needed
 - May not include all hidden content (depends on aria-hidden)
 
-### Claude in Chrome MCP Tools
-
-| Tool | hidden-content | shadow-dom | whitespace | Status |
-|------|----------------|------------|------------|--------|
-| **`get_page_text()`** | ✅ Expected | ⚠️ To verify | ⚠️ May differ | Compare with Selenium |
-
-**Notes:**
-- Should produce similar results to Selenium for hidden content
-- Shadow DOM traversal depends on implementation
-- Whitespace normalization rules may vary
-
 ### Reference APIs (Native Browser)
 
 | API | hidden-content | Behavior |
@@ -68,11 +58,22 @@ Each file contains specific patterns with "Test N passed" validation markers.
 
 ## Running Tests
 
+### Start HTTP Server
+
+Chrome extensions cannot access `file://` URLs due to security restrictions. Serve the test files via HTTP:
+
+```bash
+cd /Users/chris/claude-workspace/mcp/selenium-browser-automation/examples
+uv run python -m http.server 8888
+```
+
+Test files are then available at `http://localhost:8888/`
+
 ### Generic Workflow
 
 ```javascript
 // 1. Navigate to test file
-navigate("file:///path/to/examples/hidden-content.html")
+navigate("http://localhost:8888/hidden-content.html")
 
 // 2. Extract content using your tool
 const output = <your_extraction_method>()
@@ -88,7 +89,7 @@ const allTestsPassed = [
 ### Selenium MCP Example
 
 ```javascript
-navigate("file:///Users/chris/claude-workspace/mcp/selenium-browser-automation/examples/hidden-content.html")
+navigate("http://localhost:8888/hidden-content.html", fresh_browser=true)
 const output = get_page_text(selector="body")
 // Verify: All 12 "Test N passed" markers present
 ```
@@ -96,12 +97,12 @@ const output = get_page_text(selector="body")
 ### Claude in Chrome Example
 
 ```javascript
-navigate("file:///path/to/examples/hidden-content.html")
+navigate("http://localhost:8888/hidden-content.html")
 const output = get_page_text()
 // Compare with Selenium output
 ```
 
-### Visual Reference
+### Visual Reference (Direct File Access)
 
 ```bash
 open examples/hidden-content.html
@@ -126,6 +127,7 @@ open examples/hidden-content.html
 | marriott-modals.html | All 4 hidden benefit descriptions extracted |
 | accordion-pattern.html | All 5 section contents extracted |
 | kitchen-sink.html | All markers from all categories |
+| threshold-test.html | `source_element="main"`, `smart_info.fallback_used=false`, sidebar excluded |
 
 **For other tools:** Define expected behavior in the matrix above.
 
