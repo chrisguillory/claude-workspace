@@ -1,0 +1,207 @@
+# Text Extraction Test Suite
+
+**Purpose:** Validate content extraction behaviors across multiple tools and implementations. Test files contain patterns; each tool has documented expectations.
+
+**Philosophy:** The test files are tool-agnostic pattern libraries. The same file can validate different tools with different expected behaviors.
+
+---
+
+## Test Files
+
+Each file contains specific patterns with "Test N passed" validation markers.
+
+| File | Patterns | Validates | Marker Format |
+|------|----------|-----------|---------------|
+| `hidden-content.html` | 12 CSS hiding techniques | display:none, visibility:hidden, opacity:0, offscreen, clip-path, sr-only, aria-hidden, HTML hidden, nested, combined | "Test 1 passed" ... "Test 12 passed" |
+| `shadow-dom.html` | 5 web component patterns | Open shadow roots, nested shadows, slotted content, hidden in shadow, multiple hosts | "Shadow DOM Test 1 passed" ... "Test 5c passed" |
+| `whitespace.html` | 8 normalization scenarios | Source indentation, multiple spaces, tabs/newlines, nbsp, paragraph breaks, lists, inline elements, CJK text | "Whitespace Test 1 passed" ... "Test 8 passed" |
+| `preformatted.html` | 5 preservation cases | PRE blocks, CODE inline, TEXTAREA, nested PRE, mixed formatting | "Preformatted Test 1 passed" ... |
+| `semantic-blocks.html` | 6 structure patterns | Headings, paragraphs, DIV vs SPAN, BR, tables | "Semantic Test 1 passed" ... |
+| `marriott-modals.html` | 4 modal dialogs | Hidden benefit descriptions (original bug pattern) | Benefit description text |
+| `accordion-pattern.html` | 5 FAQ sections | Collapsed/expanded sections with display:none | Section content text |
+| `kitchen-sink.html` | All patterns combined | Comprehensive regression test | All markers from above |
+
+---
+
+## Tool-Specific Expectations
+
+### Selenium MCP Tools
+
+| Tool | hidden-content | shadow-dom | whitespace | preformatted | semantic-blocks | Real-world |
+|------|----------------|------------|------------|--------------|-----------------|------------|
+| **`get_page_text()`** | ✅ All 12 tests | ✅ All 5 tests | ✅ All 8 tests | ✅ All 5 tests | ✅ All 6 tests | ✅ All content |
+| **`get_page_html()`** | N/A (returns HTML) | N/A | N/A | N/A | N/A | N/A |
+| **`get_aria_snapshot()`** | Different format | Different format | Different format | Different format | Different format | Different format |
+
+**`get_page_text()` Pass Criteria:**
+- All validation markers must appear in extracted text
+- Hidden content must be included (textContent-based)
+- Shadow DOM content must be traversed
+- Whitespace must be normalized (except in PRE/CODE)
+
+**`get_aria_snapshot()` Expectations:**
+- Returns YAML accessibility tree, not plain text
+- Different validation approach needed
+- May not include all hidden content (depends on aria-hidden)
+
+### Claude in Chrome MCP Tools
+
+| Tool | hidden-content | shadow-dom | whitespace | Status |
+|------|----------------|------------|------------|--------|
+| **`get_page_text()`** | ✅ Expected | ⚠️ To verify | ⚠️ May differ | Compare with Selenium |
+
+**Notes:**
+- Should produce similar results to Selenium for hidden content
+- Shadow DOM traversal depends on implementation
+- Whitespace normalization rules may vary
+
+### Reference APIs (Native Browser)
+
+| API | hidden-content | Behavior |
+|-----|----------------|----------|
+| `document.body.textContent` | ✅ Includes all | Raw textContent, includes hidden |
+| `document.body.innerText` | ❌ Excludes hidden | Visible text only (rendered) |
+
+**Use Case:** If we ever implement a `get_visible_text()` tool (innerText-based), it should FAIL the hidden-content tests - that would be correct behavior.
+
+---
+
+## Running Tests
+
+### Generic Workflow
+
+```javascript
+// 1. Navigate to test file
+navigate("file:///path/to/examples/hidden-content.html")
+
+// 2. Extract content using your tool
+const output = <your_extraction_method>()
+
+// 3. Check for validation markers
+const allTestsPassed = [
+  "Test 1 passed",
+  "Test 2 passed",
+  // ... check all expected markers
+].every(marker => output.includes(marker))
+```
+
+### Selenium MCP Example
+
+```javascript
+navigate("file:///Users/chris/claude-workspace/mcp/selenium-browser-automation/examples/hidden-content.html")
+const output = get_page_text(selector="body")
+// Verify: All 12 "Test N passed" markers present
+```
+
+### Claude in Chrome Example
+
+```javascript
+navigate("file:///path/to/examples/hidden-content.html")
+const output = get_page_text()
+// Compare with Selenium output
+```
+
+### Visual Reference
+
+```bash
+open examples/hidden-content.html
+# DevTools → Elements → Cmd+F → "Test 1 passed"
+# Verify all test strings exist in DOM
+```
+
+---
+
+## Validation Criteria
+
+### Pass/Fail by Tool
+
+**For `get_page_text()` (Selenium MCP):**
+| Test File | Pass Criteria |
+|-----------|---------------|
+| hidden-content.html | All 12 "Test N passed" markers present |
+| shadow-dom.html | All 7 validation markers present |
+| whitespace.html | All 8 "Whitespace Test N passed" markers present |
+| preformatted.html | All 5 tests, exact whitespace in PRE blocks |
+| semantic-blocks.html | All 6 tests, correct paragraph breaks |
+| marriott-modals.html | All 4 hidden benefit descriptions extracted |
+| accordion-pattern.html | All 5 section contents extracted |
+| kitchen-sink.html | All markers from all categories |
+
+**For other tools:** Define expected behavior in the matrix above.
+
+---
+
+## Behaviors Tested
+
+### Content Inclusion (should extract)
+- ✅ `display: none` content
+- ✅ `visibility: hidden` content
+- ✅ `opacity: 0` content
+- ✅ Shadow DOM content (open roots)
+- ✅ `aria-hidden="true"` content
+- ✅ Offscreen positioned content
+- ✅ Clipped content (clip-path)
+
+### Content Exclusion (should NOT extract)
+- ❌ `<script>` element content
+- ❌ `<style>` element content
+- ❌ `<template>` element content
+- ❌ `<noscript>` element content
+- ❌ SVG internal structures
+- ❌ Iframe content (separate navigation required)
+- ❌ Closed shadow roots (browser security)
+
+### Formatting
+- Whitespace normalization (collapse spaces, preserve structure)
+- PRE/CODE exact preservation
+- Block element line breaks
+- Paragraph separation
+
+---
+
+## Adding New Tests
+
+When adding tests for new patterns or new tools:
+
+1. **Create test file** with clear validation markers ("Test N passed")
+2. **Document in Test Files table** above
+3. **Add tool expectations** in Tool-Specific Expectations section
+4. **Define pass criteria** for each applicable tool
+
+---
+
+## Future Tools
+
+Space for tools we might add:
+
+| Tool | Purpose | Test Expectations |
+|------|---------|-------------------|
+| `get_visible_text()` | innerText-based (visible only) | Should FAIL hidden-content (correct behavior) |
+| `extract_tables()` | Table-specific extraction | New test file needed |
+| ... | ... | ... |
+
+---
+
+## Troubleshooting
+
+**Output differs between tools:**
+- Check Tool-Specific Expectations - differences may be expected
+- Compare marker presence, not exact text match
+- Whitespace differences are often acceptable
+
+**"Selector not found" error:**
+- Verify file:// URL is correct
+- Try `selector="body"` as default
+
+**Test markers not found:**
+- Check if tool extracts hidden content (some don't by design)
+- Verify Shadow DOM traversal is implemented
+- Check for script/style content leaking through
+
+---
+
+## References
+
+- [textContent vs innerText](https://kellegous.com/j/2013/02/27/innertext-vs-textcontent/)
+- [Shadow DOM Specification](https://dom.spec.whatwg.org/#shadow-trees)
+- [WAI-ARIA Hidden Content](https://www.w3.org/TR/wai-aria/)

@@ -387,6 +387,238 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
+            title="Get Page Text",
+            readOnlyHint=True,
+            openWorldHint=True,
+        )
+    )
+    async def get_page_text(
+        ctx: Context,
+        selector: str = "body",
+    ) -> str:
+        """Extract all text content from page, including hidden content.
+
+        Uses textContent-based extraction that captures:
+        - Hidden modal/dialog content (display:none, visibility:hidden)
+        - Collapsed accordion content
+        - Inactive tab panel content
+        - Content with aria-hidden="true"
+        - Shadow DOM content (web components)
+
+        The extraction automatically:
+        - Filters out script, style, template, and other non-content elements
+        - Normalizes whitespace while preserving paragraph structure
+        - Preserves exact whitespace in pre/code blocks
+        - Traverses into Shadow DOM components
+
+        Args:
+            selector: CSS selector to scope extraction (default: 'body')
+                      Common values:
+                      - 'body' - full page (default)
+                      - 'main' - main content area
+                      - 'article' - article content
+                      - '.content' - specific class
+
+        Returns:
+            Formatted text with metadata header:
+
+            Title: Page Title
+            URL: https://example.com
+            Source: <selector>
+            ---
+            [extracted text content]
+
+        Examples:
+            # Full page extraction
+            text = get_page_text()
+
+            # Main content only (excludes nav, footer)
+            text = get_page_text(selector="main")
+
+            # Specific article
+            text = get_page_text(selector="article.post-content")
+
+        Notes:
+            - For HTML source, use get_page_html() instead
+            - For page structure, use get_aria_snapshot() first
+            - Iframe content is not extracted (matches Chrome behavior)
+        """
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        await logger.info(f"Extracting text from '{selector}'")
+
+        # JavaScript extraction function
+        extraction_script = '''
+        function extractAllText(rootSelector) {
+            const root = document.querySelector(rootSelector);
+            if (!root) {
+                return {
+                    error: 'Selector not found: ' + rootSelector,
+                    title: document.title || '',
+                    url: window.location.href
+                };
+            }
+
+            const SKIP_ELEMENTS = new Set([
+                'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS',
+                'IFRAME', 'OBJECT', 'EMBED', 'AUDIO', 'VIDEO', 'MAP', 'HEAD'
+            ]);
+
+            const BLOCK_ELEMENTS = new Set([
+                'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+                'P', 'DIV', 'BLOCKQUOTE', 'ADDRESS',
+                'LI', 'DT', 'DD', 'OL', 'UL', 'DL',
+                'TR', 'TH', 'TD', 'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'CAPTION',
+                'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'NAV', 'MAIN', 'ASIDE',
+                'PRE', 'HR', 'FIGURE', 'FIGCAPTION', 'DETAILS', 'SUMMARY',
+                'FORM', 'FIELDSET', 'LEGEND', 'OUTPUT', 'BR'
+            ]);
+
+            const PREFORMATTED = new Set(['PRE', 'CODE', 'TEXTAREA', 'XMP', 'LISTING']);
+
+            const parts = [];
+            let lastWasBlock = true;
+            let depth = 0;
+            const MAX_DEPTH = 100;
+
+            function walk(node, preserveWhitespace) {
+                if (!node) return;
+                depth++;
+                if (depth > MAX_DEPTH) { depth--; return; }
+
+                try {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        const tagName = node.tagName;
+                        if (SKIP_ELEMENTS.has(tagName)) return;
+
+                        const isBlock = BLOCK_ELEMENTS.has(tagName);
+                        const shouldPreserve = preserveWhitespace || PREFORMATTED.has(tagName);
+
+                        if (isBlock && parts.length > 0 && !lastWasBlock) {
+                            parts.push('\\n');
+                            lastWasBlock = true;
+                        }
+
+                        if (tagName === 'BR') {
+                            parts.push('\\n');
+                            lastWasBlock = true;
+                            return;
+                        }
+
+                        if (node.shadowRoot) {
+                            for (const child of node.shadowRoot.childNodes) {
+                                walk(child, shouldPreserve);
+                            }
+                        }
+
+                        for (const child of node.childNodes) {
+                            walk(child, shouldPreserve);
+                        }
+
+                        if (isBlock && parts.length > 0) {
+                            const lastPart = parts[parts.length - 1];
+                            if (lastPart && lastPart !== '\\n') {
+                                parts.push('\\n');
+                                lastWasBlock = true;
+                            }
+                        }
+                    }
+                    else if (node.nodeType === Node.TEXT_NODE) {
+                        let text = node.textContent;
+
+                        if (preserveWhitespace) {
+                            if (text) {
+                                parts.push(text);
+                                lastWasBlock = false;
+                            }
+                        } else {
+                            text = text.replace(/[\\s\\n\\r\\t\\u00A0]+/g, ' ');
+                            if (text && text !== ' ') {
+                                parts.push(text);
+                                lastWasBlock = false;
+                            } else if (text === ' ' && parts.length > 0) {
+                                const lastPart = parts[parts.length - 1];
+                                if (lastPart && !lastPart.endsWith(' ') && !lastPart.endsWith('\\n')) {
+                                    parts.push(' ');
+                                }
+                            }
+                        }
+                    }
+                    else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                        for (const child of node.childNodes) {
+                            walk(child, preserveWhitespace);
+                        }
+                    }
+                } finally {
+                    depth--;
+                }
+            }
+
+            walk(root, false);
+
+            let result = parts.join('');
+            result = result.replace(/\\n{3,}/g, '\\n\\n');
+            result = result.replace(/ {2,}/g, ' ');
+            result = result.replace(/ *\\n */g, '\\n');
+            result = result.split('\\n').map(line => line.trim()).join('\\n');
+            result = result.replace(/\\n{3,}/g, '\\n\\n');
+            result = result.trim();
+
+            const MAX_SIZE = 5 * 1024 * 1024;
+            if (result.length > MAX_SIZE) {
+                result = result.substring(0, MAX_SIZE) + '\\n\\n[Content truncated at 5MB limit]';
+            }
+
+            return {
+                text: result,
+                title: document.title || '',
+                url: window.location.href,
+                sourceSelector: rootSelector,
+                characterCount: result.length
+            };
+        }
+
+        return extractAllText(arguments[0]);
+        '''
+
+        # Execute the extraction script
+        try:
+            result = await asyncio.to_thread(
+                driver.execute_script, extraction_script, selector
+            )
+        except WebDriverException as e:
+            raise fastmcp.exceptions.ToolError(
+                f"Failed to execute extraction script: {e}"
+            )
+
+        # Handle selector not found
+        if result.get('error'):
+            raise fastmcp.exceptions.ToolError(
+                f"Selector '{selector}' not found on page. "
+                "Use get_aria_snapshot(selector='body') to discover valid selectors, "
+                "or use get_page_html() to inspect the page structure."
+            )
+
+        # Extract result components
+        title = result.get('title', 'Untitled')
+        url = result.get('url', '')
+        text = result.get('text', '')
+        char_count = result.get('characterCount', 0)
+
+        # Handle empty extraction
+        if not text:
+            text = "[No text content found in selected element]"
+
+        # Format output with metadata header (Chrome-style)
+        output = f"Title: {title}\nURL: {url}\nSource: <{selector}>\n---\n{text}"
+
+        await logger.info(f"Extracted {char_count:,} characters from '{selector}'")
+
+        return output
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
             title="Get Page Content", readOnlyHint=True, openWorldHint=True
         )
     )

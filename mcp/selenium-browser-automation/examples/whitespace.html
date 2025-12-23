@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Whitespace Normalization</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #1a1a1a; border-bottom: 3px solid #ff9800; padding-bottom: 10px; }
+    .intro { background: #fff3e0; padding: 15px; border-left: 4px solid #ff9800; margin: 20px 0; }
+    .test-case { background: white; border: 1px solid #ddd; border-radius: 8px; margin: 20px 0; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .test-case h2 { color: #333; font-size: 20px; margin-top: 0; }
+    .expected { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 12px; margin: 15px 0; font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; }
+    .actual { background: #f9f9f9; border: 1px dashed #999; padding: 15px; margin: 15px 0; }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: whitespace.html
+PURPOSE: Validate whitespace normalization in textContent extraction
+TECHNICAL: Tests regex patterns in whitespace normalization
+TEST COUNT: 8 whitespace scenarios
+EXPECTED RESULT: HTML indentation collapsed, semantic structure preserved
+UPDATED: 2025-12-22
+================================================================================
+-->
+
+  <h1>Whitespace Normalization Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that <code>get_page_text()</code> normalizes whitespace intelligently.</p>
+    <p><strong>Expected Behavior:</strong></p>
+    <ul>
+      <li>HTML source indentation - collapsed to single spaces</li>
+      <li>Multiple consecutive spaces - one space</li>
+      <li>Paragraph breaks - double newline</li>
+      <li>Inline elements - no breaks</li>
+    </ul>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: HTML Source Indentation                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>Test 1: HTML Source Indentation</h2>
+
+    <div class="expected">Expected: "Whitespace Test 1 passed: This paragraph has heavy indentation in HTML source but should appear as normal text with single spaces."</div>
+
+    <div class="actual">
+      <div>
+        <div>
+          <div>
+            <div>
+              <div>
+                <div>
+                  <p>
+                    Whitespace Test 1 passed: This paragraph has heavy
+                    indentation in the HTML source (6 levels of nesting)
+                    but should appear as normal text with single spaces
+                    between words.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: Multiple Consecutive Spaces                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>Test 2: Multiple Consecutive Spaces</h2>
+
+    <div class="expected">Expected: "Whitespace Test 2 passed: Multiple spaces between words collapsed to single space."</div>
+
+    <div class="actual">
+      <p>Whitespace Test 2 passed:      Multiple     spaces      between     words     collapsed     to     single     space.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: Tabs and Newlines                                             -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>Test 3: Tabs and Newlines</h2>
+
+    <div class="expected">Expected: "Whitespace Test 3 passed: Tabs and newlines normalized to spaces."</div>
+
+    <div class="actual">
+      <p>Whitespace	Test	3	passed:
+Tabs	and
+newlines	normalized
+to	spaces.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Non-Breaking Spaces                                           -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>Test 4: Non-Breaking Spaces</h2>
+
+    <div class="expected">Expected: "Whitespace Test 4 passed: Non-breaking spaces normalized."</div>
+
+    <div class="actual">
+      <p>Whitespace&nbsp;&nbsp;&nbsp;Test&nbsp;&nbsp;&nbsp;4&nbsp;&nbsp;&nbsp;passed:&nbsp;&nbsp;&nbsp;Non-breaking&nbsp;&nbsp;&nbsp;spaces&nbsp;&nbsp;&nbsp;normalized.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: Paragraph Breaks (Double Newline)                             -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>Test 5: Paragraph Breaks</h2>
+
+    <div class="expected">Expected: Paragraphs separated by line breaks:
+"First paragraph: Whitespace Test 5 passed.
+Second paragraph: Paragraphs create breaks.
+Third paragraph: Block elements create breaks."</div>
+
+    <div class="actual">
+      <p>First paragraph: Whitespace Test 5 passed.</p>
+      <p>Second paragraph: Paragraphs create breaks.</p>
+      <p>Third paragraph: Block elements create breaks.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: List Item Spacing                                             -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>Test 6: List Item Spacing</h2>
+
+    <div class="expected">Expected: Line breaks between list items:
+"Whitespace Test 6 passed: List item 1
+List item 2
+List item 3"</div>
+
+    <div class="actual">
+      <ul>
+        <li>Whitespace Test 6 passed: List item 1</li>
+        <li>List item 2</li>
+        <li>List item 3</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 7: Inline Elements (No Breaks)                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-7" class="test-case">
+    <h2>Test 7: Inline Elements</h2>
+
+    <div class="expected">Expected: No breaks for inline elements:
+"Whitespace Test 7 passed: This sentence has bold, italic, and link inline elements without breaks."</div>
+
+    <div class="actual">
+      <p>Whitespace Test 7 passed: This sentence has <strong>bold</strong>, <em>italic</em>, and <a href="#">link</a> inline elements without breaks.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 8: CJK Text (No Spaces Added)                                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-8" class="test-case">
+    <h2>Test 8: CJK Text</h2>
+
+    <div class="expected">Expected: No spaces added between CJK characters</div>
+
+    <div class="actual">
+      <p>Whitespace Test 8 passed:</p>
+      <p>Chinese: 你好世界这是中文测试</p>
+      <p>Japanese: こんにちは世界</p>
+      <p>Korean: 안녕하세요세계</p>
+    </div>
+  </section>
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+    <ul>
+      <li>"Whitespace Test 1 passed" - source indentation collapsed</li>
+      <li>"Whitespace Test 2 passed" - multiple spaces collapsed</li>
+      <li>"Whitespace Test 3 passed" - tabs/newlines normalized</li>
+      <li>"Whitespace Test 4 passed" - nbsp normalized</li>
+      <li>"Whitespace Test 5 passed" - paragraph breaks</li>
+      <li>"Whitespace Test 6 passed" - list item breaks</li>
+      <li>"Whitespace Test 7 passed" - inline elements</li>
+      <li>"Whitespace Test 8 passed" - CJK text preserved</li>
+    </ul>
+  </footer>
+
+</body>
+</html>

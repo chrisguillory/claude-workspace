@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Hidden Content Extraction</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #007bff;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #e3f2fd;
+      padding: 15px;
+      border-left: 4px solid #2196f3;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .test-number {
+      background: #007bff;
+      color: white;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 10px;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .expected {
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .expected::before {
+      content: "Expected: ";
+      font-weight: bold;
+      color: #2e7d32;
+    }
+
+    .actual {
+      background: #f9f9f9;
+      border: 1px dashed #999;
+      padding: 15px;
+      margin: 15px 0;
+      position: relative;
+    }
+
+    .actual::before {
+      content: "Test HTML:";
+      position: absolute;
+      top: -10px;
+      left: 10px;
+      background: white;
+      padding: 0 5px;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .technique-tag {
+      display: inline-block;
+      background: #fff3cd;
+      color: #856404;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      margin: 5px 5px 5px 0;
+    }
+
+    /* Test-specific hiding styles */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .modal-content {
+      background: #fff;
+      padding: 15px;
+      border: 2px solid #007bff;
+      border-radius: 4px;
+    }
+
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: hidden-content.html
+PURPOSE: Validate CSS-based hiding techniques are extracted by textContent
+ORIGINAL BUG: Marriott.com modal descriptions with display:none were missed
+EXTRACTION METHOD: JavaScript textContent (includes hidden DOM elements)
+TEST COUNT: 12 CSS hiding techniques
+EXPECTED RESULT: All 12 test case descriptions should appear in output
+VALIDATION: Search output for "Test 1 passed", "Test 2 passed", etc.
+UPDATED: 2025-12-22
+================================================================================
+-->
+
+  <h1>Hidden Content Extraction Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> This test file validates that <code>get_page_text()</code> extracts text content from elements hidden via CSS techniques.</p>
+    <p><strong>Method:</strong> Uses JavaScript <code>textContent</code> which includes all DOM text nodes, regardless of CSS visibility.</p>
+    <p><strong>Expected:</strong> All 12 test case descriptions below should appear in the extracted output.</p>
+    <p><strong>Original Bug:</strong> Marriott.com elite status pages had benefit descriptions in <code>display: none</code> modal dialogs that were missed by <code>innerText</code>.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: display: none (The Marriott Modal Pattern)                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>
+      <span class="test-number">1</span>
+      display: none
+    </h2>
+    <span class="technique-tag">display: none</span>
+    <span class="technique-tag">Marriott modal pattern</span>
+
+    <div class="expected">
+      "Hertz President's Circle Status" AND "Test 1 passed: This is the hidden modal content..."
+    </div>
+
+    <div class="actual">
+      <button>Hertz President's Circle Status</button>
+      <div class="modal-content" style="display: none;">
+        <h4>Hertz President's Circle Status</h4>
+        <p>Test 1 passed: This is the hidden modal content that describes the Marriott Bonvoy partnership with Hertz. Platinum, Titanium, and Ambassador Elite members receive complimentary President's Circle status enrollment. Benefits include one car class upgrade, expedited counter service, and special member rates.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: visibility: hidden                                            -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>
+      <span class="test-number">2</span>
+      visibility: hidden
+    </h2>
+    <span class="technique-tag">visibility: hidden</span>
+    <span class="technique-tag">Takes up space but invisible</span>
+
+    <div class="expected">
+      "Visible introductory text" AND "Test 2 passed: This content is invisible..."
+    </div>
+
+    <div class="actual">
+      <p>Visible introductory text about this feature.</p>
+      <p style="visibility: hidden;">
+        Test 2 passed: This content is invisible but still takes up layout space. Unlike display:none, visibility:hidden elements maintain their dimensions and affect page flow. This technique is often used for accessibility or animation purposes.
+      </p>
+      <p>More visible text after the hidden content.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: opacity: 0                                                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>
+      <span class="test-number">3</span>
+      opacity: 0
+    </h2>
+    <span class="technique-tag">opacity: 0</span>
+    <span class="technique-tag">Transparent but clickable</span>
+
+    <div class="expected">
+      "Feature description:" AND "Test 3 passed: This content is fully transparent..."
+    </div>
+
+    <div class="actual">
+      <p>Feature description:</p>
+      <div style="opacity: 0;">
+        Test 3 passed: This content is fully transparent with opacity zero. Unlike visibility:hidden, elements with opacity:0 can still receive mouse events and are still there for screen readers and search engines. This is commonly used in fade-in animations or layered UI effects.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: height: 0; overflow: hidden (Collapsed Container)             -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>
+      <span class="test-number">4</span>
+      height: 0; overflow: hidden
+    </h2>
+    <span class="technique-tag">height: 0</span>
+    <span class="technique-tag">overflow: hidden</span>
+    <span class="technique-tag">Collapsed accordion</span>
+
+    <div class="expected">
+      "Accordion Header" AND "Test 4 passed: This is collapsed accordion content..."
+    </div>
+
+    <div class="actual">
+      <div>Accordion Header (Collapsed)</div>
+      <div style="height: 0; overflow: hidden;">
+        Test 4 passed: This is collapsed accordion content hidden via height zero and overflow hidden. This technique is frequently used in accordion components, dropdown menus, and expandable sections. The content exists in the DOM but is clipped by the zero-height container.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: width: 0; height: 0 (Zero Dimensions)                         -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>
+      <span class="test-number">5</span>
+      width: 0; height: 0
+    </h2>
+    <span class="technique-tag">width: 0</span>
+    <span class="technique-tag">height: 0</span>
+
+    <div class="expected">
+      "Container with zero-dimension child:" AND "Test 5 passed: Element with both width and height..."
+    </div>
+
+    <div class="actual">
+      <p>Container with zero-dimension child:</p>
+      <div style="width: 0; height: 0;">
+        Test 5 passed: Element with both width and height set to zero. This creates an element with no visual footprint but content still exists in the DOM tree. Sometimes used for CSS pseudo-element hacks or tracking pixels.
+      </div>
+      <p>Text continues after zero-dimension element.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: position: absolute; left: -9999px (Offscreen)                 -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>
+      <span class="test-number">6</span>
+      position: absolute; left: -9999px
+    </h2>
+    <span class="technique-tag">position: absolute</span>
+    <span class="technique-tag">left: -9999px</span>
+    <span class="technique-tag">Classic offscreen technique</span>
+
+    <div class="expected">
+      "Main content section" AND "Test 6 passed: This content is positioned far offscreen..."
+    </div>
+
+    <div class="actual">
+      <p>Main content section</p>
+      <div style="position: absolute; left: -9999px;">
+        Test 6 passed: This content is positioned far offscreen to the left at -9999px. This is a classic accessibility technique for screen-reader-only content. The element is rendered and accessible to assistive technologies but invisible to sighted users. Often used for skip navigation links.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 7: clip-path: inset(100%) (Modern Clipping)                      -->
+  <!-- ===================================================================== -->
+
+  <section id="test-7" class="test-case">
+    <h2>
+      <span class="test-number">7</span>
+      clip-path: inset(100%)
+    </h2>
+    <span class="technique-tag">clip-path: inset(100%)</span>
+    <span class="technique-tag">Modern CSS clipping</span>
+
+    <div class="expected">
+      "Feature showcase:" AND "Test 7 passed: Content clipped using modern CSS clip-path..."
+    </div>
+
+    <div class="actual">
+      <p>Feature showcase:</p>
+      <div style="clip-path: inset(100%);">
+        Test 7 passed: Content clipped using modern CSS clip-path property with inset(100%). This is a newer CSS technique that completely clips the element's visible area. Unlike the old clip property, clip-path works with modern layouts and transforms. Used in advanced UI designs.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 8: .sr-only Class (Screen Reader Only Pattern)                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-8" class="test-case">
+    <h2>
+      <span class="test-number">8</span>
+      .sr-only (Screen Reader Only)
+    </h2>
+    <span class="technique-tag">.sr-only class</span>
+    <span class="technique-tag">Accessibility pattern</span>
+    <span class="technique-tag">Bootstrap/Tailwind pattern</span>
+
+    <div class="expected">
+      "Interactive component:" AND "Test 8 passed: Screen reader only text..."
+    </div>
+
+    <div class="actual">
+      <p>Interactive component:</p>
+      <button>
+        <span class="sr-only">Test 8 passed: Screen reader only text using sr-only class pattern. This is a combination of multiple CSS properties (position absolute, 1px dimensions, overflow hidden, clip) commonly found in Bootstrap, Tailwind CSS, and other frameworks. Provides context for assistive technology without visual clutter.</span>
+        <span aria-hidden="true">Search Icon</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 9: aria-hidden="true" (Semantic Hiding)                          -->
+  <!-- ===================================================================== -->
+
+  <section id="test-9" class="test-case">
+    <h2>
+      <span class="test-number">9</span>
+      aria-hidden="true"
+    </h2>
+    <span class="technique-tag">aria-hidden="true"</span>
+    <span class="technique-tag">Semantic, not CSS</span>
+
+    <div class="expected">
+      "Decorative elements section:" AND "Test 9 passed: Content with aria-hidden attribute..."
+    </div>
+
+    <div class="actual">
+      <p>Decorative elements section:</p>
+      <div aria-hidden="true">
+        Test 9 passed: Content with aria-hidden attribute set to true. This is NOT a CSS hiding technique but a semantic ARIA attribute that hides content from screen readers while keeping it visually visible. Used for decorative icons or redundant information. Our extraction should still capture this text.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 10: HTML5 hidden Attribute                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-10" class="test-case">
+    <h2>
+      <span class="test-number">10</span>
+      HTML5 hidden Attribute
+    </h2>
+    <span class="technique-tag">hidden attribute</span>
+    <span class="technique-tag">HTML5 boolean attribute</span>
+
+    <div class="expected">
+      "Feature section:" AND "Test 10 passed: Content with HTML5 hidden boolean attribute..."
+    </div>
+
+    <div class="actual">
+      <p>Feature section:</p>
+      <div hidden>
+        Test 10 passed: Content with HTML5 hidden boolean attribute. This is a semantic HTML5 attribute equivalent to display:none. When present, browsers apply display:none via user-agent stylesheet. Commonly toggled via JavaScript (element.hidden = true/false) for show/hide functionality.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 11: Nested Hidden Content (Parent Hidden, Child Visible)         -->
+  <!-- ===================================================================== -->
+
+  <section id="test-11" class="test-case">
+    <h2>
+      <span class="test-number">11</span>
+      Nested Hidden Content
+    </h2>
+    <span class="technique-tag">Nested visibility</span>
+    <span class="technique-tag">Edge case</span>
+
+    <div class="expected">
+      "Nested container:" AND "Test 11 passed: Parent container is hidden..." AND "child attempts to be visible"
+    </div>
+
+    <div class="actual">
+      <p>Nested container:</p>
+      <div style="display: none;">
+        Test 11 passed: Parent container is hidden with display:none.
+        <div style="display: block;">
+          Even though this child element has display:block, it cannot override the parent's display:none. This tests that our extraction captures all nested content regardless of visibility conflicts.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 12: Combined Techniques (Multiple Hiding Methods)                -->
+  <!-- ===================================================================== -->
+
+  <section id="test-12" class="test-case">
+    <h2>
+      <span class="test-number">12</span>
+      Combined Techniques
+    </h2>
+    <span class="technique-tag">Multiple techniques</span>
+    <span class="technique-tag">Edge case</span>
+
+    <div class="expected">
+      "Edge case test:" AND "Test 12 passed: This element combines opacity:0, visibility:hidden..."
+    </div>
+
+    <div class="actual">
+      <p>Edge case test:</p>
+      <div style="opacity: 0; visibility: hidden; position: absolute; left: -9999px;">
+        Test 12 passed: This element combines opacity:0, visibility:hidden, and position:absolute with left:-9999px. This is an extreme edge case where multiple hiding techniques are stacked. Our extraction should still capture this text since textContent traverses all DOM nodes regardless of CSS.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+    <p>After running <code>get_page_text()</code> on this file, verify the output contains:</p>
+    <ul>
+      <li>"Test 1 passed" - display:none modal content</li>
+      <li>"Test 2 passed" - visibility:hidden content</li>
+      <li>"Test 3 passed" - opacity:0 content</li>
+      <li>"Test 4 passed" - height:0 collapsed content</li>
+      <li>"Test 5 passed" - zero-dimension content</li>
+      <li>"Test 6 passed" - offscreen content</li>
+      <li>"Test 7 passed" - clip-path content</li>
+      <li>"Test 8 passed" - sr-only content</li>
+      <li>"Test 9 passed" - aria-hidden content</li>
+      <li>"Test 10 passed" - HTML hidden attribute content</li>
+      <li>"Test 11 passed" - nested hidden content</li>
+      <li>"Test 12 passed" - combined techniques content</li>
+    </ul>
+    <p><strong>Success Criteria:</strong> All 12 "Test N passed" strings should appear in extracted text.</p>
+  </footer>
+
+</body>
+</html>

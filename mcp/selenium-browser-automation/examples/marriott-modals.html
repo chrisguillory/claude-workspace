@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Marriott-Style Modal Pattern</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #1a1a1a; border-bottom: 3px solid #8b0000; padding-bottom: 10px; }
+    .intro { background: #ffebee; padding: 15px; border-left: 4px solid #8b0000; margin: 20px 0; }
+
+    /* Marriott-style benefit card */
+    .benefit-card {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .benefit-card h3 {
+      color: #8b0000;
+      margin-top: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .benefit-icon {
+      width: 40px;
+      height: 40px;
+      background: #8b0000;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+    }
+    .learn-more {
+      background: #8b0000;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    /* Bootstrap d-none pattern - THE ORIGINAL BUG */
+    .d-none { display: none; }
+
+    .modal-content {
+      background: #fafafa;
+      border-left: 4px solid #8b0000;
+      padding: 15px;
+      margin-top: 15px;
+    }
+    .modal-content h4 { color: #8b0000; margin-top: 0; }
+    .modal-content ul { margin: 10px 0; padding-left: 20px; }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: marriott-modals.html
+PURPOSE: Replicate the ORIGINAL BUG - Marriott elite status pages with hidden modal content
+TECHNICAL: Tests display:none modal descriptions (Bootstrap d-none pattern)
+TEST COUNT: 4 benefit cards with hidden modal content
+EXPECTED RESULT: All hidden benefit descriptions should appear in output
+VALIDATION: This is the most important test - validates the original bug is fixed
+UPDATED: 2025-12-22
+================================================================================
+-->
+
+  <h1>Marriott-Style Modal Pattern Tests</h1>
+
+  <div class="intro">
+    <p><strong>Original Bug:</strong> Marriott.com elite status pages had benefit descriptions hidden in modal dialogs with <code>display: none</code>. The old <code>innerText</code>-based extraction only captured the button text, missing the full benefit descriptions.</p>
+    <p><strong>This Test:</strong> Replicates the exact Marriott pattern to validate our fix works.</p>
+    <p><strong>Expected:</strong> Both visible card titles AND hidden modal descriptions should appear in extracted text.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- BENEFIT 1: Hertz President's Circle                                   -->
+  <!-- ===================================================================== -->
+
+  <div class="benefit-card">
+    <h3>
+      <span class="benefit-icon">H</span>
+      Hertz President's Circle Status
+    </h3>
+    <p>Car rental benefit for elite members.</p>
+    <button class="learn-more">Learn More</button>
+
+    <!-- THE HIDDEN MODAL CONTENT - This was missed by innerText -->
+    <div class="modal-content d-none">
+      <h4>Hertz President's Circle Status</h4>
+      <p>Marriott Modal Test 1 passed: Marriott Bonvoy has partnered with Hertz to provide complimentary President's Circle status enrollment for Platinum, Titanium, and Ambassador Elite members.</p>
+      <p>President's Circle benefits include:</p>
+      <ul>
+        <li>One car class upgrade</li>
+        <li>Expedited counter service</li>
+        <li>Special member rates</li>
+        <li>Points earning on rentals</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- BENEFIT 2: Avis Preferred Plus                                        -->
+  <!-- ===================================================================== -->
+
+  <div class="benefit-card">
+    <h3>
+      <span class="benefit-icon">A</span>
+      Avis Preferred Plus Status
+    </h3>
+    <p>Premium car rental benefits.</p>
+    <button class="learn-more">Learn More</button>
+
+    <div class="modal-content d-none">
+      <h4>Avis Preferred Plus Status</h4>
+      <p>Marriott Modal Test 2 passed: Enjoy Avis Preferred Plus status with exclusive benefits for Marriott Bonvoy elite members.</p>
+      <p>Benefits include:</p>
+      <ul>
+        <li>Skip the counter service</li>
+        <li>Guaranteed car availability</li>
+        <li>25% off base rates</li>
+        <li>Free additional driver</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- BENEFIT 3: National Emerald Club Executive                            -->
+  <!-- ===================================================================== -->
+
+  <div class="benefit-card">
+    <h3>
+      <span class="benefit-icon">N</span>
+      National Emerald Club Executive Status
+    </h3>
+    <p>Choose your own car from the Emerald Aisle.</p>
+    <button class="learn-more">Learn More</button>
+
+    <div class="modal-content d-none">
+      <h4>National Emerald Club Executive Status</h4>
+      <p>Marriott Modal Test 3 passed: National Emerald Club Executive status lets you bypass the counter and choose your own car.</p>
+      <p>Executive benefits:</p>
+      <ul>
+        <li>Choose any car from the Emerald Aisle</li>
+        <li>No waiting in line</li>
+        <li>One free rental day credit</li>
+        <li>Guaranteed reservations</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- BENEFIT 4: CLEAR Plus Membership                                      -->
+  <!-- ===================================================================== -->
+
+  <div class="benefit-card">
+    <h3>
+      <span class="benefit-icon">C</span>
+      CLEAR Plus Membership
+    </h3>
+    <p>Skip the security line at airports.</p>
+    <button class="learn-more">Learn More</button>
+
+    <div class="modal-content d-none">
+      <h4>CLEAR Plus Membership</h4>
+      <p>Marriott Modal Test 4 passed: Ambassador Elite members receive complimentary CLEAR Plus membership, allowing you to skip the ID check line at airports nationwide.</p>
+      <p>CLEAR benefits:</p>
+      <ul>
+        <li>Skip ID check lines at 50+ airports</li>
+        <li>Use biometric identity verification</li>
+        <li>Add up to 3 family members</li>
+        <li>Works with TSA PreCheck</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+    <p><strong>This is the CRITICAL test that validates the original bug is fixed.</strong></p>
+    <p>After running <code>get_page_text()</code>, verify the output contains:</p>
+    <ul>
+      <li>"Marriott Modal Test 1 passed" - Hertz hidden description</li>
+      <li>"Marriott Modal Test 2 passed" - Avis hidden description</li>
+      <li>"Marriott Modal Test 3 passed" - National hidden description</li>
+      <li>"Marriott Modal Test 4 passed" - CLEAR hidden description</li>
+    </ul>
+    <p><strong>If any are missing:</strong> The <code>d-none</code> (display:none) content is not being extracted - the original bug is NOT fixed.</p>
+  </footer>
+
+</body>
+</html>
