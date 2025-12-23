@@ -78,7 +78,7 @@ class PrintLogger:
 
 """
 Architecture: All tools operate on BrowserService (service pattern with shared state).
-Workflow: navigate(url) → get_page_content() → click() → screenshot()
+Workflow: navigate(url) → get_page_text() → click() → screenshot()
 
 Critical: CDP stealth injection bypasses Cloudflare where Playwright fails.
 Browser Context: All requests share session/cookies - bypasses bot detection.
@@ -714,82 +714,103 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Get Page Content", readOnlyHint=True, openWorldHint=True
+            title="Get Page HTML",
+            readOnlyHint=True,
+            openWorldHint=True,
         )
     )
-    async def get_page_content(
-        format: Literal["text", "html", "markdown"],
+    async def get_page_html(
         ctx: Context,
         selector: str | None = None,
         limit: int | None = None,
     ) -> str:
-        """Extract readable text or HTML content from the page.
+        """Get raw HTML source or specific elements.
 
-        Use when you need the actual text content (not just structure). Start with
-        get_aria_snapshot() to understand page structure, then use this to extract
-        specific content.
+        Use this when you need actual HTML markup for inspection or parsing.
+        For readable text content, use get_page_text() instead.
 
         Args:
-            format: 'text' (recommended), 'html' (verbose), or 'markdown' (not implemented)
-            selector: CSS selector to scope extraction (e.g., 'main', '.article')
-            limit: Max elements when using selector
+            selector: CSS selector to match elements (optional)
+                      If not provided, returns full page source
+            limit: Maximum number of elements when using selector
 
         Returns:
-            Page content as string in requested format
+            - If no selector: Full page HTML source
+            - If selector: outerHTML of matched elements, separated by newlines
 
-        Use cases:
-            - Reading article or paragraph content
-            - Extracting data from tables
-            - Getting form field values
+        Examples:
+            # Full page HTML source
+            html = get_page_html()
 
-        Workflow:
-            1. get_aria_snapshot() - understand structure
-            2. Identify content area from ARIA tree
-            3. get_page_content(selector=area) - extract it
+            # All article elements
+            html = get_page_html(selector="article")
 
-        Tip: Use selector and limit to scope extraction and reduce token usage.
+            # First 3 list items
+            html = get_page_html(selector="li", limit=3)
+
+            # Specific form by ID
+            html = get_page_html(selector="form#login")
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(
-            f"Extracting as {format}"
-            + (f' with selector "{selector}"' if selector else "")
-        )
-
         if selector:
-            # Extract specific elements
-            elements = await asyncio.to_thread(
-                driver.find_elements, By.CSS_SELECTOR, selector
+            await logger.info(
+                f"Extracting HTML for '{selector}'"
+                + (f" (limit: {limit})" if limit else "")
             )
+
+            try:
+                elements = await asyncio.to_thread(
+                    driver.find_elements, By.CSS_SELECTOR, selector
+                )
+            except WebDriverException as e:
+                raise fastmcp.exceptions.ToolError(
+                    f"Invalid CSS selector '{selector}': {e}"
+                )
+
             count = len(elements)
+
+            if count == 0:
+                raise fastmcp.exceptions.ToolError(
+                    f"No elements found matching selector '{selector}'. "
+                    "Use get_aria_snapshot(selector='body') to discover valid selectors."
+                )
 
             actual_limit = min(count, limit) if limit is not None else count
 
             html_parts = []
             for i in range(actual_limit):
-                html = await asyncio.to_thread(
-                    driver.execute_script, "return arguments[0].outerHTML;", elements[i]
-                )
-                html_parts.append(html)
+                try:
+                    html = await asyncio.to_thread(
+                        driver.execute_script,
+                        "return arguments[0].outerHTML;",
+                        elements[i]
+                    )
+                    html_parts.append(html)
+                except WebDriverException:
+                    continue  # Element may have become stale
 
-            await logger.info(f"Matched {len(html_parts)} elements")
+            await logger.info(
+                f"Extracted {len(html_parts)} of {count} elements"
+                + (f" (limited to {limit})" if limit and count > limit else "")
+            )
+
             return "\n".join(html_parts)
 
-        # Full page extraction
-        if format == "text":
-            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, "body")
-            content = await asyncio.to_thread(lambda: body.text)
-            return content
-        elif format == "html":
-            content = await asyncio.to_thread(lambda: driver.page_source)
-            return content
-        elif format == "markdown":
-            raise fastmcp.exceptions.ValidationError(
-                "Markdown format not yet implemented"
-            )
         else:
-            raise fastmcp.exceptions.ValidationError(f"Unknown format: {format}")
+            await logger.info("Extracting full page HTML source")
+
+            try:
+                html = await asyncio.to_thread(lambda: driver.page_source)
+            except WebDriverException as e:
+                raise fastmcp.exceptions.ToolError(
+                    f"Failed to get page source: {e}"
+                )
+
+            await logger.info(f"Extracted {len(html):,} characters of HTML")
+
+            return html
 
     @mcp.tool(annotations=ToolAnnotations(title="Take Screenshot", readOnlyHint=True))
     async def screenshot(filename: str, ctx: Context, full_page: bool = False) -> str:
@@ -950,7 +971,7 @@ def register_tools(service: BrowserService) -> None:
             1. Call this after navigate() to understand available elements
             2. Use returned structure to identify elements of interest
             3. Call get_interactive_elements() if you need CSS selectors for clicking
-            4. Call get_page_content() if you need actual text content
+            4. Call get_page_text() if you need actual text content
         """
         driver = await service.get_browser()
 
@@ -970,18 +991,27 @@ def register_tools(service: BrowserService) -> None:
                        style.opacity !== '0';
             }
 
+            // Shared whitespace normalization helper
+            // Per WAI-ARIA 1.2 and CSS Text Module Level 3
+            function normalize(text) {
+                return text ? text.replace(/\\s+/g, ' ').trim() : '';
+            }
+
             // Accessible name computation per WAI-ARIA spec
             function computeAccessibleName(el) {
                 // Step 1: aria-label
                 if (el.getAttribute('aria-label')) {
-                    return el.getAttribute('aria-label').trim();
+                    return normalize(el.getAttribute('aria-label'));
                 }
 
                 // Step 2: aria-labelledby
                 if (el.getAttribute('aria-labelledby')) {
                     const ids = el.getAttribute('aria-labelledby').split(/\\s+/);
                     return ids
-                        .map(id => document.getElementById(id)?.textContent || '')
+                        .map(id => {
+                            const refEl = document.getElementById(id);
+                            return refEl ? normalize(refEl.textContent) : '';
+                        })
                         .filter(Boolean)
                         .join(' ');
                 }
@@ -989,33 +1019,33 @@ def register_tools(service: BrowserService) -> None:
                 // Step 3: Label element association
                 if (el.id) {
                     const label = document.querySelector(`label[for="${el.id}"]`);
-                    if (label) return label.textContent.trim();
+                    if (label) return normalize(label.textContent);
                 }
 
                 // Step 4: Implicit label (form control inside label)
                 if (el.closest('label')) {
-                    return el.closest('label').textContent.trim();
+                    return normalize(el.closest('label').textContent);
                 }
 
                 // Step 5: Element content for links, buttons, headings
                 const tagName = el.tagName.toLowerCase();
                 if (['button', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
-                    return el.textContent.trim();
+                    return normalize(el.textContent);
                 }
 
                 // Step 6: Title attribute
                 if (el.getAttribute('title')) {
-                    return el.getAttribute('title');
+                    return normalize(el.getAttribute('title'));
                 }
 
                 // Step 7: Alt text for images
                 if (tagName === 'img') {
-                    return el.getAttribute('alt') || '';
+                    return normalize(el.getAttribute('alt') || '');
                 }
 
                 // Step 8: Placeholder for inputs
                 if (['input', 'textarea'].includes(tagName)) {
-                    return el.placeholder || el.value || '';
+                    return normalize(el.placeholder || el.value || '');
                 }
 
                 return '';
@@ -1065,7 +1095,7 @@ def register_tools(service: BrowserService) -> None:
 
                 // Handle text nodes
                 if (el.nodeType === Node.TEXT_NODE) {
-                    const text = el.textContent.trim();
+                    const text = normalize(el.textContent);
                     if (text) {
                         return { type: 'text', content: text };
                     }
@@ -1164,7 +1194,8 @@ def register_tools(service: BrowserService) -> None:
 
             # Handle text nodes
             if node.get("type") == "text":
-                content = node.get("content", "").replace("\n", " ")
+                # Full whitespace normalization: collapse all \s+ to single space
+                content = " ".join(node.get("content", "").split())
                 lines.append(f"{prefix}text: {content}")
                 return "\n".join(lines)
 

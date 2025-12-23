@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Accessibility Attributes</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #673ab7;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #ede7f6;
+      padding: 15px;
+      border-left: 4px solid #673ab7;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+    }
+
+    .expected {
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .technical-note {
+      background: #fff3e0;
+      border-left: 4px solid #ff9800;
+      padding: 12px;
+      margin: 15px 0;
+      font-size: 13px;
+    }
+
+    .philosophy-note {
+      background: #e3f2fd;
+      border-left: 4px solid #2196f3;
+      padding: 12px;
+      margin: 15px 0;
+      font-size: 13px;
+    }
+
+    .demo-box {
+      background: #fafafa;
+      border: 1px dashed #ccc;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 4px;
+    }
+
+    .hidden-description {
+      display: none;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    nav, aside, main, footer {
+      border: 2px dashed #673ab7;
+      padding: 15px;
+      margin: 10px 0;
+    }
+
+    nav::before { content: "nav"; }
+    aside::before { content: "aside"; }
+    main::before { content: "main"; }
+
+    nav::before, aside::before, main::before {
+      display: block;
+      font-size: 10px;
+      color: #673ab7;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      cursor: pointer;
+    }
+
+    [role="tabpanel"] {
+      border: 1px solid #ccc;
+      padding: 15px;
+      margin: 10px 0;
+    }
+
+    [aria-live] {
+      background: #fff9c4;
+      padding: 10px;
+      border: 1px solid #fbc02d;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: accessibility.html
+PURPOSE: Test ARIA attributes and accessibility patterns in text extraction
+KEY DISTINCTION:
+  - get_page_text() uses textContent → extracts ALL DOM text (including aria-hidden)
+  - get_aria_snapshot() respects semantic hiding (aria-hidden excluded)
+  - These are DIFFERENT TOOLS with DIFFERENT purposes
+
+DESIGN PHILOSOPHY: "Include everything" - we extract aria-hidden content because:
+  1. It's still in the DOM and may contain valuable information
+  2. AI processing benefits from complete content
+  3. Users can filter if needed; we don't hide data
+
+SHOULD EXTRACT (via get_page_text):
+  - aria-hidden="true" content (still in DOM)
+  - role="presentation" content (removes semantics, not content)
+  - Landmark region content (nav, main, aside)
+  - Live region content
+  - Hidden descriptions (aria-describedby → display:none)
+
+UPDATED: 2025-12-23
+================================================================================
+-->
+
+  <h1>Accessibility Attributes Extraction Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that <code>get_page_text()</code> extracts content regardless of ARIA attributes.</p>
+    <p><strong>Key Distinction:</strong></p>
+    <ul>
+      <li><code>get_page_text()</code> → textContent → extracts ALL DOM text including aria-hidden</li>
+      <li><code>get_aria_snapshot()</code> → respects visibility → excludes aria-hidden</li>
+    </ul>
+    <p><strong>Philosophy:</strong> "Include everything" - aria-hidden content may contain valuable information for AI processing.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: aria-hidden="true" Content                                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>Test 1: aria-hidden="true" Content</h2>
+
+    <div class="philosophy-note">
+      <strong>Our Philosophy:</strong> aria-hidden="true" removes content from screen readers,
+      but the content still exists in the DOM. We extract it because:
+      <ul>
+        <li>Decorative icons may have meaningful alt text</li>
+        <li>Hidden duplicate content may be the only complete version</li>
+        <li>AI processing benefits from complete data</li>
+      </ul>
+    </div>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> aria-hidden hides from accessibility tree but NOT from DOM.
+      textContent traverses DOM, so aria-hidden content IS extracted.
+    </div>
+
+    <div class="expected">
+      "A11y Test 1 passed: aria-hidden content should be extracted" SHOULD appear
+    </div>
+
+    <div class="demo-box">
+      <p>Visible text before aria-hidden section.</p>
+      <div aria-hidden="true">
+        <p>A11y Test 1 passed: aria-hidden content should be extracted because we use textContent which traverses all DOM nodes regardless of ARIA attributes.</p>
+      </div>
+      <p>Visible text after aria-hidden section.</p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: role="presentation" Content                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>Test 2: role="presentation" Content</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> <code>role="presentation"</code> (or <code>role="none"</code>) removes
+      the element's semantic meaning from the accessibility tree, but does NOT hide content.
+      Unlike aria-hidden, the text content remains visible to screen readers.
+    </div>
+
+    <div class="expected">
+      "A11y Test 2 passed: presentation role content" AND all list items SHOULD appear
+    </div>
+
+    <div class="demo-box">
+      <p>A11y Test 2 passed: presentation role content is extracted normally.</p>
+      <ul role="presentation">
+        <li>A11y Test 2a: List item one (list semantics hidden)</li>
+        <li>A11y Test 2b: List item two (list semantics hidden)</li>
+        <li>A11y Test 2c: List item three (list semantics hidden)</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: Landmark Regions                                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>Test 3: Landmark Regions</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> HTML5 landmark elements (nav, main, aside, header, footer)
+      define page structure. All content within landmarks is normal DOM content
+      and should be extracted.
+    </div>
+
+    <div class="expected">
+      "A11y Test 3a" (nav) AND "A11y Test 3b" (main) AND "A11y Test 3c" (aside) SHOULD appear
+    </div>
+
+    <div class="demo-box">
+      <nav aria-label="Test navigation">
+        <a href="#">A11y Test 3a passed: Navigation link in nav landmark</a>
+      </nav>
+
+      <main>
+        <p>A11y Test 3b passed: Main content in main landmark. This is typically the primary content area.</p>
+      </main>
+
+      <aside>
+        <p>A11y Test 3c passed: Supplementary content in aside landmark.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Live Regions (aria-live)                                      -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>Test 4: Live Regions (aria-live)</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> Live regions announce updates to screen readers without moving focus.
+      The content is normal DOM text. Note: dynamically-updated live regions may have
+      different content at extraction time vs. after JavaScript runs.
+    </div>
+
+    <div class="expected">
+      "A11y Test 4a: polite" AND "A11y Test 4b: assertive" SHOULD appear
+    </div>
+
+    <div class="demo-box">
+      <div aria-live="polite">
+        A11y Test 4a passed: Polite live region content. Updates are announced at next opportunity.
+      </div>
+
+      <div aria-live="assertive">
+        A11y Test 4b passed: Assertive live region content. Updates interrupt current speech.
+      </div>
+
+      <div role="status">
+        A11y Test 4c passed: Status role (implicit aria-live="polite") content.
+      </div>
+
+      <div role="alert">
+        A11y Test 4d passed: Alert role (implicit aria-live="assertive") content.
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: Hidden Descriptions (aria-describedby)                        -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>Test 5: Hidden Descriptions (aria-describedby)</h2>
+
+    <div class="philosophy-note">
+      <strong>Key Test:</strong> aria-describedby can point to display:none elements.
+      Screen readers still read these descriptions. We extract them because
+      they provide valuable context that screen reader users receive.
+    </div>
+
+    <div class="expected">
+      "A11y Test 5 passed: Hidden description" SHOULD appear (even though it's display:none)
+    </div>
+
+    <div class="demo-box">
+      <button aria-describedby="delete-warning">Delete Account</button>
+      <p id="delete-warning" class="hidden-description">
+        A11y Test 5 passed: Hidden description via aria-describedby. This warning is announced by screen readers even though it's visually hidden.
+      </p>
+
+      <br><br>
+
+      <input type="password" aria-describedby="password-requirements">
+      <p id="password-requirements" style="display: none;">
+        A11y Test 5b passed: Hidden password requirements. Must contain uppercase, lowercase, number, and special character.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: Tabpanel Content (Hidden Panels)                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>Test 6: Tabpanel Content</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> Tab interfaces often hide inactive panels with display:none.
+      Since we use textContent-based extraction, ALL panel content should be extracted
+      regardless of which tab is "active".
+    </div>
+
+    <div class="expected">
+      "A11y Test 6a: Panel 1" AND "A11y Test 6b: Panel 2" AND "A11y Test 6c: Panel 3" SHOULD appear
+    </div>
+
+    <div class="demo-box">
+      <div role="tablist">
+        <button role="tab" aria-selected="true" aria-controls="panel1">Tab 1</button>
+        <button role="tab" aria-selected="false" aria-controls="panel2">Tab 2</button>
+        <button role="tab" aria-selected="false" aria-controls="panel3">Tab 3</button>
+      </div>
+
+      <div id="panel1" role="tabpanel">
+        <p>A11y Test 6a passed: Panel 1 content (active/visible panel)</p>
+      </div>
+
+      <div id="panel2" role="tabpanel" style="display: none;">
+        <p>A11y Test 6b passed: Panel 2 content (hidden inactive panel - should still be extracted)</p>
+      </div>
+
+      <div id="panel3" role="tabpanel" hidden>
+        <p>A11y Test 6c passed: Panel 3 content (hidden with HTML hidden attribute - should still be extracted)</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 7: Dialog/Modal Content                                          -->
+  <!-- ===================================================================== -->
+
+  <section id="test-7" class="test-case">
+    <h2>Test 7: Dialog/Modal Content</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> Modal dialogs often use aria-hidden on background content.
+      The dialog itself should be extracted. When dialog is closed (display:none),
+      its content should still be extracted by textContent.
+    </div>
+
+    <div class="expected">
+      "A11y Test 7a: Dialog content" AND "A11y Test 7b: Background content" SHOULD both appear
+    </div>
+
+    <div class="demo-box">
+      <!-- Simulated "background" with aria-hidden (as if modal is open) -->
+      <div aria-hidden="true">
+        <p>A11y Test 7b passed: Background content behind modal (aria-hidden="true" when modal open)</p>
+      </div>
+
+      <!-- Simulated "closed" modal with display:none -->
+      <div role="dialog" aria-labelledby="dialog-title" aria-modal="true" style="display: none; border: 2px solid #673ab7; padding: 15px; margin: 10px 0;">
+        <h3 id="dialog-title">Modal Title</h3>
+        <p>A11y Test 7a passed: Dialog content. This modal is closed (display:none) but content should be extracted.</p>
+        <button>Close</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 8: Screen Reader Only Content (.sr-only)                         -->
+  <!-- ===================================================================== -->
+
+  <section id="test-8" class="test-case">
+    <h2>Test 8: Screen Reader Only Content (.sr-only)</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> The .sr-only pattern uses CSS (position:absolute, clip, etc.)
+      to visually hide content while keeping it accessible to screen readers.
+      This is NOT aria-hidden - the content is in the accessibility tree.
+      textContent extracts it because it's in the DOM.
+    </div>
+
+    <div class="expected">
+      "A11y Test 8 passed: Screen reader only text" SHOULD appear
+    </div>
+
+    <div class="demo-box">
+      <button>
+        <span aria-hidden="true">X</span>
+        <span class="sr-only">A11y Test 8 passed: Screen reader only text providing context for the X close button</span>
+      </button>
+
+      <a href="#">
+        Read more
+        <span class="sr-only">A11y Test 8b passed: about our accessibility features</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 9: aria-label vs Text Content                                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-9" class="test-case">
+    <h2>Test 9: aria-label vs Text Content</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> aria-label is an ATTRIBUTE, not a text node.
+      textContent does NOT capture aria-label values.
+      Only the element's text content (if any) is extracted.
+    </div>
+
+    <div class="expected">
+      "A11y Test 9 passed: Visible button text" SHOULD appear.
+      aria-label value "Search the website" should NOT appear.
+    </div>
+
+    <div class="demo-box">
+      <button aria-label="Search the website">
+        A11y Test 9 passed: Visible button text (aria-label is separate attribute)
+      </button>
+
+      <button aria-label="ARIA_LABEL_SHOULD_NOT_APPEAR">
+        A11y Test 9b passed: Another button with aria-label attribute
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 10: Nested aria-hidden                                           -->
+  <!-- ===================================================================== -->
+
+  <section id="test-10" class="test-case">
+    <h2>Test 10: Nested aria-hidden</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> aria-hidden="true" hides element and ALL descendants from
+      accessibility tree. A child with aria-hidden="false" cannot override parent's hidden state.
+      However, textContent ignores aria-hidden entirely - all text is extracted.
+    </div>
+
+    <div class="expected">
+      "A11y Test 10a: Parent content" AND "A11y Test 10b: Child content" SHOULD both appear
+    </div>
+
+    <div class="demo-box">
+      <div aria-hidden="true">
+        <p>A11y Test 10a passed: Parent aria-hidden content</p>
+        <div aria-hidden="false">
+          <p>A11y Test 10b passed: Child with aria-hidden="false" (cannot override parent)</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 11: Inert Content                                                -->
+  <!-- ===================================================================== -->
+
+  <section id="test-11" class="test-case">
+    <h2>Test 11: Inert Attribute</h2>
+
+    <div class="technical-note">
+      <strong>Technical:</strong> The HTML <code>inert</code> attribute makes content
+      non-interactive AND removes it from accessibility tree (like aria-hidden).
+      textContent still extracts the text content.
+    </div>
+
+    <div class="expected">
+      "A11y Test 11 passed: Inert content" SHOULD appear
+    </div>
+
+    <div class="demo-box">
+      <div inert>
+        <p>A11y Test 11 passed: Inert content is non-interactive but text should be extracted via textContent.</p>
+        <button>A11y Test 11b passed: Inert button (not clickable)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+
+    <h3 style="color: #2e7d32;">Should APPEAR in extraction (via get_page_text):</h3>
+    <ul>
+      <li>"A11y Test 1 passed" - aria-hidden="true" content (we extract everything)</li>
+      <li>"A11y Test 2 passed" + 2a/2b/2c - role="presentation" content</li>
+      <li>"A11y Test 3a/3b/3c passed" - landmark region content</li>
+      <li>"A11y Test 4a/4b/4c/4d passed" - live region content</li>
+      <li>"A11y Test 5 passed" + 5b - hidden aria-describedby content</li>
+      <li>"A11y Test 6a/6b/6c passed" - all tabpanel content (including hidden)</li>
+      <li>"A11y Test 7a/7b passed" - dialog and background content</li>
+      <li>"A11y Test 8 passed" + 8b - .sr-only content</li>
+      <li>"A11y Test 9 passed" + 9b - button text content</li>
+      <li>"A11y Test 10a/10b passed" - nested aria-hidden content</li>
+      <li>"A11y Test 11 passed" + 11b - inert content</li>
+    </ul>
+
+    <h3 style="color: #c62828;">Should NOT appear (attributes, not text nodes):</h3>
+    <ul>
+      <li>"Search the website" - aria-label attribute value</li>
+      <li>"ARIA_LABEL_SHOULD_NOT_APPEAR" - aria-label attribute value</li>
+    </ul>
+
+    <h3>Key Validations:</h3>
+    <ul>
+      <li><strong>aria-hidden:</strong> Tests 1, 7b, 10 - ALL content extracted</li>
+      <li><strong>Hidden panels:</strong> Tests 5, 6 - display:none content extracted</li>
+      <li><strong>Attributes vs Content:</strong> Test 9 - aria-label NOT in textContent</li>
+      <li><strong>Philosophy:</strong> We extract EVERYTHING for AI processing</li>
+    </ul>
+
+    <div class="philosophy-note" style="margin-top: 20px;">
+      <strong>Design Philosophy Reminder:</strong><br>
+      <code>get_page_text()</code> extracts ALL DOM text regardless of ARIA attributes.<br>
+      <code>get_aria_snapshot()</code> respects accessibility semantics.<br>
+      These are complementary tools with different purposes.
+    </div>
+
+    <p><strong>Success Criteria:</strong> All "A11y Test N passed" markers present. aria-label values NOT present.</p>
+  </footer>
+
+</body>
+</html>

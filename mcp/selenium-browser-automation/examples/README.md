@@ -21,6 +21,24 @@ Each file contains specific patterns with "Test N passed" validation markers.
 | `accordion-pattern.html` | 5 FAQ sections | Collapsed/expanded sections with display:none | Section content text |
 | `kitchen-sink.html` | All patterns combined | Comprehensive regression test | All markers from above |
 | `threshold-test.html` | Smart extraction threshold | 500-char threshold for main/article selection | source_element, smart_info fields |
+| `iframes.html` | 6 iframe patterns | EXCLUSION test - iframe content NOT extracted (by design) | "Iframe Test 1-6 passed" (parent doc); NO "SHOULD_NOT_APPEAR" |
+| `forms.html` | 12 form element patterns | Labels extracted, input values NOT extracted, aria-describedby | "Forms Test 1-12 passed"; NO "SHOULD_NOT_APPEAR" |
+| `tables.html` | 11 table patterns | Caption, headers, cells, hidden rows, colspan/rowspan, nested | "Tables Test 1-11" markers |
+| `accessibility.html` | 11 ARIA patterns | aria-hidden extracted, role=presentation, landmarks, live regions | "A11y Test 1-11 passed"; aria-label NOT in output |
+
+### Future Work Test Files (get_aria_snapshot enhancements)
+
+These test files validate features that are **not yet implemented** but document expected behavior for future phases:
+
+| File | Patterns | Validates | Marker Format |
+|------|----------|-----------|---------------|
+| `aria-states.html` | 11 state patterns | expanded, selected, pressed, haspopup, required, invalid, modal, busy, current, disabled, hidden | "ARIA States Test 1-11 passed" |
+| `aria-values.html` | 10 value patterns | valuenow, valuemin, valuemax, valuetext for sliders/progress/meters | "ARIA Values Test 1-10 passed" |
+| `role-mapping.html` | 14 role patterns | dialog, details, figure, search, tree, grid, menu, tabpanel, etc. | "Role Mapping Test 1-14 passed" |
+| `context-roles.html` | 15 context patterns | header/footer scoping, section naming, anchor href, img alt, form naming | "Context Roles Test 1-15 passed" |
+| `live-regions.html` | 14 live region patterns | aria-live, aria-atomic, aria-relevant, alert, status, log, timer | "Live Regions Test 1-14 passed" |
+
+**Note:** These tests are for `get_aria_snapshot()` enhancements. Current implementation may not pass all tests.
 
 ---
 

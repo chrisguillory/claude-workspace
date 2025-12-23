@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Iframe Behavior (Exclusion)</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #e91e63;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #fce4ec;
+      padding: 15px;
+      border-left: 4px solid #e91e63;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+    }
+
+    .expected {
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .excluded {
+      background: #ffebee;
+      border-left: 4px solid #f44336;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .excluded::before {
+      content: "Should NOT appear: ";
+      font-weight: bold;
+      color: #c62828;
+    }
+
+    iframe {
+      border: 2px dashed #e91e63;
+      margin: 10px 0;
+      background: white;
+    }
+
+    .security-note {
+      background: #fff3e0;
+      border-left: 4px solid #ff9800;
+      padding: 12px;
+      margin: 15px 0;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: iframes.html
+PURPOSE: Document that iframe content is NOT extracted (by design)
+TYPE: NEGATIVE TEST - validates EXCLUSION behavior
+REASON: Iframes are separate documents with security boundaries
+SECURITY: Cross-origin policy prevents DOM access; sandboxed iframes create unique origin
+CHROME PARITY: Chrome's get_page_text also excludes iframe content
+UPDATED: 2025-12-23
+================================================================================
+
+VALIDATION APPROACH:
+- INCLUDE markers: Text that SHOULD appear in extraction (parent document)
+- EXCLUDE markers: Text that should NOT appear (iframe content)
+- SUCCESS: All INCLUDE markers present, NO EXCLUDE markers present
+================================================================================
+-->
+
+  <h1>Iframe Behavior Test (Exclusion)</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> This is a <em>negative test</em> that validates iframe content is NOT extracted.</p>
+    <p><strong>Why:</strong> Iframes are separate documents with independent DOMs and security boundaries. Cross-origin iframes cannot be accessed (Same-Origin Policy). Even same-origin iframes represent author-chosen isolation.</p>
+    <p><strong>Chrome Parity:</strong> Chrome's <code>get_page_text</code> also excludes iframe content.</p>
+    <p><strong>Expected:</strong> Parent document text appears; iframe content does NOT appear.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: Same-Origin Iframe (srcdoc)                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>Test 1: Same-Origin Iframe (srcdoc)</h2>
+
+    <div class="security-note">
+      <strong>Technical:</strong> srcdoc iframes define content inline but render in a separate document context.
+      While technically accessible via contentDocument, the content already exists in parent markup.
+      Our tool skips iframes to avoid duplicate extraction and respect document boundaries.
+    </div>
+
+    <div class="expected">
+      Iframe Test 1 passed: This text IS in the parent document and should be extracted.
+    </div>
+
+    <div class="excluded">
+      IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_1: This is srcdoc iframe content
+    </div>
+
+    <iframe
+      srcdoc="<p>IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_1: This is srcdoc iframe content that should be excluded from extraction.</p>"
+      width="400"
+      height="80"
+    ></iframe>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: Sandboxed Iframe                                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>Test 2: Sandboxed Iframe</h2>
+
+    <div class="security-note">
+      <strong>Technical:</strong> The <code>sandbox</code> attribute creates a unique origin regardless of src URL.
+      JavaScript in the parent cannot access <code>contentDocument</code> even for same-origin content.
+      This is browser-enforced security isolation.
+    </div>
+
+    <div class="expected">
+      Iframe Test 2 passed: This text IS in the parent document and should be extracted.
+    </div>
+
+    <div class="excluded">
+      IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_2: This is sandboxed iframe content
+    </div>
+
+    <iframe
+      sandbox
+      srcdoc="<p>IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_2: Sandboxed iframe content that must be excluded due to security isolation.</p>"
+      width="400"
+      height="80"
+    ></iframe>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: Nested Iframes                                                -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>Test 3: Nested Iframes</h2>
+
+    <div class="security-note">
+      <strong>Technical:</strong> Nested iframes create multiple document boundaries.
+      Even if the outer iframe were accessible, the inner iframe would require separate navigation.
+      This tests that our tool doesn't partially extract from nested frame structures.
+    </div>
+
+    <div class="expected">
+      Iframe Test 3 passed: This text IS in the parent document and should be extracted.
+    </div>
+
+    <div class="excluded">
+      IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_3: Outer and inner nested iframe content
+    </div>
+
+    <iframe
+      srcdoc="<p>IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_3_OUTER: Outer iframe</p><iframe srcdoc='<p>IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_3_INNER: Inner nested iframe</p>' width='300' height='50'></iframe>"
+      width="400"
+      height="120"
+    ></iframe>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Hidden Iframe (display:none)                                  -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>Test 4: Hidden Iframe (display:none)</h2>
+
+    <div class="security-note">
+      <strong>Technical:</strong> Hidden iframes are still separate documents.
+      Even though we extract hidden content from the main document (display:none divs),
+      we do NOT cross iframe boundaries regardless of visibility.
+    </div>
+
+    <div class="expected">
+      Iframe Test 4 passed: This text IS in the parent document and should be extracted.
+    </div>
+
+    <div class="excluded">
+      IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_4: Hidden iframe content
+    </div>
+
+    <iframe
+      style="display: none;"
+      srcdoc="<p>IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_4: This hidden iframe content should not be extracted even though we extract hidden div content.</p>"
+      width="400"
+      height="80"
+    ></iframe>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: Zero-Dimension Iframe                                         -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>Test 5: Zero-Dimension Iframe</h2>
+
+    <div class="security-note">
+      <strong>Technical:</strong> Iframes with zero dimensions are sometimes used for tracking pixels
+      or hidden functionality. They are still separate documents.
+    </div>
+
+    <div class="expected">
+      Iframe Test 5 passed: This text IS in the parent document and should be extracted.
+    </div>
+
+    <div class="excluded">
+      IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_5: Zero-dimension iframe content
+    </div>
+
+    <iframe
+      srcdoc="<p>IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_5: Zero-dimension tracking iframe content.</p>"
+      width="0"
+      height="0"
+      style="border: none;"
+    ></iframe>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: Iframe with about:blank                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>Test 6: Iframe with about:blank</h2>
+
+    <div class="security-note">
+      <strong>Technical:</strong> about:blank iframes are same-origin with parent and accessible.
+      However, they start empty and content is typically added via JavaScript.
+      We still treat them as separate documents.
+    </div>
+
+    <div class="expected">
+      Iframe Test 6 passed: This text IS in the parent document and should be extracted.
+    </div>
+
+    <div class="excluded">
+      (about:blank iframe is empty by default, no content to exclude)
+    </div>
+
+    <iframe
+      id="blank-iframe"
+      src="about:blank"
+      width="400"
+      height="80"
+    ></iframe>
+
+    <script>
+      // Dynamically add content to about:blank iframe
+      document.getElementById('blank-iframe').onload = function() {
+        try {
+          var doc = this.contentDocument;
+          doc.body.innerHTML = '<p>IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_6: Dynamically added about:blank content</p>';
+        } catch(e) {
+          console.log('Could not access iframe:', e);
+        }
+      };
+    </script>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+
+    <h3 style="color: #2e7d32;">Should APPEAR in extraction:</h3>
+    <ul>
+      <li>"Iframe Test 1 passed" - parent document text</li>
+      <li>"Iframe Test 2 passed" - parent document text</li>
+      <li>"Iframe Test 3 passed" - parent document text</li>
+      <li>"Iframe Test 4 passed" - parent document text</li>
+      <li>"Iframe Test 5 passed" - parent document text</li>
+      <li>"Iframe Test 6 passed" - parent document text</li>
+    </ul>
+
+    <h3 style="color: #c62828;">Should NOT appear in extraction:</h3>
+    <ul>
+      <li>"IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_1" - srcdoc content</li>
+      <li>"IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_2" - sandboxed content</li>
+      <li>"IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_3" - nested iframe content</li>
+      <li>"IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_4" - hidden iframe content</li>
+      <li>"IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_5" - zero-dimension content</li>
+      <li>"IFRAME_CONTENT_SHOULD_NOT_APPEAR_TEST_6" - about:blank dynamic content</li>
+    </ul>
+
+    <p><strong>Success Criteria:</strong></p>
+    <ul>
+      <li>All 6 "Iframe Test N passed" markers appear</li>
+      <li>NO "IFRAME_CONTENT_SHOULD_NOT_APPEAR" markers appear</li>
+    </ul>
+
+    <p><strong>Why This Matters:</strong></p>
+    <p>Extracting iframe content could expose sensitive data from framed documents,
+    create security vulnerabilities, or duplicate content. Our exclusion matches
+    Chrome's behavior and respects document boundaries.</p>
+  </footer>
+
+</body>
+</html>
