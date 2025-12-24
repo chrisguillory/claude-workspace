@@ -522,6 +522,18 @@ Selenium MCP Server
 
 **Why single browser?** Simplicity and session sharing. All tool calls share the same cookies and authentication state, which is ideal for workflows that require login persistence.
 
+### Process Architecture
+
+```
+Selenium MCP Server (Python)
+├── chromedriver (1 process)
+└── Chrome (5-6 processes: main, GPU, renderer, network, utility)
+```
+
+Compare with Claude in Chrome, which is a browser extension controlling existing tabs via DevTools Protocol - no additional processes.
+
+**Cleanup on reconnect:** Signal handlers (SIGTERM/SIGINT) ensure browser processes close cleanly when `claude mcp reconnect` terminates the server.
+
 ### CDP Stealth Injection
 
 **Problem**: Modern bot detection (Cloudflare, DataDome) fingerprints automation by detecting WebDriver properties, CDP artifacts, and missing browser features.
