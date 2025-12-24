@@ -18,6 +18,7 @@ import asyncio
 import base64
 import json
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -2903,6 +2904,29 @@ const userCode = {escaped_code};
             )
 
 
+def _sync_cleanup(state: BrowserState) -> None:
+    """Synchronous cleanup for signal handlers (runs in main thread)."""
+    print("\n⚠ Signal received, cleaning up browser...", file=sys.stderr)
+    if state.driver:
+        try:
+            state.driver.quit()
+            print("✓ Browser closed", file=sys.stderr)
+        except Exception as e:
+            print(f"✗ Browser close error: {e}", file=sys.stderr)
+    if state.mitmproxy_process:
+        state.mitmproxy_process.terminate()
+        try:
+            state.mitmproxy_process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            state.mitmproxy_process.kill()
+    try:
+        state.temp_dir.cleanup()
+        state.capture_temp_dir.cleanup()
+    except Exception:
+        pass
+    print("✓ Signal cleanup complete, exiting", file=sys.stderr)
+
+
 @asynccontextmanager
 async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     """Manage browser lifecycle - initialization before requests, cleanup after shutdown."""
@@ -2910,13 +2934,22 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     service = BrowserService(state)
     register_tools(service)
 
+    # Register signal handlers to ensure cleanup on SIGTERM/SIGINT
+    # This is critical for `claude mcp reconnect` which sends SIGTERM
+    def signal_handler(signum: int, frame: typing.Any) -> None:
+        _sync_cleanup(state)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
     print("✓ Browser service initialized", file=sys.stderr)
     print(f"  Screenshot directory: {state.screenshot_dir}", file=sys.stderr)
     print(f"  Capture directory: {state.capture_dir}", file=sys.stderr)
 
     yield
 
-    # SHUTDOWN: Cleanup after all requests complete
+    # SHUTDOWN: Cleanup after all requests complete (graceful shutdown path)
     if state.driver:
         await asyncio.to_thread(state.driver.quit)
     if state.mitmproxy_process:
