@@ -1,0 +1,666 @@
+# execute_javascript Test Suite
+#
+# Structure: Each top-level key is an execution context (page to run tests on)
+# - "about_blank": Tests run on about:blank (no DOM needed)
+# - Other keys: Tests run on fixture HTML (loaded via data: URL)
+#
+# Test format:
+#   name: Unique identifier
+#   code: JavaScript to execute
+#   expect: Expected result fields (supports partial matching)
+#     - success: true/false
+#     - result: Exact value match
+#     - result_type: Type classification
+#     - error_type: For error cases
+#     - note_contains: Substring match on note field
+#
+# =============================================================================
+# DATA URL ENCODING RULES
+# =============================================================================
+#
+# When loading fixture HTML via data URLs, special characters can break parsing:
+#
+# CRITICAL: The `#` character (e.g., CSS selectors like `#hidden`) is interpreted
+# as a URL fragment identifier. Everything after `#` becomes location.hash, NOT
+# HTML content. This completely breaks the fixture.
+#
+# Two-tier solution:
+#   1. Simple fixtures: URL-encode `#` as `%23`
+#      Example: data:text/html,...%23hidden { display: none; }...
+#
+#   2. Complex fixtures (foolproof): Use base64 encoding
+#      Example: data:text/html;base64,PGh0bWw+Li4uPC9odG1sPg==
+#
+# Base64 handles ALL special characters automatically but sacrifices readability.
+# Use targeted %23 encoding for simple cases, base64 for complex fixtures.
+
+metadata:
+  description: Test suite for execute_javascript tool
+  version: "1.0"
+  implementations:
+    - selenium-mcp
+    - claude-in-chrome
+
+# =============================================================================
+# PURE JAVASCRIPT TESTS (no DOM required)
+# =============================================================================
+
+about_blank:
+  description: Pure JavaScript tests - run on about:blank
+  page: about:blank
+
+  categories:
+    primitives:
+      description: Basic JavaScript primitive types
+      tests:
+        - name: integer_arithmetic
+          code: "1 + 1"
+          expect:
+            success: true
+            result: 2
+            result_type: number
+
+        - name: float_arithmetic
+          code: "0.1 + 0.2"
+          expect:
+            success: true
+            result_type: number
+            # Note: Result is ~0.30000000000000004 (IEEE 754)
+
+        - name: negative_number
+          code: "-42"
+          expect:
+            success: true
+            result: -42
+            result_type: number
+
+        - name: string_literal
+          code: "'hello world'"
+          expect:
+            success: true
+            result: "hello world"
+            result_type: string
+
+        - name: empty_string
+          code: "''"
+          expect:
+            success: true
+            result: ""
+            result_type: string
+
+        - name: boolean_true
+          code: "true"
+          expect:
+            success: true
+            result: true
+            result_type: boolean
+
+        - name: boolean_false
+          code: "false"
+          expect:
+            success: true
+            result: false
+            result_type: boolean
+
+        - name: null_value
+          code: "null"
+          expect:
+            success: true
+            result: null
+            result_type: "null"
+
+        - name: undefined_value
+          code: "undefined"
+          expect:
+            success: true
+            result: null  # undefined serializes to null in JSON
+            result_type: undefined
+
+        - name: nan_value
+          code: "NaN"
+          expect:
+            success: true
+            result: "NaN"  # String representation for AI visibility
+            result_type: number
+            note_contains: "NaN"
+
+        - name: infinity_positive
+          code: "Infinity"
+          expect:
+            success: true
+            result: "Infinity"  # String representation for AI visibility
+            result_type: number
+            note_contains: "Infinity"
+
+        - name: infinity_negative
+          code: "-Infinity"
+          expect:
+            success: true
+            result: "-Infinity"  # String representation for AI visibility
+            result_type: number
+            note_contains: "-Infinity"
+
+        - name: negative_zero
+          code: "-0"
+          expect:
+            success: true
+            result: "-0"  # String representation for AI visibility
+            result_type: number
+            note_contains: "negative zero"
+
+    objects:
+      description: Object and array serialization
+      tests:
+        - name: plain_object
+          code: "({a: 1, b: 2})"
+          expect:
+            success: true
+            result_type: object
+
+        - name: nested_object
+          code: "({outer: {inner: 'value'}})"
+          expect:
+            success: true
+            result_type: object
+
+        - name: empty_object
+          code: "({})"
+          expect:
+            success: true
+            result_type: object
+
+        - name: array_simple
+          code: "[1, 2, 3]"
+          expect:
+            success: true
+            result: [1, 2, 3]
+            result_type: array
+
+        - name: array_empty
+          code: "[]"
+          expect:
+            success: true
+            result: []
+            result_type: array
+
+        - name: array_mixed_types
+          code: "[1, 'two', true, null]"
+          expect:
+            success: true
+            result_type: array
+
+        - name: object_with_array
+          code: "({items: [1, 2, 3]})"
+          expect:
+            success: true
+            result_type: object
+
+    promises:
+      description: Promise auto-await behavior
+      tests:
+        - name: promise_resolved_number
+          code: "Promise.resolve(42)"
+          expect:
+            success: true
+            result: 42
+            result_type: number
+
+        - name: promise_resolved_object
+          code: "Promise.resolve({status: 'ok'})"
+          expect:
+            success: true
+            result_type: object
+
+        - name: promise_chain
+          code: "Promise.resolve(1).then(x => x + 1).then(x => x * 2)"
+          expect:
+            success: true
+            result: 4
+            result_type: number
+
+        - name: promise_all
+          code: "Promise.all([Promise.resolve(1), Promise.resolve(2), Promise.resolve(3)])"
+          expect:
+            success: true
+            result: [1, 2, 3]
+            result_type: array
+
+        - name: async_iife
+          code: "(async () => { return 'async result'; })()"
+          expect:
+            success: true
+            result: "async result"
+            result_type: string
+
+        - name: promise_rejected
+          code: "Promise.reject(new Error('test error'))"
+          expect:
+            success: false
+            error_type: execution
+
+    special_types:
+      description: JavaScript types that need special serialization
+      tests:
+        - name: bigint_small
+          code: "BigInt(42)"
+          expect:
+            success: true
+            result: "42"
+            result_type: bigint
+
+        - name: bigint_large
+          code: "BigInt('9007199254740993')"
+          expect:
+            success: true
+            result: "9007199254740993"
+            result_type: bigint
+
+        - name: symbol
+          code: "Symbol('test')"
+          expect:
+            success: true
+            result: "Symbol(test)"
+            result_type: symbol
+
+        - name: date_object
+          code: "new Date('2024-01-15T12:00:00Z')"
+          expect:
+            success: true
+            result_type: string  # Date.toJSON() returns ISO string
+            result: "2024-01-15T12:00:00.000Z"
+
+        - name: regexp
+          code: "/test\\d+/gi"
+          expect:
+            success: true
+            result_type: string  # RegExp serializes to string representation
+            result: "/test\\d+/gi"
+
+        - name: map_object
+          code: "new Map([['a', 1], ['b', 2]])"
+          expect:
+            success: true
+            result_type: object
+
+        - name: set_object
+          code: "new Set([1, 2, 3])"
+          expect:
+            success: true
+            result_type: object
+
+        - name: weakmap
+          code: "new WeakMap()"
+          expect:
+            success: true
+            result: null
+            result_type: unserializable
+            note_contains: "WeakMap"
+
+        - name: weakset
+          code: "new WeakSet()"
+          expect:
+            success: true
+            result: null
+            result_type: unserializable
+            note_contains: "WeakSet"
+
+        - name: error_object
+          code: "new Error('test message')"
+          expect:
+            success: true
+            result_type: error
+            # result contains {name: "Error", message: "test message", stack: "..."}
+
+        - name: type_error_object
+          code: "new TypeError('type error message')"
+          expect:
+            success: true
+            result_type: error
+
+        - name: arraybuffer
+          code: "new ArrayBuffer(16)"
+          expect:
+            success: true
+            result: null
+            result_type: unserializable
+            note_contains: "ArrayBuffer"
+
+        - name: blob
+          code: "new Blob(['hello'], {type: 'text/plain'})"
+          expect:
+            success: true
+            result: null
+            result_type: unserializable
+            note_contains: "Blob"
+
+        - name: generator
+          code: "(function* () { yield 1; yield 2; })()"
+          expect:
+            success: true
+            result: null
+            result_type: unserializable
+            note_contains: "Generator"
+
+        # Nested special values - SMCP exceeds CiC by preserving these
+        - name: object_with_nan
+          code: "({x: NaN, y: 1})"
+          expect:
+            success: true
+            result_type: object
+            # result should be {x: "[NaN]", y: 1}
+
+        - name: array_with_special_numbers
+          code: "[1, NaN, Infinity, -Infinity, -0]"
+          expect:
+            success: true
+            result_type: array
+            # result should be [1, "[NaN]", "[Infinity]", "[-Infinity]", "[-0]"]
+
+        - name: nested_object_with_infinity
+          code: "({outer: {inner: Infinity}})"
+          expect:
+            success: true
+            result_type: object
+            # result should be {outer: {inner: "[Infinity]"}}
+
+    edge_cases:
+      description: Complex edge cases and serialization challenges
+      tests:
+        - name: circular_reference
+          code: "(() => { const o = {a: 1}; o.self = o; return o; })()"
+          expect:
+            success: true
+            result_type: object
+            # Circular refs replaced with "[Circular Reference]" in result value
+
+        - name: deeply_nested
+          code: "({l1: {l2: {l3: {l4: {l5: 'deep'}}}}})"
+          expect:
+            success: true
+            result_type: object
+
+        - name: function_value
+          code: "function test() { return 42; }"
+          expect:
+            success: true
+            result_type: function
+            note_contains: "cannot be serialized"
+
+        - name: array_with_holes
+          code: "[1, , , 4]"
+          expect:
+            success: true
+            result_type: array
+
+        - name: object_with_undefined_value
+          code: "({a: 1, b: undefined, c: 3})"
+          expect:
+            success: true
+            result_type: object
+            # Note: b key may be omitted or null depending on serialization
+
+    errors:
+      description: Error handling and edge cases
+      tests:
+        - name: syntax_error
+          code: "function() {"
+          expect:
+            success: false
+            error_type: execution
+
+        - name: reference_error
+          code: "nonExistentVariable"
+          expect:
+            success: false
+            error_type: execution
+
+        - name: type_error
+          code: "null.property"
+          expect:
+            success: false
+            error_type: execution
+
+        - name: throw_error
+          code: "throw new Error('intentional error')"
+          expect:
+            success: false
+            error_type: execution
+
+        - name: throw_string
+          code: "throw 'string error'"
+          expect:
+            success: false
+            error_type: execution
+
+# =============================================================================
+# DOM TESTS (require HTML fixture)
+# =============================================================================
+
+dom_basic:
+  description: Basic DOM operations
+  fixture: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Test Page</title>
+      <style>
+        .highlight { color: red; font-weight: bold; }
+        #hidden { display: none; }
+      </style>
+    </head>
+    <body>
+      <h1 id="header">Hello World</h1>
+      <p id="paragraph" class="content highlight">Test paragraph with <strong>bold</strong> text.</p>
+      <div id="hidden">Hidden content</div>
+      <ul id="list">
+        <li class="item">Item 1</li>
+        <li class="item">Item 2</li>
+        <li class="item">Item 3</li>
+      </ul>
+      <input type="text" id="input" value="default value" />
+      <button id="button" disabled>Click me</button>
+      <a id="link" href="https://example.com">Example Link</a>
+    </body>
+    </html>
+
+  categories:
+    element_selection:
+      description: DOM element selection methods
+      tests:
+        - name: get_element_by_id
+          code: "document.getElementById('header').textContent"
+          expect:
+            success: true
+            result: "Hello World"
+            result_type: string
+
+        - name: query_selector_id
+          code: "document.querySelector('#header').textContent"
+          expect:
+            success: true
+            result: "Hello World"
+            result_type: string
+
+        - name: query_selector_class
+          code: "document.querySelector('.content').id"
+          expect:
+            success: true
+            result: "paragraph"
+            result_type: string
+
+        - name: query_selector_all_count
+          code: "document.querySelectorAll('.item').length"
+          expect:
+            success: true
+            result: 3
+            result_type: number
+
+        - name: query_selector_not_found
+          code: "document.querySelector('#nonexistent')"
+          expect:
+            success: true
+            result: null
+            result_type: "null"
+
+        - name: query_selector_all_empty
+          code: "document.querySelectorAll('.nonexistent').length"
+          expect:
+            success: true
+            result: 0
+            result_type: number
+
+    element_properties:
+      description: Reading element properties and attributes
+      tests:
+        - name: inner_html
+          code: "document.getElementById('paragraph').innerHTML"
+          expect:
+            success: true
+            result_type: string
+
+        - name: text_content
+          code: "document.getElementById('paragraph').textContent"
+          expect:
+            success: true
+            result_type: string
+
+        - name: tag_name
+          code: "document.getElementById('header').tagName"
+          expect:
+            success: true
+            result: "H1"
+            result_type: string
+
+        - name: class_name
+          code: "document.getElementById('paragraph').className"
+          expect:
+            success: true
+            result: "content highlight"
+            result_type: string
+
+        - name: attribute_href
+          code: "document.getElementById('link').getAttribute('href')"
+          expect:
+            success: true
+            result: "https://example.com"
+            result_type: string
+
+        - name: input_value
+          code: "document.getElementById('input').value"
+          expect:
+            success: true
+            result: "default value"
+            result_type: string
+
+        - name: button_disabled
+          code: "document.getElementById('button').disabled"
+          expect:
+            success: true
+            result: true
+            result_type: boolean
+
+    dom_traversal:
+      description: Navigating DOM hierarchy
+      tests:
+        - name: parent_element
+          code: "document.querySelector('.item').parentElement.id"
+          expect:
+            success: true
+            result: "list"
+            result_type: string
+
+        - name: children_count
+          code: "document.getElementById('list').children.length"
+          expect:
+            success: true
+            result: 3
+            result_type: number
+
+        - name: first_child_text
+          code: "document.getElementById('list').firstElementChild.textContent"
+          expect:
+            success: true
+            result: "Item 1"
+            result_type: string
+
+        - name: next_sibling
+          code: "document.querySelector('.item').nextElementSibling.textContent"
+          expect:
+            success: true
+            result: "Item 2"
+            result_type: string
+
+    dom_serialization:
+      description: DOM nodes cannot be directly serialized
+      tests:
+        - name: element_direct
+          code: "document.getElementById('header')"
+          expect:
+            success: true
+            result_type: unserializable
+            note_contains: "DOM"
+
+        - name: node_list
+          code: "document.querySelectorAll('.item')"
+          expect:
+            success: true
+            result_type: unserializable
+            note_contains: "DOM"
+
+    page_info:
+      description: Document and window properties
+      tests:
+        - name: document_title
+          code: "document.title"
+          expect:
+            success: true
+            result: "Test Page"
+            result_type: string
+
+        - name: body_exists
+          code: "document.body !== null"
+          expect:
+            success: true
+            result: true
+            result_type: boolean
+
+        - name: location_protocol
+          code: "location.protocol"
+          expect:
+            success: true
+            result: "data:"
+            result_type: string
+
+# =============================================================================
+# TIMEOUT TESTS (need separate handling)
+# =============================================================================
+
+timeout_tests:
+  description: Tests that verify timeout behavior
+  page: about:blank
+  note: These tests are expected to timeout - run with appropriate timeout settings
+
+  categories:
+    timeout:
+      description: Operations that exceed timeout
+      tests:
+        - name: infinite_loop
+          code: "while(true) {}"
+          timeout_ms: 1000
+          expect:
+            success: false
+            error_type: timeout
+
+        - name: never_resolving_promise
+          code: "new Promise(() => {})"
+          timeout_ms: 1000
+          expect:
+            success: false
+            error_type: timeout
+
+        - name: long_delay
+          code: "new Promise(r => setTimeout(r, 10000))"
+          timeout_ms: 1000
+          expect:
+            success: false
+            error_type: timeout

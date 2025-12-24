@@ -373,3 +373,43 @@ class NetworkCapture(pydantic.BaseModel):
     requests_by_type: dict[str, int] = {}  # {document: 1, xhr: 5, ...}
 
     errors: list[str] = []
+
+
+# =============================================================================
+# JavaScript Execution Models
+# =============================================================================
+
+# Constrained types for JavaScript execution results
+JavaScriptResultType = Literal[
+    "string",
+    "number",
+    "boolean",
+    "object",
+    "array",
+    "null",
+    "undefined",
+    "bigint",
+    "symbol",
+    "function",
+    "error",
+    "unserializable",
+]
+
+JavaScriptErrorType = Literal["timeout", "execution"]
+
+
+class JavaScriptResult(BaseModel):
+    """Result of JavaScript execution in browser context.
+
+    Contains the execution outcome with typed result and error details.
+    The result field holds JSON-serializable values; non-serializable values
+    (DOM nodes, functions, etc.) return null with result_type explaining why.
+    """
+
+    success: bool
+    result: str | int | float | bool | dict | list | None = None
+    result_type: JavaScriptResultType
+    error: str | None = None
+    error_type: JavaScriptErrorType | None = None
+    error_stack: str | None = None  # JS stack trace for debugging
+    note: str | None = None  # Explanation for special cases (e.g., why result is null)
