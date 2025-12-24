@@ -61,6 +61,7 @@ from src.models import (
     NetworkCapture,
     NetworkRequest,
     RequestTiming,
+    JavaScriptResult,
 )
 
 
@@ -375,9 +376,10 @@ def register_tools(service: BrowserService) -> None:
         For performance investigation:
             Call start_network_capture() BEFORE navigate() to measure page load timing.
         """
-        if not url.startswith(("http://", "https://", "file://")):
+        valid_prefixes = ("http://", "https://", "file://", "about:", "data:")
+        if not url.startswith(valid_prefixes):
             raise fastmcp.exceptions.ValidationError(
-                "URL must start with http://, https://, or file://"
+                "URL must start with http://, https://, file://, about:, or data:"
             )
 
         if enable_har_capture and not fresh_browser:
@@ -2596,6 +2598,309 @@ Workflow:
         service.state.proxy_config = None
 
         return {"status": "proxy_cleared"}
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Execute JavaScript",
+            readOnlyHint=False,
+            idempotentHint=False,
+        )
+    )
+    async def execute_javascript(
+        code: str,
+        ctx: Context,
+        timeout_ms: int = 5000,
+    ) -> JavaScriptResult:
+        """Execute JavaScript in the browser and return the result.
+
+        Evaluates a JavaScript expression in the current page context.
+        For multiple statements, wrap in an IIFE (Immediately Invoked Function Expression).
+
+        Args:
+            code: JavaScript expression to evaluate.
+                  For multiple statements: (() => { const x = 1; return x; })()
+            timeout_ms: Maximum execution time in milliseconds. 0 disables timeout. Default: 5000.
+
+        Returns:
+            JavaScriptResult with success status, typed result, and error details if failed.
+
+        Examples:
+            # Simple expression
+            execute_javascript(code="document.title")
+
+            # Object literal (parentheses required)
+            execute_javascript(code="({url: location.href, links: document.links.length})")
+
+            # Next.js data extraction
+            execute_javascript(code="JSON.parse(document.getElementById('__NEXT_DATA__')?.textContent || '{}')")
+
+            # Async/Promise (automatically awaited)
+            execute_javascript(code="fetch('/api').then(r => r.json())")
+
+            # Multiple statements with IIFE
+            execute_javascript(code="(() => { const el = document.querySelector('h1'); return el?.textContent; })()")
+
+            # Install fetch interceptor
+            execute_javascript(code='''(() => {
+                window.__fetchCapture = [];
+                const orig = window.fetch;
+                window.fetch = async (...args) => {
+                    window.__fetchCapture.push({url: args[0], time: Date.now()});
+                    return orig.apply(window, args);
+                };
+                return "interceptor installed";
+            })()''')
+
+        Notes:
+            - Promises are automatically awaited
+            - DOM nodes and functions cannot be serialized (return null with explanation)
+            - BigInt and Symbol are converted to strings
+            - Map → object, Set → array, circular references → "[Circular Reference]"
+            - Sites with strict CSP may block execution
+        """
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        await logger.info(f"Executing JavaScript ({len(code)} chars)")
+
+        # JavaScript wrapper with comprehensive serialization handling
+        # Key design decisions:
+        # 1. safeSerialize handles all JS types that JSON.stringify can't
+        # 2. Thenable detection uses typeof check (more robust than instanceof for cross-context)
+        # 3. WeakSet tracks seen objects to detect circular references
+        # 4. User code is wrapped in new Function to provide arguments access
+        wrapper_script = '''
+(async function(__userCode) {
+    // Helper to safely serialize any JavaScript value to JSON-compatible format
+    function safeSerialize(value) {
+        // Handle primitives and special types before JSON.stringify
+        if (value === undefined) {
+            return { success: true, result: null, result_type: 'undefined' };
+        }
+        if (value === null) {
+            return { success: true, result: null, result_type: 'null' };
+        }
+        if (typeof value === 'function') {
+            return { success: true, result: null, result_type: 'function', note: 'Functions cannot be serialized' };
+        }
+        if (typeof value === 'symbol') {
+            return { success: true, result: value.toString(), result_type: 'symbol' };
+        }
+        if (typeof value === 'bigint') {
+            return { success: true, result: value.toString(), result_type: 'bigint' };
+        }
+        // Handle special number values that JSON.stringify converts to null
+        // Return string representations for AI visibility (matches CiC behavior)
+        if (typeof value === 'number') {
+            if (Number.isNaN(value)) {
+                return { success: true, result: 'NaN', result_type: 'number', note: 'Value is NaN (not serializable to JSON)' };
+            }
+            if (!Number.isFinite(value)) {
+                const repr = value > 0 ? 'Infinity' : '-Infinity';
+                return { success: true, result: repr, result_type: 'number', note: `Value is ${repr} (not serializable to JSON)` };
+            }
+            if (Object.is(value, -0)) {
+                return { success: true, result: '-0', result_type: 'number', note: 'Value is negative zero (-0)' };
+            }
+        }
+        // DOM nodes cannot be serialized
+        if (typeof Node !== 'undefined' && value instanceof Node) {
+            return { success: true, result: null, result_type: 'unserializable', note: 'DOM nodes cannot be serialized' };
+        }
+        // Window object check (common mistake)
+        if (typeof Window !== 'undefined' && value instanceof Window) {
+            return { success: true, result: null, result_type: 'unserializable', note: 'Window object cannot be serialized' };
+        }
+        // RegExp converts to string representation
+        if (value instanceof RegExp) {
+            return { success: true, result: value.toString(), result_type: 'string' };
+        }
+        // Date converts to ISO string
+        if (value instanceof Date) {
+            return { success: true, result: value.toISOString(), result_type: 'string' };
+        }
+        // Map converts to object
+        if (value instanceof Map) {
+            return safeSerialize(Object.fromEntries(value));
+        }
+        // Set converts to array
+        if (value instanceof Set) {
+            return safeSerialize([...value]);
+        }
+        // WeakMap and WeakSet cannot be serialized - entries are non-enumerable by design
+        // This is an ECMAScript specification constraint to prevent observable non-determinism from GC
+        if (value instanceof WeakMap) {
+            return { success: true, result: null, result_type: 'unserializable', note: 'WeakMap entries cannot be enumerated or serialized. WeakMap is designed for internal object metadata and deliberately prevents access to its contents.' };
+        }
+        if (value instanceof WeakSet) {
+            return { success: true, result: null, result_type: 'unserializable', note: 'WeakSet entries cannot be enumerated or serialized. WeakSet is designed for tracking object membership and deliberately prevents access to its contents.' };
+        }
+        // Error objects - extract message, name, stack (would otherwise serialize to {})
+        if (value instanceof Error) {
+            return {
+                success: true,
+                result: { name: value.name, message: value.message, stack: value.stack || null },
+                result_type: 'error'
+            };
+        }
+        // ArrayBuffer cannot be directly serialized
+        if (value instanceof ArrayBuffer) {
+            return { success: true, result: null, result_type: 'unserializable', note: 'ArrayBuffer cannot be directly serialized. Use TypedArray (e.g., new Uint8Array(buffer)) to access contents.' };
+        }
+        // Blob contents require async reading
+        if (typeof Blob !== 'undefined' && value instanceof Blob) {
+            return { success: true, result: null, result_type: 'unserializable', note: 'Blob contents require async reading via blob.text() or blob.arrayBuffer().' };
+        }
+        // Generator objects cannot be serialized (have next() and Symbol.iterator)
+        if (value && typeof value.next === 'function' && typeof value[Symbol.iterator] === 'function') {
+            return { success: true, result: null, result_type: 'unserializable', note: 'Generator state cannot be serialized. Consume the generator and return the values instead.' };
+        }
+
+        // For objects and arrays, use JSON.stringify with circular reference detection
+        const seen = new WeakSet();
+        try {
+            const serialized = JSON.stringify(value, function(key, val) {
+                // Handle BigInt in nested objects
+                if (typeof val === 'bigint') {
+                    return val.toString();
+                }
+                // Handle special number values that JSON.stringify converts to null
+                if (typeof val === 'number') {
+                    if (Number.isNaN(val)) return '[NaN]';
+                    if (!Number.isFinite(val)) return val > 0 ? '[Infinity]' : '[-Infinity]';
+                    if (Object.is(val, -0)) return '[-0]';
+                }
+                // Detect circular references
+                if (typeof val === 'object' && val !== null) {
+                    if (seen.has(val)) {
+                        return '[Circular Reference]';
+                    }
+                    seen.add(val);
+                }
+                return val;
+            });
+
+            // Parse back to get clean object (removes undefined values, etc.)
+            const result = JSON.parse(serialized);
+            const resultType = Array.isArray(value) ? 'array' : typeof value;
+            return { success: true, result: result, result_type: resultType };
+        } catch (e) {
+            // JSON.stringify failed (shouldn't happen after our checks, but be safe)
+            return { success: true, result: null, result_type: 'unserializable', note: e.message };
+        }
+    }
+
+    try {
+        // Try expression form first (most common case)
+        // This handles: 1 + 1, document.title, Promise.resolve(42), () => value
+        let result;
+
+        try {
+            const exprFn = new Function('return (' + __userCode + ')');
+            result = exprFn();
+        } catch (parseErr) {
+            if (parseErr instanceof SyntaxError) {
+                // Expression parsing failed, try as statement block
+                // This handles: throw new Error(), if/for/while, var x = 1
+                const stmtFn = new Function(__userCode);
+                result = stmtFn();  // undefined for statements without return
+            } else {
+                throw parseErr;  // Re-throw non-syntax errors
+            }
+        }
+
+        // Auto-await if result is thenable (Promise or Promise-like)
+        // Use typeof check instead of instanceof for cross-context compatibility
+        if (result && typeof result.then === 'function') {
+            result = await result;
+        }
+
+        return safeSerialize(result);
+    } catch (e) {
+        return {
+            success: false,
+            result: null,
+            result_type: 'unserializable',
+            error: e.message || String(e),
+            error_stack: e.stack || null,
+            error_type: 'execution'
+        };
+    }
+})
+'''
+
+        # Escape user code as JSON string to prevent injection
+        # json.dumps handles quotes, backslashes, newlines, etc.
+        escaped_code = json.dumps(code)
+
+        # Build the async wrapper for Selenium's execute_async_script
+        # The callback is always the last argument provided by Selenium
+        async_script = f'''
+const callback = arguments[arguments.length - 1];
+const userCode = {escaped_code};
+
+{wrapper_script}(userCode)
+    .then(function(result) {{
+        callback(result);
+    }})
+    .catch(function(e) {{
+        callback({{
+            success: false,
+            error: e.message || String(e),
+            error_type: 'execution'
+        }});
+    }});
+'''
+
+        try:
+            # Use asyncio.wait_for for Python-side timeout
+            # timeout_ms=0 means no timeout (wait indefinitely)
+            if timeout_ms > 0:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(driver.execute_async_script, async_script),
+                    timeout=timeout_ms / 1000
+                )
+            else:
+                result = await asyncio.to_thread(
+                    driver.execute_async_script, async_script
+                )
+
+            # Log result type for debugging
+            result_type = result.get('result_type', 'unknown') if isinstance(result, dict) else 'unknown'
+            success = result.get('success', False) if isinstance(result, dict) else False
+
+            if success:
+                await logger.info(f"JS execution successful: {result_type}")
+            else:
+                error = result.get('error', 'Unknown error') if isinstance(result, dict) else 'Unknown error'
+                await logger.info(f"JS execution failed: {error}")
+
+            return JavaScriptResult(**result)
+
+        except asyncio.TimeoutError:
+            await logger.info(f"JS execution timed out after {timeout_ms}ms")
+            return JavaScriptResult(
+                success=False,
+                result_type="unserializable",
+                error=f"Execution exceeded {timeout_ms}ms timeout",
+                error_type="timeout",
+            )
+        except WebDriverException as e:
+            await logger.info(f"JS execution WebDriver error: {e}")
+            return JavaScriptResult(
+                success=False,
+                result_type="unserializable",
+                error=str(e),
+                error_type="execution",
+            )
+        except Exception as e:
+            await logger.info(f"JS execution unexpected error: {e}")
+            return JavaScriptResult(
+                success=False,
+                result_type="unserializable",
+                error=str(e),
+                error_type="execution",
+            )
 
 
 @asynccontextmanager

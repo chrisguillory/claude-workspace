@@ -25,35 +25,35 @@ releases, so gaps should be addressed proactively.
 
 ### Feature Summary
 
-| Capability                       |      CiC      |   SMCP   | Notes                                             |
-|----------------------------------|:-------------:|:--------:|---------------------------------------------------|
-| Text extraction (hidden content) |       ✓       |    ✓     | Both extract display:none, visibility:hidden, etc |
-| Text extraction (Shadow DOM)     |       -       |    ✓     | **Advantage**: Traverses web component shadows    |
-| Text extraction (filtering)      |       -       |    ✓     | **Advantage**: Filters SCRIPT/STYLE noise         |
-| JavaScript execution             |       ✓       | **Gap**  | P1: Chrome can run ad-hoc JS for debugging        |
-| Console log access               |       ✓       | **Gap**  | P1: Chrome reads `console.log/error/warn`         |
-| Core Web Vitals                  |       -       |    ✓     | **Advantage**: LCP, CLS, INP, FCP, TTFB           |
-| HAR export                       |       -       |    ✓     | **Advantage**: Full network traffic logging       |
-| Proxy/IP rotation                |       -       |    ✓     | **Advantage**: Rate limit bypass                  |
-| Network timing details           |     Basic     |    ✓     | **Advantage**: DNS, connect, TLS breakdown        |
-| Chrome profiles                  | Via extension |    ✓     | **Advantage**: Direct profile access              |
-| GIF recording                    |       ✓       | **Gap**  | P3: Low priority                                  |
-| Natural language find            |       ✓       |    -     | Chrome's `find` tool uses semantic matching       |
+| Capability                       |      CiC      |  SMCP   | Notes                                                    |
+|----------------------------------|:-------------:|:-------:|----------------------------------------------------------|
+| Text extraction (hidden content) |       ✓       |    ✓    | Both extract display:none, visibility:hidden, etc        |
+| Text extraction (Shadow DOM)     |       -       |    ✓    | **Advantage**: Traverses web component shadows           |
+| Text extraction (filtering)      |       -       |    ✓    | **Advantage**: Filters SCRIPT/STYLE noise                |
+| JavaScript execution             |       ✓       |    ✓    | **Parity**: Both execute JS; SMCP adds statement support |
+| Console log access               |       ✓       | **Gap** | P1: Chrome reads `console.log/error/warn`                |
+| Core Web Vitals                  |       -       |    ✓    | **Advantage**: LCP, CLS, INP, FCP, TTFB                  |
+| HAR export                       |       -       |    ✓    | **Advantage**: Full network traffic logging              |
+| Proxy/IP rotation                |       -       |    ✓    | **Advantage**: Rate limit bypass                         |
+| Network timing details           |     Basic     |    ✓    | **Advantage**: DNS, connect, TLS breakdown               |
+| Chrome profiles                  | Via extension |    ✓    | **Advantage**: Direct profile access                     |
+| GIF recording                    |       ✓       | **Gap** | P3: Low priority                                         |
+| Natural language find            |       ✓       |    -    | Chrome's `find` tool uses semantic matching              |
 
 ### CiC Advantages (Gaps to Close)
 
 Capabilities where Claude in Chrome exceeds us:
 
-| Capability                | What CiC Provides                                          | Priority |
-|---------------------------|------------------------------------------------------------|:--------:|
-| ~~**Text Extraction**~~   | ~~Captures all text including hidden content~~ ✅ CLOSED   |  ~~P0~~  |
-| **ARIA Whitespace**       | Properly normalized accessible names                       |    P0    |
-| **JavaScript Execution**  | Run ad-hoc JS for debugging (`javascript_tool`)            |    P1    |
-| **Console Log Access**    | Read browser console (`read_console_messages`)             |    P1    |
-| **Form Input**            | Set form values by element reference                       |    P2    |
-| **Window Resize**         | Set browser dimensions for responsive testing              |    P2    |
-| **GIF Recording**         | Record interactions as animated GIF                        |    P3    |
-| **Natural Language Find** | Find elements by semantic description                      |    -     |
+| Capability                   | What CiC Provides                                            | Priority |
+|------------------------------|--------------------------------------------------------------|:--------:|
+| ~~**Text Extraction**~~      | ~~Captures all text including hidden content~~ ✅ CLOSED      |  ~~P0~~  |
+| **ARIA Whitespace**          | Properly normalized accessible names                         |    P0    |
+| ~~**JavaScript Execution**~~ | ~~Run ad-hoc JS for debugging (`javascript_tool`)~~ ✅ CLOSED |  ~~P1~~  |
+| **Console Log Access**       | Read browser console (`read_console_messages`)               |    P1    |
+| **Form Input**               | Set form values by element reference                         |    P2    |
+| **Window Resize**            | Set browser dimensions for responsive testing                |    P2    |
+| **GIF Recording**            | Record interactions as animated GIF                          |    P3    |
+| **Natural Language Find**    | Find elements by semantic description                        |    -     |
 
 ### SMCP Advantages
 
@@ -181,33 +181,66 @@ CiC uses **implicit smart extraction** without metadata. If it finds any `<artic
 
 How CiC tools map to SMCP tools:
 
-| CiC Tool(s)             | SMCP Tool(s)                                    |   Type    | Notes                                                                    |
-|-------------------------|-------------------------------------------------|:---------:|--------------------------------------------------------------------------|
-| `navigate`              | `navigate`                                      |    1:1    | SMCP adds `fresh_browser`, `profile`, `enable_har_capture` params        |
-| `get_page_text`         | `get_page_text`                                 |  Exceeds  | SMCP adds: Shadow DOM traversal, SCRIPT/STYLE filtering, structured output |
-| `read_page`             | `get_aria_snapshot`                             |    1:1    | CiC returns ref-based tree; SMCP returns YAML tree                       |
-| `find`                  | -                                               |    Gap    | CiC uses natural language; SMCP alternative: `get_interactive_elements`  |
-| `computer`              | `click`, `press_key`, `type_text`, `screenshot` |   1:N     | CiC unified tool; SMCP gaps: scroll, hover, zoom, drag, wait             |
-| `form_input`            | -                                               |    Gap    | P2: Set form values by element reference ID from `read_page`             |
-| `javascript_tool`       | -                                               |    Gap    | P1: Execute arbitrary JavaScript in page context for debugging           |
-| `read_console_messages` | -                                               |    Gap    | P1: Read console.log/error/warn messages with pattern filtering          |
+| CiC Tool(s)             | SMCP Tool(s)                                    |   Type    | Notes                                                                                                     |
+|-------------------------|-------------------------------------------------|:---------:|-----------------------------------------------------------------------------------------------------------|
+| `navigate`              | `navigate`                                      |    1:1    | SMCP adds `fresh_browser`, `profile`, `enable_har_capture` params                                         |
+| `get_page_text`         | `get_page_text`                                 |  Exceeds  | SMCP adds: Shadow DOM traversal, SCRIPT/STYLE filtering, structured output                                |
+| `read_page`             | `get_aria_snapshot`                             |    1:1    | CiC returns ref-based tree; SMCP returns YAML tree                                                        |
+| `find`                  | -                                               |    Gap    | CiC uses natural language; SMCP alternative: `get_interactive_elements`                                   |
+| `computer`              | `click`, `press_key`, `type_text`, `screenshot` |    1:N    | CiC unified tool; SMCP gaps: scroll, hover, zoom, drag, wait                                              |
+| `form_input`            | -                                               |    Gap    | P2: Set form values by element reference ID from `read_page`                                              |
+| `javascript_tool`       | `execute_javascript`                            |  Exceeds  | See [JavaScript Execution Comparison](#javascript-execution-comparison)                                   |
+| `read_console_messages` | -                                               |    Gap    | P1: Read console.log/error/warn messages with pattern filtering                                           |
 | `read_network_requests` | `start_network_capture` + `get_network_timings` |    1:2    | CiC single call; SMCP 2-step (enable capture, then retrieve with detailed DNS/connect/TLS/TTFB breakdown) |
-| `resize_window`         | -                                               |    Gap    | P2: Set browser window dimensions for responsive testing                 |
-| `gif_creator`           | -                                               |    Gap    | P3: Record browser interactions as animated GIF                          |
-| `upload_image`          | -                                               |    Gap    | Upload screenshot to file input or drag-drop target                       |
-| `update_plan`           | N/A                                             |    UI     | CiC user approval flow; SMCP doesn't need (different permission model)   |
-| `shortcuts_*`           | N/A                                             |    UI     | CiC extension shortcuts; not applicable to SMCP                          |
-| `tabs_*`                | N/A                                             |   Arch    | CiC manages tab groups; SMCP uses single browser with shared session     |
-| -                       | `get_interactive_elements`                      | SMCP-only | Find clickable elements by CSS selector or text content                  |
-| -                       | `get_focusable_elements`                        | SMCP-only | Get keyboard-navigable elements sorted by tab order                      |
-| -                       | `wait_for_network_idle`                         | SMCP-only | Wait for network activity to settle after navigation or clicks           |
-| -                       | `capture_web_vitals`                            | SMCP-only | LCP, CLS, INP, FCP, TTFB with good/needs-improvement/poor ratings        |
-| -                       | `export_har`                                    | SMCP-only | Export network traffic to HAR 1.2 format for DevTools analysis           |
-| -                       | `configure_proxy`, `clear_proxy`                | SMCP-only | Configure/clear authenticated proxy via mitmproxy for IP rotation        |
-| -                       | `download_resource`                             | SMCP-only | Download files using browser session cookies (bypasses bot detection)    |
-| -                       | `list_chrome_profiles`                          | SMCP-only | List available Chrome profiles with name, email, directory metadata      |
+| `resize_window`         | -                                               |    Gap    | P2: Set browser window dimensions for responsive testing                                                  |
+| `gif_creator`           | -                                               |    Gap    | P3: Record browser interactions as animated GIF                                                           |
+| `upload_image`          | -                                               |    Gap    | Upload screenshot to file input or drag-drop target                                                       |
+| `update_plan`           | N/A                                             |    UI     | CiC user approval flow; SMCP doesn't need (different permission model)                                    |
+| `shortcuts_*`           | N/A                                             |    UI     | CiC extension shortcuts; not applicable to SMCP                                                           |
+| `tabs_*`                | N/A                                             |   Arch    | CiC manages tab groups; SMCP uses single browser with shared session                                      |
+| -                       | `get_interactive_elements`                      | SMCP-only | Find clickable elements by CSS selector or text content                                                   |
+| -                       | `get_focusable_elements`                        | SMCP-only | Get keyboard-navigable elements sorted by tab order                                                       |
+| -                       | `wait_for_network_idle`                         | SMCP-only | Wait for network activity to settle after navigation or clicks                                            |
+| -                       | `capture_web_vitals`                            | SMCP-only | LCP, CLS, INP, FCP, TTFB with good/needs-improvement/poor ratings                                         |
+| -                       | `export_har`                                    | SMCP-only | Export network traffic to HAR 1.2 format for DevTools analysis                                            |
+| -                       | `configure_proxy`, `clear_proxy`                | SMCP-only | Configure/clear authenticated proxy via mitmproxy for IP rotation                                         |
+| -                       | `download_resource`                             | SMCP-only | Download files using browser session cookies (bypasses bot detection)                                     |
+| -                       | `list_chrome_profiles`                          | SMCP-only | List available Chrome profiles with name, email, directory metadata                                       |
 
 See [docs/claude-in-chrome.md](docs/claude-in-chrome.md) for complete Claude in Chrome tool reference.
+
+### JavaScript Execution Comparison
+
+Detailed comparison of `execute_javascript` (SMCP) vs `javascript_tool` (CiC):
+
+| Test Case             | SMCP Result                          | CiC Result                             |  Winner  |
+|-----------------------|--------------------------------------|----------------------------------------|:--------:|
+| `NaN`                 | `"NaN"` + note                       | `NaN` (string)                         |   Tie    |
+| `Infinity`            | `"Infinity"` + note                  | `Infinity` (string)                    |   Tie    |
+| `-0`                  | `"-0"` + note                        | `-0` (string)                          |   Tie    |
+| `Symbol('test')`      | `"Symbol(test)"` string              | **ERROR**: Object couldn't be returned | **SMCP** |
+| Circular reference    | `{a:1, self:"[Circular Reference]"}` | **ERROR**: Reference chain too long    | **SMCP** |
+| `new Error('msg')`    | `{name, message, stack}`             | `{}` (loses all info)                  | **SMCP** |
+| `BigInt(42)`          | `"42"`                               | `42n`                                  |   Tie    |
+| `{x: NaN}`            | `{x: "[NaN]"}`                       | `{x: null}` (loses info)               | **SMCP** |
+| `[1, Infinity, -0]`   | `[1, "[Infinity]", "[-0]"]`          | `[1, null, 0]` (loses info)            | **SMCP** |
+| `new WeakMap()`       | `null` + note explaining why         | `{}` (no explanation)                  | **SMCP** |
+| `new ArrayBuffer(16)` | `null` + note with workaround        | `{}` (no explanation)                  | **SMCP** |
+| `new Blob([...])`     | `null` + note with workaround        | `{}` (no explanation)                  | **SMCP** |
+| Generator             | `null` + note with workaround        | `{}` (no explanation)                  | **SMCP** |
+| `function test()...`  | Works (undefined)                    | Works (undefined)                      |   Tie    |
+| `throw new Error()`   | Works (statement support)            | Works                                  |   Tie    |
+| `about:blank`         | ✓ Supported                          | ✗ Not supported                        | **SMCP** |
+| `data:` URLs          | ✓ Supported                          | ✗ Not supported                        | **SMCP** |
+
+**Summary:**
+- **Tie on special numbers**: Both return string representations (NaN, Infinity, -0); SMCP adds explanatory notes
+- **SMCP advantages**: Symbol handling, circular reference handling, Error object extraction, **nested special values** (`{x: NaN}` → `{x: "[NaN]"}`), explanatory notes for unserializable types, `about:blank`/`data:` URL support
+
+**Design Philosophy:**
+- SMCP uses structured `{success, result, result_type, note}` responses with explanatory notes
+- CiC uses simpler return values but fails silently on edge cases or throws errors
+- SMCP prioritizes **debuggability** - notes explain *why* values can't be serialized and suggest workarounds
 
 ## Navigation Best Practices
 
