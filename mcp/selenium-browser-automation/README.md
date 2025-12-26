@@ -300,12 +300,25 @@ execute_javascript('window.__apiCapture')
 
 ### Gotchas
 
-| Issue | Explanation |
-|-------|-------------|
-| **Timing** | Scripts run BEFORE page scripts. Can't query DOM—use for globals only. |
-| **Stealth properties** | Don't modify `navigator.webdriver`, `navigator.languages`, `navigator.plugins`, `window.chrome`. |
-| **Errors** | Syntax errors fail silently at runtime (check browser console). |
-| **Requires fresh_browser** | Scripts can only be installed with `fresh_browser=True`. |
+| Issue                      | Explanation                                                                                                   |
+|----------------------------|---------------------------------------------------------------------------------------------------------------|
+| **Timing**                 | Scripts run BEFORE page scripts. Can't query DOM—use for globals only.                                        |
+| **Stealth properties**     | Don't modify `navigator.webdriver`, `navigator.languages`, `navigator.plugins`, `window.chrome`.              |
+| **Errors**                 | Syntax errors fail silently at runtime (check browser console).                                               |
+| **Requires fresh_browser** | Scripts can only be installed with `fresh_browser=True`.                                                      |
+| **Fetch only**             | Example above only intercepts `fetch()`. For `XMLHttpRequest`, add a similar wrapper.                         |
+| **No cookie access**       | JS can't read `Cookie` header (browser security). HAR captures more headers but also lacks cookies currently. |
+| **Beacon API**             | `navigator.sendBeacon()` can't be intercepted via JS. HAR captures these requests.                            |
+
+### When to Use JS Interception vs HAR
+
+| Use Case                | Best Approach                                         |
+|-------------------------|-------------------------------------------------------|
+| API reverse engineering | `init_scripts` — real-time access, filter by endpoint |
+| GraphQL/REST analysis   | `init_scripts` — captures request/response bodies     |
+| Performance debugging   | HAR — timing breakdown, server IP, connection reuse   |
+| Complete traffic audit  | HAR — all request types (images, scripts, XHR, fetch) |
+| Browser-set headers     | HAR — captures Referer, User-Agent, sec-ch-ua-*       |
 
 For same-origin URL changes without page reload (preserving JS state), see the soft navigation pattern in `execute_javascript()`.
 
@@ -574,7 +587,7 @@ Selenium MCP Server
 
 ### Process Architecture
 
-```
+`````
 Selenium MCP Server (Python)
 ├── chromedriver (1 process)
 └── Chrome (5-6 processes: main, GPU, renderer, network, utility)
@@ -608,6 +621,8 @@ Compare with Claude in Chrome, which is a browser extension controlling existing
 1. **Performance API** (`get_resource_timings`) - JavaScript API running in page context. Always available, lightweight, provides timing breakdown. Limited to what the Performance API exposes (no headers, no bodies).
 
 2. **Chrome Performance Logging** (`export_har`) - Chrome's internal logging of CDP Network events. Opt-in due to overhead. Provides full HTTP details in HAR format.
+
+**Cookie capture limitation:** Neither system currently captures Cookie/Set-Cookie headers. Chrome's performance logging sanitizes sensitive headers by default. CDP's `Network.requestWillBeSentExtraInfo` event does expose cookies via `associatedCookies`, but implementing this requires a different capture architecture (real-time event correlation vs batch log retrieval). This is a potential future enhancement.
 
 **Why not CDP Network interception?**
 
