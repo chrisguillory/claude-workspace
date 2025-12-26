@@ -1,17 +1,14 @@
-// noinspection JSUnresolvedReference
 /**
  * ARIA accessibility tree snapshot generator.
  * Implements accessible name computation per WAI-ARIA spec.
  *
- * Executed via Selenium's driver.execute_script() which wraps code in an
- * anonymous function. IIFE wrapper makes this valid standalone JavaScript.
+ * Arguments:
+ *   arguments[0]: rootSelector - CSS selector for root element
+ *   arguments[1]: includeUrls - boolean to include href values
  *
- * @param {string} arguments[0] - CSS selector for root element
- * @param {boolean} arguments[1] - Whether to include href values
- * @returns {Object} Hierarchical tree structure with roles, names, and states
+ * Returns:
+ *   Hierarchical tree structure with roles, names, and states
  */
-(function() {
-
 function getAccessibilitySnapshot(rootSelector, includeUrls) {
     const root = document.querySelector(rootSelector);
     if (!root) return null;
@@ -211,5 +208,3 @@ function getAccessibilitySnapshot(rootSelector, includeUrls) {
 }
 
 return getAccessibilitySnapshot(arguments[0], arguments[1]);
-
-}).apply(null, arguments);
