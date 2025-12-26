@@ -214,11 +214,6 @@ class BrowserState:
         self.capture_temp_dir = capture_temp_dir
         self.capture_dir = capture_dir
         self.capture_counter = capture_counter
-        # Network capture state (CDP-based on-demand capture)
-        self.network_capture_enabled = False
-        self.network_capture_start_time: float | None = None
-        self.network_events: list[dict] = []  # Collected CDP events
-        self.network_resource_filter: list[str] | None = None  # Optional resource type filter
         # Proxy configuration for authenticated proxies
         self.proxy_config: dict[str, str] | None = None  # {host, port, username, password}
         self.mitmproxy_process: subprocess.Popen | None = None  # Local mitmproxy for upstream auth
@@ -242,11 +237,6 @@ class BrowserService:
             await asyncio.to_thread(self.state.driver.quit)
             self.state.driver = None
         self.state.current_profile = None
-        # Reset network capture state
-        self.state.network_capture_enabled = False
-        self.state.network_capture_start_time = None
-        self.state.network_events = []
-        self.state.network_resource_filter = None
 
     async def get_browser(self, profile: str | None = None, enable_har_capture: bool = False) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
@@ -375,7 +365,8 @@ def register_tools(service: BrowserService) -> None:
             3. click(selector) - interact with elements
 
         For performance investigation:
-            Call start_network_capture() BEFORE navigate() to measure page load timing.
+            Use get_resource_timings() after navigation to measure page load timing.
+            Use export_har() for detailed HTTP transaction data (requires enable_har_capture=True).
         """
         valid_prefixes = ("http://", "https://", "file://", "about:", "data:")
         if not url.startswith(valid_prefixes):
@@ -1946,95 +1937,30 @@ def register_tools(service: BrowserService) -> None:
 
         return vitals
 
-
     @mcp.tool(
-        description="""Enable network timing capture via CDP.
+        description="""Get resource timing data from the browser's Performance API.
 
-Call this before navigate() or click() to capture network requests.
-Then call get_network_timings() to retrieve the captured data.
-
-Example workflow:
-1. start_network_capture()
-2. navigate(url)
-3. click(selector)  # optional - more requests captured
-4. get_network_timings()  # returns all requests with timing
+Returns timing breakdown for all resources loaded by the page. No setup required -
+the Performance API is always available. Useful for identifying slow resources
+and network bottlenecks.
 
 Args:
-    resource_types: Optional filter (e.g., ["fetch", "xmlhttprequest"]).
-                   If None, captures all resource types.
-
-Returns:
-    Status dict with enabled state and capture start timestamp."""
-    )
-    async def start_network_capture(
-        ctx: Context,
-        resource_types: list[str] | None = None,
-    ) -> dict:
-        logger = PrintLogger(ctx)
-        driver = await service.get_browser()
-
-        if service.state.network_capture_enabled:
-            await logger.info("Network capture already enabled")
-            return {
-                "enabled": True,
-                "capturing_since": service.state.network_capture_start_time,
-                "note": "Already capturing",
-            }
-
-        # Enable CDP Network domain with large buffers for HAR export
-        # Per Perplexity research: Chrome can handle 50MB/resource, 100MB total
-        await asyncio.to_thread(
-            driver.execute_cdp_cmd,
-            "Network.enable",
-            {
-                "maxTotalBufferSize": 100 * 1024 * 1024,  # 100MB total
-                "maxResourceBufferSize": 50 * 1024 * 1024,  # 50MB per resource
-            },
-        )
-
-        # Clear any existing performance entries for clean capture
-        await asyncio.to_thread(
-            driver.execute_script,
-            "performance.clearResourceTimings();",
-        )
-
-        # Update state
-        service.state.network_capture_enabled = True
-        service.state.network_capture_start_time = time.time()
-        service.state.network_events = []
-        service.state.network_resource_filter = (
-            [t.lower() for t in resource_types] if resource_types else None
-        )
-
-        await logger.info(
-            f"Network capture enabled"
-            + (f" (filtering: {resource_types})" if resource_types else "")
-        )
-
-        return {
-            "enabled": True,
-            "capturing_since": service.state.network_capture_start_time,
-            "resource_filter": resource_types,
-        }
-
-    @mcp.tool(
-        description="""Retrieve captured network timing data.
-
-Returns all network requests since start_network_capture() was called,
-with detailed timing breakdown for each request. Useful for identifying
-slow API calls and network bottlenecks.
-
-Args:
-    clear: If True (default), clears captured data after retrieval.
+    clear_resource_timing_buffer: If True, clears the timing buffer after retrieval.
+        Default False (non-destructive). Set True when measuring sequential page loads
+        to avoid mixing entries from previous pages.
     min_duration_ms: Only include requests slower than this threshold (0 = all).
 
 Returns:
     NetworkCapture with requests, timing breakdown, and summary statistics
-    including slowest requests and breakdown by resource type."""
+    including slowest requests and breakdown by resource type.
+
+Note:
+    Browsers maintain a buffer of 150-250 entries. For long sessions or pages
+    with many resources, use clear_resource_timing_buffer=True to prevent data loss."""
     )
-    async def get_network_timings(
+    async def get_resource_timings(
         ctx: Context,
-        clear: bool = True,
+        clear_resource_timing_buffer: bool = False,
         min_duration_ms: int = 0,
     ) -> NetworkCapture:
         logger = PrintLogger(ctx)
@@ -2043,17 +1969,7 @@ Returns:
         start_time = time.time()
         current_url = driver.current_url
 
-        if not service.state.network_capture_enabled:
-            await logger.info("Network capture not enabled - returning empty result")
-            return NetworkCapture(
-                url=current_url,
-                timestamp=time.time(),
-                requests=[],
-                total_requests=0,
-                total_size_bytes=0,
-                total_time_ms=0,
-                errors=["Network capture not enabled. Call start_network_capture() first."],
-            )
+        await logger.info(f"Getting resource timings for {current_url}")
 
         # Collect resource timing via JavaScript Performance API
         # This captures all network requests with detailed timing breakdown
@@ -2081,14 +1997,6 @@ Returns:
         """
 
         raw_entries = await asyncio.to_thread(driver.execute_script, script)
-
-        # Apply resource type filter if set
-        resource_filter = service.state.network_resource_filter
-        if resource_filter:
-            raw_entries = [
-                e for e in raw_entries
-                if e.get("resource_type", "").lower() in resource_filter
-            ]
 
         # Filter by min_duration_ms
         if min_duration_ms > 0:
@@ -2143,7 +2051,7 @@ Returns:
         total_time = max((r.duration_ms or 0) for r in requests) if requests else 0
 
         # Clear resource timing buffer if requested
-        if clear:
+        if clear_resource_timing_buffer:
             await asyncio.to_thread(
                 driver.execute_script,
                 "performance.clearResourceTimings();",

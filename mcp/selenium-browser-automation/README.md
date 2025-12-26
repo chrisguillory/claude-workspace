@@ -191,7 +191,7 @@ How CiC tools map to SMCP tools:
 | `form_input`            | -                                               |    Gap    | P2: Set form values by element reference ID from `read_page`                                              |
 | `javascript_tool`       | `execute_javascript`                            |  Exceeds  | See [JavaScript Execution Comparison](#javascript-execution-comparison)                                   |
 | `read_console_messages` | -                                               |    Gap    | P1: Read console.log/error/warn messages with pattern filtering                                           |
-| `read_network_requests` | `start_network_capture` + `get_network_timings` |    1:2    | CiC single call; SMCP 2-step (enable capture, then retrieve with detailed DNS/connect/TLS/TTFB breakdown) |
+| `read_network_requests` | `get_resource_timings`                          |  Exceeds  | Both single call; SMCP adds detailed DNS/connect/TLS/TTFB breakdown via Performance API |
 | `resize_window`         | -                                               |    Gap    | P2: Set browser window dimensions for responsive testing                                                  |
 | `gif_creator`           | -                                               |    Gap    | P3: Record browser interactions as animated GIF                                                           |
 | `upload_image`          | -                                               |    Gap    | Upload screenshot to file input or drag-drop target                                                       |
@@ -280,19 +280,30 @@ Detailed comparison of `execute_javascript` (SMCP) vs `javascript_tool` (CiC):
 - FCP (First Contentful Paint) - initial render
 - TTFB (Time to First Byte) - server response time
 
-**Network Timings** (`start_network_capture` + `get_network_timings`):
-- All resource requests with timing breakdown
+**Resource Timings** (`get_resource_timings`):
+- All resource requests with timing breakdown (no setup required)
 - Identifies slow API calls automatically
 - Breakdown: DNS, connect, SSL, wait (TTFB), receive
 
+**HAR Export** (`export_har`) - opt-in for full HTTP details:
+- Request/response headers, status codes
+- Optional response bodies
+- Requires `enable_har_capture=True` at browser init (adds overhead)
+
 **Workflow for performance investigation:**
 ```
-1. start_network_capture()          # Enable capture
-2. navigate(url)                    # Load page
-3. click(selector)                  # Trigger actions
-4. wait_for_network_idle()          # Wait for API calls
-5. get_network_timings(min_duration_ms=500)  # Show slow requests
-6. capture_web_vitals()             # Get Core Web Vitals
+1. navigate(url)                    # Load page
+2. click(selector)                  # Trigger actions
+3. wait_for_network_idle()          # Wait for API calls
+4. get_resource_timings(min_duration_ms=500)  # Show slow requests
+5. capture_web_vitals()             # Get Core Web Vitals
+```
+
+For detailed HTTP data (headers, bodies), use HAR capture:
+```
+1. navigate(url, fresh_browser=True, enable_har_capture=True)
+2. [interact with page]
+3. export_har("capture.har", include_response_bodies=True)
 ```
 
 ### Planned Capabilities
@@ -407,8 +418,7 @@ get_page_text(include_images=True)
 
 ### Performance
 - `capture_web_vitals(timeout_ms?)` - Core Web Vitals metrics
-- `start_network_capture(resource_types?)` - Enable network timing capture
-- `get_network_timings(clear?, min_duration_ms?)` - Retrieve captured timings
+- `get_resource_timings(clear_resource_timing_buffer?, min_duration_ms?)` - Resource timing via Performance API (no setup required)
 - `export_har(filename, include_response_bodies?, max_body_size_mb?)` - Export to HAR file (requires `enable_har_capture=True` on navigate)
 
 ### Utilities
@@ -550,6 +560,23 @@ Compare with Claude in Chrome, which is a browser extension controlling existing
 | Cookie persistence | Maintained across all tool calls                             |
 | Fresh session      | `navigate(url, fresh_browser=True)` starts clean             |
 | Profile loading    | `navigate(url, profile="Default")` uses saved Chrome profile |
+
+### Network Capture Design
+
+**Two complementary systems:**
+
+1. **Performance API** (`get_resource_timings`) - JavaScript API running in page context. Always available, lightweight, provides timing breakdown. Limited to what the Performance API exposes (no headers, no bodies).
+
+2. **Chrome Performance Logging** (`export_har`) - Chrome's internal logging of CDP Network events. Opt-in due to overhead. Provides full HTTP details in HAR format.
+
+**Why not CDP Network interception?**
+
+We intentionally don't expose direct CDP Network event streaming for request interception. Reasons:
+- WebDriver BiDi is replacing CDP as the standard protocol
+- Two-system approach covers 90% of use cases
+- Adding CDP would create Chrome-only, deprecated functionality
+
+When BiDi matures with cross-browser network interception support, we may add it then.
 
 ### Why Not Playwright?
 
