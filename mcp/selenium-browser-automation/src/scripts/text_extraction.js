@@ -1,13 +1,16 @@
+// noinspection JSUnresolvedReference
 /**
  * Smart text extraction from DOM elements.
  * Supports auto-detection of main content (main > article > body fallback).
  *
- * Arguments:
- *   arguments[0]: CSS selector or 'auto' for smart extraction
+ * Executed via Selenium's driver.execute_script() which wraps code in an
+ * anonymous function. IIFE wrapper makes this valid standalone JavaScript.
  *
- * Returns:
- *   Object with text, title, url, sourceElement, characterCount, and smart extraction metadata
+ * @param {string} arguments[0] - CSS selector or 'auto' for smart extraction
+ * @returns {Object} text, title, url, sourceElement, characterCount, and smart extraction metadata
  */
+(function() {
+
 function extractFromElement(root) {
     const SKIP_ELEMENTS = new Set([
         'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS',
@@ -175,3 +178,5 @@ function extractAllText(requestedSelector) {
 }
 
 return extractAllText(arguments[0]);
+
+}).apply(null, arguments);
