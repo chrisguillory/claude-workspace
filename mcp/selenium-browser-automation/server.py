@@ -47,8 +47,19 @@ from selenium.common.exceptions import WebDriverException
 
 # Local imports
 from src.chrome_profiles import list_all_profiles, get_chrome_base_path
+from src.scripts import (
+    TEXT_EXTRACTION_SCRIPT,
+    ARIA_SNAPSHOT_SCRIPT,
+    NETWORK_MONITOR_SETUP_SCRIPT,
+    NETWORK_MONITOR_CHECK_SCRIPT,
+    WEB_VITALS_SCRIPT,
+    RESOURCE_TIMING_SCRIPT,
+    build_execute_javascript_async_script,
+)
 from src.models import (
+    # Chrome profiles
     ChromeProfilesResult,
+    # Web Vitals
     CoreWebVitals,
     FCPMetric,
     LCPMetric,
@@ -59,10 +70,21 @@ from src.models import (
     LayoutShiftSource,
     INPMetric,
     INPDetails,
+    # Network
     NetworkCapture,
     NetworkRequest,
     RequestTiming,
+    # JavaScript execution
     JavaScriptResult,
+    # Navigation and page extraction
+    CapturedResource,
+    ResourceCapture,
+    HARExportResult,
+    NavigationResult,
+    InteractiveElement,
+    FocusableElement,
+    SmartExtractionInfo,
+    PageTextResult,
 )
 
 
@@ -92,80 +114,6 @@ Enhanced Features (v2):
 ✅ Full-Page Screenshots - CDP Page.captureScreenshot with captureBeyondViewport
 ✅ Resource Capture - CDP Network interception with HAR export support
 """
-
-
-# Pydantic models for structured output
-class CapturedResource(BaseModel):
-    url: str
-    path: str
-    absolute_path: str
-    type: str
-    size_bytes: int
-    content_type: str
-    status: int
-
-
-class ResourceCapture(BaseModel):
-    output_dir: str
-    html_path: str
-    captured: list[CapturedResource]
-    total_size_mb: float
-    resource_count: int
-    errors: list[dict]
-
-
-class HARExportResult(BaseModel):
-    """Result of HAR export operation."""
-    path: str
-    entry_count: int
-    size_bytes: int
-    has_errors: bool = False
-    errors: list[str] = []
-
-
-class NavigationResult(BaseModel):
-    current_url: str
-    title: str
-    resources: ResourceCapture | None = None
-
-
-class InteractiveElement(BaseModel):
-    tag: str
-    text: str
-    selector: str
-    cursor: str
-    href: str | None
-    classes: str
-
-
-class FocusableElement(BaseModel):
-    tag: str
-    text: str
-    selector: str
-    tab_index: int
-    is_tabbable: bool
-    classes: str
-
-
-class SmartExtractionInfo(BaseModel):
-    """Metadata about smart extraction decisions. Only present for selector='auto'."""
-
-    fallback_used: bool  # True if no suitable main/article found, fell back to body
-    body_character_count: int  # Total body chars for coverage: character_count/body_character_count
-
-
-class PageTextResult(BaseModel):
-    """Result of text extraction operation."""
-
-    # Core content (always present)
-    title: str
-    url: str
-    text: str
-    character_count: int
-    source_element: str  # What was extracted: "main", "article", "body", or CSS selector
-
-    # Smart extraction transparency (only present for selector='auto')
-    smart_info: SmartExtractionInfo | None = None
 
 
 class BrowserState:
@@ -476,181 +424,10 @@ def register_tools(service: BrowserService) -> None:
 
         await logger.info(f"Extracting text from '{selector}'")
 
-        # JavaScript extraction function with smart extraction support
-        extraction_script = '''
-        function extractFromElement(root) {
-            const SKIP_ELEMENTS = new Set([
-                'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS',
-                'IFRAME', 'OBJECT', 'EMBED', 'AUDIO', 'VIDEO', 'MAP', 'HEAD'
-            ]);
-            const PREFORMATTED_ELEMENTS = new Set(['PRE', 'CODE', 'TEXTAREA']);
-
-            const parts = [];
-            let depth = 0;
-            let inPreformatted = 0;
-            const MAX_DEPTH = 100;
-
-            function walk(node) {
-                if (!node) return;
-                depth++;
-                if (depth > MAX_DEPTH) { depth--; return; }
-
-                try {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        const tagName = node.tagName;
-                        if (SKIP_ELEMENTS.has(tagName)) return;
-
-                        // Handle IMG elements - emit marker with alt text
-                        if (tagName === 'IMG') {
-                            const alt = node.getAttribute('alt');
-                            const marker = alt && alt.trim()
-                                ? '__IMG_ALT__' + alt.trim() + '__END_IMG__'
-                                : '__IMG_ALT__(no alt)__END_IMG__';
-                            parts.push({text: marker, pre: false});
-                            return;  // IMG has no children to walk
-                        }
-
-                        const isPre = PREFORMATTED_ELEMENTS.has(tagName) ||
-                            (window.getComputedStyle &&
-                             ['pre', 'pre-wrap', 'pre-line'].includes(
-                                 window.getComputedStyle(node).whiteSpace));
-
-                        if (isPre) inPreformatted++;
-
-                        if (node.shadowRoot) {
-                            for (const child of node.shadowRoot.childNodes) {
-                                walk(child);
-                            }
-                        }
-
-                        for (const child of node.childNodes) {
-                            walk(child);
-                        }
-
-                        if (isPre) inPreformatted--;
-                    }
-                    else if (node.nodeType === Node.TEXT_NODE) {
-                        const text = node.textContent;
-                        if (text) {
-                            parts.push({text, pre: inPreformatted > 0});
-                        }
-                    }
-                    else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-                        for (const child of node.childNodes) {
-                            walk(child);
-                        }
-                    }
-                } finally {
-                    depth--;
-                }
-            }
-
-            walk(root);
-
-            let result = '';
-            for (const part of parts) {
-                if (part.pre) {
-                    result += part.text;
-                } else {
-                    result += part.text.replace(/[\\s\\n\\r\\t\\u00A0]+/g, ' ');
-                }
-            }
-            result = result.trim();
-
-            const MAX_SIZE = 5 * 1024 * 1024;
-            if (result.length > MAX_SIZE) {
-                result = result.substring(0, MAX_SIZE) + ' [Content truncated at 5MB limit]';
-            }
-
-            return result;
-        }
-
-        function extractAllText(requestedSelector) {
-            const SMART_THRESHOLD = 500;  // Min chars for smart extraction to use an element
-
-            // Calculate body character count for coverage calculation
-            const bodyCharCount = extractFromElement(document.body).length;
-
-            // Smart extraction mode
-            if (requestedSelector === 'auto') {
-                // Priority 1: Try <main> element or [role="main"]
-                const main = document.querySelector('main, [role="main"]');
-                if (main) {
-                    const mainText = extractFromElement(main);
-                    if (mainText.length >= SMART_THRESHOLD) {
-                        return {
-                            text: mainText,
-                            title: document.title || '',
-                            url: window.location.href,
-                            sourceElement: main.tagName.toLowerCase() === 'main' ? 'main' : '[role="main"]',
-                            characterCount: mainText.length,
-                            isSmartExtraction: true,
-                            fallbackUsed: false,
-                            bodyCharacterCount: bodyCharCount
-                        };
-                    }
-                }
-
-                // Priority 2: Try <article> element
-                const article = document.querySelector('article');
-                if (article) {
-                    const articleText = extractFromElement(article);
-                    if (articleText.length >= SMART_THRESHOLD) {
-                        return {
-                            text: articleText,
-                            title: document.title || '',
-                            url: window.location.href,
-                            sourceElement: 'article',
-                            characterCount: articleText.length,
-                            isSmartExtraction: true,
-                            fallbackUsed: false,
-                            bodyCharacterCount: bodyCharCount
-                        };
-                    }
-                }
-
-                // Fallback: Use body
-                const bodyText = extractFromElement(document.body);
-                return {
-                    text: bodyText,
-                    title: document.title || '',
-                    url: window.location.href,
-                    sourceElement: 'body',
-                    characterCount: bodyText.length,
-                    isSmartExtraction: true,
-                    fallbackUsed: true,
-                    bodyCharacterCount: bodyCharCount
-                };
-            }
-
-            // Explicit selector mode
-            const root = document.querySelector(requestedSelector);
-            if (!root) {
-                return {
-                    error: 'Selector not found: ' + requestedSelector,
-                    title: document.title || '',
-                    url: window.location.href
-                };
-            }
-
-            const text = extractFromElement(root);
-            return {
-                text: text,
-                title: document.title || '',
-                url: window.location.href,
-                sourceElement: requestedSelector,
-                characterCount: text.length,
-                isSmartExtraction: false
-            };
-        }
-
-        return extractAllText(arguments[0]);
-        '''
-
-        # Execute the extraction script
+        # Execute the extraction script (loaded from src/scripts/)
         try:
             result = await asyncio.to_thread(
-                driver.execute_script, extraction_script, selector
+                driver.execute_script, TEXT_EXTRACTION_SCRIPT, selector
             )
         except WebDriverException as e:
             raise fastmcp.exceptions.ToolError(
@@ -969,212 +746,9 @@ def register_tools(service: BrowserService) -> None:
         """
         driver = await service.get_browser()
 
-        # JavaScript for accessible name computation per WAI-ARIA spec
-        aria_script = """
-        function getAccessibilitySnapshot(rootSelector, includeUrls) {
-            const root = document.querySelector(rootSelector);
-            if (!root) return null;
-
-            // Skip non-rendered elements
-            const SKIP_TAGS = ['SCRIPT', 'STYLE', 'META', 'LINK', 'NOSCRIPT'];
-
-            function isVisible(el) {
-                const style = window.getComputedStyle(el);
-                return style.display !== 'none' &&
-                       style.visibility !== 'hidden' &&
-                       style.opacity !== '0';
-            }
-
-            // Shared whitespace normalization helper
-            // Per WAI-ARIA 1.2 and CSS Text Module Level 3
-            function normalize(text) {
-                return text ? text.replace(/\\s+/g, ' ').trim() : '';
-            }
-
-            // Accessible name computation per WAI-ARIA spec
-            function computeAccessibleName(el) {
-                // Step 1: aria-label
-                if (el.getAttribute('aria-label')) {
-                    return normalize(el.getAttribute('aria-label'));
-                }
-
-                // Step 2: aria-labelledby
-                if (el.getAttribute('aria-labelledby')) {
-                    const ids = el.getAttribute('aria-labelledby').split(/\\s+/);
-                    return ids
-                        .map(id => {
-                            const refEl = document.getElementById(id);
-                            return refEl ? normalize(refEl.textContent) : '';
-                        })
-                        .filter(Boolean)
-                        .join(' ');
-                }
-
-                // Step 3: Label element association
-                if (el.id) {
-                    const label = document.querySelector(`label[for="${el.id}"]`);
-                    if (label) return normalize(label.textContent);
-                }
-
-                // Step 4: Implicit label (form control inside label)
-                if (el.closest('label')) {
-                    return normalize(el.closest('label').textContent);
-                }
-
-                // Step 5: Element content for links, buttons, headings
-                const tagName = el.tagName.toLowerCase();
-                if (['button', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
-                    return normalize(el.textContent);
-                }
-
-                // Step 6: Title attribute
-                if (el.getAttribute('title')) {
-                    return normalize(el.getAttribute('title'));
-                }
-
-                // Step 7: Alt text for images
-                if (tagName === 'img') {
-                    return normalize(el.getAttribute('alt') || '');
-                }
-
-                // Step 8: Placeholder for inputs
-                if (['input', 'textarea'].includes(tagName)) {
-                    return normalize(el.placeholder || el.value || '');
-                }
-
-                return '';
-            }
-
-            // Implicit role mapping per HTML AAM spec
-            function getImplicitRole(el) {
-                const tagName = el.tagName.toLowerCase();
-                const type = el.getAttribute('type')?.toLowerCase();
-
-                const implicitRoles = {
-                    'a': 'link',
-                    'button': 'button',
-                    'h1': 'heading', 'h2': 'heading', 'h3': 'heading',
-                    'h4': 'heading', 'h5': 'heading', 'h6': 'heading',
-                    'header': 'banner',
-                    'footer': 'contentinfo',
-                    'nav': 'navigation',
-                    'main': 'main',
-                    'article': 'article',
-                    'section': 'region',
-                    'aside': 'complementary',
-                    'form': 'form',
-                    'p': 'paragraph',
-                    'input': type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : 'textbox',
-                    'textarea': 'textbox',
-                    'select': 'combobox',
-                    'ul': 'list',
-                    'ol': 'list',
-                    'li': 'listitem',
-                    'table': 'table',
-                    'tr': 'row',
-                    'td': 'cell',
-                    'th': 'columnheader',
-                    'img': 'img',
-                    'strong': 'strong',
-                    'em': 'emphasis',
-                    'code': 'code'
-                };
-
-                return implicitRoles[tagName] || 'generic';
-            }
-
-            // Walk tree and build hierarchical snapshot (includes text nodes!)
-            function walkTree(el, depth = 0) {
-                if (depth > 50) return null; // Prevent infinite recursion
-
-                // Handle text nodes
-                if (el.nodeType === Node.TEXT_NODE) {
-                    const text = normalize(el.textContent);
-                    if (text) {
-                        return { type: 'text', content: text };
-                    }
-                    return null;
-                }
-
-                // Skip non-element nodes
-                if (el.nodeType !== Node.ELEMENT_NODE) return null;
-
-                // Skip non-rendered elements
-                if (SKIP_TAGS.includes(el.tagName)) return null;
-
-                // Skip hidden elements
-                if (!isVisible(el)) return null;
-
-                const role = el.getAttribute('role') || getImplicitRole(el);
-                const name = computeAccessibleName(el);
-
-                const node = { role: role };
-
-                // Add name if available
-                if (name) {
-                    node.name = name;
-                }
-
-                // Add description if available
-                if (el.getAttribute('aria-description')) {
-                    node.description = el.getAttribute('aria-description');
-                }
-
-                // Add level for headings
-                if (role === 'heading') {
-                    const match = el.tagName.match(/h([1-6])/i);
-                    if (match) {
-                        node.level = parseInt(match[1]);
-                    }
-                }
-
-                // Add checked state for checkboxes/radios
-                if (['checkbox', 'radio', 'switch'].includes(role)) {
-                    if (el.hasAttribute('aria-checked')) {
-                        node.checked = el.getAttribute('aria-checked') === 'true';
-                    } else if (el.tagName === 'INPUT') {
-                        node.checked = el.checked;
-                    }
-                }
-
-                // Add disabled state
-                if (el.hasAttribute('aria-disabled')) {
-                    node.disabled = el.getAttribute('aria-disabled') === 'true';
-                } else if (['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) {
-                    node.disabled = el.disabled;
-                }
-
-                // Add URL for links if requested
-                if (includeUrls && role === 'link' && el.href) {
-                    node.url = el.href;
-                }
-
-                // Process child NODES (not just elements - includes text!)
-                const children = [];
-                for (const child of el.childNodes) {
-                    const childNode = walkTree(child, depth + 1);
-                    if (childNode) {
-                        children.push(childNode);
-                    }
-                }
-
-                // Add children array if not empty
-                if (children.length > 0) {
-                    node.children = children;
-                }
-
-                return node;
-            }
-
-            return walkTree(root);
-        }
-
-        return getAccessibilitySnapshot(arguments[0], arguments[1]);
-        """
-
-        # Execute script and get snapshot data
+        # Execute ARIA snapshot script (loaded from src/scripts/)
         snapshot_data = await asyncio.to_thread(
-            driver.execute_script, aria_script, selector, include_urls
+            driver.execute_script, ARIA_SNAPSHOT_SCRIPT, selector, include_urls
         )
 
         # Convert to Playwright-compatible YAML format using custom serializer
@@ -1475,64 +1049,17 @@ def register_tools(service: BrowserService) -> None:
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        # Step 1: Inject monitoring script to instrument Fetch and XHR
-        setup_script = """
-        window.__networkMonitor = {
-            activeRequests: 0,
-            lastRequestTime: null,
-
-            increment() {
-                this.activeRequests++;
-                this.lastRequestTime = Date.now();
-            },
-
-            decrement() {
-                this.activeRequests = Math.max(0, this.activeRequests - 1);
-            }
-        };
-
-        // Instrument Fetch API
-        const origFetch = window.fetch;
-        window.fetch = function(...args) {
-            window.__networkMonitor.increment();
-            return origFetch.apply(this, args)
-                .then(r => { window.__networkMonitor.decrement(); return r; })
-                .catch(e => { window.__networkMonitor.decrement(); throw e; });
-        };
-
-        // Instrument XMLHttpRequest
-        const origOpen = XMLHttpRequest.prototype.open;
-        const origSend = XMLHttpRequest.prototype.send;
-
-        XMLHttpRequest.prototype.open = function() {
-            window.__networkMonitor.increment();
-            return origOpen.apply(this, arguments);
-        };
-
-        XMLHttpRequest.prototype.send = function() {
-            this.addEventListener('loadend', () => window.__networkMonitor.decrement());
-            return origSend.apply(this, arguments);
-        };
-        """
-
-        await asyncio.to_thread(driver.execute_script, setup_script)
+        # Step 1: Inject monitoring script (loaded from src/scripts/)
+        await asyncio.to_thread(driver.execute_script, NETWORK_MONITOR_SETUP_SCRIPT)
         await logger.info("Network monitor injected")
 
         # Step 2: Poll for idle state (500ms threshold)
-        check_script = """
-        return {
-            activeRequests: window.__networkMonitor?.activeRequests || 0,
-            lastRequestTime: window.__networkMonitor?.lastRequestTime,
-            currentTime: Date.now()
-        };
-        """
-
         start_time = time.time()
         idle_threshold_ms = 500
         timeout_s = timeout / 1000
 
         while time.time() - start_time < timeout_s:
-            status = await asyncio.to_thread(driver.execute_script, check_script)
+            status = await asyncio.to_thread(driver.execute_script, NETWORK_MONITOR_CHECK_SCRIPT)
 
             if status["activeRequests"] == 0:
                 if status["lastRequestTime"] is None:
@@ -1736,156 +1263,12 @@ def register_tools(service: BrowserService) -> None:
 
         await logger.info(f"Capturing Core Web Vitals for {current_url}")
 
-        # JavaScript to collect all Web Vitals using Performance APIs
-        # Uses buffered: true to capture metrics that occurred before script runs
-        script = """
-        var callback = arguments[arguments.length - 1];
-        var timeoutMs = arguments[0];
-
-        (async function collectWebVitals() {
-            var results = { fcp: null, lcp: null, ttfb: null, cls: null, inp: null };
-
-            // FCP - immediate from paint entries
-            try {
-                var fcpEntry = performance.getEntriesByName('first-contentful-paint', 'paint')[0];
-                if (fcpEntry) {
-                    results.fcp = {
-                        name: 'FCP',
-                        value: fcpEntry.startTime,
-                        rating: fcpEntry.startTime <= 1800 ? 'good' : fcpEntry.startTime <= 3000 ? 'needs-improvement' : 'poor'
-                    };
-                }
-            } catch (e) { results.fcp = { error: e.toString() }; }
-
-            // TTFB - immediate from navigation timing
-            try {
-                var navEntries = performance.getEntriesByType('navigation');
-                var navEntry = navEntries[0];
-                if (navEntry) {
-                    results.ttfb = {
-                        name: 'TTFB',
-                        value: navEntry.responseStart,
-                        rating: navEntry.responseStart <= 800 ? 'good' : navEntry.responseStart <= 1800 ? 'needs-improvement' : 'poor',
-                        phases: {
-                            dns: navEntry.domainLookupEnd - navEntry.domainLookupStart,
-                            tcp: navEntry.connectEnd - navEntry.connectStart,
-                            request: navEntry.responseStart - navEntry.requestStart
-                        }
-                    };
-                }
-            } catch (e) { results.ttfb = { error: e.toString() }; }
-
-            // LCP - use PerformanceObserver with buffered flag
-            try {
-                results.lcp = await new Promise(function(resolve) {
-                    var lastEntry = null;
-                    var observer = new PerformanceObserver(function(list) {
-                        var entries = list.getEntries();
-                        lastEntry = entries[entries.length - 1];
-                    });
-                    observer.observe({ type: 'largest-contentful-paint', buffered: true });
-                    setTimeout(function() {
-                        observer.disconnect();
-                        if (lastEntry) {
-                            resolve({
-                                name: 'LCP',
-                                value: lastEntry.startTime,
-                                size: lastEntry.size,
-                                element_id: lastEntry.id || null,
-                                url: lastEntry.url || null,
-                                rating: lastEntry.startTime <= 2500 ? 'good' : lastEntry.startTime <= 4000 ? 'needs-improvement' : 'poor'
-                            });
-                        } else { resolve(null); }
-                    }, Math.min(timeoutMs, 3000));
-                });
-            } catch (e) { results.lcp = { error: e.toString() }; }
-
-            // CLS - collect layout shifts
-            try {
-                results.cls = await new Promise(function(resolve) {
-                    var sessionValue = 0;
-                    var sessionEntries = [];
-                    var observer = new PerformanceObserver(function(list) {
-                        var entries = list.getEntries();
-                        for (var i = 0; i < entries.length; i++) {
-                            var entry = entries[i];
-                            if (!entry.hadRecentInput) {
-                                sessionValue += entry.value;
-                                var sources = [];
-                                if (entry.sources) {
-                                    for (var j = 0; j < entry.sources.length; j++) {
-                                        var s = entry.sources[j];
-                                        sources.push({
-                                            node: s.node ? s.node.tagName : null
-                                        });
-                                    }
-                                }
-                                sessionEntries.push({
-                                    value: entry.value,
-                                    time: entry.startTime,
-                                    sources: sources
-                                });
-                            }
-                        }
-                    });
-                    observer.observe({ type: 'layout-shift', buffered: true });
-                    setTimeout(function() {
-                        observer.disconnect();
-                        resolve({
-                            name: 'CLS',
-                            value: sessionValue,
-                            rating: sessionValue <= 0.1 ? 'good' : sessionValue <= 0.25 ? 'needs-improvement' : 'poor',
-                            entries: sessionEntries
-                        });
-                    }, Math.min(timeoutMs, 2000));
-                });
-            } catch (e) { results.cls = { error: e.toString() }; }
-
-            // INP - collect event timing (requires user interaction)
-            try {
-                results.inp = await new Promise(function(resolve) {
-                    var worstInteraction = null;
-                    var observer = new PerformanceObserver(function(list) {
-                        var entries = list.getEntries();
-                        for (var i = 0; i < entries.length; i++) {
-                            var entry = entries[i];
-                            if (!worstInteraction || entry.duration > worstInteraction.duration) {
-                                worstInteraction = {
-                                    duration: entry.duration,
-                                    name: entry.name,
-                                    start_time: entry.startTime,
-                                    input_delay: entry.processingStart - entry.startTime,
-                                    processing_time: entry.processingEnd - entry.processingStart,
-                                    presentation_delay: entry.duration - (entry.processingEnd - entry.startTime)
-                                };
-                            }
-                        }
-                    });
-                    observer.observe({ type: 'event', durationThreshold: 40, buffered: true });
-                    setTimeout(function() {
-                        observer.disconnect();
-                        if (worstInteraction) {
-                            resolve({
-                                name: 'INP',
-                                value: worstInteraction.duration,
-                                rating: worstInteraction.duration <= 200 ? 'good' : worstInteraction.duration <= 500 ? 'needs-improvement' : 'poor',
-                                details: worstInteraction
-                            });
-                        } else { resolve(null); }
-                    }, Math.min(timeoutMs, 1000));
-                });
-            } catch (e) { results.inp = { error: e.toString() }; }
-
-            return results;
-        })().then(callback).catch(function(err) { callback({ error: err.toString() }); });
-        """
-
         errors = []
         try:
-            # Use execute_async_script for Promise-based collection
+            # Use execute_async_script for Promise-based collection (script from src/scripts/)
             results = await asyncio.to_thread(
                 driver.execute_async_script,
-                script,
+                WEB_VITALS_SCRIPT,
                 timeout_ms,
             )
         except Exception as e:
@@ -1971,32 +1354,8 @@ Note:
 
         await logger.info(f"Getting resource timings for {current_url}")
 
-        # Collect resource timing via JavaScript Performance API
-        # This captures all network requests with detailed timing breakdown
-        script = """
-        var entries = performance.getEntriesByType('resource');
-        return entries.map(function(r) {
-            return {
-                url: r.name,
-                method: 'GET',
-                resource_type: r.initiatorType,
-                started_at: r.startTime,
-                duration_ms: r.duration,
-                encoded_data_length: r.transferSize || 0,
-                timing: {
-                    blocked: Math.max(0, r.fetchStart - r.startTime),
-                    dns: Math.max(0, r.domainLookupEnd - r.domainLookupStart),
-                    connect: Math.max(0, r.connectEnd - r.connectStart),
-                    ssl: r.secureConnectionStart > 0 ? Math.max(0, r.connectEnd - r.secureConnectionStart) : 0,
-                    send: Math.max(0, r.requestStart - r.connectEnd),
-                    wait: Math.max(0, r.responseStart - r.requestStart),
-                    receive: Math.max(0, r.responseEnd - r.responseStart)
-                }
-            };
-        });
-        """
-
-        raw_entries = await asyncio.to_thread(driver.execute_script, script)
+        # Collect resource timing via JavaScript Performance API (script from src/scripts/)
+        raw_entries = await asyncio.to_thread(driver.execute_script, RESOURCE_TIMING_SCRIPT)
 
         # Filter by min_duration_ms
         if min_duration_ms > 0:
@@ -2572,194 +1931,13 @@ Workflow:
 
         await logger.info(f"Executing JavaScript ({len(code)} chars)")
 
-        # JavaScript wrapper with comprehensive serialization handling
-        # Key design decisions:
-        # 1. safeSerialize handles all JS types that JSON.stringify can't
-        # 2. Thenable detection uses typeof check (more robust than instanceof for cross-context)
-        # 3. WeakSet tracks seen objects to detect circular references
-        # 4. User code is wrapped in new Function to provide arguments access
-        wrapper_script = '''
-(async function(__userCode) {
-    // Helper to safely serialize any JavaScript value to JSON-compatible format
-    function safeSerialize(value) {
-        // Handle primitives and special types before JSON.stringify
-        if (value === undefined) {
-            return { success: true, result: null, result_type: 'undefined' };
-        }
-        if (value === null) {
-            return { success: true, result: null, result_type: 'null' };
-        }
-        if (typeof value === 'function') {
-            return { success: true, result: null, result_type: 'function', note: 'Functions cannot be serialized' };
-        }
-        if (typeof value === 'symbol') {
-            return { success: true, result: value.toString(), result_type: 'symbol' };
-        }
-        if (typeof value === 'bigint') {
-            return { success: true, result: value.toString(), result_type: 'bigint' };
-        }
-        // Handle special number values that JSON.stringify converts to null
-        // Return string representations for AI visibility (matches CiC behavior)
-        if (typeof value === 'number') {
-            if (Number.isNaN(value)) {
-                return { success: true, result: 'NaN', result_type: 'number', note: 'Value is NaN (not serializable to JSON)' };
-            }
-            if (!Number.isFinite(value)) {
-                const repr = value > 0 ? 'Infinity' : '-Infinity';
-                return { success: true, result: repr, result_type: 'number', note: `Value is ${repr} (not serializable to JSON)` };
-            }
-            if (Object.is(value, -0)) {
-                return { success: true, result: '-0', result_type: 'number', note: 'Value is negative zero (-0)' };
-            }
-        }
-        // DOM nodes cannot be serialized
-        if (typeof Node !== 'undefined' && value instanceof Node) {
-            return { success: true, result: null, result_type: 'unserializable', note: 'DOM nodes cannot be serialized' };
-        }
-        // Window object check (common mistake)
-        if (typeof Window !== 'undefined' && value instanceof Window) {
-            return { success: true, result: null, result_type: 'unserializable', note: 'Window object cannot be serialized' };
-        }
-        // RegExp converts to string representation
-        if (value instanceof RegExp) {
-            return { success: true, result: value.toString(), result_type: 'string' };
-        }
-        // Date converts to ISO string
-        if (value instanceof Date) {
-            return { success: true, result: value.toISOString(), result_type: 'string' };
-        }
-        // Map converts to object
-        if (value instanceof Map) {
-            return safeSerialize(Object.fromEntries(value));
-        }
-        // Set converts to array
-        if (value instanceof Set) {
-            return safeSerialize([...value]);
-        }
-        // WeakMap and WeakSet cannot be serialized - entries are non-enumerable by design
-        // This is an ECMAScript specification constraint to prevent observable non-determinism from GC
-        if (value instanceof WeakMap) {
-            return { success: true, result: null, result_type: 'unserializable', note: 'WeakMap entries cannot be enumerated or serialized. WeakMap is designed for internal object metadata and deliberately prevents access to its contents.' };
-        }
-        if (value instanceof WeakSet) {
-            return { success: true, result: null, result_type: 'unserializable', note: 'WeakSet entries cannot be enumerated or serialized. WeakSet is designed for tracking object membership and deliberately prevents access to its contents.' };
-        }
-        // Error objects - extract message, name, stack (would otherwise serialize to {})
-        if (value instanceof Error) {
-            return {
-                success: true,
-                result: { name: value.name, message: value.message, stack: value.stack || null },
-                result_type: 'error'
-            };
-        }
-        // ArrayBuffer cannot be directly serialized
-        if (value instanceof ArrayBuffer) {
-            return { success: true, result: null, result_type: 'unserializable', note: 'ArrayBuffer cannot be directly serialized. Use TypedArray (e.g., new Uint8Array(buffer)) to access contents.' };
-        }
-        // Blob contents require async reading
-        if (typeof Blob !== 'undefined' && value instanceof Blob) {
-            return { success: true, result: null, result_type: 'unserializable', note: 'Blob contents require async reading via blob.text() or blob.arrayBuffer().' };
-        }
-        // Generator objects cannot be serialized (have next() and Symbol.iterator)
-        if (value && typeof value.next === 'function' && typeof value[Symbol.iterator] === 'function') {
-            return { success: true, result: null, result_type: 'unserializable', note: 'Generator state cannot be serialized. Consume the generator and return the values instead.' };
-        }
-
-        // For objects and arrays, use JSON.stringify with circular reference detection
-        const seen = new WeakSet();
-        try {
-            const serialized = JSON.stringify(value, function(key, val) {
-                // Handle BigInt in nested objects
-                if (typeof val === 'bigint') {
-                    return val.toString();
-                }
-                // Handle special number values that JSON.stringify converts to null
-                if (typeof val === 'number') {
-                    if (Number.isNaN(val)) return '[NaN]';
-                    if (!Number.isFinite(val)) return val > 0 ? '[Infinity]' : '[-Infinity]';
-                    if (Object.is(val, -0)) return '[-0]';
-                }
-                // Detect circular references
-                if (typeof val === 'object' && val !== null) {
-                    if (seen.has(val)) {
-                        return '[Circular Reference]';
-                    }
-                    seen.add(val);
-                }
-                return val;
-            });
-
-            // Parse back to get clean object (removes undefined values, etc.)
-            const result = JSON.parse(serialized);
-            const resultType = Array.isArray(value) ? 'array' : typeof value;
-            return { success: true, result: result, result_type: resultType };
-        } catch (e) {
-            // JSON.stringify failed (shouldn't happen after our checks, but be safe)
-            return { success: true, result: null, result_type: 'unserializable', note: e.message };
-        }
-    }
-
-    try {
-        // Try expression form first (most common case)
-        // This handles: 1 + 1, document.title, Promise.resolve(42), () => value
-        let result;
-
-        try {
-            const exprFn = new Function('return (' + __userCode + ')');
-            result = exprFn();
-        } catch (parseErr) {
-            if (parseErr instanceof SyntaxError) {
-                // Expression parsing failed, try as statement block
-                // This handles: throw new Error(), if/for/while, var x = 1
-                const stmtFn = new Function(__userCode);
-                result = stmtFn();  // undefined for statements without return
-            } else {
-                throw parseErr;  // Re-throw non-syntax errors
-            }
-        }
-
-        // Auto-await if result is thenable (Promise or Promise-like)
-        // Use typeof check instead of instanceof for cross-context compatibility
-        if (result && typeof result.then === 'function') {
-            result = await result;
-        }
-
-        return safeSerialize(result);
-    } catch (e) {
-        return {
-            success: false,
-            result: null,
-            result_type: 'unserializable',
-            error: e.message || String(e),
-            error_stack: e.stack || null,
-            error_type: 'execution'
-        };
-    }
-})
-'''
-
         # Escape user code as JSON string to prevent injection
         # json.dumps handles quotes, backslashes, newlines, etc.
         escaped_code = json.dumps(code)
 
         # Build the async wrapper for Selenium's execute_async_script
-        # The callback is always the last argument provided by Selenium
-        async_script = f'''
-const callback = arguments[arguments.length - 1];
-const userCode = {escaped_code};
-
-{wrapper_script}(userCode)
-    .then(function(result) {{
-        callback(result);
-    }})
-    .catch(function(e) {{
-        callback({{
-            success: false,
-            error: e.message || String(e),
-            error_type: 'execution'
-        }});
-    }});
-'''
+        # (uses safe_serialize.js loaded from src/scripts/)
+        async_script = build_execute_javascript_async_script(escaped_code)
 
         try:
             # Use asyncio.wait_for for Python-side timeout

@@ -413,3 +413,92 @@ class JavaScriptResult(BaseModel):
     error_type: JavaScriptErrorType | None = None
     error_stack: str | None = None  # JS stack trace for debugging
     note: str | None = None  # Explanation for special cases (e.g., why result is null)
+
+
+# =============================================================================
+# Navigation and Page Extraction Models
+# =============================================================================
+
+
+class CapturedResource(BaseModel):
+    """Individual captured resource from page."""
+
+    url: str
+    path: str
+    absolute_path: str
+    type: str
+    size_bytes: int
+    content_type: str
+    status: int
+
+
+class ResourceCapture(BaseModel):
+    """Result of resource capture operation."""
+
+    output_dir: str
+    html_path: str
+    captured: list[CapturedResource]
+    total_size_mb: float
+    resource_count: int
+    errors: list[dict]
+
+
+class HARExportResult(BaseModel):
+    """Result of HAR export operation."""
+
+    path: str
+    entry_count: int
+    size_bytes: int
+    has_errors: bool = False
+    errors: list[str] = []
+
+
+class NavigationResult(BaseModel):
+    """Result of navigation operation."""
+
+    current_url: str
+    title: str
+    resources: ResourceCapture | None = None
+
+
+class InteractiveElement(BaseModel):
+    """Clickable element with selector for automation."""
+
+    tag: str
+    text: str
+    selector: str
+    cursor: str
+    href: str | None
+    classes: str
+
+
+class FocusableElement(BaseModel):
+    """Keyboard-navigable element with tab order."""
+
+    tag: str
+    text: str
+    selector: str
+    tab_index: int
+    is_tabbable: bool
+    classes: str
+
+
+class SmartExtractionInfo(BaseModel):
+    """Metadata about smart extraction decisions. Only present for selector='auto'."""
+
+    fallback_used: bool  # True if no suitable main/article found, fell back to body
+    body_character_count: int  # Total body chars for coverage calculation
+
+
+class PageTextResult(BaseModel):
+    """Result of text extraction operation."""
+
+    # Core content (always present)
+    title: str
+    url: str
+    text: str
+    character_count: int
+    source_element: str  # What was extracted: "main", "article", "body", or CSS selector
+
+    # Smart extraction transparency (only present for selector='auto')
+    smart_info: SmartExtractionInfo | None = None
