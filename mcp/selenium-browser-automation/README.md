@@ -31,6 +31,7 @@ releases, so gaps should be addressed proactively.
 | Text extraction (Shadow DOM)     |       -       |    ✓    | **Advantage**: Traverses web component shadows           |
 | Text extraction (filtering)      |       -       |    ✓    | **Advantage**: Filters SCRIPT/STYLE noise                |
 | JavaScript execution             |       ✓       |    ✓    | **Parity**: Both execute JS; SMCP adds statement support |
+| Init script injection            |       -       |    ✓    | **Advantage**: Persistent scripts via `init_scripts` param |
 | Console log access               |       ✓       | **Gap** | P1: Chrome reads `console.log/error/warn`                |
 | Core Web Vitals                  |       -       |    ✓    | **Advantage**: LCP, CLS, INP, FCP, TTFB                  |
 | HAR export                       |       -       |    ✓    | **Advantage**: Full network traffic logging              |
@@ -66,6 +67,7 @@ Capabilities where we exceed Claude in Chrome:
 | **PRE/CODE Preservation**   | Exact whitespace in preformatted blocks            | Code extraction, config files, ASCII art         |
 | **Smart Extraction**        | main > article > body with 500-char threshold      | Better element selection than article-only       |
 | **Transparency Metadata**   | `source_element`, `fallback_used`, coverage ratio  | Detect silent partial extraction failures        |
+| **Init Script Injection**   | User scripts via `init_scripts` parameter          | Persistent API interceptors, environment patching |
 | **Core Web Vitals**         | LCP, CLS, INP, FCP, TTFB with ratings              | Performance auditing, identifying slow pages     |
 | **HAR Export**              | Full network traffic in DevTools-compatible format | Deep network debugging, API analysis             |
 | **Detailed Network Timing** | DNS, connect, TLS, TTFB breakdown per request      | Identifying slow requests, bottleneck analysis   |
@@ -183,7 +185,7 @@ How CiC tools map to SMCP tools:
 
 | CiC Tool(s)             | SMCP Tool(s)                                    |   Type    | Notes                                                                                                     |
 |-------------------------|-------------------------------------------------|:---------:|-----------------------------------------------------------------------------------------------------------|
-| `navigate`              | `navigate`                                      |    1:1    | SMCP adds `fresh_browser`, `profile`, `enable_har_capture` params                                         |
+| `navigate`              | `navigate`                                      |    1:1    | SMCP adds `fresh_browser`, `profile`, `enable_har_capture`, `init_scripts` params                         |
 | `get_page_text`         | `get_page_text`                                 |  Exceeds  | SMCP adds: Shadow DOM traversal, SCRIPT/STYLE filtering, structured output                                |
 | `read_page`             | `get_aria_snapshot`                             |    1:1    | CiC returns ref-based tree; SMCP returns YAML tree                                                        |
 | `find`                  | -                                               |    Gap    | CiC uses natural language; SMCP alternative: `get_interactive_elements`                                   |
@@ -268,6 +270,44 @@ Detailed comparison of `execute_javascript` (SMCP) vs `javascript_tool` (CiC):
 4. click(selector)                  # Interact
 5. wait_for_network_idle()          # Wait for dynamic content
 ```
+
+## Init Scripts for API Interception
+
+Inject JavaScript that runs before every page load for persistent instrumentation.
+
+### Quick Start
+
+```python
+navigate(
+    "https://example.com",
+    fresh_browser=True,
+    init_scripts=['''
+        window.__apiCapture = [];
+        const originalFetch = window.fetch;
+        window.fetch = async (...args) => {
+            window.__apiCapture.push({url: args[0], time: Date.now()});
+            return originalFetch(...args);
+        };
+    ''']
+)
+
+# Interceptor persists across navigations
+navigate("https://example.com/account")
+
+# Retrieve captured calls
+execute_javascript('window.__apiCapture')
+```
+
+### Gotchas
+
+| Issue | Explanation |
+|-------|-------------|
+| **Timing** | Scripts run BEFORE page scripts. Can't query DOM—use for globals only. |
+| **Stealth properties** | Don't modify `navigator.webdriver`, `navigator.languages`, `navigator.plugins`, `window.chrome`. |
+| **Errors** | Syntax errors fail silently at runtime (check browser console). |
+| **Requires fresh_browser** | Scripts can only be installed with `fresh_browser=True`. |
+
+For same-origin URL changes without page reload (preserving JS state), see the soft navigation pattern in `execute_javascript()`.
 
 ## Performance Analysis
 
@@ -359,7 +399,7 @@ Ideas without implementation plans:
 ## Tool Reference
 
 ### Navigation & Content
-- `navigate(url, fresh_browser?, profile?, enable_har_capture?)` - Load URL with optional Chrome profile
+- `navigate(url, fresh_browser?, profile?, enable_har_capture?, init_scripts?)` - Load URL with optional Chrome profile
 - `get_page_text(selector?, include_images?)` - Smart content extraction with semantic element priority (see below)
 - `get_page_html(selector?, limit?)` - Extract raw HTML source or specific elements
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure

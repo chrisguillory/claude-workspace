@@ -27,7 +27,7 @@ import typing
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Sequence
 from urllib.parse import parse_qs, urlparse
 
 # Third-Party Libraries
@@ -290,6 +290,7 @@ def register_tools(service: BrowserService) -> None:
         fresh_browser: bool = False,
         profile: str | None = None,
         enable_har_capture: bool = False,
+        init_scripts: Sequence[str] | None = None,
         ctx: Context | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -303,6 +304,31 @@ def register_tools(service: BrowserService) -> None:
             profile: Chrome profile directory for authenticated sessions (e.g., "Default")
             enable_har_capture: If True, enables performance logging for HAR export.
                                Requires fresh_browser=True (adds overhead, must be set at browser init).
+            init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
+                         Scripts persist for all navigations until next fresh_browser=True.
+                         Use for API interceptors, environment patching.
+
+        Example - API interception:
+            navigate(
+                "https://example.com",
+                fresh_browser=True,
+                init_scripts=['''
+                    window.__apiCapture = [];
+                    const originalFetch = window.fetch;
+                    window.fetch = async (...args) => {
+                        window.__apiCapture.push({url: args[0], time: Date.now()});
+                        return originalFetch(...args);
+                    };
+                ''']
+            )
+            # Navigate around - interceptor persists
+            navigate("https://example.com/account")
+            # Retrieve captured APIs via execute_javascript('window.__apiCapture')
+
+        Note:
+            init_scripts run BEFORE page scripts in every frame (including iframes).
+            Do not modify navigator.webdriver, navigator.languages, navigator.plugins,
+            or window.chrome - these are reserved for bot detection evasion.
 
         Returns:
             NavigationResult with current_url and title
@@ -327,10 +353,16 @@ def register_tools(service: BrowserService) -> None:
                 "enable_har_capture requires fresh_browser=True (performance logging must be set at browser init)"
             )
 
+        if init_scripts and not fresh_browser:
+            raise fastmcp.exceptions.ValidationError(
+                "init_scripts requires fresh_browser=True (scripts must be registered before first navigation)"
+            )
+
         print(
             f"[navigate] Navigating to {url}"
             + (" (fresh browser)" if fresh_browser else "")
-            + (" (HAR capture enabled)" if enable_har_capture else ""),
+            + (" (HAR capture enabled)" if enable_har_capture else "")
+            + (f" ({len(init_scripts)} init scripts)" if init_scripts else ""),
             file=sys.stderr,
         )
 
@@ -338,6 +370,16 @@ def register_tools(service: BrowserService) -> None:
             await service.close_browser()
 
         driver = await service.get_browser(profile=profile, enable_har_capture=enable_har_capture)
+
+        # Install user init scripts (after browser creation, before navigation)
+        # Scripts registered here run on EVERY new document in this session
+        if init_scripts:
+            for script in init_scripts:
+                await asyncio.to_thread(
+                    driver.execute_cdp_cmd,
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {"source": script},
+                )
 
         # Navigate (blocking operation)
         await asyncio.to_thread(driver.get, url)
@@ -890,7 +932,7 @@ def register_tools(service: BrowserService) -> None:
                     selector: selector,
                     cursor: style.cursor,
                     href: el.href || null,
-                    classes: el.className || ''
+                    classes: el.getAttribute('class') || ''
                 });
             });
 
@@ -958,7 +1000,7 @@ def register_tools(service: BrowserService) -> None:
                         selector: selector,
                         tab_index: tabIndex,
                         is_tabbable: tabIndex >= 0,
-                        classes: el.className || ''
+                        classes: el.getAttribute('class') || ''
                     });
                 }
             });
@@ -1922,6 +1964,19 @@ Workflow:
                 };
                 return "interceptor installed";
             })()''')
+
+        Soft Navigation Pattern (preserve JS state across URL changes):
+            For single-page apps or when you need to preserve JavaScript state
+            (interceptors, global variables) across URL changes, use history.pushState:
+
+            execute_javascript('''
+                history.pushState({}, '', '/new-path');
+                window.dispatchEvent(new PopStateEvent('popstate'));
+            ''')
+
+            This changes the URL without page reload, preserving all JS context.
+            Only works for same-origin URLs. For cross-origin, use navigate()
+            with init_scripts for persistent instrumentation.
 
         Notes:
             - Promises are automatically awaited
