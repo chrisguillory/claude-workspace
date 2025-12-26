@@ -1357,6 +1357,10 @@ Note:
         # Collect resource timing via JavaScript Performance API (script from src/scripts/)
         raw_entries = await asyncio.to_thread(driver.execute_script, RESOURCE_TIMING_SCRIPT)
 
+        # Handle empty/null response
+        if not raw_entries:
+            raw_entries = []
+
         # Filter by min_duration_ms
         if min_duration_ms > 0:
             raw_entries = [
