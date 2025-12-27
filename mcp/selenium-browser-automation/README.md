@@ -327,6 +327,8 @@ For same-origin URL changes without page reload (preserving JS state), see the s
 
 Export and restore browser authentication state to avoid repeated logins.
 
+> **Deep Dive:** See [docs/session-persistence.md](docs/session-persistence.md) for complete reference including real-world testing (Marriott case study), automation research, and site-specific patterns.
+
 ### The Problem
 
 Chrome profile loading (`profile="Default"`) doesn't work reliably:
@@ -370,6 +372,94 @@ navigate(
 - **Single origin**: localStorage captured for current page's origin only
 - **Token expiration**: Tokens may expire between save and restore
 - **Navigate first**: Must be on a page before saving (need origin context)
+
+### Manual Export from Chrome
+
+When Selenium can't complete login (bot detection, complex MFA), export from your regular Chrome:
+
+**Step 1: Export localStorage (Console)**
+
+```javascript
+copy(JSON.stringify(
+  Object.entries(localStorage).map(([k, v]) => ({name: k, value: v})),
+  null, 2
+))
+```
+
+Paste into a temporary file (e.g., `localStorage.json`).
+
+**Step 2: Export Cookies (Application tab)**
+
+1. DevTools → Application → Cookies → select the site
+2. Select all cookies: `Cmd+A` (Mac) or `Ctrl+A` (Windows)
+3. Copy: `Cmd+C` / `Ctrl+C`
+4. Paste into a text file (tab-separated table format)
+
+**Step 3: Build the Storage State JSON**
+
+Parse the exports into Playwright format. Key cookie fields:
+- `expires`: Use `-1` for session cookies, epoch seconds for persistent
+- `sameSite`: Must be `"Strict"`, `"Lax"`, or `"None"` (capitalize first letter)
+- `domain`: Include leading `.` for domain-wide cookies
+
+```json
+{
+  "cookies": [
+    {
+      "name": "sessionId",
+      "value": "abc123",
+      "domain": ".example.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://www.example.com",
+      "localStorage": [
+        {"name": "authToken", "value": "..."}
+      ]
+    }
+  ]
+}
+```
+
+**Step 4: Import and Test**
+
+```python
+navigate(
+    "https://www.example.com/account",
+    fresh_browser=True,
+    storage_state_file="example_auth.json"
+)
+```
+
+**Token Lifetime Considerations**
+
+Many sites use short-lived tokens (15-30 minutes). Export and test immediately after login:
+- Check for `expiresIn`, `exp` (JWT), or similar fields in localStorage
+- JWT tokens: decode at jwt.io to check expiration
+- Some sites refresh tokens automatically; others require re-login
+
+**When This Works vs Doesn't**
+
+| Scenario                   | Likely Outcome                           |
+|----------------------------|------------------------------------------|
+| Simple cookie-based auth   | ✅ Works reliably                         |
+| JWT tokens in localStorage | ✅ Works until token expires              |
+| Short-lived session tokens | ⚠️ Time-sensitive, test immediately      |
+| Device fingerprint binding | ❌ May fail (different browser signature) |
+| IP-bound sessions          | ❌ May fail if different IP               |
+
+**Future: Automated Export**
+
+Manual export is tedious. Potential automation approaches:
+- Chrome extension that exports in Playwright format
+- CDP connection to Chrome's remote debugging port (`--remote-debugging-port=9222`)
+- Browser-specific APIs (Chrome's `chrome.cookies` extension API)
 
 ### Security
 
