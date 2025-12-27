@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Sequence
 
 import pydantic
 
@@ -502,3 +502,71 @@ class PageTextResult(BaseModel):
 
     # Smart extraction transparency (only present for selector='auto')
     smart_info: SmartExtractionInfo | None = None
+
+
+# =============================================================================
+# Storage State Models (Playwright-compatible session persistence)
+# =============================================================================
+
+SameSitePolicy = Literal["Strict", "Lax", "None"]
+
+
+class StorageStateCookie(BaseModel):
+    """Cookie in Playwright storageState format.
+
+    Matches Playwright's cookie structure for cross-tool compatibility.
+    Session cookies use expires=-1, persistent cookies use epoch timestamp.
+    """
+
+    name: str
+    value: str
+    domain: str
+    path: str
+    expires: float  # Epoch seconds, -1 for session cookies
+    httpOnly: bool
+    secure: bool
+    sameSite: SameSitePolicy
+
+
+class StorageStateLocalStorageItem(BaseModel):
+    """localStorage key-value pair in storageState format."""
+
+    name: str
+    value: str
+
+
+class StorageStateOrigin(BaseModel):
+    """Origin storage data in storageState format.
+
+    Each origin (scheme + domain + port) has its own localStorage.
+    Future: sessionStorage, indexedDB when needed.
+    """
+
+    origin: str  # e.g., "https://www.marriott.com"
+    localStorage: Sequence[StorageStateLocalStorageItem]
+    # Future storage types (not implemented yet):
+    # sessionStorage: Sequence[StorageStateLocalStorageItem] | None = None
+    # indexedDB: Sequence[...] | None = None  # Complex structure, TBD
+
+
+class StorageState(BaseModel):
+    """Playwright-compatible storage state for session persistence.
+
+    Contains browser storage that maintains authenticated sessions.
+    Export after login, import to restore auth in future sessions.
+
+    Format matches Playwright's browserContext.storageState() for portability.
+    """
+
+    cookies: Sequence[StorageStateCookie]
+    origins: Sequence[StorageStateOrigin]
+
+
+class SaveStorageStateResult(BaseModel):
+    """Result from save_storage_state operation."""
+
+    path: str
+    cookies_count: int
+    origins_count: int
+    current_origin: str
+    size_bytes: int

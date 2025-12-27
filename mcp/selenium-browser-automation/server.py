@@ -85,6 +85,12 @@ from src.models import (
     FocusableElement,
     SmartExtractionInfo,
     PageTextResult,
+    # Storage state (session persistence)
+    StorageStateCookie,
+    StorageStateLocalStorageItem,
+    StorageStateOrigin,
+    StorageState,
+    SaveStorageStateResult,
 )
 
 
@@ -291,6 +297,7 @@ def register_tools(service: BrowserService) -> None:
         profile: str | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        storage_state_file: str | None = None,
         ctx: Context | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -307,6 +314,9 @@ def register_tools(service: BrowserService) -> None:
             init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
+            storage_state_file: Import storage state before navigation (requires fresh_browser=True).
+                               Restores cookies and localStorage from Playwright-compatible JSON.
+                               Use after save_storage_state() to restore authenticated sessions.
 
         Example - API interception:
             navigate(
@@ -325,10 +335,27 @@ def register_tools(service: BrowserService) -> None:
             navigate("https://example.com/account")
             # Retrieve captured APIs via execute_javascript('window.__apiCapture')
 
+        Example - Session persistence:
+            # After logging in:
+            save_storage_state("auth.json")
+
+            # Later, in new session:
+            navigate(
+                "https://example.com/account",
+                fresh_browser=True,
+                storage_state_file="auth.json"
+            )
+            # → Cookies restored before navigation, localStorage after
+            # → Already authenticated!
+
         Note:
             init_scripts run BEFORE page scripts in every frame (including iframes).
             Do not modify navigator.webdriver, navigator.languages, navigator.plugins,
             or window.chrome - these are reserved for bot detection evasion.
+
+            storage_state_file imports cookies before navigation (sent with request)
+            and localStorage after navigation (requires origin context).
+            Only localStorage for the target page's origin is restored.
 
         Returns:
             NavigationResult with current_url and title
@@ -358,11 +385,17 @@ def register_tools(service: BrowserService) -> None:
                 "init_scripts requires fresh_browser=True (scripts must be registered before first navigation)"
             )
 
+        if storage_state_file and not fresh_browser:
+            raise fastmcp.exceptions.ValidationError(
+                "storage_state_file requires fresh_browser=True (import into clean session)"
+            )
+
         print(
             f"[navigate] Navigating to {url}"
             + (" (fresh browser)" if fresh_browser else "")
             + (" (HAR capture enabled)" if enable_har_capture else "")
-            + (f" ({len(init_scripts)} init scripts)" if init_scripts else ""),
+            + (f" ({len(init_scripts)} init scripts)" if init_scripts else "")
+            + (" (importing storage state)" if storage_state_file else ""),
             file=sys.stderr,
         )
 
@@ -381,6 +414,62 @@ def register_tools(service: BrowserService) -> None:
                     {"source": script},
                 )
 
+        # Import storage state if provided (cookies BEFORE navigation, localStorage AFTER)
+        storage_state: StorageState | None = None
+        if storage_state_file:
+            # Determine file path
+            state_path = Path(storage_state_file)
+            if not state_path.is_absolute():
+                state_path = Path.cwd() / storage_state_file
+
+            # Load and validate storage state file
+            if not state_path.exists():
+                raise fastmcp.exceptions.ToolError(
+                    f"Storage state file not found: {state_path}"
+                )
+
+            storage_state_json = state_path.read_text()
+            storage_state = StorageState.model_validate_json(storage_state_json)
+
+            print(
+                f"[navigate] Importing {len(storage_state.cookies)} cookies from {storage_state_file}",
+                file=sys.stderr,
+            )
+
+            # Set cookies via CDP BEFORE navigation
+            # This allows cookies to be sent with the navigation request
+            if storage_state.cookies:
+                # Convert storageState cookies to CDP format
+                cdp_cookies = []
+                for cookie in storage_state.cookies:
+                    cdp_cookie = {
+                        "name": cookie.name,
+                        "value": cookie.value,
+                        "domain": cookie.domain,
+                        "path": cookie.path,
+                        "httpOnly": cookie.httpOnly,
+                        "secure": cookie.secure,
+                        "sameSite": cookie.sameSite,
+                    }
+                    # Handle session cookies (expires: -1) vs persistent cookies
+                    # For CDP, omit expires for session cookies
+                    if cookie.expires != -1:
+                        cdp_cookie["expires"] = cookie.expires
+
+                    cdp_cookies.append(cdp_cookie)
+
+                # Set all cookies at once
+                await asyncio.to_thread(
+                    driver.execute_cdp_cmd,
+                    "Network.setCookies",
+                    {"cookies": cdp_cookies}
+                )
+
+                print(
+                    f"[navigate] Set {len(cdp_cookies)} cookies via CDP",
+                    file=sys.stderr,
+                )
+
         # Navigate (blocking operation)
         await asyncio.to_thread(driver.get, url)
 
@@ -388,6 +477,49 @@ def register_tools(service: BrowserService) -> None:
             f"[navigate] Successfully navigated to {driver.current_url}",
             file=sys.stderr,
         )
+
+        # Restore localStorage AFTER navigation (if storage state was imported)
+        # localStorage requires origin context, so we must navigate first
+        if storage_state is not None:
+            # Get current origin (after navigation)
+            current_origin = await asyncio.to_thread(
+                driver.execute_script,
+                "return window.location.origin"
+            )
+
+            # Find matching origin in storage state
+            origin_data: StorageStateOrigin | None = None
+            for origin in storage_state.origins:
+                if origin.origin == current_origin:
+                    origin_data = origin
+                    break
+
+            if origin_data and origin_data.localStorage:
+                print(
+                    f"[navigate] Restoring {len(origin_data.localStorage)} localStorage items",
+                    file=sys.stderr,
+                )
+
+                # Restore each localStorage item
+                for item in origin_data.localStorage:
+                    await asyncio.to_thread(
+                        driver.execute_script,
+                        "localStorage.setItem(arguments[0], arguments[1])",
+                        item.name,
+                        item.value
+                    )
+            elif origin_data:
+                print(
+                    f"[navigate] No localStorage to restore for {current_origin}",
+                    file=sys.stderr,
+                )
+            else:
+                available_origins = [o.origin for o in storage_state.origins]
+                print(
+                    f"[navigate] Storage state has no data for {current_origin} "
+                    f"(available origins: {available_origins})",
+                    file=sys.stderr,
+                )
 
         return NavigationResult(current_url=driver.current_url, title=driver.title)
 
@@ -2047,6 +2179,169 @@ Workflow:
                 error=str(e),
                 error_type="execution",
             )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Save Storage State",
+            readOnlyHint=False,
+            idempotentHint=False,
+        )
+    )
+    async def save_storage_state(
+        filename: str,
+        ctx: Context | None = None,
+    ) -> SaveStorageStateResult:
+        """Export browser storage state to Playwright-compatible JSON for session persistence.
+
+        Captures cookies and localStorage that maintain authenticated sessions.
+        After logging in once, save storage state to reuse authentication in future sessions
+        without re-login.
+
+        Args:
+            filename: Output filename (relative to cwd or absolute path).
+                      Example: "marriott_auth.json"
+
+        Returns:
+            SaveStorageStateResult with path, cookie count, and metadata
+
+        What's captured:
+            - All cookies with full attributes (HttpOnly, Secure, SameSite, expires)
+            - localStorage for current page's origin
+
+        What's NOT captured (future enhancements):
+            - sessionStorage (tab-specific, rarely needed for auth)
+            - IndexedDB (complex, can add if needed)
+            - localStorage for other origins (limitation: current origin only)
+
+        Workflow:
+            1. navigate("https://example.com/login", fresh_browser=True)
+            2. [Complete login flow - click buttons, enter credentials, etc.]
+            3. navigate("https://example.com/account")  # Navigate to authenticated page
+            4. save_storage_state("example_auth.json")  # Export auth state
+            5. [Later, in new session:]
+               navigate("https://example.com/account",
+                       fresh_browser=True,
+                       storage_state_file="example_auth.json")  # Restore auth
+
+        Format:
+            Saves in Playwright storageState JSON format for cross-tool compatibility.
+            File can be used with Playwright, Puppeteer, or manually edited.
+
+        Security:
+            Storage state files contain authentication cookies and tokens.
+            Treat them as credentials:
+            - Never commit to version control
+            - Encrypt at rest for long-term storage
+            - Delete when no longer needed
+
+        Limitations:
+            - Only captures localStorage for current page's origin
+            - Navigate to your main application page before saving
+            - Tokens may expire between save and restore - re-authenticate if needed
+        """
+        logger = PrintLogger(ctx)
+
+        driver = service.state.driver
+        if driver is None:
+            raise fastmcp.exceptions.ToolError(
+                "Browser not initialized. Call navigate() first to establish a session."
+            )
+
+        await logger.info(f"Exporting storage state to {filename}")
+
+        # Get all cookies via CDP Network.getCookies
+        cookies_result = await asyncio.to_thread(
+            driver.execute_cdp_cmd,
+            "Network.getCookies",
+            {}  # Empty = get all cookies
+        )
+
+        cdp_cookies = cookies_result.get("cookies", [])
+
+        # Convert CDP cookies to storageState format
+        storage_cookies: list[dict] = []
+        for cookie in cdp_cookies:
+            # CDP returns `session: true` for session cookies, otherwise `expires` timestamp
+            # For storageState format: session cookies have expires=-1
+            is_session = cookie.get("session", False)
+            expires = -1.0 if is_session else cookie.get("expires", -1.0)
+
+            # Normalize sameSite - CDP should return "Strict", "Lax", or "None"
+            # but handle edge cases
+            same_site = cookie.get("sameSite", "Lax")
+            if same_site not in ("Strict", "Lax", "None"):
+                same_site = "Lax"  # Default fallback
+
+            storage_cookies.append({
+                "name": cookie["name"],
+                "value": cookie["value"],
+                "domain": cookie["domain"],
+                "path": cookie["path"],
+                "expires": expires,
+                "httpOnly": cookie.get("httpOnly", False),
+                "secure": cookie.get("secure", False),
+                "sameSite": same_site,
+            })
+
+        # Get current origin
+        current_origin = await asyncio.to_thread(
+            driver.execute_script,
+            "return window.location.origin"
+        )
+
+        # Get localStorage for current origin
+        local_storage_items = await asyncio.to_thread(
+            driver.execute_script,
+            """
+            return Object.keys(localStorage).map(key => ({
+                name: key,
+                value: localStorage.getItem(key)
+            }));
+            """
+        )
+
+        # Handle null/undefined from JS
+        if local_storage_items is None:
+            local_storage_items = []
+
+        # Build storageState structure
+        storage_state_data = {
+            "cookies": storage_cookies,
+            "origins": [
+                {
+                    "origin": current_origin,
+                    "localStorage": local_storage_items,
+                }
+            ]
+        }
+
+        # Validate with Pydantic before saving
+        validated_state = StorageState(**storage_state_data)
+
+        # Determine file path (allow absolute or relative to cwd)
+        file_path = Path(filename)
+        if not file_path.is_absolute():
+            file_path = Path.cwd() / filename
+
+        # Save to file
+        json_content = validated_state.model_dump_json(indent=2)
+        file_path.write_text(json_content)
+
+        result = SaveStorageStateResult(
+            path=str(file_path),
+            cookies_count=len(storage_cookies),
+            origins_count=1,
+            current_origin=current_origin,
+            size_bytes=len(json_content),
+        )
+
+        await logger.info(
+            f"Saved {result.cookies_count} cookies + "
+            f"{len(local_storage_items)} localStorage items for {current_origin} "
+            f"to {file_path} ({result.size_bytes} bytes)"
+        )
+
+        return result
 
 
 def _sync_cleanup(state: BrowserState) -> None:

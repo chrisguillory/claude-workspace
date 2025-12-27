@@ -208,6 +208,7 @@ How CiC tools map to SMCP tools:
 | -                       | `configure_proxy`, `clear_proxy`                | SMCP-only | Configure/clear authenticated proxy via mitmproxy for IP rotation                                         |
 | -                       | `download_resource`                             | SMCP-only | Download files using browser session cookies (bypasses bot detection)                                     |
 | -                       | `list_chrome_profiles`                          | SMCP-only | List available Chrome profiles with name, email, directory metadata                                       |
+| -                       | `save_storage_state`                            | SMCP-only | Export cookies + localStorage to Playwright-compatible JSON                                               |
 
 See [docs/claude-in-chrome.md](docs/claude-in-chrome.md) for complete Claude in Chrome tool reference.
 
@@ -322,6 +323,61 @@ execute_javascript('window.__apiCapture')
 
 For same-origin URL changes without page reload (preserving JS state), see the soft navigation pattern in `execute_javascript()`.
 
+## Session Persistence
+
+Export and restore browser authentication state to avoid repeated logins.
+
+### The Problem
+
+Chrome profile loading (`profile="Default"`) doesn't work reliably:
+- Chrome locks profiles when running (can't share with Selenium)
+- Even when Chrome is closed, Selenium doesn't read profiles consistently
+- All-or-nothing approach (entire profile, not domain-scoped)
+
+### The Solution
+
+Export storage state after login, import in future sessions:
+
+```python
+# 1. Log in (once)
+navigate("https://example.com/login", fresh_browser=True)
+# [Complete login flow]
+navigate("https://example.com/account")
+
+# 2. Save authentication state
+save_storage_state("example_auth.json")
+
+# 3. Later, restore without re-login
+navigate(
+    "https://example.com/account",
+    fresh_browser=True,
+    storage_state_file="example_auth.json"
+)
+# → Already authenticated!
+```
+
+### What's Captured
+
+| Storage Type   | Captured | Notes                                                |
+|----------------|:--------:|------------------------------------------------------|
+| Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires) |
+| localStorage   |    ✓     | Current origin only                                  |
+| sessionStorage |    -     | Future enhancement                                   |
+| IndexedDB      |    -     | Future enhancement                                   |
+
+### Limitations
+
+- **Single origin**: localStorage captured for current page's origin only
+- **Token expiration**: Tokens may expire between save and restore
+- **Navigate first**: Must be on a page before saving (need origin context)
+
+### Security
+
+Storage state files contain authentication tokens. Treat as credentials:
+- Never commit to version control
+- Encrypt at rest for long-term storage
+- Delete when no longer needed
+
 ## Performance Analysis
 
 ### What We Capture
@@ -412,7 +468,7 @@ Ideas without implementation plans:
 ## Tool Reference
 
 ### Navigation & Content
-- `navigate(url, fresh_browser?, profile?, enable_har_capture?, init_scripts?)` - Load URL with optional Chrome profile
+- `navigate(url, fresh_browser?, profile?, enable_har_capture?, init_scripts?, storage_state_file?)` - Load URL with optional session restore
 - `get_page_text(selector?, include_images?)` - Smart content extraction with semantic element priority (see below)
 - `get_page_html(selector?, limit?)` - Extract raw HTML source or specific elements
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
@@ -473,6 +529,9 @@ get_page_text(include_images=True)
 - `capture_web_vitals(timeout_ms?)` - Core Web Vitals metrics
 - `get_resource_timings(clear_resource_timing_buffer?, min_duration_ms?)` - Resource timing via Performance API (no setup required)
 - `export_har(filename, include_response_bodies?, max_body_size_mb?)` - Export to HAR file (requires `enable_har_capture=True` on navigate)
+
+### Session Persistence
+- `save_storage_state(filename)` - Export cookies + localStorage to Playwright-compatible JSON
 
 ### Utilities
 - `download_resource(url, output_filename)` - Download with session cookies
@@ -608,11 +667,12 @@ Compare with Claude in Chrome, which is a browser extension controlling existing
 
 ### Session Management
 
-| Aspect             | Behavior                                                     |
-|--------------------|--------------------------------------------------------------|
-| Cookie persistence | Maintained across all tool calls                             |
-| Fresh session      | `navigate(url, fresh_browser=True)` starts clean             |
-| Profile loading    | `navigate(url, profile="Default")` uses saved Chrome profile |
+| Aspect             | Behavior                                                                 |
+|--------------------|--------------------------------------------------------------------------|
+| Cookie persistence | Maintained across all tool calls                                         |
+| Fresh session      | `navigate(url, fresh_browser=True)` starts clean                         |
+| Profile loading    | `navigate(url, profile="Default")` uses saved Chrome profile (unreliable)|
+| Storage state      | `save_storage_state()` / `storage_state_file` for portable session export|
 
 ### Network Capture Design
 
