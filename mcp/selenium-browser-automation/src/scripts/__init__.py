@@ -19,6 +19,8 @@ __all__ = [
     "WEB_VITALS_SCRIPT",
     "RESOURCE_TIMING_SCRIPT",
     "SAFE_SERIALIZE_SCRIPT",
+    "INDEXEDDB_CAPTURE_SCRIPT",
+    "INDEXEDDB_RESTORE_SCRIPT",
     "build_execute_javascript_async_script",
 ]
 
@@ -39,6 +41,8 @@ NETWORK_MONITOR_CHECK_SCRIPT: str = _load_script("network_monitor_check.js")
 WEB_VITALS_SCRIPT: str = _load_script("web_vitals.js")
 RESOURCE_TIMING_SCRIPT: str = _load_script("resource_timing.js")
 SAFE_SERIALIZE_SCRIPT: str = _load_script("safe_serialize.js")
+INDEXEDDB_CAPTURE_SCRIPT: str = _load_script("indexeddb_capture.js")
+INDEXEDDB_RESTORE_SCRIPT: str = _load_script("indexeddb_restore.js")
 
 
 def build_execute_javascript_async_script(escaped_code: str) -> str:

@@ -535,18 +535,71 @@ class StorageStateLocalStorageItem(BaseModel):
     value: str
 
 
+class StorageStateIndexedDBRecord(BaseModel):
+    """IndexedDB record - key/value pair.
+
+    Keys can be strings, numbers, dates (as ISO strings), or arrays (compound keys).
+    Values are JSON-serializable representations of stored objects.
+
+    Complex types (Date, Map, Set, ArrayBuffer) are serialized with __type markers:
+    - Date: {"__type": "Date", "__value": "2024-01-01T00:00:00.000Z"}
+    - Map: {"__type": "Map", "__value": [[key, value], ...]}
+    - Set: {"__type": "Set", "__value": [item, ...]}
+    - ArrayBuffer: {"__type": "ArrayBuffer", "__value": [byte, byte, ...]}
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid", strict=False)  # Allow flexible JSON values
+
+    key: str | int | float | list | None
+    value: str | int | float | bool | dict | list | None
+
+
+class StorageStateIndexedDBIndex(BaseModel):
+    """IndexedDB object store index metadata."""
+
+    name: str
+    keyPath: str | Sequence[str]
+    unique: bool
+    multiEntry: bool
+
+
+class StorageStateIndexedDBObjectStore(BaseModel):
+    """IndexedDB object store with schema and data.
+
+    Captures the complete state of an object store including:
+    - Schema: keyPath, autoIncrement, indexes
+    - Data: all records as key/value pairs
+    """
+
+    name: str
+    keyPath: str | Sequence[str] | None
+    autoIncrement: bool
+    indexes: Sequence[StorageStateIndexedDBIndex]
+    records: Sequence[StorageStateIndexedDBRecord]
+
+
+class StorageStateIndexedDB(BaseModel):
+    """IndexedDB database with version and object stores.
+
+    Playwright-compatible format for IndexedDB persistence.
+    The version number is critical for schema migrations.
+    """
+
+    databaseName: str
+    version: int
+    objectStores: Sequence[StorageStateIndexedDBObjectStore]
+
+
 class StorageStateOrigin(BaseModel):
     """Origin storage data in storageState format.
 
-    Each origin (scheme + domain + port) has its own localStorage.
-    Future: sessionStorage, indexedDB when needed.
+    Each origin (scheme + domain + port) has isolated storage.
+    IndexedDB is optional (captured only when include_indexeddb=True).
     """
 
     origin: str  # e.g., "https://www.marriott.com"
     localStorage: Sequence[StorageStateLocalStorageItem]
-    # Future storage types (not implemented yet):
-    # sessionStorage: Sequence[StorageStateLocalStorageItem] | None = None
-    # indexedDB: Sequence[...] | None = None  # Complex structure, TBD
+    indexedDB: Sequence[StorageStateIndexedDB] | None = None
 
 
 class StorageState(BaseModel):
@@ -570,3 +623,6 @@ class SaveStorageStateResult(BaseModel):
     origins_count: int
     current_origin: str
     size_bytes: int
+    # IndexedDB stats (only present if include_indexeddb=True)
+    indexeddb_databases_count: int | None = None
+    indexeddb_records_count: int | None = None

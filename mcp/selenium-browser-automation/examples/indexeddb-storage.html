@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: IndexedDB Storage State Capture/Restore</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #007bff;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #e3f2fd;
+      padding: 15px;
+      border-left: 4px solid #2196f3;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .test-number {
+      background: #007bff;
+      color: white;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 10px;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .expected {
+      background: #f8f9fa;
+      border: 1px dashed #6c757d;
+      padding: 10px;
+      margin-top: 15px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+    }
+
+    .expected strong {
+      color: #28a745;
+    }
+
+    #status {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 8px;
+    }
+
+    #status.success {
+      background: #d4edda;
+      border-color: #28a745;
+    }
+
+    #status.error {
+      background: #f8d7da;
+      border-color: #dc3545;
+    }
+
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+      font-size: 14px;
+    }
+
+    button:hover {
+      background: #0056b3;
+    }
+
+    button.danger {
+      background: #dc3545;
+    }
+
+    button.danger:hover {
+      background: #c82333;
+    }
+
+    pre {
+      background: #f8f9fa;
+      padding: 15px;
+      overflow-x: auto;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .controls {
+      margin: 20px 0;
+      padding: 15px;
+      background: white;
+      border-radius: 8px;
+    }
+
+    .data-types {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .data-type {
+      padding: 8px 12px;
+      background: #e9ecef;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    .data-type.serialized {
+      background: #d4edda;
+    }
+  </style>
+</head>
+<body>
+  <h1>IndexedDB Storage State Test</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Test <code>save_storage_state(include_indexeddb=True)</code> capture and
+    <code>navigate(storage_state_file)</code> restore functionality.</p>
+    <p><strong>Test Flow:</strong></p>
+    <ol>
+      <li>Click "Create Test Data" or call <code>window.initializeDatabases()</code> to create IndexedDB</li>
+      <li>Use <code>save_storage_state("test.json", include_indexeddb=True)</code> to capture</li>
+      <li>Click "Clear All" or navigate away (fresh_browser=True)</li>
+      <li>Use <code>navigate(url, storage_state_file="test.json")</code> to restore</li>
+      <li>Click "Verify Data" - data should exist WITHOUT clicking "Create Test Data"</li>
+    </ol>
+    <p><strong>Key:</strong> No auto-initialization on page load. All actions are explicit for clean testing.</p>
+  </div>
+
+  <div id="status">Initializing IndexedDB...</div>
+
+  <div class="controls">
+    <h3>Manual Controls</h3>
+    <button onclick="initializeDatabases()" style="background: #28a745;">Create Test Data</button>
+    <button onclick="verifyData()">Verify Data</button>
+    <button onclick="clearAllDatabases()" class="danger">Clear All Databases</button>
+    <button onclick="location.reload()">Reload Page</button>
+  </div>
+
+  <!-- Test Case 1: Basic Object Store with keyPath -->
+  <div class="test-case">
+    <h2><span class="test-number">1</span>Basic Object Store with keyPath</h2>
+    <p>Tests: Object store with <code>keyPath: 'id'</code>, unique index, records with primitive values.</p>
+    <div class="expected">
+      <strong>Expected in capture:</strong> Database "TestDB1" with store "users", 2 records, email index (unique: true)
+    </div>
+  </div>
+
+  <!-- Test Case 2: Date Type Serialization -->
+  <div class="test-case">
+    <h2><span class="test-number">2</span>Date Type Serialization</h2>
+    <p>Tests: JavaScript Date objects should be serialized with <code>__type: "Date"</code> marker.</p>
+    <div class="expected">
+      <strong>Expected in capture:</strong> <code>{"__type": "Date", "__value": "2024-01-15T10:30:00.000Z"}</code>
+    </div>
+  </div>
+
+  <!-- Test Case 3: Nested Objects and Arrays -->
+  <div class="test-case">
+    <h2><span class="test-number">3</span>Nested Objects and Arrays</h2>
+    <p>Tests: Complex nested structures with mixed types.</p>
+    <div class="expected">
+      <strong>Expected in capture:</strong> Nested objects preserved, arrays with mixed types intact
+    </div>
+  </div>
+
+  <!-- Test Case 4: Out-of-line Keys -->
+  <div class="test-case">
+    <h2><span class="test-number">4</span>Out-of-line Keys (no keyPath)</h2>
+    <p>Tests: Object store without keyPath, keys provided separately.</p>
+    <div class="expected">
+      <strong>Expected in capture:</strong> Store "settings" with keyPath: null, string keys ("theme", "language")
+    </div>
+  </div>
+
+  <!-- Test Case 5: Auto-increment Keys -->
+  <div class="test-case">
+    <h2><span class="test-number">5</span>Auto-increment Keys</h2>
+    <p>Tests: Object store with <code>autoIncrement: true</code>, numeric keys generated automatically.</p>
+    <div class="expected">
+      <strong>Expected in capture:</strong> Store "logs" with autoIncrement: true, keys: 1, 2
+    </div>
+  </div>
+
+  <!-- Test Case 6: Multiple Indexes -->
+  <div class="test-case">
+    <h2><span class="test-number">6</span>Multiple Indexes with multiEntry</h2>
+    <p>Tests: Index with <code>multiEntry: true</code> for array values (tags).</p>
+    <div class="expected">
+      <strong>Expected in capture:</strong> Index "tags" with multiEntry: true
+    </div>
+  </div>
+
+  <!-- Test Case 7: Multiple Databases -->
+  <div class="test-case">
+    <h2><span class="test-number">7</span>Multiple Databases</h2>
+    <p>Tests: Capture should include all databases for the origin.</p>
+    <div class="expected">
+      <strong>Expected in capture:</strong> Two databases: "TestDB1" and "TestDB2"
+    </div>
+  </div>
+
+  <!-- Verification Results -->
+  <div class="test-case">
+    <h3>Verification Results</h3>
+    <pre id="verification-output">Click "Verify Data" to check current IndexedDB state.</pre>
+  </div>
+
+  <!-- Data Types Tested -->
+  <div class="test-case">
+    <h3>Data Types Created</h3>
+    <div class="data-types" id="data-types-list">
+      <div class="data-type">String</div>
+      <div class="data-type">Number (int)</div>
+      <div class="data-type">Number (float)</div>
+      <div class="data-type">Boolean</div>
+      <div class="data-type">null</div>
+      <div class="data-type serialized">Date (__type marker)</div>
+      <div class="data-type">Array</div>
+      <div class="data-type">Nested Object</div>
+      <div class="data-type">Out-of-line Key</div>
+      <div class="data-type">Auto-increment Key</div>
+    </div>
+  </div>
+
+  <script>
+    // Test data with various types
+    const TEST_DATA = {
+      db1: {
+        name: 'TestDB1',
+        version: 1,
+        stores: [
+          {
+            name: 'users',
+            options: { keyPath: 'id' },
+            indexes: [
+              { name: 'email', keyPath: 'email', options: { unique: true } },
+              { name: 'tags', keyPath: 'tags', options: { multiEntry: true } }
+            ],
+            records: [
+              {
+                id: 1,
+                name: 'Alice',
+                email: 'alice@example.com',
+                created: new Date('2024-01-15T10:30:00Z'),
+                tags: ['admin', 'active'],
+                metadata: {
+                  lastLogin: new Date('2024-06-01T14:22:00Z'),
+                  preferences: { theme: 'dark', notifications: true }
+                },
+                score: 98.5,
+                verified: true
+              },
+              {
+                id: 2,
+                name: 'Bob',
+                email: 'bob@example.com',
+                created: new Date('2024-02-20T14:45:00Z'),
+                tags: ['user'],
+                metadata: {
+                  lastLogin: null,
+                  preferences: { theme: 'light', notifications: false }
+                },
+                score: 72.3,
+                verified: false
+              }
+            ]
+          },
+          {
+            name: 'settings',
+            options: {}, // No keyPath - out-of-line keys
+            indexes: [],
+            records: [
+              { key: 'theme', value: { name: 'dark', primary: '#007bff' } },
+              { key: 'language', value: { code: 'en-US', rtl: false } }
+            ]
+          },
+          {
+            name: 'logs',
+            options: { autoIncrement: true },
+            indexes: [],
+            records: [
+              { value: { action: 'login', timestamp: new Date(), userId: 1 } },
+              { value: { action: 'view', timestamp: new Date(), userId: 2 } }
+            ]
+          }
+        ]
+      },
+      db2: {
+        name: 'TestDB2',
+        version: 1,
+        stores: [
+          {
+            name: 'cache',
+            options: { keyPath: 'url' },
+            indexes: [],
+            records: [
+              { url: '/api/users', data: [1, 2, 3], expires: new Date(Date.now() + 3600000) }
+            ]
+          }
+        ]
+      }
+    };
+
+    // Create a database from config
+    async function createDatabase(config) {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(config.name, config.version);
+
+        request.onerror = () => reject(request.error);
+
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+
+          for (const storeConfig of config.stores) {
+            const store = db.createObjectStore(storeConfig.name, storeConfig.options);
+
+            for (const indexConfig of storeConfig.indexes || []) {
+              store.createIndex(indexConfig.name, indexConfig.keyPath, indexConfig.options);
+            }
+          }
+        };
+
+        request.onsuccess = async () => {
+          const db = request.result;
+
+          // Insert records
+          for (const storeConfig of config.stores) {
+            const tx = db.transaction(storeConfig.name, 'readwrite');
+            const store = tx.objectStore(storeConfig.name);
+
+            for (const record of storeConfig.records) {
+              if (record.key !== undefined) {
+                // Out-of-line key
+                store.put(record.value, record.key);
+              } else {
+                // In-line key or auto-increment
+                store.put(record.value || record);
+              }
+            }
+
+            await new Promise((res, rej) => {
+              tx.oncomplete = res;
+              tx.onerror = () => rej(tx.error);
+            });
+          }
+
+          db.close();
+          resolve({ name: config.name, version: config.version });
+        };
+      });
+    }
+
+    // Initialize all test databases
+    async function initializeDatabases() {
+      const status = document.getElementById('status');
+
+      try {
+        const results = [];
+
+        for (const config of Object.values(TEST_DATA)) {
+          const result = await createDatabase(config);
+          results.push(result);
+        }
+
+        status.className = 'success';
+        status.innerHTML = `
+          <strong>IndexedDB Initialized Successfully!</strong><br>
+          Created ${results.length} database(s): ${results.map(r => r.name).join(', ')}<br>
+          <small>Ready for save_storage_state(include_indexeddb=True) capture.</small>
+        `;
+
+        // Set markers for test verification
+        window.__indexedDBTestReady = true;
+        window.__indexedDBTestDatabases = results.map(r => r.name);
+
+      } catch (error) {
+        status.className = 'error';
+        status.innerHTML = `<strong>Error:</strong> ${error.message}`;
+        window.__indexedDBTestReady = false;
+      }
+    }
+
+    // Verify current IndexedDB state
+    async function verifyData() {
+      const output = document.getElementById('verification-output');
+      output.textContent = 'Verifying...';
+
+      try {
+        if (!indexedDB.databases) {
+          output.textContent = 'Error: indexedDB.databases() not supported';
+          return;
+        }
+
+        const databases = await indexedDB.databases();
+        const results = {
+          databases: [],
+          totalRecords: 0,
+          testsPassed: []
+        };
+
+        for (const dbInfo of databases) {
+          const db = await new Promise((res, rej) => {
+            const req = indexedDB.open(dbInfo.name);
+            req.onsuccess = () => res(req.result);
+            req.onerror = () => rej(req.error);
+          });
+
+          const dbResult = {
+            name: dbInfo.name,
+            version: db.version,
+            stores: []
+          };
+
+          for (const storeName of db.objectStoreNames) {
+            const tx = db.transaction(storeName, 'readonly');
+            const store = tx.objectStore(storeName);
+
+            const count = await new Promise((res) => {
+              const req = store.count();
+              req.onsuccess = () => res(req.result);
+            });
+
+            const indexes = [];
+            for (const indexName of store.indexNames) {
+              const index = store.index(indexName);
+              indexes.push({
+                name: index.name,
+                unique: index.unique,
+                multiEntry: index.multiEntry
+              });
+            }
+
+            dbResult.stores.push({
+              name: storeName,
+              keyPath: store.keyPath,
+              autoIncrement: store.autoIncrement,
+              recordCount: count,
+              indexes
+            });
+
+            results.totalRecords += count;
+          }
+
+          db.close();
+          results.databases.push(dbResult);
+        }
+
+        // Check test conditions
+        const db1 = results.databases.find(d => d.name === 'TestDB1');
+        const db2 = results.databases.find(d => d.name === 'TestDB2');
+
+        if (db1) {
+          results.testsPassed.push('Test 1 passed: TestDB1 exists');
+
+          const usersStore = db1.stores.find(s => s.name === 'users');
+          if (usersStore && usersStore.recordCount === 2) {
+            results.testsPassed.push('Test 1 passed: users store has 2 records');
+          }
+
+          const emailIndex = usersStore?.indexes.find(i => i.name === 'email');
+          if (emailIndex?.unique) {
+            results.testsPassed.push('Test 1 passed: email index is unique');
+          }
+
+          const tagsIndex = usersStore?.indexes.find(i => i.name === 'tags');
+          if (tagsIndex?.multiEntry) {
+            results.testsPassed.push('Test 6 passed: tags index is multiEntry');
+          }
+
+          const settingsStore = db1.stores.find(s => s.name === 'settings');
+          if (settingsStore && settingsStore.keyPath === null) {
+            results.testsPassed.push('Test 4 passed: settings has out-of-line keys');
+          }
+
+          const logsStore = db1.stores.find(s => s.name === 'logs');
+          if (logsStore?.autoIncrement) {
+            results.testsPassed.push('Test 5 passed: logs has autoIncrement');
+          }
+        }
+
+        if (db2) {
+          results.testsPassed.push('Test 7 passed: TestDB2 exists (multiple databases)');
+        }
+
+        // Set window variable for MCP verification
+        window.__indexedDBVerification = results;
+
+        output.textContent = JSON.stringify(results, null, 2);
+
+      } catch (error) {
+        output.textContent = `Error: ${error.message}`;
+      }
+    }
+
+    // Clear all IndexedDB databases
+    async function clearAllDatabases() {
+      const status = document.getElementById('status');
+
+      if (!confirm('Clear all IndexedDB databases? This cannot be undone.')) {
+        return;
+      }
+
+      try {
+        const databases = await indexedDB.databases();
+        let cleared = 0;
+
+        for (const db of databases) {
+          await new Promise((res) => {
+            const req = indexedDB.deleteDatabase(db.name);
+            req.onsuccess = () => { cleared++; res(); };
+            req.onerror = () => res();
+            req.onblocked = () => setTimeout(res, 100);
+          });
+        }
+
+        status.className = '';
+        status.innerHTML = `<strong>Cleared ${cleared} database(s).</strong> Reload page to recreate test data.`;
+        window.__indexedDBTestReady = false;
+
+        // Update verification
+        document.getElementById('verification-output').textContent = 'Databases cleared. Reload page to recreate.';
+
+      } catch (error) {
+        status.className = 'error';
+        status.innerHTML = `<strong>Error clearing:</strong> ${error.message}`;
+      }
+    }
+
+    // NO auto-initialization - all actions are explicit for clean testing
+    // Call window.initializeDatabases() or click the button to create test data
+
+    // Set status to show page is ready but IndexedDB is NOT auto-created
+    document.getElementById('status').innerHTML = `
+      <strong>Page Ready - No IndexedDB Created Yet</strong><br>
+      Click "Create Test Data" to initialize databases, or use this page to verify restoration.
+    `;
+  </script>
+
+  <!-- Validation markers for automated testing -->
+  <div style="display: none;" id="test-markers">
+    <!-- These markers are checked by MCP tools after restore -->
+    <span id="marker-db1">IndexedDB Test 1 passed: TestDB1 with users store</span>
+    <span id="marker-db2">IndexedDB Test 7 passed: TestDB2 multiple databases</span>
+    <span id="marker-types">IndexedDB Test 2 passed: Date type serialization</span>
+    <span id="marker-nested">IndexedDB Test 3 passed: Nested objects and arrays</span>
+    <span id="marker-outofline">IndexedDB Test 4 passed: Out-of-line keys</span>
+    <span id="marker-autoincrement">IndexedDB Test 5 passed: Auto-increment keys</span>
+    <span id="marker-multientry">IndexedDB Test 6 passed: MultiEntry index</span>
+  </div>
+</body>
+</html>

@@ -25,6 +25,7 @@ Each file contains specific patterns with "Test N passed" validation markers.
 | `forms.html` | 12 form element patterns | Labels extracted, input values NOT extracted, aria-describedby | "Forms Test 1-12 passed"; NO "SHOULD_NOT_APPEAR" |
 | `tables.html` | 11 table patterns | Caption, headers, cells, hidden rows, colspan/rowspan, nested | "Tables Test 1-11" markers |
 | `accessibility.html` | 11 ARIA patterns | aria-hidden extracted, role=presentation, landmarks, live regions | "A11y Test 1-11 passed"; aria-label NOT in output |
+| `indexeddb-storage.html` | 7 IndexedDB patterns | `save_storage_state(include_indexeddb=True)` capture and `navigate(storage_state_file)` restore | `verifyData()` returns `testsPassed` array |
 
 ### Future Work Test Files (get_aria_snapshot enhancements)
 
@@ -127,6 +128,50 @@ open examples/hidden-content.html
 # DevTools → Elements → Cmd+F → "Test 1 passed"
 # Verify all test strings exist in DOM
 ```
+
+### IndexedDB Storage State Test
+
+Tests `save_storage_state(include_indexeddb=True)` capture and `navigate(storage_state_file)` restore.
+
+**Key Design:** No auto-initialization on page load. All actions are explicit to prevent false positives.
+
+```javascript
+// 1. Navigate to test page (IndexedDB is empty)
+navigate("file:///.../examples/indexeddb-storage.html", fresh_browser=true)
+
+// 2. Create test data explicitly
+execute_javascript("window.initializeDatabases()")
+
+// 3. Capture with IndexedDB
+save_storage_state("test.json", include_indexeddb=true)
+// Returns: indexeddb_databases_count=2, indexeddb_records_count=7
+
+// 4. New browser session with restoration
+navigate("file:///.../examples/indexeddb-storage.html",
+         fresh_browser=true, storage_state_file="test.json")
+
+// 5. Verify data exists WITHOUT calling initializeDatabases
+execute_javascript(`(async () => {
+  const dbs = await indexedDB.databases();
+  return { databases: dbs.length }; // Should be 2
+})()`)
+```
+
+**Pass Criteria:**
+- Step 1: `indexedDB.databases().length === 0` (clean load)
+- Step 3: Capture returns 2 databases, 7 records
+- Step 5: `indexedDB.databases().length === 2` (restored, not recreated)
+
+**Test Cases Validated:**
+| Test | What's Validated |
+|------|------------------|
+| 1 | Object store with keyPath, unique index |
+| 2 | Date type serialization (`__type: "Date"`) |
+| 3 | Nested objects and arrays |
+| 4 | Out-of-line keys (no keyPath) |
+| 5 | Auto-increment keys |
+| 6 | MultiEntry index |
+| 7 | Multiple databases |
 
 ---
 

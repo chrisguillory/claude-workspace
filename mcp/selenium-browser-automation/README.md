@@ -208,7 +208,7 @@ How CiC tools map to SMCP tools:
 | -                       | `configure_proxy`, `clear_proxy`                | SMCP-only | Configure/clear authenticated proxy via mitmproxy for IP rotation                                         |
 | -                       | `download_resource`                             | SMCP-only | Download files using browser session cookies (bypasses bot detection)                                     |
 | -                       | `list_chrome_profiles`                          | SMCP-only | List available Chrome profiles with name, email, directory metadata                                       |
-| -                       | `save_storage_state`                            | SMCP-only | Export cookies + localStorage to Playwright-compatible JSON                                               |
+| -                       | `save_storage_state`                            | SMCP-only | Export cookies + localStorage (+ IndexedDB opt-in) to Playwright-compatible JSON                         |
 
 See [docs/claude-in-chrome.md](docs/claude-in-chrome.md) for complete Claude in Chrome tool reference.
 
@@ -360,12 +360,28 @@ navigate(
 
 ### What's Captured
 
-| Storage Type   | Captured | Notes                                                |
-|----------------|:--------:|------------------------------------------------------|
-| Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires) |
-| localStorage   |    ✓     | Current origin only                                  |
-| sessionStorage |    -     | Future enhancement                                   |
-| IndexedDB      |    -     | Future enhancement                                   |
+| Storage Type   | Captured | Notes                                                        |
+|----------------|:--------:|--------------------------------------------------------------|
+| Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires)         |
+| localStorage   |    ✓     | Current origin only                                          |
+| IndexedDB      |   opt-in | `include_indexeddb=True` - databases, stores, records, types |
+| sessionStorage |    -     | Future enhancement                                           |
+
+**IndexedDB Support:**
+
+```python
+# Capture IndexedDB (opt-in for backward compatibility)
+save_storage_state("auth.json", include_indexeddb=True)
+# Returns: indexeddb_databases_count, indexeddb_records_count
+
+# Restore happens automatically when storage_state_file contains IndexedDB data
+navigate(url, fresh_browser=True, storage_state_file="auth.json")
+```
+
+Complex types are serialized with `__type` markers and restored correctly:
+- `Date` → `{"__type": "Date", "__value": "2024-01-15T10:30:00.000Z"}`
+- `Map`, `Set`, `ArrayBuffer`, TypedArrays preserved
+- Object store schema (keyPath, autoIncrement, indexes) fully restored
 
 ### Limitations
 
@@ -621,7 +637,7 @@ get_page_text(include_images=True)
 - `export_har(filename, include_response_bodies?, max_body_size_mb?)` - Export to HAR file (requires `enable_har_capture=True` on navigate)
 
 ### Session Persistence
-- `save_storage_state(filename)` - Export cookies + localStorage to Playwright-compatible JSON
+- `save_storage_state(filename, include_indexeddb?)` - Export cookies + localStorage (+ IndexedDB if opt-in) to Playwright-compatible JSON
 
 ### Utilities
 - `download_resource(url, output_filename)` - Download with session cookies
