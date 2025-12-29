@@ -360,12 +360,12 @@ navigate(
 
 ### What's Captured
 
-| Storage Type   | Captured | Notes                                                        |
-|----------------|:--------:|--------------------------------------------------------------|
-| Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires)         |
-| localStorage   |    ✓     | Current origin only                                          |
-| IndexedDB      |   opt-in | `include_indexeddb=True` - databases, stores, records, types |
-| sessionStorage |    -     | Future enhancement                                           |
+| Storage Type   | Captured | Notes                                                                              |
+|----------------|:--------:|------------------------------------------------------------------------------------|
+| Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires)                               |
+| localStorage   |    ✓     | All tracked origins via CDP (lazy restore on navigate)                             |
+| IndexedDB      |  opt-in  | `include_indexeddb=True` - databases, stores, records, types (current origin only) |
+| sessionStorage |    -     | Future enhancement                                                                 |
 
 **IndexedDB Support:**
 
@@ -385,9 +385,9 @@ Complex types are serialized with `__type` markers and restored correctly:
 
 ### Limitations
 
-- **Single origin**: localStorage captured for current page's origin only
 - **Token expiration**: Tokens may expire between save and restore
 - **Navigate first**: Must be on a page before saving (need origin context)
+- **IndexedDB single-origin**: IndexedDB capture/restore works for current origin only (multi-origin planned)
 
 ### Manual Export from Chrome
 

@@ -585,29 +585,38 @@ Sites using third-party authentication:
 
 ## Future Enhancements
 
-### Planned
+### Near-Term
 
-| Enhancement | Description | Effort |
-|-------------|-------------|--------|
-| sessionStorage capture | Add to storageState export | Low |
-| IndexedDB capture | Complex structure, site-specific | High |
-| Multi-origin localStorage | Navigate to each origin, capture separately | Medium |
+| Enhancement            | Description                                       | Approach                                     |
+|------------------------|---------------------------------------------------|----------------------------------------------|
+| sessionStorage capture | Add to storageState export                        | CDP `DOMStorage` with `isLocalStorage=false` |
+| Multi-origin IndexedDB | Capture/restore IndexedDB for all visited origins | Same lazy restore pattern as localStorage    |
 
-### Research Needed
+### Longer-Term
 
-| Enhancement | Description | Challenges |
-|-------------|-------------|------------|
-| Token refresh detection | Detect and export refresh tokens | Site-specific logic |
-| Cross-domain auth | OAuth flows spanning domains | Security, multi-domain cookies |
-| Automatic expiration check | Parse JWTs, warn on expired tokens | JWT library, edge cases |
+| Enhancement                | Description                                       | Challenges               |
+|----------------------------|---------------------------------------------------|--------------------------|
+| Token expiration detection | Parse JWTs, warn on expired tokens before restore | JWT library, edge cases  |
+| Chrome extension export    | Export storage state from regular Chrome          | Extension API, user flow |
 
-### Automation Priority
+### CDP Implementation Notes
 
-Based on user feedback and testing:
+Key discoveries from multi-origin localStorage implementation:
 
-1. **Chrome Extension** - Best balance of UX and completeness
-2. **CDP Integration** - Good for power users, could be opt-in MCP tool
-3. **Bookmarklet** - Quick but incomplete (no HttpOnly)
+**CDP DOMStorage asymmetry:**
+- `getDOMStorageItems` CAN read any origin (no frame required)
+- `setDOMStorageItem` REQUIRES active frame for target origin
+
+**Lazy restore pattern (validated by Perplexity research):**
+1. Store pending storage state in memory
+2. Restore each origin's data only when navigating there
+3. Track restored origins to avoid double-restore
+4. This matches Playwright's internal approach
+
+**For multi-origin IndexedDB:**
+- CDP IndexedDB domain can READ any origin's databases
+- CDP IndexedDB has NO write API - must use JavaScript
+- Same lazy restore pattern applies: inject JS to restore when visiting each origin
 
 ## Security Considerations
 

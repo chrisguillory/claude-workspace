@@ -235,6 +235,7 @@ def get_users() -> Sequence[User]:
 - Async-first libraries when available (aioboto3, asyncpg)
 - Assertions only in `tests/` - application code raises exceptions explicitly
 - DI via closures for MCP servers (FastMCP pattern)
+- **NEVER use `python` or `python3` directly** - always use `uv run`
 
 ### Scripting
 
