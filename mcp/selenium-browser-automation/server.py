@@ -54,6 +54,8 @@ from src.scripts import (
     NETWORK_MONITOR_CHECK_SCRIPT,
     WEB_VITALS_SCRIPT,
     RESOURCE_TIMING_SCRIPT,
+    INDEXEDDB_CAPTURE_SCRIPT,
+    INDEXEDDB_RESTORE_SCRIPT,
     build_execute_javascript_async_script,
 )
 from src.models import (
@@ -508,16 +510,64 @@ def register_tools(service: BrowserService) -> None:
                         item.name,
                         item.value
                     )
-            elif origin_data:
+
+            # Restore IndexedDB if present in storage state
+            if origin_data and origin_data.indexedDB:
+                indexeddb_databases = [
+                    db.model_dump() for db in origin_data.indexedDB
+                ]
+
                 print(
-                    f"[navigate] No localStorage to restore for {current_origin}",
+                    f"[navigate] Restoring {len(indexeddb_databases)} IndexedDB databases",
                     file=sys.stderr,
                 )
-            else:
+
+                try:
+                    # Use the loaded script from src/scripts/indexeddb_restore.js
+                    restore_result = await asyncio.to_thread(
+                        driver.execute_script,
+                        INDEXEDDB_RESTORE_SCRIPT,
+                        indexeddb_databases
+                    )
+
+                    if restore_result.get("success"):
+                        print(
+                            f"[navigate] IndexedDB restored: "
+                            f"{restore_result.get('databases_restored', 0)} databases, "
+                            f"{restore_result.get('records_restored', 0)} records",
+                            file=sys.stderr,
+                        )
+
+                        # Log any errors encountered during restoration
+                        if restore_result.get("errors"):
+                            for error in restore_result["errors"][:3]:  # Limit to first 3
+                                print(
+                                    f"[navigate] IndexedDB warning: {error}",
+                                    file=sys.stderr,
+                                )
+                    else:
+                        print(
+                            f"[navigate] IndexedDB restoration failed: "
+                            f"{restore_result.get('errors', ['Unknown error'])}",
+                            file=sys.stderr,
+                        )
+
+                except Exception as e:
+                    print(
+                        f"[navigate] IndexedDB restoration error: {e}",
+                        file=sys.stderr,
+                    )
+
+            if not origin_data:
                 available_origins = [o.origin for o in storage_state.origins]
                 print(
                     f"[navigate] Storage state has no data for {current_origin} "
                     f"(available origins: {available_origins})",
+                    file=sys.stderr,
+                )
+            elif not origin_data.localStorage and not origin_data.indexedDB:
+                print(
+                    f"[navigate] No storage data to restore for {current_origin}",
                     file=sys.stderr,
                 )
 
@@ -2189,6 +2239,7 @@ Workflow:
     )
     async def save_storage_state(
         filename: str,
+        include_indexeddb: bool = False,
         ctx: Context | None = None,
     ) -> SaveStorageStateResult:
         """Export browser storage state to Playwright-compatible JSON for session persistence.
@@ -2200,6 +2251,9 @@ Workflow:
         Args:
             filename: Output filename (relative to cwd or absolute path).
                       Example: "marriott_auth.json"
+            include_indexeddb: If True, capture IndexedDB databases for current origin.
+                              Enable for apps using IndexedDB for auth (e.g., Firebase).
+                              Default False for backward compatibility and performance.
 
         Returns:
             SaveStorageStateResult with path, cookie count, and metadata
@@ -2207,17 +2261,17 @@ Workflow:
         What's captured:
             - All cookies with full attributes (HttpOnly, Secure, SameSite, expires)
             - localStorage for current page's origin
+            - IndexedDB databases (if include_indexeddb=True)
 
-        What's NOT captured (future enhancements):
+        What's NOT captured:
             - sessionStorage (tab-specific, rarely needed for auth)
-            - IndexedDB (complex, can add if needed)
             - localStorage for other origins (limitation: current origin only)
 
         Workflow:
             1. navigate("https://example.com/login", fresh_browser=True)
             2. [Complete login flow - click buttons, enter credentials, etc.]
             3. navigate("https://example.com/account")  # Navigate to authenticated page
-            4. save_storage_state("example_auth.json")  # Export auth state
+            4. save_storage_state("example_auth.json", include_indexeddb=True)  # Export auth state
             5. [Later, in new session:]
                navigate("https://example.com/account",
                        fresh_browser=True,
@@ -2235,7 +2289,7 @@ Workflow:
             - Delete when no longer needed
 
         Limitations:
-            - Only captures localStorage for current page's origin
+            - Only captures localStorage/IndexedDB for current page's origin
             - Navigate to your main application page before saving
             - Tokens may expire between save and restore - re-authenticate if needed
         """
@@ -2304,15 +2358,52 @@ Workflow:
         if local_storage_items is None:
             local_storage_items = []
 
+        # Capture IndexedDB databases if requested
+        indexeddb_data: list[dict] | None = None
+        indexeddb_databases_count = 0
+        indexeddb_records_count = 0
+
+        if include_indexeddb:
+            await logger.info("Capturing IndexedDB databases...")
+
+            try:
+                # Use the loaded script from src/scripts/indexeddb_capture.js
+                indexeddb_data = await asyncio.to_thread(
+                    driver.execute_script, INDEXEDDB_CAPTURE_SCRIPT
+                )
+
+                # Handle null/undefined from JS
+                if indexeddb_data is None:
+                    indexeddb_data = []
+
+                # Count databases and records
+                indexeddb_databases_count = len(indexeddb_data)
+                for db in indexeddb_data:
+                    for store in db.get("objectStores", []):
+                        indexeddb_records_count += len(store.get("records", []))
+
+                await logger.info(
+                    f"Captured {indexeddb_databases_count} IndexedDB databases "
+                    f"with {indexeddb_records_count} total records"
+                )
+
+            except Exception as e:
+                await logger.info(f"IndexedDB capture failed: {e}")
+                indexeddb_data = []
+
         # Build storageState structure
+        origin_data: dict = {
+            "origin": current_origin,
+            "localStorage": local_storage_items,
+        }
+
+        # Add IndexedDB data if captured
+        if include_indexeddb and indexeddb_data:
+            origin_data["indexedDB"] = indexeddb_data
+
         storage_state_data = {
             "cookies": storage_cookies,
-            "origins": [
-                {
-                    "origin": current_origin,
-                    "localStorage": local_storage_items,
-                }
-            ]
+            "origins": [origin_data]
         }
 
         # Validate with Pydantic before saving
@@ -2333,11 +2424,20 @@ Workflow:
             origins_count=1,
             current_origin=current_origin,
             size_bytes=len(json_content),
+            indexeddb_databases_count=indexeddb_databases_count if include_indexeddb else None,
+            indexeddb_records_count=indexeddb_records_count if include_indexeddb else None,
         )
 
+        # Build log message
+        log_parts = [
+            f"Saved {result.cookies_count} cookies",
+            f"{len(local_storage_items)} localStorage items",
+        ]
+        if include_indexeddb and indexeddb_databases_count > 0:
+            log_parts.append(f"{indexeddb_databases_count} IndexedDB databases ({indexeddb_records_count} records)")
+
         await logger.info(
-            f"Saved {result.cookies_count} cookies + "
-            f"{len(local_storage_items)} localStorage items for {current_origin} "
+            f"{' + '.join(log_parts)} for {current_origin} "
             f"to {file_path} ({result.size_bytes} bytes)"
         )
 
