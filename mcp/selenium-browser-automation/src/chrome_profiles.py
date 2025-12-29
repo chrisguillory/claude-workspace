@@ -144,12 +144,8 @@ def load_profile_preferences(profile_path: Path) -> dict | None:
     if not prefs_path.exists():
         return None
 
-    try:
-        with open(prefs_path) as f:
-            return json.load(f)
-    except Exception:
-        # Non-fatal: return None if Preferences can't be read
-        return None
+    with open(prefs_path) as f:
+        return json.load(f)
 
 
 def get_profile_metadata(

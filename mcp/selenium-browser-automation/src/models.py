@@ -626,3 +626,5 @@ class SaveStorageStateResult(BaseModel):
     # IndexedDB stats (only present if include_indexeddb=True)
     indexeddb_databases_count: int | None = None
     indexeddb_records_count: int | None = None
+    # All origins visited during session (for multi-origin storage capture)
+    tracked_origins: Sequence[str] = []
