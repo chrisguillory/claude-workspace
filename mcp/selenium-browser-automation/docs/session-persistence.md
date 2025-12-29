@@ -61,23 +61,23 @@ We use Playwright's storageState JSON format for cross-tool compatibility. Files
 
 ### Cookie Fields
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `name` | string | Cookie name |
-| `value` | string | Cookie value |
-| `domain` | string | Include leading `.` for domain-wide cookies |
-| `path` | string | Usually `/` |
-| `expires` | number | `-1` for session cookies, Unix epoch seconds for persistent |
-| `httpOnly` | boolean | If true, not accessible via JavaScript |
-| `secure` | boolean | If true, only sent over HTTPS |
-| `sameSite` | string | `"Strict"`, `"Lax"`, or `"None"` (must capitalize first letter) |
+| Field      | Type    | Notes                                                           |
+|------------|---------|-----------------------------------------------------------------|
+| `name`     | string  | Cookie name                                                     |
+| `value`    | string  | Cookie value                                                    |
+| `domain`   | string  | Include leading `.` for domain-wide cookies                     |
+| `path`     | string  | Usually `/`                                                     |
+| `expires`  | number  | `-1` for session cookies, Unix epoch seconds for persistent     |
+| `httpOnly` | boolean | If true, not accessible via JavaScript                          |
+| `secure`   | boolean | If true, only sent over HTTPS                                   |
+| `sameSite` | string  | `"Strict"`, `"Lax"`, or `"None"` (must capitalize first letter) |
 
 ### Origin Fields
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `origin` | string | Full origin: `https://www.example.com` (no trailing slash) |
-| `localStorage` | array | `[{name, value}, ...]` pairs |
+| Field          | Type   | Notes                                                      |
+|----------------|--------|------------------------------------------------------------|
+| `origin`       | string | Full origin: `https://www.example.com` (no trailing slash) |
+| `localStorage` | array  | `[{name, value}, ...]` pairs                               |
 
 ### Import Behavior
 
@@ -594,10 +594,9 @@ Sites using third-party authentication:
 
 ### Longer-Term
 
-| Enhancement                | Description                                       | Challenges               |
-|----------------------------|---------------------------------------------------|--------------------------|
-| Token expiration detection | Parse JWTs, warn on expired tokens before restore | JWT library, edge cases  |
-| Chrome extension export    | Export storage state from regular Chrome          | Extension API, user flow |
+| Enhancement             | Description                              | Challenges               |
+|-------------------------|------------------------------------------|--------------------------|
+| Chrome extension export | Export storage state from regular Chrome | Extension API, user flow |
 
 ### CDP Implementation Notes
 
