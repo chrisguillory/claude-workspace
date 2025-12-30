@@ -365,7 +365,7 @@ navigate(
 | Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires)                               |
 | localStorage   |    ✓     | All tracked origins via CDP (lazy restore on navigate)                             |
 | sessionStorage |    ✓     | All tracked origins via CDP (lazy restore on navigate) - see note below            |
-| IndexedDB      |  opt-in  | `include_indexeddb=True` - databases, stores, records, types (current origin only) |
+| IndexedDB      |  opt-in  | `include_indexeddb=True` - databases, stores, records, types (multi-origin via lazy capture) |
 
 **sessionStorage Note:** sessionStorage is ephemeral by design—browsers clear it when tabs close. We capture it for two reasons: (1) debugging value—seeing sessionStorage helps understand application state, and (2) automation continuity—when `fresh_browser=True` restarts Chrome for proxy rotation, you may want to preserve form wizard progress. Restored sessionStorage is new sessionStorage pre-populated with saved data, not a continuation of the original session. This capability exceeds Playwright ([#31108](https://github.com/microsoft/playwright/issues/31108)).
 
@@ -389,7 +389,6 @@ Complex types are serialized with `__type` markers and restored correctly:
 
 - **Token expiration**: Tokens may expire between save and restore
 - **Navigate first**: Must be on a page before saving (need origin context)
-- **IndexedDB single-origin**: IndexedDB capture/restore works for current origin only (multi-origin planned)
 
 ### Manual Export from Chrome
 

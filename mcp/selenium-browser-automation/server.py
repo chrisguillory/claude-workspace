@@ -187,14 +187,15 @@ async def _capture_current_origin_storage(
     service: BrowserService,
     driver: webdriver.Chrome,
 ) -> None:
-    """Capture current origin's localStorage and sessionStorage to cache before navigation.
+    """Capture current origin's localStorage, sessionStorage, and IndexedDB to cache.
 
     Call this BEFORE any action that might navigate away (click, press_key, navigate).
     Safe to call multiple times - idempotent, overwrites previous cache for same origin.
 
-    This is necessary because CDP DOMStorage.getDOMStorageItems requires an active
-    frame for the origin. Once you navigate away, the frame is gone and CDP returns
-    "Frame not found" error.
+    This is necessary because:
+    - CDP DOMStorage requires an active frame for the origin
+    - IndexedDB JavaScript capture requires page context
+    Once you navigate away, the frame is gone and these operations fail.
     """
     current_url = driver.current_url
     if not current_url or current_url.startswith(("about:", "data:", "chrome:", "blob:", "file://")):
@@ -211,34 +212,59 @@ async def _capture_current_origin_storage(
     # Capture localStorage - always update cache (even if empty) to avoid stale data
     # if user clears storage and then navigates away
     local_storage_items = await _cdp_get_storage(driver, current_origin, is_local=True)
-    service.state.localStorage_cache[current_origin] = list(local_storage_items)
+    service.state.local_storage_cache[current_origin] = list(local_storage_items)
 
     # Capture sessionStorage - always update cache (even if empty)
     session_storage_items = await _cdp_get_storage(driver, current_origin, is_local=False)
-    service.state.sessionStorage_cache[current_origin] = list(session_storage_items)
+    service.state.session_storage_cache[current_origin] = list(session_storage_items)
+
+    # Capture IndexedDB - requires JavaScript (CDP has no write API, so we use JS for both)
+    # This may add ~100ms for sites with IndexedDB; most sites have none so this is fast.
+    # Note: INDEXEDDB_CAPTURE_SCRIPT returns a Promise, so we must use execute_async_script
+    # with a wrapper that awaits the Promise and calls the Selenium callback.
+    # Wrap in IIFE so 'return' statement works, then chain .then() on the Promise.
+    async_wrapper = f"""
+        var callback = arguments[arguments.length - 1];
+        (function() {{ {INDEXEDDB_CAPTURE_SCRIPT} }})()
+            .then(function(r) {{ callback(r); }})
+            .catch(function(e) {{ callback([]); }});
+    """
+    indexeddb_result = await asyncio.to_thread(
+        driver.execute_async_script, async_wrapper
+    )
+    # INDEXEDDB_CAPTURE_SCRIPT returns list of database dicts, or empty list
+    if indexeddb_result:
+        service.state.indexed_db_cache[current_origin] = indexeddb_result
+    else:
+        # No databases - still update cache to avoid stale data
+        service.state.indexed_db_cache[current_origin] = []
 
     # Log combined stats
-    total_items = len(local_storage_items) + len(session_storage_items)
-    if total_items > 0:
-        print(
-            f"[storage] Cached {len(local_storage_items)} localStorage + "
-            f"{len(session_storage_items)} sessionStorage items for {current_origin}",
-            file=sys.stderr,
-        )
+    total_domstorage = len(local_storage_items) + len(session_storage_items)
+    indexeddb_count = len(service.state.indexed_db_cache.get(current_origin, []))
+    if total_domstorage > 0 or indexeddb_count > 0:
+        parts = []
+        if local_storage_items:
+            parts.append(f"{len(local_storage_items)} localStorage")
+        if session_storage_items:
+            parts.append(f"{len(session_storage_items)} sessionStorage")
+        if indexeddb_count > 0:
+            parts.append(f"{indexeddb_count} IndexedDB databases")
+        print(f"[storage] Cached {' + '.join(parts)} for {current_origin}", file=sys.stderr)
 
 
 async def _restore_pending_storage_for_current_origin(
     service: BrowserService,
     driver: webdriver.Chrome,
 ) -> None:
-    """Restore localStorage and sessionStorage for current origin from pending storage state.
+    """Restore localStorage, sessionStorage, and IndexedDB for current origin.
 
     Called after navigation to check if we have pending storage for the
     new current origin. Tracks restored origins to avoid double-restore which
     could overwrite page modifications.
 
     CDP DOMStorage.setDOMStorageItem requires an active frame for the origin,
-    so we can only restore storage AFTER navigating to each origin.
+    and IndexedDB restore requires JavaScript execution in page context.
     This implements "lazy restore" - restore on-demand when we arrive at each origin.
 
     Note: sessionStorage is session-scoped. Restoring it to a new browser context
@@ -273,34 +299,64 @@ async def _restore_pending_storage_for_current_origin(
         return
 
     # Check if there's anything to restore
-    has_localStorage = origin_data.localStorage and len(origin_data.localStorage) > 0
-    has_sessionStorage = origin_data.sessionStorage and len(origin_data.sessionStorage) > 0
+    has_local_storage = origin_data.localStorage and len(origin_data.localStorage) > 0
+    has_session_storage = origin_data.sessionStorage and len(origin_data.sessionStorage) > 0
+    has_indexed_db = origin_data.indexedDB and len(origin_data.indexedDB) > 0
 
-    if not has_localStorage and not has_sessionStorage:
+    if not has_local_storage and not has_session_storage and not has_indexed_db:
         service.state.restored_origins.add(current_origin)
         return
 
-    await _cdp_enable_domstorage(driver)
-
-    # Restore localStorage
+    # Restore localStorage and sessionStorage via CDP
     local_count = 0
-    if has_localStorage:
-        for item in origin_data.localStorage:
-            await _cdp_set_storage(driver, current_origin, item.name, item.value, is_local=True)
-            local_count += 1
-
-    # Restore sessionStorage
     session_count = 0
-    if has_sessionStorage:
-        for item in origin_data.sessionStorage:
-            await _cdp_set_storage(driver, current_origin, item.name, item.value, is_local=False)
-            session_count += 1
+    if has_local_storage or has_session_storage:
+        await _cdp_enable_domstorage(driver)
+
+        if has_local_storage:
+            for item in origin_data.localStorage:
+                await _cdp_set_storage(driver, current_origin, item.name, item.value, is_local=True)
+                local_count += 1
+
+        if has_session_storage:
+            for item in origin_data.sessionStorage:
+                await _cdp_set_storage(driver, current_origin, item.name, item.value, is_local=False)
+                session_count += 1
+
+    # Restore IndexedDB via JavaScript (CDP has no write API)
+    # Note: INDEXEDDB_RESTORE_SCRIPT returns a Promise, so we must use execute_async_script.
+    # The script expects arguments[0] to contain the databases list, so we use .apply()
+    # to set up the arguments array. Wrap in IIFE so 'return' statement works.
+    indexeddb_count = 0
+    if has_indexed_db:
+        databases_list = [db.model_dump() for db in origin_data.indexedDB]
+        databases_json = json.dumps(databases_list)
+        async_wrapper = f"""
+            var callback = arguments[arguments.length - 1];
+            var data = {databases_json};
+            (function() {{ {INDEXEDDB_RESTORE_SCRIPT} }}).apply(null, [data])
+                .then(function(r) {{ callback(r); }})
+                .catch(function(e) {{ callback({{success: false, error: String(e)}}); }});
+        """
+        restore_result = await asyncio.to_thread(
+            driver.execute_async_script, async_wrapper
+        )
+        if restore_result and restore_result.get("success"):
+            indexeddb_count = restore_result.get("databases_restored", 0)
 
     service.state.restored_origins.add(current_origin)
-    print(
-        f"[storage] Restored {local_count} localStorage + {session_count} sessionStorage items for {current_origin}",
-        file=sys.stderr,
-    )
+
+    # Build log message
+    parts = []
+    if local_count > 0:
+        parts.append(f"{local_count} localStorage")
+    if session_count > 0:
+        parts.append(f"{session_count} sessionStorage")
+    if indexeddb_count > 0:
+        parts.append(f"{indexeddb_count} IndexedDB databases")
+
+    if parts:
+        print(f"[storage] Restored {' + '.join(parts)} for {current_origin}", file=sys.stderr)
 
 
 class OriginTracker:
@@ -411,8 +467,9 @@ class BrowserState:
         # Origin tracking for multi-origin storage capture
         self.origin_tracker = OriginTracker()
         # Storage caches - captured on navigate-away since CDP can't query departed origins
-        self.localStorage_cache: dict[str, list[dict]] = {}
-        self.sessionStorage_cache: dict[str, list[dict]] = {}
+        self.local_storage_cache: dict[str, list[dict]] = {}
+        self.session_storage_cache: dict[str, list[dict]] = {}
+        self.indexed_db_cache: dict[str, list[dict]] = {}  # origin -> list of database dicts
         # Lazy restore: pending storage state and tracking of already-restored origins
         self.pending_storage_state: StorageState | None = None
         self.restored_origins: set[str] = set()
@@ -441,8 +498,9 @@ class BrowserService:
         self.state.current_profile = None
         # Clear origin tracking and storage caches - new browser = new session
         self.state.origin_tracker.clear()
-        self.state.localStorage_cache.clear()
-        self.state.sessionStorage_cache.clear()
+        self.state.local_storage_cache.clear()
+        self.state.session_storage_cache.clear()
+        self.state.indexed_db_cache.clear()
         # Clear lazy restore state - new browser = fresh session
         self.state.pending_storage_state = None
         self.state.restored_origins.clear()
@@ -570,8 +628,9 @@ def register_tools(service: BrowserService) -> None:
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
             storage_state_file: Import storage state before navigation (requires fresh_browser=True).
-                               Restores cookies and localStorage from Playwright-compatible JSON.
-                               Use after save_storage_state() to restore authenticated sessions.
+                               Restores cookies, localStorage, sessionStorage, and IndexedDB from
+                               Playwright-compatible JSON. Use after save_storage_state() to restore
+                               authenticated sessions.
 
         Example - API interception:
             navigate(
@@ -750,66 +809,12 @@ def register_tools(service: BrowserService) -> None:
             service.state.pending_storage_state = storage_state
             service.state.restored_origins.clear()
 
-        # ALWAYS try to restore localStorage for current origin (idempotent)
+        # ALWAYS try to restore storage for current origin (idempotent)
         # This handles both initial navigation with storage_state_file AND
         # subsequent navigations to other origins with pending storage state.
         # The helper checks restored_origins to avoid double-restore.
+        # Restores: localStorage, sessionStorage, and IndexedDB (if present)
         await _restore_pending_storage_for_current_origin(service, driver)
-
-        # IndexedDB restore is current-origin only (requires DOM context)
-        if storage_state is not None:
-            current_origin = await asyncio.to_thread(
-                driver.execute_script,
-                "return window.location.origin"
-            )
-
-            # Find current origin for IndexedDB restore
-            origin_data: StorageStateOrigin | None = None
-            for origin in storage_state.origins:
-                if origin.origin == current_origin:
-                    origin_data = origin
-                    break
-
-            # Restore IndexedDB if present in storage state
-            if origin_data and origin_data.indexedDB:
-                indexeddb_databases = [
-                    db.model_dump() for db in origin_data.indexedDB
-                ]
-
-                print(
-                    f"[navigate] Restoring {len(indexeddb_databases)} IndexedDB databases",
-                    file=sys.stderr,
-                )
-
-                # Use the loaded script from src/scripts/indexeddb_restore.js
-                restore_result = await asyncio.to_thread(
-                    driver.execute_script,
-                    INDEXEDDB_RESTORE_SCRIPT,
-                    indexeddb_databases
-                )
-
-                if restore_result.get("success"):
-                    print(
-                        f"[navigate] IndexedDB restored: "
-                        f"{restore_result.get('databases_restored', 0)} databases, "
-                        f"{restore_result.get('records_restored', 0)} records",
-                        file=sys.stderr,
-                    )
-
-                    # Log any errors encountered during restoration
-                    if restore_result.get("errors"):
-                        for error in restore_result["errors"][:3]:  # Limit to first 3
-                            print(
-                                f"[navigate] IndexedDB warning: {error}",
-                                file=sys.stderr,
-                            )
-                else:
-                    print(
-                        f"[navigate] IndexedDB restoration failed: "
-                        f"{restore_result.get('errors', ['Unknown error'])}",
-                        file=sys.stderr,
-                    )
-
 
         return NavigationResult(current_url=driver.current_url, title=driver.title)
 
@@ -2508,7 +2513,7 @@ Workflow:
             - All cookies with full attributes (HttpOnly, Secure, SameSite, expires)
             - localStorage for all tracked origins (multi-origin via lazy capture)
             - sessionStorage for all tracked origins (multi-origin via lazy capture)
-            - IndexedDB databases (if include_indexeddb=True, current origin only)
+            - IndexedDB databases (if include_indexeddb=True, multi-origin via lazy capture)
 
         sessionStorage behavior:
             sessionStorage is session-scoped by browser design. Restored sessionStorage
@@ -2537,7 +2542,6 @@ Workflow:
             - Delete when no longer needed
 
         Limitations:
-            - IndexedDB only captured for current origin (not multi-origin yet)
             - Tokens may expire between save and restore - re-authenticate if needed
         """
         logger = PrintLogger(ctx)
@@ -2613,89 +2617,76 @@ Workflow:
             # Capture localStorage: cache for departed origins, CDP for current
             if origin == current_origin:
                 local_storage_items = await _cdp_get_storage(driver, origin, is_local=True)
-            elif origin in service.state.localStorage_cache:
-                local_storage_items = service.state.localStorage_cache[origin]
+            elif origin in service.state.local_storage_cache:
+                local_storage_items = service.state.local_storage_cache[origin]
             else:
                 local_storage_items = []
 
             # Capture sessionStorage: cache for departed origins, CDP for current
             if origin == current_origin:
                 session_storage_items = await _cdp_get_storage(driver, origin, is_local=False)
-            elif origin in service.state.sessionStorage_cache:
-                session_storage_items = service.state.sessionStorage_cache[origin]
+            elif origin in service.state.session_storage_cache:
+                session_storage_items = service.state.session_storage_cache[origin]
             else:
                 session_storage_items = []
 
+            # Capture IndexedDB if requested: cache for departed origins, live for current
+            # Note: INDEXEDDB_CAPTURE_SCRIPT returns a Promise, must use execute_async_script.
+            # Wrap in IIFE so 'return' statement works, then chain .then() on the Promise.
+            indexeddb_databases: list[dict] = []
+            if include_indexeddb:
+                if origin == current_origin:
+                    async_wrapper = f"""
+                        var callback = arguments[arguments.length - 1];
+                        (function() {{ {INDEXEDDB_CAPTURE_SCRIPT} }})()
+                            .then(function(r) {{ callback(r); }})
+                            .catch(function(e) {{ callback([]); }});
+                    """
+                    indexeddb_result = await asyncio.to_thread(
+                        driver.execute_async_script, async_wrapper
+                    )
+                    indexeddb_databases = indexeddb_result if indexeddb_result else []
+                elif origin in service.state.indexed_db_cache:
+                    indexeddb_databases = service.state.indexed_db_cache[origin]
+
             # Only add origin if it has any storage
-            if local_storage_items or session_storage_items:
+            if local_storage_items or session_storage_items or indexeddb_databases:
                 origin_entry: dict = {
                     "origin": origin,
                     "localStorage": local_storage_items,
                 }
                 if session_storage_items:
                     origin_entry["sessionStorage"] = session_storage_items
+                if indexeddb_databases:
+                    origin_entry["indexedDB"] = indexeddb_databases
 
                 origins_data.append(origin_entry)
                 total_localstorage_items += len(local_storage_items)
                 total_sessionstorage_items += len(session_storage_items)
 
-        await logger.info(
-            f"Captured storage: {total_localstorage_items} localStorage + "
-            f"{total_sessionstorage_items} sessionStorage items across "
-            f"{len(origins_data)} origins (of {len(tracked_origins)} tracked)"
-        )
-
-        # Capture IndexedDB databases if requested
-        indexeddb_data: list[dict] | None = None
+        # Count IndexedDB databases and records for result metadata
         indexeddb_databases_count = 0
         indexeddb_records_count = 0
-
         if include_indexeddb:
-            await logger.info("Capturing IndexedDB databases...")
-
-            # Use the loaded script from src/scripts/indexeddb_capture.js
-            indexeddb_data = await asyncio.to_thread(
-                driver.execute_script, INDEXEDDB_CAPTURE_SCRIPT
-            )
-
-            # Handle null/undefined from JS
-            if indexeddb_data is None:
-                indexeddb_data = []
-
-            # Count databases and records
-            indexeddb_databases_count = len(indexeddb_data)
-            for db in indexeddb_data:
-                for store in db.get("objectStores", []):
-                    indexeddb_records_count += len(store.get("records", []))
-
-            await logger.info(
-                f"Captured {indexeddb_databases_count} IndexedDB databases "
-                f"with {indexeddb_records_count} total records"
-            )
-
-        # Add IndexedDB data to current origin if captured
-        # Note: IndexedDB capture is still single-origin (current page) - Phase 3 will add multi-origin
-        if include_indexeddb and indexeddb_data:
-            # Find current origin in origins_data and add IndexedDB
-            origin_found = False
             for origin_entry in origins_data:
-                if origin_entry["origin"] == current_origin:
-                    origin_entry["indexedDB"] = indexeddb_data
-                    origin_found = True
-                    break
+                if "indexedDB" in origin_entry:
+                    for db in origin_entry["indexedDB"]:
+                        indexeddb_databases_count += 1
+                        for store in db.get("objectStores", []):
+                            indexeddb_records_count += len(store.get("records", []))
 
-            # If current origin had no localStorage/sessionStorage but has IndexedDB, add it
-            if not origin_found:
-                # Query sessionStorage for this edge case too
-                current_session_storage = await _cdp_get_storage(driver, current_origin, is_local=False)
-                origin_entry_new: dict = {
-                    "origin": current_origin,
-                    "localStorage": [],
-                    "indexedDB": indexeddb_data,
-                }
-                if current_session_storage:
-                    origin_entry_new["sessionStorage"] = list(current_session_storage)
-                origins_data.append(origin_entry_new)
+        # Build log message parts
+        log_storage_parts = [
+            f"{total_localstorage_items} localStorage",
+            f"{total_sessionstorage_items} sessionStorage",
+        ]
+        if include_indexeddb:
+            log_storage_parts.append(f"{indexeddb_databases_count} IndexedDB databases")
+
+        await logger.info(
+            f"Captured storage: {' + '.join(log_storage_parts)} "
+            f"across {len(origins_data)} origins (of {len(tracked_origins)} tracked)"
+        )
 
         # Build storageState structure with all captured origins
         storage_state_data = {

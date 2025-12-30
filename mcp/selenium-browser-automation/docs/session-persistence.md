@@ -640,12 +640,6 @@ driver.execute_cdp_cmd("DOMStorage.setDOMStorageItem", {
 
 ## Future Enhancements
 
-### Near-Term
-
-| Enhancement            | Description                                       | Approach                                     |
-|------------------------|---------------------------------------------------|----------------------------------------------|
-| Multi-origin IndexedDB | Capture/restore IndexedDB for all visited origins | Same lazy restore pattern as localStorage    |
-
 ### Longer-Term
 
 | Enhancement             | Description                              | Challenges               |
