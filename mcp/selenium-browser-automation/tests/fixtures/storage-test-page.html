@@ -55,6 +55,13 @@
       background: #ffc107;
       color: #333;
     }
+    .storage-display h2 .badge.database {
+      background: #6f42c1;
+      color: white;
+    }
+    button.database {
+      background: #6f42c1;
+    }
     pre {
       background: #f8f9fa;
       padding: 15px;
@@ -178,6 +185,11 @@
     </div>
   </div>
 
+  <div class="storage-display">
+    <h2>IndexedDB <span class="badge database">Persistent</span></h2>
+    <pre id="indexeddb-contents">Loading...</pre>
+  </div>
+
   <div class="controls-section">
     <h3>localStorage Controls</h3>
     <div class="controls">
@@ -191,6 +203,14 @@
     <div class="controls">
       <button onclick="setDefaultSessionData()" class="session">Set Session Test Data</button>
       <button onclick="clearSessionData()" class="danger">Clear sessionStorage</button>
+    </div>
+  </div>
+
+  <div class="controls-section">
+    <h3>IndexedDB Controls</h3>
+    <div class="controls">
+      <button onclick="setDefaultIndexedDBData()" class="database">Set IndexedDB Test Data</button>
+      <button onclick="clearIndexedDBData()" class="danger">Clear IndexedDB</button>
     </div>
   </div>
 
@@ -248,6 +268,9 @@
         sessionStorage.length === 0
           ? '(empty)'
           : JSON.stringify(sessionContents, null, 2);
+
+      // IndexedDB (async, fire and forget for UI refresh)
+      refreshIndexedDBDisplay().catch(console.error);
     }
 
     function showStatus(message, type) {
@@ -310,25 +333,214 @@
     };
 
     // =================================================================
-    // Combined API (exposed globally for Selenium)
+    // IndexedDB API (exposed globally for Selenium)
     // =================================================================
 
-    window.setAllData = function(localData, sessionData) {
-      if (localData) window.setTestData(localData);
-      if (sessionData) window.setSessionData(sessionData);
+    /**
+     * Get summary of all IndexedDB databases for display.
+     * Returns: Promise<{databaseName: string, stores: string[], recordCounts: {[storeName]: number}}[]>
+     */
+    window.getIndexedDBInfo = async function() {
+      if (!indexedDB || !indexedDB.databases) {
+        return [];
+      }
+
+      const databases = await indexedDB.databases();
+      const result = [];
+
+      for (const dbInfo of databases) {
+        const db = await new Promise((res, rej) => {
+          const req = indexedDB.open(dbInfo.name);
+          req.onsuccess = () => res(req.result);
+          req.onerror = () => rej(req.error);
+        });
+
+        const dbSummary = {
+          databaseName: dbInfo.name,
+          version: db.version,
+          stores: Array.from(db.objectStoreNames),
+          recordCounts: {}
+        };
+
+        for (const storeName of db.objectStoreNames) {
+          const tx = db.transaction(storeName, 'readonly');
+          const store = tx.objectStore(storeName);
+          const count = await new Promise((res, rej) => {
+            const req = store.count();
+            req.onsuccess = () => res(req.result);
+            req.onerror = () => rej(req.error);
+          });
+          dbSummary.recordCounts[storeName] = count;
+        }
+
+        db.close();
+        result.push(dbSummary);
+      }
+
+      return result;
+    };
+
+    /**
+     * Set data in an IndexedDB database/store. Creates DB and store if they don't exist.
+     * records: Array of objects with the key field matching keyPath (default: 'id')
+     */
+    window.setIndexedDBData = async function(dbName, storeName, records, keyPath = 'id') {
+      // Delete existing database to start fresh
+      await new Promise((res) => {
+        const deleteReq = indexedDB.deleteDatabase(dbName);
+        deleteReq.onsuccess = () => res();
+        deleteReq.onerror = () => res();
+        deleteReq.onblocked = () => setTimeout(res, 100);
+      });
+
+      // Create database with object store
+      const db = await new Promise((res, rej) => {
+        const req = indexedDB.open(dbName, 1);
+        req.onerror = () => rej(req.error);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          db.createObjectStore(storeName, { keyPath });
+        };
+        req.onsuccess = () => res(req.result);
+      });
+
+      // Insert records
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+
+      for (const record of records) {
+        store.put(record);
+      }
+
+      await new Promise((res, rej) => {
+        tx.oncomplete = () => res();
+        tx.onerror = () => rej(tx.error);
+      });
+
+      db.close();
+      await refreshIndexedDBDisplay();
+      showStatus(`IndexedDB: ${records.length} records added to ${dbName}/${storeName}`, 'success');
       return true;
     };
 
-    window.getAllData = function() {
+    /**
+     * Get all records from an IndexedDB store.
+     */
+    window.getIndexedDBData = async function(dbName, storeName) {
+      const db = await new Promise((res, rej) => {
+        const req = indexedDB.open(dbName);
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        return [];
+      }
+
+      const tx = db.transaction(storeName, 'readonly');
+      const store = tx.objectStore(storeName);
+
+      const records = await new Promise((res, rej) => {
+        const req = store.getAll();
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+
+      db.close();
+      return records;
+    };
+
+    /**
+     * Clear all IndexedDB databases.
+     */
+    window.clearIndexedDB = async function() {
+      if (!indexedDB || !indexedDB.databases) {
+        return true;
+      }
+
+      const databases = await indexedDB.databases();
+      for (const dbInfo of databases) {
+        await new Promise((res) => {
+          const req = indexedDB.deleteDatabase(dbInfo.name);
+          req.onsuccess = () => res();
+          req.onerror = () => res();
+          req.onblocked = () => setTimeout(res, 100);
+        });
+      }
+
+      await refreshIndexedDBDisplay();
+      showStatus('IndexedDB cleared', 'success');
+      return true;
+    };
+
+    /**
+     * Verify IndexedDB data matches expected records.
+     */
+    window.verifyIndexedDBData = async function(dbName, storeName, expectedRecords) {
+      const actual = await window.getIndexedDBData(dbName, storeName);
+      const errors = [];
+
+      if (actual.length !== expectedRecords.length) {
+        errors.push(`Record count mismatch: expected ${expectedRecords.length}, got ${actual.length}`);
+      }
+
+      for (let i = 0; i < expectedRecords.length; i++) {
+        const expected = expectedRecords[i];
+        const found = actual.find(r => JSON.stringify(r) === JSON.stringify(expected));
+        if (!found) {
+          errors.push(`Missing record: ${JSON.stringify(expected)}`);
+        }
+      }
+
       return {
-        localStorage: getStorageContents(localStorage),
-        sessionStorage: getStorageContents(sessionStorage)
+        success: errors.length === 0,
+        errors: errors,
+        actual: actual
       };
     };
 
-    window.clearAllData = function() {
+    /**
+     * Refresh IndexedDB display (async).
+     */
+    async function refreshIndexedDBDisplay() {
+      const info = await window.getIndexedDBInfo();
+      const el = document.getElementById('indexeddb-contents');
+
+      if (info.length === 0) {
+        el.textContent = '(empty)';
+      } else {
+        el.textContent = JSON.stringify(info, null, 2);
+      }
+    }
+
+    // =================================================================
+    // Combined API (exposed globally for Selenium)
+    // =================================================================
+
+    window.setAllData = async function(localData, sessionData, indexedDBData) {
+      if (localData) window.setTestData(localData);
+      if (sessionData) window.setSessionData(sessionData);
+      if (indexedDBData) {
+        for (const { dbName, storeName, records, keyPath } of indexedDBData) {
+          await window.setIndexedDBData(dbName, storeName, records, keyPath);
+        }
+      }
+      return true;
+    };
+
+    window.getAllData = async function() {
+      return {
+        localStorage: getStorageContents(localStorage),
+        sessionStorage: getStorageContents(sessionStorage),
+        indexedDB: await window.getIndexedDBInfo()
+      };
+    };
+
+    window.clearAllData = async function() {
       localStorage.clear();
       sessionStorage.clear();
+      await window.clearIndexedDB();
       refreshDisplay();
       showStatus('All storage cleared', 'success');
       return true;
@@ -364,9 +576,22 @@
       });
     }
 
-    function setAllTestData() {
+    async function setDefaultIndexedDBData() {
+      const port = window.location.port || '80';
+      await window.setIndexedDBData(`testDB_${port}`, 'testStore', [
+        { id: 1, name: `Alice from ${port}`, port: port },
+        { id: 2, name: `Bob from ${port}`, port: port }
+      ]);
+    }
+
+    async function clearIndexedDBData() {
+      await window.clearIndexedDB();
+    }
+
+    async function setAllTestData() {
       setDefaultLocalData();
       setDefaultSessionData();
+      await setDefaultIndexedDBData();
       showStatus('All test data set', 'success');
     }
 
