@@ -732,11 +732,17 @@ These are NOT bugs to fix, but limitations to document clearly:
 
 ---
 
-**Sleep (2025-12-30) ✅ DONE:**
-- [x] `sleep(400000)` raises ValueError (exceeds 5 minute max)
-- [x] `sleep(-100)` raises ValueError (negative)
-- [x] `sleep(15000)` logs warning about long sleep
+**Sleep (2025-12-30) ✅ VERIFIED:**
+- [x] `sleep(-100)` → ValueError: "duration_ms cannot be negative"
+- [x] `sleep(400000)` → ValueError with guidance to use wait_for_selector()
+- [x] `sleep(15000)` completes, returns `{slept_ms: 15000}` (warning logged server-side)
 - [x] Renamed from `wait()` to `sleep()` per Perplexity research
+
+**Console Logs (2025-12-30) ✅ VERIFIED:**
+- [x] Basic: Returns logs with level breakdown (severe_count, warning_count, info_count)
+- [x] Level filter: `level_filter="SEVERE"` returns only error-level logs
+- [x] Pattern filter: `pattern="BETA"` returns only matching messages
+- [x] Logs cleared after retrieval (Chrome logging behavior)
 
 **Resize Window (TODO):**
 - [ ] `resize_window(100, 100)` raises ValueError (too small)
