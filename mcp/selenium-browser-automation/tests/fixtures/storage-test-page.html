@@ -40,18 +40,46 @@
       margin-top: 0;
       color: #333;
     }
+    .storage-display h2 .badge {
+      font-size: 12px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      margin-left: 10px;
+      font-weight: normal;
+    }
+    .storage-display h2 .badge.persistent {
+      background: #28a745;
+      color: white;
+    }
+    .storage-display h2 .badge.session {
+      background: #ffc107;
+      color: #333;
+    }
     pre {
       background: #f8f9fa;
       padding: 15px;
       border-radius: 4px;
       overflow-x: auto;
       font-size: 14px;
-      min-height: 100px;
+      min-height: 80px;
     }
     .controls {
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .controls-section {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+    .controls-section h3 {
+      margin: 0 0 10px 0;
+      color: #555;
+      font-size: 14px;
     }
     button {
       background: #28a745;
@@ -67,6 +95,13 @@
     }
     button.danger {
       background: #dc3545;
+    }
+    button.secondary {
+      background: #6c757d;
+    }
+    button.session {
+      background: #ffc107;
+      color: #333;
     }
     .status {
       margin-top: 20px;
@@ -114,6 +149,16 @@
       background: #007bff;
       cursor: default;
     }
+    .storage-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 768px) {
+      .storage-row {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -122,15 +167,40 @@
     <div class="origin" id="current-origin"></div>
   </div>
 
-  <div class="storage-display">
-    <h2>localStorage Contents</h2>
-    <pre id="storage-contents">Loading...</pre>
+  <div class="storage-row">
+    <div class="storage-display">
+      <h2>localStorage <span class="badge persistent">Persistent</span></h2>
+      <pre id="local-storage-contents">Loading...</pre>
+    </div>
+    <div class="storage-display">
+      <h2>sessionStorage <span class="badge session">Session-only</span></h2>
+      <pre id="session-storage-contents">Loading...</pre>
+    </div>
   </div>
 
-  <div class="controls">
-    <button onclick="setDefaultTestData()">Set Test Data</button>
-    <button onclick="refreshDisplay()">Refresh Display</button>
-    <button onclick="clearTestData()" class="danger">Clear localStorage</button>
+  <div class="controls-section">
+    <h3>localStorage Controls</h3>
+    <div class="controls">
+      <button onclick="setDefaultLocalData()">Set Local Test Data</button>
+      <button onclick="clearLocalData()" class="danger">Clear localStorage</button>
+    </div>
+  </div>
+
+  <div class="controls-section">
+    <h3>sessionStorage Controls</h3>
+    <div class="controls">
+      <button onclick="setDefaultSessionData()" class="session">Set Session Test Data</button>
+      <button onclick="clearSessionData()" class="danger">Clear sessionStorage</button>
+    </div>
+  </div>
+
+  <div class="controls-section">
+    <h3>Combined Controls</h3>
+    <div class="controls">
+      <button onclick="setAllTestData()">Set All Test Data</button>
+      <button onclick="refreshDisplay()" class="secondary">Refresh Display</button>
+      <button onclick="clearAllData()" class="danger">Clear All Storage</button>
+    </div>
   </div>
 
   <div id="status" class="status"></div>
@@ -147,74 +217,39 @@
     const origin = window.location.origin;
     document.getElementById('current-origin').textContent = origin;
 
-    // Refresh localStorage display
-    function refreshDisplay() {
+    // =================================================================
+    // Display Functions
+    // =================================================================
+
+    function getStorageContents(storage) {
       const contents = {};
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i);
         try {
-          contents[key] = JSON.parse(localStorage.getItem(key));
+          contents[key] = JSON.parse(storage.getItem(key));
         } catch {
-          contents[key] = localStorage.getItem(key);
+          contents[key] = storage.getItem(key);
         }
       }
-      document.getElementById('storage-contents').textContent =
+      return contents;
+    }
+
+    function refreshDisplay() {
+      // localStorage
+      const localContents = getStorageContents(localStorage);
+      document.getElementById('local-storage-contents').textContent =
         localStorage.length === 0
           ? '(empty)'
-          : JSON.stringify(contents, null, 2);
+          : JSON.stringify(localContents, null, 2);
+
+      // sessionStorage
+      const sessionContents = getStorageContents(sessionStorage);
+      document.getElementById('session-storage-contents').textContent =
+        sessionStorage.length === 0
+          ? '(empty)'
+          : JSON.stringify(sessionContents, null, 2);
     }
 
-    // Set test data - exposed globally for Selenium
-    window.setTestData = function(data) {
-      if (typeof data === 'object') {
-        for (const [key, value] of Object.entries(data)) {
-          localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
-        }
-      }
-      refreshDisplay();
-      showStatus('Test data set successfully', 'success');
-      return true;
-    };
-
-    // Get all test data - exposed globally for Selenium
-    window.getTestData = function() {
-      const data = {};
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        try {
-          data[key] = JSON.parse(localStorage.getItem(key));
-        } catch {
-          data[key] = localStorage.getItem(key);
-        }
-      }
-      return data;
-    };
-
-    // Clear test data - exposed globally for Selenium
-    window.clearTestData = function() {
-      localStorage.clear();
-      refreshDisplay();
-      showStatus('localStorage cleared', 'success');
-      return true;
-    };
-
-    // Set default test data based on current port
-    function setDefaultTestData() {
-      const port = window.location.port || '80';
-      window.setTestData({
-        origin: origin,
-        port: port,
-        testKey: `value_from_${port}`,
-        timestamp: new Date().toISOString(),
-        nested: {
-          level1: {
-            level2: `nested_value_${port}`
-          }
-        }
-      });
-    }
-
-    // Show status message
     function showStatus(message, type) {
       const status = document.getElementById('status');
       status.textContent = message;
@@ -222,20 +257,127 @@
       setTimeout(() => { status.className = 'status'; }, 3000);
     }
 
-    // Listen for storage events (changes from other tabs/windows)
-    window.addEventListener('storage', refreshDisplay);
+    // =================================================================
+    // localStorage API (exposed globally for Selenium)
+    // =================================================================
 
-    // Initial display
-    refreshDisplay();
+    window.setTestData = function(data) {
+      if (typeof data === 'object') {
+        for (const [key, value] of Object.entries(data)) {
+          localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+        }
+      }
+      refreshDisplay();
+      showStatus('localStorage data set successfully', 'success');
+      return true;
+    };
 
-    // Highlight current port's navigation link
-    const currentPort = window.location.port;
-    const currentLink = document.getElementById(`link-${currentPort}`);
-    if (currentLink) {
-      currentLink.classList.add('current');
+    window.getTestData = function() {
+      return getStorageContents(localStorage);
+    };
+
+    window.clearTestData = function() {
+      localStorage.clear();
+      refreshDisplay();
+      showStatus('localStorage cleared', 'success');
+      return true;
+    };
+
+    // =================================================================
+    // sessionStorage API (exposed globally for Selenium)
+    // =================================================================
+
+    window.setSessionData = function(data) {
+      if (typeof data === 'object') {
+        for (const [key, value] of Object.entries(data)) {
+          sessionStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+        }
+      }
+      refreshDisplay();
+      showStatus('sessionStorage data set successfully', 'success');
+      return true;
+    };
+
+    window.getSessionData = function() {
+      return getStorageContents(sessionStorage);
+    };
+
+    window.clearSessionData = function() {
+      sessionStorage.clear();
+      refreshDisplay();
+      showStatus('sessionStorage cleared', 'success');
+      return true;
+    };
+
+    // =================================================================
+    // Combined API (exposed globally for Selenium)
+    // =================================================================
+
+    window.setAllData = function(localData, sessionData) {
+      if (localData) window.setTestData(localData);
+      if (sessionData) window.setSessionData(sessionData);
+      return true;
+    };
+
+    window.getAllData = function() {
+      return {
+        localStorage: getStorageContents(localStorage),
+        sessionStorage: getStorageContents(sessionStorage)
+      };
+    };
+
+    window.clearAllData = function() {
+      localStorage.clear();
+      sessionStorage.clear();
+      refreshDisplay();
+      showStatus('All storage cleared', 'success');
+      return true;
+    };
+
+    // =================================================================
+    // UI Button Handlers
+    // =================================================================
+
+    function setDefaultLocalData() {
+      const port = window.location.port || '80';
+      window.setTestData({
+        origin: origin,
+        port: port,
+        testKey: `local_value_from_${port}`,
+        timestamp: new Date().toISOString(),
+        nested: {
+          level1: {
+            level2: `local_nested_${port}`
+          }
+        }
+      });
     }
 
-    // Expose verification function for automated tests
+    function setDefaultSessionData() {
+      const port = window.location.port || '80';
+      window.setSessionData({
+        origin: origin,
+        port: port,
+        sessionKey: `session_value_from_${port}`,
+        timestamp: new Date().toISOString(),
+        visitId: Math.random().toString(36).substring(7)
+      });
+    }
+
+    function setAllTestData() {
+      setDefaultLocalData();
+      setDefaultSessionData();
+      showStatus('All test data set', 'success');
+    }
+
+    function clearLocalData() {
+      window.clearTestData();
+    }
+
+    // =================================================================
+    // Verification Functions (for automated testing)
+    // =================================================================
+
     window.verifyTestData = function(expectedData) {
       const actual = window.getTestData();
       const errors = [];
@@ -254,6 +396,42 @@
         actual: actual
       };
     };
+
+    window.verifySessionData = function(expectedData) {
+      const actual = window.getSessionData();
+      const errors = [];
+
+      for (const [key, expectedValue] of Object.entries(expectedData)) {
+        if (!(key in actual)) {
+          errors.push(`Missing key: ${key}`);
+        } else if (JSON.stringify(actual[key]) !== JSON.stringify(expectedValue)) {
+          errors.push(`Key ${key}: expected ${JSON.stringify(expectedValue)}, got ${JSON.stringify(actual[key])}`);
+        }
+      }
+
+      return {
+        success: errors.length === 0,
+        errors: errors,
+        actual: actual
+      };
+    };
+
+    // =================================================================
+    // Event Listeners
+    // =================================================================
+
+    // Listen for storage events (changes from other tabs/windows)
+    window.addEventListener('storage', refreshDisplay);
+
+    // Initial display
+    refreshDisplay();
+
+    // Highlight current port's navigation link
+    const currentPort = window.location.port;
+    const currentLink = document.getElementById(`link-${currentPort}`);
+    if (currentLink) {
+      currentLink.classList.add('current');
+    }
   </script>
 </body>
 </html>
