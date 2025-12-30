@@ -118,64 +118,76 @@ async def _cdp_enable_domstorage(driver: webdriver.Chrome) -> None:
     await asyncio.to_thread(driver.execute_cdp_cmd, "DOMStorage.enable", {})
 
 
-async def _cdp_get_localstorage(driver: webdriver.Chrome, origin: str) -> list[dict]:
-    """Get localStorage items for a specific origin via CDP.
+async def _cdp_get_storage(
+    driver: webdriver.Chrome,
+    origin: str,
+    is_local: bool = True,
+) -> Sequence[dict]:
+    """Get storage items for a specific origin via CDP.
 
     Args:
         driver: WebDriver with CDP support
         origin: Security origin (e.g., "https://example.com")
+        is_local: True for localStorage, False for sessionStorage
 
     Returns:
-        List of {name, value} dicts, or empty list if origin has no localStorage
+        Sequence of {name, value} dicts, or empty sequence if origin has no storage
 
-    Raises:
-        WebDriverException: If CDP command fails for reasons other than empty storage
-
-    Note: Requires DOMStorage domain to be enabled first.
+    Note:
+        - Requires DOMStorage domain to be enabled first
+        - Read requires active frame for target origin (same as write)
+        - This is why we pre-capture before navigation - departed origins have no frame
     """
     result = await asyncio.to_thread(
         driver.execute_cdp_cmd,
         "DOMStorage.getDOMStorageItems",
-        {"storageId": {"securityOrigin": origin, "isLocalStorage": True}},
+        {"storageId": {"securityOrigin": origin, "isLocalStorage": is_local}},
     )
     # CDP returns {"entries": [["key1", "value1"], ["key2", "value2"], ...]}
     entries = result.get("entries", [])
     return [{"name": kv[0], "value": kv[1]} for kv in entries]
 
 
-async def _cdp_set_localstorage(
-    driver: webdriver.Chrome, origin: str, key: str, value: str
+async def _cdp_set_storage(
+    driver: webdriver.Chrome,
+    origin: str,
+    key: str,
+    value: str,
+    is_local: bool = True,
 ) -> None:
-    """Set a localStorage item for a specific origin via CDP.
+    """Set a storage item for a specific origin via CDP.
 
     Args:
         driver: WebDriver with CDP support
         origin: Security origin (e.g., "https://example.com")
-        key: localStorage key
-        value: localStorage value
+        key: Storage key
+        value: Storage value
+        is_local: True for localStorage, False for sessionStorage
 
     Raises:
-        WebDriverException: If CDP command fails
+        WebDriverException: "Frame not found for the given storage id" if no active frame
 
-    Note: Requires DOMStorage domain to be enabled first.
-          Works WITHOUT navigating to the origin!
+    Note:
+        - Requires DOMStorage domain to be enabled first
+        - Write REQUIRES active frame for target origin (frame-dependent)
+        - This is why we use lazy restore pattern
     """
     await asyncio.to_thread(
         driver.execute_cdp_cmd,
         "DOMStorage.setDOMStorageItem",
         {
-            "storageId": {"securityOrigin": origin, "isLocalStorage": True},
+            "storageId": {"securityOrigin": origin, "isLocalStorage": is_local},
             "key": key,
             "value": value,
         },
     )
 
 
-async def _capture_current_origin_localstorage(
+async def _capture_current_origin_storage(
     service: BrowserService,
     driver: webdriver.Chrome,
 ) -> None:
-    """Capture current origin's localStorage to cache before navigation.
+    """Capture current origin's localStorage and sessionStorage to cache before navigation.
 
     Call this BEFORE any action that might navigate away (click, press_key, navigate).
     Safe to call multiple times - idempotent, overwrites previous cache for same origin.
@@ -185,7 +197,7 @@ async def _capture_current_origin_localstorage(
     "Frame not found" error.
     """
     current_url = driver.current_url
-    if not current_url or current_url.startswith(("about:", "data:")):
+    if not current_url or current_url.startswith(("about:", "data:", "chrome:", "blob:", "file://")):
         return
 
     current_origin = await asyncio.to_thread(
@@ -195,29 +207,42 @@ async def _capture_current_origin_localstorage(
         return
 
     await _cdp_enable_domstorage(driver)
-    local_storage_items = await _cdp_get_localstorage(driver, current_origin)
 
-    if local_storage_items:
-        service.state.localStorage_cache[current_origin] = local_storage_items
+    # Capture localStorage - always update cache (even if empty) to avoid stale data
+    # if user clears storage and then navigates away
+    local_storage_items = await _cdp_get_storage(driver, current_origin, is_local=True)
+    service.state.localStorage_cache[current_origin] = list(local_storage_items)
+
+    # Capture sessionStorage - always update cache (even if empty)
+    session_storage_items = await _cdp_get_storage(driver, current_origin, is_local=False)
+    service.state.sessionStorage_cache[current_origin] = list(session_storage_items)
+
+    # Log combined stats
+    total_items = len(local_storage_items) + len(session_storage_items)
+    if total_items > 0:
         print(
-            f"[storage] Cached {len(local_storage_items)} localStorage items for {current_origin}",
+            f"[storage] Cached {len(local_storage_items)} localStorage + "
+            f"{len(session_storage_items)} sessionStorage items for {current_origin}",
             file=sys.stderr,
         )
 
 
-async def _restore_pending_localstorage_for_current_origin(
+async def _restore_pending_storage_for_current_origin(
     service: BrowserService,
     driver: webdriver.Chrome,
 ) -> None:
-    """Restore localStorage for current origin from pending storage state.
+    """Restore localStorage and sessionStorage for current origin from pending storage state.
 
-    Called after navigation to check if we have pending localStorage for the
+    Called after navigation to check if we have pending storage for the
     new current origin. Tracks restored origins to avoid double-restore which
     could overwrite page modifications.
 
     CDP DOMStorage.setDOMStorageItem requires an active frame for the origin,
-    so we can only restore localStorage AFTER navigating to each origin.
+    so we can only restore storage AFTER navigating to each origin.
     This implements "lazy restore" - restore on-demand when we arrive at each origin.
+
+    Note: sessionStorage is session-scoped. Restoring it to a new browser context
+    works, but the data will be lost when the browser closes (correct browser behavior).
     """
     if not service.state.pending_storage_state:
         return
@@ -226,6 +251,10 @@ async def _restore_pending_localstorage_for_current_origin(
         driver.execute_script, "return window.location.origin"
     )
     if not current_origin or current_origin == "null":
+        return
+
+    # Skip special origins
+    if current_origin.startswith(("chrome://", "about:", "data:", "blob:", "file://")):
         return
 
     if current_origin in service.state.restored_origins:
@@ -238,17 +267,38 @@ async def _restore_pending_localstorage_for_current_origin(
             origin_data = origin_entry
             break
 
-    if not origin_data or not origin_data.localStorage:
-        return  # No pending data for this origin
+    if not origin_data:
+        # Mark as checked so we don't repeatedly search for non-existent origin
+        service.state.restored_origins.add(current_origin)
+        return
 
-    # Restore localStorage via CDP
+    # Check if there's anything to restore
+    has_localStorage = origin_data.localStorage and len(origin_data.localStorage) > 0
+    has_sessionStorage = origin_data.sessionStorage and len(origin_data.sessionStorage) > 0
+
+    if not has_localStorage and not has_sessionStorage:
+        service.state.restored_origins.add(current_origin)
+        return
+
     await _cdp_enable_domstorage(driver)
-    for item in origin_data.localStorage:
-        await _cdp_set_localstorage(driver, current_origin, item.name, item.value)
+
+    # Restore localStorage
+    local_count = 0
+    if has_localStorage:
+        for item in origin_data.localStorage:
+            await _cdp_set_storage(driver, current_origin, item.name, item.value, is_local=True)
+            local_count += 1
+
+    # Restore sessionStorage
+    session_count = 0
+    if has_sessionStorage:
+        for item in origin_data.sessionStorage:
+            await _cdp_set_storage(driver, current_origin, item.name, item.value, is_local=False)
+            session_count += 1
 
     service.state.restored_origins.add(current_origin)
     print(
-        f"[storage] Restored {len(origin_data.localStorage)} localStorage items for {current_origin}",
+        f"[storage] Restored {local_count} localStorage + {session_count} sessionStorage items for {current_origin}",
         file=sys.stderr,
     )
 
@@ -360,8 +410,9 @@ class BrowserState:
         self.mitmproxy_process: subprocess.Popen | None = None  # Local mitmproxy for upstream auth
         # Origin tracking for multi-origin storage capture
         self.origin_tracker = OriginTracker()
-        # localStorage cache - captured on navigate-away since CDP can't query departed origins
+        # Storage caches - captured on navigate-away since CDP can't query departed origins
         self.localStorage_cache: dict[str, list[dict]] = {}
+        self.sessionStorage_cache: dict[str, list[dict]] = {}
         # Lazy restore: pending storage state and tracking of already-restored origins
         self.pending_storage_state: StorageState | None = None
         self.restored_origins: set[str] = set()
@@ -388,9 +439,10 @@ class BrowserService:
             await asyncio.to_thread(self.state.driver.quit)
             self.state.driver = None
         self.state.current_profile = None
-        # Clear origin tracking and localStorage cache - new browser = new session
+        # Clear origin tracking and storage caches - new browser = new session
         self.state.origin_tracker.clear()
         self.state.localStorage_cache.clear()
+        self.state.sessionStorage_cache.clear()
         # Clear lazy restore state - new browser = fresh session
         self.state.pending_storage_state = None
         self.state.restored_origins.clear()
@@ -675,7 +727,7 @@ def register_tools(service: BrowserService) -> None:
 
         # PRE-ACTION: Capture localStorage before navigating away
         # (CDP can't query departed origins - frame is gone after navigation)
-        await _capture_current_origin_localstorage(service, driver)
+        await _capture_current_origin_storage(service, driver)
 
         # Navigate (blocking operation)
         await asyncio.to_thread(driver.get, url)
@@ -702,7 +754,7 @@ def register_tools(service: BrowserService) -> None:
         # This handles both initial navigation with storage_state_file AND
         # subsequent navigations to other origins with pending storage state.
         # The helper checks restored_origins to avoid double-restore.
-        await _restore_pending_localstorage_for_current_origin(service, driver)
+        await _restore_pending_storage_for_current_origin(service, driver)
 
         # IndexedDB restore is current-origin only (requires DOM context)
         if storage_state is not None:
@@ -1413,7 +1465,7 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
 
         # PRE-ACTION: Capture localStorage before click (might navigate away)
-        await _capture_current_origin_localstorage(service, driver)
+        await _capture_current_origin_storage(service, driver)
         url_before = driver.current_url
 
         await logger.info(
@@ -1442,7 +1494,7 @@ def register_tools(service: BrowserService) -> None:
             service.state.origin_tracker.add_origin(url_after)
             await logger.info(f"Navigation detected: {url_before} -> {url_after}")
             # Lazy restore: if we navigated to a new origin with pending storage state
-            await _restore_pending_localstorage_for_current_origin(service, driver)
+            await _restore_pending_storage_for_current_origin(service, driver)
 
         await logger.info("Click successful")
 
@@ -1530,7 +1582,7 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
 
         # PRE-ACTION: Capture localStorage before key press (ENTER might submit form and navigate)
-        await _capture_current_origin_localstorage(service, driver)
+        await _capture_current_origin_storage(service, driver)
         url_before = driver.current_url
 
         await logger.info(f"Pressing key: {key}")
@@ -1567,7 +1619,7 @@ def register_tools(service: BrowserService) -> None:
             service.state.origin_tracker.add_origin(url_after)
             await logger.info(f"Navigation detected: {url_before} -> {url_after}")
             # Lazy restore: if we navigated to a new origin with pending storage state
-            await _restore_pending_localstorage_for_current_origin(service, driver)
+            await _restore_pending_storage_for_current_origin(service, driver)
 
         await logger.info("Key press successful")
 
@@ -2439,9 +2491,8 @@ Workflow:
     ) -> SaveStorageStateResult:
         """Export browser storage state to Playwright-compatible JSON for session persistence.
 
-        Captures cookies and localStorage that maintain authenticated sessions.
-        After logging in once, save storage state to reuse authentication in future sessions
-        without re-login.
+        Captures cookies, localStorage, and sessionStorage that maintain authenticated sessions.
+        After logging in once, save storage state to reuse authentication in future sessions.
 
         Args:
             filename: Output filename (relative to cwd or absolute path).
@@ -2455,18 +2506,20 @@ Workflow:
 
         What's captured:
             - All cookies with full attributes (HttpOnly, Secure, SameSite, expires)
-            - localStorage for current page's origin
-            - IndexedDB databases (if include_indexeddb=True)
+            - localStorage for all tracked origins (multi-origin via lazy capture)
+            - sessionStorage for all tracked origins (multi-origin via lazy capture)
+            - IndexedDB databases (if include_indexeddb=True, current origin only)
 
-        What's NOT captured:
-            - sessionStorage (tab-specific, rarely needed for auth)
-            - localStorage for other origins (limitation: current origin only)
+        sessionStorage behavior:
+            sessionStorage is session-scoped by browser design. Restored sessionStorage
+            persists only for the lifetime of the browser context - closing the browser
+            clears it. For cross-session persistence, use localStorage or cookies.
 
         Workflow:
             1. navigate("https://example.com/login", fresh_browser=True)
             2. [Complete login flow - click buttons, enter credentials, etc.]
             3. navigate("https://example.com/account")  # Navigate to authenticated page
-            4. save_storage_state("example_auth.json", include_indexeddb=True)  # Export auth state
+            4. save_storage_state("example_auth.json", include_indexeddb=True)  # Export auth
             5. [Later, in new session:]
                navigate("https://example.com/account",
                        fresh_browser=True,
@@ -2484,8 +2537,7 @@ Workflow:
             - Delete when no longer needed
 
         Limitations:
-            - Only captures localStorage/IndexedDB for current page's origin
-            - Navigate to your main application page before saving
+            - IndexedDB only captured for current origin (not multi-origin yet)
             - Tokens may expire between save and restore - re-authenticate if needed
         """
         logger = PrintLogger(ctx)
@@ -2539,7 +2591,7 @@ Workflow:
         )
 
         # =================================================================
-        # Multi-Origin localStorage Capture
+        # Multi-Origin Storage Capture (localStorage + sessionStorage)
         # =================================================================
         # CDP DOMStorage.getDOMStorageItems requires an active frame for the origin.
         # For departed origins (navigated away), we use the cached data captured
@@ -2551,28 +2603,45 @@ Workflow:
 
         origins_data: list[dict] = []
         total_localstorage_items = 0
+        total_sessionstorage_items = 0
 
         for origin in tracked_origins:
-            # Use cache for departed origins, CDP for current origin
+            # Skip special origins
+            if origin.startswith(("chrome://", "about:", "data:", "blob:", "file://")):
+                continue
+
+            # Capture localStorage: cache for departed origins, CDP for current
             if origin == current_origin:
-                # Current origin - query CDP directly (have active frame)
-                local_storage_items = await _cdp_get_localstorage(driver, origin)
+                local_storage_items = await _cdp_get_storage(driver, origin, is_local=True)
             elif origin in service.state.localStorage_cache:
-                # Departed origin - use cached data
                 local_storage_items = service.state.localStorage_cache[origin]
             else:
-                # Not current and not cached (origin visited but had no localStorage)
                 local_storage_items = []
 
-            if local_storage_items:
-                origins_data.append({
+            # Capture sessionStorage: cache for departed origins, CDP for current
+            if origin == current_origin:
+                session_storage_items = await _cdp_get_storage(driver, origin, is_local=False)
+            elif origin in service.state.sessionStorage_cache:
+                session_storage_items = service.state.sessionStorage_cache[origin]
+            else:
+                session_storage_items = []
+
+            # Only add origin if it has any storage
+            if local_storage_items or session_storage_items:
+                origin_entry: dict = {
                     "origin": origin,
                     "localStorage": local_storage_items,
-                })
+                }
+                if session_storage_items:
+                    origin_entry["sessionStorage"] = session_storage_items
+
+                origins_data.append(origin_entry)
                 total_localstorage_items += len(local_storage_items)
+                total_sessionstorage_items += len(session_storage_items)
 
         await logger.info(
-            f"Captured localStorage: {total_localstorage_items} items across "
+            f"Captured storage: {total_localstorage_items} localStorage + "
+            f"{total_sessionstorage_items} sessionStorage items across "
             f"{len(origins_data)} origins (of {len(tracked_origins)} tracked)"
         )
 
@@ -2615,13 +2684,18 @@ Workflow:
                     origin_found = True
                     break
 
-            # If current origin had no localStorage but has IndexedDB, add it
+            # If current origin had no localStorage/sessionStorage but has IndexedDB, add it
             if not origin_found:
-                origins_data.append({
+                # Query sessionStorage for this edge case too
+                current_session_storage = await _cdp_get_storage(driver, current_origin, is_local=False)
+                origin_entry_new: dict = {
                     "origin": current_origin,
                     "localStorage": [],
                     "indexedDB": indexeddb_data,
-                })
+                }
+                if current_session_storage:
+                    origin_entry_new["sessionStorage"] = list(current_session_storage)
+                origins_data.append(origin_entry_new)
 
         # Build storageState structure with all captured origins
         storage_state_data = {
@@ -2655,7 +2729,8 @@ Workflow:
         # Build log message
         log_parts = [
             f"Saved {result.cookies_count} cookies",
-            f"{total_localstorage_items} localStorage items across {len(origins_data)} origins",
+            f"{total_localstorage_items} localStorage + {total_sessionstorage_items} sessionStorage items "
+            f"across {len(origins_data)} origins",
         ]
         if include_indexeddb and indexeddb_databases_count > 0:
             log_parts.append(f"{indexeddb_databases_count} IndexedDB databases ({indexeddb_records_count} records)")

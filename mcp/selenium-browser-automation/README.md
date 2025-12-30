@@ -364,8 +364,10 @@ navigate(
 |----------------|:--------:|------------------------------------------------------------------------------------|
 | Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires)                               |
 | localStorage   |    ✓     | All tracked origins via CDP (lazy restore on navigate)                             |
+| sessionStorage |    ✓     | All tracked origins via CDP (lazy restore on navigate) - see note below            |
 | IndexedDB      |  opt-in  | `include_indexeddb=True` - databases, stores, records, types (current origin only) |
-| sessionStorage |    -     | Future enhancement                                                                 |
+
+**sessionStorage Note:** sessionStorage is ephemeral by design—browsers clear it when tabs close. We capture it for two reasons: (1) debugging value—seeing sessionStorage helps understand application state, and (2) automation continuity—when `fresh_browser=True` restarts Chrome for proxy rotation, you may want to preserve form wizard progress. Restored sessionStorage is new sessionStorage pre-populated with saved data, not a continuation of the original session. This capability exceeds Playwright ([#31108](https://github.com/microsoft/playwright/issues/31108)).
 
 **IndexedDB Support:**
 
@@ -637,7 +639,7 @@ get_page_text(include_images=True)
 - `export_har(filename, include_response_bodies?, max_body_size_mb?)` - Export to HAR file (requires `enable_har_capture=True` on navigate)
 
 ### Session Persistence
-- `save_storage_state(filename, include_indexeddb?)` - Export cookies + localStorage (+ IndexedDB if opt-in) to Playwright-compatible JSON
+- `save_storage_state(filename, include_indexeddb?)` - Export cookies, localStorage, sessionStorage (+ IndexedDB if opt-in) to Playwright-compatible JSON
 
 ### Utilities
 - `download_resource(url, output_filename)` - Download with session cookies

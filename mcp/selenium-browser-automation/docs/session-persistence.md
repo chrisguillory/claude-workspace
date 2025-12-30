@@ -53,6 +53,9 @@ We use Playwright's storageState JSON format for cross-tool compatibility. Files
       "origin": "https://www.example.com",
       "localStorage": [
         {"name": "authToken", "value": "eyJ..."}
+      ],
+      "sessionStorage": [
+        {"name": "wizardStep", "value": "3"}
       ]
     }
   ]
@@ -583,13 +586,64 @@ Sites using third-party authentication:
 **Export complexity:** Very High - multi-domain cookie capture needed
 **Current support:** Limited (single origin localStorage)
 
+## sessionStorage Capture (Unique Capability)
+
+We capture and restore sessionStorage for all tracked origins. This is a **unique capability that exceeds Playwright**, which has an open feature request for sessionStorage support ([microsoft/playwright#31108](https://github.com/microsoft/playwright/issues/31108)).
+
+### Why Capture Ephemeral Storage?
+
+sessionStorage is ephemeral by design—browsers intentionally clear it when tabs close. So why capture it?
+
+| Use Case                   | Value                                                                                               |
+|----------------------------|-----------------------------------------------------------------------------------------------------|
+| **Debugging**              | Seeing sessionStorage reveals application state (wizard progress, temporary tokens, UI state)       |
+| **Automation continuity**  | When `fresh_browser=True` restarts Chrome for proxy rotation, you can preserve form wizard progress |
+| **Complete state capture** | Provides a full point-in-time snapshot of browser state for analysis                                |
+
+### Semantic Expectations
+
+**What "restore" actually means:**
+- Restored sessionStorage is **new sessionStorage pre-populated with saved data**
+- It is NOT a continuation of the original browser session
+- The restored data persists for the lifetime of the new browser context
+- Closing the browser clears sessionStorage (correct browser behavior)
+
+**Comparison with other storage:**
+
+| Storage Type | Persistence | After Browser Close |
+|--------------|-------------|---------------------|
+| Cookies | Per cookie expiry | Preserved (unless session cookie) |
+| localStorage | Forever | Preserved |
+| **sessionStorage** | Tab lifetime | **Cleared** (by design) |
+| IndexedDB | Forever | Preserved |
+
+### CDP Implementation
+
+sessionStorage uses the same CDP DOMStorage domain as localStorage:
+
+```python
+# Read sessionStorage
+driver.execute_cdp_cmd("DOMStorage.getDOMStorageItems", {
+    "storageId": {
+        "securityOrigin": "https://example.com",
+        "isLocalStorage": False  # False = sessionStorage
+    }
+})
+
+# Write sessionStorage (requires active frame)
+driver.execute_cdp_cmd("DOMStorage.setDOMStorageItem", {
+    "storageId": {"securityOrigin": "https://example.com", "isLocalStorage": False},
+    "key": "wizardStep",
+    "value": "3"
+})
+```
+
 ## Future Enhancements
 
 ### Near-Term
 
 | Enhancement            | Description                                       | Approach                                     |
 |------------------------|---------------------------------------------------|----------------------------------------------|
-| sessionStorage capture | Add to storageState export                        | CDP `DOMStorage` with `isLocalStorage=false` |
 | Multi-origin IndexedDB | Capture/restore IndexedDB for all visited origins | Same lazy restore pattern as localStorage    |
 
 ### Longer-Term

@@ -594,11 +594,16 @@ class StorageStateOrigin(BaseModel):
     """Origin storage data in storageState format.
 
     Each origin (scheme + domain + port) has isolated storage.
-    IndexedDB is optional (captured only when include_indexeddb=True).
+    sessionStorage and IndexedDB are optional.
+
+    Note: sessionStorage is session-scoped by design. Restored sessionStorage
+    persists only for the lifetime of the browser context - closing the browser
+    clears it. For cross-session persistence, use localStorage or cookies.
     """
 
     origin: str  # e.g., "https://www.marriott.com"
     localStorage: Sequence[StorageStateLocalStorageItem]
+    sessionStorage: Sequence[StorageStateLocalStorageItem] | None = None
     indexedDB: Sequence[StorageStateIndexedDB] | None = None
 
 
