@@ -28,6 +28,47 @@ The Chrome-to-Selenium workflow is valuable when:
 - 2FA/MFA is easier to complete in your regular browser
 - You want to reuse existing authenticated sessions from daily browsing
 
+## Chrome Profile Coverage
+
+Complete inventory of what Chrome profiles store vs our implementation:
+
+| Storage Type           | Chrome Profile | Our Status | Notes                                                           |
+|------------------------|:--------------:|:----------:|-----------------------------------------------------------------|
+| **Cookies**            |       ✅        | ✅ Complete | All attributes via CDP (HttpOnly, Secure, SameSite, expires)    |
+| **localStorage**       |       ✅        | ✅ Complete | Multi-origin capture + lazy restore                             |
+| **sessionStorage**     |       ✅        | ✅ Complete | Multi-origin (Playwright doesn't support)                       |
+| **IndexedDB**          |       ✅        | ✅ Complete | Multi-origin with schema + type serialization                   |
+| **Permissions**        |       ✅        | 🔲 Planned | CDP `Browser.grantPermissions` to SET, JS to capture            |
+| **Cache Storage**      |       ✅        | 🔲 Planned | CDP `CacheStorage` domain, primarily for PWA testing            |
+| **Service Workers**    |       ✅        |   ➖ N/A    | Can't pre-register without script files; re-init from IndexedDB |
+| **WebSQL**             |       ✅        |   ➖ N/A    | Deprecated, use IndexedDB                                       |
+| **File System Access** |       ✅        |   ➖ N/A    | Very new API, limited adoption                                  |
+| **Form Autofill**      |       ✅        |   ➖ N/A    | No browser API for programmatic access                          |
+| **Saved Passwords**    |       ✅        |   ➖ N/A    | Chrome encryption prevents access                               |
+| **Payment Methods**    |       ✅        |   ➖ N/A    | High security risk, out of scope                                |
+| **Client Hints**       |       ✅        |   ➖ N/A    | Browser preferences, niche use case                             |
+| **Push Subscriptions** |       ✅        |   ➖ N/A    | Tied to Service Worker lifecycle                                |
+| **Background Sync**    |       ✅        |   ➖ N/A    | Service Worker feature                                          |
+
+**Legend:** ✅ Complete | 🔲 Planned | ➖ Not Applicable/Out of Scope
+
+### Comparison with Other Frameworks
+
+| Feature                      | Us | Playwright | Puppeteer | Cypress | TestCafe |
+|------------------------------|:--:|:----------:|:---------:|:-------:|:--------:|
+| Cookies                      | ✅  |     ✅      |  Manual   |    ✅    |    ✅     |
+| localStorage (multi-origin)  | ✅  |     ✅      |  Manual   |    ✅    |    ✅     |
+| sessionStorage               | ✅  |     ❌      |  Manual   |    ✅    |    ❌     |
+| IndexedDB (multi-origin)     | ✅  |     ✅      |  Manual   |    ❌    |    ❌     |
+| IndexedDB type serialization | ✅  |     ❌      |     ❌     |    ❌    |    ❌     |
+| Permissions                  | 🔲 |     ❌      |     ❌     |    ❌    |    ❌     |
+| Cache Storage                | 🔲 |     ❌      |     ❌     |    ❌    |    ❌     |
+
+**Our unique capabilities:**
+- sessionStorage multi-origin (Playwright explicitly skips - [#31108](https://github.com/microsoft/playwright/issues/31108))
+- IndexedDB type serialization (Date, Map, Set, ArrayBuffer with `__type` markers)
+- Pre-capture pattern for departed origins (automatic, not manual)
+
 ## Playwright storageState Format
 
 We use Playwright's storageState JSON format for cross-tool compatibility. Files can be used with Playwright, Puppeteer, or edited manually.
@@ -638,13 +679,53 @@ driver.execute_cdp_cmd("DOMStorage.setDOMStorageItem", {
 })
 ```
 
-## Future Enhancements
+## Roadmap
 
-### Longer-Term
+### Current State (Complete)
 
-| Enhancement             | Description                              | Challenges               |
-|-------------------------|------------------------------------------|--------------------------|
-| Chrome extension export | Export storage state from regular Chrome | Extension API, user flow |
+Core session persistence is **feature-complete**, exceeding all major frameworks:
+
+| Storage Type   | Status | Notes |
+|----------------|:------:|-------|
+| Cookies        | ✅     | All attributes via CDP (HttpOnly, Secure, SameSite, expires) |
+| localStorage   | ✅     | Multi-origin capture + lazy restore via CDP |
+| sessionStorage | ✅     | Multi-origin (Playwright explicitly skips this - [#31108](https://github.com/microsoft/playwright/issues/31108)) |
+| IndexedDB      | ✅     | Multi-origin with full schema + type serialization (Date, Map, Set, ArrayBuffer) |
+
+**Unique capabilities vs competitors:**
+- sessionStorage multi-origin (Playwright doesn't support)
+- IndexedDB type serialization (no framework preserves Date/Map/Set)
+- Pre-capture pattern for departed origins (Playwright requires manual handling)
+
+### Tier 1: Quick Wins (High Value, Low Complexity)
+
+| Enhancement | Description | Approach |
+|-------------|-------------|----------|
+| Permissions capture/restore | Skip permission prompts (camera, mic, geolocation) | CDP `Browser.grantPermissions` to SET, JS `navigator.permissions.query()` to CAPTURE |
+| Storage encryption | Protect auth tokens at rest | AES-256 encryption with key from env var |
+| Token expiration detection | Warn before using expired JWT tokens | Parse JWT `exp` claim on load, validate timestamps |
+
+### Tier 2: Medium Priority
+
+| Enhancement | Description | Approach |
+|-------------|-------------|----------|
+| Chrome extension export | Export session from regular Chrome (solves bot detection) | Manifest V3 extension with `chrome.cookies.getAll` + content scripts |
+
+### Tier 3: Lower Priority (Specialized Use Cases)
+
+| Enhancement | Description | When Needed |
+|-------------|-------------|-------------|
+| CacheStorage | Service Worker cache capture/restore | PWA testing, offline-first apps |
+
+### Not Planned
+
+| Feature | Reason |
+|---------|--------|
+| Service Workers | Can't pre-register without script files. Let them re-initialize from IndexedDB (which we capture). Low value. |
+| WebSQL | Deprecated, use IndexedDB instead |
+| Saved Passwords | Chrome encryption prevents access, security concern |
+| Payment Methods | High security risk, out of scope |
+| Form Autofill | No browser API for programmatic access |
 
 ### CDP Implementation Notes
 
@@ -664,6 +745,149 @@ Key discoveries from multi-origin localStorage implementation:
 - CDP IndexedDB domain can READ any origin's databases
 - CDP IndexedDB has NO write API - must use JavaScript
 - Same lazy restore pattern applies: inject JS to restore when visiting each origin
+
+## Implementation Research
+
+Technical details from CDP documentation and Perplexity research for planned features.
+
+### Permissions (Tier 1)
+
+**CDP Approach:**
+```python
+# SET permissions via CDP (no capture API exists)
+driver.execute_cdp_cmd("Browser.grantPermissions", {
+    "permissions": ["geolocation", "notifications", "camera", "microphone"],
+    "origin": "https://example.com"
+})
+```
+
+**Capture via JavaScript:**
+```javascript
+// Must enumerate known permissions and query each
+const permissionTypes = [
+    'geolocation', 'notifications', 'camera', 'microphone',
+    'clipboard-read', 'clipboard-write', 'background-sync', 'push'
+];
+
+const granted = [];
+for (const perm of permissionTypes) {
+    try {
+        const result = await navigator.permissions.query({ name: perm });
+        if (result.state === 'granted') granted.push(perm);
+    } catch (e) { /* Permission type not supported */ }
+}
+return granted;
+```
+
+**Gotcha:** CDP can SET but not GET permissions. Capture requires JavaScript enumeration.
+
+### Token Expiration Detection (Tier 1)
+
+**JWT Structure:**
+```
+header.payload.signature
+```
+
+**Decode without verification (just checking expiration):**
+```javascript
+function isTokenExpired(token) {
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (!payload.exp) return false;  // No exp claim
+        const buffer = 60;  // Consider expired 60s early
+        return payload.exp < (Date.now() / 1000) + buffer;
+    } catch (e) {
+        return true;  // Can't decode = consider invalid
+    }
+}
+```
+
+**Token detection heuristics:**
+- Key names containing: `token`, `auth`, `jwt`, `bearer`, `access`, `refresh`
+- Values matching JWT pattern: `eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*`
+
+### Storage Encryption (Tier 1)
+
+**Pattern:**
+```python
+import os
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
+
+def derive_key(password: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=480000)
+    return base64.urlsafe_b64encode(kdf.derive(password.encode()))
+
+def encrypt_storage_state(data: dict, password: str) -> dict:
+    salt = os.urandom(16)
+    key = derive_key(password, salt)
+    f = Fernet(key)
+    encrypted = f.encrypt(json.dumps(data).encode())
+    return {"salt": base64.b64encode(salt).decode(), "data": encrypted.decode()}
+```
+
+**Security practices:**
+- Key from environment variable, never hardcoded
+- File permissions: `chmod 600` (owner read/write only)
+- Token redaction in logs: Replace JWT-like strings with `[REDACTED]`
+- Temp file cleanup: Overwrite with random data before deletion
+
+### CacheStorage (Tier 3)
+
+**CDP Methods:**
+```python
+# List caches for origin
+caches = driver.execute_cdp_cmd("CacheStorage.requestCacheNames", {
+    "securityOrigin": "https://example.com"
+})
+
+# Get entries from a cache
+entries = driver.execute_cdp_cmd("CacheStorage.requestEntries", {
+    "cacheId": cache_id,
+    "skipCount": 0,
+    "pageSize": 100
+})
+
+# Get specific cached response (body is base64)
+response = driver.execute_cdp_cmd("CacheStorage.requestCachedResponse", {
+    "cacheId": cache_id,
+    "requestURL": "https://example.com/api/data"
+})
+```
+
+**Gotchas:**
+- Response bodies returned as base64 - must decode for storage, re-encode for restore
+- Response type (basic, cors, opaque) must be preserved for correct CORS behavior
+- Headers are name-value objects, must preserve casing
+
+**Value assessment:** Primarily for PWA testing where offline functionality is critical. Most SPAs don't use CacheStorage. Lower priority.
+
+### Chrome Extension Export (Tier 2)
+
+**Manifest V3 constraints:**
+- Service worker replaces background pages (terminates when idle)
+- Content scripts can't access cross-origin IndexedDB (same-origin policy)
+- Must inject content script per-origin to capture localStorage/IndexedDB
+
+**Architecture:**
+1. `chrome.cookies.getAll({})` - All cookies including HttpOnly
+2. Content script per tab for localStorage (injected via `chrome.scripting.executeScript`)
+3. IndexedDB capture requires content script in each origin's context
+4. Service worker coordinates, stores in extension's IndexedDB
+
+**Limitation:** Extension cannot capture IndexedDB from origins the user hasn't visited in that session. Must have active tab per origin.
+
+### WebDriver BiDi
+
+**Status:** Emerging W3C standard for bidirectional browser automation.
+
+**Storage-related commands:**
+- `storage.getCookies` / `storage.setCookie` - Low-level cookie ops
+- No high-level "capture all session state" command planned
+
+**Implication:** Session persistence will remain a framework-level feature built on BiDi primitives. Our architecture is forward-compatible.
 
 ## Security Considerations
 
