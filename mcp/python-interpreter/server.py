@@ -4,10 +4,14 @@
 #   "attrs",
 #   "fastapi",
 #   "fastmcp>=2.12.5",
+#   "local-lib",
 #   "pandas",
 #   "pydantic",
 #   "uvicorn",
 # ]
+#
+# [tool.uv.sources]
+# local-lib = { path = "../../local-lib", editable = true }
 # ///
 """
 Python Interpreter MCP Server
@@ -870,6 +874,22 @@ server = mcp.server.fastmcp.FastMCP("python-interpreter", lifespan=lifespan)
 
 # Create FastAPI app for HTTP bridge
 fastapi_app = fastapi.FastAPI(title="Python Interpreter HTTP Bridge")
+
+
+@fastapi_app.exception_handler(Exception)
+async def global_exception_handler(
+    request: fastapi.Request, exc: Exception
+) -> fastapi.responses.JSONResponse:
+    """Global exception handler - returns all unhandled exceptions with full traceback."""
+    tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+
+    return fastapi.responses.JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"{type(exc).__name__}: {str(exc)}",
+            "traceback": tb_str,
+        },
+    )
 
 
 class ExecuteRequest(pydantic.BaseModel):

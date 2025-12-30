@@ -86,7 +86,20 @@ def main():
     transport = httpx.HTTPTransport(uds=socket_path.as_posix())
     with httpx.Client(transport=transport, timeout=30.0) as client:
         response = client.post("http://localhost/execute", json={"code": code})
-        response.raise_for_status()
+
+        # Handle errors by printing response details before raising
+        if response.is_error:
+            try:
+                error_data = response.json()
+                if "detail" in error_data:
+                    print(error_data["detail"], file=sys.stderr)
+                if "traceback" in error_data:
+                    print(error_data["traceback"], file=sys.stderr)
+            except Exception:
+                # Fallback if response isn't JSON
+                print(f"Error: {response.text}", file=sys.stderr)
+
+            response.raise_for_status()
 
         # Print result
         result = response.json()["result"]
