@@ -39,6 +39,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -93,6 +94,9 @@ from src.models import (
     StorageStateOrigin,
     StorageState,
     SaveStorageStateResult,
+    # Console logs
+    ConsoleLogEntry,
+    ConsoleLogsResult,
 )
 
 
@@ -542,12 +546,18 @@ class BrowserService:
                 "profile.password_manager_enabled": False,
             },
         )
+        # Browser console logging (always enabled, lightweight)
+        # Captures console.log/warn/error for debugging via get_console_logs()
+        logging_prefs = {"browser": "ALL"}
+
         # Performance logging for HAR export (opt-in due to overhead)
         # When enabled, Chrome continuously buffers Network.* events which adds
         # CPU, memory, and data transfer overhead even when export_har() isn't called.
         if enable_har_capture:
-            opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+            logging_prefs["performance"] = "ALL"
             opts.add_experimental_option("perfLoggingPrefs", {"enableNetwork": True})
+
+        opts.set_capability("goog:loggingPrefs", logging_prefs)
 
         # Apply proxy configuration if mitmproxy is running
         # mitmproxy handles upstream authentication, Chrome just connects to local proxy
@@ -1673,6 +1683,440 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
+            title="Hover Over Element",
+            destructiveHint=False,
+            idempotentHint=True,
+        )
+    )
+    async def hover(
+        selector: str,
+        ctx: Context,
+        duration_ms: int = 0,
+    ) -> None:
+        """Move mouse over an element to trigger hover states.
+
+        Essential for dropdown menus, tooltips, and hover-triggered UI.
+        JavaScript events (mouseover/mouseenter) don't trigger CSS :hover -
+        this tool uses real mouse simulation via ActionChains.
+
+        Args:
+            selector: CSS selector from get_interactive_elements()
+            duration_ms: Hold duration in ms (for menus that need sustained hover)
+
+        Workflow:
+            1. get_interactive_elements(text_contains='Products') - find menu trigger
+            2. hover(selector) - reveal dropdown
+            3. get_aria_snapshot() - see dropdown content
+            4. click(dropdown_item_selector) - select item
+        """
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        # Validate duration
+        if duration_ms < 0:
+            raise ValueError("duration_ms cannot be negative")
+        if duration_ms > 30000:
+            raise ValueError("duration_ms exceeds maximum of 30000ms (30 seconds)")
+
+        await logger.info(f"Hovering over element: {selector}")
+
+        # Wait for element to be present
+        element = await asyncio.to_thread(
+            WebDriverWait(driver, 10).until,
+            EC.presence_of_element_located((By.CSS_SELECTOR, selector)),
+        )
+
+        # Scroll element into view (Playwright does this automatically)
+        await asyncio.to_thread(
+            driver.execute_script,
+            "arguments[0].scrollIntoView({behavior: 'instant', block: 'nearest'});",
+            element,
+        )
+
+        # Verify element is visible (not display:none, visibility:hidden, etc.)
+        is_displayed = await asyncio.to_thread(element.is_displayed)
+        if not is_displayed:
+            raise ValueError(f"Element '{selector}' is not visible - cannot hover")
+
+        # Multi-signal stability check (based on Playwright's approach)
+        # Uses: requestAnimationFrame timing, getAnimations() API, distance threshold
+        stability_result = await asyncio.to_thread(
+            driver.execute_script,
+            """
+            const el = arguments[0];
+            const DISTANCE_THRESHOLD = 5;  // Pixels - matches Cypress default
+            const MAX_CHECKS = 10;  // ~160ms at 60fps
+
+            return new Promise((resolve) => {
+                // Check for running animations using Web Animations API
+                let animations = [];
+                let hasInfiniteAnimation = false;
+                try {
+                    animations = el.getAnimations();
+                    hasInfiniteAnimation = animations.some(a => {
+                        const effect = a.effect;
+                        if (effect && effect.getTiming) {
+                            const timing = effect.getTiming();
+                            return timing.iterations === Infinity;
+                        }
+                        return false;
+                    });
+                } catch (e) {
+                    // getAnimations not supported, proceed without
+                }
+
+                const runningAnimations = animations.filter(a => a.playState === 'running');
+
+                // Two-frame stability check using requestAnimationFrame
+                let prevRect = el.getBoundingClientRect();
+                let checkCount = 0;
+                let consecutiveStable = 0;
+
+                function checkStability() {
+                    checkCount++;
+                    const currRect = el.getBoundingClientRect();
+
+                    // Calculate distance moved
+                    const dx = currRect.x - prevRect.x;
+                    const dy = currRect.y - prevRect.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    // Check size stability
+                    const sizeStable = (
+                        Math.abs(currRect.width - prevRect.width) < 1 &&
+                        Math.abs(currRect.height - prevRect.height) < 1
+                    );
+
+                    // Element is stable if moved less than threshold and size unchanged
+                    const isStable = distance < DISTANCE_THRESHOLD && sizeStable;
+
+                    if (isStable) {
+                        consecutiveStable++;
+                        // Require 2 consecutive stable frames (like Playwright)
+                        if (consecutiveStable >= 2) {
+                            resolve({
+                                stable: true,
+                                framesChecked: checkCount,
+                                runningAnimations: runningAnimations.length,
+                                hasInfiniteAnimation: hasInfiniteAnimation,
+                                finalDistance: distance
+                            });
+                            return;
+                        }
+                    } else {
+                        consecutiveStable = 0;
+                    }
+
+                    prevRect = currRect;
+
+                    // Max checks reached - report as unstable or proceed with warning
+                    if (checkCount >= MAX_CHECKS) {
+                        resolve({
+                            stable: false,
+                            framesChecked: checkCount,
+                            runningAnimations: runningAnimations.length,
+                            hasInfiniteAnimation: hasInfiniteAnimation,
+                            finalDistance: distance,
+                            reason: 'timeout'
+                        });
+                        return;
+                    }
+
+                    requestAnimationFrame(checkStability);
+                }
+
+                // Start checking on next frame
+                requestAnimationFrame(checkStability);
+            });
+            """,
+            element,
+        )
+
+        # Log stability check results
+        if stability_result.get('hasInfiniteAnimation'):
+            await logger.info(
+                "Warning: Element has infinite animation - hover may be inconsistent"
+            )
+
+        if not stability_result.get('stable'):
+            if stability_result.get('runningAnimations', 0) > 0:
+                await logger.info(
+                    f"Element has {stability_result['runningAnimations']} running animation(s), "
+                    f"proceeding after {stability_result['framesChecked']} frame checks"
+                )
+            else:
+                await logger.info(
+                    f"Element did not stabilize after {stability_result['framesChecked']} frames "
+                    f"(final distance: {stability_result.get('finalDistance', 0):.1f}px)"
+                )
+
+        # Verify element receives pointer events (not obscured by overlay/modal)
+        rect = await asyncio.to_thread(lambda: element.rect)
+        center_x = rect['x'] + rect['width'] / 2
+        center_y = rect['y'] + rect['height'] / 2
+
+        pointer_check = await asyncio.to_thread(
+            driver.execute_script,
+            """
+            const x = arguments[0], y = arguments[1], target = arguments[2];
+            const atPoint = document.elementFromPoint(x, y);
+            if (!atPoint) return 'no_element';
+            if (atPoint === target) return 'ok';
+            if (target.contains(atPoint)) return 'ok';  // Clicked descendant is fine
+            return 'obscured';
+            """,
+            center_x, center_y, element
+        )
+        if pointer_check == 'obscured':
+            raise ValueError(
+                f"Element '{selector}' is obscured by another element at its center. "
+                "A modal, overlay, or other element may be blocking it."
+            )
+
+        # Move mouse to element center
+        actions = ActionChains(driver)
+        await asyncio.to_thread(actions.move_to_element(element).perform)
+
+        # Hold if duration specified (for menus that need sustained hover)
+        if duration_ms > 0:
+            await logger.info(f"Holding hover for {duration_ms}ms")
+            await asyncio.sleep(duration_ms / 1000)
+
+        await logger.info("Hover successful")
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Sleep",
+            readOnlyHint=True,
+            idempotentHint=True,
+        )
+    )
+    async def sleep(
+        duration_ms: int,
+        ctx: Context,
+        reason: str | None = None,
+    ) -> dict:
+        """Pause execution for a fixed duration. Use sparingly.
+
+        This is a simple time-based delay. For most automation scenarios,
+        prefer condition-based waits instead:
+        - wait_for_selector() - Wait for specific UI elements
+        - wait_for_network_idle() - Wait for network activity to settle
+
+        Use sleep() only when you need a fixed delay for:
+        - CSS animations with known duration
+        - Debounce timers
+        - Rate limiting between actions
+        - Timing-sensitive test scenarios
+
+        Args:
+            duration_ms: Sleep duration in milliseconds (max 300000 = 5 min)
+            reason: Optional context for logging (e.g., "CSS animation")
+
+        Returns:
+            Dict with slept_ms confirming the sleep duration
+        """
+        logger = PrintLogger(ctx)
+
+        # Validation
+        if duration_ms < 0:
+            raise ValueError("duration_ms cannot be negative")
+        if duration_ms > 300000:
+            raise ValueError(
+                "duration_ms exceeds maximum of 300000ms (5 minutes). "
+                "Such long delays usually indicate missing condition-based waiting logic. "
+                "Consider using wait_for_selector() or wait_for_network_idle() instead."
+            )
+
+        # Graduated warnings for AI agents
+        if duration_ms > 10000:
+            await logger.info(
+                f"Warning: Long sleep({duration_ms}ms) requested. "
+                "Consider wait_for_selector() or wait_for_network_idle() for dynamic content."
+            )
+
+        if reason:
+            await logger.info(f"Sleeping {duration_ms}ms: {reason}")
+        else:
+            await logger.info(f"Sleeping {duration_ms}ms")
+
+        await asyncio.sleep(duration_ms / 1000)
+
+        return {"slept_ms": duration_ms}
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Wait for Selector",
+            readOnlyHint=True,
+            idempotentHint=False,  # State can change between calls
+        )
+    )
+    async def wait_for_selector(
+        selector: str,
+        ctx: Context,
+        state: Literal["visible", "hidden", "attached", "detached"] = "visible",
+        timeout: int = 30000,
+    ) -> dict:
+        """Wait for an element matching the selector to reach a desired state.
+
+        More reliable than wait_for_network_idle() for modern SPAs because it waits
+        for specific UI state rather than network activity. Use this when you need
+        to interact with a specific element after dynamic content loads.
+
+        Args:
+            selector: CSS selector to wait for
+            state: Target state (default "visible"):
+                - "visible": Element in DOM AND displayed (not display:none/visibility:hidden)
+                - "hidden": Element not visible OR not in DOM
+                - "attached": Element present in DOM (regardless of visibility)
+                - "detached": Element removed from DOM
+            timeout: Maximum wait in milliseconds (default 30000, max 300000)
+
+        Returns:
+            Dict with selector, state achieved, and elapsed_ms
+
+        Examples:
+            - wait_for_selector("#modal")  # Wait for modal to appear
+            - wait_for_selector(".loading", state="hidden")  # Wait for loader to disappear
+            - wait_for_selector("[data-loaded]", state="attached")  # Wait for attribute
+
+        Raises:
+            ValueError: If timeout is invalid or selector is empty
+            TimeoutError: If element doesn't reach desired state within timeout
+        """
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        # Validation
+        if not selector or not selector.strip():
+            raise ValueError("selector cannot be empty")
+        if timeout < 0:
+            raise ValueError("timeout cannot be negative")
+        if timeout > 300000:
+            raise ValueError("timeout exceeds maximum of 300000ms (5 minutes)")
+
+        await logger.info(f"Waiting for selector '{selector}' to be {state}")
+
+        start_time = time.time()
+        timeout_s = timeout / 1000
+        polling_interval = 0.05  # 50ms polling
+
+        while time.time() - start_time < timeout_s:
+            try:
+                elements = await asyncio.to_thread(
+                    driver.find_elements, By.CSS_SELECTOR, selector
+                )
+
+                if state == "attached":
+                    # Element exists in DOM
+                    if elements:
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        await logger.info(
+                            f"Selector '{selector}' attached after {elapsed_ms}ms"
+                        )
+                        return {
+                            "selector": selector,
+                            "state": "attached",
+                            "elapsed_ms": elapsed_ms,
+                            "element_count": len(elements),
+                        }
+
+                elif state == "detached":
+                    # Element removed from DOM
+                    if not elements:
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        await logger.info(
+                            f"Selector '{selector}' detached after {elapsed_ms}ms"
+                        )
+                        return {
+                            "selector": selector,
+                            "state": "detached",
+                            "elapsed_ms": elapsed_ms,
+                        }
+
+                elif state == "visible":
+                    # Element exists AND is displayed
+                    for element in elements:
+                        is_displayed = await asyncio.to_thread(element.is_displayed)
+                        if is_displayed:
+                            elapsed_ms = int((time.time() - start_time) * 1000)
+                            await logger.info(
+                                f"Selector '{selector}' visible after {elapsed_ms}ms"
+                            )
+                            return {
+                                "selector": selector,
+                                "state": "visible",
+                                "elapsed_ms": elapsed_ms,
+                                "element_count": len(elements),
+                            }
+
+                elif state == "hidden":
+                    # Element not in DOM OR not displayed
+                    if not elements:
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        await logger.info(
+                            f"Selector '{selector}' hidden (not in DOM) after {elapsed_ms}ms"
+                        )
+                        return {
+                            "selector": selector,
+                            "state": "hidden",
+                            "elapsed_ms": elapsed_ms,
+                            "reason": "not_in_dom",
+                        }
+                    # Check if all matching elements are hidden
+                    all_hidden = True
+                    for element in elements:
+                        is_displayed = await asyncio.to_thread(element.is_displayed)
+                        if is_displayed:
+                            all_hidden = False
+                            break
+                    if all_hidden:
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        await logger.info(
+                            f"Selector '{selector}' hidden (not displayed) after {elapsed_ms}ms"
+                        )
+                        return {
+                            "selector": selector,
+                            "state": "hidden",
+                            "elapsed_ms": elapsed_ms,
+                            "reason": "not_displayed",
+                            "element_count": len(elements),
+                        }
+
+            except Exception as e:
+                # Selector might be invalid or stale element - keep polling
+                pass
+
+            await asyncio.sleep(polling_interval)
+
+        # Timeout reached
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        # Build helpful error message for AI agents
+        try:
+            elements = await asyncio.to_thread(
+                driver.find_elements, By.CSS_SELECTOR, selector
+            )
+            element_count = len(elements)
+            if elements:
+                first_displayed = await asyncio.to_thread(elements[0].is_displayed)
+                current_state = "visible" if first_displayed else "in DOM but hidden"
+            else:
+                current_state = "not in DOM"
+        except Exception:
+            element_count = 0
+            current_state = "unknown (selector may be invalid)"
+
+        raise TimeoutError(
+            f"wait_for_selector('{selector}', state='{state}') timed out after {elapsed_ms}ms. "
+            f"Current state: {current_state} (found {element_count} element(s)). "
+            f"Possible causes: (1) Selector is incorrect, (2) Element is in iframe, "
+            f"(3) Element requires user action to appear, (4) Page didn't finish loading. "
+            f"Try: verify selector with get_page_html(), check for iframes, or increase timeout."
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
             title="List Chrome Profiles", readOnlyHint=True, idempotentHint=True
         )
     )
@@ -1706,6 +2150,53 @@ def register_tools(service: BrowserService) -> None:
             await logger.info(f"Found {result.total_count} profiles")
 
         return result
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Resize Browser Window",
+            destructiveHint=False,
+            idempotentHint=True,
+        )
+    )
+    async def resize_window(
+        width: int,
+        height: int,
+        ctx: Context,
+    ) -> dict:
+        """Resize the browser window to specified dimensions.
+
+        Useful for responsive design testing and mobile simulation.
+
+        Args:
+            width: Window width in pixels
+            height: Window height in pixels
+
+        Returns:
+            Dict with actual width and height after resize
+
+        Common presets:
+            - Mobile (iPhone SE): 375 x 667
+            - Tablet (iPad): 768 x 1024
+            - Desktop (1080p): 1920 x 1080
+            - Desktop (1440p): 2560 x 1440
+
+        Example:
+            resize_window(375, 667)  # Mobile viewport
+            screenshot("mobile-view.png")
+        """
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        await logger.info(f"Resizing window to {width}x{height}")
+
+        await asyncio.to_thread(driver.set_window_size, width, height)
+
+        # Get actual size (may differ due to OS constraints)
+        size = await asyncio.to_thread(driver.get_window_size)
+
+        await logger.info(f"Window resized to {size['width']}x{size['height']}")
+
+        return {"width": size["width"], "height": size["height"]}
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2181,6 +2672,125 @@ Workflow:
             has_errors=len(errors) > 0,
             errors=errors,
         )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Get Console Logs",
+            readOnlyHint=True,
+            idempotentHint=False,  # Clears buffer after retrieval
+        )
+    )
+    async def get_console_logs(
+        ctx: Context,
+        level_filter: Literal["ALL", "SEVERE", "WARNING", "INFO"] | None = None,
+        pattern: str | None = None,
+    ) -> ConsoleLogsResult:
+        """Get browser console logs (console.log, console.error, etc.).
+
+        Retrieves JavaScript console output for debugging. Logs are cleared after
+        each retrieval, so call this to capture logs between page interactions.
+
+        Args:
+            level_filter: Only include logs at or above this level.
+                         SEVERE = errors only, WARNING = warnings+errors,
+                         INFO = all (including console.log), ALL = everything.
+                         Default None = ALL.
+            pattern: Regex pattern to filter messages (case-insensitive).
+                    Example: "error|failed" to find error-related messages.
+
+        Returns:
+            ConsoleLogsResult with logs array and counts by level.
+
+        Log levels (Chrome's naming):
+            - SEVERE: console.error(), uncaught exceptions
+            - WARNING: console.warn()
+            - INFO: console.log(), console.info(), console.debug()
+
+        Notes:
+            - Console logging is always enabled (no special setup needed)
+            - Each call clears the log buffer - subsequent calls only see new logs
+            - For network errors, check the 'source' field (e.g., "network")
+
+        Example workflow:
+            navigate("https://example.com")
+            get_console_logs()  # Check for load-time errors
+            click(selector)
+            get_console_logs()  # Check for interaction errors
+        """
+        logger = PrintLogger(ctx)
+        driver = await service.get_browser()
+
+        await logger.info("Getting browser console logs")
+
+        # Get browser logs (clears buffer after retrieval)
+        try:
+            raw_logs = await asyncio.to_thread(driver.get_log, "browser")
+        except WebDriverException as e:
+            await logger.info(f"Failed to get console logs: {e}")
+            return ConsoleLogsResult(
+                logs=[],
+                total_count=0,
+            )
+
+        # Parse raw logs into structured entries
+        entries: list[ConsoleLogEntry] = []
+        level_counts = {"SEVERE": 0, "WARNING": 0, "INFO": 0}
+
+        # Level hierarchy for filtering
+        level_hierarchy = {"SEVERE": 3, "WARNING": 2, "INFO": 1}
+        min_level = level_hierarchy.get(level_filter, 0) if level_filter and level_filter != "ALL" else 0
+
+        # Compile pattern if provided
+        pattern_regex = re.compile(pattern, re.IGNORECASE) if pattern else None
+
+        for log in raw_logs:
+            level = log.get("level", "INFO")
+            message = log.get("message", "")
+            source = log.get("source", "")
+            timestamp = log.get("timestamp", 0)
+
+            # Normalize level (Chrome sometimes uses lowercase)
+            level = level.upper()
+            if level not in level_counts:
+                level = "INFO"  # Default unknown levels to INFO
+
+            # Count all logs by level (before filtering)
+            level_counts[level] += 1
+
+            # Apply level filter
+            if min_level > 0 and level_hierarchy.get(level, 0) < min_level:
+                continue
+
+            # Apply pattern filter
+            if pattern_regex and not pattern_regex.search(message):
+                continue
+
+            entries.append(ConsoleLogEntry(
+                level=level,
+                message=message,
+                source=source,
+                timestamp=timestamp,
+            ))
+
+        result = ConsoleLogsResult(
+            logs=entries,
+            total_count=len(raw_logs),
+            severe_count=level_counts["SEVERE"],
+            warning_count=level_counts["WARNING"],
+            info_count=level_counts["INFO"],
+        )
+
+        # Log summary
+        if result.total_count > 0:
+            await logger.info(
+                f"Console logs: {result.severe_count} errors, "
+                f"{result.warning_count} warnings, {result.info_count} info "
+                f"({len(entries)} returned after filtering)"
+            )
+        else:
+            await logger.info("No console logs captured")
+
+        return result
 
     @mcp.tool(
         annotations=ToolAnnotations(

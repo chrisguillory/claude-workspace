@@ -27,6 +27,28 @@ Each file contains specific patterns with "Test N passed" validation markers.
 | `accessibility.html` | 11 ARIA patterns | aria-hidden extracted, role=presentation, landmarks, live regions | "A11y Test 1-11 passed"; aria-label NOT in output |
 | `indexeddb-storage.html` | 7 IndexedDB patterns | `save_storage_state(include_indexeddb=True)` capture and `navigate(storage_state_file)` restore | `verifyData()` returns `testsPassed` array |
 
+### Hover Tool Actionability Tests
+
+These test files validate the `hover()` tool's 5 actionability checks:
+
+| File                    | Patterns               | Validates                                                                                                           | Marker Format                      |
+|-------------------------|------------------------|---------------------------------------------------------------------------------------------------------------------|------------------------------------|
+| `hover-stability.html`  | 10 stability scenarios | Multi-signal stability detection (RAF timing, getAnimations, 5px threshold), CSS/JS animations, infinite animations | "Hover Stability Test 1-10 passed" |
+| `hover-visibility.html` | 8 visibility scenarios | display:none, visibility:hidden, opacity:0, pointer-events:none, clip-path, zero-size                               | "Hover Visibility Test 1-8 passed" |
+| `hover-occlusion.html`  | 8 occlusion scenarios  | Modal overlays, partial overlays, transparent overlays, dropdown menus, pointer-events:none pass-through            | "Hover Occlusion Test 1-8 passed"  |
+
+**Hover Tool Actionability Checks:**
+1. **Duration validation** (0-30000ms)
+2. **Scroll into view** (scrollIntoView with behavior:'instant')
+3. **Visibility check** (element.is_displayed())
+4. **Stability check** (multi-signal: requestAnimationFrame, getAnimations(), position polling)
+5. **Pointer events check** (elementFromPoint at element center)
+
+**Validation Approach:** Each fixture includes JavaScript helpers (`validateHover()`, `getAnimationInfo()`, `checkVisibility()`, `checkOcclusion()`) for programmatic verification of test results.
+
+**Test Definitions:** See `tests/hover_tests.yaml` for structured test case definitions.
+**Manual Tests:** See `tests/HOVER_TEST.md` for step-by-step test procedures.
+
 ### Future Work Test Files (get_aria_snapshot enhancements)
 
 These test files validate features that are **not yet implemented** but document expected behavior for future phases:

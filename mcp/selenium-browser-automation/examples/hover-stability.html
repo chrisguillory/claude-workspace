@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Hover Stability Detection</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #4caf50;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #e8f5e9;
+      padding: 15px;
+      border-left: 4px solid #4caf50;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .test-number {
+      background: #4caf50;
+      color: white;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 10px;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .expected {
+      background: #e3f2fd;
+      border-left: 4px solid #2196f3;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .expected::before {
+      content: "Expected: ";
+      font-weight: bold;
+      color: #1565c0;
+    }
+
+    .actual {
+      background: #f9f9f9;
+      border: 2px dashed #4caf50;
+      padding: 20px;
+      margin: 15px 0;
+      position: relative;
+      min-height: 80px;
+    }
+
+    .actual::before {
+      content: "Test Element:";
+      position: absolute;
+      top: -10px;
+      left: 10px;
+      background: white;
+      padding: 0 5px;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .technique-tag {
+      display: inline-block;
+      background: #fff3cd;
+      color: #856404;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      margin: 5px 5px 5px 0;
+    }
+
+    .signal-tag {
+      display: inline-block;
+      background: #d1ecf1;
+      color: #0c5460;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      margin: 5px 5px 5px 0;
+    }
+
+    /* Test button base styles */
+    .hover-test-btn {
+      padding: 15px 30px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: none; /* Disable default transitions for cleaner testing */
+    }
+
+    .hover-test-btn:hover {
+      background-color: #4caf50 !important;
+      color: white !important;
+    }
+
+    /* Animation keyframes */
+    @keyframes slideX {
+      0% { transform: translateX(0); }
+      50% { transform: translateX(100px); }
+      100% { transform: translateX(0); }
+    }
+
+    @keyframes slideMargin {
+      0% { margin-left: 0; }
+      50% { margin-left: 100px; }
+      100% { margin-left: 0; }
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes fastBounce {
+      0% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+      100% { transform: translateY(0); }
+    }
+
+    /* Animation classes */
+    .animate-transform {
+      animation: slideX 1s infinite;
+    }
+
+    .animate-margin {
+      animation: slideMargin 1s infinite;
+    }
+
+    .animate-infinite {
+      animation: pulse 0.5s infinite;
+    }
+
+    .animate-finite {
+      animation: slideX 500ms 1 forwards;
+    }
+
+    .animate-fast {
+      animation: fastBounce 80ms infinite;
+    }
+
+    .animate-paused {
+      animation: slideX 1s infinite;
+      animation-play-state: paused;
+    }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: hover-stability.html
+PURPOSE: Validate multi-signal stability detection before hover operations
+TECHNICAL: Tests requestAnimationFrame timing, getAnimations() API, distance threshold
+TEST COUNT: 10 stability scenarios
+EXPECTED RESULT: All stability scenarios correctly detected and handled
+VALIDATION: Hover each button; verify CSS :hover state applies; check console for stability info
+SIGNALS TESTED:
+  - Position-based (getBoundingClientRect across 2 animation frames)
+  - Animation API (getAnimations() for running animations)
+  - Distance threshold (5px movement tolerance)
+  - Infinite animation detection and warning
+UPDATED: 2025-12-30
+================================================================================
+-->
+
+  <h1>Hover Stability Detection Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that the <code>hover()</code> tool correctly detects element stability before performing hover operations.</p>
+    <p><strong>Method:</strong> Multi-signal stability check using requestAnimationFrame timing, Web Animations API, and distance threshold (5px).</p>
+    <p><strong>Expected:</strong> Static elements hover immediately; animated elements wait for stability or warn about infinite animations.</p>
+    <p><strong>Validation:</strong> Hover each button and verify it turns green (CSS :hover state). Check MCP logs for stability detection messages.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: Static Element (Baseline)                                     -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>
+      <span class="test-number">1</span>
+      Static Element (Baseline)
+    </h2>
+    <span class="technique-tag">No animation</span>
+    <span class="signal-tag">Position stable</span>
+    <span class="signal-tag">getAnimations() empty</span>
+
+    <div class="expected">
+      Hover should succeed immediately (2 frame checks). Button turns green on hover.
+    </div>
+
+    <div class="actual">
+      <button id="static-btn" class="hover-test-btn" style="background: #e0e0e0;">
+        Hover Stability Test 1 passed: Static button with no animation
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: CSS Transform Animation (translateX)                          -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>
+      <span class="test-number">2</span>
+      CSS Transform Animation
+    </h2>
+    <span class="technique-tag">transform: translateX</span>
+    <span class="signal-tag">Position changing</span>
+    <span class="signal-tag">getAnimations() running</span>
+
+    <div class="expected">
+      Stability check detects animation via getAnimations() AND position change. Should wait or warn about infinite animation.
+    </div>
+
+    <div class="actual">
+      <button id="transform-btn" class="hover-test-btn animate-transform" style="background: #ffeb3b;">
+        Hover Stability Test 2 passed: CSS transform animation (translateX)
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: CSS Margin Animation (Layout-affecting)                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>
+      <span class="test-number">3</span>
+      CSS Margin Animation
+    </h2>
+    <span class="technique-tag">margin-left animation</span>
+    <span class="signal-tag">Layout reflow</span>
+    <span class="signal-tag">Position changing</span>
+
+    <div class="expected">
+      Margin animations cause layout reflow. getBoundingClientRect() will show position change. Should detect as unstable.
+    </div>
+
+    <div class="actual">
+      <button id="margin-btn" class="hover-test-btn animate-margin" style="background: #ff9800;">
+        Hover Stability Test 3 passed: CSS margin animation (layout-affecting)
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Infinite CSS Animation                                        -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>
+      <span class="test-number">4</span>
+      Infinite CSS Animation
+    </h2>
+    <span class="technique-tag">animation-iteration-count: infinite</span>
+    <span class="signal-tag">Never stabilizes</span>
+    <span class="signal-tag">Should warn</span>
+
+    <div class="expected">
+      Framework should detect infinite animation and log warning: "Element has infinite animation - hover may be inconsistent". Should still proceed with hover after max checks.
+    </div>
+
+    <div class="actual">
+      <button id="infinite-btn" class="hover-test-btn animate-infinite" style="background: #f44336; color: white;">
+        Hover Stability Test 4 passed: Infinite CSS animation (never stabilizes)
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: JavaScript setInterval Animation                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>
+      <span class="test-number">5</span>
+      JavaScript setInterval Animation
+    </h2>
+    <span class="technique-tag">setInterval</span>
+    <span class="signal-tag">getAnimations() empty</span>
+    <span class="signal-tag">Position changing</span>
+
+    <div class="expected">
+      getAnimations() returns empty (not a CSS animation), but position-based detection should catch the movement. Tests ground-truth position polling.
+    </div>
+
+    <div class="actual">
+      <button id="setinterval-btn" class="hover-test-btn" style="background: #9c27b0; color: white;">
+        Hover Stability Test 5 passed: JavaScript setInterval animation
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: JavaScript requestAnimationFrame Animation                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>
+      <span class="test-number">6</span>
+      JavaScript requestAnimationFrame Animation
+    </h2>
+    <span class="technique-tag">requestAnimationFrame</span>
+    <span class="signal-tag">getAnimations() empty</span>
+    <span class="signal-tag">Position changing</span>
+
+    <div class="expected">
+      Like setInterval, this is not detected by getAnimations(). Position-based detection is the only signal. Tests frame-aligned polling.
+    </div>
+
+    <div class="actual">
+      <button id="raf-btn" class="hover-test-btn" style="background: #3f51b5; color: white;">
+        Hover Stability Test 6 passed: JavaScript requestAnimationFrame animation
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 7: Finite Animation (Single Iteration)                           -->
+  <!-- ===================================================================== -->
+
+  <section id="test-7" class="test-case">
+    <h2>
+      <span class="test-number">7</span>
+      Finite Animation (Single Iteration)
+    </h2>
+    <span class="technique-tag">animation-iteration-count: 1</span>
+    <span class="signal-tag">Completes in 500ms</span>
+
+    <div class="expected">
+      Animation runs once (500ms) then stops. Click "Start Animation" then quickly hover the target. Framework should wait for animation to complete.
+    </div>
+
+    <div class="actual">
+      <button onclick="startFiniteAnimation()" style="margin-right: 10px; padding: 10px;">Start Animation</button>
+      <button id="finite-btn" class="hover-test-btn" style="background: #00bcd4; color: white;">
+        Hover Stability Test 7 passed: Finite animation (click Start first)
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 8: Fast Animation (<100ms)                                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-8" class="test-case">
+    <h2>
+      <span class="test-number">8</span>
+      Fast Animation (&lt;100ms)
+    </h2>
+    <span class="technique-tag">80ms animation cycle</span>
+    <span class="signal-tag">Edge case</span>
+
+    <div class="expected">
+      Very fast animations (80ms) may complete between stability checks. Tests timing edge cases. Two-frame check should still detect movement.
+    </div>
+
+    <div class="actual">
+      <button id="fast-btn" class="hover-test-btn animate-fast" style="background: #e91e63; color: white;">
+        Hover Stability Test 8 passed: Fast animation (80ms cycle)
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 9: Paused Animation                                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-9" class="test-case">
+    <h2>
+      <span class="test-number">9</span>
+      Paused Animation
+    </h2>
+    <span class="technique-tag">animation-play-state: paused</span>
+    <span class="signal-tag">Position stable</span>
+    <span class="signal-tag">getAnimations() playState: paused</span>
+
+    <div class="expected">
+      Animation is defined but paused. getAnimations() returns animation with playState='paused', not 'running'. Should pass stability check immediately.
+    </div>
+
+    <div class="actual">
+      <button id="paused-btn" class="hover-test-btn animate-paused" style="background: #607d8b; color: white;">
+        Hover Stability Test 9 passed: Paused animation (animation-play-state: paused)
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 10: Distance Threshold (5px)                                     -->
+  <!-- ===================================================================== -->
+
+  <section id="test-10" class="test-case">
+    <h2>
+      <span class="test-number">10</span>
+      Distance Threshold Test
+    </h2>
+    <span class="technique-tag">3px movement</span>
+    <span class="signal-tag">Below 5px threshold</span>
+
+    <div class="expected">
+      Element moves 3px (below 5px threshold). Should be considered stable despite minor movement. Tests threshold tolerance for jitter/minor layout shifts.
+    </div>
+
+    <div class="actual">
+      <button id="threshold-btn" class="hover-test-btn" style="background: #795548; color: white;">
+        Hover Stability Test 10 passed: Small movement below 5px threshold
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- JAVASCRIPT FOR DYNAMIC TESTS                                          -->
+  <!-- ===================================================================== -->
+
+  <script>
+    // Test 5: setInterval animation
+    (function() {
+      const btn = document.getElementById('setinterval-btn');
+      let position = 0;
+      let direction = 1;
+      setInterval(() => {
+        position += direction * 2;
+        if (position >= 50 || position <= 0) direction *= -1;
+        btn.style.transform = `translateX(${position}px)`;
+      }, 50);
+    })();
+
+    // Test 6: requestAnimationFrame animation
+    (function() {
+      const btn = document.getElementById('raf-btn');
+      let position = 0;
+      let direction = 1;
+      function animate() {
+        position += direction * 1.5;
+        if (position >= 50 || position <= 0) direction *= -1;
+        btn.style.transform = `translateX(${position}px)`;
+        requestAnimationFrame(animate);
+      }
+      requestAnimationFrame(animate);
+    })();
+
+    // Test 7: Finite animation trigger
+    function startFiniteAnimation() {
+      const btn = document.getElementById('finite-btn');
+      btn.classList.remove('animate-finite');
+      // Force reflow to restart animation
+      void btn.offsetWidth;
+      btn.classList.add('animate-finite');
+    }
+
+    // Test 10: Small movement (below threshold)
+    (function() {
+      const btn = document.getElementById('threshold-btn');
+      let position = 0;
+      let direction = 1;
+      setInterval(() => {
+        position += direction * 0.5;
+        if (position >= 3 || position <= 0) direction *= -1;
+        btn.style.transform = `translateX(${position}px)`;
+      }, 100);
+    })();
+
+    // Hover event logging for validation
+    document.querySelectorAll('.hover-test-btn').forEach(btn => {
+      btn.addEventListener('mouseenter', function() {
+        console.log(`[HOVER] mouseenter fired on: ${this.id}`);
+        this.dataset.hoverDetected = 'true';
+      });
+      btn.addEventListener('mouseleave', function() {
+        console.log(`[HOVER] mouseleave fired on: ${this.id}`);
+      });
+    });
+
+    // Validation helper
+    window.validateHover = function(buttonId) {
+      const btn = document.getElementById(buttonId);
+      if (!btn) return { error: 'Button not found' };
+
+      const computedStyle = getComputedStyle(btn);
+      const isHovered = btn.matches(':hover');
+      const hoverDetected = btn.dataset.hoverDetected === 'true';
+
+      return {
+        buttonId,
+        isHovered,
+        hoverDetected,
+        backgroundColor: computedStyle.backgroundColor
+      };
+    };
+
+    // Get animation info for debugging
+    window.getAnimationInfo = function(buttonId) {
+      const btn = document.getElementById(buttonId);
+      if (!btn) return { error: 'Button not found' };
+
+      const animations = btn.getAnimations();
+      return {
+        buttonId,
+        animationCount: animations.length,
+        animations: animations.map(a => ({
+          id: a.id,
+          playState: a.playState,
+          currentTime: a.currentTime
+        })),
+        rect: btn.getBoundingClientRect()
+      };
+    };
+  </script>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+    <p>After running <code>hover()</code> on each button, verify:</p>
+    <ul>
+      <li><strong>Test 1:</strong> Static - Immediate hover success (2 frames)</li>
+      <li><strong>Test 2:</strong> Transform - Detects running animation via getAnimations()</li>
+      <li><strong>Test 3:</strong> Margin - Detects layout-based movement via position polling</li>
+      <li><strong>Test 4:</strong> Infinite - Logs warning about infinite animation</li>
+      <li><strong>Test 5:</strong> setInterval - Detects movement (getAnimations empty)</li>
+      <li><strong>Test 6:</strong> RAF - Detects movement (getAnimations empty)</li>
+      <li><strong>Test 7:</strong> Finite - Waits for animation completion</li>
+      <li><strong>Test 8:</strong> Fast - Handles rapid 80ms cycles</li>
+      <li><strong>Test 9:</strong> Paused - Immediate success (playState: paused)</li>
+      <li><strong>Test 10:</strong> Threshold - Passes despite 3px movement (&lt; 5px threshold)</li>
+    </ul>
+
+    <h3>JavaScript Validation Helpers</h3>
+    <pre style="background: #e0e0e0; padding: 10px; border-radius: 4px; overflow-x: auto;">
+// Check if hover was detected:
+window.validateHover('static-btn')
+
+// Get animation info for debugging:
+window.getAnimationInfo('transform-btn')
+    </pre>
+
+    <h3>Success Criteria</h3>
+    <ul>
+      <li>All buttons turn <span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 3px;">green</span> on hover</li>
+      <li>mouseenter events fire for all buttons (check console)</li>
+      <li>MCP logs show appropriate stability detection messages</li>
+      <li>No exceptions thrown during hover operations</li>
+    </ul>
+  </footer>
+
+</body>
+</html>

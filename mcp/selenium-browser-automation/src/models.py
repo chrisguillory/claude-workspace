@@ -633,3 +633,23 @@ class SaveStorageStateResult(BaseModel):
     indexeddb_records_count: int | None = None
     # All origins visited during session (for multi-origin storage capture)
     tracked_origins: Sequence[str] = []
+
+
+class ConsoleLogEntry(BaseModel):
+    """Individual browser console log entry."""
+
+    level: str  # SEVERE, WARNING, INFO
+    message: str
+    source: str  # javascript, network, security, etc.
+    timestamp: int  # Epoch milliseconds
+
+
+class ConsoleLogsResult(BaseModel):
+    """Result of get_console_logs operation."""
+
+    logs: Sequence[ConsoleLogEntry]
+    total_count: int
+    # Breakdown by level for quick triage
+    severe_count: int = 0
+    warning_count: int = 0
+    info_count: int = 0

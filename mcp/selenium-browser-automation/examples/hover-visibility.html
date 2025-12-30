@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Hover Visibility Detection</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #1a1a1a;
+      border-bottom: 3px solid #2196f3;
+      padding-bottom: 10px;
+    }
+
+    .intro {
+      background: #e3f2fd;
+      padding: 15px;
+      border-left: 4px solid #2196f3;
+      margin: 20px 0;
+    }
+
+    .test-case {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 20px 0;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .test-case h2 {
+      color: #333;
+      font-size: 20px;
+      margin-top: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .test-number {
+      background: #2196f3;
+      color: white;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 10px;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .test-number.fail {
+      background: #f44336;
+    }
+
+    .test-number.pass {
+      background: #4caf50;
+    }
+
+    .expected {
+      background: #fff3e0;
+      border-left: 4px solid #ff9800;
+      padding: 12px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .expected::before {
+      content: "Expected: ";
+      font-weight: bold;
+      color: #e65100;
+    }
+
+    .expected.should-fail::before {
+      content: "Expected: SHOULD FAIL - ";
+      color: #c62828;
+    }
+
+    .expected.should-pass::before {
+      content: "Expected: SHOULD PASS - ";
+      color: #2e7d32;
+    }
+
+    .actual {
+      background: #f9f9f9;
+      border: 2px dashed #2196f3;
+      padding: 20px;
+      margin: 15px 0;
+      position: relative;
+      min-height: 80px;
+    }
+
+    .actual::before {
+      content: "Test Element:";
+      position: absolute;
+      top: -10px;
+      left: 10px;
+      background: white;
+      padding: 0 5px;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .technique-tag {
+      display: inline-block;
+      background: #ffcdd2;
+      color: #c62828;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      margin: 5px 5px 5px 0;
+    }
+
+    .technique-tag.pass {
+      background: #c8e6c9;
+      color: #2e7d32;
+    }
+
+    /* Test button base styles */
+    .hover-test-btn {
+      padding: 15px 30px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background: #e0e0e0;
+    }
+
+    .hover-test-btn:hover {
+      background-color: #4caf50 !important;
+      color: white !important;
+    }
+
+    /* Visibility states */
+    .display-none { display: none; }
+    .visibility-hidden { visibility: hidden; }
+    .opacity-zero { opacity: 0; }
+    .pointer-events-none { pointer-events: none; }
+    .clip-path-hidden { clip-path: inset(100%); }
+    .zero-size { width: 0; height: 0; overflow: hidden; }
+    .offscreen { position: absolute; left: -9999px; }
+  </style>
+</head>
+<body>
+
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: hover-visibility.html
+PURPOSE: Validate visibility detection before hover operations
+TECHNICAL: Tests is_displayed() check and various CSS hiding techniques
+TEST COUNT: 8 visibility scenarios (6 should fail, 2 should pass)
+EXPECTED RESULT: Hidden elements rejected with clear error; visible elements hoverable
+VALIDATION: Attempt hover on each element; verify appropriate success/failure
+ERROR MESSAGE: "Element '#selector' is not visible - cannot hover"
+UPDATED: 2025-12-30
+================================================================================
+-->
+
+  <h1>Hover Visibility Detection Tests</h1>
+
+  <div class="intro">
+    <p><strong>Purpose:</strong> Validate that the <code>hover()</code> tool correctly detects and rejects hidden elements.</p>
+    <p><strong>Method:</strong> Uses Selenium's <code>element.is_displayed()</code> after scroll-into-view to check visibility.</p>
+    <p><strong>Expected:</strong> Hidden elements should fail with error "Element is not visible - cannot hover".</p>
+    <p><strong>Note:</strong> Tests 1-6 are expected to FAIL (element not visible). Tests 7-8 should PASS.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: display: none (SHOULD FAIL)                                   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-1" class="test-case">
+    <h2>
+      <span class="test-number fail">1</span>
+      display: none
+    </h2>
+    <span class="technique-tag">display: none</span>
+    <span class="technique-tag">SHOULD FAIL</span>
+
+    <div class="expected should-fail">
+      Hover should fail with: "Element '#display-none-btn' is not visible - cannot hover"
+    </div>
+
+    <div class="actual">
+      <button id="display-none-btn" class="hover-test-btn display-none">
+        Hover Visibility Test 1: display:none button (SHOULD NOT BE HOVERABLE)
+      </button>
+      <p><em>Button is hidden with display:none - you cannot see it</em></p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: visibility: hidden (SHOULD FAIL)                              -->
+  <!-- ===================================================================== -->
+
+  <section id="test-2" class="test-case">
+    <h2>
+      <span class="test-number fail">2</span>
+      visibility: hidden
+    </h2>
+    <span class="technique-tag">visibility: hidden</span>
+    <span class="technique-tag">SHOULD FAIL</span>
+
+    <div class="expected should-fail">
+      Hover should fail with: "Element '#visibility-hidden-btn' is not visible - cannot hover"
+    </div>
+
+    <div class="actual">
+      <button id="visibility-hidden-btn" class="hover-test-btn visibility-hidden">
+        Hover Visibility Test 2: visibility:hidden button (SHOULD NOT BE HOVERABLE)
+      </button>
+      <p><em>Button takes up space but is invisible (visibility:hidden)</em></p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: opacity: 0 (EDGE CASE - behavior varies)                      -->
+  <!-- ===================================================================== -->
+
+  <section id="test-3" class="test-case">
+    <h2>
+      <span class="test-number">3</span>
+      opacity: 0
+    </h2>
+    <span class="technique-tag">opacity: 0</span>
+    <span class="technique-tag">EDGE CASE</span>
+
+    <div class="expected">
+      Selenium's is_displayed() returns TRUE for opacity:0 elements. Hover MAY succeed but user cannot see the element. This is an edge case - behavior is implementation-dependent.
+    </div>
+
+    <div class="actual">
+      <button id="opacity-zero-btn" class="hover-test-btn opacity-zero">
+        Hover Visibility Test 3: opacity:0 button (EDGE CASE - may or may not be hoverable)
+      </button>
+      <p><em>Button is fully transparent (opacity:0) - still occupies space and receives events</em></p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: pointer-events: none (SHOULD PASS visibility, FAIL pointer)   -->
+  <!-- ===================================================================== -->
+
+  <section id="test-4" class="test-case">
+    <h2>
+      <span class="test-number">4</span>
+      pointer-events: none
+    </h2>
+    <span class="technique-tag">pointer-events: none</span>
+    <span class="technique-tag">PASSES visibility, FAILS pointer check</span>
+
+    <div class="expected">
+      Element is VISIBLE but cannot receive pointer events. Should pass visibility check but fail pointer events check (elementFromPoint returns underlying element).
+    </div>
+
+    <div class="actual">
+      <button id="pointer-events-none-btn" class="hover-test-btn pointer-events-none" style="background: #ffeb3b;">
+        Hover Visibility Test 4: pointer-events:none button (visible but not interactive)
+      </button>
+      <p><em>Button is visible but pointer-events:none prevents interaction</em></p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: clip-path: inset(100%) (SHOULD FAIL)                          -->
+  <!-- ===================================================================== -->
+
+  <section id="test-5" class="test-case">
+    <h2>
+      <span class="test-number fail">5</span>
+      clip-path: inset(100%)
+    </h2>
+    <span class="technique-tag">clip-path: inset(100%)</span>
+    <span class="technique-tag">SHOULD FAIL</span>
+
+    <div class="expected should-fail">
+      Element is completely clipped. is_displayed() typically returns FALSE for fully clipped elements.
+    </div>
+
+    <div class="actual">
+      <button id="clip-path-btn" class="hover-test-btn clip-path-hidden">
+        Hover Visibility Test 5: clip-path:inset(100%) button (SHOULD NOT BE HOVERABLE)
+      </button>
+      <p><em>Button is completely clipped with clip-path</em></p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: Zero Size (width/height: 0) (SHOULD FAIL)                     -->
+  <!-- ===================================================================== -->
+
+  <section id="test-6" class="test-case">
+    <h2>
+      <span class="test-number fail">6</span>
+      Zero Size
+    </h2>
+    <span class="technique-tag">width: 0; height: 0</span>
+    <span class="technique-tag">SHOULD FAIL</span>
+
+    <div class="expected should-fail">
+      Element has zero dimensions. is_displayed() returns FALSE for zero-size elements.
+    </div>
+
+    <div class="actual">
+      <button id="zero-size-btn" class="hover-test-btn zero-size">
+        Hover Visibility Test 6: zero-size button (SHOULD NOT BE HOVERABLE)
+      </button>
+      <p><em>Button has width:0 and height:0 with overflow:hidden</em></p>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 7: Visible Element (SHOULD PASS)                                 -->
+  <!-- ===================================================================== -->
+
+  <section id="test-7" class="test-case">
+    <h2>
+      <span class="test-number pass">7</span>
+      Visible Element (Baseline)
+    </h2>
+    <span class="technique-tag pass">Fully visible</span>
+    <span class="technique-tag pass">SHOULD PASS</span>
+
+    <div class="expected should-pass">
+      Normal visible element. Hover should succeed. Button turns green on hover.
+    </div>
+
+    <div class="actual">
+      <button id="visible-btn" class="hover-test-btn">
+        Hover Visibility Test 7 passed: Normal visible button
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 8: Element with High Opacity (SHOULD PASS)                       -->
+  <!-- ===================================================================== -->
+
+  <section id="test-8" class="test-case">
+    <h2>
+      <span class="test-number pass">8</span>
+      Semi-Transparent Element
+    </h2>
+    <span class="technique-tag pass">opacity: 0.5</span>
+    <span class="technique-tag pass">SHOULD PASS</span>
+
+    <div class="expected should-pass">
+      Element with opacity:0.5 is still visible and interactive. Hover should succeed.
+    </div>
+
+    <div class="actual">
+      <button id="semi-transparent-btn" class="hover-test-btn" style="opacity: 0.5;">
+        Hover Visibility Test 8 passed: Semi-transparent button (opacity: 0.5)
+      </button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- JAVASCRIPT VALIDATION                                                 -->
+  <!-- ===================================================================== -->
+
+  <script>
+    // Hover event logging for validation
+    document.querySelectorAll('.hover-test-btn').forEach(btn => {
+      btn.addEventListener('mouseenter', function() {
+        console.log(`[HOVER] mouseenter fired on: ${this.id}`);
+        this.dataset.hoverDetected = 'true';
+      });
+    });
+
+    // Validation helper - check visibility state
+    window.checkVisibility = function(buttonId) {
+      const btn = document.getElementById(buttonId);
+      if (!btn) return { error: 'Button not found' };
+
+      const rect = btn.getBoundingClientRect();
+      const style = getComputedStyle(btn);
+
+      return {
+        buttonId,
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        pointerEvents: style.pointerEvents,
+        clipPath: style.clipPath,
+        width: rect.width,
+        height: rect.height,
+        isDisplayed: rect.width > 0 && rect.height > 0 &&
+                     style.display !== 'none' &&
+                     style.visibility !== 'hidden'
+      };
+    };
+
+    // Check all visibility states
+    window.checkAllVisibility = function() {
+      const buttons = [
+        'display-none-btn',
+        'visibility-hidden-btn',
+        'opacity-zero-btn',
+        'pointer-events-none-btn',
+        'clip-path-btn',
+        'zero-size-btn',
+        'visible-btn',
+        'semi-transparent-btn'
+      ];
+      return buttons.map(id => window.checkVisibility(id));
+    };
+  </script>
+
+  <!-- ===================================================================== -->
+  <!-- VALIDATION SECTION                                                    -->
+  <!-- ===================================================================== -->
+
+  <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
+    <h2>Validation Checklist</h2>
+
+    <h3>Tests Expected to FAIL (Element Not Visible)</h3>
+    <ul>
+      <li><strong>Test 1:</strong> display:none - Error: "not visible"</li>
+      <li><strong>Test 2:</strong> visibility:hidden - Error: "not visible"</li>
+      <li><strong>Test 5:</strong> clip-path:inset(100%) - Error: "not visible"</li>
+      <li><strong>Test 6:</strong> Zero size - Error: "not visible"</li>
+    </ul>
+
+    <h3>Edge Cases (Implementation-Dependent)</h3>
+    <ul>
+      <li><strong>Test 3:</strong> opacity:0 - Selenium considers this visible (is_displayed=true)</li>
+      <li><strong>Test 4:</strong> pointer-events:none - Visible but fails pointer events check</li>
+    </ul>
+
+    <h3>Tests Expected to PASS</h3>
+    <ul>
+      <li><strong>Test 7:</strong> Visible button - Hover succeeds, turns green</li>
+      <li><strong>Test 8:</strong> Semi-transparent - Hover succeeds, turns green</li>
+    </ul>
+
+    <h3>JavaScript Validation Helper</h3>
+    <pre style="background: #e0e0e0; padding: 10px; border-radius: 4px; overflow-x: auto;">
+// Check visibility state of a specific button:
+window.checkVisibility('display-none-btn')
+
+// Check all button visibility states:
+window.checkAllVisibility()
+    </pre>
+  </footer>
+
+</body>
+</html>
