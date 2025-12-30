@@ -32,7 +32,7 @@ releases, so gaps should be addressed proactively.
 | Text extraction (filtering)      |       -       |    ✓    | **Advantage**: Filters SCRIPT/STYLE noise                |
 | JavaScript execution             |       ✓       |    ✓    | **Parity**: Both execute JS; SMCP adds statement support |
 | Init script injection            |       -       |    ✓    | **Advantage**: Persistent scripts via `init_scripts` param |
-| Console log access               |       ✓       | **Gap** | P1: Chrome reads `console.log/error/warn`                |
+| Console log access               |       ✓       |    ✓    | **Parity**: Both read console.log/error/warn             |
 | Core Web Vitals                  |       -       |    ✓    | **Advantage**: LCP, CLS, INP, FCP, TTFB                  |
 | HAR export                       |       -       |    ✓    | **Advantage**: Full network traffic logging              |
 | Proxy/IP rotation                |       -       |    ✓    | **Advantage**: Rate limit bypass                         |
@@ -50,9 +50,9 @@ Capabilities where Claude in Chrome exceeds us:
 | ~~**Text Extraction**~~      | ~~Captures all text including hidden content~~ ✅ CLOSED      |  ~~P0~~  |
 | **ARIA Whitespace**          | Properly normalized accessible names                         |    P0    |
 | ~~**JavaScript Execution**~~ | ~~Run ad-hoc JS for debugging (`javascript_tool`)~~ ✅ CLOSED |  ~~P1~~  |
-| **Console Log Access**       | Read browser console (`read_console_messages`)               |    P1    |
+| ~~**Console Log Access**~~   | ~~Read browser console (`read_console_messages`)~~ ✅ CLOSED  |  ~~P1~~  |
 | **Form Input**               | Set form values by element reference                         |    P2    |
-| **Window Resize**            | Set browser dimensions for responsive testing                |    P2    |
+| ~~**Window Resize**~~        | ~~Set browser dimensions for responsive testing~~ ✅ CLOSED   |  ~~P2~~  |
 | **GIF Recording**            | Record interactions as animated GIF                          |    P3    |
 | **Natural Language Find**    | Find elements by semantic description                        |    -     |
 
@@ -189,12 +189,12 @@ How CiC tools map to SMCP tools:
 | `get_page_text`         | `get_page_text`                                 |  Exceeds  | SMCP adds: Shadow DOM traversal, SCRIPT/STYLE filtering, structured output                                |
 | `read_page`             | `get_aria_snapshot`                             |    1:1    | CiC returns ref-based tree; SMCP returns YAML tree                                                        |
 | `find`                  | -                                               |    Gap    | CiC uses natural language; SMCP alternative: `get_interactive_elements`                                   |
-| `computer`              | `click`, `press_key`, `type_text`, `screenshot` |    1:N    | CiC unified tool; SMCP gaps: scroll, hover, zoom, drag, wait                                              |
+| `computer`              | `click`, `press_key`, `type_text`, `screenshot`, `hover`, `sleep` |    1:N    | CiC unified tool; SMCP gaps: scroll, zoom, drag                                              |
 | `form_input`            | -                                               |    Gap    | P2: Set form values by element reference ID from `read_page`                                              |
 | `javascript_tool`       | `execute_javascript`                            |  Exceeds  | See [JavaScript Execution Comparison](#javascript-execution-comparison)                                   |
-| `read_console_messages` | -                                               |    Gap    | P1: Read console.log/error/warn messages with pattern filtering                                           |
+| `read_console_messages` | `get_console_logs`                              |  Exceeds  | SMCP adds level breakdown (severe/warning/info counts); see [Hover Testing](#hover-testing-2025-12-29)    |
 | `read_network_requests` | `get_resource_timings`                          |  Exceeds  | Both single call; SMCP adds detailed DNS/connect/TLS/TTFB breakdown via Performance API |
-| `resize_window`         | -                                               |    Gap    | P2: Set browser window dimensions for responsive testing                                                  |
+| `resize_window`         | `resize_window`                                 |    1:1    | Both set browser dimensions; SMCP returns actual size after resize                                        |
 | `gif_creator`           | -                                               |    Gap    | P3: Record browser interactions as animated GIF                                                           |
 | `upload_image`          | -                                               |    Gap    | Upload screenshot to file input or drag-drop target                                                       |
 | `update_plan`           | N/A                                             |    UI     | CiC user approval flow; SMCP doesn't need (different permission model)                                    |
@@ -560,11 +560,61 @@ Full DevTools-style performance traces with long task detection and timeline ana
 
 ---
 
+### Hover Testing (2025-12-29)
+
+Comparative testing of `hover` tool against Claude in Chrome's `computer` hover action:
+
+| Test                     |         SMCP `hover`         |   CiC `computer hover`    |
+|--------------------------|:----------------------------:|:-------------------------:|
+| CSS `:hover` activation  |  ✅ Yes (`isHovered: true`)   | ❌ No (`isHovered: false`) |
+| Hover state persistence  | ✅ Persists across tool calls |   ❌ Lost between calls    |
+| Background color change  |          ✅ Observed          |      ❌ Not observed       |
+| Selector-based targeting |       ✅ CSS selectors        |    ❌ Coordinates only     |
+| Built-in element wait    |        ✅ 10s timeout         |         ❌ Manual          |
+| Duration hold            |    ✅ `duration_ms` param     |          ❌ None           |
+| Iframe content           |      ❌ Same limitation       |     ❌ Same limitation     |
+
+**Key Finding:** SMCP hover is **functionally superior** for CSS `:hover` testing. While both tools can dispatch hover events, only SMCP's ActionChains-based implementation actually triggers and maintains CSS `:hover` pseudo-class state.
+
+**Root Cause:** SMCP uses Selenium's ActionChains which maintains internal mouse state within the WebDriver-controlled browser. CiC likely uses CDP `Input.dispatchMouseEvent` which fires a one-time event but doesn't establish persistent cursor position.
+
+**Use Case:** When you need to:
+- Test dropdown menus that appear on hover
+- Verify CSS `:hover` styling
+- Interact with hover-triggered UI (tooltips, previews)
+
+Use SMCP's `hover` tool, not CiC's `computer` hover action.
+
+### Hover Actionability Tests (2025-12-30) ✅ ALL PASSED
+
+The hover tool now performs 5 Playwright-style actionability checks before hovering. All 12 test scenarios passed:
+
+| Category       | Test                        | Result | Evidence                                   |
+|----------------|-----------------------------|:------:|--------------------------------------------|
+| **Stability**  | Static element              |   ✅    | Passes in 2 frames                         |
+| **Stability**  | CSS transform animation     |   ✅    | Detected via getAnimations()               |
+| **Stability**  | CSS margin animation        |   ✅    | Detected via position polling              |
+| **Stability**  | Infinite animation          |   ✅    | Warns + proceeds                           |
+| **Stability**  | JS setInterval animation    |   ✅    | Position polling catches (getAnimations=0) |
+| **Stability**  | JS RAF animation            |   ✅    | Position polling catches (getAnimations=0) |
+| **Stability**  | Paused animation            |   ✅    | Passes immediately (playState=paused)      |
+| **Stability**  | Distance threshold (3px)    |   ✅    | Below 5px threshold = stable               |
+| **Visibility** | display:none                |   ✅    | Rejected: "not visible"                    |
+| **Visibility** | visibility:hidden           |   ✅    | Rejected: "not visible"                    |
+| **Occlusion**  | Modal overlay               |   ✅    | Rejected: "obscured by another element"    |
+| **Occlusion**  | pointer-events:none overlay |   ✅    | Passes through correctly                   |
+
+**Test Fixtures:** `examples/hover-stability.html`, `hover-visibility.html`, `hover-occlusion.html`
+**Test Definitions:** `tests/hover_tests.yaml` (30+ test cases)
+**Manual Tests:** `tests/HOVER_TEST.md` (14 procedures)
+
+---
+
 ### What DevTools Has That We Don't (Yet)
 
 Ideas without implementation plans:
 
-1. **Console errors/warnings** - JS exceptions, React errors, deprecation warnings. Useful for debugging but potentially noisy. (Also a [Claude in Chrome parity item](#comparison-with-claude-in-chrome) at P1 priority.)
+1. ~~**Console errors/warnings** - JS exceptions, React errors, deprecation warnings.~~ ✅ **IMPLEMENTED** as `get_console_logs(level_filter?, pattern?)`
 
 2. **HTTP status codes** - Resource Timing API doesn't expose 4xx/5xx errors. Would require always-on CDP logging (has overhead).
 
@@ -628,9 +678,50 @@ get_page_text(include_images=True)
 - `get_interactive_elements(selector_scope, text_contains?, tag_filter?, limit?)` - Find clickable elements
 - `get_focusable_elements(only_tabbable?)` - Keyboard-navigable elements
 - `click(selector, wait_for_network?, network_timeout?)` - Click element
+- `hover(selector, duration_ms?)` - Hover over element to trigger CSS `:hover` (see [Hover Testing](#hover-testing-2025-12-29))
 - `press_key(key)` - Keyboard input (ENTER, ESCAPE, CONTROL+A, etc.)
 - `type_text(text, delay_ms?)` - Type text character by character
-- `wait_for_network_idle(timeout?)` - Wait for network activity to settle
+- `resize_window(width, height)` - Set browser dimensions for responsive testing
+
+### Wait Strategy (2025-12-30)
+
+Choose the right wait tool for your scenario:
+
+| Tool | When to Use | Example |
+|------|-------------|---------|
+| `wait_for_selector(selector, state?, timeout?)` | **Preferred** - Wait for specific UI element | `wait_for_selector("#modal", state="visible")` |
+| `wait_for_network_idle(timeout?)` | After actions that trigger AJAX | `click(btn); wait_for_network_idle()` |
+| `sleep(duration_ms, reason?)` | **Use sparingly** - Known fixed delays only | `sleep(300, reason="CSS animation")` |
+
+**Why `wait_for_selector` is preferred:**
+- More reliable than network-based waiting for SPAs
+- Explicit about what you're waiting for
+- Works with sites that use polling/WebSockets (where network never idles)
+
+**`wait_for_selector` states:**
+- `visible` (default): Element in DOM AND displayed
+- `hidden`: Element not visible OR removed from DOM
+- `attached`: Element present in DOM (regardless of visibility)
+- `detached`: Element removed from DOM
+
+**When NOT to use `wait_for_network_idle`:**
+- Real-time dashboards (constant polling)
+- Chat apps (WebSocket connections)
+- Sites with analytics heartbeats
+
+**`sleep` anti-patterns:**
+```python
+# ❌ Bad: Arbitrary delay hoping content loads
+sleep(5000)
+
+# ✅ Good: Known CSS animation duration
+sleep(300, reason="300ms CSS transition")
+
+# ✅ Good: Rate limiting between actions
+sleep(1000, reason="Rate limit cooldown")
+```
+
+See [Wait Strategy Architecture](PLAN-interaction-tools.md#wait-strategy-architecture-perplexity-research-2025-12-30) for detailed analysis.
 
 ### Performance
 - `capture_web_vitals(timeout_ms?)` - Core Web Vitals metrics

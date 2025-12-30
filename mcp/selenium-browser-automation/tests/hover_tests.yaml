@@ -1,0 +1,389 @@
+# Hover Tool Test Suite
+#
+# Structure: Each top-level key is a test category
+# - "stability": Tests for multi-signal stability detection
+# - "visibility": Tests for visibility check (is_displayed)
+# - "occlusion": Tests for pointer events check (elementFromPoint)
+#
+# Test format:
+#   name: Unique identifier
+#   selector: CSS selector for target element
+#   expect: Expected result
+#     - success: true/false
+#     - error_contains: Substring match on error message
+#     - stability_signals: Expected stability detection signals
+#     - logs_contain: Expected log messages
+#
+# =============================================================================
+# IMPLEMENTATION NOTES
+# =============================================================================
+#
+# Selenium MCP Implementation:
+#   - Uses ActionChains.move_to_element() for hover
+#   - Multi-signal stability check: requestAnimationFrame timing, getAnimations(), 5px threshold
+#   - Visibility check: element.is_displayed() after scroll-into-view
+#   - Pointer events check: elementFromPoint() at element center
+#
+# Claude-in-Chrome Implementation:
+#   - Uses CDP Input.dispatchMouseEvent for hover
+#   - May have different stability detection (single event vs maintained state)
+#   - CSS :hover state may not persist between tool calls
+#
+# Key Differences:
+#   - Selenium ActionChains maintains cursor position state
+#   - CDP dispatchMouseEvent fires one-time event without persistent cursor
+#   - See README.md lines 564-587 for detailed comparison
+#
+
+metadata:
+  description: Test suite for hover tool actionability checks
+  version: "1.0"
+  updated: "2025-12-30"
+  implementations:
+    - selenium-mcp
+    - claude-in-chrome
+  fixtures:
+    - examples/hover-stability.html
+    - examples/hover-visibility.html
+    - examples/hover-occlusion.html
+
+# =============================================================================
+# STABILITY TESTS
+# =============================================================================
+# Tests for multi-signal stability detection before hover
+# Fixture: examples/hover-stability.html
+
+stability:
+  description: Element stability detection tests
+  fixture: examples/hover-stability.html
+  serve_via: file:// or http://localhost:8888/
+
+  tests:
+    - name: static_element_baseline
+      description: Static element with no animation - should pass immediately
+      selector: "#static-btn"
+      expect:
+        success: true
+        stability_signals:
+          position_stable: true
+          animations_running: 0
+          frames_checked: 2  # Minimum frames for stability confirmation
+
+    - name: css_transform_animation
+      description: CSS transform animation (translateX) - detectable via getAnimations and position
+      selector: "#transform-btn"
+      expect:
+        success: true  # Proceeds after stability check
+        stability_signals:
+          animations_running: 1
+          has_infinite_animation: true
+        logs_contain: "infinite animation"
+
+    - name: css_margin_animation
+      description: CSS margin animation (layout-affecting) - detectable via position polling
+      selector: "#margin-btn"
+      expect:
+        success: true  # Proceeds after stability check
+        stability_signals:
+          position_stable: false
+          animations_running: 1
+
+    - name: infinite_css_animation
+      description: Infinite CSS animation - should warn but proceed
+      selector: "#infinite-btn"
+      expect:
+        success: true
+        stability_signals:
+          has_infinite_animation: true
+        logs_contain: "Element has infinite animation"
+
+    - name: js_setinterval_animation
+      description: JavaScript setInterval animation - not detected by getAnimations, caught by position
+      selector: "#setinterval-btn"
+      expect:
+        success: true
+        stability_signals:
+          animations_running: 0  # getAnimations returns empty for JS animations
+          position_stable: false  # But position polling catches it
+
+    - name: js_raf_animation
+      description: JavaScript requestAnimationFrame animation - caught by position polling
+      selector: "#raf-btn"
+      expect:
+        success: true
+        stability_signals:
+          animations_running: 0
+          position_stable: false
+
+    - name: finite_animation
+      description: Finite animation (500ms, single iteration) - should wait for completion
+      selector: "#finite-btn"
+      setup: "Click 'Start Animation' button first"
+      expect:
+        success: true
+        # Animation should complete within stability check window
+
+    - name: fast_animation
+      description: Fast animation (80ms cycle) - edge case for timing
+      selector: "#fast-btn"
+      expect:
+        success: true
+        stability_signals:
+          animations_running: 1
+          has_infinite_animation: true
+
+    - name: paused_animation
+      description: Paused animation - should pass immediately (playState: paused)
+      selector: "#paused-btn"
+      expect:
+        success: true
+        stability_signals:
+          position_stable: true
+          # Animation exists but playState is 'paused', not 'running'
+
+    - name: distance_threshold
+      description: Small movement (3px) below 5px threshold - should be considered stable
+      selector: "#threshold-btn"
+      expect:
+        success: true
+        stability_signals:
+          position_stable: true  # Movement below threshold is ignored
+          final_distance_px: "<5"
+
+# =============================================================================
+# VISIBILITY TESTS
+# =============================================================================
+# Tests for visibility check before hover
+# Fixture: examples/hover-visibility.html
+
+visibility:
+  description: Element visibility detection tests
+  fixture: examples/hover-visibility.html
+  serve_via: file:// or http://localhost:8888/
+
+  tests:
+    - name: display_none
+      description: Element with display:none - should fail visibility check
+      selector: "#display-none-btn"
+      expect:
+        success: false
+        error_contains: "not visible"
+
+    - name: visibility_hidden
+      description: Element with visibility:hidden - should fail visibility check
+      selector: "#visibility-hidden-btn"
+      expect:
+        success: false
+        error_contains: "not visible"
+
+    - name: opacity_zero
+      description: Element with opacity:0 - edge case (Selenium considers visible)
+      selector: "#opacity-zero-btn"
+      expect:
+        # Selenium's is_displayed() returns TRUE for opacity:0
+        # This is an edge case - behavior may vary
+        success: true  # For Selenium MCP
+      implementation_notes:
+        selenium-mcp: "is_displayed() returns true for opacity:0"
+        claude-in-chrome: "May differ - check specific behavior"
+
+    - name: pointer_events_none
+      description: Element with pointer-events:none - passes visibility, fails pointer check
+      selector: "#pointer-events-none-btn"
+      expect:
+        success: false
+        error_contains: "obscured"  # Fails pointer events check, not visibility
+
+    - name: clip_path_hidden
+      description: Element with clip-path:inset(100%) - should fail visibility check
+      selector: "#clip-path-btn"
+      expect:
+        success: false
+        error_contains: "not visible"
+
+    - name: zero_size
+      description: Element with width:0 height:0 - should fail visibility check
+      selector: "#zero-size-btn"
+      expect:
+        success: false
+        error_contains: "not visible"
+
+    - name: visible_element_baseline
+      description: Normal visible element - should pass all checks
+      selector: "#visible-btn"
+      expect:
+        success: true
+
+    - name: semi_transparent
+      description: Element with opacity:0.5 - should pass (still visible)
+      selector: "#semi-transparent-btn"
+      expect:
+        success: true
+
+# =============================================================================
+# OCCLUSION TESTS
+# =============================================================================
+# Tests for pointer events check (elementFromPoint) before hover
+# Fixture: examples/hover-occlusion.html
+
+occlusion:
+  description: Element occlusion detection tests (elementFromPoint)
+  fixture: examples/hover-occlusion.html
+  serve_via: file:// or http://localhost:8888/
+
+  tests:
+    - name: modal_overlay
+      description: Element covered by modal overlay - should fail pointer check
+      selector: "#modal-covered-btn"
+      setup: "Click 'Show Modal' button first to display overlay"
+      expect:
+        success: false
+        error_contains: "obscured"
+
+    - name: partial_overlay_center
+      description: Overlay covers only element center - should fail (center-based check)
+      selector: "#center-covered-btn"
+      expect:
+        success: false
+        error_contains: "obscured"
+
+    - name: transparent_overlay
+      description: Semi-transparent overlay (opacity:0.3) - still blocks pointer events
+      selector: "#transparent-overlay-btn"
+      expect:
+        success: false
+        error_contains: "obscured"
+
+    - name: dropdown_menu
+      description: Dropdown menu covering element - should fail when dropdown open
+      selector: "#dropdown-covered-btn"
+      setup: "Click 'Toggle Dropdown' button first"
+      expect:
+        success: false
+        error_contains: "obscured"
+
+    - name: toast_notification
+      description: Toast notification covering element - should fail while toast visible
+      selector: "#toast-covered-btn"
+      setup: "Click 'Show Toast' button first (3s timeout)"
+      expect:
+        success: false
+        error_contains: "obscured"
+
+    - name: pointer_events_none_overlay
+      description: Overlay with pointer-events:none - should pass (clicks through)
+      selector: "#passthrough-overlay-btn"
+      expect:
+        success: true
+        # elementFromPoint returns the button, not the overlay
+
+    - name: no_overlay_baseline
+      description: No overlay - should pass
+      selector: "#no-overlay-btn"
+      expect:
+        success: true
+
+    - name: nested_child_element
+      description: elementFromPoint returns child of target - should pass
+      selector: "#nested-child-btn"
+      expect:
+        success: true
+        # Our check allows: target === atPoint OR target.contains(atPoint)
+
+# =============================================================================
+# DURATION VALIDATION TESTS
+# =============================================================================
+# Tests for duration_ms parameter validation
+# Can run on any page (about:blank)
+
+duration_validation:
+  description: Duration parameter validation tests
+  fixture: about:blank
+
+  tests:
+    - name: negative_duration
+      description: Negative duration should be rejected
+      selector: "body"
+      duration_ms: -100
+      expect:
+        success: false
+        error_contains: "cannot be negative"
+
+    - name: excessive_duration
+      description: Duration > 30000ms should be rejected
+      selector: "body"
+      duration_ms: 50000
+      expect:
+        success: false
+        error_contains: "exceeds maximum"
+
+    - name: zero_duration
+      description: Zero duration is valid (immediate hover)
+      selector: "body"
+      duration_ms: 0
+      expect:
+        success: true
+
+    - name: valid_duration
+      description: Valid duration within range
+      selector: "body"
+      duration_ms: 1000
+      expect:
+        success: true
+
+    - name: max_duration
+      description: Maximum allowed duration (30000ms)
+      selector: "body"
+      duration_ms: 30000
+      expect:
+        success: true
+
+# =============================================================================
+# SCROLL INTO VIEW TESTS
+# =============================================================================
+# Tests for scroll-into-view before hover
+# Would need a fixture with elements below the fold
+
+scroll:
+  description: Scroll into view tests
+  fixture: "TBD - needs fixture with scrollable content"
+  status: planned
+
+  tests:
+    - name: element_below_fold
+      description: Element below viewport - should scroll into view
+      selector: "#below-fold-btn"
+      expect:
+        success: true
+        scroll_occurred: true
+
+    - name: element_in_viewport
+      description: Element already in viewport - no scroll needed
+      selector: "#in-viewport-btn"
+      expect:
+        success: true
+        scroll_occurred: false
+
+# =============================================================================
+# VALIDATION WORKFLOW
+# =============================================================================
+#
+# To run these tests:
+#
+# 1. Start HTTP server:
+#    cd /Users/chris/claude-workspace/mcp/selenium-browser-automation/examples
+#    uv run python -m http.server 8888
+#
+# 2. Navigate to fixture:
+#    navigate("http://localhost:8888/hover-stability.html")
+#
+# 3. Run hover tests:
+#    hover("#static-btn")  # Should succeed
+#    hover("#infinite-btn")  # Should succeed with warning
+#
+# 4. Check MCP logs for stability detection messages
+#
+# 5. Use JavaScript helpers to validate:
+#    execute_javascript("window.validateHover('static-btn')")
+#    execute_javascript("window.getAnimationInfo('transform-btn')")
+#    execute_javascript("window.checkOcclusion('modal-covered-btn')")
