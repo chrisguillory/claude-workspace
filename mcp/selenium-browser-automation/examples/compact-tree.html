@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Compact Tree Transformations</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
+    .test-section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+    .test-section h2 { margin-top: 0; color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }
+    .test-case { margin: 15px 0; padding: 15px; background: #f9f9f9; border-radius: 4px; }
+    .test-case h3 { margin: 0 0 10px 0; font-size: 14px; color: #666; }
+    .test-id { font-family: monospace; background: #e0e0e0; padding: 2px 6px; border-radius: 3px; }
+    .expected { font-size: 12px; color: #666; margin-top: 8px; font-style: italic; }
+    .actual { margin-top: 10px; padding: 10px; background: white; border: 1px solid #ccc; }
+    code { background: #f0f0f0; padding: 2px 4px; border-radius: 2px; font-size: 13px; }
+  </style>
+</head>
+<body>
+<!--
+================================================================================
+TEST FILE METADATA
+================================================================================
+FILE: compact-tree.html
+PURPOSE: Validate compact_tree transformation rules in get_aria_snapshot
+TEST COUNT: 30 test cases across 5 categories
+VALIDATION: Compare get_aria_snapshot(compact_tree=true) vs compact_tree=false
+UPDATED: 2025-12-31
+
+USAGE:
+  1. Start server: cd examples && python -m http.server 8888
+  2. Navigate: mcp__selenium-browser-automation__navigate(url="http://localhost:8888/compact-tree.html")
+  3. Test each section: get_aria_snapshot(selector="#test-X-Y", compact_tree=true/false)
+
+RULES TESTED:
+  Rule 1: Remove empty generics (no name, no description, no children)
+  Rule 2: Collapse single-child generic chains (unwrap wrapper divs)
+  Rule 3: Remove redundant text children (name equals text content)
+  Enhancement: Multi-text concatenation (when all children are text, concat matches name)
+  Enhancement: Unicode normalization (NFKC for visually-equivalent characters)
+================================================================================
+-->
+
+<h1>Compact Tree Test Fixture</h1>
+<p>This page contains test cases for the <code>compact_tree</code> parameter in <code>get_aria_snapshot()</code>.</p>
+
+<!-- ========================================================================
+     SECTION 1: RULE 1 - EMPTY GENERIC REMOVAL
+     ======================================================================== -->
+<section class="test-section" id="section-1">
+  <h2>Rule 1: Empty Generic Removal</h2>
+  <p>Empty div/span elements with no name, description, or children should be removed.</p>
+
+  <!-- Test 1.1: Simple empty div -->
+  <div class="test-case" id="test-1-1">
+    <h3><span class="test-id">1.1</span> Simple Empty Div</h3>
+    <p>An empty div should be removed, sibling button preserved.</p>
+    <div class="actual">
+      <div id="empty-div-target"></div>
+      <button>Test 1.1 passed</button>
+    </div>
+    <p class="expected">Expected: No "generic" in compact output, button present</p>
+  </div>
+
+  <!-- Test 1.2: Nested empty divs -->
+  <div class="test-case" id="test-1-2">
+    <h3><span class="test-id">1.2</span> Nested Empty Divs</h3>
+    <p>Nested empty divs should all be removed recursively.</p>
+    <div class="actual">
+      <div><div><div></div></div></div>
+      <button>Test 1.2 passed</button>
+    </div>
+    <p class="expected">Expected: No "generic" entries, only button</p>
+  </div>
+
+  <!-- Test 1.3: Whitespace-only div -->
+  <div class="test-case" id="test-1-3">
+    <h3><span class="test-id">1.3</span> Whitespace-Only Div</h3>
+    <p>Div with only whitespace should be treated as empty (whitespace normalizes to empty).</p>
+    <div class="actual">
+      <div>     </div>
+      <button>Test 1.3 passed</button>
+    </div>
+    <p class="expected">Expected: No "generic", whitespace filtered by JS normalization</p>
+  </div>
+
+  <!-- Test 1.4: Named empty div (should preserve) -->
+  <div class="test-case" id="test-1-4">
+    <h3><span class="test-id">1.4</span> Named Empty Div (Preserve)</h3>
+    <p>Empty div with aria-label should NOT be removed - name is semantic.</p>
+    <div class="actual">
+      <div aria-label="spacer-region"></div>
+      <button>Test 1.4 passed</button>
+    </div>
+    <p class="expected">Expected: generic "spacer-region" PRESERVED, button present</p>
+  </div>
+
+  <!-- Test 1.5: Described empty div (should preserve) -->
+  <div class="test-case" id="test-1-5">
+    <h3><span class="test-id">1.5</span> Described Empty Div (Preserve)</h3>
+    <p>Empty div with aria-description should NOT be removed.</p>
+    <div class="actual">
+      <div aria-description="visual separator"></div>
+      <button>Test 1.5 passed</button>
+    </div>
+    <p class="expected">Expected: generic with description PRESERVED</p>
+  </div>
+
+  <!-- Test 1.6: Empty with content sibling -->
+  <div class="test-case" id="test-1-6">
+    <h3><span class="test-id">1.6</span> Empty Sibling Independence</h3>
+    <p>Empty divs removed independently; content siblings preserved.</p>
+    <div class="actual">
+      <div></div>
+      <div><button>First</button></div>
+      <div></div>
+      <button>Test 1.6 passed</button>
+    </div>
+    <p class="expected">Expected: Two buttons present, no empty generics</p>
+  </div>
+</section>
+
+<!-- ========================================================================
+     SECTION 2: RULE 2 - SINGLE-CHILD COLLAPSE
+     ======================================================================== -->
+<section class="test-section" id="section-2">
+  <h2>Rule 2: Single-Child Generic Collapse</h2>
+  <p>Generic elements with exactly one child (and no name/description) should be collapsed.</p>
+
+  <!-- Test 2.1: Single button in div -->
+  <div class="test-case" id="test-2-1">
+    <h3><span class="test-id">2.1</span> Single Button in Div</h3>
+    <p>Wrapper div should collapse, button promoted to parent level.</p>
+    <div class="actual">
+      <div><button>Test 2.1 passed</button></div>
+    </div>
+    <p class="expected">Expected: button at top level, no wrapper generic</p>
+  </div>
+
+  <!-- Test 2.2: Single link in div -->
+  <div class="test-case" id="test-2-2">
+    <h3><span class="test-id">2.2</span> Single Link in Div</h3>
+    <p>Wrapper div should collapse, link promoted.</p>
+    <div class="actual">
+      <div><a href="#">Test 2.2 passed</a></div>
+    </div>
+    <p class="expected">Expected: link at top level, no wrapper generic</p>
+  </div>
+
+  <!-- Test 2.3: Deep nesting (5 levels) -->
+  <div class="test-case" id="test-2-3">
+    <h3><span class="test-id">2.3</span> Deep Nesting (5 Levels)</h3>
+    <p>All wrapper divs should collapse recursively.</p>
+    <div class="actual">
+      <div><div><div><div><div><button>Test 2.3 passed</button></div></div></div></div></div>
+    </div>
+    <p class="expected">Expected: Only button, all 5 generic wrappers removed</p>
+  </div>
+
+  <!-- Test 2.4: Single text content -->
+  <div class="test-case" id="test-2-4">
+    <h3><span class="test-id">2.4</span> Single Text Content</h3>
+    <p>Div with only text should collapse to just the text node.</p>
+    <div class="actual">
+      <div>Test 2.4 passed</div>
+    </div>
+    <p class="expected">Expected: text node promoted, no generic wrapper</p>
+  </div>
+
+  <!-- Test 2.5: Multi-child (should preserve) -->
+  <div class="test-case" id="test-2-5">
+    <h3><span class="test-id">2.5</span> Multi-Child (Preserve)</h3>
+    <p>Div with multiple children should NOT collapse.</p>
+    <div class="actual">
+      <div>
+        <button>First</button>
+        <button>Second</button>
+      </div>
+      <span>Test 2.5 passed</span>
+    </div>
+    <p class="expected">Expected: generic PRESERVED (has 2 button children)</p>
+  </div>
+
+  <!-- Test 2.6: Named wrapper (should preserve) -->
+  <div class="test-case" id="test-2-6">
+    <h3><span class="test-id">2.6</span> Named Wrapper (Preserve)</h3>
+    <p>Div with aria-label should NOT collapse - name is semantic.</p>
+    <div class="actual">
+      <div aria-label="action-group"><button>Test 2.6 passed</button></div>
+    </div>
+    <p class="expected">Expected: generic "action-group" PRESERVED with button child</p>
+  </div>
+
+  <!-- Test 2.7: Semantic element (should preserve) -->
+  <div class="test-case" id="test-2-7">
+    <h3><span class="test-id">2.7</span> Semantic Element (Preserve)</h3>
+    <p>Nav element should NOT collapse - it has semantic role, not generic.</p>
+    <div class="actual">
+      <nav><a href="#">Test 2.7 passed</a></nav>
+    </div>
+    <p class="expected">Expected: navigation role PRESERVED with link child</p>
+  </div>
+
+  <!-- Test 2.8: Table structure (should preserve) -->
+  <div class="test-case" id="test-2-8">
+    <h3><span class="test-id">2.8</span> Table Structure (Preserve)</h3>
+    <p>Table elements should NOT collapse - they have semantic table roles.</p>
+    <div class="actual">
+      <table>
+        <tr><td>Test 2.8 passed</td></tr>
+      </table>
+    </div>
+    <p class="expected">Expected: table > row > cell structure PRESERVED</p>
+  </div>
+</section>
+
+<!-- ========================================================================
+     SECTION 3: RULE 3 - REDUNDANT TEXT REMOVAL
+     ======================================================================== -->
+<section class="test-section" id="section-3">
+  <h2>Rule 3: Redundant Text Removal</h2>
+  <p>Text children that duplicate the element's accessible name should be removed.</p>
+
+  <!-- Test 3.1: Button text matches name -->
+  <div class="test-case" id="test-3-1">
+    <h3><span class="test-id">3.1</span> Button Text Matches Name</h3>
+    <p>Button's text child "Submit" duplicates its accessible name.</p>
+    <div class="actual">
+      <button>Submit</button>
+      <span>Test 3.1 passed</span>
+    </div>
+    <p class="expected">Expected: button "Submit" with NO text child</p>
+  </div>
+
+  <!-- Test 3.2: Link text matches name -->
+  <div class="test-case" id="test-3-2">
+    <h3><span class="test-id">3.2</span> Link Text Matches Name</h3>
+    <p>Link's text child duplicates its accessible name.</p>
+    <div class="actual">
+      <a href="#">Click here</a>
+      <span>Test 3.2 passed</span>
+    </div>
+    <p class="expected">Expected: link "Click here" with NO text child</p>
+  </div>
+
+  <!-- Test 3.3: Heading text matches name -->
+  <div class="test-case" id="test-3-3">
+    <h3><span class="test-id">3.3</span> Heading Text Matches Name</h3>
+    <p>Heading's text child duplicates its accessible name.</p>
+    <div class="actual">
+      <h4>Section Title</h4>
+      <span>Test 3.3 passed</span>
+    </div>
+    <p class="expected">Expected: heading "Section Title" [level=4] with NO text child</p>
+  </div>
+
+  <!-- Test 3.4: aria-label differs from text (should preserve) -->
+  <div class="test-case" id="test-3-4">
+    <h3><span class="test-id">3.4</span> aria-label Differs (Preserve)</h3>
+    <p>Button's aria-label is "Close" but text is "X" - different, preserve.</p>
+    <div class="actual">
+      <button aria-label="Close">X</button>
+      <span>Test 3.4 passed</span>
+    </div>
+    <p class="expected">Expected: button "Close" WITH text child "X" (different content)</p>
+  </div>
+
+  <!-- Test 3.5: Multiple children (should preserve with current rule) -->
+  <div class="test-case" id="test-3-5">
+    <h3><span class="test-id">3.5</span> Multiple Children (Current Rule)</h3>
+    <p>Two span children - current Rule 3 only handles single child.</p>
+    <div class="actual">
+      <a href="#"><span>Shell</span> <span>46.4%</span></a>
+      <span>Test 3.5 passed</span>
+    </div>
+    <p class="expected">Expected (current): link "Shell 46.4%" WITH two text children</p>
+    <p class="expected">Expected (enhanced): link "Shell 46.4%" with NO text children (concat matches)</p>
+  </div>
+</section>
+
+<!-- ========================================================================
+     SECTION 4: MULTI-TEXT ENHANCEMENT
+     ======================================================================== -->
+<section class="test-section" id="section-4">
+  <h2>Enhancement: Multi-Text Concatenation</h2>
+  <p>When ALL children are text nodes and their space-joined concatenation equals the name, remove them.</p>
+
+  <!-- Test 4.1: Two text children, concat matches -->
+  <div class="test-case" id="test-4-1">
+    <h3><span class="test-id">4.1</span> Two Texts, Concat Matches</h3>
+    <p>"Python" + " " + "33.8%" = "Python 33.8%" = name</p>
+    <div class="actual">
+      <a href="#"><span>Python</span> <span>33.8%</span></a>
+      <span>Test 4.1 passed</span>
+    </div>
+    <p class="expected">Expected (enhanced): link "Python 33.8%" with NO text children</p>
+  </div>
+
+  <!-- Test 4.2: Three text children, concat matches -->
+  <div class="test-case" id="test-4-2">
+    <h3><span class="test-id">4.2</span> Three Texts, Concat Matches</h3>
+    <p>"A" + " " + "B" + " " + "C" = "A B C" = name</p>
+    <div class="actual">
+      <button><span>A</span> <span>B</span> <span>C</span></button>
+      <span>Test 4.2 passed</span>
+    </div>
+    <p class="expected">Expected (enhanced): button "A B C" with NO text children</p>
+  </div>
+
+  <!-- Test 4.3: Mixed children (should preserve) -->
+  <div class="test-case" id="test-4-3">
+    <h3><span class="test-id">4.3</span> Mixed Children (Preserve)</h3>
+    <p>Has text AND element children - not all text, preserve structure.</p>
+    <div class="actual">
+      <a href="#">Fork <span class="badge">3.5k</span></a>
+      <span>Test 4.3 passed</span>
+    </div>
+    <p class="expected">Expected: link "Fork 3.5k" WITH children (span.badge is element, not text)</p>
+  </div>
+
+  <!-- Test 4.4: Emphasis element (should preserve) -->
+  <div class="test-case" id="test-4-4">
+    <h3><span class="test-id">4.4</span> Emphasis Element (Preserve)</h3>
+    <p>Strong element provides semantic emphasis - preserve structure.</p>
+    <div class="actual">
+      <a href="#">Click <strong>here</strong></a>
+      <span>Test 4.4 passed</span>
+    </div>
+    <p class="expected">Expected: link with text "Click" AND strong element preserved</p>
+  </div>
+
+  <!-- Test 4.5: Concat doesn't match (no space in name) -->
+  <div class="test-case" id="test-4-5">
+    <h3><span class="test-id">4.5</span> Concat Doesn't Match (Preserve)</h3>
+    <p>Name is "HelloWorld" (no space), concat is "Hello World" - different.</p>
+    <div class="actual">
+      <a href="#" aria-label="HelloWorld"><span>Hello</span><span>World</span></a>
+      <span>Test 4.5 passed</span>
+    </div>
+    <p class="expected">Expected: link "HelloWorld" WITH text children (concat doesn't match)</p>
+  </div>
+
+  <!-- Test 4.6: Badge pattern (GitHub style) -->
+  <div class="test-case" id="test-4-6">
+    <h3><span class="test-id">4.6</span> Badge Pattern (Preserve)</h3>
+    <p>GitHub-style badge with named generic for count - preserve structure.</p>
+    <div class="actual">
+      <a href="#">Issues <span aria-label="5000+">5k+</span></a>
+      <span>Test 4.6 passed</span>
+    </div>
+    <p class="expected">Expected: Structure preserved - named span is semantic</p>
+  </div>
+</section>
+
+<!-- ========================================================================
+     SECTION 5: UNICODE NORMALIZATION
+     ======================================================================== -->
+<section class="test-section" id="section-5">
+  <h2>Enhancement: Unicode Normalization</h2>
+  <p>Visually-equivalent Unicode characters should match using NFKC normalization.</p>
+
+  <!-- Test 5.1: Ellipsis vs three periods -->
+  <div class="test-case" id="test-5-1">
+    <h3><span class="test-id">5.1</span> Ellipsis vs Periods</h3>
+    <p>Name has ellipsis (U+2026), text has three periods - visually identical.</p>
+    <div class="actual">
+      <button aria-label="Search or jump to…">Search or jump to...</button>
+      <span>Test 5.1 passed</span>
+    </div>
+    <p class="expected">Expected (enhanced): button with NO text child (NFKC normalizes ellipsis)</p>
+  </div>
+
+  <!-- Test 5.2: Curly quotes vs straight quotes -->
+  <div class="test-case" id="test-5-2">
+    <h3><span class="test-id">5.2</span> Curly vs Straight Quotes</h3>
+    <p>Name has curly apostrophe (U+2019), text has straight (U+0027).</p>
+    <div class="actual">
+      <button aria-label="Don't stop">Don't stop</button>
+      <span>Test 5.2 passed</span>
+    </div>
+    <p class="expected">Expected: Depends on NFKC behavior for quotes (may or may not match)</p>
+  </div>
+
+  <!-- Test 5.3: Em-dash vs hyphen -->
+  <div class="test-case" id="test-5-3">
+    <h3><span class="test-id">5.3</span> Em-Dash vs Hyphen</h3>
+    <p>Name has em-dash (U+2014), text has hyphen (U+002D).</p>
+    <div class="actual">
+      <a href="#" aria-label="A—B">A-B</a>
+      <span>Test 5.3 passed</span>
+    </div>
+    <p class="expected">Expected: Depends on NFKC behavior for dashes</p>
+  </div>
+
+  <!-- Test 5.4: Exact match (no normalization needed) -->
+  <div class="test-case" id="test-5-4">
+    <h3><span class="test-id">5.4</span> Exact Match (Baseline)</h3>
+    <p>Both name and text use same characters - should always match.</p>
+    <div class="actual">
+      <button>Simple text</button>
+      <span>Test 5.4 passed</span>
+    </div>
+    <p class="expected">Expected: button "Simple text" with NO text child</p>
+  </div>
+</section>
+
+<!-- ========================================================================
+     SECTION 6: COMBINED RULE INTERACTIONS
+     ======================================================================== -->
+<section class="test-section" id="section-6">
+  <h2>Combined Rule Interactions</h2>
+  <p>Multiple rules can apply to the same structure - verify correct interaction.</p>
+
+  <!-- Test 6.1: Rule 1 + Rule 2 -->
+  <div class="test-case" id="test-6-1">
+    <h3><span class="test-id">6.1</span> Empty Removal + Collapse</h3>
+    <p>Inner empty div removed (R1), outer div then collapses (R2).</p>
+    <div class="actual">
+      <div>
+        <div></div>
+        <button>Test 6.1 passed</button>
+      </div>
+    </div>
+    <p class="expected">Expected: Only button remains</p>
+  </div>
+
+  <!-- Test 6.2: Rule 2 + Rule 3 -->
+  <div class="test-case" id="test-6-2">
+    <h3><span class="test-id">6.2</span> Collapse + Text Removal</h3>
+    <p>Wrapper collapses (R2), then text removed (R3).</p>
+    <div class="actual">
+      <div><div><a href="#">Click</a></div></div>
+    </div>
+    <p class="expected">Expected: link "Click" with no wrapper and no text child</p>
+  </div>
+
+  <!-- Test 6.3: All three rules -->
+  <div class="test-case" id="test-6-3">
+    <h3><span class="test-id">6.3</span> All Three Rules</h3>
+    <p>Empty removed (R1), wrapper collapsed (R2), text removed (R3).</p>
+    <div class="actual">
+      <div>
+        <div></div>
+        <div><button>Submit</button></div>
+      </div>
+    </div>
+    <p class="expected">Expected: button "Submit" only - all rules applied</p>
+  </div>
+
+  <!-- Test 6.4: Preservation cascade -->
+  <div class="test-case" id="test-6-4">
+    <h3><span class="test-id">6.4</span> Preservation Cascade</h3>
+    <p>Named elements prevent collapse at multiple levels.</p>
+    <div class="actual">
+      <div aria-label="outer">
+        <div aria-label="inner">
+          <button>Test 6.4 passed</button>
+        </div>
+      </div>
+    </div>
+    <p class="expected">Expected: Both named generics preserved with button inside</p>
+  </div>
+</section>
+
+<footer style="margin-top: 40px; padding: 20px; border-top: 1px solid #ddd; color: #666; font-size: 12px;">
+  <p>Compact Tree Test Fixture v1.0 | 30 test cases | Last updated: 2025-12-31</p>
+  <p>Run tests with: <code>get_aria_snapshot(selector="#test-X-Y .actual", compact_tree=true/false)</code></p>
+</footer>
+
+</body>
+</html>
