@@ -1,12 +1,13 @@
 [project]
 name = "python-interpreter-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python Interpreter MCP Server - Persistent Python execution environment"
 requires-python = ">=3.11"
 dependencies = [
     "attrs",
     "fastapi",
     "fastmcp>=2.12.5",
+    "httpx>=0.28.1",
     "local-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=local-lib",
     "pandas",
     "pydantic",
@@ -14,7 +15,8 @@ dependencies = [
 ]
 
 [project.scripts]
-server = "server:main"
+mcp-py-server = "server:main"
+mcp-py-client = "client:main"
 
 [tool.uv.sources]
 # Local development override: workspace reference takes precedence over git URL in dependencies.

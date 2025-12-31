@@ -33,20 +33,32 @@ claude-workspace/
 
 ## Installing MCP Servers
 
-All MCP servers can be installed globally (user scope) via `uvx` from GitHub:
+MCP servers can be installed globally via `uv tool install` (recommended) or `uvx` from GitHub.
 
 ### [Python Interpreter MCP](mcp/python-interpreter)
 
 Persistent Python execution environment with variable retention across calls.
 
 ```bash
-# From GitHub (recommended)
-claude mcp add --scope user python-interpreter -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter server
+# Install globally (recommended)
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
 
-# From local clone
+# Configure Claude Code
+claude mcp add --scope user python-interpreter -- mcp-py-server
+
+# Check version / Upgrade
+uv tool list | grep python-interpreter
+uv tool upgrade python-interpreter-mcp
+
+# Alternative: uvx (runs fresh each time, no persistent install)
+claude mcp add --scope user python-interpreter -- uvx --refresh --from \
+  git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter \
+  mcp-py-server
+
+# Local development (live code changes)
 claude mcp add --scope user python-interpreter -- uv run \
-  --project ~/claude-workspace/mcp/python-interpreter \
-  --script ~/claude-workspace/mcp/python-interpreter/server.py
+  --project "$(git rev-parse --show-toplevel)/mcp/python-interpreter" \
+  --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/server.py"
 ```
 
 ### [Browser Automation MCP](mcp/browser-automation)
@@ -87,9 +99,9 @@ For local development with live code changes, use workspace mode from the repo r
 
 ```bash
 cd ~/claude-workspace
-uv run -p python-interpreter-mcp server
-uv run -p browser-automation-mcp server
-uv run -p selenium-browser-automation-mcp server
+uv run --project python-interpreter-mcp mcp-py-server
+uv run --project browser-automation-mcp server
+uv run --project selenium-browser-automation-mcp server
 ```
 
 ### Dependency Resolution and Reproducibility
@@ -112,7 +124,7 @@ This repo includes a `uv.lock` file, but whether it's used depends on your insta
 git clone https://github.com/chrisguillory/claude-workspace.git
 cd claude-workspace
 uv sync
-uv run -p browser-automation-mcp server
+uv run --project browser-automation-mcp server
 ```
 
 ## Hook Installation

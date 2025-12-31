@@ -440,21 +440,29 @@ This logs to both MCP context (visible in Claude) and stderr (visible in debug l
 
 ### MCP Server Paths
 
-MCP servers are registered in `~/.claude.json`:
+MCP servers are installed via `uv tool install` and registered in `~/.claude.json`:
+
+```bash
+# Install globally
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
+
+# Configure Claude Code
+claude mcp add --scope user python-interpreter -- mcp-py-server
+```
+
+This adds to `~/.claude.json`:
 
 ```json
 {
   "mcpServers": {
     "python-interpreter": {
       "type": "stdio",
-      "command": "uv",
-      "args": ["run", "--script", "/Users/chris/claude-workspace/mcp/python-interpreter/server.py"]
+      "command": "mcp-py-server",
+      "args": []
     }
   }
 }
 ```
-
-**Note:** Uses absolute paths in `~/.claude.json` for reliability.
 
 ## Development Guidelines
 

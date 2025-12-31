@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 
 [manifest]
@@ -1007,6 +1007,7 @@ dependencies = [
     { name = "attrs" },
     { name = "fastapi" },
     { name = "fastmcp" },
+    { name = "httpx" },
     { name = "local-lib" },
     { name = "pandas" },
     { name = "pydantic" },
@@ -1018,6 +1019,7 @@ requires-dist = [
     { name = "attrs" },
     { name = "fastapi" },
     { name = "fastmcp", specifier = ">=2.12.5" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "local-lib", editable = "local-lib" },
     { name = "pandas" },
     { name = "pydantic" },
