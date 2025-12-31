@@ -2183,9 +2183,20 @@ def register_tools(service: BrowserService) -> None:
         Example:
             resize_window(375, 667)  # Mobile viewport
             screenshot("mobile-view.png")
+
+        Note:
+            Actual window size may differ from requested due to OS constraints
+            (e.g., macOS enforces minimum ~500px width). The returned dimensions
+            reflect the actual size achieved.
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
+
+        # Validation: positive integers only
+        if width <= 0 or height <= 0:
+            raise ValueError(
+                f"Width and height must be positive integers. Got: {width}x{height}"
+            )
 
         await logger.info(f"Resizing window to {width}x{height}")
 
