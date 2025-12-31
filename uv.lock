@@ -1001,7 +1001,7 @@ wheels = [
 
 [[package]]
 name = "python-interpreter-mcp"
-version = "0.1.0"
+version = "0.2.1"
 source = { editable = "mcp/python-interpreter" }
 dependencies = [
     { name = "attrs" },
