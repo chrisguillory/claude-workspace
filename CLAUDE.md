@@ -464,15 +464,134 @@ This adds to `~/.claude.json`:
 }
 ```
 
+## MCP Server Operations
+
+### Version Management
+
+MCP servers use semantic versioning in `pyproject.toml`. **Always bump version when making changes** that affect installed users:
+
+| Change Type                       | Version Bump | Example       |
+|-----------------------------------|--------------|---------------|
+| Bug fixes, docstring updates      | Patch        | 0.2.0 → 0.2.1 |
+| New features, entry point changes | Minor        | 0.1.0 → 0.2.0 |
+| Breaking changes                  | Major        | 0.x.x → 1.0.0 |
+
+Users see versions via `uv tool list` and upgrade via `uv tool upgrade <package-name>`.
+
+### Entry Point Naming Convention
+
+| Component | Pattern                  | Example         |
+|-----------|--------------------------|-----------------|
+| Server    | `mcp-<shortname>-server` | `mcp-py-server` |
+| Client    | `mcp-<shortname>-client` | `mcp-py-client` |
+
+Avoid generic names like `server` that could collide with other tools when installed globally via `uv tool install`.
+
+### Tool Docstrings Guide Claude's Behavior
+
+**Critical:** MCP tool docstrings are what Claude reads to understand how to use tools. When installation or usage patterns change, update:
+
+1. The tool's docstring (what Claude sees)
+2. Module-level docstrings (for human reference)
+3. README documentation
+
+Include in tool docstrings:
+- Preferred usage pattern
+- Installation instructions if command not found
+- Fallback options
+
+Example pattern:
+```python
+"""Execute Python code in persistent scope...
+
+IMPORTANT: For better user experience, you should typically use the Bash client instead:
+    mcp-py-client <<'PY'
+    print("Hello")
+    PY
+
+If mcp-py-client is not found, install via:
+    uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
+
+Only use this MCP tool directly if the user explicitly requests it or you need structured output."""
+```
+
+### Installation Methods
+
+Three installation patterns in order of preference:
+
+**1. Global install** (recommended for users):
+```bash
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/<server>
+claude mcp add --scope user <name> -- mcp-<shortname>-server
+```
+- Fast startup (no network call)
+- Version locked until explicit upgrade
+- Works offline after install
+
+**2. uvx** (always-latest, slower startup):
+```bash
+claude mcp add --scope user <name> -- uvx --refresh --from \
+  git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/<server> \
+  mcp-<shortname>-server
+```
+- Network call every startup
+- Always gets latest from git
+- No explicit upgrade needed
+
+**3. Local development** (live code changes):
+```bash
+claude mcp add --scope user <name> -- uv run \
+  --project "$(git rev-parse --show-toplevel)/mcp/<server>" \
+  --script "$(git rev-parse --show-toplevel)/mcp/<server>/server.py"
+```
+- Uses local source files
+- Changes take effect immediately
+- Requires repo clone
+
+### Permission Patterns
+
+Claude Code permission patterns use **literal prefix matching** (no shell expansion):
+
+| Pattern | Works? | Reason |
+|---------|--------|--------|
+| `Bash(mcp-py-client:*)` | ✅ | Simple command name |
+| `Bash("$(git rev-parse ...)":*)` | ❌ | Shell expansion not evaluated |
+| `Bash(/absolute/path/client.py:*)` | ✅ | Literal path match |
+
+This is why `uv tool install` is preferred—it creates simple commands in PATH that match easily.
+
+### Client vs MCP Tool
+
+| Component | Use Case | Invocation |
+|-----------|----------|------------|
+| MCP Tool (`mcp__python-interpreter__execute`) | Structured output, explicit request | Via MCP protocol |
+| Bash Client (`mcp-py-client`) | Multiline code, readable approval prompts | Heredoc syntax |
+
+Claude should prefer the Bash client for multiline code because approval prompts show clean, readable Python instead of escaped JSON strings.
+
+### Release Process
+
+When modifying MCP servers:
+
+1. Make code changes
+2. Update tool docstrings if usage patterns changed
+3. Bump version in `pyproject.toml`
+4. Update README if needed
+5. Commit with appropriate prefix (`feat:`, `fix:`)
+6. Push to git
+7. Users upgrade via `uv tool upgrade <package-name>`
+
 ## Development Guidelines
 
 ### Adding New MCP Servers
 
 1. Create directory under `mcp/your-server/`
 2. Add `server.py` with uv inline dependencies
-3. Include `local_lib` in dependencies for shared utilities
-4. Use relative path: `local_lib = { path = "../../local-lib/", editable = true }`
-5. Import shared code: `from local_lib.utils import DualLogger`
+3. Add `pyproject.toml` with entry points following naming convention
+4. Include `local_lib` in dependencies for shared utilities
+5. Use relative path: `local_lib = { path = "../../local-lib/", editable = true }`
+6. Import shared code: `from local_lib.utils import DualLogger`
+7. Write tool docstrings that guide Claude's behavior
 
 ### Adding Shared Utilities
 
@@ -482,11 +601,15 @@ Add to `local-lib/local_lib/` directory. All MCP servers can import them. Follow
 
 Test inline dependencies work:
 ```bash
-cd mcp/python-interpreter
-uv run --script server.py
+uv run --directory mcp/python-interpreter --script server.py
 ```
 
 Should successfully import `local_lib` and start the server.
+
+Test entry points work:
+```bash
+uv run --project mcp/python-interpreter mcp-py-server
+```
 
 ## Next Steps
 
