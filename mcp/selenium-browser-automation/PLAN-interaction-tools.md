@@ -106,6 +106,17 @@ Industry standard (Playwright, Puppeteer). Do not change - it balances sensitivi
 
 Our ActionChains-based hover **genuinely triggers CSS `:hover` states**, unlike CDP-based approaches (Claude-in-Chrome). This enables testing dropdown menus, tooltips, and hover-triggered UI.
 
+**Why ActionChains works and CDP doesn't:**
+
+| Approach               | Mechanism                         | CSS :hover |    State Persistence    |
+|------------------------|-----------------------------------|:----------:|:-----------------------:|
+| ActionChains           | Maintains internal mouse position |   ✅ Yes    | ✅ Persists across calls |
+| CDP dispatchMouseEvent | One-time event dispatch           |    ❌ No    |   ❌ Lost immediately    |
+
+ActionChains maintains a virtual cursor position within the WebDriver-controlled browser. The cursor stays where you put it until another action moves it. CDP's `Input.dispatchMouseEvent` fires a single event without establishing persistent cursor state.
+
+**Practical impact:** If you need to hover → wait → click a dropdown item, only ActionChains works. CDP hover would lose the dropdown before you can click.
+
 Five actionability checks (Playwright-style):
 1. Duration validation (0-30000ms)
 2. Scroll into view
@@ -177,6 +188,95 @@ These are **limitations to document**, not bugs to fix.
 9. **Race conditions**: Narrow window between request batches (mitigated by 500ms threshold)
 10. **Service Workers**: Can intercept requests transparently
 11. **Resource loading**: Images/CSS/fonts not tracked by network monitor
+
+---
+
+## Development Workflow
+
+### Testing Protocol
+
+**Always test via MCP tools, not Python scripts:**
+```python
+# ✅ Correct: Test through MCP interface
+mcp__selenium-browser-automation__sleep(duration_ms=-100)
+# → Verifies full stack including validation
+
+# ❌ Wrong: Python unit test
+# Wouldn't catch integration issues
+```
+
+**MCP server reload after changes:**
+- Changes to `server.py` require MCP reconnect
+- `navigate(fresh_browser=True)` only restarts browser, not MCP server
+- Use `/mcp reconnect selenium-browser-automation` after code changes
+
+**Test fixture HTTP server:**
+```bash
+cd examples && uv run python -m http.server 8888
+# Test files at http://localhost:8888/
+```
+Chrome can't access `file://` URLs in some security contexts.
+
+### Fixture Philosophy
+
+Each test fixture includes JavaScript validation helpers:
+```javascript
+window.validateHover('button-id')     // Check hover state
+window.getAnimationInfo('button-id')  // Check animations
+window.checkOcclusion('button-id')    // Check if obscured
+```
+
+This enables programmatic verification without visual inspection. The fixture provides both test scenarios AND validation functions.
+
+---
+
+## Implementation Notes (Non-Obvious Details)
+
+### Hover Stability Detection Algorithm
+
+We use THREE signals for stability detection:
+
+| Signal | Catches | Misses |
+|--------|---------|--------|
+| `getAnimations()` | CSS animations/transitions | JS animations (setInterval, RAF) |
+| RAF timing | Frame-to-frame jitter | Nothing (but adds latency) |
+| Position polling (5px) | All movement | Nothing (catches everything) |
+
+**Why all three?**
+- `getAnimations()` alone misses JS animations
+- Position polling alone is slow (needs multiple frames)
+- Combining gives fast detection for CSS + fallback for JS
+
+**Edge cases:**
+- Paused animations (`playState='paused'`) pass immediately
+- Infinite animations warn but don't block (proceed after max checks)
+- 5px threshold chosen because smaller movements are likely jitter
+
+### wait_for_selector Polling
+
+- We use 50ms polling interval
+- Playwright uses 100ms for `waitForSelector`
+- Our lower interval = faster detection, slightly more CPU
+- Tradeoff acceptable for automation use case
+
+### sleep() Thresholds
+
+| Duration | Behavior | Rationale |
+|----------|----------|-----------|
+| 0-10000ms | Silent | Normal for animations, debounce |
+| >10000ms | Warning | Suspicious - probably wrong approach |
+| >300000ms | Reject | 5 minutes is definitely wrong |
+
+These came from Perplexity research on "when is a fixed wait suspicious vs definitely wrong."
+
+### resize_window KISS Decision
+
+We initially implemented 7680x4320 (8K) max limit. User pushed back:
+- "Where are these magic numbers from?"
+- No authoritative source
+- Browser/OS already handles clamping
+
+**Lesson**: Only validate what actually matters (positive integers). Let platform handle edge cases.
 
 ---
 
