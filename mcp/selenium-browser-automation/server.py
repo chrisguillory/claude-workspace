@@ -21,6 +21,7 @@ import re
 import signal
 import subprocess
 import sys
+import unicodedata
 import tempfile
 import time
 import typing
@@ -1196,7 +1197,7 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(title="Get ARIA Snapshot", readOnlyHint=True))
     async def get_aria_snapshot(
-        selector: str, include_urls: bool = False
+        selector: str, include_urls: bool = False, compact_tree: bool = True
     ) -> str:
         """Understand page structure and find elements. PRIMARY tool for page comprehension.
 
@@ -1207,6 +1208,11 @@ def register_tools(service: BrowserService) -> None:
         Args:
             selector: CSS selector scope ('body' for full page, 'form' for specific sections)
             include_urls: Include href values (default False saves tokens)
+            compact_tree: Remove structural noise from tree (default True). Applies:
+                1. Remove empty generics (divs with no content)
+                2. Collapse single-child generic chains (unwrap wrapper divs)
+                3. Remove redundant text children (when name equals text content)
+                Set to False for complete unfiltered tree.
 
         Returns:
             YAML with ARIA roles, accessible names, element hierarchy, and states
@@ -1223,6 +1229,82 @@ def register_tools(service: BrowserService) -> None:
         snapshot_data = await asyncio.to_thread(
             driver.execute_script, ARIA_SNAPSHOT_SCRIPT, selector, include_urls
         )
+
+        def normalize_for_comparison(s: str) -> str:
+            """Normalize using NFKC for visually-equivalent character comparison.
+
+            NFKC (Compatibility Composition) normalizes:
+            - Ellipsis (…) → three periods (...)
+            - Ligatures (ﬁ) → component characters (fi)
+            - Some other compatibility equivalents
+
+            Note: NFKC does NOT normalize curly quotes or dashes to ASCII equivalents.
+            Those remain distinct. This is intentional - only true compatibility
+            equivalents are normalized.
+            """
+            return unicodedata.normalize("NFKC", s)
+
+        def compact_aria_tree(node: dict | None) -> dict | None:
+            """Recursively compact tree by removing structural noise.
+
+            Bottom-up recursion ensures children are compacted before parent decisions.
+            Returns None for nodes that should be removed, otherwise a new (not mutated) node.
+
+            Compaction rules:
+            1. Remove empty generics (no name, description, or children)
+            2. Collapse single-child generic chains (promote the child)
+            3. Remove redundant text children when:
+               - ALL children are text nodes, AND
+               - Their space-joined concatenation equals the element's name
+               - Comparison uses NFKC normalization for Unicode equivalence
+            """
+            if node is None:
+                return None
+
+            # Text nodes pass through unchanged
+            if node.get("type") == "text":
+                return node
+
+            # Process children first (bottom-up recursion)
+            children = node.get("children", [])
+            compacted_children = []
+            for child in children:
+                compacted = compact_aria_tree(child)
+                if compacted is not None:
+                    compacted_children.append(compacted)
+
+            role = node.get("role", "generic")
+            name = node.get("name", "")
+            has_description = bool(node.get("description"))
+
+            # Rule 1: Remove empty generics (no semantic content, no children)
+            if role == "generic" and not name and not has_description and not compacted_children:
+                return None
+
+            # Rule 2: Collapse single-child generic chains (unwrap wrapper divs)
+            if role == "generic" and not name and not has_description and len(compacted_children) == 1:
+                return compacted_children[0]
+
+            # Rule 3: Remove redundant text children (name already captures the text)
+            # Enhanced: handles multiple text children via concatenation
+            if name and compacted_children:
+                all_text = all(c.get("type") == "text" for c in compacted_children)
+                if all_text:
+                    texts = [c.get("content", "") for c in compacted_children]
+                    concatenated = " ".join(texts)
+                    # Use NFKC normalization for comparison (handles ellipsis, etc.)
+                    if normalize_for_comparison(concatenated) == normalize_for_comparison(name):
+                        compacted_children = []
+
+            # Return node with updated children (don't mutate original)
+            result = {k: v for k, v in node.items() if k != "children"}
+            if compacted_children:
+                result["children"] = compacted_children
+            return result
+
+        # Apply compaction if requested
+        if compact_tree:
+            snapshot_data = compact_aria_tree(snapshot_data)
 
         # Convert to Playwright-compatible YAML format using custom serializer
         def serialize_aria_snapshot(node, indent=0):

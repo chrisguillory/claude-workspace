@@ -1,0 +1,406 @@
+# Compact Tree Transformation Tests
+# ==================================
+# Test specification for get_aria_snapshot compact_tree parameter
+#
+# Usage:
+#   1. Start fixture server: cd examples && python -m http.server 8888
+#   2. Navigate to fixture: navigate("http://localhost:8888/compact-tree.html")
+#   3. For each test: get_aria_snapshot(selector="#test-X-Y .actual", compact_tree=true/false)
+#   4. Verify output matches expectations below
+#
+# Expectation format:
+#   compact.includes: strings that MUST appear in compact_tree=true output
+#   compact.excludes: strings that MUST NOT appear in compact_tree=true output
+#   full.includes: strings that MUST appear in compact_tree=false output
+
+metadata:
+  description: Test suite for get_aria_snapshot compact_tree transformations
+  version: "1.0"
+  fixture: examples/compact-tree.html
+  fixture_url: http://localhost:8888/compact-tree.html
+
+# =============================================================================
+# RULE 1: EMPTY GENERIC REMOVAL
+# =============================================================================
+rule_1_empty_generic:
+  description: Empty div/span elements should be removed when compact_tree=true
+
+  tests:
+    - id: "1.1"
+      name: simple_empty_div
+      selector: "#test-1-1 .actual"
+      description: Empty div removed, sibling button preserved
+      compact:
+        includes:
+          - 'button "Test 1.1 passed"'
+        excludes:
+          - "- generic\n"  # No standalone empty generic
+      full:
+        includes:
+          - "- generic"
+          - 'button "Test 1.1 passed"'
+
+    - id: "1.2"
+      name: nested_empty_divs
+      selector: "#test-1-2 .actual"
+      description: All nested empty divs removed recursively
+      compact:
+        includes:
+          - 'button "Test 1.2 passed"'
+        excludes:
+          - "generic"
+      full:
+        includes:
+          - "generic"  # Multiple nested generics in full output
+
+    - id: "1.3"
+      name: whitespace_only_div
+      selector: "#test-1-3 .actual"
+      description: Whitespace-only div treated as empty (JS normalizes to empty)
+      compact:
+        includes:
+          - 'button "Test 1.3 passed"'
+        excludes:
+          - "- generic\n"
+
+    - id: "1.4"
+      name: named_empty_preserved
+      selector: "#test-1-4 .actual"
+      description: Empty div with aria-label PRESERVED (has semantic name)
+      compact:
+        includes:
+          - 'generic "spacer-region"'
+          - 'button "Test 1.4 passed"'
+      full:
+        includes:
+          - 'generic "spacer-region"'
+
+    - id: "1.5"
+      name: described_empty_preserved
+      selector: "#test-1-5 .actual"
+      description: Empty div with aria-description PRESERVED
+      compact:
+        includes:
+          - "generic"  # Preserved due to description
+          - 'button "Test 1.5 passed"'
+
+    - id: "1.6"
+      name: empty_sibling_independence
+      selector: "#test-1-6 .actual"
+      description: Empty divs removed independently, content preserved
+      compact:
+        includes:
+          - 'button "First"'
+          - 'button "Test 1.6 passed"'
+        excludes:
+          - "- generic\n"  # No empty generics
+
+# =============================================================================
+# RULE 2: SINGLE-CHILD GENERIC COLLAPSE
+# =============================================================================
+rule_2_single_child_collapse:
+  description: Generic elements with single child collapse when compact_tree=true
+
+  tests:
+    - id: "2.1"
+      name: single_button_in_div
+      selector: "#test-2-1 .actual"
+      description: Wrapper div collapses, button promoted
+      compact:
+        includes:
+          - 'button "Test 2.1 passed"'
+        excludes:
+          - "generic"
+      full:
+        includes:
+          - "generic"
+          - "button"
+
+    - id: "2.2"
+      name: single_link_in_div
+      selector: "#test-2-2 .actual"
+      description: Wrapper div collapses, link promoted
+      compact:
+        includes:
+          - 'link "Test 2.2 passed"'
+        excludes:
+          - "generic"
+
+    - id: "2.3"
+      name: deep_nesting_5_levels
+      selector: "#test-2-3 .actual"
+      description: All 5 wrapper divs collapse recursively
+      compact:
+        includes:
+          - 'button "Test 2.3 passed"'
+        excludes:
+          - "generic"
+      full:
+        includes:
+          - "generic"  # Multiple levels in full
+
+    - id: "2.4"
+      name: single_text_content
+      selector: "#test-2-4 .actual"
+      description: Div with text collapses to text node
+      compact:
+        includes:
+          - "text: Test 2.4 passed"
+        excludes:
+          - "generic"
+
+    - id: "2.5"
+      name: multi_child_preserved
+      selector: "#test-2-5 .actual"
+      description: Div with multiple children NOT collapsed
+      compact:
+        includes:
+          - "generic"  # Preserved - has 2 children
+          - 'button "First"'
+          - 'button "Second"'
+
+    - id: "2.6"
+      name: named_wrapper_preserved
+      selector: "#test-2-6 .actual"
+      description: Div with aria-label NOT collapsed
+      compact:
+        includes:
+          - 'generic "action-group"'
+          - 'button "Test 2.6 passed"'
+
+    - id: "2.7"
+      name: semantic_element_preserved
+      selector: "#test-2-7 .actual"
+      description: Nav element NOT collapsed (semantic role, not generic)
+      compact:
+        includes:
+          - "navigation"
+          - 'link "Test 2.7 passed"'
+
+    - id: "2.8"
+      name: table_structure_preserved
+      selector: "#test-2-8 .actual"
+      description: Table elements NOT collapsed (table/row/cell roles)
+      compact:
+        includes:
+          - "table"
+          - "row"
+          - "cell"
+          - "Test 2.8 passed"
+
+# =============================================================================
+# RULE 3: REDUNDANT TEXT REMOVAL
+# =============================================================================
+rule_3_redundant_text:
+  description: Text children matching element name removed when compact_tree=true
+
+  tests:
+    - id: "3.1"
+      name: button_text_matches
+      selector: "#test-3-1 .actual"
+      description: Button text "Submit" matches name, text removed
+      compact:
+        includes:
+          - 'button "Submit"'
+        excludes:
+          - "text: Submit"  # Redundant text removed
+
+    - id: "3.2"
+      name: link_text_matches
+      selector: "#test-3-2 .actual"
+      description: Link text matches name, text removed
+      compact:
+        includes:
+          - 'link "Click here"'
+        excludes:
+          - "text: Click here"
+
+    - id: "3.3"
+      name: heading_text_matches
+      selector: "#test-3-3 .actual"
+      description: Heading text matches name, text removed
+      compact:
+        includes:
+          - 'heading "Section Title"'
+          - "[level=4]"
+        excludes:
+          - "text: Section Title"
+
+    - id: "3.4"
+      name: aria_label_differs_preserved
+      selector: "#test-3-4 .actual"
+      description: aria-label "Close" differs from text "X", text PRESERVED
+      compact:
+        includes:
+          - 'button "Close"'
+          - "text: X"  # Different from name, preserved
+
+    - id: "3.5"
+      name: multiple_children_current
+      selector: "#test-3-5 .actual"
+      description: Current Rule 3 only handles single child
+      note: "Enhancement test - see section 4 for multi-text handling"
+      compact:
+        includes:
+          - 'link "Shell 46.4%"'
+          # Current implementation: text children preserved (>1 child)
+          # Enhanced implementation: text children removed (concat matches)
+
+# =============================================================================
+# ENHANCEMENT: MULTI-TEXT CONCATENATION
+# =============================================================================
+enhancement_multi_text:
+  description: When ALL children are text and concat matches name, remove them
+  status: proposed  # Not yet implemented
+
+  tests:
+    - id: "4.1"
+      name: two_texts_concat_matches
+      selector: "#test-4-1 .actual"
+      description: '"Python" + " " + "33.8%" = "Python 33.8%" = name'
+      enhanced_compact:
+        includes:
+          - 'link "Python 33.8%"'
+        excludes:
+          - "text: Python"
+          - "text: 33.8%"
+
+    - id: "4.2"
+      name: three_texts_concat_matches
+      selector: "#test-4-2 .actual"
+      description: Three text children, concat matches name
+      enhanced_compact:
+        includes:
+          - 'button "A B C"'
+        excludes:
+          - "text: A"
+          - "text: B"
+          - "text: C"
+
+    - id: "4.3"
+      name: mixed_children_preserved
+      selector: "#test-4-3 .actual"
+      description: Has non-text child (span.badge), structure preserved
+      compact:
+        includes:
+          - 'link "Fork 3.5k"'
+          - "generic"  # The span.badge becomes generic
+
+    - id: "4.4"
+      name: emphasis_preserved
+      selector: "#test-4-4 .actual"
+      description: Strong element preserved (semantic emphasis)
+      compact:
+        includes:
+          - "link"
+          - "strong"
+          - "text: Click"
+          - "text: here"
+
+    - id: "4.5"
+      name: concat_doesnt_match_preserved
+      selector: "#test-4-5 .actual"
+      description: Name "HelloWorld" != concat "Hello World", preserved
+      compact:
+        includes:
+          - 'link "HelloWorld"'
+          - "text: Hello"
+          - "text: World"
+
+    - id: "4.6"
+      name: badge_pattern_preserved
+      selector: "#test-4-6 .actual"
+      description: Named span (aria-label) is semantic, preserved
+      compact:
+        includes:
+          - "link"
+          - 'generic "5000+"'  # Named span preserved
+
+# =============================================================================
+# ENHANCEMENT: UNICODE NORMALIZATION
+# =============================================================================
+enhancement_unicode:
+  description: NFKC normalization for visually-equivalent characters
+  status: proposed  # Not yet implemented
+
+  tests:
+    - id: "5.1"
+      name: ellipsis_vs_periods
+      selector: "#test-5-1 .actual"
+      description: Ellipsis (U+2026) matches three periods via NFKC
+      enhanced_compact:
+        includes:
+          - 'button "Search or jump to'  # Name preserved (partial match)
+        excludes:
+          - "text: Search"  # Text removed after NFKC normalization
+
+    - id: "5.2"
+      name: curly_vs_straight_quotes
+      selector: "#test-5-2 .actual"
+      description: Curly apostrophe vs straight - NFKC behavior varies
+      note: "NFKC may not normalize quotes - verify actual behavior"
+
+    - id: "5.3"
+      name: em_dash_vs_hyphen
+      selector: "#test-5-3 .actual"
+      description: Em-dash (U+2014) vs hyphen - NFKC behavior varies
+      note: "NFKC may not normalize dashes - verify actual behavior"
+
+    - id: "5.4"
+      name: exact_match_baseline
+      selector: "#test-5-4 .actual"
+      description: Identical characters - baseline, always matches
+      compact:
+        includes:
+          - 'button "Simple text"'
+        excludes:
+          - "text: Simple text"
+
+# =============================================================================
+# COMBINED RULE INTERACTIONS
+# =============================================================================
+combined_interactions:
+  description: Multiple rules applying to same structure
+
+  tests:
+    - id: "6.1"
+      name: empty_plus_collapse
+      selector: "#test-6-1 .actual"
+      description: Empty removed (R1), wrapper then collapses (R2)
+      compact:
+        includes:
+          - 'button "Test 6.1 passed"'
+        excludes:
+          - "generic"
+
+    - id: "6.2"
+      name: collapse_plus_text
+      selector: "#test-6-2 .actual"
+      description: Wrapper collapses (R2), text removed (R3)
+      compact:
+        includes:
+          - 'link "Click"'
+        excludes:
+          - "generic"
+          - "text: Click"
+
+    - id: "6.3"
+      name: all_three_rules
+      selector: "#test-6-3 .actual"
+      description: R1 + R2 + R3 all apply
+      compact:
+        includes:
+          - 'button "Submit"'
+        excludes:
+          - "generic"
+          - "text: Submit"
+
+    - id: "6.4"
+      name: preservation_cascade
+      selector: "#test-6-4 .actual"
+      description: Named elements prevent collapse at multiple levels
+      compact:
+        includes:
+          - 'generic "outer"'
+          - 'generic "inner"'
+          - 'button "Test 6.4 passed"'
