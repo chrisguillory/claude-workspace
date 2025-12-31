@@ -139,21 +139,12 @@ Implemented in `sleep()` function with:
 - 5-minute max (300000ms) validation
 - Graduated warnings for durations > 10000ms
 
-### 1.4 Add Dimension Validation to Resize Window
+### ~~1.4 Add Dimension Validation to Resize Window~~ ✅ DONE (2025-12-30)
 
-**Problem:** No validation for absurd dimensions. Passing width=0 or width=100000 could cause undefined behavior.
-
-**File:** `server.py`
-**Location:** Inside `resize_window()` function, at start (line ~1833)
-
-**Implementation:**
-```python
-# At start of resize_window():
-if width < 320 or width > 7680:
-    raise ValueError(f"Width {width} outside valid range (320-7680)")
-if height < 240 or height > 4320:
-    raise ValueError(f"Height {height} outside valid range (240-4320)")
-```
+Implemented with KISS principle:
+- Positive integer validation only (`width > 0`, `height > 0`)
+- No arbitrary max limits - browser/OS handles clamping naturally
+- Returns actual achieved size (already documents OS constraints)
 
 ---
 
@@ -164,7 +155,7 @@ if height < 240 or height > 4320:
 **Problem:** `set_window_size()` sets the ENTIRE browser window including chrome (address bar, tabs, borders). Viewport is smaller by 50-200px. For responsive testing, viewport size is what matters.
 
 **File:** `server.py`
-**Location:** Rewrite `resize_window()` function (line 1807-1845)
+**Location:** Rewrite `resize_window()` function
 
 **Implementation:**
 ```python
@@ -173,11 +164,9 @@ async def resize_window(width: int, height: int, ctx: Context) -> dict:
     logger = PrintLogger(ctx)
     driver = await service.get_browser()
 
-    # Validation
-    if width < 320 or width > 7680:
-        raise ValueError(f"Width {width} outside valid range (320-7680)")
-    if height < 240 or height > 4320:
-        raise ValueError(f"Height {height} outside valid range (240-4320)")
+    # Validation: positive integers only (KISS - no arbitrary max limits)
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Width and height must be positive integers. Got: {width}x{height}")
 
     await logger.info(f"Resizing viewport to {width}x{height}")
 
@@ -624,10 +613,10 @@ return {
 - `sleep()` - deterministic timing (renamed from `wait()` 2025-12-30)
 - `wait_for_network_idle()` - condition-based network monitoring
 
-### Phase 2: Near-term (HIGH PRIORITY) ✅ MOSTLY DONE
+### Phase 2: Near-term ✅ COMPLETE
 - ~~`wait_for_selector(selector, state, timeout)`~~ **IMPLEMENTED 2025-12-30**
 - ~~Add duration validation to `sleep()`~~ **IMPLEMENTED 2025-12-30**
-- Add dimension validation to `resize_window()` (P1.4)
+- ~~Add dimension validation to `resize_window()`~~ **IMPLEMENTED 2025-12-30** (positive integers only, KISS)
 - ~~Add graduated timeout warnings for `sleep()`~~ **IMPLEMENTED 2025-12-30**
 
 ### Phase 3: Medium-term
@@ -744,10 +733,12 @@ These are NOT bugs to fix, but limitations to document clearly:
 - [x] Pattern filter: `pattern="BETA"` returns only matching messages
 - [x] Logs cleared after retrieval (Chrome logging behavior)
 
-**Resize Window (2025-12-30) ✅ BASIC VERIFIED:**
+**Resize Window (2025-12-30) ✅ VERIFIED:**
 - [x] `resize_window(800, 600)` → returns `{width: 800, height: 600}`
 - [x] `resize_window(375, 667)` → clamped to OS minimum (500x667)
-- [ ] FUTURE: Add validation (P1.4) - currently no min/max checks
+- [x] `resize_window(0, 600)` → ValueError: "must be positive integers"
+- [x] `resize_window(-100, 600)` → ValueError: "must be positive integers"
+- [x] No max limits - browser/OS handles clamping (KISS principle)
 
 **Wait for Network Idle (2025-12-30) ✅ VERIFIED:**
 - [x] Static page → returns immediately (no pending requests)
