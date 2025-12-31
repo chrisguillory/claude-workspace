@@ -68,7 +68,18 @@ uv tool upgrade python-interpreter-mcp
 
 ### Local Development
 
-For development with live code changes (no global install):
+**Editable install** (recommended for developers):
+
+```bash
+uv tool install --editable /path/to/claude-workspace/mcp/python-interpreter
+claude mcp add --scope user python-interpreter -- mcp-py-server
+```
+
+This gives you:
+- Commands in PATH (permission patterns like `Bash(mcp-py-client:*)` work)
+- Changes to source files take effect immediately (no reinstall needed)
+
+**Script mode** (alternative, commands not in PATH):
 
 ```bash
 claude mcp add --scope user python-interpreter -- uv run \

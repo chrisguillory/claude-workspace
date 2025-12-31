@@ -538,15 +538,24 @@ claude mcp add --scope user <name> -- uvx --refresh --from \
 - Always gets latest from git
 - No explicit upgrade needed
 
-**3. Local development** (live code changes):
+**3. Local development - editable install** (recommended for developers):
+```bash
+uv tool install --editable /path/to/claude-workspace/mcp/<server>
+claude mcp add --scope user <name> -- mcp-<shortname>-server
+```
+- Commands in PATH (permission patterns work)
+- Changes to source files take effect immediately
+- Best of both worlds for active development
+
+**4. Local development - script mode** (alternative):
 ```bash
 claude mcp add --scope user <name> -- uv run \
   --project "$(git rev-parse --show-toplevel)/mcp/<server>" \
   --script "$(git rev-parse --show-toplevel)/mcp/<server>/server.py"
 ```
-- Uses local source files
-- Changes take effect immediately
-- Requires repo clone
+- Uses local source files directly
+- Commands NOT in PATH (permission patterns require absolute paths)
+- Useful when you don't want to install globally
 
 ### Permission Patterns
 
