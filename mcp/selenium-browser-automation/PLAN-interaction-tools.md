@@ -744,9 +744,14 @@ These are NOT bugs to fix, but limitations to document clearly:
 - [x] Pattern filter: `pattern="BETA"` returns only matching messages
 - [x] Logs cleared after retrieval (Chrome logging behavior)
 
-**Resize Window (TODO):**
-- [ ] `resize_window(100, 100)` raises ValueError (too small)
-- [ ] `resize_window(10000, 10000)` raises ValueError (too large)
+**Resize Window (2025-12-30) ✅ BASIC VERIFIED:**
+- [x] `resize_window(800, 600)` → returns `{width: 800, height: 600}`
+- [x] `resize_window(375, 667)` → clamped to OS minimum (500x667)
+- [ ] FUTURE: Add validation (P1.4) - currently no min/max checks
+
+**Wait for Network Idle (2025-12-30) ✅ VERIFIED:**
+- [x] Static page → returns immediately (no pending requests)
+- [x] After fetch → waits for completion then returns
 
 ---
 
