@@ -73,13 +73,16 @@ Example Session:
     4. reset()  # Returns: "Scope reset - all variables cleared (2 items removed)"
 
 HTTP Bridge Usage (recommended for multiline code):
-    "$(git rev-parse --show-toplevel)"/mcp/python-interpreter/client.py <<'PY'
+    mcp-py-client <<'PY'
     import pandas as pd
     print(pd.__version__)
     PY
 
     The client automatically discovers the Unix socket by walking the process tree
     to find Claude's PID. No manual configuration needed!
+
+    Note: Requires installation via `uv tool install`. If mcp-py-client is not found,
+    install with: uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
 
 === Detailed Tool Documentation ===
 
@@ -781,11 +784,14 @@ def register_tools(service: PythonInterpreterService) -> None:
         """Execute Python code in persistent scope with auto-installation of missing packages. Variables persist across calls.
 
         IMPORTANT: For better user experience, you should typically use the Bash client instead:
-            "$(git rev-parse --show-toplevel)"/mcp/python-interpreter/client.py <<'PY'
+            mcp-py-client <<'PY'
             import tiktoken
             tokens = tiktoken.get_encoding("cl100k_base").encode("Strawberry")
             print(f"Token count: {len(tokens)}")
             PY
+
+        If mcp-py-client is not found, install via:
+            uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
 
         Only use this MCP tool directly if the user explicitly requests it or you need structured ExecuteResult output."""
         logger = DualLogger(ctx)
@@ -917,8 +923,8 @@ async def http_execute(
 ) -> dict[str, str]:
     """HTTP endpoint for executing Python code.
 
-    This allows beautiful heredoc syntax via python-interpreter-client.py:
-        "$(git rev-parse --show-toplevel)"/mcp/python-interpreter/client.py <<'PY'
+    This allows beautiful heredoc syntax via mcp-py-client:
+        mcp-py-client <<'PY'
         import pandas as pd
         print(pd.__version__)
         PY
