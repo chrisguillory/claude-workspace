@@ -25,7 +25,7 @@ Each file contains specific patterns with "Test N passed" validation markers.
 | `forms.html` | 12 form element patterns | Labels extracted, input values NOT extracted, aria-describedby | "Forms Test 1-12 passed"; NO "SHOULD_NOT_APPEAR" |
 | `tables.html` | 11 table patterns | Caption, headers, cells, hidden rows, colspan/rowspan, nested | "Tables Test 1-11" markers |
 | `accessibility.html` | 11 ARIA patterns | aria-hidden extracted, role=presentation, landmarks, live regions | "A11y Test 1-11 passed"; aria-label NOT in output |
-| `indexeddb-storage.html` | 7 IndexedDB patterns | `save_storage_state(include_indexeddb=True)` capture and `navigate(storage_state_file)` restore | `verifyData()` returns `testsPassed` array |
+| `indexeddb-storage.html` | 7 IndexedDB patterns | `save_storage_state(include_indexeddb=True)` capture and `navigate_with_session(storage_state_file)` restore | `verifyData()` returns `testsPassed` array |
 
 ### Hover Tool Actionability Tests
 
@@ -153,7 +153,7 @@ open examples/hidden-content.html
 
 ### IndexedDB Storage State Test
 
-Tests `save_storage_state(include_indexeddb=True)` capture and `navigate(storage_state_file)` restore.
+Tests `save_storage_state(include_indexeddb=True)` capture and `navigate_with_session(storage_state_file)` restore.
 
 **Key Design:** No auto-initialization on page load. All actions are explicit to prevent false positives.
 
@@ -169,8 +169,8 @@ save_storage_state("test.json", include_indexeddb=true)
 // Returns: indexeddb_databases_count=2, indexeddb_records_count=7
 
 // 4. New browser session with restoration
-navigate("file:///.../examples/indexeddb-storage.html",
-         fresh_browser=true, storage_state_file="test.json")
+navigate_with_session("file:///.../examples/indexeddb-storage.html",
+                      storage_state_file="test.json")
 
 // 5. Verify data exists WITHOUT calling initializeDatabases
 execute_javascript(`(async () => {

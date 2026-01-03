@@ -20,8 +20,8 @@ Export browser storage state (cookies + localStorage) to a portable JSON format,
 
 | Workflow | When to Use |
 |----------|-------------|
-| **Selenium-native** | Login via Selenium → `save_storage_state()` → later `storage_state_file` |
-| **Chrome-to-Selenium** | Login in Chrome proper → manual export → build JSON → `storage_state_file` |
+| **Selenium-native** | Login via Selenium → `save_storage_state()` → later `navigate_with_session(storage_state_file=...)` |
+| **Chrome-to-Selenium** | Login in Chrome proper → `export_chrome_session()` OR manual export → `navigate_with_session(storage_state_file=...)` |
 
 The Chrome-to-Selenium workflow is valuable when:
 - Sites with bot detection block Selenium login but accept Chrome-established sessions
@@ -125,7 +125,7 @@ We use Playwright's storageState JSON format for cross-tool compatibility. Files
 
 ### Import Behavior
 
-When `storage_state_file` is provided to `navigate()`:
+When `storage_state_file` is provided to `navigate_with_session()`:
 
 1. **Cookies set via CDP BEFORE navigation** - Sent with the initial HTTP request
 2. **localStorage restored AFTER navigation** - Requires origin context (page must load first)
@@ -236,9 +236,8 @@ with open("auth.json", "w") as f:
 ### Step 5: Test Import
 
 ```python
-navigate(
+navigate_with_session(
     "https://www.example.com/account",
-    fresh_browser=True,
     storage_state_file="auth.json"
 )
 ```
