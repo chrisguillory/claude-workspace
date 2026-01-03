@@ -98,7 +98,10 @@ from src.models import (
     # Console logs
     ConsoleLogEntry,
     ConsoleLogsResult,
+    # Chrome session export
+    ChromeSessionExportResult,
 )
+from src.chrome_session_export import export_chrome_session as _export_chrome_session
 
 
 class PrintLogger:
@@ -3435,6 +3438,109 @@ Workflow:
         )
 
         return result
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Export Chrome Session",
+            readOnlyHint=True,
+            idempotentHint=True,
+        )
+    )
+    async def export_chrome_session(
+        output_file: str,
+        profile_name: str = "Default",
+        include_session_storage: bool = True,
+        include_indexeddb: bool = False,
+        origins_filter: Sequence[str] | None = None,
+        ctx: Context | None = None,
+    ) -> ChromeSessionExportResult:
+        """Export session state from Chrome's profile files for use in automation.
+
+        Captures cookies, localStorage, sessionStorage, and optionally IndexedDB
+        from a standalone Chrome browser's profile files. Works with running Chrome.
+        Outputs Playwright-compatible JSON for use with storage_state_file.
+
+        This complements save_storage_state() which exports from a Selenium-controlled
+        browser. Use this when you've logged in manually in Chrome and want to
+        capture that authenticated session for automation.
+
+        Workflow:
+            1. Log into websites in normal Chrome browser (handles CAPTCHA, MFA)
+            2. export_chrome_session("auth.json")  # Capture session from Chrome
+            3. navigate(url, fresh_browser=True, storage_state_file="auth.json")
+
+        Args:
+            output_file: Path to save JSON file (e.g., "auth.json")
+            profile_name: Chrome profile name ("Default", "Profile 1", etc.)
+            include_session_storage: Include sessionStorage (default True)
+            include_indexeddb: Include IndexedDB records (default False, can be 200MB+)
+            origins_filter: Only export origins matching these patterns
+                           (e.g., ["github.com", "google.com"])
+
+        Returns:
+            ChromeSessionExportResult with counts and any warnings
+
+        Storage Types (matches save_storage_state):
+            - Cookies: Full attributes including sameSite
+            - localStorage: All origins
+            - sessionStorage: All origins (Chrome persists to disk)
+            - IndexedDB: Records only (schema metadata not available)
+
+        Limitations:
+            - macOS only (Windows/Linux untested)
+            - First run prompts for Keychain access - click "Always Allow"
+            - IndexedDB exports records without schema (version, keyPath, indexes)
+            - For full IndexedDB support, use save_storage_state() from Selenium
+
+        Security:
+            Output file created with 0o600 permissions (owner read/write only).
+            Contains sensitive auth tokens - treat as credentials.
+        """
+        logger = PrintLogger(ctx)
+
+        await logger.info(
+            f"Exporting Chrome session from profile '{profile_name}' to {output_file}"
+        )
+
+        # Convert Sequence to list for the export function
+        filter_list = list(origins_filter) if origins_filter else None
+
+        # Call the sync export function in a thread
+        result = await asyncio.to_thread(
+            _export_chrome_session,
+            output_file=output_file,
+            profile_name=profile_name,
+            include_session_storage=include_session_storage,
+            include_indexeddb=include_indexeddb,
+            origins_filter=filter_list,
+        )
+
+        # Log summary
+        parts = [f"{result.cookie_count} cookies"]
+        if result.local_storage_keys > 0:
+            parts.append(f"{result.local_storage_keys} localStorage keys")
+        if result.session_storage_keys > 0:
+            parts.append(f"{result.session_storage_keys} sessionStorage keys")
+        if result.indexeddb_origins > 0:
+            parts.append(f"{result.indexeddb_origins} IndexedDB origins")
+
+        await logger.info(
+            f"Exported {', '.join(parts)} across {result.origin_count} origins "
+            f"to {result.path}"
+        )
+
+        if result.warnings:
+            await logger.info(f"Warnings: {len(result.warnings)}")
+
+        return ChromeSessionExportResult(
+            path=result.path,
+            cookie_count=result.cookie_count,
+            origin_count=result.origin_count,
+            local_storage_keys=result.local_storage_keys,
+            session_storage_keys=result.session_storage_keys,
+            indexeddb_origins=result.indexeddb_origins,
+            warnings=list(result.warnings),
+        )
 
 
 def _sync_cleanup(state: BrowserState) -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import platform
-import sys
 from pathlib import Path
 
 from .models import (
@@ -149,17 +148,21 @@ def load_profile_preferences(profile_path: Path) -> dict | None:
 
 
 def get_profile_metadata(
-    profile_dir: str, base_path: Path, verbose: bool = False
+    profile_dir: str,
+    base_path: Path,
+    local_state: ChromeLocalState,
+    verbose: bool = False,
 ) -> ChromeProfileEssential | ChromeProfileFull:
     """Extract metadata for a single profile.
 
     Data sources:
-    1. Local State -> profile.info_cache[profile_dir]
+    1. Local State -> profile.info_cache[profile_dir] (passed in, not re-loaded)
     2. Preferences (optional) -> profile section
 
     Args:
         profile_dir: "Default", "Profile 1", etc.
         base_path: Chrome base directory
+        local_state: Pre-loaded ChromeLocalState (load once, reuse for all profiles)
         verbose: If True, return ChromeProfileFull with all fields
 
     Returns:
@@ -167,15 +170,13 @@ def get_profile_metadata(
 
     Raises:
         ProfileNotFoundError: If profile directory doesn't exist
-        MetadataParseError: If metadata cannot be parsed
+        MetadataParseError: If profile not found in Local State info_cache
     """
     profile_path = base_path / profile_dir
 
     if not profile_path.is_dir():
         raise ProfileNotFoundError(f"Profile directory not found: {profile_path}")
 
-    # Load Local State with strict Pydantic validation
-    local_state = load_local_state(base_path)
     info_cache = local_state.profile.info_cache
 
     if profile_dir not in info_cache:
@@ -238,23 +239,22 @@ def list_all_profiles(verbose: bool = False) -> ChromeProfilesResult:
 
     Raises:
         ChromeNotFoundError: If Chrome installation not found
-        MetadataParseError: If metadata cannot be parsed
+        MetadataParseError: If Local State cannot be parsed (schema mismatch, etc.)
     """
     base_path = get_chrome_base_path()
     profile_dirs = list_profile_directories(base_path)
 
+    # Load Local State ONCE - let parse errors bubble up
+    # If Chrome's schema changed, we want to know immediately, not silently fail
+    local_state = load_local_state(base_path)
+
     profiles = []
     for profile_dir in profile_dirs:
-        try:
-            profile = get_profile_metadata(profile_dir, base_path, verbose=verbose)
-            profiles.append(profile)
-        except (ProfileNotFoundError, MetadataParseError) as e:
-            # Log warning but continue with other profiles
-            print(
-                f"[chrome_profiles] Warning: Failed to load {profile_dir}: {e}",
-                file=sys.stderr,
-            )
-            continue
+        # Extract profile metadata from pre-loaded Local State
+        # Profile directory exists but not in info_cache shouldn't happen,
+        # but if it does, let the error bubble up
+        profile = get_profile_metadata(profile_dir, base_path, local_state, verbose=verbose)
+        profiles.append(profile)
 
     # Determine default profile (first one, typically "Default")
     default_profile = profile_dirs[0] if profile_dirs else None

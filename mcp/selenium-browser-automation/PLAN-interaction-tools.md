@@ -138,6 +138,44 @@ Possible causes: (1) Selector incorrect, (2) Element in iframe, (3) Requires use
 Try: verify selector with get_page_html(), check for iframes."
 ```
 
+### Chrome Session Export (Perplexity Research 2025-01)
+
+Captures session state from standalone Chrome for Selenium automation.
+
+**Use case:** Log in manually (CAPTCHA, MFA) → export session → automate with authenticated state.
+
+**Libraries evaluated:**
+
+| Library | Purpose | Notes |
+|---------|---------|-------|
+| `browser-cookie3` | Cookie decryption | Handles macOS Keychain automatically |
+| `ccl_chromium_reader` | LevelDB parser | Pure Python, no C compilation required |
+| `plyvel` | LevelDB access | ❌ C compilation issues on macOS ARM64 |
+
+**Chrome profile storage locations:**
+
+| Storage Type | Path | Format |
+|--------------|------|--------|
+| Cookies | `{profile}/Cookies` | SQLite |
+| localStorage | `{profile}/Local Storage/leveldb/` | LevelDB |
+| sessionStorage | `{profile}/Session Storage/` | LevelDB |
+| IndexedDB | `{profile}/IndexedDB/{origin}.indexeddb.leveldb/` | LevelDB |
+
+**Critical path discovery:** localStorage is at `Local Storage/leveldb/`, NOT just `Local Storage/`. Tests found 0 origins without the subdirectory, 1,341 with correct path.
+
+**Chrome epoch conversion:** `expires // 1_000_000 - 11644473600` (microseconds since 1601 → Unix seconds)
+
+**sameSite SQLite values:** -1=unspecified, 0=None, 1=Lax, 2=Strict
+
+**sessionStorage persistence:** Chrome persists sessionStorage to disk for crash recovery, contradicting browser specs but enabling useful automation workflows.
+
+**IndexedDB schema limitation:** `ccl_chromium_reader` raises `NotImplementedError` for:
+- `DatabaseMetadataType.IdbVersion`
+- `ObjectStoreMetadataType.KeyPath`
+- `ObjectStoreMetadataType.AutoIncrementFlag`
+
+Records can be exported but schema cannot be recreated. For full IndexedDB support, use `save_storage_state()` from a Selenium session.
+
 ---
 
 ## Architectural Decisions
@@ -188,6 +226,14 @@ These are **limitations to document**, not bugs to fix.
 9. **Race conditions**: Narrow window between request batches (mitigated by 500ms threshold)
 10. **Service Workers**: Can intercept requests transparently
 11. **Resource loading**: Images/CSS/fonts not tracked by network monitor
+
+### Chrome Session Export
+12. **macOS only**: Not tested on Windows/Linux
+13. **Keychain prompt**: First run requires clicking "Always Allow" for cookie decryption
+14. **IndexedDB records only**: Schema (version, keyPath, indexes) cannot be extracted from profile files
+15. **Multi-profile cookie limitation**: `browser-cookie3` reads from default Chrome location regardless of profile_name parameter
+16. **Binary decode warnings**: Some localStorage values (Slack compression) show decode errors but continue
+17. **Race conditions**: Exporting while Chrome is actively writing may capture inconsistent state
 
 ---
 
