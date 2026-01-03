@@ -2,3 +2,10 @@
 __pycache__/
 scratch/
 .DS_Store
+
+# IDE
+.idea/
+
+# Auth/session files (sensitive)
+*_auth.json
+*.auth.json

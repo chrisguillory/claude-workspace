@@ -34,6 +34,7 @@ Cookie Decryption (DIY implementation):
 
 from __future__ import annotations
 
+import re
 import hashlib
 import json
 import os
@@ -165,6 +166,129 @@ _SAMESITE_MAP: Mapping[int, str] = {
     2: "Strict",
 }
 
+# Regex for IPv4 addresses (validates 0-255 octets)
+_IPV4_PATTERN = re.compile(
+    r"^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$"
+)
+
+
+def _validate_domain_pattern(pattern: str) -> None:
+    """Validate that a domain pattern is well-formed.
+
+    Args:
+        pattern: User-provided domain filter (e.g., "amazon.com")
+
+    Raises:
+        ValueError: If pattern is empty or missing TLD
+
+    Examples:
+        _validate_domain_pattern("amazon.com")  # OK
+        _validate_domain_pattern(".amazon.com")  # OK (leading dot stripped)
+        _validate_domain_pattern("localhost")  # OK (special case)
+        _validate_domain_pattern("192.168.1.1")  # OK (IP address)
+        _validate_domain_pattern("amazon")  # Raises ValueError
+    """
+    # Strip leading/trailing dots and port numbers
+    cleaned = pattern.lower().strip(".")
+    if ":" in cleaned:
+        cleaned = cleaned.split(":")[0]  # Strip port if present
+
+    if not cleaned:
+        raise ValueError(f"Empty domain pattern: {pattern!r}")
+
+    # Allow localhost as special case
+    if cleaned == "localhost":
+        return
+
+    # Allow IP addresses (IPv4)
+    if _IPV4_PATTERN.match(cleaned):
+        return
+
+    # For regular domains, require at least one dot (TLD)
+    if "." not in cleaned:
+        raise ValueError(
+            f"Invalid domain pattern: {pattern!r} - "
+            f"must include TLD (e.g., 'amazon.com' not 'amazon')"
+        )
+
+
+def _extract_domain_from_origin(origin: str) -> str:
+    """Extract domain from various origin formats.
+
+    Handles:
+    - Full URLs: https://www.amazon.com → www.amazon.com
+    - URLs with port: https://localhost:3000 → localhost
+    - URLs with path: https://www.amazon.com/ → www.amazon.com
+    - IndexedDB format: https_www.amazon.com_0 → www.amazon.com
+    - Bare domains: amazon.com → amazon.com
+
+    Args:
+        origin: Origin string in any format
+
+    Returns:
+        Bare domain without scheme, port, or path
+    """
+    # Handle full URLs (https://example.com or https://example.com/)
+    if "://" in origin:
+        # Remove scheme
+        origin = origin.split("://", 1)[1]
+        # Remove path
+        origin = origin.split("/", 1)[0]
+        # Remove port
+        origin = origin.split(":", 1)[0]
+        return origin
+
+    # Handle IndexedDB format (https_www.amazon.com_0)
+    if origin.startswith(("https_", "http_")):
+        # Remove scheme prefix
+        origin = origin.split("_", 1)[1]
+        # Remove trailing _0, _1, etc.
+        if "_" in origin:
+            parts = origin.rsplit("_", 1)
+            if parts[-1].isdigit():
+                origin = parts[0]
+        return origin
+
+    # Already a bare domain
+    return origin
+
+
+def _domain_matches(host: str, pattern: str) -> bool:
+    """RFC 6265 domain matching - suffix match with dot boundary.
+
+    This is the correct way to match cookie domains, NOT substring matching.
+    Substring matching would be insecure (e.g., "amazon" matching "amazon.evil.com").
+
+    Args:
+        host: The cookie's host_key from SQLite (e.g., ".amazon.com")
+        pattern: The filter pattern (e.g., "amazon.com")
+
+    Returns:
+        True if host matches pattern per RFC 6265 rules
+
+    Examples:
+        _domain_matches(".amazon.com", "amazon.com") → True
+        _domain_matches("www.amazon.com", "amazon.com") → True
+        _domain_matches("amazon.com", "amazon.com") → True
+        _domain_matches("amazon.evil.com", "amazon.com") → False
+        _domain_matches("notamazon.com", "amazon.com") → False
+    """
+    # Canonicalize: lowercase, strip leading/trailing dots, strip port
+    host = host.lower().strip(".")
+    pattern = pattern.lower().strip(".")
+    if ":" in pattern:
+        pattern = pattern.split(":")[0]
+
+    # Exact match (handles IPs and localhost)
+    if host == pattern:
+        return True
+
+    # Suffix match with dot boundary: host ends with ".pattern"
+    if host.endswith("." + pattern):
+        return True
+
+    return False
+
 
 # =============================================================================
 # DIY Cookie Decryption (replaces browser-cookie3)
@@ -258,7 +382,10 @@ def _get_chrome_cookies_version(cookies_db: Path) -> int:
     try:
         cursor.execute("SELECT value FROM meta WHERE key = 'version'")
         row = cursor.fetchone()
-        return int(row[0]) if row else 0
+        # Handle both missing row and NULL value
+        if row and row[0] is not None:
+            return int(row[0])
+        return 0
     except sqlite3.OperationalError:
         return 0  # Assume old format if meta table missing
     finally:
@@ -304,7 +431,8 @@ def _decrypt_cookie_value(
 
     # Chrome 130+ (version >= 24): SHA256(domain) prepended to decrypted value
     # The hash is INSIDE the encrypted blob, so we strip it after decryption
-    if chrome_version >= 24 and len(unpadded) > 32:
+    # Use >= 32 to handle empty cookie values (exactly 32 bytes = just the hash)
+    if chrome_version >= 24 and len(unpadded) >= 32:
         unpadded = unpadded[32:]
 
     return unpadded.decode("utf-8", errors="replace")
@@ -313,7 +441,7 @@ def _decrypt_cookie_value(
 def export_cookies(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> tuple[Sequence[CookieData], Sequence[str]]:
+) -> Sequence[CookieData]:
     """Export cookies from any Chrome profile with full decryption.
 
     Unlike browser-cookie3, this supports ANY Chrome profile, not just Default.
@@ -324,30 +452,30 @@ def export_cookies(
         origins_filter: Optional domain patterns to include
 
     Returns:
-        Tuple of (cookies, warnings)
+        Sequence of CookieData
+
+    Raises:
+        FileNotFoundError: If Cookies database doesn't exist
+        RuntimeError: If Keychain access fails
+        sqlite3.Error: If database read fails
+        ValueError: If cookie decryption fails
     """
-    warnings: list[str] = []
     cookies: list[CookieData] = []
 
     cookies_db = profile_path / "Cookies"
     if not cookies_db.exists():
-        warnings.append(f"Cookies database not found: {cookies_db}")
-        return cookies, warnings
+        raise FileNotFoundError(f"Cookies database not found: {cookies_db}")
 
     # Get encryption key from Keychain (shared across all profiles)
-    try:
-        keychain_password = _get_chrome_encryption_key()
-        aes_key = _derive_aes_key(keychain_password)
-    except RuntimeError as e:
-        warnings.append(str(e))
-        return cookies, warnings
+    keychain_password = _get_chrome_encryption_key()
+    aes_key = _derive_aes_key(keychain_password)
 
     # Detect Chrome version for hash handling
     chrome_version = _get_chrome_cookies_version(cookies_db)
 
     # Read and decrypt all cookies from this profile's SQLite
+    conn = sqlite3.connect(f"file:{cookies_db}?mode=ro", uri=True)
     try:
-        conn = sqlite3.connect(f"file:{cookies_db}?mode=ro", uri=True)
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -369,20 +497,16 @@ def export_cookies(
                 encrypted_value,
             ) = row
 
-            # Apply origin filter
+            # Apply origin filter (RFC 6265 domain matching)
             if origins_filter:
-                if not any(pattern in host for pattern in origins_filter):
+                if not any(_domain_matches(host, pattern) for pattern in origins_filter):
                     continue
 
             # Decrypt if needed
-            if encrypted_value and len(encrypted_value) > 0:
-                try:
-                    cookie_value = _decrypt_cookie_value(
-                        encrypted_value, aes_key, chrome_version
-                    )
-                except ValueError as e:
-                    warnings.append(f"Failed to decrypt cookie {name}@{host}: {e}")
-                    continue
+            if encrypted_value:
+                cookie_value = _decrypt_cookie_value(
+                    encrypted_value, aes_key, chrome_version
+                )
             else:
                 cookie_value = value or ""
 
@@ -407,13 +531,10 @@ def export_cookies(
                     sameSite=_SAMESITE_MAP.get(samesite, "Lax"),
                 )
             )
-
+    finally:
         conn.close()
 
-    except sqlite3.Error as e:
-        warnings.append(f"SQLite error reading cookies: {e}")
-
-    return cookies, warnings
+    return cookies
 
 
 # =============================================================================
@@ -424,7 +545,7 @@ def export_cookies(
 def export_local_storage(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> tuple[Mapping[str, Sequence[StorageItem]], Sequence[str]]:
+) -> Mapping[str, Sequence[StorageItem]]:
     """Export localStorage from Chrome's LevelDB.
 
     Args:
@@ -432,43 +553,38 @@ def export_local_storage(
         origins_filter: Optional origin patterns to include
 
     Returns:
-        Tuple of ({origin: [StorageItem, ...]}, warnings)
+        Mapping of {origin: [StorageItem, ...]}
+
+    Raises:
+        FileNotFoundError: If localStorage path doesn't exist
     """
-    warnings: list[str] = []
     storage: dict[str, list[StorageItem]] = {}
 
     # CRITICAL: localStorage is in "Local Storage/leveldb/", not "Local Storage/"
     leveldb_path = profile_path / "Local Storage" / "leveldb"
 
     if not leveldb_path.exists():
-        warnings.append(f"localStorage path not found: {leveldb_path}")
-        return storage, warnings
+        raise FileNotFoundError(f"localStorage path not found: {leveldb_path}")
 
-    try:
-        with ccl_chromium_localstorage.LocalStoreDb(leveldb_path) as ls:
-            for storage_key in ls.iter_storage_keys():
-                # Filter origins
-                if origins_filter:
-                    if not any(pattern in storage_key for pattern in origins_filter):
-                        continue
+    with ccl_chromium_localstorage.LocalStoreDb(leveldb_path) as ls:
+        for storage_key in ls.iter_storage_keys():
+            # Filter origins (extract domain from URL, then RFC 6265 matching)
+            if origins_filter:
+                domain = _extract_domain_from_origin(storage_key)
+                if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
+                    continue
 
-                origin_storage: list[StorageItem] = []
-                for record in ls.iter_records_for_storage_key(storage_key):
-                    try:
-                        value = str(record.value) if record.value else ""
-                        origin_storage.append(
-                            StorageItem(name=record.script_key, value=value)
-                        )
-                    except Exception as e:
-                        warnings.append(f"localStorage decode error for {storage_key}: {e}")
+            origin_storage: list[StorageItem] = []
+            for record in ls.iter_records_for_storage_key(storage_key):
+                value = str(record.value) if record.value else ""
+                origin_storage.append(
+                    StorageItem(name=record.script_key, value=value)
+                )
 
-                if origin_storage:
-                    storage[storage_key] = origin_storage
+            if origin_storage:
+                storage[storage_key] = origin_storage
 
-    except Exception as e:
-        warnings.append(f"localStorage export failed: {e}")
-
-    return storage, warnings
+    return storage
 
 
 # =============================================================================
@@ -479,7 +595,7 @@ def export_local_storage(
 def export_session_storage(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> tuple[Mapping[str, Sequence[StorageItem]], Sequence[str]]:
+) -> Mapping[str, Sequence[StorageItem]]:
     """Export sessionStorage from Chrome's LevelDB.
 
     Chrome persists sessionStorage to disk for session recovery, enabling
@@ -491,40 +607,35 @@ def export_session_storage(
         origins_filter: Optional origin patterns to include
 
     Returns:
-        Tuple of ({origin: [StorageItem, ...]}, warnings)
+        Mapping of {origin: [StorageItem, ...]}
+
+    Raises:
+        FileNotFoundError: If sessionStorage path doesn't exist
     """
-    warnings: list[str] = []
     storage: dict[str, list[StorageItem]] = {}
 
     session_storage_path = profile_path / "Session Storage"
 
     if not session_storage_path.exists():
-        warnings.append(f"sessionStorage path not found: {session_storage_path}")
-        return storage, warnings
+        raise FileNotFoundError(f"sessionStorage path not found: {session_storage_path}")
 
-    try:
-        with ccl_chromium_sessionstorage.SessionStoreDb(session_storage_path) as ss:
-            for host in ss.iter_hosts():
-                # Filter origins
-                if origins_filter:
-                    if not any(pattern in host for pattern in origins_filter):
-                        continue
+    with ccl_chromium_sessionstorage.SessionStoreDb(session_storage_path) as ss:
+        for host in ss.iter_hosts():
+            # Filter origins (extract domain from URL, then RFC 6265 matching)
+            if origins_filter:
+                domain = _extract_domain_from_origin(host)
+                if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
+                    continue
 
-                origin_storage: list[StorageItem] = []
-                for record in ss.iter_records_for_host(host):
-                    try:
-                        value = str(record.value) if record.value else ""
-                        origin_storage.append(StorageItem(name=record.key, value=value))
-                    except Exception as e:
-                        warnings.append(f"sessionStorage decode error for {host}: {e}")
+            origin_storage: list[StorageItem] = []
+            for record in ss.iter_records_for_host(host):
+                value = str(record.value) if record.value else ""
+                origin_storage.append(StorageItem(name=record.key, value=value))
 
-                if origin_storage:
-                    storage[host] = origin_storage
+            if origin_storage:
+                storage[host] = origin_storage
 
-    except Exception as e:
-        warnings.append(f"sessionStorage export failed: {e}")
-
-    return storage, warnings
+    return storage
 
 
 # =============================================================================
@@ -535,7 +646,7 @@ def export_session_storage(
 def export_indexeddb(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> tuple[Mapping[str, Any], Sequence[str]]:
+) -> Mapping[str, Any]:
     """Export IndexedDB records from Chrome's LevelDB.
 
     LIMITATION: ccl_chromium_reader cannot extract schema metadata (version,
@@ -548,17 +659,17 @@ def export_indexeddb(
         origins_filter: Optional origin patterns to include
 
     Returns:
-        Tuple of (databases_by_origin, warnings)
-        Format: {origin: {db_name: {"objectStores": {store_name: [records]}}}}
+        Mapping of {origin: {db_name: {"objectStores": {store_name: [records]}}}}
+
+    Raises:
+        FileNotFoundError: If IndexedDB path doesn't exist
     """
-    warnings: list[str] = []
     databases: dict[str, Any] = {}
 
     indexeddb_path = profile_path / "IndexedDB"
 
     if not indexeddb_path.exists():
-        warnings.append(f"IndexedDB path not found: {indexeddb_path}")
-        return databases, warnings
+        raise FileNotFoundError(f"IndexedDB path not found: {indexeddb_path}")
 
     for item in indexeddb_path.iterdir():
         if not (item.is_dir() and item.name.endswith(".indexeddb.leveldb")):
@@ -567,49 +678,43 @@ def export_indexeddb(
         # Origin is encoded in directory name (e.g., "https_example.com_0")
         origin = item.name.replace(".indexeddb.leveldb", "")
 
+        # Filter origins (extract domain from IndexedDB format, then RFC 6265 matching)
         if origins_filter:
-            if not any(pattern in origin for pattern in origins_filter):
+            domain = _extract_domain_from_origin(origin)
+            if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
                 continue
 
-        try:
-            wrapper = ccl_chromium_indexeddb.WrappedIndexDB(item)
-            origin_dbs: dict[str, Any] = {}
+        wrapper = ccl_chromium_indexeddb.WrappedIndexDB(item)
+        origin_dbs: dict[str, Any] = {}
 
-            for db_id in wrapper.database_ids:
-                db = wrapper[db_id]
-                db_data: dict[str, Any] = {"objectStores": {}}
+        for db_id in wrapper.database_ids:
+            db = wrapper[db_id]
+            db_data: dict[str, Any] = {"objectStores": {}}
 
-                for obj_store_name in db.object_store_names:
-                    store = db[obj_store_name]
-                    records: list[dict[str, Any]] = []
+            for obj_store_name in db.object_store_names:
+                store = db[obj_store_name]
+                records: list[dict[str, Any]] = []
 
-                    try:
-                        for record in store.iterate_records():
-                            try:
-                                key = str(record.key)
-                                value = record.value
-                                # Ensure JSON-serializable
-                                if not isinstance(value, (dict, list, str, int, float, bool, type(None))):
-                                    value = str(value)
-                                records.append({"key": key, "value": value})
-                            except Exception:
-                                records.append({"key": str(record.key), "value": "<binary>"})
-                    except Exception as e:
-                        warnings.append(f"IndexedDB store '{obj_store_name}' read error: {e}")
+                for record in store.iterate_records():
+                    key = str(record.key)
+                    value = record.value
+                    # Ensure JSON-serializable
+                    if not isinstance(
+                        value, (dict, list, str, int, float, bool, type(None))
+                    ):
+                        value = str(value)
+                    records.append({"key": key, "value": value})
 
-                    if records:
-                        db_data["objectStores"][obj_store_name] = records
+                if records:
+                    db_data["objectStores"][obj_store_name] = records
 
-                if db_data["objectStores"]:
-                    origin_dbs[db.name] = db_data
+            if db_data["objectStores"]:
+                origin_dbs[db.name] = db_data
 
-            if origin_dbs:
-                databases[origin] = origin_dbs
+        if origin_dbs:
+            databases[origin] = origin_dbs
 
-        except Exception as e:
-            warnings.append(f"IndexedDB origin '{origin}' export failed: {e}")
-
-    return databases, warnings
+    return databases
 
 
 # =============================================================================
@@ -646,8 +751,6 @@ def export_chrome_session(
         # Then in Selenium:
         navigate("https://github.com", storage_state_file="auth.json")
     """
-    warnings: list[str] = []
-
     # Fail if output file exists - delete first to replace
     if Path(output_file).expanduser().exists():
         raise FileExistsError(f"Output file already exists: {output_file}")
@@ -655,34 +758,29 @@ def export_chrome_session(
     # Resolve profile path
     profile_path = get_chrome_profile_path(profile_name)
 
+    # Validate filter patterns
+    if origins_filter:
+        for pattern in origins_filter:
+            _validate_domain_pattern(pattern)
+
     # Convert to list for filtering if provided
     filter_list = list(origins_filter) if origins_filter else None
 
     # Export cookies
-    cookies, cookie_warnings = export_cookies(profile_path, filter_list)
-    warnings.extend(cookie_warnings)
+    cookies = export_cookies(profile_path, filter_list)
 
     # Export localStorage
-    local_storage, ls_warnings = export_local_storage(profile_path, filter_list)
-    warnings.extend(ls_warnings)
+    local_storage = export_local_storage(profile_path, filter_list)
 
     # Export sessionStorage (optional, default on)
     session_storage: Mapping[str, Sequence[StorageItem]] = {}
     if include_session_storage:
-        session_storage, ss_warnings = export_session_storage(profile_path, filter_list)
-        warnings.extend(ss_warnings)
+        session_storage = export_session_storage(profile_path, filter_list)
 
     # Export IndexedDB (optional, default off - can be huge)
     indexeddb: Mapping[str, Any] = {}
     if include_indexeddb:
-        indexeddb, idb_warnings = export_indexeddb(profile_path, filter_list)
-        warnings.extend(idb_warnings)
-        if indexeddb:
-            warnings.append(
-                "IndexedDB export contains records only (no schema). "
-                "Full restoration with keyPath/indexes requires save_storage_state() "
-                "from a Selenium session."
-            )
+        indexeddb = export_indexeddb(profile_path, filter_list)
 
     # Build origins array (Playwright-compatible StorageStateOrigin format)
     all_origins = set(local_storage.keys()) | set(session_storage.keys())
@@ -713,16 +811,14 @@ def export_chrome_session(
     if indexeddb:
         output["indexedDB"] = dict(indexeddb)
 
-    # Write to file
+    # Write to file with secure permissions from the start (avoid TOCTOU race)
+    # SECURITY: Output contains sensitive auth tokens - create with 0o600, not umask
     output_path = Path(output_file).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, "w") as f:
+    fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(output, f, indent=2, default=str)
-
-    # SECURITY: Restrict file permissions (owner read/write only)
-    # Output contains sensitive auth tokens
-    os.chmod(output_path, 0o600)
 
     # Calculate statistics
     ls_keys = sum(len(items) for items in local_storage.values())
@@ -735,5 +831,4 @@ def export_chrome_session(
         local_storage_keys=ls_keys,
         session_storage_keys=ss_keys,
         indexeddb_origins=len(indexeddb),
-        warnings=list(warnings),
     )

@@ -131,6 +131,7 @@ class ChromeLocalState(BaseModel):
     background_tracing: dict | None = None
     breadcrumbs: dict | None = None
     browser: dict | None = None
+    cloned_install: dict | None = None  # Chrome 120+ install tracking
     hardware_acceleration_mode_previous: bool | None = None
     legacy: dict | None = None
     local: dict | None = None
@@ -144,11 +145,14 @@ class ChromeLocalState(BaseModel):
     policy: dict | None = None
     privacy_budget: dict | None = None
     profile_network_context_service: dict | None = None
+    profiles: dict | None = None  # Note: different from 'profile' section
     segmentation_platform: dict | None = None
     session_id_generator_last_value: str | None = None
     signin: dict | None = None
+    sm: dict | None = None  # Chrome sync/management state
     subresource_filter: dict | None = None
     tab_stats: dict | None = None
+    task_manager: dict | None = None  # Task manager window state
     toast: dict | None = None
     tpcd: dict | None = None
     tpcd_experiment: dict | None = None
@@ -653,3 +657,35 @@ class ConsoleLogsResult(BaseModel):
     severe_count: int = 0
     warning_count: int = 0
     info_count: int = 0
+
+
+# =============================================================================
+# Chrome Session Export Models
+# =============================================================================
+
+
+class ChromeSessionExportResult(BaseModel):
+    """Result of exporting Chrome session state from profile files.
+
+    This model is returned by export_chrome_session() which reads session state
+    directly from Chrome's profile directory (cookies, localStorage, sessionStorage,
+    IndexedDB) for use in Selenium automation.
+
+    Complements save_storage_state() which exports from a running Selenium browser.
+    Use export_chrome_session when you've logged in manually and want to capture
+    that authenticated session for automation.
+
+    Limitations:
+        IndexedDB exports records only. Schema metadata (version, keyPath,
+        autoIncrement, indexes) is not available from Chrome's LevelDB files
+        via ccl_chromium_reader. For full IndexedDB support, use
+        save_storage_state() from a Selenium session instead.
+    """
+
+    path: str
+    cookie_count: int
+    origin_count: int
+    local_storage_keys: int
+    session_storage_keys: int
+    indexeddb_origins: int
+    warnings: Sequence[str] = []

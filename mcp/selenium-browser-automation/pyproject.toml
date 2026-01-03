@@ -1,11 +1,13 @@
 [project]
 name = "selenium-browser-automation-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Selenium Browser Automation MCP Server - CDP stealth injection for Cloudflare bypass"
 requires-python = ">=3.11"
 dependencies = [
+    "ccl-chromium-reader",
     "fastmcp>=2.12.5",
     "httpx",
+    "pycryptodome>=3.23.0",
     "pydantic>=2.0.0",
     "pyyaml",
     "selenium",
@@ -20,6 +22,9 @@ include = ["server.py", "src/"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.uv.sources]
+ccl-chromium-reader = { git = "https://github.com/cclgroupltd/ccl_chromium_reader.git" }
 
 [build-system]
 requires = ["hatchling"]
