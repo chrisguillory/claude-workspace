@@ -350,9 +350,8 @@ navigate("https://example.com/account")
 save_storage_state("example_auth.json")
 
 # 3. Later, restore without re-login
-navigate(
+navigate_with_session(
     "https://example.com/account",
-    fresh_browser=True,
     storage_state_file="example_auth.json"
 )
 # → Already authenticated!
@@ -377,7 +376,7 @@ save_storage_state("auth.json", include_indexeddb=True)
 # Returns: indexeddb_databases_count, indexeddb_records_count
 
 # Restore happens automatically when storage_state_file contains IndexedDB data
-navigate(url, fresh_browser=True, storage_state_file="auth.json")
+navigate_with_session(url, storage_state_file="auth.json")
 ```
 
 Complex types are serialized with `__type` markers and restored correctly:
@@ -447,9 +446,8 @@ Parse the exports into Playwright format. Key cookie fields:
 **Step 4: Import and Test**
 
 ```python
-navigate(
+navigate_with_session(
     "https://www.example.com/account",
-    fresh_browser=True,
     storage_state_file="example_auth.json"
 )
 ```
@@ -625,7 +623,8 @@ Ideas without implementation plans:
 ## Tool Reference
 
 ### Navigation & Content
-- `navigate(url, fresh_browser?, profile?, enable_har_capture?, init_scripts?, storage_state_file?)` - Load URL with optional session restore
+- `navigate(url, fresh_browser?, profile?, enable_har_capture?, init_scripts?)` - Load URL in browser
+- `navigate_with_session(url, storage_state_file?, chrome_session_profile?, origins_filter?, ...)` - Load URL with session import (separate permission scope)
 - `get_page_text(selector?, include_images?)` - Smart content extraction with semantic element priority (see below)
 - `get_page_html(selector?, limit?)` - Extract raw HTML source or specific elements
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
@@ -870,7 +869,7 @@ Compare with Claude in Chrome, which is a browser extension controlling existing
 | Cookie persistence | Maintained across all tool calls                                         |
 | Fresh session      | `navigate(url, fresh_browser=True)` starts clean                         |
 | Profile loading    | `navigate(url, profile="Default")` uses saved Chrome profile (unreliable)|
-| Storage state      | `save_storage_state()` / `storage_state_file` for portable session export|
+| Storage state      | `save_storage_state()` + `navigate_with_session()` for portable session export/import |
 
 ### Network Capture Design
 

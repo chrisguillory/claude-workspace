@@ -7,7 +7,7 @@ Chrome profile files for use in Selenium automation.
 This enables the workflow:
 1. User logs into websites in normal Chrome (handles CAPTCHA, MFA manually)
 2. Export session state from Chrome profile files
-3. Import into Selenium via navigate(storage_state_file=...)
+3. Import into Selenium via navigate_with_session(storage_state_file=...)
 4. Continue automation with authenticated session
 
 Storage Types Captured (matching save_storage_state):
@@ -731,7 +731,7 @@ def export_chrome_session(
 ) -> ExportResult:
     """Export Chrome session state to Playwright-compatible JSON.
 
-    Produces JSON compatible with navigate(storage_state_file=...) for
+    Produces JSON compatible with navigate_with_session(storage_state_file=...) for
     restoring authenticated sessions in Selenium automation.
 
     Args:
@@ -749,7 +749,7 @@ def export_chrome_session(
         result = export_chrome_session("auth.json", origins_filter=["github.com"])
 
         # Then in Selenium:
-        navigate("https://github.com", storage_state_file="auth.json")
+        navigate_with_session("https://github.com", storage_state_file="auth.json")
     """
     # Fail if output file exists - delete first to replace
     if Path(output_file).expanduser().exists():

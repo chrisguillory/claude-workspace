@@ -70,7 +70,8 @@ window.clearAllData()              // Clear all storage types
 
 ### MCP Tools Used
 
-- `navigate(url, fresh_browser, storage_state_file)` - Navigation with optional state import
+- `navigate(url, fresh_browser)` - Navigation
+- `navigate_with_session(url, storage_state_file)` - Navigation with session state import
 - `execute_javascript(code)` - Run JavaScript in page context
 - `save_storage_state(filename, include_indexeddb)` - Export storage state
 
@@ -173,7 +174,7 @@ Read the JSON file and verify it contains localStorage for all 3 origins:
 
 1. Navigate to first origin with storage state (fresh browser clears previous state):
 ```
-navigate("http://localhost:8001/storage-test-page.html", fresh_browser=True, storage_state_file="test_L1_localstorage.json")
+navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_L1_localstorage.json")
 ```
 
 2. Verify localStorage on current origin (8001):
@@ -357,7 +358,7 @@ Read the JSON file and verify sessionStorage is captured:
 
 1. Navigate with storage state:
 ```
-navigate("http://localhost:8001/storage-test-page.html", fresh_browser=True, storage_state_file="test_S1_session.json")
+navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_S1_session.json")
 execute_javascript("window.getSessionData()")
 ```
 Should return: `{session: "port8001", visitId: "abc"}`
@@ -389,7 +390,7 @@ Should return: `{session: "port8002", visitId: "def"}`
 
 1. Save sessionStorage via `save_storage_state()`
 2. Close browser (`fresh_browser=True` on next navigate)
-3. Restore via `storage_state_file`
+3. Restore via `navigate_with_session(storage_state_file=...)`
 4. sessionStorage is restored and works during the session
 5. When browser closes again, sessionStorage is cleared
 
@@ -514,7 +515,7 @@ Read the JSON file and verify IndexedDB structure:
 
 1. Navigate with storage state:
 ```
-navigate("http://localhost:8001/storage-test-page.html", fresh_browser=True, storage_state_file="test_I1_indexeddb.json")
+navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_I1_indexeddb.json")
 ```
 
 2. Verify IndexedDB on 8001:
@@ -583,7 +584,7 @@ save_storage_state("test_I3_types.json", include_indexeddb=True)
 
 3. Fresh browser, restore:
 ```
-navigate("http://localhost:8001/storage-test-page.html", fresh_browser=True, storage_state_file="test_I3_types.json")
+navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_I3_types.json")
 ```
 
 4. Verify types:
@@ -706,7 +707,7 @@ save_storage_state("test_C1_combined.json", include_indexeddb=True)
 
 4. Fresh browser, restore:
 ```
-navigate("http://localhost:8001/storage-test-page.html", fresh_browser=True, storage_state_file="test_C1_combined.json")
+navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_C1_combined.json")
 ```
 
 5. Verify all three on 8001:

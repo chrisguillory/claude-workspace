@@ -151,13 +151,13 @@
 
   <div class="intro">
     <p><strong>Purpose:</strong> Test <code>save_storage_state(include_indexeddb=True)</code> capture and
-    <code>navigate(storage_state_file)</code> restore functionality.</p>
+    <code>navigate_with_session(storage_state_file)</code> restore functionality.</p>
     <p><strong>Test Flow:</strong></p>
     <ol>
       <li>Click "Create Test Data" or call <code>window.initializeDatabases()</code> to create IndexedDB</li>
       <li>Use <code>save_storage_state("test.json", include_indexeddb=True)</code> to capture</li>
       <li>Click "Clear All" or navigate away (fresh_browser=True)</li>
-      <li>Use <code>navigate(url, storage_state_file="test.json")</code> to restore</li>
+      <li>Use <code>navigate_with_session(url, storage_state_file="test.json")</code> to restore</li>
       <li>Click "Verify Data" - data should exist WITHOUT clicking "Create Test Data"</li>
     </ol>
     <p><strong>Key:</strong> No auto-initialization on page load. All actions are explicit for clean testing.</p>

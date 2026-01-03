@@ -23,6 +23,7 @@ import subprocess
 import sys
 import unicodedata
 import tempfile
+import os
 import time
 import typing
 from contextlib import asynccontextmanager
@@ -101,7 +102,7 @@ from src.models import (
     # Chrome session export
     ChromeSessionExportResult,
 )
-from src.chrome_session_export import export_chrome_session as _export_chrome_session
+from src import chrome_session_export
 
 
 class PrintLogger:
@@ -367,6 +368,102 @@ async def _restore_pending_storage_for_current_origin(
         print(f"[storage] Restored {' + '.join(parts)} for {current_origin}", file=sys.stderr)
 
 
+# =============================================================================
+# Storage State Import Helpers
+# =============================================================================
+
+
+async def _load_storage_state_from_file(file_path: str) -> StorageState:
+    """Load and validate storage state from JSON file.
+
+    Args:
+        file_path: Path to Playwright-compatible storage state JSON.
+                   Relative paths are resolved from current working directory.
+
+    Returns:
+        Parsed and validated StorageState model.
+
+    Raises:
+        ToolError: If file not found or invalid JSON/schema.
+    """
+    state_path = Path(file_path)
+    if not state_path.is_absolute():
+        state_path = Path.cwd() / file_path
+
+    if not state_path.exists():
+        raise fastmcp.exceptions.ToolError(
+            f"Storage state file not found: {state_path}"
+        )
+
+    storage_state_json = state_path.read_text()
+    return StorageState.model_validate_json(storage_state_json)
+
+
+async def _inject_cookies_via_cdp(
+    driver: webdriver.Chrome,
+    cookies: Sequence[StorageStateCookie],
+) -> int:
+    """Inject cookies via CDP Network.setCookies.
+
+    Cookies are set BEFORE navigation so they're sent with the request.
+
+    Args:
+        driver: WebDriver instance with CDP support.
+        cookies: Sequence of StorageStateCookie objects.
+
+    Returns:
+        Number of cookies injected.
+    """
+    if not cookies:
+        return 0
+
+    # Convert storageState cookies to CDP format
+    cdp_cookies = []
+    for cookie in cookies:
+        cdp_cookie = {
+            "name": cookie.name,
+            "value": cookie.value,
+            "domain": cookie.domain,
+            "path": cookie.path,
+            "httpOnly": cookie.httpOnly,
+            "secure": cookie.secure,
+            "sameSite": cookie.sameSite,
+        }
+        # Handle session cookies (expires: -1) vs persistent cookies
+        # For CDP, omit expires for session cookies
+        if cookie.expires != -1:
+            cdp_cookie["expires"] = cookie.expires
+
+        cdp_cookies.append(cdp_cookie)
+
+    # Set all cookies at once
+    await asyncio.to_thread(
+        driver.execute_cdp_cmd,
+        "Network.setCookies",
+        {"cookies": cdp_cookies}
+    )
+
+    return len(cdp_cookies)
+
+
+async def _setup_pending_storage_state(
+    service: "BrowserService",
+    storage_state: StorageState,
+) -> None:
+    """Configure lazy restore for localStorage/sessionStorage/IndexedDB.
+
+    CDP DOMStorage.setDOMStorageItem requires an active frame for the target origin,
+    so we can only restore storage as we visit each origin. This stores the pending
+    state and clears the restored origins set.
+
+    Args:
+        service: BrowserService instance.
+        storage_state: StorageState to restore lazily.
+    """
+    service.state.pending_storage_state = storage_state
+    service.state.restored_origins.clear()
+
+
 class OriginTracker:
     """Tracks origins visited during browser session for multi-origin storage capture.
 
@@ -442,7 +539,6 @@ class BrowserState:
 
         return cls(
             driver=None,
-            current_profile=None,
             temp_dir=temp_dir,
             screenshot_dir=screenshot_dir,
             capture_temp_dir=capture_temp_dir,
@@ -454,8 +550,6 @@ class BrowserState:
         self,
         driver: webdriver.Chrome
         | None,  # None = lazy initialization (created on first use)
-        current_profile: str
-        | None,  # None = no profile selected (temporary profile mode)
         temp_dir: tempfile.TemporaryDirectory,
         screenshot_dir: Path,
         capture_temp_dir: tempfile.TemporaryDirectory,
@@ -463,7 +557,6 @@ class BrowserState:
         capture_counter: int,
     ) -> None:
         self.driver = driver  # Lazy-initialized: None until first navigation
-        self.current_profile = current_profile  # None when using temporary profile
         self.temp_dir = temp_dir
         self.screenshot_dir = screenshot_dir
         self.capture_temp_dir = capture_temp_dir
@@ -624,7 +717,6 @@ def register_tools(service: BrowserService) -> None:
         profile: str | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
-        storage_state_file: str | None = None,
         ctx: Context | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -641,10 +733,6 @@ def register_tools(service: BrowserService) -> None:
             init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
-            storage_state_file: Import storage state before navigation (requires fresh_browser=True).
-                               Restores cookies, localStorage, sessionStorage, and IndexedDB from
-                               Playwright-compatible JSON. Use after save_storage_state() to restore
-                               authenticated sessions.
 
         Example - API interception:
             navigate(
@@ -663,27 +751,10 @@ def register_tools(service: BrowserService) -> None:
             navigate("https://example.com/account")
             # Retrieve captured APIs via execute_javascript('window.__apiCapture')
 
-        Example - Session persistence:
-            # After logging in:
-            save_storage_state("auth.json")
-
-            # Later, in new session:
-            navigate(
-                "https://example.com/account",
-                fresh_browser=True,
-                storage_state_file="auth.json"
-            )
-            # → Cookies restored before navigation, localStorage after
-            # → Already authenticated!
-
         Note:
             init_scripts run BEFORE page scripts in every frame (including iframes).
             Do not modify navigator.webdriver, navigator.languages, navigator.plugins,
             or window.chrome - these are reserved for bot detection evasion.
-
-            storage_state_file imports cookies before navigation (sent with request)
-            and localStorage after navigation (requires origin context).
-            Only localStorage for the target page's origin is restored.
 
         Returns:
             NavigationResult with current_url and title
@@ -713,17 +784,11 @@ def register_tools(service: BrowserService) -> None:
                 "init_scripts requires fresh_browser=True (scripts must be registered before first navigation)"
             )
 
-        if storage_state_file and not fresh_browser:
-            raise fastmcp.exceptions.ValidationError(
-                "storage_state_file requires fresh_browser=True (import into clean session)"
-            )
-
         print(
             f"[navigate] Navigating to {url}"
             + (" (fresh browser)" if fresh_browser else "")
             + (" (HAR capture enabled)" if enable_har_capture else "")
-            + (f" ({len(init_scripts)} init scripts)" if init_scripts else "")
-            + (" (importing storage state)" if storage_state_file else ""),
+            + (f" ({len(init_scripts)} init scripts)" if init_scripts else ""),
             file=sys.stderr,
         )
 
@@ -740,62 +805,6 @@ def register_tools(service: BrowserService) -> None:
                     driver.execute_cdp_cmd,
                     "Page.addScriptToEvaluateOnNewDocument",
                     {"source": script},
-                )
-
-        # Import storage state if provided (cookies BEFORE navigation, localStorage AFTER)
-        storage_state: StorageState | None = None
-        if storage_state_file:
-            # Determine file path
-            state_path = Path(storage_state_file)
-            if not state_path.is_absolute():
-                state_path = Path.cwd() / storage_state_file
-
-            # Load and validate storage state file
-            if not state_path.exists():
-                raise fastmcp.exceptions.ToolError(
-                    f"Storage state file not found: {state_path}"
-                )
-
-            storage_state_json = state_path.read_text()
-            storage_state = StorageState.model_validate_json(storage_state_json)
-
-            print(
-                f"[navigate] Importing {len(storage_state.cookies)} cookies from {storage_state_file}",
-                file=sys.stderr,
-            )
-
-            # Set cookies via CDP BEFORE navigation
-            # This allows cookies to be sent with the navigation request
-            if storage_state.cookies:
-                # Convert storageState cookies to CDP format
-                cdp_cookies = []
-                for cookie in storage_state.cookies:
-                    cdp_cookie = {
-                        "name": cookie.name,
-                        "value": cookie.value,
-                        "domain": cookie.domain,
-                        "path": cookie.path,
-                        "httpOnly": cookie.httpOnly,
-                        "secure": cookie.secure,
-                        "sameSite": cookie.sameSite,
-                    }
-                    # Handle session cookies (expires: -1) vs persistent cookies
-                    # For CDP, omit expires for session cookies
-                    if cookie.expires != -1:
-                        cdp_cookie["expires"] = cookie.expires
-
-                    cdp_cookies.append(cdp_cookie)
-
-                # Set all cookies at once
-                await asyncio.to_thread(
-                    driver.execute_cdp_cmd,
-                    "Network.setCookies",
-                    {"cookies": cdp_cookies}
-                )
-
-                print(
-                    f"[navigate] Set {len(cdp_cookies)} cookies via CDP",
-                    file=sys.stderr,
                 )
 
         # PRE-ACTION: Capture localStorage before navigating away
@@ -815,19 +824,236 @@ def register_tools(service: BrowserService) -> None:
             file=sys.stderr,
         )
 
-        # Lazy restore: store pending storage state if new file provided
-        # CDP DOMStorage.setDOMStorageItem requires an active frame for the target origin,
-        # so we can only restore localStorage as we visit each origin.
-        if storage_state is not None:
-            # Store for lazy restore - localStorage will be restored as we visit each origin
-            service.state.pending_storage_state = storage_state
-            service.state.restored_origins.clear()
+        # Lazy restore: if navigate_with_session() was called previously, restore
+        # storage for current origin. This handles multi-origin sessions where the user
+        # navigates to different origins after the initial session import.
+        # The helper is idempotent and checks restored_origins to avoid double-restore.
+        await _restore_pending_storage_for_current_origin(service, driver)
 
-        # ALWAYS try to restore storage for current origin (idempotent)
-        # This handles both initial navigation with storage_state_file AND
-        # subsequent navigations to other origins with pending storage state.
-        # The helper checks restored_origins to avoid double-restore.
-        # Restores: localStorage, sessionStorage, and IndexedDB (if present)
+        return NavigationResult(current_url=driver.current_url, title=driver.title)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Navigate with Session",
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        )
+    )
+    async def navigate_with_session(
+        url: str,
+        # Session source (one required)
+        storage_state_file: str | None = None,
+        chrome_session_profile: str | None = None,
+        origins_filter: Sequence[str] | None = None,
+        # Browser configuration (all fresh_browser capabilities)
+        profile: str | None = None,
+        enable_har_capture: bool = False,
+        init_scripts: Sequence[str] | None = None,
+        ctx: Context | None = None,
+    ) -> NavigationResult:
+        """Launch fresh browser with imported session and navigate.
+
+        PERMISSION SCOPE: This tool imports sensitive authentication data.
+        Requires separate approval from navigate().
+
+        Use this for authenticated automation where you need to:
+        - Import a previously saved session (from save_storage_state or export_chrome_session)
+        - Import session directly from a Chrome profile
+
+        Session Sources (exactly one required):
+        - storage_state_file: Load from Playwright-compatible JSON file
+        - chrome_session_profile: Export and load from Chrome profile
+
+        Args:
+            url: URL to navigate to after session import
+            storage_state_file: Path to session JSON file (from save_storage_state or export_chrome_session)
+            chrome_session_profile: Chrome profile name to import from ("Default", "Profile 1", etc.)
+            origins_filter: Only import origins matching these patterns (e.g., ["amazon.com"])
+                           Works with both storage_state_file and chrome_session_profile.
+            profile: Chrome profile for Selenium to RUN with (separate from import source)
+            enable_har_capture: Enable performance logging for HAR export
+            init_scripts: JavaScript to inject before every page load
+
+        Returns:
+            NavigationResult with current_url and title
+
+        Example - From file:
+            navigate_with_session("https://github.com", storage_state_file="auth.json")
+
+        Example - From Chrome profile:
+            navigate_with_session("https://amazon.com",
+                                  chrome_session_profile="Profile 1",
+                                  origins_filter=["amazon.com"])
+
+        Note:
+            This tool always starts a fresh browser (implicit fresh_browser=True).
+            Use profile param to run Selenium with a specific Chrome profile while
+            importing session from a different source.
+        """
+        # Validate URL
+        valid_prefixes = ("http://", "https://", "file://", "about:", "data:")
+        if not url.startswith(valid_prefixes):
+            raise fastmcp.exceptions.ValidationError(
+                "URL must start with http://, https://, file://, about:, or data:"
+            )
+
+        # Validate session source - exactly one required
+        has_file = storage_state_file is not None
+        has_chrome = chrome_session_profile is not None
+
+        if not has_file and not has_chrome:
+            raise fastmcp.exceptions.ValidationError(
+                "Exactly one of storage_state_file or chrome_session_profile is required. "
+                "Provide a session source to import."
+            )
+
+        if has_file and has_chrome:
+            raise fastmcp.exceptions.ValidationError(
+                "Cannot specify both storage_state_file and chrome_session_profile. "
+                "Choose one session source."
+            )
+
+        # Log what we're doing
+        if has_chrome:
+            print(
+                f"[navigate_with_session] Importing session from Chrome profile '{chrome_session_profile}' "
+                f"and navigating to {url}"
+                + (f" (filtering: {origins_filter})" if origins_filter else "")
+                + (" (HAR capture enabled)" if enable_har_capture else "")
+                + (f" ({len(init_scripts)} init scripts)" if init_scripts else ""),
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"[navigate_with_session] Loading session from {storage_state_file} "
+                f"and navigating to {url}"
+                + (f" (filtering: {origins_filter})" if origins_filter else "")
+                + (" (HAR capture enabled)" if enable_har_capture else "")
+                + (f" ({len(init_scripts)} init scripts)" if init_scripts else ""),
+                file=sys.stderr,
+            )
+
+        # Load storage state from the appropriate source
+        storage_state: StorageState
+
+        if has_chrome:
+            # Export from Chrome profile to temp file, then load
+            # Use TemporaryDirectory as context manager for automatic cleanup
+            with tempfile.TemporaryDirectory(prefix="chrome_session_") as temp_dir:
+                temp_file_path = Path(temp_dir) / "session.json"
+                filter_list = list(origins_filter) if origins_filter else None
+
+                await asyncio.to_thread(
+                    chrome_session_export.export_chrome_session,
+                    output_file=str(temp_file_path),
+                    profile_name=chrome_session_profile,
+                    include_session_storage=True,
+                    include_indexeddb=False,  # IndexedDB schema issues
+                    origins_filter=filter_list,
+                )
+
+                storage_state = await _load_storage_state_from_file(str(temp_file_path))
+
+            print(
+                f"[navigate_with_session] Exported {len(storage_state.cookies)} cookies "
+                f"from Chrome profile '{chrome_session_profile}'",
+                file=sys.stderr,
+            )
+
+        else:
+            # Load from file directly
+            storage_state = await _load_storage_state_from_file(storage_state_file)
+
+            print(
+                f"[navigate_with_session] Loaded {len(storage_state.cookies)} cookies "
+                f"from {storage_state_file}",
+                file=sys.stderr,
+            )
+
+        # Apply origins_filter to loaded storage state if specified
+        if origins_filter and has_file:
+            # Filter cookies
+            filtered_cookies = []
+            for cookie in storage_state.cookies:
+                cookie_domain = cookie.domain.lower().strip(".")
+                for pattern in origins_filter:
+                    pattern_clean = pattern.lower().strip(".")
+                    if cookie_domain == pattern_clean or cookie_domain.endswith("." + pattern_clean):
+                        filtered_cookies.append(cookie)
+                        break
+
+            # Filter origins
+            filtered_origins = []
+            for origin_entry in storage_state.origins:
+                origin_domain = origin_entry.origin.lower()
+                # Extract domain from origin URL
+                if "://" in origin_domain:
+                    origin_domain = origin_domain.split("://", 1)[1]
+                    origin_domain = origin_domain.split("/", 1)[0]
+                    origin_domain = origin_domain.split(":", 1)[0]
+
+                for pattern in origins_filter:
+                    pattern_clean = pattern.lower().strip(".")
+                    if origin_domain == pattern_clean or origin_domain.endswith("." + pattern_clean):
+                        filtered_origins.append(origin_entry)
+                        break
+
+            # Create filtered storage state
+            storage_state = StorageState(
+                cookies=filtered_cookies,
+                origins=filtered_origins,
+            )
+
+            print(
+                f"[navigate_with_session] Filtered to {len(filtered_cookies)} cookies "
+                f"and {len(filtered_origins)} origins matching {origins_filter}",
+                file=sys.stderr,
+            )
+
+        # Always start fresh browser for session import
+        await service.close_browser()
+
+        # Get browser with configuration
+        driver = await service.get_browser(profile=profile, enable_har_capture=enable_har_capture)
+
+        # Install user init scripts (after browser creation, before navigation)
+        if init_scripts:
+            for script in init_scripts:
+                await asyncio.to_thread(
+                    driver.execute_cdp_cmd,
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {"source": script},
+                )
+
+        # Inject cookies via CDP BEFORE navigation
+        cookies_injected = await _inject_cookies_via_cdp(driver, storage_state.cookies)
+
+        print(
+            f"[navigate_with_session] Injected {cookies_injected} cookies via CDP",
+            file=sys.stderr,
+        )
+
+        # PRE-ACTION: Capture localStorage before navigating away
+        await _capture_current_origin_storage(service, driver)
+
+        # Navigate (blocking operation)
+        await asyncio.to_thread(driver.get, url)
+
+        # Track the final origin after redirects
+        final_url = driver.current_url
+        tracked_origin = service.state.origin_tracker.add_origin(final_url)
+
+        print(
+            f"[navigate_with_session] Successfully navigated to {final_url} "
+            f"(tracked origins: {len(service.state.origin_tracker)})",
+            file=sys.stderr,
+        )
+
+        # Setup lazy restore for localStorage/sessionStorage/IndexedDB
+        await _setup_pending_storage_state(service, storage_state)
+
+        # Restore storage for current origin immediately
         await _restore_pending_storage_for_current_origin(service, driver)
 
         return NavigationResult(current_url=driver.current_url, title=driver.title)
@@ -3232,9 +3458,8 @@ Workflow:
             3. navigate("https://example.com/account")  # Navigate to authenticated page
             4. save_storage_state("example_auth.json", include_indexeddb=True)  # Export auth
             5. [Later, in new session:]
-               navigate("https://example.com/account",
-                       fresh_browser=True,
-                       storage_state_file="example_auth.json")  # Restore auth
+               navigate_with_session("https://example.com/account",
+                                     storage_state_file="example_auth.json")  # Restore auth
 
         Format:
             Saves in Playwright storageState JSON format for cross-tool compatibility.
@@ -3467,7 +3692,7 @@ Workflow:
         Workflow:
             1. Log into websites in normal Chrome browser (handles CAPTCHA, MFA)
             2. export_chrome_session("auth.json")  # Capture session from Chrome
-            3. navigate(url, fresh_browser=True, storage_state_file="auth.json")
+            3. navigate_with_session(url, storage_state_file="auth.json")  # Restore auth
 
         Args:
             output_file: Path to save JSON file (e.g., "auth.json")
@@ -3507,7 +3732,7 @@ Workflow:
 
         # Call the sync export function in a thread
         result = await asyncio.to_thread(
-            _export_chrome_session,
+            chrome_session_export.export_chrome_session,
             output_file=output_file,
             profile_name=profile_name,
             include_session_storage=include_session_storage,
