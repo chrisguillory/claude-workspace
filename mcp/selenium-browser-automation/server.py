@@ -734,6 +734,8 @@ def register_tools(service: BrowserService) -> None:
         For performance investigation:
             Use get_resource_timings() after navigation to measure page load timing.
             Use export_har() for detailed HTTP transaction data (requires enable_har_capture=True).
+
+        Note: Single-page apps may ignore URL parameters. Page elements control navigation state.
         """
         valid_prefixes = ("http://", "https://", "file://", "about:", "data:")
         if not url.startswith(valid_prefixes):
@@ -1535,6 +1537,8 @@ def register_tools(service: BrowserService) -> None:
                 attrs.append("checked")
             if node.get("disabled"):
                 attrs.append("disabled")
+            if node.get("url"):
+                attrs.append(f"url={node['url']}")
 
             if attrs:
                 header += f" [{', '.join(attrs)}]"
