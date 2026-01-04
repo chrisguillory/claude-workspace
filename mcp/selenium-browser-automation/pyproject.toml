@@ -1,6 +1,6 @@
 [project]
 name = "selenium-browser-automation-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "Selenium Browser Automation MCP Server - CDP stealth injection for Cloudflare bypass"
 requires-python = ">=3.11"
 dependencies = [
