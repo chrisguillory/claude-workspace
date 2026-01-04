@@ -24,7 +24,7 @@ This document tests the **storage persistence** feature of the Selenium Browser 
 
 - `_capture_current_origin_storage()` - Captures all three storage types before navigation
 - `_restore_pending_storage_for_current_origin()` - Restores all three types lazily
-- `save_storage_state()` - Saves cookies + multi-origin storage to JSON
+- `save_profile_state()` - Saves cookies + multi-origin storage to JSON
 - `BrowserState` caches: `local_storage_cache`, `session_storage_cache`, `indexed_db_cache`
 
 ---
@@ -71,9 +71,9 @@ window.clearAllData()              // Clear all storage types
 ### MCP Tools Used
 
 - `navigate(url, fresh_browser)` - Navigation
-- `navigate_with_session(url, storage_state_file)` - Navigation with session state import
+- `navigate_with_profile_state(url, profile_state_file)` - Navigation with session state import
 - `execute_javascript(code)` - Run JavaScript in page context
-- `save_storage_state(filename, include_indexeddb)` - Export storage state
+- `save_profile_state(filename, include_indexeddb)` - Export storage state
 
 ---
 
@@ -110,7 +110,7 @@ These tests verify multi-origin localStorage capture and restore.
 
 ### Test L1: Multi-Origin Capture
 
-**Goal:** Verify `save_storage_state()` captures localStorage from ALL visited origins, not just the current one.
+**Goal:** Verify `save_profile_state()` captures localStorage from ALL visited origins, not just the current one.
 
 **Why this matters:** CDP DOMStorage can only query the current origin's frame. We cache localStorage before navigating away so departed origins aren't lost.
 
@@ -136,7 +136,7 @@ execute_javascript("window.setTestData({origin: 'port8003', key3: 'value3'})")
 
 4. Save storage state:
 ```
-save_storage_state("test_L1_localstorage.json")
+save_profile_state("test_L1_localstorage.json")
 ```
 
 #### Verify
@@ -174,7 +174,7 @@ Read the JSON file and verify it contains localStorage for all 3 origins:
 
 1. Navigate to first origin with storage state (fresh browser clears previous state):
 ```
-navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_L1_localstorage.json")
+navigate_with_profile_state("http://localhost:8001/storage-test-page.html", profile_state_file="test_L1_localstorage.json")
 ```
 
 2. Verify localStorage on current origin (8001):
@@ -224,7 +224,7 @@ execute_javascript("window.setTestData({origin: 'only8001'})")
 
 2. Save storage state:
 ```
-save_storage_state("test_L3_single.json")
+save_profile_state("test_L3_single.json")
 ```
 
 #### Verify
@@ -260,7 +260,7 @@ execute_javascript("window.setTestData({afterFresh: 'yes'})")
 
 3. Save storage state:
 ```
-save_storage_state("test_L4_fresh.json")
+save_profile_state("test_L4_fresh.json")
 ```
 
 #### Verify
@@ -290,7 +290,7 @@ navigate("http://localhost:8002/storage-test-page.html")
 
 2. Save storage state:
 ```
-save_storage_state("test_L5_empty.json")
+save_profile_state("test_L5_empty.json")
 ```
 
 #### Verify
@@ -314,7 +314,7 @@ sessionStorage follows the same patterns as localStorage, but with session-scope
 
 ### Test S1: Multi-Origin sessionStorage Capture
 
-**Goal:** Verify `save_storage_state()` captures sessionStorage from all visited origins.
+**Goal:** Verify `save_profile_state()` captures sessionStorage from all visited origins.
 
 #### Steps
 
@@ -329,7 +329,7 @@ execute_javascript("window.setSessionData({session: 'port8002', visitId: 'def'})
 
 2. Save storage state:
 ```
-save_storage_state("test_S1_session.json")
+save_profile_state("test_S1_session.json")
 ```
 
 #### Verify
@@ -358,7 +358,7 @@ Read the JSON file and verify sessionStorage is captured:
 
 1. Navigate with storage state:
 ```
-navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_S1_session.json")
+navigate_with_profile_state("http://localhost:8001/storage-test-page.html", profile_state_file="test_S1_session.json")
 execute_javascript("window.getSessionData()")
 ```
 Should return: `{session: "port8001", visitId: "abc"}`
@@ -388,9 +388,9 @@ Should return: `{session: "port8002", visitId: "def"}`
 
 #### Behavior
 
-1. Save sessionStorage via `save_storage_state()`
+1. Save sessionStorage via `save_profile_state()`
 2. Close browser (`fresh_browser=True` on next navigate)
-3. Restore via `navigate_with_session(storage_state_file=...)`
+3. Restore via `navigate_with_profile_state(profile_state_file=...)`
 4. sessionStorage is restored and works during the session
 5. When browser closes again, sessionStorage is cleared
 
@@ -416,7 +416,7 @@ navigate("http://localhost:8002/storage-test-page.html")
 
 2. Save and verify:
 ```
-save_storage_state("test_S4_empty.json")
+save_profile_state("test_S4_empty.json")
 ```
 
 #### Verify
@@ -440,7 +440,7 @@ IndexedDB has unique characteristics:
 
 ### Test I1: Multi-Origin IndexedDB Capture
 
-**Goal:** Verify `save_storage_state(include_indexeddb=True)` captures IndexedDB from all visited origins.
+**Goal:** Verify `save_profile_state(include_indexeddb=True)` captures IndexedDB from all visited origins.
 
 #### Steps
 
@@ -464,7 +464,7 @@ execute_javascript("await window.setIndexedDBData('testDB_8003', 'items', [{id: 
 
 4. Save storage state with IndexedDB:
 ```
-save_storage_state("test_I1_indexeddb.json", include_indexeddb=True)
+save_profile_state("test_I1_indexeddb.json", include_indexeddb=True)
 ```
 
 #### Verify
@@ -515,7 +515,7 @@ Read the JSON file and verify IndexedDB structure:
 
 1. Navigate with storage state:
 ```
-navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_I1_indexeddb.json")
+navigate_with_profile_state("http://localhost:8001/storage-test-page.html", profile_state_file="test_I1_indexeddb.json")
 ```
 
 2. Verify IndexedDB on 8001:
@@ -579,12 +579,12 @@ execute_javascript(`
 
 2. Save storage state:
 ```
-save_storage_state("test_I3_types.json", include_indexeddb=True)
+save_profile_state("test_I3_types.json", include_indexeddb=True)
 ```
 
 3. Fresh browser, restore:
 ```
-navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_I3_types.json")
+navigate_with_profile_state("http://localhost:8001/storage-test-page.html", profile_state_file="test_I3_types.json")
 ```
 
 4. Verify types:
@@ -631,7 +631,7 @@ navigate("http://localhost:8002/storage-test-page.html")
 
 2. Save with IndexedDB:
 ```
-save_storage_state("test_I4_empty.json", include_indexeddb=True)
+save_profile_state("test_I4_empty.json", include_indexeddb=True)
 ```
 
 #### Verify
@@ -662,7 +662,7 @@ execute_javascript("await window.setIndexedDBData('db2', 'store2', [{id: 2, from
 
 2. Save storage state:
 ```
-save_storage_state("test_I5_multi_db.json", include_indexeddb=True)
+save_profile_state("test_I5_multi_db.json", include_indexeddb=True)
 ```
 
 #### Verify
@@ -702,12 +702,12 @@ execute_javascript("await window.setIndexedDBData('combinedDB', 'store', [{id: 2
 
 3. Save storage state:
 ```
-save_storage_state("test_C1_combined.json", include_indexeddb=True)
+save_profile_state("test_C1_combined.json", include_indexeddb=True)
 ```
 
 4. Fresh browser, restore:
 ```
-navigate_with_session("http://localhost:8001/storage-test-page.html", storage_state_file="test_C1_combined.json")
+navigate_with_profile_state("http://localhost:8001/storage-test-page.html", profile_state_file="test_C1_combined.json")
 ```
 
 5. Verify all three on 8001:
@@ -754,7 +754,7 @@ execute_javascript("await window.setIndexedDBData('testDB', 'store', [{id: 1}])"
 
 2. Save WITHOUT include_indexeddb:
 ```
-save_storage_state("test_C2_no_indexeddb.json")
+save_profile_state("test_C2_no_indexeddb.json")
 ```
 
 #### Verify
@@ -847,7 +847,7 @@ This error occurs when trying to set storage for an origin without an active fra
 
 ### Empty Storage State
 
-If `save_storage_state()` returns 0 origins:
+If `save_profile_state()` returns 0 origins:
 1. Verify you set data before navigating away
 2. Check that `fresh_browser=True` wasn't called between setting data and saving
 3. Verify the storage was actually set (use the test page UI to check)

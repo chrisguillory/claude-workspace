@@ -185,7 +185,7 @@ How CiC tools map to SMCP tools:
 
 | CiC Tool(s)             | SMCP Tool(s)                                    |   Type    | Notes                                                                                                     |
 |-------------------------|-------------------------------------------------|:---------:|-----------------------------------------------------------------------------------------------------------|
-| `navigate`              | `navigate`                                      |    1:1    | SMCP adds `fresh_browser`, `profile`, `enable_har_capture`, `init_scripts` params                         |
+| `navigate`              | `navigate`                                      |    1:1    | SMCP adds `fresh_browser`, `enable_har_capture`, `init_scripts` params                                    |
 | `get_page_text`         | `get_page_text`                                 |  Exceeds  | SMCP adds: Shadow DOM traversal, SCRIPT/STYLE filtering, structured output                                |
 | `read_page`             | `get_aria_snapshot`                             |    1:1    | CiC returns ref-based tree; SMCP returns YAML tree                                                        |
 | `find`                  | -                                               |    Gap    | CiC uses natural language; SMCP alternative: `get_interactive_elements`                                   |
@@ -208,7 +208,7 @@ How CiC tools map to SMCP tools:
 | -                       | `configure_proxy`, `clear_proxy`                | SMCP-only | Configure/clear authenticated proxy via mitmproxy for IP rotation                                         |
 | -                       | `download_resource`                             | SMCP-only | Download files using browser session cookies (bypasses bot detection)                                     |
 | -                       | `list_chrome_profiles`                          | SMCP-only | List available Chrome profiles with name, email, directory metadata                                       |
-| -                       | `save_storage_state`                            | SMCP-only | Export cookies + localStorage (+ IndexedDB opt-in) to Playwright-compatible JSON                         |
+| -                       | `save_profile_state`                            | SMCP-only | Export cookies + localStorage (+ IndexedDB opt-in) to Playwright-compatible JSON                         |
 
 See [docs/claude-in-chrome.md](docs/claude-in-chrome.md) for complete Claude in Chrome tool reference.
 
@@ -327,14 +327,16 @@ For same-origin URL changes without page reload (preserving JS state), see the s
 
 Export and restore browser authentication state to avoid repeated logins.
 
-> **Deep Dive:** See [docs/session-persistence.md](docs/session-persistence.md) for complete reference including real-world testing (Marriott case study), automation research, and site-specific patterns.
+> **Deep Dive:** See [docs/profile-state-persistence.md](docs/profile-state-persistence.md) for complete reference including real-world testing (Marriott case study), automation research, and site-specific patterns.
 
 ### The Problem
 
-Chrome profile loading (`profile="Default"`) doesn't work reliably:
+Chrome profile loading doesn't work reliably for session reuse:
 - Chrome locks profiles when running (can't share with Selenium)
 - Even when Chrome is closed, Selenium doesn't read profiles consistently
 - All-or-nothing approach (entire profile, not domain-scoped)
+
+**Note:** The `profile` parameter has been removed from navigation tools. Use `export_chrome_profile_state()` to extract state from Chrome profiles instead.
 
 ### The Solution
 
@@ -347,12 +349,12 @@ navigate("https://example.com/login", fresh_browser=True)
 navigate("https://example.com/account")
 
 # 2. Save authentication state
-save_storage_state("example_auth.json")
+save_profile_state("example_auth.json")
 
 # 3. Later, restore without re-login
-navigate_with_session(
+navigate_with_profile_state(
     "https://example.com/account",
-    storage_state_file="example_auth.json"
+    profile_state_file="example_auth.json"
 )
 # → Already authenticated!
 ```
@@ -372,11 +374,11 @@ navigate_with_session(
 
 ```python
 # Capture IndexedDB (opt-in for backward compatibility)
-save_storage_state("auth.json", include_indexeddb=True)
+save_profile_state("auth.json", include_indexeddb=True)
 # Returns: indexeddb_databases_count, indexeddb_records_count
 
-# Restore happens automatically when storage_state_file contains IndexedDB data
-navigate_with_session(url, storage_state_file="auth.json")
+# Restore happens automatically when profile_state_file contains IndexedDB data
+navigate_with_profile_state(url, profile_state_file="auth.json")
 ```
 
 Complex types are serialized with `__type` markers and restored correctly:
@@ -446,9 +448,9 @@ Parse the exports into Playwright format. Key cookie fields:
 **Step 4: Import and Test**
 
 ```python
-navigate_with_session(
+navigate_with_profile_state(
     "https://www.example.com/account",
-    storage_state_file="example_auth.json"
+    profile_state_file="example_auth.json"
 )
 ```
 
@@ -623,8 +625,8 @@ Ideas without implementation plans:
 ## Tool Reference
 
 ### Navigation & Content
-- `navigate(url, fresh_browser?, profile?, enable_har_capture?, init_scripts?)` - Load URL in browser
-- `navigate_with_session(url, storage_state_file?, chrome_session_profile?, origins_filter?, ...)` - Load URL with session import (separate permission scope)
+- `navigate(url, fresh_browser?, enable_har_capture?, init_scripts?)` - Load URL in browser
+- `navigate_with_profile_state(url, profile_state_file?, chrome_profile?, origins_filter?, ...)` - Load URL with profile state import (separate permission scope)
 - `get_page_text(selector?, include_images?)` - Smart content extraction with semantic element priority (see below)
 - `get_page_html(selector?, limit?)` - Extract raw HTML source or specific elements
 - `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
@@ -728,7 +730,8 @@ See [Wait Strategy Architecture](PLAN-interaction-tools.md#wait-strategy-archite
 - `export_har(filename, include_response_bodies?, max_body_size_mb?)` - Export to HAR file (requires `enable_har_capture=True` on navigate)
 
 ### Session Persistence
-- `save_storage_state(filename, include_indexeddb?)` - Export cookies, localStorage, sessionStorage (+ IndexedDB if opt-in) to Playwright-compatible JSON
+- `save_profile_state(filename, include_indexeddb?)` - Export cookies, localStorage, sessionStorage (+ IndexedDB if opt-in) to Playwright-compatible JSON
+- `export_chrome_profile_state(output_file, chrome_profile?, origins_filter?, ...)` - Export profile state from Chrome files
 
 ### Utilities
 - `download_resource(url, output_filename)` - Download with session cookies
@@ -868,8 +871,8 @@ Compare with Claude in Chrome, which is a browser extension controlling existing
 |--------------------|--------------------------------------------------------------------------|
 | Cookie persistence | Maintained across all tool calls                                         |
 | Fresh session      | `navigate(url, fresh_browser=True)` starts clean                         |
-| Profile loading    | `navigate(url, profile="Default")` uses saved Chrome profile (unreliable)|
-| Storage state      | `save_storage_state()` + `navigate_with_session()` for portable session export/import |
+| Storage state      | `save_profile_state()` + `navigate_with_profile_state()` for portable profile state export/import |
+| Chrome export      | `export_chrome_profile_state()` extracts state from Chrome profile files |
 
 ### Network Capture Design
 
