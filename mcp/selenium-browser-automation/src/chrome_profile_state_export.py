@@ -1,16 +1,16 @@
 """
-Chrome Session State Export
+Chrome Profile State Export
 
-Exports session state (cookies, localStorage, sessionStorage, IndexedDB) from
+Exports browser state (cookies, localStorage, sessionStorage, IndexedDB) from
 Chrome profile files for use in Selenium automation.
 
 This enables the workflow:
 1. User logs into websites in normal Chrome (handles CAPTCHA, MFA manually)
-2. Export session state from Chrome profile files
-3. Import into Selenium via navigate_with_session(storage_state_file=...)
-4. Continue automation with authenticated session
+2. Export profile state from Chrome profile files
+3. Import into Selenium via navigate_with_profile_state(profile_state_file=...)
+4. Continue automation with authenticated state
 
-Storage Types Captured (matching save_storage_state):
+Storage Types Captured (matching save_profile_state):
 - Cookies: Full attributes including sameSite via DIY Keychain decryption
 - localStorage: All origins from LevelDB
 - sessionStorage: All origins from LevelDB (Chrome persists to disk)
@@ -23,7 +23,7 @@ Dependencies:
 Limitations:
 - macOS only (Windows/Linux require different key retrieval)
 - First run prompts for Keychain access - click "Always Allow"
-- IndexedDB exports records without schema; full restoration requires save_storage_state
+- IndexedDB exports records without schema; full restoration requires save_profile_state
 
 Cookie Decryption (DIY implementation):
 - Keychain: "Chrome Safe Storage" password (SHARED across all profiles)
@@ -34,83 +34,29 @@ Cookie Decryption (DIY implementation):
 
 from __future__ import annotations
 
-import re
 import hashlib
-import json
 import os
+import re
 import sqlite3
 import subprocess
-from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
 from ccl_chromium_reader import (
     ccl_chromium_indexeddb,
     ccl_chromium_localstorage,
     ccl_chromium_sessionstorage,
 )
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 
-
-# =============================================================================
-# Type Definitions
-# =============================================================================
-
-# Typed dictionaries for export data structures
-# These match the existing Pydantic models in models.py for compatibility
-
-
-@dataclass(frozen=True)
-class CookieData:
-    """Cookie with full Playwright-compatible attributes."""
-
-    name: str
-    value: str
-    domain: str
-    path: str
-    expires: float  # Unix timestamp, -1 for session cookies
-    httpOnly: bool
-    secure: bool
-    sameSite: str  # "Strict", "Lax", or "None"
-
-    def to_dict(self) -> Mapping[str, Any]:
-        """Convert to dict for JSON serialization."""
-        return {
-            "name": self.name,
-            "value": self.value,
-            "domain": self.domain,
-            "path": self.path,
-            "expires": self.expires,
-            "httpOnly": self.httpOnly,
-            "secure": self.secure,
-            "sameSite": self.sameSite,
-        }
-
-
-@dataclass(frozen=True)
-class StorageItem:
-    """localStorage or sessionStorage key-value pair."""
-
-    name: str
-    value: str
-
-    def to_dict(self) -> Mapping[str, str]:
-        """Convert to dict for JSON serialization."""
-        return {"name": self.name, "value": self.value}
-
-
-@dataclass
-class ExportResult:
-    """Result of Chrome session export."""
-
-    path: str
-    cookie_count: int
-    origin_count: int
-    local_storage_keys: int
-    session_storage_keys: int
-    indexeddb_origins: int
-    warnings: Sequence[str] = field(default_factory=list)
+from .models import (
+    ChromeProfileStateExportResult,
+    ProfileState,
+    ProfileStateCookie,
+    ProfileStateOriginStorage,
+)
 
 
 # =============================================================================
@@ -441,7 +387,7 @@ def _decrypt_cookie_value(
 def export_cookies(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> Sequence[CookieData]:
+) -> Sequence[ProfileStateCookie]:
     """Export cookies from any Chrome profile with full decryption.
 
     Unlike browser-cookie3, this supports ANY Chrome profile, not just Default.
@@ -452,7 +398,7 @@ def export_cookies(
         origins_filter: Optional domain patterns to include
 
     Returns:
-        Sequence of CookieData
+        Sequence of ProfileStateCookie models
 
     Raises:
         FileNotFoundError: If Cookies database doesn't exist
@@ -460,7 +406,7 @@ def export_cookies(
         sqlite3.Error: If database read fails
         ValueError: If cookie decryption fails
     """
-    cookies: list[CookieData] = []
+    cookies: list[ProfileStateCookie] = []
 
     cookies_db = profile_path / "Cookies"
     if not cookies_db.exists():
@@ -520,15 +466,15 @@ def export_cookies(
                 expires = -1.0  # Session cookie
 
             cookies.append(
-                CookieData(
+                ProfileStateCookie(
                     name=name,
                     value=cookie_value,
                     domain=host,
                     path=path,
                     expires=expires,
-                    httpOnly=bool(httponly),
+                    http_only=bool(httponly),
                     secure=bool(secure),
-                    sameSite=_SAMESITE_MAP.get(samesite, "Lax"),
+                    same_site=_SAMESITE_MAP.get(samesite, "Lax"),
                 )
             )
     finally:
@@ -545,7 +491,7 @@ def export_cookies(
 def export_local_storage(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> Mapping[str, Sequence[StorageItem]]:
+) -> Mapping[str, Mapping[str, str]]:
     """Export localStorage from Chrome's LevelDB.
 
     Args:
@@ -553,12 +499,12 @@ def export_local_storage(
         origins_filter: Optional origin patterns to include
 
     Returns:
-        Mapping of {origin: [StorageItem, ...]}
+        Mapping of {origin: {key: value, ...}}
 
     Raises:
         FileNotFoundError: If localStorage path doesn't exist
     """
-    storage: dict[str, list[StorageItem]] = {}
+    storage: dict[str, dict[str, str]] = {}
 
     # CRITICAL: localStorage is in "Local Storage/leveldb/", not "Local Storage/"
     leveldb_path = profile_path / "Local Storage" / "leveldb"
@@ -574,12 +520,10 @@ def export_local_storage(
                 if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
                     continue
 
-            origin_storage: list[StorageItem] = []
+            origin_storage: dict[str, str] = {}
             for record in ls.iter_records_for_storage_key(storage_key):
                 value = str(record.value) if record.value else ""
-                origin_storage.append(
-                    StorageItem(name=record.script_key, value=value)
-                )
+                origin_storage[record.script_key] = value
 
             if origin_storage:
                 storage[storage_key] = origin_storage
@@ -595,7 +539,7 @@ def export_local_storage(
 def export_session_storage(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> Mapping[str, Sequence[StorageItem]]:
+) -> Mapping[str, Mapping[str, str]]:
     """Export sessionStorage from Chrome's LevelDB.
 
     Chrome persists sessionStorage to disk for session recovery, enabling
@@ -607,12 +551,12 @@ def export_session_storage(
         origins_filter: Optional origin patterns to include
 
     Returns:
-        Mapping of {origin: [StorageItem, ...]}
+        Mapping of {origin: {key: value, ...}}
 
     Raises:
         FileNotFoundError: If sessionStorage path doesn't exist
     """
-    storage: dict[str, list[StorageItem]] = {}
+    storage: dict[str, dict[str, str]] = {}
 
     session_storage_path = profile_path / "Session Storage"
 
@@ -627,10 +571,10 @@ def export_session_storage(
                 if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
                     continue
 
-            origin_storage: list[StorageItem] = []
+            origin_storage: dict[str, str] = {}
             for record in ss.iter_records_for_host(host):
                 value = str(record.value) if record.value else ""
-                origin_storage.append(StorageItem(name=record.key, value=value))
+                origin_storage[record.key] = value
 
             if origin_storage:
                 storage[host] = origin_storage
@@ -651,7 +595,7 @@ def export_indexeddb(
 
     LIMITATION: ccl_chromium_reader cannot extract schema metadata (version,
     keyPath, autoIncrement, indexes). Only database/store names and records
-    are available. Full restoration requires save_storage_state() from a
+    are available. Full restoration requires save_profile_state() from a
     Selenium session.
 
     Args:
@@ -722,41 +666,41 @@ def export_indexeddb(
 # =============================================================================
 
 
-def export_chrome_session(
+def export_chrome_profile_state(
     output_file: str,
-    profile_name: str = "Default",
+    chrome_profile: str = "Default",
     include_session_storage: bool = True,
     include_indexeddb: bool = False,
     origins_filter: Sequence[str] | None = None,
-) -> ExportResult:
-    """Export Chrome session state to Playwright-compatible JSON.
+) -> ChromeProfileStateExportResult:
+    """Export Chrome profile state to ProfileState JSON format.
 
-    Produces JSON compatible with navigate_with_session(storage_state_file=...) for
-    restoring authenticated sessions in Selenium automation.
+    Produces JSON compatible with navigate_with_profile_state(profile_state_file=...)
+    for restoring authenticated state in Selenium automation.
 
     Args:
         output_file: Path to save JSON output
-        profile_name: Chrome profile name ("Default", "Profile 1", etc.)
+        chrome_profile: Chrome profile name ("Default", "Profile 1", etc.)
         include_session_storage: Include sessionStorage (default True)
         include_indexeddb: Include IndexedDB records (default False)
         origins_filter: Only export origins matching these patterns
 
     Returns:
-        ExportResult with statistics and warnings
+        ChromeProfileStateExportResult with statistics
 
     Example:
         # After logging into sites in Chrome...
-        result = export_chrome_session("auth.json", origins_filter=["github.com"])
+        result = export_chrome_profile_state("auth.json", origins_filter=["github.com"])
 
         # Then in Selenium:
-        navigate_with_session("https://github.com", storage_state_file="auth.json")
+        navigate_with_profile_state("https://github.com", profile_state_file="auth.json")
     """
     # Fail if output file exists - delete first to replace
     if Path(output_file).expanduser().exists():
         raise FileExistsError(f"Output file already exists: {output_file}")
 
     # Resolve profile path
-    profile_path = get_chrome_profile_path(profile_name)
+    profile_path = get_chrome_profile_path(chrome_profile)
 
     # Validate filter patterns
     if origins_filter:
@@ -766,14 +710,14 @@ def export_chrome_session(
     # Convert to list for filtering if provided
     filter_list = list(origins_filter) if origins_filter else None
 
-    # Export cookies
+    # Export cookies (already returns Sequence[ProfileStateCookie])
     cookies = export_cookies(profile_path, filter_list)
 
-    # Export localStorage
+    # Export localStorage (returns Mapping[origin, Mapping[key, value]])
     local_storage = export_local_storage(profile_path, filter_list)
 
     # Export sessionStorage (optional, default on)
-    session_storage: Mapping[str, Sequence[StorageItem]] = {}
+    session_storage: Mapping[str, Mapping[str, str]] = {}
     if include_session_storage:
         session_storage = export_session_storage(profile_path, filter_list)
 
@@ -782,52 +726,48 @@ def export_chrome_session(
     if include_indexeddb:
         indexeddb = export_indexeddb(profile_path, filter_list)
 
-    # Build origins array (Playwright-compatible StorageStateOrigin format)
+    # Build origins dict with ProfileStateOriginStorage models
     all_origins = set(local_storage.keys()) | set(session_storage.keys())
-    origins_list: list[dict[str, Any]] = []
+    origins_data: dict[str, ProfileStateOriginStorage] = {}
 
-    for origin in sorted(all_origins):
-        origin_data: dict[str, Any] = {"origin": origin}
+    for origin in all_origins:
+        # Get localStorage for this origin (empty dict if not present)
+        ls_data = dict(local_storage.get(origin, {}))
 
-        # localStorage is REQUIRED by StorageStateOrigin model - always include it
-        if origin in local_storage:
-            origin_data["localStorage"] = [item.to_dict() for item in local_storage[origin]]
-        else:
-            origin_data["localStorage"] = []
+        # Get sessionStorage for this origin (None if not present)
+        ss_data = dict(session_storage[origin]) if origin in session_storage else None
 
-        # sessionStorage is optional - only include if present
-        if origin in session_storage:
-            origin_data["sessionStorage"] = [item.to_dict() for item in session_storage[origin]]
+        origins_data[origin] = ProfileStateOriginStorage(
+            local_storage=ls_data,
+            session_storage=ss_data,
+            indexed_db=None,  # IndexedDB from Chrome export lacks schema
+        )
 
-        origins_list.append(origin_data)
+    # Build ProfileState with typed models
+    profile_state = ProfileState(
+        schema_version="1.0",
+        captured_at=datetime.now(UTC).isoformat(),
+        cookies=list(cookies),
+        origins=origins_data,
+    )
 
-    # Build final output (Playwright storageState format)
-    output: dict[str, Any] = {
-        "cookies": [cookie.to_dict() for cookie in cookies],
-        "origins": origins_list,
-    }
-
-    # IndexedDB uses simplified format (records only, no schema)
-    if indexeddb:
-        output["indexedDB"] = dict(indexeddb)
-
-    # Write to file with secure permissions from the start (avoid TOCTOU race)
-    # SECURITY: Output contains sensitive auth tokens - create with 0o600, not umask
+    # Write to file with secure permissions (avoid TOCTOU race)
+    # SECURITY: Output contains sensitive auth tokens - create with 0o600
     output_path = Path(output_file).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
-        json.dump(output, f, indent=2, default=str)
+        f.write(profile_state.model_dump_json(indent=2))
 
     # Calculate statistics
-    ls_keys = sum(len(items) for items in local_storage.values())
-    ss_keys = sum(len(items) for items in session_storage.values())
+    ls_keys = sum(len(storage) for storage in local_storage.values())
+    ss_keys = sum(len(storage) for storage in session_storage.values())
 
-    return ExportResult(
+    return ChromeProfileStateExportResult(
         path=str(output_path),
         cookie_count=len(cookies),
-        origin_count=len(origins_list),
+        origin_count=len(origins_data),
         local_storage_keys=ls_keys,
         session_storage_keys=ss_keys,
         indexeddb_origins=len(indexeddb),

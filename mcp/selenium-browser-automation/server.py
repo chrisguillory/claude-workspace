@@ -90,19 +90,18 @@ from src.models import (
     FocusableElement,
     SmartExtractionInfo,
     PageTextResult,
-    # Storage state (session persistence)
-    StorageStateCookie,
-    StorageStateLocalStorageItem,
-    StorageStateOrigin,
-    StorageState,
-    SaveStorageStateResult,
+    # Profile state (browser state persistence)
+    ProfileStateCookie,
+    ProfileStateOriginStorage,
+    ProfileState,
+    SaveProfileStateResult,
     # Console logs
     ConsoleLogEntry,
     ConsoleLogsResult,
-    # Chrome session export
-    ChromeSessionExportResult,
+    # Chrome profile state export
+    ChromeProfileStateExportResult,
 )
-from src import chrome_session_export
+from src import chrome_profile_state_export
 
 
 class PrintLogger:
@@ -262,13 +261,13 @@ async def _capture_current_origin_storage(
         print(f"[storage] Cached {' + '.join(parts)} for {current_origin}", file=sys.stderr)
 
 
-async def _restore_pending_storage_for_current_origin(
+async def _restore_pending_profile_state_for_current_origin(
     service: BrowserService,
     driver: webdriver.Chrome,
 ) -> None:
     """Restore localStorage, sessionStorage, and IndexedDB for current origin.
 
-    Called after navigation to check if we have pending storage for the
+    Called after navigation to check if we have pending profile state for the
     new current origin. Tracks restored origins to avoid double-restore which
     could overwrite page modifications.
 
@@ -279,7 +278,7 @@ async def _restore_pending_storage_for_current_origin(
     Note: sessionStorage is session-scoped. Restoring it to a new browser context
     works, but the data will be lost when the browser closes (correct browser behavior).
     """
-    if not service.state.pending_storage_state:
+    if not service.state.pending_profile_state:
         return
 
     current_origin = await asyncio.to_thread(
@@ -295,22 +294,18 @@ async def _restore_pending_storage_for_current_origin(
     if current_origin in service.state.restored_origins:
         return  # Already restored in this session
 
-    # Find storage data for this origin
-    origin_data = None
-    for origin_entry in service.state.pending_storage_state.origins:
-        if origin_entry.origin == current_origin:
-            origin_data = origin_entry
-            break
+    # Find storage data for this origin (dict lookup, not array iteration)
+    origin_data = service.state.pending_profile_state.origins.get(current_origin)
 
     if not origin_data:
         # Mark as checked so we don't repeatedly search for non-existent origin
         service.state.restored_origins.add(current_origin)
         return
 
-    # Check if there's anything to restore
-    has_local_storage = origin_data.localStorage and len(origin_data.localStorage) > 0
-    has_session_storage = origin_data.sessionStorage and len(origin_data.sessionStorage) > 0
-    has_indexed_db = origin_data.indexedDB and len(origin_data.indexedDB) > 0
+    # Check if there's anything to restore (snake_case fields, dict-based storage)
+    has_local_storage = origin_data.local_storage and len(origin_data.local_storage) > 0
+    has_session_storage = origin_data.session_storage and len(origin_data.session_storage) > 0
+    has_indexed_db = origin_data.indexed_db and len(origin_data.indexed_db) > 0
 
     if not has_local_storage and not has_session_storage and not has_indexed_db:
         service.state.restored_origins.add(current_origin)
@@ -323,13 +318,15 @@ async def _restore_pending_storage_for_current_origin(
         await _cdp_enable_domstorage(driver)
 
         if has_local_storage:
-            for item in origin_data.localStorage:
-                await _cdp_set_storage(driver, current_origin, item.name, item.value, is_local=True)
+            # local_storage is dict[str, str] in new format
+            for name, value in origin_data.local_storage.items():
+                await _cdp_set_storage(driver, current_origin, name, value, is_local=True)
                 local_count += 1
 
         if has_session_storage:
-            for item in origin_data.sessionStorage:
-                await _cdp_set_storage(driver, current_origin, item.name, item.value, is_local=False)
+            # session_storage is dict[str, str] in new format
+            for name, value in origin_data.session_storage.items():
+                await _cdp_set_storage(driver, current_origin, name, value, is_local=False)
                 session_count += 1
 
     # Restore IndexedDB via JavaScript (CDP has no write API)
@@ -338,7 +335,7 @@ async def _restore_pending_storage_for_current_origin(
     # to set up the arguments array. Wrap in IIFE so 'return' statement works.
     indexeddb_count = 0
     if has_indexed_db:
-        databases_list = [db.model_dump() for db in origin_data.indexedDB]
+        databases_list = [db.model_dump() for db in origin_data.indexed_db]
         databases_json = json.dumps(databases_list)
         async_wrapper = f"""
             var callback = arguments[arguments.length - 1];
@@ -369,19 +366,19 @@ async def _restore_pending_storage_for_current_origin(
 
 
 # =============================================================================
-# Storage State Import Helpers
+# Profile State Import Helpers
 # =============================================================================
 
 
-async def _load_storage_state_from_file(file_path: str) -> StorageState:
-    """Load and validate storage state from JSON file.
+async def _load_profile_state_from_file(file_path: str) -> ProfileState:
+    """Load and validate profile state from JSON file.
 
     Args:
-        file_path: Path to Playwright-compatible storage state JSON.
-                   Relative paths are resolved from current working directory.
+        file_path: Path to profile state JSON file.
+                   Relative paths resolved from current working directory.
 
     Returns:
-        Parsed and validated StorageState model.
+        Parsed and validated ProfileState model.
 
     Raises:
         ToolError: If file not found or invalid JSON/schema.
@@ -392,24 +389,26 @@ async def _load_storage_state_from_file(file_path: str) -> StorageState:
 
     if not state_path.exists():
         raise fastmcp.exceptions.ToolError(
-            f"Storage state file not found: {state_path}"
+            f"Profile state file not found: {state_path}"
         )
 
-    storage_state_json = state_path.read_text()
-    return StorageState.model_validate_json(storage_state_json)
+    profile_state_json = state_path.read_text()
+    return ProfileState.model_validate_json(profile_state_json)
 
 
 async def _inject_cookies_via_cdp(
     driver: webdriver.Chrome,
-    cookies: Sequence[StorageStateCookie],
+    cookies: Sequence[ProfileStateCookie],
 ) -> int:
     """Inject cookies via CDP Network.setCookies.
 
     Cookies are set BEFORE navigation so they're sent with the request.
+    CDP API requires camelCase field names, so we convert from our
+    snake_case ProfileStateCookie fields.
 
     Args:
         driver: WebDriver instance with CDP support.
-        cookies: Sequence of StorageStateCookie objects.
+        cookies: Sequence of ProfileStateCookie objects.
 
     Returns:
         Number of cookies injected.
@@ -417,7 +416,6 @@ async def _inject_cookies_via_cdp(
     if not cookies:
         return 0
 
-    # Convert storageState cookies to CDP format
     cdp_cookies = []
     for cookie in cookies:
         cdp_cookie = {
@@ -425,9 +423,9 @@ async def _inject_cookies_via_cdp(
             "value": cookie.value,
             "domain": cookie.domain,
             "path": cookie.path,
-            "httpOnly": cookie.httpOnly,
+            "httpOnly": cookie.http_only,
             "secure": cookie.secure,
-            "sameSite": cookie.sameSite,
+            "sameSite": cookie.same_site,
         }
         # Handle session cookies (expires: -1) vs persistent cookies
         # For CDP, omit expires for session cookies
@@ -446,9 +444,9 @@ async def _inject_cookies_via_cdp(
     return len(cdp_cookies)
 
 
-async def _setup_pending_storage_state(
+async def _setup_pending_profile_state(
     service: "BrowserService",
-    storage_state: StorageState,
+    profile_state: ProfileState,
 ) -> None:
     """Configure lazy restore for localStorage/sessionStorage/IndexedDB.
 
@@ -458,9 +456,9 @@ async def _setup_pending_storage_state(
 
     Args:
         service: BrowserService instance.
-        storage_state: StorageState to restore lazily.
+        profile_state: ProfileState to restore lazily.
     """
-    service.state.pending_storage_state = storage_state
+    service.state.pending_profile_state = profile_state
     service.state.restored_origins.clear()
 
 
@@ -469,7 +467,7 @@ class OriginTracker:
 
     CDP storage APIs require explicit origin specification - they have no enumeration
     API (security by design). This tracker maintains a set of all origins visited
-    via navigate() so save_storage_state() knows which origins to query.
+    via navigate() so save_profile_state() knows which origins to query.
 
     Origin format: scheme://host:port (e.g., "https://example.com", "http://localhost:8080")
     Port is included only if non-default (not 80 for http, not 443 for https).
@@ -571,8 +569,8 @@ class BrowserState:
         self.local_storage_cache: dict[str, list[dict]] = {}
         self.session_storage_cache: dict[str, list[dict]] = {}
         self.indexed_db_cache: dict[str, list[dict]] = {}  # origin -> list of database dicts
-        # Lazy restore: pending storage state and tracking of already-restored origins
-        self.pending_storage_state: StorageState | None = None
+        # Lazy restore: pending profile state and tracking of already-restored origins
+        self.pending_profile_state: ProfileState | None = None
         self.restored_origins: set[str] = set()
 
 
@@ -589,44 +587,31 @@ class BrowserService:
         self.state = state  # Non-Optional - guaranteed by constructor
 
     async def close_browser(self) -> None:
-        """Tear down browser and reset profile state.
+        """Tear down browser and clear session state.
 
         Also clears origin tracking since a fresh browser is a fresh session.
         """
         if self.state.driver:
             await asyncio.to_thread(self.state.driver.quit)
             self.state.driver = None
-        self.state.current_profile = None
         # Clear origin tracking and storage caches - new browser = new session
         self.state.origin_tracker.clear()
         self.state.local_storage_cache.clear()
         self.state.session_storage_cache.clear()
         self.state.indexed_db_cache.clear()
         # Clear lazy restore state - new browser = fresh session
-        self.state.pending_storage_state = None
+        self.state.pending_profile_state = None
         self.state.restored_origins.clear()
 
-    async def get_browser(self, profile: str | None = None, enable_har_capture: bool = False) -> webdriver.Chrome:
+    async def get_browser(self, enable_har_capture: bool = False) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
         Args:
-            profile: Chrome profile directory (e.g., "Default", "Profile 1")
-                     If None, uses fresh temporary profile (no saved logins)
+            enable_har_capture: Enable Chrome performance logging for HAR export.
 
         Returns:
             WebDriver instance
-
-        Raises:
-            ValidationError: If specified profile doesn't exist
-
-        Note: If profile changes from current session, browser will be recreated.
-              Chrome locks profiles, so you can't have the same profile open in both
-              regular Chrome and this automation at the same time.
         """
-        # If profile changed, need fresh browser
-        if self.state.driver is not None and profile != self.state.current_profile:
-            await self.close_browser()
-
         if self.state.driver is not None:
             return self.state.driver
 
@@ -663,24 +648,8 @@ class BrowserService:
             opts.add_argument('--ignore-certificate-errors')  # mitmproxy uses self-signed certs
             print(f"[browser] Using local mitmproxy -> {self.state.proxy_config['host']}:{self.state.proxy_config['port']}", file=sys.stderr)
 
-        # Add profile if specified
-        if profile:
-            chrome_base = get_chrome_base_path()
-            profile_path = chrome_base / profile
-
-            if not profile_path.exists():
-                raise fastmcp.exceptions.ValidationError(
-                    f"Chrome profile not found: {profile}\n"
-                    f"Use list_chrome_profiles() to see available profiles"
-                )
-
-            opts.add_argument(f"--user-data-dir={chrome_base}")
-            opts.add_argument(f"--profile-directory={profile}")
-            print(f"[browser] Using Chrome profile: {profile}", file=sys.stderr)
-
         # Initialize driver in thread pool (blocking operation)
         self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
-        self.state.current_profile = profile
 
         # CRITICAL: CDP injection AFTER driver creation but BEFORE first navigation
         # This is what makes Selenium bypass Cloudflare where Playwright fails
@@ -714,7 +683,6 @@ def register_tools(service: BrowserService) -> None:
     async def navigate(
         url: str,
         fresh_browser: bool = False,
-        profile: str | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
         ctx: Context | None = None,
@@ -727,7 +695,6 @@ def register_tools(service: BrowserService) -> None:
         Args:
             url: Full URL (http:// or https://)
             fresh_browser: If True, creates clean session (no cache/cookies)
-            profile: Chrome profile directory for authenticated sessions (e.g., "Default")
             enable_har_capture: If True, enables performance logging for HAR export.
                                Requires fresh_browser=True (adds overhead, must be set at browser init).
             init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
@@ -795,7 +762,7 @@ def register_tools(service: BrowserService) -> None:
         if fresh_browser:
             await service.close_browser()
 
-        driver = await service.get_browser(profile=profile, enable_har_capture=enable_har_capture)
+        driver = await service.get_browser(enable_har_capture=enable_har_capture)
 
         # Install user init scripts (after browser creation, before navigation)
         # Scripts registered here run on EVERY new document in this session
@@ -824,54 +791,52 @@ def register_tools(service: BrowserService) -> None:
             file=sys.stderr,
         )
 
-        # Lazy restore: if navigate_with_session() was called previously, restore
+        # Lazy restore: if navigate_with_profile_state() was called previously, restore
         # storage for current origin. This handles multi-origin sessions where the user
         # navigates to different origins after the initial session import.
         # The helper is idempotent and checks restored_origins to avoid double-restore.
-        await _restore_pending_storage_for_current_origin(service, driver)
+        await _restore_pending_profile_state_for_current_origin(service, driver)
 
         return NavigationResult(current_url=driver.current_url, title=driver.title)
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Navigate with Session",
+            title="Navigate with Profile State",
             destructiveHint=False,
             idempotentHint=False,
             openWorldHint=True,
         )
     )
-    async def navigate_with_session(
+    async def navigate_with_profile_state(
         url: str,
-        # Session source (one required)
-        storage_state_file: str | None = None,
-        chrome_session_profile: str | None = None,
+        # Profile state source (one required)
+        profile_state_file: str | None = None,
+        chrome_profile: str | None = None,
         origins_filter: Sequence[str] | None = None,
         # Browser configuration (all fresh_browser capabilities)
-        profile: str | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
         ctx: Context | None = None,
     ) -> NavigationResult:
-        """Launch fresh browser with imported session and navigate.
+        """Launch fresh browser with imported profile state and navigate.
 
         PERMISSION SCOPE: This tool imports sensitive authentication data.
         Requires separate approval from navigate().
 
         Use this for authenticated automation where you need to:
-        - Import a previously saved session (from save_storage_state or export_chrome_session)
-        - Import session directly from a Chrome profile
+        - Import a previously saved profile state (from save_profile_state or export_chrome_profile_state)
+        - Import profile state directly from a Chrome profile
 
-        Session Sources (exactly one required):
-        - storage_state_file: Load from Playwright-compatible JSON file
-        - chrome_session_profile: Export and load from Chrome profile
+        Profile State Sources (exactly one required):
+        - profile_state_file: Load from ProfileState JSON file
+        - chrome_profile: Export and load from Chrome profile
 
         Args:
-            url: URL to navigate to after session import
-            storage_state_file: Path to session JSON file (from save_storage_state or export_chrome_session)
-            chrome_session_profile: Chrome profile name to import from ("Default", "Profile 1", etc.)
+            url: URL to navigate to after profile state import
+            profile_state_file: Path to ProfileState JSON file (from save_profile_state or export_chrome_profile_state)
+            chrome_profile: Chrome profile name to import from ("Default", "Profile 1", etc.)
             origins_filter: Only import origins matching these patterns (e.g., ["amazon.com"])
-                           Works with both storage_state_file and chrome_session_profile.
-            profile: Chrome profile for Selenium to RUN with (separate from import source)
+                           Works with both profile_state_file and chrome_profile.
             enable_har_capture: Enable performance logging for HAR export
             init_scripts: JavaScript to inject before every page load
 
@@ -879,17 +844,15 @@ def register_tools(service: BrowserService) -> None:
             NavigationResult with current_url and title
 
         Example - From file:
-            navigate_with_session("https://github.com", storage_state_file="auth.json")
+            navigate_with_profile_state("https://github.com", profile_state_file="auth.json")
 
         Example - From Chrome profile:
-            navigate_with_session("https://amazon.com",
-                                  chrome_session_profile="Profile 1",
-                                  origins_filter=["amazon.com"])
+            navigate_with_profile_state("https://amazon.com",
+                                        chrome_profile="Profile 1",
+                                        origins_filter=["amazon.com"])
 
         Note:
             This tool always starts a fresh browser (implicit fresh_browser=True).
-            Use profile param to run Selenium with a specific Chrome profile while
-            importing session from a different source.
         """
         # Validate URL
         valid_prefixes = ("http://", "https://", "file://", "about:", "data:")
@@ -898,26 +861,26 @@ def register_tools(service: BrowserService) -> None:
                 "URL must start with http://, https://, file://, about:, or data:"
             )
 
-        # Validate session source - exactly one required
-        has_file = storage_state_file is not None
-        has_chrome = chrome_session_profile is not None
+        # Validate profile state source - exactly one required
+        has_file = profile_state_file is not None
+        has_chrome = chrome_profile is not None
 
         if not has_file and not has_chrome:
             raise fastmcp.exceptions.ValidationError(
-                "Exactly one of storage_state_file or chrome_session_profile is required. "
-                "Provide a session source to import."
+                "Exactly one of profile_state_file or chrome_profile is required. "
+                "Provide a profile state source to import."
             )
 
         if has_file and has_chrome:
             raise fastmcp.exceptions.ValidationError(
-                "Cannot specify both storage_state_file and chrome_session_profile. "
-                "Choose one session source."
+                "Cannot specify both profile_state_file and chrome_profile. "
+                "Choose one profile state source."
             )
 
         # Log what we're doing
         if has_chrome:
             print(
-                f"[navigate_with_session] Importing session from Chrome profile '{chrome_session_profile}' "
+                f"[navigate_with_profile_state] Importing profile state from Chrome profile '{chrome_profile}' "
                 f"and navigating to {url}"
                 + (f" (filtering: {origins_filter})" if origins_filter else "")
                 + (" (HAR capture enabled)" if enable_har_capture else "")
@@ -926,7 +889,7 @@ def register_tools(service: BrowserService) -> None:
             )
         else:
             print(
-                f"[navigate_with_session] Loading session from {storage_state_file} "
+                f"[navigate_with_profile_state] Loading profile state from {profile_state_file} "
                 f"and navigating to {url}"
                 + (f" (filtering: {origins_filter})" if origins_filter else "")
                 + (" (HAR capture enabled)" if enable_har_capture else "")
@@ -934,48 +897,48 @@ def register_tools(service: BrowserService) -> None:
                 file=sys.stderr,
             )
 
-        # Load storage state from the appropriate source
-        storage_state: StorageState
+        # Load profile state from the appropriate source
+        profile_state: ProfileState
 
         if has_chrome:
             # Export from Chrome profile to temp file, then load
             # Use TemporaryDirectory as context manager for automatic cleanup
-            with tempfile.TemporaryDirectory(prefix="chrome_session_") as temp_dir:
-                temp_file_path = Path(temp_dir) / "session.json"
+            with tempfile.TemporaryDirectory(prefix="chrome_profile_state_") as temp_dir:
+                temp_file_path = Path(temp_dir) / "profile_state.json"
                 filter_list = list(origins_filter) if origins_filter else None
 
                 await asyncio.to_thread(
-                    chrome_session_export.export_chrome_session,
+                    chrome_profile_state_export.export_chrome_profile_state,
                     output_file=str(temp_file_path),
-                    profile_name=chrome_session_profile,
+                    chrome_profile=chrome_profile,
                     include_session_storage=True,
                     include_indexeddb=False,  # IndexedDB schema issues
                     origins_filter=filter_list,
                 )
 
-                storage_state = await _load_storage_state_from_file(str(temp_file_path))
+                profile_state = await _load_profile_state_from_file(str(temp_file_path))
 
             print(
-                f"[navigate_with_session] Exported {len(storage_state.cookies)} cookies "
-                f"from Chrome profile '{chrome_session_profile}'",
+                f"[navigate_with_profile_state] Exported {len(profile_state.cookies)} cookies "
+                f"from Chrome profile '{chrome_profile}'",
                 file=sys.stderr,
             )
 
         else:
             # Load from file directly
-            storage_state = await _load_storage_state_from_file(storage_state_file)
+            profile_state = await _load_profile_state_from_file(profile_state_file)
 
             print(
-                f"[navigate_with_session] Loaded {len(storage_state.cookies)} cookies "
-                f"from {storage_state_file}",
+                f"[navigate_with_profile_state] Loaded {len(profile_state.cookies)} cookies "
+                f"from {profile_state_file}",
                 file=sys.stderr,
             )
 
-        # Apply origins_filter to loaded storage state if specified
+        # Apply origins_filter to loaded profile state if specified
         if origins_filter and has_file:
             # Filter cookies
             filtered_cookies = []
-            for cookie in storage_state.cookies:
+            for cookie in profile_state.cookies:
                 cookie_domain = cookie.domain.lower().strip(".")
                 for pattern in origins_filter:
                     pattern_clean = pattern.lower().strip(".")
@@ -983,10 +946,10 @@ def register_tools(service: BrowserService) -> None:
                         filtered_cookies.append(cookie)
                         break
 
-            # Filter origins
-            filtered_origins = []
-            for origin_entry in storage_state.origins:
-                origin_domain = origin_entry.origin.lower()
+            # Filter origins (dict-based in new format)
+            filtered_origins: dict[str, ProfileStateOriginStorage] = {}
+            for origin_url, origin_data in profile_state.origins.items():
+                origin_domain = origin_url.lower()
                 # Extract domain from origin URL
                 if "://" in origin_domain:
                     origin_domain = origin_domain.split("://", 1)[1]
@@ -996,17 +959,17 @@ def register_tools(service: BrowserService) -> None:
                 for pattern in origins_filter:
                     pattern_clean = pattern.lower().strip(".")
                     if origin_domain == pattern_clean or origin_domain.endswith("." + pattern_clean):
-                        filtered_origins.append(origin_entry)
+                        filtered_origins[origin_url] = origin_data
                         break
 
-            # Create filtered storage state
-            storage_state = StorageState(
-                cookies=filtered_cookies,
+            # Create filtered profile state
+            profile_state = ProfileState(
+                cookies=list(filtered_cookies),
                 origins=filtered_origins,
             )
 
             print(
-                f"[navigate_with_session] Filtered to {len(filtered_cookies)} cookies "
+                f"[navigate_with_profile_state] Filtered to {len(filtered_cookies)} cookies "
                 f"and {len(filtered_origins)} origins matching {origins_filter}",
                 file=sys.stderr,
             )
@@ -1015,7 +978,7 @@ def register_tools(service: BrowserService) -> None:
         await service.close_browser()
 
         # Get browser with configuration
-        driver = await service.get_browser(profile=profile, enable_har_capture=enable_har_capture)
+        driver = await service.get_browser(enable_har_capture=enable_har_capture)
 
         # Install user init scripts (after browser creation, before navigation)
         if init_scripts:
@@ -1027,10 +990,10 @@ def register_tools(service: BrowserService) -> None:
                 )
 
         # Inject cookies via CDP BEFORE navigation
-        cookies_injected = await _inject_cookies_via_cdp(driver, storage_state.cookies)
+        cookies_injected = await _inject_cookies_via_cdp(driver, profile_state.cookies)
 
         print(
-            f"[navigate_with_session] Injected {cookies_injected} cookies via CDP",
+            f"[navigate_with_profile_state] Injected {cookies_injected} cookies via CDP",
             file=sys.stderr,
         )
 
@@ -1045,16 +1008,16 @@ def register_tools(service: BrowserService) -> None:
         tracked_origin = service.state.origin_tracker.add_origin(final_url)
 
         print(
-            f"[navigate_with_session] Successfully navigated to {final_url} "
+            f"[navigate_with_profile_state] Successfully navigated to {final_url} "
             f"(tracked origins: {len(service.state.origin_tracker)})",
             file=sys.stderr,
         )
 
         # Setup lazy restore for localStorage/sessionStorage/IndexedDB
-        await _setup_pending_storage_state(service, storage_state)
+        await _setup_pending_profile_state(service, profile_state)
 
         # Restore storage for current origin immediately
-        await _restore_pending_storage_for_current_origin(service, driver)
+        await _restore_pending_profile_state_for_current_origin(service, driver)
 
         return NavigationResult(current_url=driver.current_url, title=driver.title)
 
@@ -1820,7 +1783,7 @@ def register_tools(service: BrowserService) -> None:
             service.state.origin_tracker.add_origin(url_after)
             await logger.info(f"Navigation detected: {url_before} -> {url_after}")
             # Lazy restore: if we navigated to a new origin with pending storage state
-            await _restore_pending_storage_for_current_origin(service, driver)
+            await _restore_pending_profile_state_for_current_origin(service, driver)
 
         await logger.info("Click successful")
 
@@ -1945,7 +1908,7 @@ def register_tools(service: BrowserService) -> None:
             service.state.origin_tracker.add_origin(url_after)
             await logger.info(f"Navigation detected: {url_before} -> {url_after}")
             # Lazy restore: if we navigated to a new origin with pending storage state
-            await _restore_pending_storage_for_current_origin(service, driver)
+            await _restore_pending_profile_state_for_current_origin(service, driver)
 
         await logger.info("Key press successful")
 
@@ -3416,16 +3379,16 @@ Workflow:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Save Storage State",
+            title="Save Profile State",
             readOnlyHint=False,
             idempotentHint=False,
         )
     )
-    async def save_storage_state(
+    async def save_profile_state(
         filename: str,
         include_indexeddb: bool = False,
         ctx: Context | None = None,
-    ) -> SaveStorageStateResult:
+    ) -> SaveProfileStateResult:
         """Export browser storage state to Playwright-compatible JSON for session persistence.
 
         Captures cookies, localStorage, and sessionStorage that maintain authenticated sessions.
@@ -3439,7 +3402,7 @@ Workflow:
                               Default False for backward compatibility and performance.
 
         Returns:
-            SaveStorageStateResult with path, cookie count, and metadata
+            SaveProfileStateResult with path, cookie count, and metadata
 
         What's captured:
             - All cookies with full attributes (HttpOnly, Secure, SameSite, expires)
@@ -3456,10 +3419,10 @@ Workflow:
             1. navigate("https://example.com/login", fresh_browser=True)
             2. [Complete login flow - click buttons, enter credentials, etc.]
             3. navigate("https://example.com/account")  # Navigate to authenticated page
-            4. save_storage_state("example_auth.json", include_indexeddb=True)  # Export auth
+            4. save_profile_state("example_auth.json", include_indexeddb=True)  # Export auth
             5. [Later, in new session:]
-               navigate_with_session("https://example.com/account",
-                                     storage_state_file="example_auth.json")  # Restore auth
+               navigate_with_profile_state("https://example.com/account",
+                                           profile_state_file="example_auth.json")  # Restore auth
 
         Format:
             Saves in Playwright storageState JSON format for cross-tool compatibility.
@@ -3494,30 +3457,26 @@ Workflow:
 
         cdp_cookies = cookies_result.get("cookies", [])
 
-        # Convert CDP cookies to storageState format
-        storage_cookies: list[dict] = []
+        # Convert CDP cookies to ProfileStateCookie models
+        profile_cookies: list[ProfileStateCookie] = []
         for cookie in cdp_cookies:
-            # CDP returns `session: true` for session cookies, otherwise `expires` timestamp
-            # For storageState format: session cookies have expires=-1
             is_session = cookie.get("session", False)
             expires = -1.0 if is_session else cookie.get("expires", -1.0)
 
-            # Normalize sameSite - CDP should return "Strict", "Lax", or "None"
-            # but handle edge cases
             same_site = cookie.get("sameSite", "Lax")
             if same_site not in ("Strict", "Lax", "None"):
-                same_site = "Lax"  # Default fallback
+                same_site = "Lax"
 
-            storage_cookies.append({
-                "name": cookie["name"],
-                "value": cookie["value"],
-                "domain": cookie["domain"],
-                "path": cookie["path"],
-                "expires": expires,
-                "httpOnly": cookie.get("httpOnly", False),
-                "secure": cookie.get("secure", False),
-                "sameSite": same_site,
-            })
+            profile_cookies.append(ProfileStateCookie(
+                name=cookie["name"],
+                value=cookie["value"],
+                domain=cookie["domain"],
+                path=cookie["path"],
+                expires=expires,
+                http_only=cookie.get("httpOnly", False),
+                secure=cookie.get("secure", False),
+                same_site=same_site,
+            ))
 
         # Get current origin (for result metadata)
         current_origin = await asyncio.to_thread(
@@ -3536,12 +3495,14 @@ Workflow:
         tracked_origins = service.state.origin_tracker.get_origins()
         await _cdp_enable_domstorage(driver)
 
-        origins_data: list[dict] = []
+        # Build origins as dict[str, ProfileStateOriginStorage]
+        origins_data: dict[str, ProfileStateOriginStorage] = {}
         total_localstorage_items = 0
         total_sessionstorage_items = 0
+        indexeddb_databases_count = 0
+        indexeddb_records_count = 0
 
         for origin in tracked_origins:
-            # Skip special origins
             if origin.startswith(("chrome://", "about:", "data:", "blob:", "file://")):
                 continue
 
@@ -3561,9 +3522,7 @@ Workflow:
             else:
                 session_storage_items = []
 
-            # Capture IndexedDB if requested: cache for departed origins, live for current
-            # Note: INDEXEDDB_CAPTURE_SCRIPT returns a Promise, must use execute_async_script.
-            # Wrap in IIFE so 'return' statement works, then chain .then() on the Promise.
+            # Capture IndexedDB if requested
             indexeddb_databases: list[dict] = []
             if include_indexeddb:
                 if origin == current_origin:
@@ -3582,26 +3541,22 @@ Workflow:
 
             # Only add origin if it has any storage
             if local_storage_items or session_storage_items or indexeddb_databases:
-                origin_entry: dict = {
-                    "origin": origin,
-                    "localStorage": local_storage_items,
-                }
-                if session_storage_items:
-                    origin_entry["sessionStorage"] = session_storage_items
-                if indexeddb_databases:
-                    origin_entry["indexedDB"] = indexeddb_databases
+                # Convert array of {name, value} to dict[str, str]
+                local_storage_dict = {item["name"]: item["value"] for item in local_storage_items}
+                session_storage_dict = {item["name"]: item["value"] for item in session_storage_items} if session_storage_items else None
 
-                origins_data.append(origin_entry)
+                origins_data[origin] = ProfileStateOriginStorage(
+                    local_storage=local_storage_dict,
+                    session_storage=session_storage_dict,
+                    indexed_db=indexeddb_databases if indexeddb_databases else None,
+                )
+
                 total_localstorage_items += len(local_storage_items)
                 total_sessionstorage_items += len(session_storage_items)
 
-        # Count IndexedDB databases and records for result metadata
-        indexeddb_databases_count = 0
-        indexeddb_records_count = 0
-        if include_indexeddb:
-            for origin_entry in origins_data:
-                if "indexedDB" in origin_entry:
-                    for db in origin_entry["indexedDB"]:
+                # Count IndexedDB for metadata
+                if indexeddb_databases:
+                    for db in indexeddb_databases:
                         indexeddb_databases_count += 1
                         for store in db.get("objectStores", []):
                             indexeddb_records_count += len(store.get("records", []))
@@ -3619,14 +3574,11 @@ Workflow:
             f"across {len(origins_data)} origins (of {len(tracked_origins)} tracked)"
         )
 
-        # Build storageState structure with all captured origins
-        storage_state_data = {
-            "cookies": storage_cookies,
-            "origins": origins_data,
-        }
-
-        # Validate with Pydantic before saving
-        validated_state = StorageState(**storage_state_data)
+        # Build ProfileState with typed models
+        profile_state = ProfileState(
+            cookies=profile_cookies,
+            origins=origins_data,
+        )
 
         # Determine file path (allow absolute or relative to cwd)
         file_path = Path(filename)
@@ -3634,12 +3586,12 @@ Workflow:
             file_path = Path.cwd() / filename
 
         # Save to file
-        json_content = validated_state.model_dump_json(indent=2)
+        json_content = profile_state.model_dump_json(indent=2)
         file_path.write_text(json_content)
 
-        result = SaveStorageStateResult(
+        result = SaveProfileStateResult(
             path=str(file_path),
-            cookies_count=len(storage_cookies),
+            cookies_count=len(profile_cookies),
             origins_count=len(origins_data),
             current_origin=current_origin,
             size_bytes=len(json_content),
@@ -3666,46 +3618,46 @@ Workflow:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Export Chrome Session",
+            title="Export Chrome Profile State",
             readOnlyHint=True,
             idempotentHint=True,
         )
     )
-    async def export_chrome_session(
+    async def export_chrome_profile_state(
         output_file: str,
-        profile_name: str = "Default",
+        chrome_profile: str = "Default",
         include_session_storage: bool = True,
         include_indexeddb: bool = False,
         origins_filter: Sequence[str] | None = None,
         ctx: Context | None = None,
-    ) -> ChromeSessionExportResult:
-        """Export session state from Chrome's profile files for use in automation.
+    ) -> ChromeProfileStateExportResult:
+        """Export profile state from Chrome's profile files for use in automation.
 
         Captures cookies, localStorage, sessionStorage, and optionally IndexedDB
         from a standalone Chrome browser's profile files. Works with running Chrome.
-        Outputs Playwright-compatible JSON for use with storage_state_file.
+        Outputs Playwright-compatible JSON for use with profile_state_file.
 
-        This complements save_storage_state() which exports from a Selenium-controlled
+        This complements save_profile_state() which exports from a Selenium-controlled
         browser. Use this when you've logged in manually in Chrome and want to
-        capture that authenticated session for automation.
+        capture that authenticated profile state for automation.
 
         Workflow:
             1. Log into websites in normal Chrome browser (handles CAPTCHA, MFA)
-            2. export_chrome_session("auth.json")  # Capture session from Chrome
-            3. navigate_with_session(url, storage_state_file="auth.json")  # Restore auth
+            2. export_chrome_profile_state("auth.json")  # Capture profile state
+            3. navigate_with_profile_state(url, profile_state_file="auth.json")  # Restore
 
         Args:
             output_file: Path to save JSON file (e.g., "auth.json")
-            profile_name: Chrome profile name ("Default", "Profile 1", etc.)
+            chrome_profile: Chrome profile name ("Default", "Profile 1", etc.)
             include_session_storage: Include sessionStorage (default True)
             include_indexeddb: Include IndexedDB records (default False, can be 200MB+)
             origins_filter: Only export origins matching these patterns
                            (e.g., ["github.com", "google.com"])
 
         Returns:
-            ChromeSessionExportResult with counts and any warnings
+            ChromeProfileStateExportResult with counts and any warnings
 
-        Storage Types (matches save_storage_state):
+        Storage Types (matches save_profile_state):
             - Cookies: Full attributes including sameSite
             - localStorage: All origins
             - sessionStorage: All origins (Chrome persists to disk)
@@ -3715,7 +3667,7 @@ Workflow:
             - macOS only (Windows/Linux untested)
             - First run prompts for Keychain access - click "Always Allow"
             - IndexedDB exports records without schema (version, keyPath, indexes)
-            - For full IndexedDB support, use save_storage_state() from Selenium
+            - For full IndexedDB support, use save_profile_state() from Selenium
 
         Security:
             Output file created with 0o600 permissions (owner read/write only).
@@ -3724,7 +3676,7 @@ Workflow:
         logger = PrintLogger(ctx)
 
         await logger.info(
-            f"Exporting Chrome session from profile '{profile_name}' to {output_file}"
+            f"Exporting Chrome profile state from profile '{chrome_profile}' to {output_file}"
         )
 
         # Convert Sequence to list for the export function
@@ -3732,9 +3684,9 @@ Workflow:
 
         # Call the sync export function in a thread
         result = await asyncio.to_thread(
-            chrome_session_export.export_chrome_session,
+            chrome_profile_state_export.export_chrome_profile_state,
             output_file=output_file,
-            profile_name=profile_name,
+            chrome_profile=chrome_profile,
             include_session_storage=include_session_storage,
             include_indexeddb=include_indexeddb,
             origins_filter=filter_list,
@@ -3757,7 +3709,7 @@ Workflow:
         if result.warnings:
             await logger.info(f"Warnings: {len(result.warnings)}")
 
-        return ChromeSessionExportResult(
+        return ChromeProfileStateExportResult(
             path=result.path,
             cookie_count=result.cookie_count,
             origin_count=result.origin_count,

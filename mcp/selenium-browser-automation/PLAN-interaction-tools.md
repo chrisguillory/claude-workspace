@@ -174,7 +174,7 @@ Captures session state from standalone Chrome for Selenium automation.
 - `ObjectStoreMetadataType.KeyPath`
 - `ObjectStoreMetadataType.AutoIncrementFlag`
 
-Records can be exported but schema cannot be recreated. For full IndexedDB support, use `save_storage_state()` from a Selenium session.
+Records can be exported but schema cannot be recreated. For full IndexedDB support, use `save_profile_state()` from a Selenium session.
 
 ---
 

@@ -20,8 +20,8 @@ Export browser storage state (cookies + localStorage) to a portable JSON format,
 
 | Workflow | When to Use |
 |----------|-------------|
-| **Selenium-native** | Login via Selenium → `save_storage_state()` → later `navigate_with_session(storage_state_file=...)` |
-| **Chrome-to-Selenium** | Login in Chrome proper → `export_chrome_session()` OR manual export → `navigate_with_session(storage_state_file=...)` |
+| **Selenium-native** | Login via Selenium → `save_profile_state()` → later `navigate_with_profile_state(profile_state_file=...)` |
+| **Chrome-to-Selenium** | Login in Chrome proper → `export_chrome_profile_state()` OR manual export → `navigate_with_profile_state(profile_state_file=...)` |
 
 The Chrome-to-Selenium workflow is valuable when:
 - Sites with bot detection block Selenium login but accept Chrome-established sessions
@@ -125,7 +125,7 @@ We use Playwright's storageState JSON format for cross-tool compatibility. Files
 
 ### Import Behavior
 
-When `storage_state_file` is provided to `navigate_with_session()`:
+When `profile_state_file` is provided to `navigate_with_profile_state()`:
 
 1. **Cookies set via CDP BEFORE navigation** - Sent with the initial HTTP request
 2. **localStorage restored AFTER navigation** - Requires origin context (page must load first)
@@ -236,9 +236,9 @@ with open("auth.json", "w") as f:
 ### Step 5: Test Import
 
 ```python
-navigate_with_session(
+navigate_with_profile_state(
     "https://www.example.com/account",
-    storage_state_file="auth.json"
+    profile_state_file="auth.json"
 )
 ```
 
@@ -451,7 +451,7 @@ async function exportSession() {
   // Download as file
   const blob = new Blob([JSON.stringify(storageState, null, 2)], {type: "application/json"});
   const downloadUrl = URL.createObjectURL(blob);
-  chrome.downloads.download({url: downloadUrl, filename: "session.json"});
+  chrome.downloads.download({url: downloadUrl, filename: "profile_state.json"});
 }
 ```
 
@@ -485,10 +485,10 @@ New tool `import_from_chrome()` that:
 @mcp.tool()
 async def import_from_chrome(
     domain: str | None = None,
-    output_file: str = "session.json",
+    output_file: str = "profile_state.json",
 ) -> ImportResult:
     """
-    Import session from running Chrome (requires --remote-debugging-port=9222).
+    Import profile state from running Chrome (requires --remote-debugging-port=9222).
 
     If Chrome isn't running with debugging enabled, returns instructions.
     """
@@ -550,7 +550,7 @@ javascript:(function(){
   const state = {cookies, origins: [{origin: location.origin, localStorage: ls}]};
   const blob = new Blob([JSON.stringify(state, null, 2)], {type: 'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = location.hostname + '_session.json'; a.click();
+  a.download = location.hostname + '_profile_state.json'; a.click();
 })();
 ```
 

@@ -509,16 +509,20 @@ class PageTextResult(BaseModel):
 
 
 # =============================================================================
-# Storage State Models (Playwright-compatible session persistence)
+# Profile State Models (Browser state persistence)
 # =============================================================================
 
 SameSitePolicy = Literal["Strict", "Lax", "None"]
 
 
-class StorageStateCookie(BaseModel):
-    """Cookie in Playwright storageState format.
+class ProfileStateCookie(BaseModel):
+    """Cookie in profile state format.
 
-    Matches Playwright's cookie structure for cross-tool compatibility.
+    Cookies are stored at the top level of ProfileState (not under origins) because
+    they use domain+path scoping, not strict origin scoping. A single cookie for
+    ".example.com" applies to multiple origins: https://example.com,
+    https://www.example.com, https://api.example.com, etc.
+
     Session cookies use expires=-1, persistent cookies use epoch timestamp.
     """
 
@@ -527,19 +531,12 @@ class StorageStateCookie(BaseModel):
     domain: str
     path: str
     expires: float  # Epoch seconds, -1 for session cookies
-    httpOnly: bool
+    http_only: bool
     secure: bool
-    sameSite: SameSitePolicy
+    same_site: SameSitePolicy
 
 
-class StorageStateLocalStorageItem(BaseModel):
-    """localStorage key-value pair in storageState format."""
-
-    name: str
-    value: str
-
-
-class StorageStateIndexedDBRecord(BaseModel):
+class ProfileStateIndexedDBRecord(BaseModel):
     """IndexedDB record - key/value pair.
 
     Keys can be strings, numbers, dates (as ISO strings), or arrays (compound keys).
@@ -558,74 +555,91 @@ class StorageStateIndexedDBRecord(BaseModel):
     value: str | int | float | bool | dict | list | None
 
 
-class StorageStateIndexedDBIndex(BaseModel):
+class ProfileStateIndexedDBIndex(BaseModel):
     """IndexedDB object store index metadata."""
 
     name: str
-    keyPath: str | Sequence[str]
+    key_path: str | Sequence[str]
     unique: bool
-    multiEntry: bool
+    multi_entry: bool
 
 
-class StorageStateIndexedDBObjectStore(BaseModel):
+class ProfileStateIndexedDBObjectStore(BaseModel):
     """IndexedDB object store with schema and data.
 
     Captures the complete state of an object store including:
-    - Schema: keyPath, autoIncrement, indexes
+    - Schema: key_path, auto_increment, indexes
     - Data: all records as key/value pairs
     """
 
     name: str
-    keyPath: str | Sequence[str] | None
-    autoIncrement: bool
-    indexes: Sequence[StorageStateIndexedDBIndex]
-    records: Sequence[StorageStateIndexedDBRecord]
+    key_path: str | Sequence[str] | None
+    auto_increment: bool
+    indexes: Sequence[ProfileStateIndexedDBIndex]
+    records: Sequence[ProfileStateIndexedDBRecord]
 
 
-class StorageStateIndexedDB(BaseModel):
+class ProfileStateIndexedDB(BaseModel):
     """IndexedDB database with version and object stores.
 
-    Playwright-compatible format for IndexedDB persistence.
     The version number is critical for schema migrations.
     """
 
-    databaseName: str
+    name: str
     version: int
-    objectStores: Sequence[StorageStateIndexedDBObjectStore]
+    object_stores: Sequence[ProfileStateIndexedDBObjectStore]
 
 
-class StorageStateOrigin(BaseModel):
-    """Origin storage data in storageState format.
+class ProfileStateOriginStorage(BaseModel):
+    """Storage data for a single origin.
 
-    Each origin (scheme + domain + port) has isolated storage.
-    sessionStorage and IndexedDB are optional.
+    Each origin (scheme://host:port) has isolated storage per the same-origin policy.
+    All storage types for this origin are grouped together.
 
-    Note: sessionStorage is session-scoped by design. Restored sessionStorage
+    Note: session_storage is session-scoped by design. Restored session_storage
     persists only for the lifetime of the browser context - closing the browser
-    clears it. For cross-session persistence, use localStorage or cookies.
+    clears it. For cross-session persistence, use local_storage or cookies.
     """
 
-    origin: str  # e.g., "https://www.marriott.com"
-    localStorage: Sequence[StorageStateLocalStorageItem]
-    sessionStorage: Sequence[StorageStateLocalStorageItem] | None = None
-    indexedDB: Sequence[StorageStateIndexedDB] | None = None
+    local_storage: dict[str, str]
+    session_storage: dict[str, str] | None = None
+    indexed_db: Sequence[ProfileStateIndexedDB] | None = None
 
 
-class StorageState(BaseModel):
-    """Playwright-compatible storage state for session persistence.
+class ProfileState(BaseModel):
+    """Browser profile state for session persistence.
 
-    Contains browser storage that maintains authenticated sessions.
-    Export after login, import to restore auth in future sessions.
+    Captures browser state that maintains authenticated sessions:
+    - Cookies (domain-scoped, stored at top level)
+    - Per-origin storage (localStorage, sessionStorage, IndexedDB)
 
-    Format matches Playwright's browserContext.storageState() for portability.
+    Design Principles:
+    - Cookies are top-level because they use domain+path scoping, not origin scoping.
+      A single cookie can match multiple origins.
+    - Storage is origin-keyed because localStorage/sessionStorage/IndexedDB use strict
+      origin scoping (scheme://host:port must match exactly).
+    - Format designed for future expansion: extensions, permissions, preferences.
+
+    See docs/browser-data-taxonomy.md for detailed architecture documentation.
     """
 
-    cookies: Sequence[StorageStateCookie]
-    origins: Sequence[StorageStateOrigin]
+    schema_version: str = "1.0"
+    captured_at: str | None = None  # ISO 8601 timestamp
+
+    # Cookies: domain+path scoped, top-level (see docstring for rationale)
+    cookies: Sequence[ProfileStateCookie]
+
+    # Storage: origin-scoped, keyed by origin string (e.g., "https://example.com")
+    origins: dict[str, ProfileStateOriginStorage]
+
+    # Future expansion slots (not yet implemented)
+    extensions: dict | None = None
+    permissions: dict | None = None
+    preferences: dict | None = None
 
 
-class SaveStorageStateResult(BaseModel):
-    """Result from save_storage_state operation."""
+class SaveProfileStateResult(BaseModel):
+    """Result from save_profile_state operation."""
 
     path: str
     cookies_count: int
@@ -660,26 +674,26 @@ class ConsoleLogsResult(BaseModel):
 
 
 # =============================================================================
-# Chrome Session Export Models
+# Chrome Profile State Export Models
 # =============================================================================
 
 
-class ChromeSessionExportResult(BaseModel):
-    """Result of exporting Chrome session state from profile files.
+class ChromeProfileStateExportResult(BaseModel):
+    """Result of exporting Chrome profile state from profile files.
 
-    This model is returned by export_chrome_session() which reads session state
-    directly from Chrome's profile directory (cookies, localStorage, sessionStorage,
+    Returned by export_chrome_profile_state() which reads profile state directly
+    from Chrome's profile directory (cookies, localStorage, sessionStorage,
     IndexedDB) for use in Selenium automation.
 
-    Complements save_storage_state() which exports from a running Selenium browser.
-    Use export_chrome_session when you've logged in manually and want to capture
-    that authenticated session for automation.
+    Complements save_profile_state() which exports from a running Selenium browser.
+    Use export_chrome_profile_state when you've logged in manually and want to
+    capture that authenticated state for automation.
 
     Limitations:
-        IndexedDB exports records only. Schema metadata (version, keyPath,
-        autoIncrement, indexes) is not available from Chrome's LevelDB files
+        IndexedDB exports records only. Schema metadata (version, key_path,
+        auto_increment, indexes) is not available from Chrome's LevelDB files
         via ccl_chromium_reader. For full IndexedDB support, use
-        save_storage_state() from a Selenium session instead.
+        save_profile_state() from a Selenium session instead.
     """
 
     path: str
