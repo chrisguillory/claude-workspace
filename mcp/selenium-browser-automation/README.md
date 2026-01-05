@@ -403,6 +403,22 @@ Complex types are serialized with `__type` markers and restored correctly:
 
 - **Token expiration**: Tokens may expire between save and restore
 - **Navigate first**: Must be on a page before saving (need origin context)
+- **Application-compressed data**: Some sites (notably Slack) compress sessionStorage values using libraries like `lz-string`. You'll see decode warnings like `Error decoding record value... b"\x00\x84..."` - this is expected behavior, not a bug. The compressed bytes are captured and restored correctly; they just can't be displayed as readable text.
+
+### Implementation Notes
+
+The storage persistence feature uses different libraries optimized for each storage type:
+
+| Storage Type   | Library                | Why                                                                                |
+|----------------|------------------------|------------------------------------------------------------------------------------|
+| Cookies        | DIY (AES + Keychain)   | `browser-cookie3` hardcodes Default profile; we need multi-profile support         |
+| localStorage   | `ccl_chromium_reader`  | Pure Python LevelDB parser, handles Chrome's protobuf format                       |
+| sessionStorage | `ccl_chromium_reader`  | Same library, handles Chrome's UTF-16-LE encoding                                  |
+| IndexedDB      | `dfindexeddb`          | Google's library with full schema extraction (version, keyPath, indexes)           |
+
+**Why DIY for cookies?** The `browser-cookie3` library hardcodes the path to Chrome's "Default" profile. We needed to support any profile (`Profile 1`, `Profile 2`, etc.), so we implemented AES-128-CBC decryption directly using macOS Keychain for the encryption key. This matches what `browser-cookie3`, `pycookiecheat`, and `HackBrowserData` do internally.
+
+**Why dfindexeddb for IndexedDB?** We initially used `ccl_chromium_reader` for IndexedDB but discovered it only exports records, not schema (version, keyPath, autoIncrement, indexes). Without schema, restoration fails silently. Google's `dfindexeddb` provides complete schema extraction.
 
 ### Manual Export from Chrome
 
