@@ -67,11 +67,14 @@ This replaces the complex workaround of:
 - PYTHONPATH=. ensures the project root is on Python's path
 """
 
+from __future__ import annotations
+
 import os
 import signal
 import subprocess
 import sys
 from pathlib import Path
+from types import FrameType
 
 
 def find_project_root(script_path: Path) -> Path:
@@ -79,17 +82,17 @@ def find_project_root(script_path: Path) -> Path:
     current = script_path.parent
 
     while current != current.parent:
-        if (current / "pyproject.toml").exists():
+        if (current / 'pyproject.toml').exists():
             return current
         current = current.parent
 
-    raise FileNotFoundError(f"No pyproject.toml found above {script_path}")
+    raise FileNotFoundError(f'No pyproject.toml found above {script_path}')
 
 
 def main() -> None:
     """Run script with project-relative discovery and PYTHONPATH."""
     if len(sys.argv) < 2:
-        sys.exit("Usage: uv-wrapper.py /path/to/script.py [args...]")
+        sys.exit('Usage: uv-wrapper.py /path/to/script.py [args...]')
 
     script_path = Path(sys.argv[1]).resolve()
     script_args = sys.argv[2:]  # Pass through any additional arguments
@@ -99,12 +102,15 @@ def main() -> None:
 
     # Run with PYTHONPATH=. from project directory, with signal forwarding
     with subprocess.Popen(
-        ["uv", "run", "python", str(relative_script), *script_args],
+        ['uv', 'run', 'python', str(relative_script), *script_args],
         cwd=project_root,
-        env={**os.environ, "PYTHONPATH": ".",}
+        env={
+            **os.environ,
+            'PYTHONPATH': '.',
+        },
     ) as proc:
         # Forward signals to child process for graceful shutdown
-        def forward_signal(sig, frame):
+        def forward_signal(sig: int, frame: FrameType | None) -> None:
             proc.send_signal(sig)
 
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -114,5 +120,5 @@ def main() -> None:
         sys.exit(proc.wait())
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

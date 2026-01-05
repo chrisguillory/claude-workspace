@@ -219,23 +219,18 @@ from __future__ import annotations
 # Using absolute imports (import X) for libraries with multiple used types/functions
 # to make it explicit which library provides what, improving readability when
 # coupling multiple frameworks (MCP, FastAPI, Pydantic, asyncio, socket, etc.)
-
 import ast
 import asyncio
 import contextlib
 import datetime
 import functools
-import glob
 import importlib
 import io
-import json
 import os
 import pathlib
-import socket
 import subprocess
 import sys
 import tempfile
-import textwrap
 import traceback
 import typing
 import uuid
@@ -243,16 +238,16 @@ import uuid
 # Third-party imports
 import attrs
 
-# MCP imports
-import mcp.types
-import mcp.server.fastmcp
-
 # FastAPI imports
 import fastapi
-import uvicorn
+import mcp.server.fastmcp
+
+# MCP imports
+import mcp.types
 
 # Pydantic imports
 import pydantic
+import uvicorn
 
 # Local library imports
 from local_lib.utils import DualLogger, humanize_seconds
@@ -274,14 +269,14 @@ class MaxInstallAttemptsError(Exception):
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
 
-    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
 
 
 class ExecuteCodeInput(BaseModel):
     """Input model for execute tool."""
 
     code: str = pydantic.Field(
-        description="Python code to execute (can be multi-line)",
+        description='Python code to execute (can be multi-line)',
         min_length=1,
         max_length=100_000,
     )
@@ -345,24 +340,32 @@ async def _discover_session_id(session_marker: str) -> str:
     Raises:
         RuntimeError: If debug directory doesn't exist or session ID cannot be found after retries
     """
-    debug_dir = pathlib.Path.home() / ".claude" / "debug"
+    debug_dir = pathlib.Path.home() / '.claude' / 'debug'
     if not debug_dir.exists():
-        raise RuntimeError(f"Claude debug directory not found: {debug_dir}")
+        raise RuntimeError(f'Claude debug directory not found: {debug_dir}')
 
     # Retry up to 10 times to handle race condition where log hasn't flushed yet
     # Claude Code buffers log writes, so we need longer waits (200ms × 10 = ~2s max)
-    print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Starting session discovery for marker: {session_marker}", file=sys.stderr, flush=True)
+    print(
+        f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Starting session discovery for marker: {session_marker}',
+        file=sys.stderr,
+        flush=True,
+    )
 
     for attempt in range(20):
-        print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Attempt {attempt + 1}/20", file=sys.stderr, flush=True)
+        print(
+            f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Attempt {attempt + 1}/20',
+            file=sys.stderr,
+            flush=True,
+        )
 
         result = subprocess.run(
             [
-                "rg",
-                "-l",
-                "--fixed-strings",
-                "--glob",
-                "*.txt",
+                'rg',
+                '-l',
+                '--fixed-strings',
+                '--glob',
+                '*.txt',
                 session_marker,
                 debug_dir.as_posix(),
             ],
@@ -371,24 +374,38 @@ async def _discover_session_id(session_marker: str) -> str:
             timeout=2,
         )
 
-        print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] rg returncode={result.returncode}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}", file=sys.stderr, flush=True)
+        print(
+            f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] rg returncode={result.returncode}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}',
+            file=sys.stderr,
+            flush=True,
+        )
 
         if result.returncode == 0 and result.stdout.strip():
             # rg found the marker - extract session ID from first matching file
-            first_match = result.stdout.strip().split("\n")[0]
+            first_match = result.stdout.strip().split('\n')[0]
             session_id = pathlib.Path(first_match).stem
-            print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] SUCCESS - Found session ID: {session_id}", file=sys.stderr, flush=True)
+            print(
+                f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] SUCCESS - Found session ID: {session_id}',
+                file=sys.stderr,
+                flush=True,
+            )
             return session_id
 
         # Not found yet - wait briefly before retrying (except on last attempt)
         if attempt < 19:
-            print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Not found, sleeping 50ms before retry", file=sys.stderr, flush=True)
+            print(
+                f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Not found, sleeping 50ms before retry',
+                file=sys.stderr,
+                flush=True,
+            )
             await asyncio.sleep(0.05)
 
-    print(f"[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] FAILED after 20 attempts", file=sys.stderr, flush=True)
-    raise RuntimeError(
-        f"Could not find session marker in any debug log files in {debug_dir} after 20 attempts"
+    print(
+        f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] FAILED after 20 attempts',
+        file=sys.stderr,
+        flush=True,
     )
+    raise RuntimeError(f'Could not find session marker in any debug log files in {debug_dir} after 20 attempts')
 
 
 @functools.cache
@@ -400,7 +417,7 @@ def _find_claude_context() -> ClaudeContext:
 
     for _ in range(20):  # Depth limit
         result = subprocess.run(
-            ["ps", "-p", str(current), "-o", "ppid=,comm="],
+            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
             capture_output=True,
             text=True,
         )
@@ -410,77 +427,69 @@ def _find_claude_context() -> ClaudeContext:
 
         parts = result.stdout.strip().split(None, 1)
         ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ""
+        comm = parts[1] if len(parts) > 1 else ''
 
         # Check if this is Claude
-        if "claude" in comm.lower():
+        if 'claude' in comm.lower():
             # Get Claude's CWD using lsof
             result = subprocess.run(
-                ["lsof", "-p", str(current), "-a", "-d", "cwd"],
+                ['lsof', '-p', str(current), '-a', '-d', 'cwd'],
                 capture_output=True,
                 text=True,
             )
 
             cwd = None
-            for line in result.stdout.split("\n"):
-                if "cwd" in line:
+            for line in result.stdout.split('\n'):
+                if 'cwd' in line:
                     parts = line.split()
                     if len(parts) >= 9:
-                        cwd = pathlib.Path(" ".join(parts[8:]))
+                        cwd = pathlib.Path(' '.join(parts[8:]))
                         break
 
             if not cwd:
-                raise RuntimeError(
-                    f"Found Claude process (PID {current}) but could not determine CWD"
-                )
+                raise RuntimeError(f'Found Claude process (PID {current}) but could not determine CWD')
 
             # Verify by checking if Claude has .claude/ files open that match the CWD
-            result = subprocess.run(
-                ["lsof", "-p", str(current)], capture_output=True, text=True
-            )
+            result = subprocess.run(['lsof', '-p', str(current)], capture_output=True, text=True)
 
             claude_files = []
-            for line in result.stdout.split("\n"):
-                if ".claude" in line:
+            for line in result.stdout.split('\n'):
+                if '.claude' in line:
                     # Extract the full path from lsof output
                     parts = line.split()
                     if len(parts) >= 9:
-                        file_path = pathlib.Path(" ".join(parts[8:]))
+                        file_path = pathlib.Path(' '.join(parts[8:]))
                         claude_files.append(file_path)
 
             if not claude_files:
                 raise RuntimeError(
-                    f"Found Claude process (PID {current}) with CWD {cwd}, "
-                    f"but no .claude/ files are open - may not be a Claude project"
+                    f'Found Claude process (PID {current}) with CWD {cwd}, '
+                    f'but no .claude/ files are open - may not be a Claude project'
                 )
 
             # Verify at least one .claude file is in ~/.claude/ directory
-            claude_dir = pathlib.Path("~/.claude").expanduser()
+            claude_dir = pathlib.Path('~/.claude').expanduser()
             matching_files = [f for f in claude_files if f.is_relative_to(claude_dir)]
 
             if not matching_files:
                 raise RuntimeError(
-                    f"Found Claude process (PID {current}) with CWD {cwd}, "
-                    f"but .claude/ files open are not in ~/.claude/ directory:\n"
-                    f"  Open files: {claude_files}\n"
-                    f"  Expected to find files in: {claude_dir}"
+                    f'Found Claude process (PID {current}) with CWD {cwd}, '
+                    f'but .claude/ files open are not in ~/.claude/ directory:\n'
+                    f'  Open files: {claude_files}\n'
+                    f'  Expected to find files in: {claude_dir}'
                 )
 
             # Compute socket path based on Claude PID
-            socket_path = pathlib.Path(f"/tmp/python-interpreter-{current}.sock")
+            socket_path = pathlib.Path(f'/tmp/python-interpreter-{current}.sock')
 
-            return ClaudeContext(
-                claude_pid=current, project_dir=cwd, socket_path=socket_path
-            )
+            return ClaudeContext(claude_pid=current, project_dir=cwd, socket_path=socket_path)
 
         if ppid == 0:
             break
 
         current = ppid
 
-    raise RuntimeError(
-        "Not running under Claude Code - could not find Claude process in process tree"
-    )
+    raise RuntimeError('Not running under Claude Code - could not find Claude process in process tree')
 
 
 class ServerState:
@@ -493,41 +502,35 @@ class ServerState:
         started_at = datetime.datetime.now(datetime.UTC)
 
         # Discover session ID via self-referential marker search
-        session_marker = f"SESSION_MARKER_{uuid.uuid4()}"
+        session_marker = f'SESSION_MARKER_{uuid.uuid4()}'
         print(session_marker, file=sys.stderr, flush=True)
 
         session_id = await _discover_session_id(session_marker)
-        print(f"✓ Discovered session ID: {session_id}", file=sys.stderr, flush=True)
+        print(f'✓ Discovered session ID: {session_id}', file=sys.stderr, flush=True)
 
         # Find Claude context (PID, project directory) by walking process tree
         claude_context = _find_claude_context()
-        print(
-            f"Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}"
-        )
+        print(f'Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}')
 
         # Compute transcript path using session tracker pattern
         # Normalize project dir to create safe directory name
         # Note: Claude Code creates the transcript file before starting MCP servers,
         # so this path should always exist. strict=True validates this assumption.
-        project_name = str(claude_context.project_dir).replace("/", "-")
-        transcript_path = (
-            pathlib.Path.home()
-            / ".claude"
-            / "projects"
-            / project_name
-            / f"{session_id}.jsonl"
-        ).resolve(strict=True)
+        project_name = str(claude_context.project_dir).replace('/', '-')
+        transcript_path = (pathlib.Path.home() / '.claude' / 'projects' / project_name / f'{session_id}.jsonl').resolve(
+            strict=True
+        )
 
         # Initialize temp directory for large outputs
         temp_dir = tempfile.TemporaryDirectory()
         output_dir = pathlib.Path(temp_dir.name)
-        print(f"Temp directory for large outputs: {output_dir}")
+        print(f'Temp directory for large outputs: {output_dir}')
 
         # Remove stale socket if it exists
         if claude_context.socket_path.exists():
             claude_context.socket_path.unlink()
 
-        print(f"Unix socket path: {claude_context.socket_path}")
+        print(f'Unix socket path: {claude_context.socket_path}')
 
         return cls(
             session_id=session_id,
@@ -575,15 +578,15 @@ CHARACTER_LIMIT = 25_000
 # Import name to PyPI package name mappings for common mismatches
 # Philosophy: Explicit curated list (secure) vs dynamic lookup (complex/risky)
 IMPORT_TO_PACKAGE_MAP = {
-    "aws_cdk": "aws-cdk-lib",
-    "bs4": "beautifulsoup4",
-    "dateutil": "python-dateutil",
-    "OpenSSL": "pyOpenSSL",
-    "PIL": "pillow",
-    "psycopg2": "psycopg2-binary",
-    "skimage": "scikit-image",
-    "sklearn": "scikit-learn",
-    "yaml": "PyYAML",
+    'aws_cdk': 'aws-cdk-lib',
+    'bs4': 'beautifulsoup4',
+    'dateutil': 'python-dateutil',
+    'OpenSSL': 'pyOpenSSL',
+    'PIL': 'pillow',
+    'psycopg2': 'psycopg2-binary',
+    'skimage': 'scikit-image',
+    'sklearn': 'scikit-learn',
+    'yaml': 'PyYAML',
 }
 
 
@@ -623,24 +626,22 @@ class PythonInterpreterService:
 
     async def execute(self, code: str, logger: LoggerProtocol) -> ExecuteResult:
         """Execute Python code in persistent scope."""
-        await logger.info(f"Executing Python code ({len(code)} chars)")
+        await logger.info(f'Executing Python code ({len(code)} chars)')
 
         try:
             result, truncation_info = self._execute_with_file_handling(code)
 
             if truncation_info:
                 await logger.warning(
-                    f"Output truncated: {truncation_info.original_size} chars exceeds limit of {truncation_info.truncated_at}"
+                    f'Output truncated: {truncation_info.original_size} chars exceeds limit of {truncation_info.truncated_at}'
                 )
-                await logger.info(f"Full output saved to: {truncation_info.file_path}")
+                await logger.info(f'Full output saved to: {truncation_info.file_path}')
 
-            await logger.info(
-                f"Execution complete - output length: {len(result)} chars"
-            )
+            await logger.info(f'Execution complete - output length: {len(result)} chars')
             return ExecuteResult(truncation_info=truncation_info, result=result)
 
         except Exception as e:
-            await logger.warning(f"Execution failed: {type(e).__name__}: {e}")
+            await logger.warning(f'Execution failed: {type(e).__name__}: {e}')
             raise
 
     async def reset(self, logger: LoggerProtocol) -> str:
@@ -648,12 +649,10 @@ class PythonInterpreterService:
 
         Reloads all modules added to sys.modules during execution (excludes stdlib and MCP server itself).
         """
-        await logger.info("Resetting Python interpreter scope")
+        await logger.info('Resetting Python interpreter scope')
 
         # Clear execution scope
-        var_count = len(
-            [k for k in self.state.scope_globals.keys() if not k.startswith("__")]
-        )
+        var_count = len([k for k in self.state.scope_globals if not k.startswith('__')])
         self.state.scope_globals.clear()
 
         # Reload everything except builtins/C extensions (that would crash Python)
@@ -662,7 +661,7 @@ class PythonInterpreterService:
             if module is None:
                 continue
             # Skip only builtins and C extensions (no __file__ means can't reload)
-            if not hasattr(module, "__file__") or module.__file__ is None:
+            if not hasattr(module, '__file__') or module.__file__ is None:
                 continue
             modules_to_reload.append(module)
 
@@ -672,42 +671,34 @@ class PythonInterpreterService:
             try:
                 importlib.reload(module)
                 reload_count += 1
-                await logger.info(f"Reloaded: {module.__name__}")
+                await logger.info(f'Reloaded: {module.__name__}')
             except Exception as e:
-                await logger.warning(f"Failed to reload {module.__name__}: {e}")
+                await logger.warning(f'Failed to reload {module.__name__}: {e}')
 
-        await logger.info(
-            f"Reset complete - cleared {var_count} vars, reloaded {reload_count} modules"
-        )
-        return (
-            f"Scope reset - cleared {var_count} vars, reloaded {reload_count} modules"
-        )
+        await logger.info(f'Reset complete - cleared {var_count} vars, reloaded {reload_count} modules')
+        return f'Scope reset - cleared {var_count} vars, reloaded {reload_count} modules'
 
     async def list_vars(self, logger: LoggerProtocol) -> str:
         """List all user-defined variables in persistent scope."""
-        await logger.info("Listing Python interpreter variables")
+        await logger.info('Listing Python interpreter variables')
 
         if not self.state.scope_globals:
-            await logger.info("No variables in scope")
-            return "No variables defined"
+            await logger.info('No variables in scope')
+            return 'No variables defined'
 
         # Filter out builtins like __name__, __doc__, etc
-        user_vars = [
-            name
-            for name in self.state.scope_globals.keys()
-            if not name.startswith("__")
-        ]
+        user_vars = [name for name in self.state.scope_globals if not name.startswith('__')]
 
         if not user_vars:
-            await logger.info("No user variables in scope (only builtins)")
-            return "No variables defined"
+            await logger.info('No user variables in scope (only builtins)')
+            return 'No variables defined'
 
-        await logger.info(f"Found {len(user_vars)} variables in scope")
-        return ", ".join(sorted(user_vars))
+        await logger.info(f'Found {len(user_vars)} variables in scope')
+        return ', '.join(sorted(user_vars))
 
     async def get_session_info(self, logger: LoggerProtocol) -> SessionInfo:
         """Get comprehensive session and server metadata."""
-        await logger.info("Getting session info")
+        await logger.info('Getting session info')
 
         # Calculate uptime
         uptime_seconds = (datetime.datetime.now(datetime.UTC) - self.state.started_at).total_seconds()
@@ -724,9 +715,7 @@ class PythonInterpreterService:
             uptime=uptime,
         )
 
-    def _execute_with_file_handling(
-        self, code: str
-    ) -> tuple[str, TruncationInfo | None]:
+    def _execute_with_file_handling(self, code: str) -> tuple[str, TruncationInfo | None]:
         """Execute code and handle large output by saving to temp file."""
         # Execute the code
         result = _execute_code(code, self.state.scope_globals)
@@ -734,12 +723,12 @@ class PythonInterpreterService:
         # Check if output exceeds limit
         if len(result) > CHARACTER_LIMIT:
             # Generate unique filename with timestamp
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"output_{timestamp}.txt"
+            timestamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%d_%H%M%S')
+            filename = f'output_{timestamp}.txt'
             file_path = self.state.output_dir / filename
 
             # Write full output to file
-            file_path.write_text(result, encoding="utf-8")
+            file_path.write_text(result, encoding='utf-8')
 
             # Create truncation info
             truncation_info = TruncationInfo(
@@ -759,13 +748,13 @@ class SimpleLogger:
     """Simple logger for HTTP endpoint - logs to stdout."""
 
     async def info(self, message: str) -> None:
-        print(f"INFO: {message}")
+        print(f'INFO: {message}')
 
     async def warning(self, message: str) -> None:
-        print(f"WARNING: {message}")
+        print(f'WARNING: {message}')
 
     async def error(self, message: str) -> None:
-        print(f"ERROR: {message}")
+        print(f'ERROR: {message}')
 
 
 def register_tools(service: PythonInterpreterService) -> None:
@@ -773,7 +762,7 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title="Execute Python Code",
+            title='Execute Python Code',
             destructiveHint=False,
             idempotentHint=False,
             readOnlyHint=False,
@@ -799,7 +788,7 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title="Reset Python Scope",
+            title='Reset Python Scope',
             destructiveHint=True,
             idempotentHint=True,
             readOnlyHint=False,
@@ -814,7 +803,7 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title="List Python Variables",
+            title='List Python Variables',
             destructiveHint=False,
             idempotentHint=True,
             readOnlyHint=True,
@@ -829,7 +818,7 @@ def register_tools(service: PythonInterpreterService) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title="Get Session Info",
+            title='Get Session Info',
             destructiveHint=False,
             idempotentHint=True,
             readOnlyHint=True,
@@ -855,15 +844,13 @@ async def lifespan(
     fastapi_app.state.service = service
 
     # Start FastAPI in background on Unix socket
-    config = uvicorn.Config(
-        fastapi_app, uds=state.socket_path.as_posix(), log_level="warning"
-    )
+    config = uvicorn.Config(fastapi_app, uds=state.socket_path.as_posix(), log_level='warning')
     uvicorn_server = uvicorn.Server(config)
     asyncio.create_task(uvicorn_server.serve())
 
-    print(f"✓ Server initialized")
-    print(f"  Output directory: {state.output_dir}")
-    print(f"  Unix socket: {state.socket_path}")
+    print('✓ Server initialized')
+    print(f'  Output directory: {state.output_dir}')
+    print(f'  Unix socket: {state.socket_path}')
 
     # Server is ready - yield control back to FastMCP
     yield
@@ -872,28 +859,26 @@ async def lifespan(
     state.temp_dir.cleanup()
     if state.socket_path.exists():
         state.socket_path.unlink()
-    print("✓ Server cleanup complete")
+    print('✓ Server cleanup complete')
 
 
 # Create FastMCP server with lifespan
-server = mcp.server.fastmcp.FastMCP("python-interpreter", lifespan=lifespan)
+server = mcp.server.fastmcp.FastMCP('python-interpreter', lifespan=lifespan)
 
 # Create FastAPI app for HTTP bridge
-fastapi_app = fastapi.FastAPI(title="Python Interpreter HTTP Bridge")
+fastapi_app = fastapi.FastAPI(title='Python Interpreter HTTP Bridge')
 
 
 @fastapi_app.exception_handler(Exception)
-async def global_exception_handler(
-    request: fastapi.Request, exc: Exception
-) -> fastapi.responses.JSONResponse:
+async def global_exception_handler(request: fastapi.Request, exc: Exception) -> fastapi.responses.JSONResponse:
     """Global exception handler - returns all unhandled exceptions with full traceback."""
-    tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    tb_str = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
     return fastapi.responses.JSONResponse(
         status_code=500,
         content={
-            "detail": f"{type(exc).__name__}: {str(exc)}",
-            "traceback": tb_str,
+            'detail': f'{type(exc).__name__}: {str(exc)}',
+            'traceback': tb_str,
         },
     )
 
@@ -915,7 +900,7 @@ def get_simple_logger() -> SimpleLogger:
     return SimpleLogger()
 
 
-@fastapi_app.post("/execute")
+@fastapi_app.post('/execute')
 async def http_execute(
     request: ExecuteRequest,
     service: PythonInterpreterService = fastapi.Depends(get_interpreter_service),
@@ -943,11 +928,11 @@ async def http_execute(
 
     # Format response with truncation info if needed
     if result.truncation_info:
-        separator = "=" * 50
-        formatted_result = f"{result.result}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {result.truncation_info.original_size:,} chars\n# Full output: {result.truncation_info.file_path}\n{separator}"
-        return {"result": formatted_result}
+        separator = '=' * 50
+        formatted_result = f'{result.result}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {result.truncation_info.original_size:,} chars\n# Full output: {result.truncation_info.file_path}\n{separator}'
+        return {'result': formatted_result}
 
-    return {"result": result.result}
+    return {'result': result.result}
 
 
 # Helper functions for code execution
@@ -987,28 +972,24 @@ def _install_package(import_name: str) -> str:
     try:
         # Use sys.executable to ensure we install into the current venv
         result = subprocess.run(
-            ["uv", "pip", "install", "--python", sys.executable, package_name],
+            ['uv', 'pip', 'install', '--python', sys.executable, package_name],
             capture_output=True,
             text=True,
             timeout=60,  # 60 second timeout for installation
         )
     except subprocess.TimeoutExpired:
-        raise PackageInstallationError(
-            f"Timeout (>60s) while installing {package_name}"
-        )
+        raise PackageInstallationError(f'Timeout (>60s) while installing {package_name}')
 
     if result.returncode == 0:
         # Include stdout for transparency about what was installed
-        details = result.stdout.strip() if result.stdout.strip() else "No output"
+        details = result.stdout.strip() if result.stdout.strip() else 'No output'
         if import_name != package_name:
-            return (
-                f"✓ Auto-installed {package_name} (for import {import_name})\n{details}"
-            )
+            return f'✓ Auto-installed {package_name} (for import {import_name})\n{details}'
         else:
-            return f"✓ Auto-installed {package_name}\n{details}"
+            return f'✓ Auto-installed {package_name}\n{details}'
     else:
-        stderr = result.stderr.strip() if result.stderr else "No error details"
-        raise PackageInstallationError(f"Failed to install {package_name}\n{stderr}")
+        stderr = result.stderr.strip() if result.stderr else 'No error details'
+        raise PackageInstallationError(f'Failed to install {package_name}\n{stderr}')
 
 
 def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
@@ -1045,7 +1026,7 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
             if is_expr and last_line:
                 # Execute everything except last line, then eval last line
                 lines = code.splitlines()
-                code_without_last = "\n".join(lines[:-1])
+                code_without_last = '\n'.join(lines[:-1])
 
                 if code_without_last.strip():
                     exec(code_without_last, scope_globals)
@@ -1060,7 +1041,7 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
                 if stdout_value or stderr_value:
                     return (stdout_value + stderr_value).rstrip()
                 else:
-                    return repr(result) if result is not None else ""
+                    return repr(result) if result is not None else ''
             else:
                 # Pure statements, just exec
                 exec(code, scope_globals)
@@ -1097,21 +1078,17 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
                 except PackageInstallationError as install_error:
                     failed_installs.add(module_name)
                     # Re-raise with context
-                    raise PackageInstallationError(
-                        f"{install_error}\n\nOriginal import error: {e}"
-                    ) from e
+                    raise PackageInstallationError(f'{install_error}\n\nOriginal import error: {e}') from e
             else:
                 # Cannot or should not retry
                 if total_attempts >= max_install_attempts:
                     raise MaxInstallAttemptsError(
-                        f"Maximum installation attempts ({max_install_attempts}) exceeded.\n"
-                        f"Successfully installed: {successfully_installed}\n"
-                        f"Failed: {failed_installs}"
+                        f'Maximum installation attempts ({max_install_attempts}) exceeded.\n'
+                        f'Successfully installed: {successfully_installed}\n'
+                        f'Failed: {failed_installs}'
                     ) from e
                 elif module_name in failed_installs:
-                    raise PackageInstallationError(
-                        f"Package '{module_name}' already failed to install"
-                    ) from e
+                    raise PackageInstallationError(f"Package '{module_name}' already failed to install") from e
                 else:
                     # No module name or other issue - re-raise original
                     raise
@@ -1124,9 +1101,9 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
 
 def main() -> None:
     """Main entry point for the Python Interpreter MCP server."""
-    print("Starting Python Interpreter MCP server")
+    print('Starting Python Interpreter MCP server')
     server.run()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

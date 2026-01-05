@@ -39,9 +39,10 @@ import os
 import re
 import sqlite3
 import subprocess
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Literal
 
 from ccl_chromium_reader import (
     ccl_chromium_localstorage,
@@ -62,7 +63,6 @@ from .models import (
     ProfileStateOriginStorage,
 )
 
-
 # =============================================================================
 # Chrome Profile Path Resolution
 # =============================================================================
@@ -70,10 +70,10 @@ from .models import (
 
 def get_chrome_base_path() -> Path:
     """Get Chrome base directory for macOS."""
-    return Path.home() / "Library/Application Support/Google/Chrome"
+    return Path.home() / 'Library/Application Support/Google/Chrome'
 
 
-def get_chrome_profile_path(profile_name: str = "Default") -> Path:
+def get_chrome_profile_path(profile_name: str = 'Default') -> Path:
     """Get Chrome profile path for macOS.
 
     Args:
@@ -92,14 +92,9 @@ def get_chrome_profile_path(profile_name: str = "Default") -> Path:
         available = sorted(
             p.name
             for p in base.iterdir()
-            if p.is_dir()
-            and not p.name.startswith(".")
-            and (p / "Cookies").exists()  # Only real profiles have Cookies
+            if p.is_dir() and not p.name.startswith('.') and (p / 'Cookies').exists()  # Only real profiles have Cookies
         )
-        raise FileNotFoundError(
-            f"Chrome profile not found: {profile_path}\n"
-            f"Available profiles: {available}"
-        )
+        raise FileNotFoundError(f'Chrome profile not found: {profile_path}\nAvailable profiles: {available}')
 
     return profile_path
 
@@ -108,18 +103,19 @@ def get_chrome_profile_path(profile_name: str = "Default") -> Path:
 # Cookie Export
 # =============================================================================
 
+# Type alias for sameSite values
+type SameSiteValue = Literal['Strict', 'Lax', 'None']
+
 # Chrome SQLite sameSite values → Playwright format
-_SAMESITE_MAP: Mapping[int, str] = {
-    -1: "Lax",  # Unspecified → default to Lax
-    0: "None",
-    1: "Lax",
-    2: "Strict",
+_SAMESITE_MAP: Mapping[int, SameSiteValue] = {
+    -1: 'Lax',  # Unspecified → default to Lax
+    0: 'None',
+    1: 'Lax',
+    2: 'Strict',
 }
 
 # Regex for IPv4 addresses (validates 0-255 octets)
-_IPV4_PATTERN = re.compile(
-    r"^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$"
-)
+_IPV4_PATTERN = re.compile(r'^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$')
 
 
 def _validate_domain_pattern(pattern: str) -> None:
@@ -139,15 +135,15 @@ def _validate_domain_pattern(pattern: str) -> None:
         _validate_domain_pattern("amazon")  # Raises ValueError
     """
     # Strip leading/trailing dots and port numbers
-    cleaned = pattern.lower().strip(".")
-    if ":" in cleaned:
-        cleaned = cleaned.split(":")[0]  # Strip port if present
+    cleaned = pattern.lower().strip('.')
+    if ':' in cleaned:
+        cleaned = cleaned.split(':')[0]  # Strip port if present
 
     if not cleaned:
-        raise ValueError(f"Empty domain pattern: {pattern!r}")
+        raise ValueError(f'Empty domain pattern: {pattern!r}')
 
     # Allow localhost as special case
-    if cleaned == "localhost":
+    if cleaned == 'localhost':
         return
 
     # Allow IP addresses (IPv4)
@@ -155,11 +151,8 @@ def _validate_domain_pattern(pattern: str) -> None:
         return
 
     # For regular domains, require at least one dot (TLD)
-    if "." not in cleaned:
-        raise ValueError(
-            f"Invalid domain pattern: {pattern!r} - "
-            f"must include TLD (e.g., 'amazon.com' not 'amazon')"
-        )
+    if '.' not in cleaned:
+        raise ValueError(f"Invalid domain pattern: {pattern!r} - must include TLD (e.g., 'amazon.com' not 'amazon')")
 
 
 def _extract_domain_from_origin(origin: str) -> str:
@@ -179,22 +172,22 @@ def _extract_domain_from_origin(origin: str) -> str:
         Bare domain without scheme, port, or path
     """
     # Handle full URLs (https://example.com or https://example.com/)
-    if "://" in origin:
+    if '://' in origin:
         # Remove scheme
-        origin = origin.split("://", 1)[1]
+        origin = origin.split('://', 1)[1]
         # Remove path
-        origin = origin.split("/", 1)[0]
+        origin = origin.split('/', 1)[0]
         # Remove port
-        origin = origin.split(":", 1)[0]
+        origin = origin.split(':', 1)[0]
         return origin
 
     # Handle IndexedDB format (https_www.amazon.com_0)
-    if origin.startswith(("https_", "http_")):
+    if origin.startswith(('https_', 'http_')):
         # Remove scheme prefix
-        origin = origin.split("_", 1)[1]
+        origin = origin.split('_', 1)[1]
         # Remove trailing _0, _1, etc.
-        if "_" in origin:
-            parts = origin.rsplit("_", 1)
+        if '_' in origin:
+            parts = origin.rsplit('_', 1)
             if parts[-1].isdigit():
                 origin = parts[0]
         return origin
@@ -224,20 +217,17 @@ def _domain_matches(host: str, pattern: str) -> bool:
         _domain_matches("notamazon.com", "amazon.com") → False
     """
     # Canonicalize: lowercase, strip leading/trailing dots, strip port
-    host = host.lower().strip(".")
-    pattern = pattern.lower().strip(".")
-    if ":" in pattern:
-        pattern = pattern.split(":")[0]
+    host = host.lower().strip('.')
+    pattern = pattern.lower().strip('.')
+    if ':' in pattern:
+        pattern = pattern.split(':')[0]
 
     # Exact match (handles IPs and localhost)
     if host == pattern:
         return True
 
     # Suffix match with dot boundary: host ends with ".pattern"
-    if host.endswith("." + pattern):
-        return True
-
-    return False
+    return host.endswith('.' + pattern)
 
 
 # =============================================================================
@@ -271,24 +261,24 @@ def _get_chrome_encryption_key() -> bytes:
     """
     result = subprocess.run(
         [
-            "/usr/bin/security",
-            "-q",
-            "find-generic-password",
-            "-w",
-            "-a",
-            "Chrome",
-            "-s",
-            "Chrome Safe Storage",
+            '/usr/bin/security',
+            '-q',
+            'find-generic-password',
+            '-w',
+            '-a',
+            'Chrome',
+            '-s',
+            'Chrome Safe Storage',
         ],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"Failed to retrieve Chrome Safe Storage from Keychain: {result.stderr}\n"
+            f'Failed to retrieve Chrome Safe Storage from Keychain: {result.stderr}\n'
             "First run may require clicking 'Always Allow' when prompted."
         )
-    return result.stdout.strip().encode("utf-8")
+    return result.stdout.strip().encode('utf-8')
 
 
 def _derive_aes_key(keychain_password: bytes) -> bytes:
@@ -307,9 +297,9 @@ def _derive_aes_key(keychain_password: bytes) -> bytes:
         16-byte AES key for cookie decryption
     """
     return hashlib.pbkdf2_hmac(
-        "sha1",
+        'sha1',
         keychain_password,
-        b"saltysalt",
+        b'saltysalt',
         1003,
         dklen=16,
     )
@@ -327,7 +317,7 @@ def _get_chrome_cookies_version(cookies_db: Path) -> int:
     Returns:
         Version number (24+ means domain hash present)
     """
-    conn = sqlite3.connect(f"file:{cookies_db}?mode=ro", uri=True)
+    conn = sqlite3.connect(f'file:{cookies_db}?mode=ro', uri=True)
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT value FROM meta WHERE key = 'version'")
@@ -361,15 +351,15 @@ def _decrypt_cookie_value(
         ValueError: If decryption fails (wrong key, corrupted data)
     """
     # Check for v10 prefix (macOS/Linux encrypted format)
-    if not encrypted_value.startswith(b"v10"):
+    if not encrypted_value.startswith(b'v10'):
         # Unencrypted value (rare but possible)
-        return encrypted_value.decode("utf-8", errors="replace")
+        return encrypted_value.decode('utf-8', errors='replace')
 
     # Strip v10 prefix (3 bytes)
     ciphertext = encrypted_value[3:]
 
     # Decrypt with AES-128-CBC, IV = 16 spaces
-    iv = b" " * 16
+    iv = b' ' * 16
     cipher = AES.new(aes_key, AES.MODE_CBC, iv)
     decrypted = cipher.decrypt(ciphertext)
 
@@ -377,7 +367,7 @@ def _decrypt_cookie_value(
     try:
         unpadded = unpad(decrypted, AES.block_size)
     except ValueError as e:
-        raise ValueError(f"PKCS7 unpadding failed: {e}") from e
+        raise ValueError(f'PKCS7 unpadding failed: {e}') from e
 
     # Chrome 130+ (version >= 24): SHA256(domain) prepended to decrypted value
     # The hash is INSIDE the encrypted blob, so we strip it after decryption
@@ -385,7 +375,7 @@ def _decrypt_cookie_value(
     if chrome_version >= 24 and len(unpadded) >= 32:
         unpadded = unpadded[32:]
 
-    return unpadded.decode("utf-8", errors="replace")
+    return unpadded.decode('utf-8', errors='replace')
 
 
 def export_cookies(
@@ -412,9 +402,9 @@ def export_cookies(
     """
     cookies: list[ProfileStateCookie] = []
 
-    cookies_db = profile_path / "Cookies"
+    cookies_db = profile_path / 'Cookies'
     if not cookies_db.exists():
-        raise FileNotFoundError(f"Cookies database not found: {cookies_db}")
+        raise FileNotFoundError(f'Cookies database not found: {cookies_db}')
 
     # Get encryption key from Keychain (shared across all profiles)
     keychain_password = _get_chrome_encryption_key()
@@ -424,7 +414,7 @@ def export_cookies(
     chrome_version = _get_chrome_cookies_version(cookies_db)
 
     # Read and decrypt all cookies from this profile's SQLite
-    conn = sqlite3.connect(f"file:{cookies_db}?mode=ro", uri=True)
+    conn = sqlite3.connect(f'file:{cookies_db}?mode=ro', uri=True)
     try:
         cursor = conn.cursor()
 
@@ -454,11 +444,9 @@ def export_cookies(
 
             # Decrypt if needed
             if encrypted_value:
-                cookie_value = _decrypt_cookie_value(
-                    encrypted_value, aes_key, chrome_version
-                )
+                cookie_value = _decrypt_cookie_value(encrypted_value, aes_key, chrome_version)
             else:
-                cookie_value = value or ""
+                cookie_value = value or ''
 
             # Convert Chrome epoch to Unix timestamp
             # Chrome epoch: microseconds since 1601-01-01
@@ -478,7 +466,7 @@ def export_cookies(
                     expires=expires,
                     http_only=bool(httponly),
                     secure=bool(secure),
-                    same_site=_SAMESITE_MAP.get(samesite, "Lax"),
+                    same_site=_SAMESITE_MAP.get(samesite, 'Lax'),
                 )
             )
     finally:
@@ -511,10 +499,10 @@ def export_local_storage(
     storage: dict[str, dict[str, str]] = {}
 
     # CRITICAL: localStorage is in "Local Storage/leveldb/", not "Local Storage/"
-    leveldb_path = profile_path / "Local Storage" / "leveldb"
+    leveldb_path = profile_path / 'Local Storage' / 'leveldb'
 
     if not leveldb_path.exists():
-        raise FileNotFoundError(f"localStorage path not found: {leveldb_path}")
+        raise FileNotFoundError(f'localStorage path not found: {leveldb_path}')
 
     with ccl_chromium_localstorage.LocalStoreDb(leveldb_path) as ls:
         for storage_key in ls.iter_storage_keys():
@@ -526,7 +514,7 @@ def export_local_storage(
 
             origin_storage: dict[str, str] = {}
             for record in ls.iter_records_for_storage_key(storage_key):
-                value = str(record.value) if record.value else ""
+                value = str(record.value) if record.value else ''
                 origin_storage[record.script_key] = value
 
             if origin_storage:
@@ -562,10 +550,10 @@ def export_session_storage(
     """
     storage: dict[str, dict[str, str]] = {}
 
-    session_storage_path = profile_path / "Session Storage"
+    session_storage_path = profile_path / 'Session Storage'
 
     if not session_storage_path.exists():
-        raise FileNotFoundError(f"sessionStorage path not found: {session_storage_path}")
+        raise FileNotFoundError(f'sessionStorage path not found: {session_storage_path}')
 
     with ccl_chromium_sessionstorage.SessionStoreDb(session_storage_path) as ss:
         for host in ss.iter_hosts():
@@ -577,7 +565,7 @@ def export_session_storage(
 
             origin_storage: dict[str, str] = {}
             for record in ss.iter_records_for_host(host):
-                value = str(record.value) if record.value else ""
+                value = str(record.value) if record.value else ''
                 origin_storage[record.key] = value
 
             if origin_storage:
@@ -593,7 +581,7 @@ def export_session_storage(
 
 def export_chrome_profile_state(
     output_file: str,
-    chrome_profile: str = "Default",
+    chrome_profile: str = 'Default',
     include_session_storage: bool = True,
     include_indexeddb: bool = False,
     origins_filter: Sequence[str] | None = None,
@@ -622,7 +610,7 @@ def export_chrome_profile_state(
     """
     # Fail if output file exists - delete first to replace
     if Path(output_file).expanduser().exists():
-        raise FileExistsError(f"Output file already exists: {output_file}")
+        raise FileExistsError(f'Output file already exists: {output_file}')
 
     # Resolve profile path
     profile_path = get_chrome_profile_path(chrome_profile)
@@ -669,35 +657,35 @@ def export_chrome_profile_state(
             for db_dict in indexeddb[origin]:
                 # Convert object stores
                 object_stores: list[ProfileStateIndexedDBObjectStore] = []
-                for store_dict in db_dict.get("object_stores", []):
+                for store_dict in db_dict.get('object_stores', []):
                     # Convert indexes
                     indexes: list[ProfileStateIndexedDBIndex] = [
                         ProfileStateIndexedDBIndex(
-                            name=idx["name"],
-                            key_path=idx["key_path"],
-                            unique=idx["unique"],
-                            multi_entry=idx["multi_entry"],
+                            name=idx['name'],
+                            key_path=idx['key_path'],
+                            unique=idx['unique'],
+                            multi_entry=idx['multi_entry'],
                         )
-                        for idx in store_dict.get("indexes", [])
+                        for idx in store_dict.get('indexes', [])
                     ]
                     # Convert records
                     records: list[ProfileStateIndexedDBRecord] = [
-                        ProfileStateIndexedDBRecord(key=rec["key"], value=rec["value"])
-                        for rec in store_dict.get("records", [])
+                        ProfileStateIndexedDBRecord(key=rec['key'], value=rec['value'])
+                        for rec in store_dict.get('records', [])
                     ]
                     object_stores.append(
                         ProfileStateIndexedDBObjectStore(
-                            name=store_dict["name"],
-                            key_path=store_dict["key_path"],
-                            auto_increment=store_dict["auto_increment"],
+                            name=store_dict['name'],
+                            key_path=store_dict['key_path'],
+                            auto_increment=store_dict['auto_increment'],
                             indexes=indexes,
                             records=records,
                         )
                     )
                 idb_models.append(
                     ProfileStateIndexedDB(
-                        database_name=db_dict["database_name"],
-                        version=db_dict["version"],
+                        database_name=db_dict['database_name'],
+                        version=db_dict['version'],
                         object_stores=object_stores,
                     )
                 )
@@ -710,7 +698,7 @@ def export_chrome_profile_state(
 
     # Build ProfileState with typed models
     profile_state = ProfileState(
-        schema_version="1.0",
+        schema_version='1.0',
         captured_at=datetime.now(UTC).isoformat(),
         cookies=list(cookies),
         origins=origins_data,
@@ -722,7 +710,7 @@ def export_chrome_profile_state(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, 'w') as f:
         # Use by_alias=True to serialize IndexedDB fields as camelCase for JS compatibility
         f.write(profile_state.model_dump_json(indent=2, by_alias=True))
 

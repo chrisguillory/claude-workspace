@@ -4,7 +4,8 @@ from __future__ import annotations
 
 # Standard Library
 import time
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any
 
 # Third-Party Libraries
 from mcp.server.fastmcp import Context
@@ -13,33 +14,33 @@ from mcp.server.fastmcp import Context
 class DualLogger:
     """Logs messages to both stdout and MCP client context."""
 
-    def __init__(self, ctx: Context):
+    def __init__(self, ctx: Context[Any, Any, Any]):
         self.ctx = ctx
 
     def _timestamp(self) -> str:
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')
 
-    async def info(self, msg: str):
-        print(f"[{self._timestamp()}] [INFO] {msg}")
+    async def info(self, msg: str) -> None:
+        print(f'[{self._timestamp()}] [INFO] {msg}')
         await self.ctx.info(msg)
 
-    async def debug(self, msg: str):
-        print(f"[{self._timestamp()}] [DEBUG] {msg}")
+    async def debug(self, msg: str) -> None:
+        print(f'[{self._timestamp()}] [DEBUG] {msg}')
         await self.ctx.debug(msg)
 
-    async def warning(self, msg: str):
-        print(f"[{self._timestamp()}] [WARNING] {msg}")
+    async def warning(self, msg: str) -> None:
+        print(f'[{self._timestamp()}] [WARNING] {msg}')
         await self.ctx.warning(msg)
 
-    async def error(self, msg: str):
-        print(f"[{self._timestamp()}] [ERROR] {msg}")
+    async def error(self, msg: str) -> None:
+        print(f'[{self._timestamp()}] [ERROR] {msg}')
         await self.ctx.error(msg)
 
 
 class Timer:
     """Simple stopwatch-style timer for measuring elapsed time."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._start = time.perf_counter()
 
     def elapsed(self) -> float:
@@ -67,16 +68,16 @@ def humanize_seconds(seconds: float) -> str:
         Human-readable duration string with abbreviated unit
     """
     intervals = [
-        ('d', 86400),    # days
-        ('hr', 3600),    # hours
-        ('min', 60),     # minutes
-        ('sec', 1)       # seconds
+        ('d', 86400),  # days
+        ('hr', 3600),  # hours
+        ('min', 60),  # minutes
+        ('sec', 1),  # seconds
     ]
 
     for unit, count in intervals:
         if seconds >= count:
             value = seconds / count
-            value_str = f"{value:.1f}".rstrip('0').rstrip('.')
-            return f"{value_str} {unit}"
+            value_str = f'{value:.1f}'.rstrip('0').rstrip('.')
+            return f'{value_str} {unit}'
 
-    return "0 sec"
+    return '0 sec'

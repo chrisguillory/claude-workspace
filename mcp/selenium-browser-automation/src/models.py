@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Literal, Sequence
+from collections.abc import Sequence
+from typing import Any, Literal
 
 import pydantic
 import pydantic.alias_generators
@@ -11,7 +12,7 @@ import pydantic.alias_generators
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
 
-    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
 
 
 class ChromeProfileEssential(BaseModel):
@@ -102,9 +103,7 @@ class ChromeInfoCacheEntry(BaseModel):
     enterprise_label: str | None = None
     has_multiple_account_names: bool | None = None
     managed_user_id: str | None = None
-    signin_with_credential_provider: bool | None = pydantic.Field(
-        None, alias="signin.with_credential_provider"
-    )
+    signin_with_credential_provider: bool | None = pydantic.Field(None, alias='signin.with_credential_provider')
 
 
 class ChromeLocalStateProfile(BaseModel):
@@ -113,7 +112,7 @@ class ChromeLocalStateProfile(BaseModel):
     info_cache: dict[str, ChromeInfoCacheEntry]
     last_active_profiles: list[str] | None = None
     last_used: str | None = None
-    metrics: dict | None = None  # e.g., {"next_bucket_index": 6}
+    metrics: dict[str, Any] | None = None  # e.g., {"next_bucket_index": 6}
     picker_shown: bool | None = None
     profile_counts_reported: str | None = None
     profiles_created: int | None = None
@@ -126,53 +125,53 @@ class ChromeLocalState(BaseModel):
     profile: ChromeLocalStateProfile
 
     # Top-level Chrome settings and state fields (alphabetically sorted)
-    accessibility: dict | None = None
-    app_shims: dict | None = None
-    autofill: dict | None = None
-    background_tracing: dict | None = None
-    breadcrumbs: dict | None = None
-    browser: dict | None = None
-    cloned_install: dict | None = None  # Chrome 120+ install tracking
+    accessibility: dict[str, Any] | None = None
+    app_shims: dict[str, Any] | None = None
+    autofill: dict[str, Any] | None = None
+    background_tracing: dict[str, Any] | None = None
+    breadcrumbs: dict[str, Any] | None = None
+    browser: dict[str, Any] | None = None
+    cloned_install: dict[str, Any] | None = None  # Chrome 120+ install tracking
     hardware_acceleration_mode_previous: bool | None = None
-    legacy: dict | None = None
-    local: dict | None = None
-    management: dict | None = None
-    network_time: dict | None = None
-    optimization_guide: dict | None = None
-    origin_trials: dict | None = None
-    password_manager: dict | None = None
-    performance_intervention: dict | None = None
-    performance_tuning: dict | None = None
-    policy: dict | None = None
-    privacy_budget: dict | None = None
-    profile_network_context_service: dict | None = None
-    profiles: dict | None = None  # Note: different from 'profile' section
-    segmentation_platform: dict | None = None
+    legacy: dict[str, Any] | None = None
+    local: dict[str, Any] | None = None
+    management: dict[str, Any] | None = None
+    network_time: dict[str, Any] | None = None
+    optimization_guide: dict[str, Any] | None = None
+    origin_trials: dict[str, Any] | None = None
+    password_manager: dict[str, Any] | None = None
+    performance_intervention: dict[str, Any] | None = None
+    performance_tuning: dict[str, Any] | None = None
+    policy: dict[str, Any] | None = None
+    privacy_budget: dict[str, Any] | None = None
+    profile_network_context_service: dict[str, Any] | None = None
+    profiles: dict[str, Any] | None = None  # Note: different from 'profile' section
+    segmentation_platform: dict[str, Any] | None = None
     session_id_generator_last_value: str | None = None
-    signin: dict | None = None
-    sm: dict | None = None  # Chrome sync/management state
-    subresource_filter: dict | None = None
-    tab_stats: dict | None = None
-    task_manager: dict | None = None  # Task manager window state
-    toast: dict | None = None
-    tpcd: dict | None = None
-    tpcd_experiment: dict | None = None
-    ukm: dict | None = None
-    uninstall_metrics: dict | None = None
-    updateclientdata: dict | None = None
+    signin: dict[str, Any] | None = None
+    sm: dict[str, Any] | None = None  # Chrome sync/management state
+    subresource_filter: dict[str, Any] | None = None
+    tab_stats: dict[str, Any] | None = None
+    task_manager: dict[str, Any] | None = None  # Task manager window state
+    toast: dict[str, Any] | None = None
+    tpcd: dict[str, Any] | None = None
+    tpcd_experiment: dict[str, Any] | None = None
+    ukm: dict[str, Any] | None = None
+    uninstall_metrics: dict[str, Any] | None = None
+    updateclientdata: dict[str, Any] | None = None
     updateclientlastupdatecheckerror: int | None = None
     updateclientlastupdatecheckerrorcategory: int | None = None
     updateclientlastupdatecheckerrorextracode1: int | None = None
-    user_experience_metrics: dict | None = None
+    user_experience_metrics: dict[str, Any] | None = None
 
     # Variations framework fields (A/B testing)
     variations_compressed_seed: str | None = None
     variations_country: str | None = None
     variations_crash_streak: int | None = None
     variations_failed_to_fetch_seed_streak: int | None = None
-    variations_google_groups: dict | None = None
+    variations_google_groups: dict[str, Any] | None = None
     variations_last_fetch_time: str | None = None
-    variations_permanent_consistency_country: list | None = None
+    variations_permanent_consistency_country: list[str] | None = None
     variations_safe_compressed_seed: str | None = None
     variations_safe_seed_date: str | None = None
     variations_safe_seed_fetch_time: str | None = None
@@ -188,20 +187,20 @@ class ChromeLocalState(BaseModel):
     variations_sticky_studies: str | None = None
 
     # Additional state
-    was: dict | None = None
+    was: dict[str, Any] | None = None
 
 
 # =============================================================================
 # Core Web Vitals Models
 # =============================================================================
 
-MetricRating = Literal["good", "needs-improvement", "poor"]
+MetricRating = Literal['good', 'needs-improvement', 'poor']
 
 
 class WebVitalMetric(pydantic.BaseModel):
     """Base model for Web Vital metrics - allows extra fields from JS."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     name: str
     value: float  # milliseconds for timing, unitless for CLS
@@ -211,13 +210,13 @@ class WebVitalMetric(pydantic.BaseModel):
 class FCPMetric(WebVitalMetric):
     """First Contentful Paint metric."""
 
-    name: Literal["FCP"] = "FCP"
+    name: Literal['FCP'] = 'FCP'
 
 
 class LCPMetric(WebVitalMetric):
     """Largest Contentful Paint metric with element details."""
 
-    name: Literal["LCP"] = "LCP"
+    name: Literal['LCP'] = 'LCP'
     size: int | None = None  # Pixels
     element_id: str | None = None
     url: str | None = None
@@ -226,7 +225,7 @@ class LCPMetric(WebVitalMetric):
 class TTFBPhases(pydantic.BaseModel):
     """TTFB timing phase breakdown."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     dns: float = 0
     tcp: float = 0
@@ -236,14 +235,14 @@ class TTFBPhases(pydantic.BaseModel):
 class TTFBMetric(WebVitalMetric):
     """Time to First Byte with phase breakdown."""
 
-    name: Literal["TTFB"] = "TTFB"
+    name: Literal['TTFB'] = 'TTFB'
     phases: TTFBPhases | None = None
 
 
 class LayoutShiftSource(pydantic.BaseModel):
     """Source element that caused layout shift."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     node: str | None = None
 
@@ -251,7 +250,7 @@ class LayoutShiftSource(pydantic.BaseModel):
 class LayoutShiftEntry(pydantic.BaseModel):
     """Individual layout shift entry."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     value: float
     time: float
@@ -261,14 +260,14 @@ class LayoutShiftEntry(pydantic.BaseModel):
 class CLSMetric(WebVitalMetric):
     """Cumulative Layout Shift with session entries."""
 
-    name: Literal["CLS"] = "CLS"
+    name: Literal['CLS'] = 'CLS'
     entries: list[LayoutShiftEntry] = []
 
 
 class INPDetails(pydantic.BaseModel):
     """INP interaction phase breakdown."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     duration: float
     name: str
@@ -281,14 +280,14 @@ class INPDetails(pydantic.BaseModel):
 class INPMetric(WebVitalMetric):
     """Interaction to Next Paint metric."""
 
-    name: Literal["INP"] = "INP"
+    name: Literal['INP'] = 'INP'
     details: INPDetails | None = None
 
 
 class CoreWebVitals(pydantic.BaseModel):
     """Complete Core Web Vitals report."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     url: str
     timestamp: float  # Unix timestamp when captured
@@ -315,7 +314,7 @@ class CoreWebVitals(pydantic.BaseModel):
 class RequestTiming(pydantic.BaseModel):
     """CDP ResourceTiming converted to milliseconds."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     blocked: float = 0
     dns: float = 0
@@ -328,21 +327,13 @@ class RequestTiming(pydantic.BaseModel):
     @property
     def total(self) -> float:
         """Total request time in milliseconds."""
-        return (
-            self.blocked
-            + self.dns
-            + self.connect
-            + self.ssl
-            + self.send
-            + self.wait
-            + self.receive
-        )
+        return self.blocked + self.dns + self.connect + self.ssl + self.send + self.wait + self.receive
 
 
 class NetworkRequest(pydantic.BaseModel):
     """Individual network request with timing data."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     request_id: str
     url: str
@@ -364,7 +355,7 @@ class NetworkRequest(pydantic.BaseModel):
 class NetworkCapture(pydantic.BaseModel):
     """Complete network capture result."""
 
-    model_config = pydantic.ConfigDict(extra="ignore")
+    model_config = pydantic.ConfigDict(extra='ignore')
 
     url: str
     timestamp: float
@@ -374,7 +365,7 @@ class NetworkCapture(pydantic.BaseModel):
     total_time_ms: float
 
     # Summary statistics
-    slowest_requests: list[dict] = []  # [{url, duration_ms, status}]
+    slowest_requests: list[dict[str, Any]] = []  # [{url, duration_ms, status}]
     requests_by_type: dict[str, int] = {}  # {document: 1, xhr: 5, ...}
 
     errors: list[str] = []
@@ -386,21 +377,21 @@ class NetworkCapture(pydantic.BaseModel):
 
 # Constrained types for JavaScript execution results
 JavaScriptResultType = Literal[
-    "string",
-    "number",
-    "boolean",
-    "object",
-    "array",
-    "null",
-    "undefined",
-    "bigint",
-    "symbol",
-    "function",
-    "error",
-    "unserializable",
+    'string',
+    'number',
+    'boolean',
+    'object',
+    'array',
+    'null',
+    'undefined',
+    'bigint',
+    'symbol',
+    'function',
+    'error',
+    'unserializable',
 ]
 
-JavaScriptErrorType = Literal["timeout", "execution"]
+JavaScriptErrorType = Literal['timeout', 'execution']
 
 
 class JavaScriptResult(BaseModel):
@@ -412,7 +403,7 @@ class JavaScriptResult(BaseModel):
     """
 
     success: bool
-    result: str | int | float | bool | dict | list | None = None
+    result: str | int | float | bool | dict[str, Any] | list[Any] | None = None
     result_type: JavaScriptResultType
     error: str | None = None
     error_type: JavaScriptErrorType | None = None
@@ -445,7 +436,7 @@ class ResourceCapture(BaseModel):
     captured: list[CapturedResource]
     total_size_mb: float
     resource_count: int
-    errors: list[dict]
+    errors: list[dict[str, Any]]
 
 
 class HARExportResult(BaseModel):
@@ -513,7 +504,7 @@ class PageTextResult(BaseModel):
 # Profile State Models (Browser state persistence)
 # =============================================================================
 
-SameSitePolicy = Literal["Strict", "Lax", "None"]
+SameSitePolicy = Literal['Strict', 'Lax', 'None']
 
 
 class ProfileStateCookie(BaseModel):
@@ -550,10 +541,10 @@ class ProfileStateIndexedDBRecord(BaseModel):
     - ArrayBuffer: {"__type": "ArrayBuffer", "__value": [byte, byte, ...]}
     """
 
-    model_config = pydantic.ConfigDict(extra="forbid", strict=False)  # Allow flexible JSON values
+    model_config = pydantic.ConfigDict(extra='forbid', strict=False)  # Allow flexible JSON values
 
-    key: str | int | float | list | None
-    value: str | int | float | bool | dict | list | None
+    key: str | int | float | list[Any] | None
+    value: str | int | float | bool | dict[str, Any] | list[Any] | None
 
 
 class ProfileStateIndexedDBIndex(BaseModel):
@@ -649,7 +640,7 @@ class ProfileState(BaseModel):
     See docs/browser-data-taxonomy.md for detailed architecture documentation.
     """
 
-    schema_version: str = "1.0"
+    schema_version: str = '1.0'
     captured_at: str | None = None  # ISO 8601 timestamp
 
     # Cookies: domain+path scoped, top-level (see docstring for rationale)
@@ -659,9 +650,9 @@ class ProfileState(BaseModel):
     origins: dict[str, ProfileStateOriginStorage]
 
     # Future expansion slots (not yet implemented)
-    extensions: dict | None = None
-    permissions: dict | None = None
-    preferences: dict | None = None
+    extensions: dict[str, Any] | None = None
+    permissions: dict[str, Any] | None = None
+    preferences: dict[str, Any] | None = None
 
 
 class SaveProfileStateResult(BaseModel):
