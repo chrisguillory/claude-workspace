@@ -12,15 +12,15 @@ dependencies = [
 ]
 
 [project.scripts]
-server = "server:main"
+browser-server = "browser_automation.server:main"
 
 [tool.uv.sources]
 # Local development override: workspace reference takes precedence over git URL
 local-lib = { workspace = true }
 
 [tool.hatch.build]
-# Files to include in distribution package
-include = ["server.py"]
+# Package directory to include in distribution
+include = ["browser_automation/"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

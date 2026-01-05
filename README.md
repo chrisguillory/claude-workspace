@@ -58,7 +58,7 @@ claude mcp add --scope user python-interpreter -- uvx --refresh --from \
 # Local development (live code changes)
 claude mcp add --scope user python-interpreter -- uv run \
   --project "$(git rev-parse --show-toplevel)/mcp/python-interpreter" \
-  --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/server.py"
+  --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/python_interpreter/server.py"
 ```
 
 ### [Browser Automation MCP](mcp/browser-automation)
@@ -67,12 +67,12 @@ Playwright-based browser control with stealth mode for web automation.
 
 ```bash
 # From GitHub (recommended)
-claude mcp add --scope user browser-automation -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation server
+claude mcp add --scope user browser-automation -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation browser-server
 
 # From local clone
 claude mcp add --scope user browser-automation -- uv run \
   --project ~/claude-workspace/mcp/browser-automation \
-  --script ~/claude-workspace/mcp/browser-automation/server.py
+  --script ~/claude-workspace/mcp/browser-automation/browser_automation/server.py
 ```
 
 **Note:** Requires Playwright browsers. After installation, run: `playwright install chromium`
@@ -83,12 +83,12 @@ Selenium with CDP stealth injection to bypass Cloudflare bot detection.
 
 ```bash
 # From GitHub (recommended)
-claude mcp add --scope user selenium-browser-automation -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation server
+claude mcp add --scope user selenium-browser-automation -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation selenium-server
 
 # From local clone
 claude mcp add --scope user selenium-browser-automation -- uv run \
   --project ~/claude-workspace/mcp/selenium-browser-automation \
-  --script ~/claude-workspace/mcp/selenium-browser-automation/server.py
+  --script ~/claude-workspace/mcp/selenium-browser-automation/selenium_browser_automation/server.py
 ```
 
 **Note:** Requires Chrome/Chromium installed on the system.
@@ -100,8 +100,8 @@ For local development with live code changes, use workspace mode from the repo r
 ```bash
 cd ~/claude-workspace
 uv run --project python-interpreter-mcp mcp-py-server
-uv run --project browser-automation-mcp server
-uv run --project selenium-browser-automation-mcp server
+uv run --project browser-automation-mcp browser-server
+uv run --project selenium-browser-automation-mcp selenium-server
 ```
 
 ### Dependency Resolution and Reproducibility
@@ -124,7 +124,7 @@ This repo includes a `uv.lock` file, but whether it's used depends on your insta
 git clone https://github.com/chrisguillory/claude-workspace.git
 cd claude-workspace
 uv sync
-uv run --project browser-automation-mcp server
+uv run --project browser-automation-mcp browser-server
 ```
 
 ## Hook Installation

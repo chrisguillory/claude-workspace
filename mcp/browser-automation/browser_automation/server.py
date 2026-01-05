@@ -5,7 +5,7 @@ Browser Automation MCP Server
 Playwright-based browser control with stealth mode for Claude Code.
 
 Install:
-    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation server
+    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation browser-server
 
 Architecture: Runs locally (not Docker) for visible browser monitoring.
 """
@@ -15,9 +15,10 @@ from __future__ import annotations
 # Standard Library
 import asyncio
 import tempfile
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 # Third-Party Libraries
@@ -44,7 +45,7 @@ Temp Files: Auto-cleanup on shutdown via _temp_dir.
 
 
 @asynccontextmanager
-async def lifespan(server):
+async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     """Manage browser lifecycle - cleanup on shutdown."""
     # Browser is lazy-initialized on first use
     try:
@@ -78,7 +79,7 @@ class ResourceCapture(BaseModel):
     captured: list[CapturedResource]
     total_size_mb: float
     resource_count: int
-    errors: list[dict]
+    errors: list[dict[str, str]]
 
 
 class NavigationResult(BaseModel):
@@ -121,7 +122,7 @@ _capture_dir = Path(_capture_temp_dir.name)
 _capture_counter = 0  # Zero-padded 3-digit counter for capture directories
 
 
-def _save_captured_resource(capture_dir: Path, url: str, data: dict) -> CapturedResource | None:
+def _save_captured_resource(capture_dir: Path, url: str, data: dict[str, Any]) -> CapturedResource | None:
     """Save single captured resource to hierarchical path. Returns metadata or None on error."""
     # Create hierarchical path from URL
     parsed = urlparse(url)
@@ -151,23 +152,23 @@ def _save_captured_resource(capture_dir: Path, url: str, data: dict) -> Captured
     )
 
 
-def _remove_url_fields(node):
+def _remove_url_fields(node: Any) -> Any:
     """Recursively remove /url fields and empty containers from YAML data structure."""
     if isinstance(node, dict):
-        filtered = {k: _remove_url_fields(v) for k, v in node.items() if k != '/url'}
+        filtered_dict = {k: _remove_url_fields(v) for k, v in node.items() if k != '/url'}
         # Remove keys with empty/None values
-        filtered = {k: v for k, v in filtered.items() if v not in (None, [], {})}
-        return filtered if filtered else None
+        filtered_dict = {k: v for k, v in filtered_dict.items() if v not in (None, [], {})}
+        return filtered_dict if filtered_dict else None
     elif isinstance(node, list):
-        filtered = [_remove_url_fields(item) for item in node]
+        filtered_list = [_remove_url_fields(item) for item in node]
         # Filter out None and empty containers
-        filtered = [item for item in filtered if item not in (None, [], {})]
-        return filtered if filtered else None
+        filtered_list = [item for item in filtered_list if item not in (None, [], {})]
+        return filtered_list if filtered_list else None
     else:
         return node
 
 
-async def _close_browser():
+async def _close_browser() -> None:
     """Tear down browser, context, and page. Reset all global state."""
     global _playwright, _browser, _context, _page
 
@@ -186,11 +187,11 @@ async def get_browser() -> tuple[Browser, BrowserContext, Page]:
     """Initialize and return browser session (lazy singleton pattern)."""
     global _playwright, _browser, _context, _page
 
-    if _page is not None:
+    if _page is not None and _browser is not None and _context is not None:
         return _browser, _context, _page
 
     # Third-Party Libraries
-    from playwright_stealth.stealth import Stealth
+    from playwright_stealth.stealth import Stealth  # type: ignore[import-untyped]
 
     _playwright = await async_playwright().start()
 
@@ -275,7 +276,7 @@ async def navigate(
         capture_dir.mkdir(parents=True, exist_ok=True)
 
         # Response event monitoring - doesn't block network stack
-        async def capture_response(response):
+        async def capture_response(response: Any) -> None:
             try:
                 req_type = response.request.resource_type
 
@@ -323,7 +324,7 @@ async def navigate(
 
     result = NavigationResult(current_url=page.url, title=await page.title())
 
-    if capture_resources:
+    if capture_resources and capture_dir is not None:
         # Save main HTML
         html_path = capture_dir / 'index.html'
         html_path.write_text(await page.content(), encoding='utf-8')
@@ -362,7 +363,7 @@ async def navigate(
 @mcp.tool(annotations=ToolAnnotations(title='Get Page Content', readOnlyHint=True, openWorldHint=True))
 async def get_page_content(
     format: Literal['text', 'html', 'markdown'],
-    ctx: Context,
+    ctx: Context[Any, Any, Any],
     selector: str | None = None,
     limit: int | None = None,
 ) -> str:
@@ -416,7 +417,7 @@ async def get_page_content(
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Take Screenshot', readOnlyHint=True))
-async def screenshot(filename: str, ctx: Context) -> str:
+async def screenshot(filename: str, ctx: Context[Any, Any, Any]) -> str:
     """Take full-page screenshot. Saves to temp directory with auto-cleanup on exit.
 
     Args:
@@ -439,7 +440,7 @@ async def screenshot(filename: str, ctx: Context) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-async def download_resource(url: str, output_filename: str) -> dict:
+async def download_resource(url: str, output_filename: str) -> dict[str, Any]:
     """Download specific resource using current browser context and session.
 
     Uses page.request.get() to maintain cookies/session from prior navigation.
@@ -532,7 +533,7 @@ async def get_interactive_elements(
     text_contains: str | None,
     tag_filter: list[str] | None,
     limit: int | None,
-    ctx: Context,
+    ctx: Context[Any, Any, Any],
 ) -> list[InteractiveElement]:
     """Get clickable elements with optional filters for targeted extraction.
 
@@ -622,7 +623,7 @@ async def get_interactive_elements(
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
-async def get_focusable_elements(only_tabbable: bool, ctx: Context) -> list[FocusableElement]:
+async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> list[FocusableElement]:
     """Get keyboard-navigable elements sorted by tab order.
 
     Args:
@@ -688,10 +689,10 @@ async def get_focusable_elements(only_tabbable: bool, ctx: Context) -> list[Focu
 @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))
 async def click(
     selector: str,
-    ctx: Context,
+    ctx: Context[Any, Any, Any],
     wait_for_network: bool = False,
     network_timeout: int = 10000,
-):
+) -> None:
     """Click element. Auto-waits for element to be visible, enabled, and stable.
 
     Args:
@@ -719,7 +720,7 @@ async def click(
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Wait for Network Idle', readOnlyHint=True, idempotentHint=True))
-async def wait_for_network_idle(ctx: Context, timeout: int = 10000):
+async def wait_for_network_idle(ctx: Context[Any, Any, Any], timeout: int = 10000) -> None:
     """Wait for network activity to settle after clicks or dynamic content loads.
 
     Use after click() if page triggers AJAX/fetch requests. Default: 10000ms (10 sec).
@@ -739,7 +740,7 @@ async def wait_for_network_idle(ctx: Context, timeout: int = 10000):
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
-async def press_key(key: str, ctx: Context):
+async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
     """Press a keyboard key or key combination.
 
     Args:
@@ -770,7 +771,7 @@ async def press_key(key: str, ctx: Context):
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Type Text', destructiveHint=False, idempotentHint=False))
-async def type_text(text: str, ctx: Context, delay_ms: int = 0):
+async def type_text(text: str, ctx: Context[Any, Any, Any], delay_ms: int = 0) -> None:
     """Type text character by character with optional delay between keystrokes.
 
     Args:
@@ -795,7 +796,7 @@ async def type_text(text: str, ctx: Context, delay_ms: int = 0):
     await logger.info('Text typing successful')
 
 
-def main():
+def main() -> None:
     """Entry point for uvx installation."""
     print('Starting Browser Automation MCP server')
     mcp.run()

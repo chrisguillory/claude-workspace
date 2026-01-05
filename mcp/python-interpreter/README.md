@@ -84,14 +84,14 @@ This gives you:
 ```bash
 claude mcp add --scope user python-interpreter -- uv run \
   --project "$(git rev-parse --show-toplevel)/mcp/python-interpreter" \
-  --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/server.py"
+  --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/python_interpreter/server.py"
 ```
 
 Or run the server directly for testing (from repo root):
 
 ```bash
 # Script mode (uses inline script dependencies)
-uv run --directory mcp/python-interpreter --script server.py
+uv run --directory mcp/python-interpreter --script python_interpreter/server.py
 
 # Entry point mode (uses pyproject.toml dependencies)
 uv run --project mcp/python-interpreter mcp-py-server

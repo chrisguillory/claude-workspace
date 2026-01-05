@@ -5,7 +5,7 @@ Selenium Browser Automation MCP Server
 CDP stealth injection to bypass Cloudflare bot detection.
 
 Install:
-    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation server
+    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation selenium-server
 
 Architecture: Runs locally (not Docker) for visible browser monitoring.
 Uses Selenium with CDP stealth injection where Playwright fails.
@@ -46,11 +46,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from src import chrome_profile_state_export
+
+from . import chrome_profile_state_export
 
 # Local imports
-from src.chrome_profiles import list_all_profiles
-from src.models import (
+from .chrome_profiles import list_all_profiles
+from .models import (
     # Navigation and page extraction
     ChromeProfilesResult,
     # Chrome profile state export
@@ -83,7 +84,7 @@ from src.models import (
     SmartExtractionInfo,
     TTFBMetric,
 )
-from src.scripts import (
+from .scripts import (
     ARIA_SNAPSHOT_SCRIPT,
     INDEXEDDB_CAPTURE_SCRIPT,
     INDEXEDDB_RESTORE_SCRIPT,
@@ -1178,7 +1179,7 @@ def register_tools(service: BrowserService) -> None:
 
         await logger.info(f"Extracting text from '{selector}'")
 
-        # Execute the extraction script (loaded from src/scripts/)
+        # Execute the extraction script (loaded from scripts/)
         try:
             result = await asyncio.to_thread(driver.execute_script, TEXT_EXTRACTION_SCRIPT, selector)
         except WebDriverException as e:
@@ -1470,7 +1471,7 @@ def register_tools(service: BrowserService) -> None:
         """
         driver = await service.get_browser()
 
-        # Execute ARIA snapshot script (loaded from src/scripts/)
+        # Execute ARIA snapshot script (loaded from scripts/)
         snapshot_data = await asyncio.to_thread(driver.execute_script, ARIA_SNAPSHOT_SCRIPT, selector, include_urls)
 
         def normalize_for_comparison(s: str) -> str:
@@ -1844,7 +1845,7 @@ def register_tools(service: BrowserService) -> None:
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        # Step 1: Inject monitoring script (loaded from src/scripts/)
+        # Step 1: Inject monitoring script (loaded from scripts/)
         await asyncio.to_thread(driver.execute_script, NETWORK_MONITOR_SETUP_SCRIPT)
         await logger.info('Network monitor injected')
 
@@ -2527,7 +2528,7 @@ def register_tools(service: BrowserService) -> None:
 
         errors: list[str] = []
 
-        # Use execute_async_script for Promise-based collection (script from src/scripts/)
+        # Use execute_async_script for Promise-based collection (script from scripts/)
         results = await asyncio.to_thread(
             driver.execute_async_script,
             WEB_VITALS_SCRIPT,
@@ -2610,7 +2611,7 @@ Note:
 
         await logger.info(f'Getting resource timings for {current_url}')
 
-        # Collect resource timing via JavaScript Performance API (script from src/scripts/)
+        # Collect resource timing via JavaScript Performance API (script from scripts/)
         raw_entries = await asyncio.to_thread(driver.execute_script, RESOURCE_TIMING_SCRIPT)
 
         # Handle empty/null response
@@ -3315,7 +3316,7 @@ Workflow:
         escaped_code = json.dumps(code)
 
         # Build the async wrapper for Selenium's execute_async_script
-        # (uses safe_serialize.js loaded from src/scripts/)
+        # (uses safe_serialize.js loaded from scripts/)
         async_script = build_execute_javascript_async_script(escaped_code)
 
         try:

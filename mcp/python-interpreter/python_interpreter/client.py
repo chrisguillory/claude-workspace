@@ -74,7 +74,7 @@ def get_socket_path() -> pathlib.Path:
     raise RuntimeError('Could not find Claude process in process tree')
 
 
-def main():
+def main() -> None:
     # Read code from stdin
     code = sys.stdin.read()
     if not code.strip():

@@ -4,7 +4,7 @@ Scripts are loaded at import time from .js files in this directory.
 All scripts are validated to exist at startup (fail-fast pattern).
 
 Usage:
-    from src.scripts import TEXT_EXTRACTION_SCRIPT, ARIA_SNAPSHOT_SCRIPT
+    from selenium_browser_automation.scripts import TEXT_EXTRACTION_SCRIPT, ARIA_SNAPSHOT_SCRIPT
 """
 
 from __future__ import annotations
