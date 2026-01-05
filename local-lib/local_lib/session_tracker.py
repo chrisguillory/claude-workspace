@@ -11,33 +11,33 @@ from __future__ import annotations
 
 import json
 import tempfile
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, UTC
-from typing import Sequence
-import pydantic
+
 import psutil
+import pydantic
 from filelock import FileLock
 
 from local_lib.types import JsonDatetime, SessionSource, SessionState
 
-
 __all__ = [
-    "SessionManager",
-    "SessionDatabase",
-    "Session",
-    "SessionMetadata",
+    'SessionManager',
+    'SessionDatabase',
+    'Session',
+    'SessionMetadata',
 ]
 
 
 # Path configuration
-SESSIONS_PATH = Path("~/.claude-workspace/sessions.json").expanduser()
-LOCK_PATH = Path("~/.claude-workspace/.sessions.json.lock").expanduser()
+SESSIONS_PATH = Path('~/.claude-workspace/sessions.json').expanduser()
+LOCK_PATH = Path('~/.claude-workspace/.sessions.json.lock').expanduser()
 
 
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
 
-    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
 
 
 class SessionDatabase(BaseModel):
@@ -107,7 +107,7 @@ class SessionManager:
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: object | None,
-    ) -> bool:
+    ) -> None:
         """Save on success, rollback on error, always release lock."""
         try:
             if exc_type is None and self._db is not None:
@@ -116,7 +116,6 @@ class SessionManager:
             if self._lock:
                 self._lock.release()
             self._db = None
-        return False
 
     def start_session(
         self,
@@ -147,22 +146,17 @@ class SessionManager:
                     project_dir=existing_session.project_dir,
                     transcript_path=existing_session.transcript_path,
                     source=source,  # Updated to new source (e.g., "resume")
-                    state="active",
+                    state='active',
                     metadata=SessionMetadata(
                         claude_pid=claude_pid,
                         started_at=datetime.now(UTC).astimezone(),
                         ended_at=None,
                         crash_detected_at=None,
-                        parent_id=parent_id
-                        if parent_id is not None
-                        else existing_session.metadata.parent_id,
+                        parent_id=parent_id if parent_id is not None else existing_session.metadata.parent_id,
                     ),
                 )
                 # Replace in sessions list
-                self._db.sessions = [
-                    restarted_session if s.session_id == session_id else s
-                    for s in self._db.sessions
-                ]
+                self._db.sessions = [restarted_session if s.session_id == session_id else s for s in self._db.sessions]
                 return
 
         # Create new session if doesn't exist
@@ -171,7 +165,7 @@ class SessionManager:
             project_dir=self.cwd,
             transcript_path=transcript_path,
             source=source,
-            state="active",
+            state='active',
             metadata=SessionMetadata(
                 claude_pid=claude_pid,
                 started_at=datetime.now(UTC).astimezone(),
@@ -200,7 +194,7 @@ class SessionManager:
                     project_dir=existing_session.project_dir,
                     transcript_path=existing_session.transcript_path,
                     source=existing_session.source,
-                    state="exited",
+                    state='exited',
                     metadata=SessionMetadata(
                         claude_pid=existing_session.metadata.claude_pid,
                         started_at=existing_session.metadata.started_at,
@@ -210,10 +204,7 @@ class SessionManager:
                     ),
                 )
                 # Replace in sessions list
-                self._db.sessions = [
-                    exited_session if s.session_id == session_id else s
-                    for s in self._db.sessions
-                ]
+                self._db.sessions = [exited_session if s.session_id == session_id else s for s in self._db.sessions]
                 return
 
     def detect_crashed_sessions(self) -> Sequence[str]:
@@ -229,7 +220,7 @@ class SessionManager:
         updated_sessions: list[Session] = []
 
         for session in self._db.sessions:
-            if session.state != "active":
+            if session.state != 'active':
                 updated_sessions.append(session)
                 continue
 
@@ -240,7 +231,7 @@ class SessionManager:
                     project_dir=session.project_dir,
                     transcript_path=session.transcript_path,
                     source=session.source,
-                    state="crashed",
+                    state='crashed',
                     metadata=SessionMetadata(
                         claude_pid=session.metadata.claude_pid,
                         started_at=session.metadata.started_at,
@@ -290,7 +281,7 @@ def add_session(
         project_dir=cwd,
         transcript_path=transcript_path,
         source=source,
-        state="active",
+        state='active',
         metadata=SessionMetadata(
             claude_pid=claude_pid,
             started_at=datetime.now(UTC).astimezone(),
@@ -314,7 +305,7 @@ def end_session(cwd: str, session_id: str) -> None:
     # Find and update session
     for session in db.sessions:
         if session.session_id == session_id:
-            session.state = "exited"
+            session.state = 'exited'
             session.metadata.ended_at = datetime.now(UTC).astimezone()
             break
 
@@ -331,7 +322,7 @@ def get_active_sessions(cwd: str) -> Sequence[Session]:
         Sequence of active Session objects
     """
     db = load_sessions(cwd)
-    return [s for s in db.sessions if s.state == "active"]
+    return [s for s in db.sessions if s.state == 'active']
 
 
 def get_exited_sessions(cwd: str) -> Sequence[Session]:
@@ -344,7 +335,7 @@ def get_exited_sessions(cwd: str) -> Sequence[Session]:
         Sequence of exited Session objects
     """
     db = load_sessions(cwd)
-    return [s for s in db.sessions if s.state == "exited"]
+    return [s for s in db.sessions if s.state == 'exited']
 
 
 def get_crashed_sessions(cwd: str) -> Sequence[Session]:
@@ -357,7 +348,7 @@ def get_crashed_sessions(cwd: str) -> Sequence[Session]:
         Sequence of crashed Session objects
     """
     db = load_sessions(cwd)
-    return [s for s in db.sessions if s.state == "crashed"]
+    return [s for s in db.sessions if s.state == 'crashed']
 
 
 def detect_crashed_sessions(cwd: str) -> Sequence[str]:
@@ -376,12 +367,12 @@ def detect_crashed_sessions(cwd: str) -> Sequence[str]:
     crashed_ids: list[str] = []
 
     for session in db.sessions:
-        if session.state != "active":
+        if session.state != 'active':
             continue
 
         # psutil.pid_exists() is fast - O(1) syscall, not scanning all processes
         if not psutil.pid_exists(session.metadata.claude_pid):
-            session.state = "crashed"
+            session.state = 'crashed'
             session.metadata.crash_detected_at = datetime.now(UTC).astimezone()
             crashed_ids.append(session.session_id)
 
@@ -412,7 +403,7 @@ def load_sessions(cwd: str) -> SessionDatabase:
     if not sessions_file.exists():
         return SessionDatabase(sessions=[])
 
-    with open(sessions_file, "r") as f:
+    with open(sessions_file) as f:
         data = json.load(f)
         return SessionDatabase.model_validate(data)
 
@@ -429,11 +420,9 @@ def save_sessions(cwd: str, db: SessionDatabase) -> None:
     sessions_file = get_sessions_file(cwd)
 
     # Write to temp file in same directory (required for atomic rename)
-    with tempfile.NamedTemporaryFile(
-        mode="w", dir=sessions_file.parent, delete=False, suffix=".tmp"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode='w', dir=sessions_file.parent, delete=False, suffix='.tmp') as f:
         temp_path = Path(f.name)
-        json.dump(db.model_dump(mode="json", exclude_none=True), f, indent=2)
+        json.dump(db.model_dump(mode='json', exclude_none=True), f, indent=2)
 
     # Atomic rename
     temp_path.replace(sessions_file)

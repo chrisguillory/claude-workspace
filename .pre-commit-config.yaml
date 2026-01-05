@@ -49,8 +49,8 @@ repos:
           # selenium-browser-automation dependencies
           - selenium
           - pycryptodome>=3.23.0
-          - dfindexeddb>=20251109
-          # ccl-chromium-reader - git dependency, may need special handling
+          # dfindexeddb and ccl-chromium-reader have custom stubs in stubs/
+          # Don't include as dependencies - they require C libraries (snappy)
         args: [--config-file=pyproject.toml, .]
         pass_filenames: false
         always_run: true

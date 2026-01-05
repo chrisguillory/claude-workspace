@@ -8,11 +8,11 @@
 # [tool.uv.sources]
 # local_lib = { path = "../local-lib/", editable = true }
 # ///
+from __future__ import annotations
 
 import sys
-from pathlib import Path
-import pydantic
 
+import pydantic
 from local_lib.session_tracker import SessionManager
 from local_lib.types import SessionEndReason
 from local_lib.utils import Timer
@@ -24,7 +24,7 @@ timer = Timer()
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
 
-    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
 
 
 class SessionEndHookInput(BaseModel):
@@ -45,5 +45,5 @@ with SessionManager(hook_data.cwd) as manager:
     manager.end_session(hook_data.session_id)
 
 # Print all session information (comprehensive - don't prematurely optimize)
-print(f"Completed in {timer.elapsed_ms()} ms")
+print(f'Completed in {timer.elapsed_ms()} ms')
 print(repr(hook_data))

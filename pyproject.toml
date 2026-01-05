@@ -68,7 +68,7 @@ python_version = "3.13"
 plugins = ["pydantic.mypy"]
 strict = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR"
+mypy_path = "$MYPY_CONFIG_FILE_DIR:$MYPY_CONFIG_FILE_DIR/stubs"
 exclude = [
     ".venv",
     # Exclude MCP servers with duplicate "server.py" names (mypy limitation)
@@ -89,7 +89,8 @@ init_typed = true
 dev = [
     "mypy>=1.19.1",
     "pre-commit>=4.5.1",
-    "pydantic>=2.12.5",  # Required for pydantic.mypy plugin
+    "pydantic>=2.12.5", # Required for pydantic.mypy plugin
     "ruff>=0.14.10",
     "types-psutil>=7.2.1.20251231",
+    "types-pyyaml>=6.0.12.20250915",
 ]

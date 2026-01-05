@@ -10,16 +10,19 @@ This module provides reusable functions for extracting session information
 from Claude Code hook inputs, improving upon hardcoded path approaches.
 """
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
+
 import pydantic
 
 
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
 
-    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
 
 
 class HookInput(BaseModel):
@@ -40,8 +43,8 @@ class SessionInfo(BaseModel):
 
     def __str__(self) -> str:
         if self.parent_id:
-            return f"session_id: {self.session_id}\nparent_id: {self.parent_id}"
-        return f"session_id: {self.session_id}"
+            return f'session_id: {self.session_id}\nparent_id: {self.parent_id}'
+        return f'session_id: {self.session_id}'
 
 
 def read_hook_input() -> HookInput:
@@ -98,7 +101,7 @@ def _extract_parent_id(hook_input: HookInput) -> str | None:
         return None
 
     try:
-        with open(transcript_file, "r") as f:
+        with open(transcript_file) as f:
             first_line = f.readline()
 
             # Handle empty file
@@ -106,12 +109,12 @@ def _extract_parent_id(hook_input: HookInput) -> str | None:
                 return None
 
             # Parse first line as JSON
-            metadata = json.loads(first_line)
+            metadata: dict[str, str] = json.loads(first_line)
 
             # Extract leafUuid if present
-            return metadata.get("leafUuid")
+            return metadata.get('leafUuid')
 
-    except (json.JSONDecodeError, IOError) as e:
+    except (OSError, json.JSONDecodeError):
         # Silently handle corrupted/unreadable files
         # (Hook should not fail the entire session)
         return None
@@ -127,7 +130,7 @@ def print_session_info(session_info: SessionInfo) -> None:
 
 
 # Example usage when run as a hook
-if __name__ == "__main__":
+if __name__ == '__main__':
     # This allows the module to be used directly as a hook
     try:
         hook_data = read_hook_input()
@@ -135,5 +138,5 @@ if __name__ == "__main__":
         print_session_info(info)
     except Exception as e:
         # Hooks should not crash - print error and continue
-        print(f"Error detecting session: {e}", file=sys.stderr)
+        print(f'Error detecting session: {e}', file=sys.stderr)
         sys.exit(0)  # Exit successfully to not block Claude

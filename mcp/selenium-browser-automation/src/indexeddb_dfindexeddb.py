@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import sys
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from dfindexeddb.indexeddb.chromium.definitions import (
     DatabaseMetaDataKeyType,
@@ -45,18 +46,18 @@ def _extract_domain_from_origin(origin: str) -> str:
         Bare domain (e.g., "example.com", "localhost")
     """
     # Remove trailing _0, _1, etc. (partition key)
-    if "_" in origin:
-        parts = origin.rsplit("_", 1)
+    if '_' in origin:
+        parts = origin.rsplit('_', 1)
         if parts[-1].isdigit():
             origin = parts[0]
 
     # Remove scheme prefix (https_, http_, chrome-extension_, etc.)
-    if "_" in origin:
-        origin = origin.split("_", 1)[1]
+    if '_' in origin:
+        origin = origin.split('_', 1)[1]
 
     # Handle port (localhost_3000 -> localhost)
-    if "_" in origin:
-        parts = origin.rsplit("_", 1)
+    if '_' in origin:
+        parts = origin.rsplit('_', 1)
         if parts[-1].isdigit():
             origin = parts[0]
 
@@ -73,22 +74,19 @@ def _domain_matches(host: str, pattern: str) -> bool:
     Returns:
         True if host matches pattern per RFC 6265 rules
     """
-    host = host.lower().strip(".")
-    pattern = pattern.lower().strip(".")
+    host = host.lower().strip('.')
+    pattern = pattern.lower().strip('.')
 
     # Remove port from pattern if present
-    if ":" in pattern:
-        pattern = pattern.split(":")[0]
+    if ':' in pattern:
+        pattern = pattern.split(':')[0]
 
     # Exact match
     if host == pattern:
         return True
 
     # Suffix match with dot boundary
-    if host.endswith("." + pattern):
-        return True
-
-    return False
+    return host.endswith('.' + pattern)
 
 
 def _make_json_serializable(value: Any) -> Any:
@@ -109,7 +107,7 @@ def _make_json_serializable(value: Any) -> Any:
         return value
     if isinstance(value, bytes):
         # Encode as ArrayBuffer format matching indexeddb_restore.js deserializeValue()
-        return {"__type": "ArrayBuffer", "__value": list(value)}
+        return {'__type': 'ArrayBuffer', '__value': list(value)}
     if isinstance(value, (list, tuple)):
         return [_make_json_serializable(v) for v in value]
     if isinstance(value, dict):
@@ -144,25 +142,25 @@ def _origin_dir_to_url(origin_dir: str) -> str:
         URL like "https://example.com"
     """
     # Remove partition key suffix
-    if "_" in origin_dir:
-        parts = origin_dir.rsplit("_", 1)
+    if '_' in origin_dir:
+        parts = origin_dir.rsplit('_', 1)
         if parts[-1].isdigit():
             origin_dir = parts[0]
 
     # Parse scheme and domain
-    if "_" in origin_dir:
-        scheme, rest = origin_dir.split("_", 1)
+    if '_' in origin_dir:
+        scheme, rest = origin_dir.split('_', 1)
         # Handle port if present (localhost_3000 -> localhost:3000)
-        if "_" in rest:
-            parts = rest.rsplit("_", 1)
+        if '_' in rest:
+            parts = rest.rsplit('_', 1)
             if parts[-1].isdigit():
                 domain = parts[0]
                 port = parts[1]
-                return f"{scheme}://{domain}:{port}"
-        return f"{scheme}://{rest}"
+                return f'{scheme}://{domain}:{port}'
+        return f'{scheme}://{rest}'
 
     # Fallback
-    return f"https://{origin_dir}"
+    return f'https://{origin_dir}'
 
 
 def export_indexeddb_with_schema(
@@ -217,15 +215,15 @@ def export_indexeddb_with_schema(
     Raises:
         FileNotFoundError: If IndexedDB path doesn't exist
     """
-    indexeddb_path = profile_path / "IndexedDB"
+    indexeddb_path = profile_path / 'IndexedDB'
 
     if not indexeddb_path.exists():
         return {}
 
     result: dict[str, list[dict[str, Any]]] = {}
 
-    for db_dir in indexeddb_path.glob("*.indexeddb.leveldb"):
-        origin_dir = db_dir.name.replace(".indexeddb.leveldb", "")
+    for db_dir in indexeddb_path.glob('*.indexeddb.leveldb'):
+        origin_dir = db_dir.name.replace('.indexeddb.leveldb', '')
 
         # Filter by origin if specified
         if origins_filter:
@@ -242,7 +240,7 @@ def export_indexeddb_with_schema(
         except Exception as e:
             # Log but continue with other origins
             print(
-                f"[indexeddb] Warning: Failed to parse {origin_dir}: {e}",
+                f'[indexeddb] Warning: Failed to parse {origin_dir}: {e}',
                 file=sys.stderr,
             )
 
@@ -269,11 +267,11 @@ def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
     stores: dict[int, dict[int, dict[str, Any]]] = defaultdict(
         lambda: defaultdict(
             lambda: {
-                "name": None,
-                "keyPath": None,
-                "autoIncrement": False,
-                "indexes": {},
-                "records": [],
+                'name': None,
+                'keyPath': None,
+                'autoIncrement': False,
+                'indexes': {},
+                'records': [],
             }
         )
     )
@@ -308,11 +306,11 @@ def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
             store = stores[db_id][store_id]
 
             if key.metadata_type == ObjectStoreMetaDataKeyType.OBJECT_STORE_NAME:
-                store["name"] = rec.value
+                store['name'] = rec.value
             elif key.metadata_type == ObjectStoreMetaDataKeyType.KEY_PATH:
-                store["keyPath"] = _keypath_to_value(rec.value)
+                store['keyPath'] = _keypath_to_value(rec.value)
             elif key.metadata_type == ObjectStoreMetaDataKeyType.AUTO_INCREMENT_FLAG:
-                store["autoIncrement"] = bool(rec.value)
+                store['autoIncrement'] = bool(rec.value)
 
         # Index metadata
         elif isinstance(key, IndexMetaDataKey):
@@ -322,13 +320,13 @@ def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
             idx = indexes[db_id][store_id][index_id]
 
             if key.metadata_type == IndexMetaDataKeyType.INDEX_NAME:
-                idx["name"] = rec.value
+                idx['name'] = rec.value
             elif key.metadata_type == IndexMetaDataKeyType.KEY_PATH:
-                idx["keyPath"] = _keypath_to_value(rec.value)
+                idx['keyPath'] = _keypath_to_value(rec.value)
             elif key.metadata_type == IndexMetaDataKeyType.UNIQUE_FLAG:
-                idx["unique"] = bool(rec.value)
+                idx['unique'] = bool(rec.value)
             elif key.metadata_type == IndexMetaDataKeyType.MULTI_ENTRY_FLAG:
-                idx["multiEntry"] = bool(rec.value)
+                idx['multiEntry'] = bool(rec.value)
 
         # Object store data (records)
         elif isinstance(key, ObjectStoreDataKey):
@@ -340,13 +338,13 @@ def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
             record_key = key.encoded_user_key.value
 
             # Extract record value from ObjectStoreDataValue
-            record_value = rec.value.value if hasattr(rec.value, "value") else rec.value
+            record_value = rec.value.value if hasattr(rec.value, 'value') else rec.value
 
             # Ensure values are JSON-serializable
             record_key = _make_json_serializable(record_key)
             record_value = _make_json_serializable(record_value)
 
-            store["records"].append({"key": record_key, "value": record_value})
+            store['records'].append({'key': record_key, 'value': record_value})
 
     # Build output format matching ProfileStateIndexedDB Pydantic model
     result: list[dict[str, Any]] = []
@@ -356,40 +354,40 @@ def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
             continue
 
         db_export: dict[str, Any] = {
-            "database_name": db_name,
-            "version": db_versions.get(db_id, 1),
-            "object_stores": [],
+            'database_name': db_name,
+            'version': db_versions.get(db_id, 1),
+            'object_stores': [],
         }
 
         for store_id, store_data in sorted(stores[db_id].items()):
-            if store_data["name"] is None:
+            if store_data['name'] is None:
                 continue
 
             # Add indexes to store (matching ProfileStateIndexedDBIndex)
             store_indexes = []
             if db_id in indexes and store_id in indexes[db_id]:
                 for index_id, idx_data in sorted(indexes[db_id][store_id].items()):
-                    if idx_data.get("name"):
+                    if idx_data.get('name'):
                         store_indexes.append(
                             {
-                                "name": idx_data["name"],
-                                "key_path": idx_data.get("keyPath"),
-                                "unique": idx_data.get("unique", False),
-                                "multi_entry": idx_data.get("multiEntry", False),
+                                'name': idx_data['name'],
+                                'key_path': idx_data.get('keyPath'),
+                                'unique': idx_data.get('unique', False),
+                                'multi_entry': idx_data.get('multiEntry', False),
                             }
                         )
 
             # Matching ProfileStateIndexedDBObjectStore
             store_export = {
-                "name": store_data["name"],
-                "key_path": store_data["keyPath"],
-                "auto_increment": store_data["autoIncrement"],
-                "indexes": store_indexes,
-                "records": store_data["records"],
+                'name': store_data['name'],
+                'key_path': store_data['keyPath'],
+                'auto_increment': store_data['autoIncrement'],
+                'indexes': store_indexes,
+                'records': store_data['records'],
             }
-            db_export["object_stores"].append(store_export)
+            db_export['object_stores'].append(store_export)
 
-        if db_export["object_stores"]:
+        if db_export['object_stores']:
             result.append(db_export)
 
     return result
