@@ -15,11 +15,11 @@ dependencies = [
 ]
 
 [project.scripts]
-server = "server:main"
+selenium-server = "selenium_browser_automation.server:main"
 
 [tool.hatch.build]
-# CRITICAL: Must include src/ directory for local module imports
-include = ["server.py", "src/"]
+# Package directory to include in distribution
+include = ["selenium_browser_automation/"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

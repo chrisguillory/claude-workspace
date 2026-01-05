@@ -15,8 +15,8 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-py-server = "server:main"
-mcp-py-client = "client:main"
+mcp-py-server = "python_interpreter.server:main"
+mcp-py-client = "python_interpreter.client:main"
 
 [tool.uv.sources]
 # Local development override: workspace reference takes precedence over git URL in dependencies.
@@ -24,8 +24,8 @@ mcp-py-client = "client:main"
 local-lib = { workspace = true }
 
 [tool.hatch.build]
-# Files to include in distribution package
-include = ["client.py", "server.py"]
+# Package directory to include in distribution
+include = ["python_interpreter/"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

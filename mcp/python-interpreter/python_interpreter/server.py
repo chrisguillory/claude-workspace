@@ -20,7 +20,7 @@ Provides a persistent Python execution environment accessible via MCP tools. Cod
 imports, and functions persist across tool calls for stateful computation.
 
 Architecture:
-    Claude Code ──[stdio/JSON-RPC]──> mcp/python-interpreter/server.py
+    Claude Code ──[stdio/JSON-RPC]──> mcp/python-interpreter/python_interpreter/server.py
                                        ├── FastMCP (main, stdio)
                                        └── FastAPI (background, Unix socket)
                                                 ▲
@@ -64,7 +64,7 @@ Use Cases:
     - ASCII art and text formatting
 
 Setup:
-    claude mcp add --transport stdio python-interpreter -- uv run --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/server.py"
+    claude mcp add --transport stdio python-interpreter -- uv run --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/python_interpreter/server.py"
 
 Example Session:
     1. execute("import math; pi_squared = math.pi ** 2")  # Returns: ""
@@ -551,7 +551,7 @@ class ServerState:
         socket_path: pathlib.Path,
         transcript_path: pathlib.Path,
         output_dir: pathlib.Path,
-        temp_dir: tempfile.TemporaryDirectory,
+        temp_dir: tempfile.TemporaryDirectory[str],
         claude_pid: int,
     ) -> None:
         # Identity
@@ -769,7 +769,7 @@ def register_tools(service: PythonInterpreterService) -> None:
             openWorldHint=False,
         ),
     )
-    async def execute(code: str, ctx: mcp.server.fastmcp.Context) -> ExecuteResult:
+    async def execute(code: str, ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> ExecuteResult:
         """Execute Python code in persistent scope with auto-installation of missing packages. Variables persist across calls.
 
         IMPORTANT: For better user experience, you should typically use the Bash client instead:
@@ -796,7 +796,7 @@ def register_tools(service: PythonInterpreterService) -> None:
         ),
         structured_output=False,
     )
-    async def reset(ctx: mcp.server.fastmcp.Context) -> str:
+    async def reset(ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> str:
         """Clear all variables, imports, and functions from persistent scope."""
         logger = DualLogger(ctx)
         return await service.reset(logger)
@@ -811,7 +811,7 @@ def register_tools(service: PythonInterpreterService) -> None:
         ),
         structured_output=False,
     )
-    async def list_vars(ctx: mcp.server.fastmcp.Context) -> str:
+    async def list_vars(ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> str:
         """List all user-defined variables in persistent scope."""
         logger = DualLogger(ctx)
         return await service.list_vars(logger)
@@ -825,7 +825,7 @@ def register_tools(service: PythonInterpreterService) -> None:
             openWorldHint=False,
         ),
     )
-    async def get_session_info(ctx: mcp.server.fastmcp.Context) -> SessionInfo:
+    async def get_session_info(ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> SessionInfo:
         """Get comprehensive session and server metadata including session ID, paths, PID, start time, and uptime."""
         logger = DualLogger(ctx)
         return await service.get_session_info(logger)
@@ -892,7 +892,8 @@ class ExecuteRequest(pydantic.BaseModel):
 # Dependency functions (standard FastAPI pattern)
 def get_interpreter_service(request: fastapi.Request) -> PythonInterpreterService:
     """Retrieve service from app.state."""
-    return request.app.state.service
+    service: PythonInterpreterService = request.app.state.service
+    return service
 
 
 def get_simple_logger() -> SimpleLogger:
@@ -1009,8 +1010,8 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
         Exception: Any exception from user code execution
     """
     max_install_attempts = 3
-    successfully_installed = set()
-    failed_installs = set()
+    successfully_installed: set[str] = set()
+    failed_installs: set[str] = set()
 
     while True:
         # Capture stdout/stderr
@@ -1063,7 +1064,7 @@ def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
                 and total_attempts < max_install_attempts
             )
 
-            if should_attempt:
+            if should_attempt and module_name is not None:
                 try:
                     # Attempt auto-install
                     message = _install_package(module_name)

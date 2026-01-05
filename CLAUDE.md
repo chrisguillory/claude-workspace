@@ -386,7 +386,7 @@ Document **what's in the PR, not the journey**. Focus on deliverables and result
 | Client | `S3Client` | `clients/s3.py` |
 | Service | `SessionTrackerService` | `services/session_tracker.py` |
 | Repository | `UserRepository` | `repositories/user.py` |
-| MCP Server | `PythonInterpreterServer` | `mcp/python-interpreter/server.py` |
+| MCP Server | `PythonInterpreterServer` | `mcp/python-interpreter/python_interpreter/server.py` |
 
 **Directory rules:**
 - Directories plural (`clients/`, `services/`) **except acronyms** (`mcp/` not `mcps/`)
@@ -442,13 +442,16 @@ MCP servers are organized **by project** (not by type):
 ```
 mcp/
 ├── browser-automation/
-│   └── server.py
+│   └── browser_automation/
+│       └── server.py
 ├── python-interpreter/
-│   ├── server.py
-│   └── client.py
+│   └── python_interpreter/
+│       ├── server.py
+│       └── client.py
 └── selenium-browser-automation/
-    ├── server.py
-    └── src/
+    └── selenium_browser_automation/
+        ├── server.py
+        └── scripts/
 ```
 
 Related code (server + client) stays together, not split into separate directories.
@@ -611,8 +614,9 @@ claude mcp add --scope user <name> -- mcp-<shortname>-server
 ```bash
 claude mcp add --scope user <name> -- uv run \
   --project "$(git rev-parse --show-toplevel)/mcp/<server>" \
-  --script "$(git rev-parse --show-toplevel)/mcp/<server>/server.py"
+  --script "$(git rev-parse --show-toplevel)/mcp/<server>/<package>/server.py"
 ```
+Where `<package>` is the underscored Python package name (e.g., `python_interpreter`).
 - Uses local source files directly
 - Commands NOT in PATH (permission patterns require absolute paths)
 - Useful when you don't want to install globally
@@ -670,7 +674,7 @@ Add to `local-lib/local_lib/` directory. All MCP servers can import them. Follow
 
 Test inline dependencies work:
 ```bash
-uv run --directory mcp/python-interpreter --script server.py
+uv run --directory mcp/python-interpreter --script python_interpreter/server.py
 ```
 
 Should successfully import `local_lib` and start the server.

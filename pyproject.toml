@@ -71,10 +71,6 @@ explicit_package_bases = true
 mypy_path = "$MYPY_CONFIG_FILE_DIR:$MYPY_CONFIG_FILE_DIR/stubs"
 exclude = [
     ".venv",
-    # Exclude MCP servers with duplicate "server.py" names (mypy limitation)
-    # TODO: Refactor these into proper packages or rename to unique names
-    "mcp/browser-automation/",
-    "mcp/python-interpreter/",
 ]
 
 [tool.pydantic-mypy]
