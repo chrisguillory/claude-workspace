@@ -254,15 +254,18 @@ async def _restore_pending_profile_state_for_current_origin(
     service: BrowserService,
     driver: webdriver.Chrome,
 ) -> None:
-    """Restore localStorage, sessionStorage, and IndexedDB for current origin.
+    """Restore IndexedDB for current origin (localStorage/sessionStorage handled by init script).
 
-    Called after navigation to check if we have pending profile state for the
+    Called after navigation to check if we have pending IndexedDB data for the
     new current origin. Tracks restored origins to avoid double-restore which
     could overwrite page modifications.
 
-    CDP DOMStorage.setDOMStorageItem requires an active frame for the origin,
-    and IndexedDB restore requires JavaScript execution in page context.
-    This implements "lazy restore" - restore on-demand when we arrive at each origin.
+    localStorage and sessionStorage are restored via Page.addScriptToEvaluateOnNewDocument
+    (init script approach), which runs BEFORE page JavaScript. This ensures storage
+    is populated before apps check for auth tokens or initialization data.
+
+    IndexedDB requires JavaScript execution in page context and uses async APIs,
+    so it must be restored after navigation via this lazy restore mechanism.
 
     Note: sessionStorage is session-scoped. Restoring it to a new browser context
     works, but the data will be lost when the browser closes (correct browser behavior).
@@ -289,39 +292,21 @@ async def _restore_pending_profile_state_for_current_origin(
         service.state.restored_origins.add(current_origin)
         return
 
-    # Check if there's anything to restore (snake_case fields, dict-based storage)
-    has_local_storage = origin_data.local_storage and len(origin_data.local_storage) > 0
-    has_session_storage = origin_data.session_storage and len(origin_data.session_storage) > 0
+    # Check if there's IndexedDB to restore
+    # Note: localStorage/sessionStorage are handled by init script (runs before page JS)
     has_indexed_db = origin_data.indexed_db and len(origin_data.indexed_db) > 0
 
-    if not has_local_storage and not has_session_storage and not has_indexed_db:
+    if not has_indexed_db:
         service.state.restored_origins.add(current_origin)
         return
 
-    # Restore localStorage and sessionStorage via CDP
-    local_count = 0
-    session_count = 0
-    if has_local_storage or has_session_storage:
-        await _cdp_enable_domstorage(driver)
-
-        if has_local_storage:
-            # local_storage is dict[str, str] in new format
-            for name, value in origin_data.local_storage.items():
-                await _cdp_set_storage(driver, current_origin, name, value, is_local=True)
-                local_count += 1
-
-        if has_session_storage and origin_data.session_storage:
-            # session_storage is dict[str, str] in new format
-            for name, value in origin_data.session_storage.items():
-                await _cdp_set_storage(driver, current_origin, name, value, is_local=False)
-                session_count += 1
-
     # Restore IndexedDB via JavaScript (CDP has no write API)
+    # Note: localStorage/sessionStorage handled by init script (runs before page JS)
     # Note: INDEXEDDB_RESTORE_SCRIPT returns a Promise, so we must use execute_async_script.
     # The script expects arguments[0] to contain the databases list, so we use .apply()
     # to set up the arguments array. Wrap in IIFE so 'return' statement works.
     indexeddb_count = 0
-    if has_indexed_db and origin_data.indexed_db:
+    if origin_data.indexed_db:  # Defensive check even though has_indexed_db was true
         # Use by_alias=True to serialize as camelCase for JavaScript compatibility
         databases_list = [db.model_dump(by_alias=True) for db in origin_data.indexed_db]
         databases_json = json.dumps(databases_list)
@@ -338,17 +323,8 @@ async def _restore_pending_profile_state_for_current_origin(
 
     service.state.restored_origins.add(current_origin)
 
-    # Build log message
-    parts = []
-    if local_count > 0:
-        parts.append(f'{local_count} localStorage')
-    if session_count > 0:
-        parts.append(f'{session_count} sessionStorage')
     if indexeddb_count > 0:
-        parts.append(f'{indexeddb_count} IndexedDB databases')
-
-    if parts:
-        print(f'[storage] Restored {" + ".join(parts)} for {current_origin}', file=sys.stderr)
+        print(f'[storage] Restored {indexeddb_count} IndexedDB databases for {current_origin}', file=sys.stderr)
 
 
 # =============================================================================
@@ -378,6 +354,108 @@ async def _load_profile_state_from_file(file_path: str) -> ProfileState:
 
     profile_state_json = state_path.read_text()
     return ProfileState.model_validate_json(profile_state_json)
+
+
+def _build_storage_init_script(profile_state: ProfileState) -> str | None:
+    """Build JavaScript init script to restore localStorage/sessionStorage.
+
+    Creates a script that runs via Page.addScriptToEvaluateOnNewDocument BEFORE
+    any page JavaScript executes. This ensures storage is populated before apps
+    check for auth tokens, user preferences, or other initialization data.
+
+    The script:
+    - Checks window.location.origin against captured origins
+    - Restores matching localStorage and sessionStorage
+    - Logs errors to window.__storageRestoreState for debugging
+    - Handles quota errors and private browsing gracefully
+
+    This approach matches how Playwright's storageState option works internally.
+
+    Args:
+        profile_state: ProfileState containing origins with local_storage/session_storage.
+
+    Returns:
+        JavaScript source string, or None if no storage data to restore.
+    """
+    # Build storage data object keyed by origin
+    storage_data: dict[str, dict[str, dict[str, str]]] = {}
+
+    for origin_url, origin_data in profile_state.origins.items():
+        has_local = origin_data.local_storage and len(origin_data.local_storage) > 0
+        has_session = origin_data.session_storage and len(origin_data.session_storage) > 0
+
+        if has_local or has_session:
+            storage_data[origin_url] = {
+                'localStorage': origin_data.local_storage or {},
+                'sessionStorage': origin_data.session_storage or {},
+            }
+
+    if not storage_data:
+        return None
+
+    # Serialize to JSON for embedding in JavaScript
+    # json.dumps handles escaping of quotes, newlines, etc.
+    storage_json = json.dumps(storage_data, ensure_ascii=False)
+
+    # Build the init script
+    # This runs before any page JavaScript in every new document
+    return f"""
+(function() {{
+    'use strict';
+
+    // Storage restoration state for debugging
+    window.__storageRestoreState = {{
+        restored: {{ localStorage: [], sessionStorage: [] }},
+        errors: [],
+        origin: null,
+        timestamp: Date.now()
+    }};
+
+    var storageData = {storage_json};
+    var currentOrigin = window.location.origin;
+    window.__storageRestoreState.origin = currentOrigin;
+
+    var data = storageData[currentOrigin];
+    if (!data) {{
+        // No data for this origin - nothing to restore
+        return;
+    }}
+
+    // Restore localStorage
+    if (data.localStorage) {{
+        Object.keys(data.localStorage).forEach(function(key) {{
+            try {{
+                window.localStorage.setItem(key, data.localStorage[key]);
+                window.__storageRestoreState.restored.localStorage.push(key);
+            }} catch (e) {{
+                window.__storageRestoreState.errors.push({{
+                    type: 'localStorage',
+                    key: key,
+                    error: e.name,
+                    message: e.message
+                }});
+            }}
+        }});
+    }}
+
+    // Restore sessionStorage
+    if (data.sessionStorage) {{
+        Object.keys(data.sessionStorage).forEach(function(key) {{
+            try {{
+                window.sessionStorage.setItem(key, data.sessionStorage[key]);
+                window.__storageRestoreState.restored.sessionStorage.push(key);
+            }} catch (e) {{
+                window.__storageRestoreState.errors.push({{
+                    type: 'sessionStorage',
+                    key: key,
+                    error: e.name,
+                    message: e.message
+                }});
+            }}
+        }});
+    }}
+}})();
+"""
 
 
 async def _inject_cookies_via_cdp(
@@ -428,15 +506,18 @@ async def _setup_pending_profile_state(
     service: BrowserService,
     profile_state: ProfileState,
 ) -> None:
-    """Configure lazy restore for localStorage/sessionStorage/IndexedDB.
+    """Configure lazy restore for IndexedDB (localStorage/sessionStorage handled by init script).
 
-    CDP DOMStorage.setDOMStorageItem requires an active frame for the target origin,
-    so we can only restore storage as we visit each origin. This stores the pending
-    state and clears the restored origins set.
+    Stores profile state for lazy IndexedDB restoration as origins are visited.
+    localStorage and sessionStorage are restored via Page.addScriptToEvaluateOnNewDocument
+    which runs BEFORE page JavaScript - no lazy restore needed.
+
+    IndexedDB requires JavaScript execution in page context with async APIs, so it
+    must be restored lazily via _restore_pending_profile_state_for_current_origin.
 
     Args:
         service: BrowserService instance.
-        profile_state: ProfileState to restore lazily.
+        profile_state: ProfileState to restore lazily (IndexedDB only).
     """
     service.state.pending_profile_state = profile_state
     service.state.restored_origins.clear()
@@ -961,7 +1042,27 @@ def register_tools(service: BrowserService) -> None:
         # Get browser with configuration
         driver = await service.get_browser(enable_har_capture=enable_har_capture)
 
-        # Install user init scripts (after browser creation, before navigation)
+        # Build and register storage init script for localStorage/sessionStorage
+        # This runs BEFORE page JavaScript on every new document (Playwright-style)
+        storage_init_script = _build_storage_init_script(profile_state)
+        if storage_init_script:
+            await asyncio.to_thread(
+                driver.execute_cdp_cmd,
+                'Page.addScriptToEvaluateOnNewDocument',
+                {'source': storage_init_script},
+            )
+            # Count storage entries for logging
+            storage_entry_count = sum(
+                len(origin_data.local_storage or {}) + len(origin_data.session_storage or {})
+                for origin_data in profile_state.origins.values()
+            )
+            print(
+                f'[navigate_with_profile_state] Registered storage init script '
+                f'({storage_entry_count} entries across {len(profile_state.origins)} origins)',
+                file=sys.stderr,
+            )
+
+        # Install user init scripts (after storage script, before navigation)
         if init_scripts:
             for script in init_scripts:
                 await asyncio.to_thread(

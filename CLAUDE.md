@@ -312,10 +312,27 @@ uv {add,remove} package-name
 Run pre-commit hooks before committing to catch linting/formatting issues:
 
 ```bash
-git add -A && .githooks/pre-commit
+uv run --group dev pre-commit run --all-files
 ```
 
-If hooks auto-fix files (isort, ruff format), re-stage and run again until clean.
+If hooks auto-fix files (ruff format), re-stage and run again until clean.
+
+### Commit Workflow
+
+**Critical**: Run pre-commit BEFORE writing commit messages. A failed commit wastes all tokens spent generating the message.
+
+```
+1. Stage changes: git add <files>
+2. Run pre-commit: uv run --group dev pre-commit run --all-files
+3. If pre-commit fails → fix issues → re-stage → re-run pre-commit
+4. Only AFTER pre-commit passes → write commit message and commit
+```
+
+**Stash discipline**: Don't drop stashes carelessly. `git stash pop` with conflicts does NOT auto-drop - the stash remains as a backup. Other stashes (stash@{1}, stash@{2}) may contain unrelated work from previous sessions.
+
+**MCP server reconnect**: Ask the user to run `/mcp reconnect <server-name>` rather than trying bash commands. The CLI handles this.
+
+**Debug logs**: Session debug logs are at `~/.claude/debug/{session_id}.txt` for troubleshooting MCP server startup failures and other issues.
 
 ### Directory-Specific Tooling
 
@@ -665,6 +682,6 @@ uv run --project mcp/python-interpreter mcp-py-server
 
 ## Next Steps
 
-- [ ] Set up pre-commit hooks infrastructure (ruff, isort, mypy for type checking)
+- [x] Set up pre-commit hooks infrastructure (ruff, isort, mypy for type checking) - Done: `uv run --group dev pre-commit run --all-files`
 - [ ] Consider bringing over docs/ structure from underwriting-api (testing-strategy.md, assertions.md, dependency-injection.md)
 - [ ] Migrate remaining untyped dicts to strict Pydantic models
