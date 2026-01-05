@@ -237,6 +237,49 @@ def get_users() -> Sequence[User]:
 - DI via closures for MCP servers (FastMCP pattern)
 - **NEVER use `python` or `python3` directly** - always use `uv run`
 
+### JSON Serialization for JavaScript Consumers
+
+**Python snake_case internally, camelCase JSON output** - Use Pydantic v2's `alias_generator` to maintain Pythonic code while producing JavaScript-friendly JSON.
+
+| Layer | Convention | Example |
+|-------|------------|---------|
+| Python field names | snake_case | `first_name`, `auto_increment` |
+| JSON output | camelCase | `firstName`, `autoIncrement` |
+| JSON input | Accept both | `populate_by_name=True` |
+
+**Industry standard:** Google APIs, GraphQL, JSON:API spec all use camelCase for JSON. Major exceptions (Stripe, GitHub) provide SDKs that handle the conversion.
+
+**Pydantic v2 pattern:**
+
+```python
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
+
+class UserProfile(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,  # Accept both snake_case and camelCase input
+    )
+
+    first_name: str           # Python uses snake_case
+    email_address: str
+    phone_number: str | None = None
+
+# Serialization: use by_alias=True for camelCase output
+user.model_dump_json(by_alias=True)
+# → {"firstName": "...", "emailAddress": "...", "phoneNumber": null}
+```
+
+**When fields need custom aliases** (e.g., `name` → `databaseName`):
+
+```python
+class Database(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    database_name: str  # to_camel produces "databaseName" ✓
+    version: int        # No transformation needed
+```
+
 ### Scripting
 
 Use `uv run --no-project -` with heredoc + PEP 723 inline dependencies:

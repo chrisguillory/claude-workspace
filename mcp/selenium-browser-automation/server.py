@@ -335,7 +335,8 @@ async def _restore_pending_profile_state_for_current_origin(
     # to set up the arguments array. Wrap in IIFE so 'return' statement works.
     indexeddb_count = 0
     if has_indexed_db:
-        databases_list = [db.model_dump() for db in origin_data.indexed_db]
+        # Use by_alias=True to serialize as camelCase for JavaScript compatibility
+        databases_list = [db.model_dump(by_alias=True) for db in origin_data.indexed_db]
         databases_json = json.dumps(databases_list)
         async_wrapper = f"""
             var callback = arguments[arguments.length - 1];
@@ -3589,8 +3590,8 @@ Workflow:
         if not file_path.is_absolute():
             file_path = Path.cwd() / filename
 
-        # Save to file
-        json_content = profile_state.model_dump_json(indent=2)
+        # Save to file (by_alias=True for camelCase IndexedDB fields for JS compatibility)
+        json_content = profile_state.model_dump_json(indent=2, by_alias=True)
         file_path.write_text(json_content)
 
         result = SaveProfileStateResult(

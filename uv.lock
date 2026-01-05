@@ -336,6 +336,19 @@ wheels = [
 ]
 
 [[package]]
+name = "dfindexeddb"
+version = "20251109"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-snappy" },
+    { name = "zstd" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1f/53/f5725398c78a302cd9e0c13e76d2b4cb3a03c2f5793dcc5642546772612b/dfindexeddb-20251109.tar.gz", hash = "sha256:108726bc75f9b03975122ac1e048c8967f3e65e50402aa2c8a7b44ce6e60f190", size = 60432, upload-time = "2025-11-09T00:03:07.633Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/18/cf/851ff8068424177770cbe0fcbaa0ef915823d9dda4a715d90707d4def457/dfindexeddb-20251109-py3-none-any.whl", hash = "sha256:e530471e2bb078b9015ef026746d89d0b954b8e5f1c56c755908111122153994", size = 81122, upload-time = "2025-11-09T00:03:05.974Z" },
+]
+
+[[package]]
 name = "diskcache"
 version = "5.6.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1108,6 +1121,12 @@ wheels = [
 ]
 
 [[package]]
+name = "python-snappy"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/7a/44a24bad98335b2c72e4cadcdecf79f50197d1bab9f22f863a274f104b96/python-snappy-0.6.1.tar.gz", hash = "sha256:b6a107ab06206acc5359d4c5632bd9b22d448702a79b3169b0c62e0fb808bb2a", size = 24110, upload-time = "2022-02-22T15:54:07.129Z" }
+
+[[package]]
 name = "pytz"
 version = "2025.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1304,10 +1323,11 @@ wheels = [
 
 [[package]]
 name = "selenium-browser-automation-mcp"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "mcp/selenium-browser-automation" }
 dependencies = [
     { name = "ccl-chromium-reader" },
+    { name = "dfindexeddb" },
     { name = "fastmcp" },
     { name = "httpx" },
     { name = "pycryptodome" },
@@ -1319,6 +1339,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "ccl-chromium-reader", git = "https://github.com/cclgroupltd/ccl_chromium_reader.git" },
+    { name = "dfindexeddb", specifier = ">=20251109" },
     { name = "fastmcp", specifier = ">=2.12.5" },
     { name = "httpx" },
     { name = "pycryptodome", specifier = ">=3.23.0" },
@@ -1506,3 +1527,9 @@ sdist = { url = "https://files.pythonhosted.org/packages/c7/79/12135bdf8b9c9367b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a4/f5/10b68b7b1544245097b2a1b8238f66f2fc6dcaeb24ba5d917f52bd2eed4f/wsproto-1.3.2-py3-none-any.whl", hash = "sha256:61eea322cdf56e8cc904bd3ad7573359a242ba65688716b0710a5eb12beab584", size = 24405, upload-time = "2025-11-20T18:18:00.454Z" },
 ]
+
+[[package]]
+name = "zstd"
+version = "1.5.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/b4/bf8c6a6b73c6b267a13df955f821f041fcc770b56820b135849f33e3b888/zstd-1.5.5.1.tar.gz", hash = "sha256:1ef980abf0e1e072b028d2d76ef95b476632651c96225cf30b619c6eef625672", size = 1106585, upload-time = "2023-04-05T23:32:37.801Z" }

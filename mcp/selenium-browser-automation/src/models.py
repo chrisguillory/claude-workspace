@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal, Sequence
 
 import pydantic
+import pydantic.alias_generators
 
 
 class BaseModel(pydantic.BaseModel):
@@ -556,7 +557,16 @@ class ProfileStateIndexedDBRecord(BaseModel):
 
 
 class ProfileStateIndexedDBIndex(BaseModel):
-    """IndexedDB object store index metadata."""
+    """IndexedDB object store index metadata.
+
+    Serializes to camelCase for JavaScript compatibility:
+    key_path → keyPath, multi_entry → multiEntry
+    """
+
+    model_config = pydantic.ConfigDict(
+        alias_generator=pydantic.alias_generators.to_camel,
+        populate_by_name=True,
+    )
 
     name: str
     key_path: str | Sequence[str]
@@ -570,7 +580,15 @@ class ProfileStateIndexedDBObjectStore(BaseModel):
     Captures the complete state of an object store including:
     - Schema: key_path, auto_increment, indexes
     - Data: all records as key/value pairs
+
+    Serializes to camelCase for JavaScript compatibility:
+    key_path → keyPath, auto_increment → autoIncrement
     """
+
+    model_config = pydantic.ConfigDict(
+        alias_generator=pydantic.alias_generators.to_camel,
+        populate_by_name=True,
+    )
 
     name: str
     key_path: str | Sequence[str] | None
@@ -583,9 +601,17 @@ class ProfileStateIndexedDB(BaseModel):
     """IndexedDB database with version and object stores.
 
     The version number is critical for schema migrations.
+
+    Serializes to camelCase for JavaScript compatibility:
+    database_name → databaseName, object_stores → objectStores
     """
 
-    name: str
+    model_config = pydantic.ConfigDict(
+        alias_generator=pydantic.alias_generators.to_camel,
+        populate_by_name=True,
+    )
+
+    database_name: str
     version: int
     object_stores: Sequence[ProfileStateIndexedDBObjectStore]
 
@@ -689,11 +715,8 @@ class ChromeProfileStateExportResult(BaseModel):
     Use export_chrome_profile_state when you've logged in manually and want to
     capture that authenticated state for automation.
 
-    Limitations:
-        IndexedDB exports records only. Schema metadata (version, key_path,
-        auto_increment, indexes) is not available from Chrome's LevelDB files
-        via ccl_chromium_reader. For full IndexedDB support, use
-        save_profile_state() from a Selenium session instead.
+    IndexedDB includes full schema (version, key_path, auto_increment, indexes)
+    via dfindexeddb library, enabling complete database restoration.
     """
 
     path: str
