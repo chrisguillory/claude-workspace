@@ -1,0 +1,56 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff
+        args: [--fix, .]
+        pass_filenames: false
+        always_run: true
+      - id: ruff-format
+        args: [.]
+        pass_filenames: false
+        always_run: true
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        # NOTE: pre-commit runs mypy in an isolated environment. Dependencies from
+        # pyproject.toml are NOT automatically available. Any library or type stub
+        # that mypy needs to resolve imports must be listed here explicitly.
+        #
+        # This includes dependencies from ALL workspace members:
+        # - local-lib
+        # - mcp/browser-automation
+        # - mcp/python-interpreter
+        # - mcp/selenium-browser-automation
+        additional_dependencies:
+          # Core dependencies (used by multiple packages)
+          - fastmcp>=2.12.5
+          - pydantic>=2.12.4
+          - httpx>=0.28.1
+          - pyyaml
+
+          # local-lib dependencies
+          - filelock>=3.20.0
+          - psutil>=7.1.3
+          - types-psutil>=7.2.1.20251231
+
+          # browser-automation dependencies
+          - playwright
+          - playwright-stealth
+
+          # python-interpreter dependencies
+          - attrs
+          - fastapi
+          - pandas
+          - uvicorn
+
+          # selenium-browser-automation dependencies
+          - selenium
+          - pycryptodome>=3.23.0
+          - dfindexeddb>=20251109
+          # ccl-chromium-reader - git dependency, may need special handling
+        args: [--config-file=pyproject.toml, .]
+        pass_filenames: false
+        always_run: true
