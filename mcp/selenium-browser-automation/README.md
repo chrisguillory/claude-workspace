@@ -11,6 +11,19 @@ claude mcp add --scope user selenium-browser-automation -- \
   --script "$(git rev-parse --show-toplevel)/mcp/selenium-browser-automation/server.py"
 ```
 
+### Prerequisites (macOS)
+
+The `dfindexeddb` dependency requires the snappy compression library:
+
+```bash
+brew install snappy
+
+# If pip/uv fails to find snappy headers, set paths explicitly:
+CPPFLAGS="-I/opt/homebrew/include" LDFLAGS="-L/opt/homebrew/lib" uv sync
+```
+
+Linux/Windows typically get pre-built wheels and don't need this step.
+
 ## Comparison with Claude in Chrome
 
 This server is designed to match or exceed the capabilities of Anthropic's official

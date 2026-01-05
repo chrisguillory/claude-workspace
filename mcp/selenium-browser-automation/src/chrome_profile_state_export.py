@@ -14,16 +14,16 @@ Storage Types Captured (matching save_profile_state):
 - Cookies: Full attributes including sameSite via DIY Keychain decryption
 - localStorage: All origins from LevelDB
 - sessionStorage: All origins from LevelDB (Chrome persists to disk)
-- IndexedDB: Records only - schema (version, keyPath, indexes) not available
+- IndexedDB: Full schema (version, keyPath, indexes) + records via dfindexeddb
 
 Dependencies:
 - pycryptodome: AES decryption for Chrome cookies
-- ccl_chromium_reader: Pure Python LevelDB parser (no C compilation)
+- ccl_chromium_reader: Pure Python LevelDB parser for localStorage/sessionStorage
+- dfindexeddb: Google's IndexedDB parser with complete schema support
 
 Limitations:
 - macOS only (Windows/Linux require different key retrieval)
 - First run prompts for Keychain access - click "Always Allow"
-- IndexedDB exports records without schema; full restoration requires save_profile_state
 
 Cookie Decryption (DIY implementation):
 - Keychain: "Chrome Safe Storage" password (SHARED across all profiles)
@@ -44,17 +44,21 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ccl_chromium_reader import (
-    ccl_chromium_indexeddb,
     ccl_chromium_localstorage,
     ccl_chromium_sessionstorage,
 )
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
+from .indexeddb_dfindexeddb import export_indexeddb_with_schema
 from .models import (
     ChromeProfileStateExportResult,
     ProfileState,
     ProfileStateCookie,
+    ProfileStateIndexedDB,
+    ProfileStateIndexedDBIndex,
+    ProfileStateIndexedDBObjectStore,
+    ProfileStateIndexedDBRecord,
     ProfileStateOriginStorage,
 )
 
@@ -583,85 +587,6 @@ def export_session_storage(
 
 
 # =============================================================================
-# IndexedDB Export (Best-Effort, Records Only)
-# =============================================================================
-
-
-def export_indexeddb(
-    profile_path: Path,
-    origins_filter: Sequence[str] | None = None,
-) -> Mapping[str, Any]:
-    """Export IndexedDB records from Chrome's LevelDB.
-
-    LIMITATION: ccl_chromium_reader cannot extract schema metadata (version,
-    keyPath, autoIncrement, indexes). Only database/store names and records
-    are available. Full restoration requires save_profile_state() from a
-    Selenium session.
-
-    Args:
-        profile_path: Path to Chrome profile directory
-        origins_filter: Optional origin patterns to include
-
-    Returns:
-        Mapping of {origin: {db_name: {"objectStores": {store_name: [records]}}}}
-
-    Raises:
-        FileNotFoundError: If IndexedDB path doesn't exist
-    """
-    databases: dict[str, Any] = {}
-
-    indexeddb_path = profile_path / "IndexedDB"
-
-    if not indexeddb_path.exists():
-        raise FileNotFoundError(f"IndexedDB path not found: {indexeddb_path}")
-
-    for item in indexeddb_path.iterdir():
-        if not (item.is_dir() and item.name.endswith(".indexeddb.leveldb")):
-            continue
-
-        # Origin is encoded in directory name (e.g., "https_example.com_0")
-        origin = item.name.replace(".indexeddb.leveldb", "")
-
-        # Filter origins (extract domain from IndexedDB format, then RFC 6265 matching)
-        if origins_filter:
-            domain = _extract_domain_from_origin(origin)
-            if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
-                continue
-
-        wrapper = ccl_chromium_indexeddb.WrappedIndexDB(item)
-        origin_dbs: dict[str, Any] = {}
-
-        for db_id in wrapper.database_ids:
-            db = wrapper[db_id]
-            db_data: dict[str, Any] = {"objectStores": {}}
-
-            for obj_store_name in db.object_store_names:
-                store = db[obj_store_name]
-                records: list[dict[str, Any]] = []
-
-                for record in store.iterate_records():
-                    key = str(record.key)
-                    value = record.value
-                    # Ensure JSON-serializable
-                    if not isinstance(
-                        value, (dict, list, str, int, float, bool, type(None))
-                    ):
-                        value = str(value)
-                    records.append({"key": key, "value": value})
-
-                if records:
-                    db_data["objectStores"][obj_store_name] = records
-
-            if db_data["objectStores"]:
-                origin_dbs[db.name] = db_data
-
-        if origin_dbs:
-            databases[origin] = origin_dbs
-
-    return databases
-
-
-# =============================================================================
 # Main Export Function
 # =============================================================================
 
@@ -721,13 +646,13 @@ def export_chrome_profile_state(
     if include_session_storage:
         session_storage = export_session_storage(profile_path, filter_list)
 
-    # Export IndexedDB (optional, default off - can be huge)
-    indexeddb: Mapping[str, Any] = {}
+    # Export IndexedDB with full schema (optional, default off - can be huge)
+    indexeddb: dict[str, list[dict[str, Any]]] = {}
     if include_indexeddb:
-        indexeddb = export_indexeddb(profile_path, filter_list)
+        indexeddb = export_indexeddb_with_schema(profile_path, filter_list)
 
     # Build origins dict with ProfileStateOriginStorage models
-    all_origins = set(local_storage.keys()) | set(session_storage.keys())
+    all_origins = set(local_storage.keys()) | set(session_storage.keys()) | set(indexeddb.keys())
     origins_data: dict[str, ProfileStateOriginStorage] = {}
 
     for origin in all_origins:
@@ -737,10 +662,50 @@ def export_chrome_profile_state(
         # Get sessionStorage for this origin (None if not present)
         ss_data = dict(session_storage[origin]) if origin in session_storage else None
 
+        # Convert IndexedDB dicts to Pydantic models
+        idb_models: list[ProfileStateIndexedDB] | None = None
+        if origin in indexeddb:
+            idb_models = []
+            for db_dict in indexeddb[origin]:
+                # Convert object stores
+                object_stores: list[ProfileStateIndexedDBObjectStore] = []
+                for store_dict in db_dict.get("object_stores", []):
+                    # Convert indexes
+                    indexes: list[ProfileStateIndexedDBIndex] = [
+                        ProfileStateIndexedDBIndex(
+                            name=idx["name"],
+                            key_path=idx["key_path"],
+                            unique=idx["unique"],
+                            multi_entry=idx["multi_entry"],
+                        )
+                        for idx in store_dict.get("indexes", [])
+                    ]
+                    # Convert records
+                    records: list[ProfileStateIndexedDBRecord] = [
+                        ProfileStateIndexedDBRecord(key=rec["key"], value=rec["value"])
+                        for rec in store_dict.get("records", [])
+                    ]
+                    object_stores.append(
+                        ProfileStateIndexedDBObjectStore(
+                            name=store_dict["name"],
+                            key_path=store_dict["key_path"],
+                            auto_increment=store_dict["auto_increment"],
+                            indexes=indexes,
+                            records=records,
+                        )
+                    )
+                idb_models.append(
+                    ProfileStateIndexedDB(
+                        database_name=db_dict["database_name"],
+                        version=db_dict["version"],
+                        object_stores=object_stores,
+                    )
+                )
+
         origins_data[origin] = ProfileStateOriginStorage(
             local_storage=ls_data,
             session_storage=ss_data,
-            indexed_db=None,  # IndexedDB from Chrome export lacks schema
+            indexed_db=idb_models,
         )
 
     # Build ProfileState with typed models
@@ -758,7 +723,8 @@ def export_chrome_profile_state(
 
     fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
-        f.write(profile_state.model_dump_json(indent=2))
+        # Use by_alias=True to serialize IndexedDB fields as camelCase for JS compatibility
+        f.write(profile_state.model_dump_json(indent=2, by_alias=True))
 
     # Calculate statistics
     ls_keys = sum(len(storage) for storage in local_storage.values())
