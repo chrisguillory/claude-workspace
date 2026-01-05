@@ -2,6 +2,21 @@
 
 Browser automation with CDP stealth injection to bypass Cloudflare bot detection. Runs locally via `uv --script` for visible browser monitoring.
 
+## Prerequisites (macOS)
+
+**Complete these steps before Setup.** The `dfindexeddb` dependency requires the snappy compression library:
+
+```bash
+# 1. Install snappy via Homebrew
+brew install snappy
+
+# 2. Sync dependencies (flags required for Homebrew paths)
+cd /path/to/claude-workspace/mcp/selenium-browser-automation
+CPPFLAGS="-I/opt/homebrew/include" LDFLAGS="-L/opt/homebrew/lib" uv sync
+```
+
+Linux/Windows typically get pre-built wheels and don't need this step.
+
 ## Setup
 
 ```bash
@@ -10,19 +25,6 @@ claude mcp add --scope user selenium-browser-automation -- \
   uv run --project "$(git rev-parse --show-toplevel)/mcp/selenium-browser-automation" \
   --script "$(git rev-parse --show-toplevel)/mcp/selenium-browser-automation/server.py"
 ```
-
-### Prerequisites (macOS)
-
-The `dfindexeddb` dependency requires the snappy compression library:
-
-```bash
-brew install snappy
-
-# If pip/uv fails to find snappy headers, set paths explicitly:
-CPPFLAGS="-I/opt/homebrew/include" LDFLAGS="-L/opt/homebrew/lib" uv sync
-```
-
-Linux/Windows typically get pre-built wheels and don't need this step.
 
 ## Comparison with Claude in Chrome
 
@@ -376,10 +378,10 @@ navigate_with_profile_state(
 
 | Storage Type   | Captured | Notes                                                                              |
 |----------------|:--------:|------------------------------------------------------------------------------------|
-| Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires)                               |
-| localStorage   |    ✓     | All tracked origins via CDP (lazy restore on navigate)                             |
-| sessionStorage |    ✓     | All tracked origins via CDP (lazy restore on navigate) - see note below            |
-| IndexedDB      |  opt-in  | `include_indexeddb=True` - databases, stores, records, types (multi-origin via lazy capture) |
+| Cookies        |    ✓     | All attributes (HttpOnly, Secure, SameSite, expires) - via CDP before navigation   |
+| localStorage   |    ✓     | Via init script (runs BEFORE page JS) - Playwright-style approach                  |
+| sessionStorage |    ✓     | Via init script (runs BEFORE page JS) - see note below                             |
+| IndexedDB      |  opt-in  | `include_indexeddb=True` - via lazy restore after navigation (async API requires it) |
 
 **sessionStorage Note:** sessionStorage is ephemeral by design—browsers clear it when tabs close. We capture it for two reasons: (1) debugging value—seeing sessionStorage helps understand application state, and (2) automation continuity—when `fresh_browser=True` restarts Chrome for proxy rotation, you may want to preserve form wizard progress. Restored sessionStorage is new sessionStorage pre-populated with saved data, not a continuation of the original session. This capability exceeds Playwright ([#31108](https://github.com/microsoft/playwright/issues/31108)).
 
