@@ -11,7 +11,7 @@
 # ]
 #
 # [tool.uv.sources]
-# local-lib = { path = "../../local-lib", editable = true }
+# local-lib = { path = "../../../local-lib", editable = true }
 # ///
 """
 Python Interpreter MCP Server
