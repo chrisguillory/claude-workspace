@@ -250,7 +250,7 @@ import pydantic
 import uvicorn
 
 # Local library imports
-from local_lib.utils import DualLogger, humanize_seconds
+from local_lib.utils import DualLogger, encode_project_path, humanize_seconds
 
 
 # Custom exceptions for auto-installation
@@ -512,14 +512,13 @@ class ServerState:
         claude_context = _find_claude_context()
         print(f'Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}')
 
-        # Compute transcript path using session tracker pattern
-        # Normalize project dir to create safe directory name
+        # Compute transcript path using Claude Code's path encoding convention
         # Note: Claude Code creates the transcript file before starting MCP servers,
         # so this path should always exist. strict=True validates this assumption.
-        project_name = str(claude_context.project_dir).replace('/', '-')
-        transcript_path = (pathlib.Path.home() / '.claude' / 'projects' / project_name / f'{session_id}.jsonl').resolve(
-            strict=True
-        )
+        encoded_project_path = encode_project_path(claude_context.project_dir)
+        transcript_path = (
+            pathlib.Path.home() / '.claude' / 'projects' / encoded_project_path / f'{session_id}.jsonl'
+        ).resolve(strict=True)
 
         # Initialize temp directory for large outputs
         temp_dir = tempfile.TemporaryDirectory()
