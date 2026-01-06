@@ -5,10 +5,43 @@ from __future__ import annotations
 # Standard Library
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 # Third-Party Libraries
 from mcp.server.fastmcp import Context
+
+
+def encode_project_path(path: Path | str) -> str:
+    """Encode filesystem path for Claude Code's directory naming convention.
+
+    Claude Code stores project data in ~/.claude/projects/{encoded_path}/ where
+    the path is encoded by replacing certain characters with hyphens.
+
+    This encoding is LOSSY and non-reversible (5 different chars -> 1 char).
+    To recover the original path, read the 'cwd' field from session records.
+
+    Args:
+        path: Filesystem path to encode (e.g., /Users/chris/My Project)
+
+    Returns:
+        Encoded string for use as directory name in ~/.claude/projects/
+
+    Examples:
+        >>> encode_project_path("/Users/chris/project")
+        '-Users-chris-project'
+
+        >>> encode_project_path("/Users/chris/Mobile Documents/com~apple~CloudDocs")
+        '-Users-chris-Mobile-Documents-com-apple-CloudDocs'
+
+        >>> encode_project_path("/Users/chris/my_project.app")
+        '-Users-chris-my-project-app'
+    """
+    result = str(path) if isinstance(path, Path) else path
+    # Claude Code encodes paths by replacing these characters with hyphens:
+    for char in ['/', '.', ' ', '~', '_']:
+        result = result.replace(char, '-')
+    return result
 
 
 class DualLogger:
