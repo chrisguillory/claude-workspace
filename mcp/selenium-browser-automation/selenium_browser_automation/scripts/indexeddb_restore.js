@@ -1,3 +1,5 @@
+// noinspection JSAnnotator
+
 /**
  * IndexedDB Restore Script
  *

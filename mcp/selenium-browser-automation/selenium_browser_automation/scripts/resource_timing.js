@@ -1,3 +1,5 @@
+// noinspection JSAnnotator
+
 /**
  * Extract resource timing entries from Performance API.
  *

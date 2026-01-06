@@ -1,3 +1,5 @@
+// noinspection JSAnnotator
+
 /**
  * Smart text extraction from DOM elements.
  * Supports auto-detection of main content (main > article > body fallback).
