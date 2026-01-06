@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: get_aria_snapshot include_hidden Parameter</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; }
+        .test-case { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        .test-case h2 { margin-top: 0; color: #333; }
+        .description { color: #666; font-size: 14px; margin-bottom: 15px; }
+        .actual { background: #f5f5f5; padding: 15px; border-radius: 4px; }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <h1>include_hidden Parameter Test Suite</h1>
+    <p>
+        Tests for <code>get_aria_snapshot(selector, include_hidden=True|False)</code>.
+        Default (<code>include_hidden=false</code>) excludes hidden content.
+        When <code>include_hidden=true</code>, hidden elements appear with <code>[hidden:X]</code> markers.
+    </p>
+
+    <!-- Test 1: aria-hidden="true" -->
+    <section id="test-1-aria-hidden" class="test-case">
+        <h2>Test 1: aria-hidden="true"</h2>
+        <p class="description">
+            Elements with <code>aria-hidden="true"</code> are removed from accessibility tree.
+            Marker: <code>[hidden:aria]</code>
+        </p>
+        <div class="actual">
+            <button>Visible Button</button>
+            <div aria-hidden="true">
+                <button>ARIA Hidden Button</button>
+                <p>This content is aria-hidden</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 2: inert attribute -->
+    <section id="test-2-inert" class="test-case">
+        <h2>Test 2: inert attribute</h2>
+        <p class="description">
+            Elements with <code>inert</code> attribute are removed from accessibility tree and non-interactive.
+            Marker: <code>[hidden:inert]</code>
+        </p>
+        <div class="actual">
+            <button>Active Button</button>
+            <div inert>
+                <button>Inert Button</button>
+                <a href="#">Inert Link</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 3: display:none -->
+    <section id="test-3-display-none" class="test-case">
+        <h2>Test 3: CSS display:none</h2>
+        <p class="description">
+            Elements with <code>display:none</code> are not rendered.
+            Marker: <code>[hidden:css]</code>
+        </p>
+        <div class="actual">
+            <button>Displayed Button</button>
+            <div style="display:none">
+                <button>Display None Button</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 4: visibility:hidden -->
+    <section id="test-4-visibility-hidden" class="test-case">
+        <h2>Test 4: CSS visibility:hidden</h2>
+        <p class="description">
+            Elements with <code>visibility:hidden</code> take up space but are invisible.
+            Marker: <code>[hidden:css]</code>
+        </p>
+        <div class="actual">
+            <button>Visible Button</button>
+            <div style="visibility:hidden">
+                <button>Visibility Hidden Button</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 5: opacity:0 -->
+    <section id="test-5-opacity-zero" class="test-case">
+        <h2>Test 5: CSS opacity:0</h2>
+        <p class="description">
+            Elements with <code>opacity:0</code> are transparent (technically in accessibility tree, but visually hidden).
+            Marker: <code>[hidden:css]</code>
+        </p>
+        <div class="actual">
+            <button>Opaque Button</button>
+            <div style="opacity:0">
+                <button>Transparent Button</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 6: Combined hiding (aria-hidden + CSS) -->
+    <section id="test-6-combined" class="test-case">
+        <h2>Test 6: Combined Hiding</h2>
+        <p class="description">
+            Element hidden by both <code>aria-hidden="true"</code> AND <code>display:none</code>.
+            Marker: <code>[hidden:aria,css]</code> or <code>[hidden:css,aria]</code>
+        </p>
+        <div class="actual">
+            <button>Visible Button</button>
+            <div aria-hidden="true" style="display:none">
+                <button>Double Hidden Button</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 7: Screen-reader-only (NOT hidden) -->
+    <section id="test-7-sr-only" class="test-case">
+        <h2>Test 7: Screen-reader-only (NOT hidden)</h2>
+        <p class="description">
+            <code>.sr-only</code> pattern (clip, offscreen) should NOT be detected as hidden.
+            These elements ARE in the accessibility tree - they're just visually hidden.
+            No <code>[hidden:X]</code> marker should appear.
+        </p>
+        <div class="actual">
+            <button>
+                <span class="sr-only">Screen Reader Only Text</span>
+                <span aria-hidden="true">Icon Placeholder</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- Test 8: Nested hiding -->
+    <section id="test-8-nested" class="test-case">
+        <h2>Test 8: Nested Hiding</h2>
+        <p class="description">
+            Parent has <code>aria-hidden="true"</code>, child has <code>display:none</code>.
+            Parent marker: <code>[hidden:aria]</code>, child marker: <code>[hidden:css]</code>
+        </p>
+        <div class="actual">
+            <button>Outer Visible Button</button>
+            <div aria-hidden="true">
+                <button>Parent Hidden Button</button>
+                <div style="display:none">
+                    <button>Nested CSS Hidden Button</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 9: HTML5 hidden attribute -->
+    <section id="test-9-html-hidden" class="test-case">
+        <h2>Test 9: HTML5 hidden attribute</h2>
+        <p class="description">
+            The <code>hidden</code> attribute applies <code>display:none</code> by default.
+            Marker: <code>[hidden:css]</code>
+        </p>
+        <div class="actual">
+            <button>Visible Button</button>
+            <div hidden>
+                <button>HTML Hidden Button</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 10: Compact tree interaction -->
+    <section id="test-10-compact" class="test-case">
+        <h2>Test 10: Compact Tree Interaction</h2>
+        <p class="description">
+            Hidden containers should NOT be collapsed by compact_tree rules.
+            When <code>include_hidden=true</code> AND <code>compact_tree=true</code>,
+            the generic wrapper div should be preserved (not collapsed) because it has <code>[hidden:aria]</code>.
+        </p>
+        <div class="actual">
+            <div aria-hidden="true">
+                <div>
+                    <button>Deeply Nested Hidden</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 11: aria-labelledby referencing hidden element -->
+    <section id="test-11-labelledby" class="test-case">
+        <h2>Test 11: aria-labelledby references hidden element</h2>
+        <p class="description">
+            Per W3C, <code>aria-labelledby</code> MUST access hidden elements for name computation.
+            The button should have accessible name "Hidden Label Text" regardless of include_hidden setting.
+        </p>
+        <div class="actual">
+            <span id="hidden-label" aria-hidden="true" style="display:none">Hidden Label Text</span>
+            <button aria-labelledby="hidden-label">Button</button>
+        </div>
+    </section>
+
+    <script>
+        // Test validation helper
+        window.validateTests = function() {
+            const results = [];
+
+            // Count test cases
+            const testCases = document.querySelectorAll('.test-case');
+            results.push(`Found ${testCases.length} test cases`);
+
+            // Check aria-hidden elements
+            const ariaHidden = document.querySelectorAll('[aria-hidden="true"]');
+            results.push(`aria-hidden elements: ${ariaHidden.length}`);
+
+            // Check inert elements
+            const inertElements = document.querySelectorAll('[inert]');
+            results.push(`inert elements: ${inertElements.length}`);
+
+            // Check display:none elements
+            const displayNone = document.querySelectorAll('[style*="display:none"], [style*="display: none"]');
+            results.push(`display:none elements: ${displayNone.length}`);
+
+            // Check .sr-only elements
+            const srOnly = document.querySelectorAll('.sr-only');
+            results.push(`sr-only elements (should NOT be hidden): ${srOnly.length}`);
+
+            return results.join('\n');
+        };
+    </script>
+</body>
+</html>

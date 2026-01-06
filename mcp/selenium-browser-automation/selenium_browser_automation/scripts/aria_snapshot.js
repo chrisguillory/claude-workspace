@@ -5,23 +5,19 @@
  * Arguments:
  *   arguments[0]: rootSelector - CSS selector for root element
  *   arguments[1]: includeUrls - boolean to include href values
+ *   arguments[2]: includeHidden - boolean to include hidden content with markers
  *
  * Returns:
- *   Hierarchical tree structure with roles, names, and states
+ *   Hierarchical tree structure with roles, names, and states.
+ *   When includeHidden=true, hidden elements include a 'hidden' array
+ *   indicating the hiding mechanism(s): 'aria', 'inert', or 'css'.
  */
-function getAccessibilitySnapshot(rootSelector, includeUrls) {
+function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = false) {
     const root = document.querySelector(rootSelector);
     if (!root) return null;
 
-    // Skip non-rendered elements
-    const SKIP_TAGS = ['SCRIPT', 'STYLE', 'META', 'LINK', 'NOSCRIPT'];
-
-    function isVisible(el) {
-        const style = window.getComputedStyle(el);
-        return style.display !== 'none' &&
-               style.visibility !== 'hidden' &&
-               style.opacity !== '0';
-    }
+    // Skip non-content elements (never included regardless of includeHidden)
+    const SKIP_TAGS = ['SCRIPT', 'STYLE', 'META', 'LINK', 'NOSCRIPT', 'TEMPLATE'];
 
     // Shared whitespace normalization helper
     // Per WAI-ARIA 1.2 and CSS Text Module Level 3
@@ -29,7 +25,53 @@ function getAccessibilitySnapshot(rootSelector, includeUrls) {
         return text ? text.replace(/\s+/g, ' ').trim() : '';
     }
 
+    /**
+     * Detect hiding mechanisms on an element.
+     * Returns an array of hiding reasons: 'aria', 'inert', 'css'
+     * Empty array means element is not hidden.
+     *
+     * Note: .sr-only patterns (clip, offscreen positioning) are NOT detected
+     * as hidden because they ARE in the accessibility tree - they're just
+     * visually hidden for sighted users.
+     */
+    function getHiddenReasons(el) {
+        const reasons = [];
+
+        // 1. aria-hidden="true" - explicit accessibility hiding
+        // Note: aria-hidden="false" on children cannot override parent's true
+        // But we don't need to check ancestors here because if parent is skipped,
+        // we never reach children (recursive early return)
+        if (el.getAttribute('aria-hidden') === 'true') {
+            reasons.push('aria');
+        }
+
+        // 2. inert attribute - removes from accessibility tree AND prevents interaction
+        // Check attribute directly - works in all browsers, reflects property changes
+        if (el.hasAttribute('inert')) {
+            reasons.push('inert');
+        }
+
+        // 3. CSS hiding - removes from visual rendering and accessibility tree
+        // Note: We include opacity:0 here because from AI consumer perspective,
+        // if something is invisible, it's "hidden" even if technically in AT.
+        // This helps AI agents understand visual state.
+        try {
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' ||
+                style.visibility === 'hidden' ||
+                style.opacity === '0') {
+                reasons.push('css');
+            }
+        } catch (e) {
+            // getComputedStyle can fail on some elements, skip CSS check
+        }
+
+        return reasons;
+    }
+
     // Accessible name computation per WAI-ARIA spec
+    // IMPORTANT: This uses getElementById which accesses hidden elements.
+    // Per W3C, aria-labelledby references MUST include hidden element content.
     function computeAccessibleName(el) {
         // Step 1: aria-label
         if (el.getAttribute('aria-label')) {
@@ -37,6 +79,8 @@ function getAccessibilitySnapshot(rootSelector, includeUrls) {
         }
 
         // Step 2: aria-labelledby
+        // Note: Referenced elements are accessed via getElementById regardless of
+        // their hidden state. This is W3C-mandated behavior.
         if (el.getAttribute('aria-labelledby')) {
             const ids = el.getAttribute('aria-labelledby').split(/\s+/);
             return ids
@@ -137,11 +181,18 @@ function getAccessibilitySnapshot(rootSelector, includeUrls) {
         // Skip non-element nodes
         if (el.nodeType !== Node.ELEMENT_NODE) return null;
 
-        // Skip non-rendered elements
+        // Always skip non-content elements
         if (SKIP_TAGS.includes(el.tagName)) return null;
 
-        // Skip hidden elements
-        if (!isVisible(el)) return null;
+        // Detect hidden state
+        const hiddenReasons = getHiddenReasons(el);
+        const isHidden = hiddenReasons.length > 0;
+
+        // Skip hidden elements unless includeHidden is true
+        // This is an early return that prevents recursion into hidden subtrees
+        if (isHidden && !includeHidden) {
+            return null;
+        }
 
         const role = el.getAttribute('role') || getImplicitRole(el);
         const name = computeAccessibleName(el);
@@ -151,6 +202,12 @@ function getAccessibilitySnapshot(rootSelector, includeUrls) {
         // Add name if available
         if (name) {
             node.name = name;
+        }
+
+        // Add hidden markers when including hidden content
+        // This tells the AI consumer WHY this element is hidden
+        if (isHidden && includeHidden) {
+            node.hidden = hiddenReasons;
         }
 
         // Add description if available
@@ -207,4 +264,4 @@ function getAccessibilitySnapshot(rootSelector, includeUrls) {
     return walkTree(root);
 }
 
-return getAccessibilitySnapshot(arguments[0], arguments[1]);
+return getAccessibilitySnapshot(arguments[0], arguments[1], arguments[2]);
