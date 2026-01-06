@@ -1,3 +1,5 @@
+// noinspection JSAnnotator
+
 /**
  * Check network monitor status.
  * Must be called after network_monitor_setup.js has been executed.
