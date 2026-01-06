@@ -1444,7 +1444,12 @@ def register_tools(service: BrowserService) -> None:
         return result
 
     @mcp.tool(annotations=ToolAnnotations(title='Get ARIA Snapshot', readOnlyHint=True))
-    async def get_aria_snapshot(selector: str, include_urls: bool = False, compact_tree: bool = True) -> str:
+    async def get_aria_snapshot(
+        selector: str,
+        include_urls: bool = False,
+        compact_tree: bool = True,
+        include_hidden: bool = False,
+    ) -> str:
         """Understand page structure and find elements. PRIMARY tool for page comprehension.
 
         Returns semantic accessibility tree with roles, names, and hierarchy. Use immediately
@@ -1459,9 +1464,17 @@ def register_tools(service: BrowserService) -> None:
                 2. Collapse single-child generic chains (unwrap wrapper divs)
                 3. Remove redundant text children (when name equals text content)
                 Set to False for complete unfiltered tree.
+            include_hidden: Include hidden content with markers (default False).
+                When False: Excludes aria-hidden, inert, and CSS-hidden elements.
+                    Matches what assistive technology perceives.
+                When True: Includes ALL content with [hidden:X] markers showing
+                    hiding mechanism (aria, inert, css, or combinations).
+                    Use for debugging "why can't I find this element?" or
+                    seeing collapsed menus, hidden modals, full page structure.
 
         Returns:
-            YAML with ARIA roles, accessible names, element hierarchy, and states
+            YAML with ARIA roles, accessible names, element hierarchy, and states.
+            When include_hidden=True, hidden elements show [hidden:X] markers.
 
         Workflow:
             1. Call this after navigate() to understand available elements
@@ -1472,7 +1485,9 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
 
         # Execute ARIA snapshot script (loaded from scripts/)
-        snapshot_data = await asyncio.to_thread(driver.execute_script, ARIA_SNAPSHOT_SCRIPT, selector, include_urls)
+        snapshot_data = await asyncio.to_thread(
+            driver.execute_script, ARIA_SNAPSHOT_SCRIPT, selector, include_urls, include_hidden
+        )
 
         def normalize_for_comparison(s: str) -> str:
             """Normalize using NFKC for visually-equivalent character comparison.
@@ -1521,12 +1536,23 @@ def register_tools(service: BrowserService) -> None:
             name = node.get('name', '')
             has_description = bool(node.get('description'))
 
+            # Preserve hidden containers for debugging - don't collapse them
+            has_hidden = bool(node.get('hidden'))
+
             # Rule 1: Remove empty generics (no semantic content, no children)
-            if role == 'generic' and not name and not has_description and not compacted_children:
+            # Exception: Keep hidden nodes even if empty (debugging value)
+            if role == 'generic' and not name and not has_description and not compacted_children and not has_hidden:
                 return None
 
             # Rule 2: Collapse single-child generic chains (unwrap wrapper divs)
-            if role == 'generic' and not name and not has_description and len(compacted_children) == 1:
+            # Exception: Don't collapse hidden containers (preserve structure for debugging)
+            if (
+                role == 'generic'
+                and not name
+                and not has_description
+                and len(compacted_children) == 1
+                and not has_hidden
+            ):
                 return compacted_children[0]
 
             # Rule 3: Remove redundant text children (name already captures the text)
@@ -1589,6 +1615,10 @@ def register_tools(service: BrowserService) -> None:
                 attrs.append('disabled')
             if node.get('url'):
                 attrs.append(f'url={node["url"]}')
+            # Add hidden marker showing hiding mechanism(s)
+            if node.get('hidden'):
+                hidden_reasons = node['hidden']
+                attrs.append(f'hidden:{",".join(hidden_reasons)}')
 
             if attrs:
                 header += f' [{", ".join(attrs)}]'

@@ -1,0 +1,339 @@
+# Test suite for get_aria_snapshot include_hidden parameter
+#
+# Usage:
+#   1. Start HTTP server: cd examples && python -m http.server 8888
+#   2. Navigate: navigate("http://localhost:8888/include-hidden-test.html")
+#   3. Run tests: get_aria_snapshot(selector, include_hidden=...)
+#   4. Verify output matches expected includes/excludes
+
+metadata:
+  description: Test suite for get_aria_snapshot include_hidden parameter
+  version: "1.0"
+  fixture: examples/include-hidden-test.html
+  fixture_url: http://localhost:8888/include-hidden-test.html
+  created: "2026-01-05"
+
+# =============================================================================
+# Test 1: aria-hidden="true"
+# =============================================================================
+test_1_aria_hidden:
+  description: Elements with aria-hidden="true" attribute
+  selector: "#test-1-aria-hidden .actual"
+  tests:
+    - id: "1.1"
+      name: aria_hidden_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+        excludes:
+          - "ARIA Hidden Button"
+          - "[hidden:"
+
+    - id: "1.2"
+      name: aria_hidden_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Visible Button"'
+          - "ARIA Hidden Button"
+          - "[hidden:aria]"
+
+# =============================================================================
+# Test 2: inert attribute
+# =============================================================================
+test_2_inert:
+  description: Elements with inert attribute
+  selector: "#test-2-inert .actual"
+  tests:
+    - id: "2.1"
+      name: inert_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Active Button"'
+        excludes:
+          - "Inert Button"
+          - "Inert Link"
+          - "[hidden:"
+
+    - id: "2.2"
+      name: inert_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Active Button"'
+          - "Inert Button"
+          - "[hidden:inert]"
+
+# =============================================================================
+# Test 3: display:none
+# =============================================================================
+test_3_display_none:
+  description: Elements with CSS display:none
+  selector: "#test-3-display-none .actual"
+  tests:
+    - id: "3.1"
+      name: display_none_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Displayed Button"'
+        excludes:
+          - "Display None Button"
+          - "[hidden:"
+
+    - id: "3.2"
+      name: display_none_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Displayed Button"'
+          - "Display None Button"
+          - "[hidden:css]"
+
+# =============================================================================
+# Test 4: visibility:hidden
+# =============================================================================
+test_4_visibility_hidden:
+  description: Elements with CSS visibility:hidden
+  selector: "#test-4-visibility-hidden .actual"
+  tests:
+    - id: "4.1"
+      name: visibility_hidden_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+        excludes:
+          - "Visibility Hidden Button"
+          - "[hidden:"
+
+    - id: "4.2"
+      name: visibility_hidden_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Visible Button"'
+          - "Visibility Hidden Button"
+          - "[hidden:css]"
+
+# =============================================================================
+# Test 5: opacity:0
+# =============================================================================
+test_5_opacity_zero:
+  description: Elements with CSS opacity:0
+  selector: "#test-5-opacity-zero .actual"
+  tests:
+    - id: "5.1"
+      name: opacity_zero_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Opaque Button"'
+        excludes:
+          - "Transparent Button"
+          - "[hidden:"
+
+    - id: "5.2"
+      name: opacity_zero_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Opaque Button"'
+          - "Transparent Button"
+          - "[hidden:css]"
+
+# =============================================================================
+# Test 6: Combined hiding (aria-hidden + CSS)
+# =============================================================================
+test_6_combined:
+  description: Elements hidden by multiple mechanisms
+  selector: "#test-6-combined .actual"
+  tests:
+    - id: "6.1"
+      name: combined_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+        excludes:
+          - "Double Hidden Button"
+          - "[hidden:"
+
+    - id: "6.2"
+      name: combined_shows_multiple_markers
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Visible Button"'
+          - "Double Hidden Button"
+        # Should show both mechanisms - order may vary
+        includes_any:
+          - "[hidden:aria,css]"
+          - "[hidden:css,aria]"
+
+# =============================================================================
+# Test 7: Screen-reader-only (NOT hidden)
+# =============================================================================
+test_7_sr_only:
+  description: sr-only pattern should NOT be detected as hidden
+  selector: "#test-7-sr-only .actual"
+  notes: |
+    The sr-only span uses clip/offscreen positioning which is NOT detected as hidden.
+    The aria-hidden span IS excluded from tree structure but may appear in button's
+    accessible name due to textContent-based name computation (separate issue).
+  tests:
+    - id: "7.1"
+      name: sr_only_visible_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - "Screen Reader Only Text"
+          # Text appears in button name AND as child text node
+        excludes:
+          - "[hidden:"
+          # No hidden markers should appear - sr-only is NOT hidden
+        tree_excludes:
+          # aria-hidden span excluded from tree structure (not as separate node)
+          - 'generic [hidden:aria]'
+
+    - id: "7.2"
+      name: sr_only_shows_aria_hidden_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - "Screen Reader Only Text"
+          - "[hidden:aria]"  # Marker on the aria-hidden span
+        excludes:
+          # sr-only text should NOT have hidden marker
+          - 'text: Screen Reader Only Text" [hidden:'
+
+# =============================================================================
+# Test 8: Nested hiding
+# =============================================================================
+test_8_nested:
+  description: Nested elements with different hiding mechanisms
+  selector: "#test-8-nested .actual"
+  tests:
+    - id: "8.1"
+      name: nested_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Outer Visible Button"'
+        excludes:
+          - "Parent Hidden Button"
+          - "Nested CSS Hidden Button"
+          - "[hidden:"
+
+    - id: "8.2"
+      name: nested_shows_correct_markers
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Outer Visible Button"'
+          - "Parent Hidden Button"
+          - "Nested CSS Hidden Button"
+          - "[hidden:aria]"  # On parent
+          - "[hidden:css]"   # On nested child
+
+# =============================================================================
+# Test 9: HTML5 hidden attribute
+# =============================================================================
+test_9_html_hidden:
+  description: HTML5 hidden attribute (applies display:none)
+  selector: "#test-9-html-hidden .actual"
+  tests:
+    - id: "9.1"
+      name: html_hidden_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+        excludes:
+          - "HTML Hidden Button"
+          - "[hidden:"
+
+    - id: "9.2"
+      name: html_hidden_included_with_css_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Visible Button"'
+          - "HTML Hidden Button"
+          - "[hidden:css]"  # Browser applies display:none
+
+# =============================================================================
+# Test 10: Compact tree interaction
+# =============================================================================
+test_10_compact_interaction:
+  description: Hidden containers preserved during tree compaction
+  selector: "#test-10-compact .actual"
+  tests:
+    - id: "10.1"
+      name: compact_preserves_hidden_container
+      include_hidden: true
+      compact_tree: true
+      expect:
+        includes:
+          - "[hidden:aria]"
+          - "Deeply Nested Hidden"
+        # The parent generic with [hidden:aria] should NOT be collapsed
+        # even with compact_tree=true
+
+    - id: "10.2"
+      name: compact_without_hidden_excludes
+      include_hidden: false
+      compact_tree: true
+      expect:
+        excludes:
+          - "Deeply Nested Hidden"
+          - "[hidden:"
+
+# =============================================================================
+# Test 11: aria-labelledby referencing hidden element
+# =============================================================================
+test_11_aria_labelledby:
+  description: aria-labelledby correctly accesses hidden elements
+  selector: "#test-11-labelledby .actual"
+  tests:
+    - id: "11.1"
+      name: labelledby_gets_hidden_label_text
+      include_hidden: false
+      expect:
+        includes:
+          # Button should have name from hidden span (W3C spec requirement)
+          - 'button "Hidden Label Text"'
+        excludes:
+          # The hidden span itself should not appear
+          - "[hidden:"
+
+    - id: "11.2"
+      name: labelledby_hidden_shows_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Hidden Label Text"'
+          - "[hidden:aria]"
+          - "[hidden:css]"
+
+# =============================================================================
+# Summary
+# =============================================================================
+# Total: 11 test groups, 22 individual test cases
+#
+# Hiding mechanisms tested:
+#   - aria-hidden="true" -> [hidden:aria]
+#   - inert attribute -> [hidden:inert]
+#   - display:none -> [hidden:css]
+#   - visibility:hidden -> [hidden:css]
+#   - opacity:0 -> [hidden:css]
+#   - HTML5 hidden attribute -> [hidden:css]
+#   - Combined mechanisms -> [hidden:aria,css] or similar
+#
+# Edge cases tested:
+#   - sr-only pattern (should NOT be hidden)
+#   - Nested hiding (parent aria-hidden, child CSS)
+#   - Compact tree interaction (hidden containers preserved)
+#   - aria-labelledby accessing hidden elements (W3C requirement)

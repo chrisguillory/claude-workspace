@@ -141,7 +141,7 @@ Comprehensive testing (2025-12-23) of accessibility tree extraction:
 | Feature                        | SMCP `get_aria_snapshot` |    CiC `read_page`    | Notes                                   |
 |--------------------------------|:------------------------:|:---------------------:|-----------------------------------------|
 | **Reference IDs**              |            ❌             | ✅ (ref_1, ref_2, ...) | CiC advantage - enables click(ref)      |
-| **aria-hidden exclusion**      |         ❌ (BUG)          |     ❌ (SAME BUG)      | **P0**: Both show aria-hidden content   |
+| **aria-hidden exclusion**      |    ✅ `include_hidden`    |     ❌ (SAME BUG)      | SMCP fixed: excludes by default, opt-in |
 | **Explicit ARIA roles**        |            ✅             |           ✅           | dialog, tablist, menu, etc.             |
 | **Named landmarks**            |            ✅             |           ✅           | `navigation "Main nav"`                 |
 | **Interactive filter**         |            ❌             |           ✅           | CiC: `filter="interactive"`             |
@@ -155,7 +155,7 @@ Comprehensive testing (2025-12-23) of accessibility tree extraction:
 | **Section without name**       |     → region (wrong)     |   → region (wrong)    | Should be `generic` (context-sensitive) |
 | **aria-live attributes**       |            ❌             |           ❌           | Neither shows polite/assertive          |
 
-**Key Finding**: Both implementations have identical native role mapping and context-sensitive role gaps. The P0 aria-hidden bug exists in both.
+**Key Finding**: Both implementations have identical native role mapping and context-sensitive role gaps. SMCP now excludes aria-hidden content by default (fixed P0 bug); CiC still shows it.
 
 ### `get_aria_snapshot` Roadmap
 
@@ -163,7 +163,7 @@ Prioritized implementation plan based on Phase 6-7 testing:
 
 | Priority | Issue                         | Impact                                    | Test File                  |
 |:--------:|-------------------------------|-------------------------------------------|----------------------------|
-|  **P0**  | aria-hidden content appearing | Security/privacy - exposes hidden content | `aria-states.html` Test 11 |
+| ~~P0~~   | ~~aria-hidden content appearing~~ ✅ FIXED | Default excludes; `include_hidden=true` for debug | `include-hidden-test.html` |
 |  **P1**  | No reference IDs              | Can't target elements for click/input     | Chrome comparison          |
 |  **P1**  | Missing ARIA states           | Can't detect expanded/collapsed/selected  | `aria-states.html`         |
 |  **P2**  | Native role mapping gaps      | details/progress/meter show as generic    | `role-mapping.html`        |
@@ -660,7 +660,7 @@ Ideas without implementation plans:
 - `navigate_with_profile_state(url, profile_state_file?, chrome_profile?, origins_filter?, ...)` - Load URL with profile state import (separate permission scope)
 - `get_page_text(selector?, include_images?)` - Smart content extraction with semantic element priority (see below)
 - `get_page_html(selector?, limit?)` - Extract raw HTML source or specific elements
-- `get_aria_snapshot(selector, include_urls?)` - Semantic page structure
+- `get_aria_snapshot(selector, include_urls?, compact_tree?, include_hidden?)` - Semantic page structure (excludes hidden by default)
 - `screenshot(filename, full_page?)` - Capture viewport or full page
 
 ### Smart Extraction (`get_page_text`)
