@@ -94,12 +94,13 @@
         </div>
     </section>
 
-    <!-- Test 5: opacity:0 -->
+    <!-- Test 5: opacity:0 (NOW IN ACCESSIBILITY TREE) -->
     <section id="test-5-opacity-zero" class="test-case">
-        <h2>Test 5: CSS opacity:0</h2>
+        <h2>Test 5: CSS opacity:0 (IN Accessibility Tree)</h2>
         <p class="description">
-            Elements with <code>opacity:0</code> are transparent (technically in accessibility tree, but visually hidden).
-            Marker: <code>[hidden:css]</code>
+            Elements with <code>opacity:0</code> ARE in the accessibility tree per W3C specs.
+            This is how screen-reader-only patterns work (e.g., Amazon's .a-offscreen prices).
+            Marker: <code>[visually-hidden:opacity]</code> - INCLUDED by default.
         </p>
         <div class="actual">
             <button>Opaque Button</button>
@@ -124,13 +125,13 @@
         </div>
     </section>
 
-    <!-- Test 7: Screen-reader-only (NOT hidden) -->
+    <!-- Test 7: Screen-reader-only (IN accessibility tree with marker) -->
     <section id="test-7-sr-only" class="test-case">
-        <h2>Test 7: Screen-reader-only (NOT hidden)</h2>
+        <h2>Test 7: Screen-reader-only (IN Accessibility Tree)</h2>
         <p class="description">
-            <code>.sr-only</code> pattern (clip, offscreen) should NOT be detected as hidden.
-            These elements ARE in the accessibility tree - they're just visually hidden.
-            No <code>[hidden:X]</code> marker should appear.
+            <code>.sr-only</code> pattern (clip/offscreen) IS in the accessibility tree - just visually hidden.
+            Marker: <code>[visually-hidden:clipped]</code> - INCLUDED by default.
+            The <code>aria-hidden</code> span gets <code>[hidden:aria-hidden]</code>.
         </p>
         <div class="actual">
             <button>
@@ -140,12 +141,13 @@
         </div>
     </section>
 
-    <!-- Test 8: Nested hiding -->
+    <!-- Test 8: Nested hiding (with ancestor propagation) -->
     <section id="test-8-nested" class="test-case">
-        <h2>Test 8: Nested Hiding</h2>
+        <h2>Test 8: Nested Hiding (Ancestor Propagation)</h2>
         <p class="description">
             Parent has <code>aria-hidden="true"</code>, child has <code>display:none</code>.
-            Parent marker: <code>[hidden:aria]</code>, child marker: <code>[hidden:css]</code>
+            Parent: <code>[hidden:aria-hidden]</code>, children: <code>[hidden:ancestor]</code> (inherited).
+            The nested display:none div would show <code>[hidden:display-none]</code> if not inherited.
         </p>
         <div class="actual">
             <button>Outer Visible Button</button>
@@ -200,6 +202,38 @@
         <div class="actual">
             <span id="hidden-label" aria-hidden="true" style="display:none">Hidden Label Text</span>
             <button aria-labelledby="hidden-label">Button</button>
+        </div>
+    </section>
+
+    <!-- Test 12: visibility:collapse (NEW Phase 2) -->
+    <section id="test-12-visibility-collapse" class="test-case">
+        <h2>Test 12: CSS visibility:collapse</h2>
+        <p class="description">
+            Elements with <code>visibility:collapse</code> are removed from accessibility tree.
+            Behaves like <code>visibility:hidden</code> for most elements, collapses table rows/columns.
+            Marker: <code>[hidden:visibility-collapse]</code>
+        </p>
+        <div class="actual">
+            <button>Visible Button</button>
+            <div style="visibility:collapse">
+                <button>Collapsed Button</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 13: Offscreen positioning (NEW Phase 2) -->
+    <section id="test-13-offscreen" class="test-case">
+        <h2>Test 13: Offscreen Positioning (IN Accessibility Tree)</h2>
+        <p class="description">
+            Elements positioned far off-screen (<code>left:-9999px</code>, etc.) ARE in accessibility tree.
+            This is another common screen-reader-only pattern.
+            Marker: <code>[visually-hidden:offscreen]</code> - INCLUDED by default.
+        </p>
+        <div class="actual">
+            <button>Visible Button</button>
+            <div style="position:absolute; left:-9999px">
+                <button>Offscreen Button</button>
+            </div>
         </div>
     </section>
 

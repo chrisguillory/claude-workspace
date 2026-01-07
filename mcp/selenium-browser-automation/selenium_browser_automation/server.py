@@ -1536,22 +1536,28 @@ def register_tools(service: BrowserService) -> None:
             name = node.get('name', '')
             has_description = bool(node.get('description'))
 
-            # Preserve hidden containers for debugging - don't collapse them
-            has_hidden = bool(node.get('hidden'))
+            # Preserve containers with visibility markers - don't collapse them
+            has_visibility_marker = bool(node.get('hidden') or node.get('visuallyHidden'))
 
             # Rule 1: Remove empty generics (no semantic content, no children)
-            # Exception: Keep hidden nodes even if empty (debugging value)
-            if role == 'generic' and not name and not has_description and not compacted_children and not has_hidden:
+            # Exception: Keep nodes with visibility markers even if empty (debugging value)
+            if (
+                role == 'generic'
+                and not name
+                and not has_description
+                and not compacted_children
+                and not has_visibility_marker
+            ):
                 return None
 
             # Rule 2: Collapse single-child generic chains (unwrap wrapper divs)
-            # Exception: Don't collapse hidden containers (preserve structure for debugging)
+            # Exception: Don't collapse containers with visibility markers (preserve structure)
             if (
                 role == 'generic'
                 and not name
                 and not has_description
                 and len(compacted_children) == 1
-                and not has_hidden
+                and not has_visibility_marker
             ):
                 return compacted_children[0]
 
@@ -1615,10 +1621,12 @@ def register_tools(service: BrowserService) -> None:
                 attrs.append('disabled')
             if node.get('url'):
                 attrs.append(f'url={node["url"]}')
-            # Add hidden marker showing hiding mechanism(s)
+            # Add hidden marker (element NOT in accessibility tree)
             if node.get('hidden'):
-                hidden_reasons = node['hidden']
-                attrs.append(f'hidden:{",".join(hidden_reasons)}')
+                attrs.append(f'hidden:{node["hidden"]}')
+            # Add visually-hidden marker (element IN accessibility tree but not visible)
+            if node.get('visuallyHidden'):
+                attrs.append(f'visually-hidden:{node["visuallyHidden"]}')
 
             if attrs:
                 header += f' [{", ".join(attrs)}]'

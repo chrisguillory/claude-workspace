@@ -8,10 +8,38 @@
 
 metadata:
   description: Test suite for get_aria_snapshot include_hidden parameter
-  version: "1.0"
+  version: "2.0"
   fixture: examples/include-hidden-test.html
   fixture_url: http://localhost:8888/include-hidden-test.html
   created: "2026-01-05"
+  updated: "2026-01-06"
+  notes: |
+    Phase 2 changes:
+    - Markers now granular: [hidden:display-none], [hidden:visibility-hidden], etc.
+    - opacity:0 is now [visually-hidden:opacity] and INCLUDED by default (in AT)
+    - Single marker returned (first match), not array
+    - Ancestor propagation: children of hidden elements get [hidden:ancestor]
+
+# =============================================================================
+# Marker Categories (Phase 2)
+# =============================================================================
+#
+# [hidden:X] - Element NOT in accessibility tree:
+#   - aria-hidden    (aria-hidden="true")
+#   - inert          (inert attribute)
+#   - display-none   (display:none)
+#   - visibility-hidden (visibility:hidden)
+#   - visibility-collapse (visibility:collapse)
+#   - ancestor       (parent is not in AT)
+#
+# [visually-hidden:X] - Element IN accessibility tree but not visible:
+#   - opacity        (opacity:0)
+#   - clipped        (clip/clip-path sr-only patterns)
+#   - offscreen      (position:absolute with large negative offsets)
+#
+# Key semantic difference:
+#   include_hidden=false: EXCLUDES [hidden:*], INCLUDES [visually-hidden:*]
+#   include_hidden=true:  INCLUDES both with markers
 
 # =============================================================================
 # Test 1: aria-hidden="true"
@@ -37,7 +65,7 @@ test_1_aria_hidden:
         includes:
           - 'button "Visible Button"'
           - "ARIA Hidden Button"
-          - "[hidden:aria]"
+          - "[hidden:aria-hidden]"
 
 # =============================================================================
 # Test 2: inert attribute
@@ -90,7 +118,7 @@ test_3_display_none:
         includes:
           - 'button "Displayed Button"'
           - "Display None Button"
-          - "[hidden:css]"
+          - "[hidden:display-none]"
 
 # =============================================================================
 # Test 4: visibility:hidden
@@ -116,24 +144,28 @@ test_4_visibility_hidden:
         includes:
           - 'button "Visible Button"'
           - "Visibility Hidden Button"
-          - "[hidden:css]"
+          - "[hidden:visibility-hidden]"
 
 # =============================================================================
-# Test 5: opacity:0
+# Test 5: opacity:0 (NOW IN ACCESSIBILITY TREE)
 # =============================================================================
 test_5_opacity_zero:
-  description: Elements with CSS opacity:0
+  description: |
+    Elements with opacity:0 ARE in the accessibility tree per W3C specs.
+    This is how screen-reader-only patterns work (e.g., Amazon's .a-offscreen prices).
+    Phase 2 change: Now [visually-hidden:opacity] and INCLUDED by default.
   selector: "#test-5-opacity-zero .actual"
   tests:
     - id: "5.1"
-      name: opacity_zero_excluded_by_default
+      name: opacity_zero_INCLUDED_by_default
       include_hidden: false
       expect:
         includes:
           - 'button "Opaque Button"'
-        excludes:
           - "Transparent Button"
-          - "[hidden:"
+          - "[visually-hidden:opacity]"
+        excludes:
+          - "[hidden:"  # NOT hidden - it's visually-hidden
 
     - id: "5.2"
       name: opacity_zero_included_with_marker
@@ -142,13 +174,15 @@ test_5_opacity_zero:
         includes:
           - 'button "Opaque Button"'
           - "Transparent Button"
-          - "[hidden:css]"
+          - "[visually-hidden:opacity]"
 
 # =============================================================================
 # Test 6: Combined hiding (aria-hidden + CSS)
 # =============================================================================
 test_6_combined:
-  description: Elements hidden by multiple mechanisms
+  description: |
+    Element hidden by both aria-hidden="true" AND display:none.
+    Phase 2: Returns first matching marker only (aria-hidden checked first).
   selector: "#test-6-combined .actual"
   tests:
     - id: "6.1"
@@ -162,58 +196,49 @@ test_6_combined:
           - "[hidden:"
 
     - id: "6.2"
-      name: combined_shows_multiple_markers
+      name: combined_shows_first_marker
       include_hidden: true
       expect:
         includes:
           - 'button "Visible Button"'
           - "Double Hidden Button"
-        # Should show both mechanisms - order may vary
-        includes_any:
-          - "[hidden:aria,css]"
-          - "[hidden:css,aria]"
+          - "[hidden:aria-hidden]"  # First match wins
 
 # =============================================================================
-# Test 7: Screen-reader-only (NOT hidden)
+# Test 7: Screen-reader-only (sr-only pattern)
 # =============================================================================
 test_7_sr_only:
-  description: sr-only pattern should NOT be detected as hidden
+  description: |
+    sr-only pattern (clip/offscreen) is IN accessibility tree but visually hidden.
+    Phase 2: Gets [visually-hidden:clipped] marker but IS included by default.
   selector: "#test-7-sr-only .actual"
-  notes: |
-    The sr-only span uses clip/offscreen positioning which is NOT detected as hidden.
-    The aria-hidden span IS excluded from tree structure but may appear in button's
-    accessible name due to textContent-based name computation (separate issue).
   tests:
     - id: "7.1"
-      name: sr_only_visible_by_default
+      name: sr_only_INCLUDED_with_marker
       include_hidden: false
       expect:
         includes:
           - "Screen Reader Only Text"
-          # Text appears in button name AND as child text node
+          - "[visually-hidden:clipped]"  # New Phase 2 marker
         excludes:
-          - "[hidden:"
-          # No hidden markers should appear - sr-only is NOT hidden
-        tree_excludes:
-          # aria-hidden span excluded from tree structure (not as separate node)
-          - 'generic [hidden:aria]'
+          - "[hidden:"  # NOT hidden - it's visually-hidden
 
     - id: "7.2"
-      name: sr_only_shows_aria_hidden_with_marker
+      name: sr_only_shows_all_markers
       include_hidden: true
       expect:
         includes:
           - "Screen Reader Only Text"
-          - "[hidden:aria]"  # Marker on the aria-hidden span
-        excludes:
-          # sr-only text should NOT have hidden marker
-          - 'text: Screen Reader Only Text" [hidden:'
+          - "[visually-hidden:clipped]"  # sr-only span
+          - "[hidden:aria-hidden]"        # Icon Placeholder span
 
 # =============================================================================
-# Test 8: Nested hiding
+# Test 8: Nested hiding (ancestor propagation)
 # =============================================================================
 test_8_nested:
-  description: Nested elements with different hiding mechanisms
+  description: |
+    Parent has aria-hidden, child has display:none.
+    Phase 2: Children of hidden parents get [hidden:ancestor] marker.
   selector: "#test-8-nested .actual"
   tests:
     - id: "8.1"
@@ -228,15 +253,15 @@ test_8_nested:
           - "[hidden:"
 
     - id: "8.2"
-      name: nested_shows_correct_markers
+      name: nested_shows_ancestor_marker
       include_hidden: true
       expect:
         includes:
           - 'button "Outer Visible Button"'
           - "Parent Hidden Button"
           - "Nested CSS Hidden Button"
-          - "[hidden:aria]"  # On parent
-          - "[hidden:css]"   # On nested child
+          - "[hidden:aria-hidden]"  # On parent div
+          - "[hidden:ancestor]"     # On children (inherited hidden state)
 
 # =============================================================================
 # Test 9: HTML5 hidden attribute
@@ -256,13 +281,13 @@ test_9_html_hidden:
           - "[hidden:"
 
     - id: "9.2"
-      name: html_hidden_included_with_css_marker
+      name: html_hidden_included_with_display_none_marker
       include_hidden: true
       expect:
         includes:
           - 'button "Visible Button"'
           - "HTML Hidden Button"
-          - "[hidden:css]"  # Browser applies display:none
+          - "[hidden:display-none]"  # Browser applies display:none
 
 # =============================================================================
 # Test 10: Compact tree interaction
@@ -277,10 +302,9 @@ test_10_compact_interaction:
       compact_tree: true
       expect:
         includes:
-          - "[hidden:aria]"
+          - "[hidden:aria-hidden]"
           - "Deeply Nested Hidden"
-        # The parent generic with [hidden:aria] should NOT be collapsed
-        # even with compact_tree=true
+        # The parent generic with [hidden:aria-hidden] should NOT be collapsed
 
     - id: "10.2"
       name: compact_without_hidden_excludes
@@ -315,25 +339,87 @@ test_11_aria_labelledby:
       expect:
         includes:
           - 'button "Hidden Label Text"'
-          - "[hidden:aria]"
-          - "[hidden:css]"
+          - "[hidden:aria-hidden]"
+
+# =============================================================================
+# Test 12: visibility:collapse (NEW Phase 2)
+# =============================================================================
+test_12_visibility_collapse:
+  description: |
+    visibility:collapse removes from accessibility tree.
+    Behaves like hidden for most elements, like display:none for table elements.
+  selector: "#test-12-visibility-collapse .actual"
+  tests:
+    - id: "12.1"
+      name: visibility_collapse_excluded_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+        excludes:
+          - "Collapsed Button"
+          - "[hidden:"
+
+    - id: "12.2"
+      name: visibility_collapse_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Visible Button"'
+          - "Collapsed Button"
+          - "[hidden:visibility-collapse]"
+
+# =============================================================================
+# Test 13: Offscreen positioning (NEW Phase 2)
+# =============================================================================
+test_13_offscreen:
+  description: |
+    Elements positioned far off-screen (left:-9999px etc.) are IN accessibility tree
+    but visually hidden. Gets [visually-hidden:offscreen] marker.
+  selector: "#test-13-offscreen .actual"
+  tests:
+    - id: "13.1"
+      name: offscreen_INCLUDED_by_default
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+          - "Offscreen Button"
+          - "[visually-hidden:offscreen]"
+        excludes:
+          - "[hidden:"
+
+    - id: "13.2"
+      name: offscreen_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Visible Button"'
+          - "Offscreen Button"
+          - "[visually-hidden:offscreen]"
 
 # =============================================================================
 # Summary
 # =============================================================================
-# Total: 11 test groups, 22 individual test cases
+# Total: 13 test groups, 26 individual test cases
 #
-# Hiding mechanisms tested:
-#   - aria-hidden="true" -> [hidden:aria]
+# Hidden mechanisms (NOT in accessibility tree):
+#   - aria-hidden="true" -> [hidden:aria-hidden]
 #   - inert attribute -> [hidden:inert]
-#   - display:none -> [hidden:css]
-#   - visibility:hidden -> [hidden:css]
-#   - opacity:0 -> [hidden:css]
-#   - HTML5 hidden attribute -> [hidden:css]
-#   - Combined mechanisms -> [hidden:aria,css] or similar
+#   - display:none -> [hidden:display-none]
+#   - visibility:hidden -> [hidden:visibility-hidden]
+#   - visibility:collapse -> [hidden:visibility-collapse]
+#   - HTML5 hidden attribute -> [hidden:display-none]
+#   - Ancestor hidden -> [hidden:ancestor]
 #
-# Edge cases tested:
-#   - sr-only pattern (should NOT be hidden)
-#   - Nested hiding (parent aria-hidden, child CSS)
-#   - Compact tree interaction (hidden containers preserved)
-#   - aria-labelledby accessing hidden elements (W3C requirement)
+# Visually-hidden mechanisms (IN accessibility tree):
+#   - opacity:0 -> [visually-hidden:opacity]
+#   - sr-only clip pattern -> [visually-hidden:clipped]
+#   - offscreen positioning -> [visually-hidden:offscreen]
+#
+# Key Phase 2 changes:
+#   - Granular markers instead of [hidden:css]
+#   - opacity:0 now IN accessibility tree (was excluded)
+#   - sr-only patterns now detected with [visually-hidden:clipped]
+#   - Ancestor propagation via [hidden:ancestor]
+#   - Single marker per element (first match wins)

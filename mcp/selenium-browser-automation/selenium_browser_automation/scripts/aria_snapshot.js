@@ -5,12 +5,20 @@
  * Arguments:
  *   arguments[0]: rootSelector - CSS selector for root element
  *   arguments[1]: includeUrls - boolean to include href values
- *   arguments[2]: includeHidden - boolean to include hidden content with markers
+ *   arguments[2]: includeHidden - boolean to include content not in accessibility tree
  *
  * Returns:
  *   Hierarchical tree structure with roles, names, and states.
- *   When includeHidden=true, hidden elements include a 'hidden' array
- *   indicating the hiding mechanism(s): 'aria', 'inert', or 'css'.
+ *
+ *   Visibility markers (single string, not array):
+ *   - 'hidden' property: Element NOT in accessibility tree
+ *     Values: 'display-none', 'visibility-hidden', 'visibility-collapse',
+ *             'aria-hidden', 'inert', 'ancestor'
+ *   - 'visuallyHidden' property: Element IN accessibility tree but not visible
+ *     Values: 'opacity', 'clipped', 'offscreen'
+ *
+ *   With includeHidden=false (default): Excludes hidden:*, includes visuallyHidden:*
+ *   With includeHidden=true: Includes all elements with appropriate markers
  */
 function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = false) {
     const root = document.querySelector(rootSelector);
@@ -26,46 +34,116 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
     }
 
     /**
-     * Detect hiding mechanisms on an element.
-     * Returns an array of hiding reasons: 'aria', 'inert', 'css'
-     * Empty array means element is not hidden.
-     *
-     * Note: .sr-only patterns (clip, offscreen positioning) are NOT detected
-     * as hidden because they ARE in the accessibility tree - they're just
-     * visually hidden for sighted users.
+     * Detect sr-only clip patterns (Bootstrap, Tailwind, WordPress, etc.)
+     * Requires position:absolute AND overflow:hidden as prerequisites.
      */
-    function getHiddenReasons(el) {
-        const reasons = [];
-
-        // 1. aria-hidden="true" - explicit accessibility hiding
-        // Note: aria-hidden="false" on children cannot override parent's true
-        // But we don't need to check ancestors here because if parent is skipped,
-        // we never reach children (recursive early return)
-        if (el.getAttribute('aria-hidden') === 'true') {
-            reasons.push('aria');
+    function isSrOnlyClippedPattern(style) {
+        if (style.position !== 'absolute' || style.overflow !== 'hidden') {
+            return false;
         }
 
-        // 2. inert attribute - removes from accessibility tree AND prevents interaction
-        // Check attribute directly - works in all browsers, reflects property changes
-        if (el.hasAttribute('inert')) {
-            reasons.push('inert');
-        }
+        // Check for clip or clip-path (most reliable indicator)
+        if (style.clip && style.clip !== 'auto') return true;
+        if (style.clipPath && style.clipPath !== 'none') return true;
 
-        // 3. CSS hiding - removes element from accessibility tree
-        // Note: opacity:0 is intentionally NOT included because elements with
-        // opacity:0 ARE in the accessibility tree per W3C specs. This is how
-        // screen-reader-only patterns work (e.g., Amazon's .a-offscreen prices).
-        try {
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none' ||
-                style.visibility === 'hidden') {
-                reasons.push('css');
+        // Check for 1px x 1px dimensions (Bootstrap/Tailwind pattern)
+        const width = parseFloat(style.width);
+        const height = parseFloat(style.height);
+        if (width <= 1 && height <= 1) return true;
+
+        return false;
+    }
+
+    /**
+     * Detect off-screen positioning patterns.
+     * Requires position:absolute as prerequisite.
+     */
+    function isOffscreenPositioned(style) {
+        if (style.position !== 'absolute') return false;
+
+        const threshold = 1000; // pixels - anything beyond this is "off-screen"
+
+        // Check left/right/top/bottom
+        for (const prop of ['left', 'right', 'top', 'bottom']) {
+            const value = style[prop];
+            if (value && value !== 'auto') {
+                const num = parseFloat(value);
+                if (Math.abs(num) > threshold) return true;
             }
-        } catch (e) {
-            // getComputedStyle can fail on some elements, skip CSS check
         }
 
-        return reasons;
+        // Check transform translate (less common but used)
+        if (style.transform && style.transform !== 'none') {
+            const match = style.transform.match(/translate[XYZ]?\(([^)]+)\)/);
+            if (match) {
+                const values = match[1].split(',').map(v => parseFloat(v));
+                if (values.some(v => Math.abs(v) > threshold)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Determine element's visibility state for accessibility tree purposes.
+     *
+     * Returns: { inAT: boolean, marker: string | null }
+     *   - inAT: true if element is in accessibility tree
+     *   - marker: visibility reason (or null if fully visible)
+     *
+     * Hidden markers (NOT in accessibility tree):
+     *   'ancestor', 'aria-hidden', 'inert', 'display-none',
+     *   'visibility-hidden', 'visibility-collapse'
+     *
+     * VisuallyHidden markers (IN accessibility tree but not visible):
+     *   'opacity', 'clipped', 'offscreen'
+     */
+    function getVisibilityState(el, ancestorHidden) {
+        // Ancestor already hidden - propagate with 'ancestor' marker
+        if (ancestorHidden) {
+            return { inAT: false, marker: 'ancestor' };
+        }
+
+        // Check element's own NOT-in-AT conditions
+        if (el.getAttribute('aria-hidden') === 'true') {
+            return { inAT: false, marker: 'aria-hidden' };
+        }
+        if (el.hasAttribute('inert')) {
+            return { inAT: false, marker: 'inert' };
+        }
+
+        // CSS properties that remove from accessibility tree
+        let style;
+        try {
+            style = window.getComputedStyle(el);
+        } catch (e) {
+            // getComputedStyle can fail on some elements, treat as visible
+            return { inAT: true, marker: null };
+        }
+
+        if (style.display === 'none') {
+            return { inAT: false, marker: 'display-none' };
+        }
+        if (style.visibility === 'hidden') {
+            return { inAT: false, marker: 'visibility-hidden' };
+        }
+        if (style.visibility === 'collapse') {
+            return { inAT: false, marker: 'visibility-collapse' };
+        }
+
+        // Check IN-AT-but-visually-hidden conditions
+        if (style.opacity === '0') {
+            return { inAT: true, marker: 'opacity' };
+        }
+        if (isSrOnlyClippedPattern(style)) {
+            return { inAT: true, marker: 'clipped' };
+        }
+        if (isOffscreenPositioned(style)) {
+            return { inAT: true, marker: 'offscreen' };
+        }
+
+        // Fully visible and in AT
+        return { inAT: true, marker: null };
     }
 
     // Accessible name computation per WAI-ARIA spec
@@ -165,7 +243,8 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
     }
 
     // Walk tree and build hierarchical snapshot (includes text nodes!)
-    function walkTree(el, depth = 0) {
+    // ancestorHidden: true if any ancestor is not in accessibility tree
+    function walkTree(el, depth = 0, ancestorHidden = false) {
         if (depth > 50) return null; // Prevent infinite recursion
 
         // Handle text nodes
@@ -183,13 +262,12 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         // Always skip non-content elements
         if (SKIP_TAGS.includes(el.tagName)) return null;
 
-        // Detect hidden state
-        const hiddenReasons = getHiddenReasons(el);
-        const isHidden = hiddenReasons.length > 0;
+        // Detect visibility state (checks ancestor state and element's own state)
+        const visState = getVisibilityState(el, ancestorHidden);
 
-        // Skip hidden elements unless includeHidden is true
-        // This is an early return that prevents recursion into hidden subtrees
-        if (isHidden && !includeHidden) {
+        // Skip elements NOT in accessibility tree unless includeHidden is true
+        // Elements with visually-hidden markers ARE in AT and always included
+        if (!visState.inAT && !includeHidden) {
             return null;
         }
 
@@ -203,10 +281,15 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
             node.name = name;
         }
 
-        // Add hidden markers when including hidden content
-        // This tells the AI consumer WHY this element is hidden
-        if (isHidden && includeHidden) {
-            node.hidden = hiddenReasons;
+        // Add visibility markers based on state
+        if (visState.marker) {
+            if (visState.inAT) {
+                // In accessibility tree but visually hidden
+                node.visuallyHidden = visState.marker;
+            } else {
+                // Not in accessibility tree (only shown when includeHidden=true)
+                node.hidden = visState.marker;
+            }
         }
 
         // Add description if available
@@ -243,10 +326,14 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
             node.url = el.href;
         }
 
+        // Propagate hidden state to children
+        // Children of hidden elements inherit the hidden state
+        const childAncestorHidden = !visState.inAT || ancestorHidden;
+
         // Process child NODES (not just elements - includes text!)
         const children = [];
         for (const child of el.childNodes) {
-            const childNode = walkTree(child, depth + 1);
+            const childNode = walkTree(child, depth + 1, childAncestorHidden);
             if (childNode) {
                 children.push(childNode);
             }
