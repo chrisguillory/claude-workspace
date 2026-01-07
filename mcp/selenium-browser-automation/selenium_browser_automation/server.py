@@ -92,6 +92,7 @@ from .scripts import (
     NETWORK_MONITOR_SETUP_SCRIPT,
     RESOURCE_TIMING_SCRIPT,
     TEXT_EXTRACTION_SCRIPT,
+    VISUAL_TREE_SCRIPT,
     WEB_VITALS_SCRIPT,
     build_execute_javascript_async_script,
 )
@@ -1647,6 +1648,155 @@ def register_tools(service: BrowserService) -> None:
             return '\n'.join(lines)
 
         return serialize_aria_snapshot(snapshot_data)
+
+    @mcp.tool(annotations=ToolAnnotations(title='Get Visual Tree', readOnlyHint=True))
+    async def get_visual_tree(
+        selector: str,
+        include_urls: bool = False,
+        compact_tree: bool = True,
+        include_hidden: bool = False,
+    ) -> str:
+        """Show what sighted users see. Complements get_aria_snapshot() (what AT sees).
+
+        Key difference from ARIA snapshot:
+        - aria-hidden elements ARE included (they're visible to sighted users!)
+        - opacity:0 elements are EXCLUDED (invisible to sighted users)
+        - sr-only/clipped elements are EXCLUDED (invisible to sighted users)
+
+        Use cases:
+        - Visual verification: understanding what users actually see
+        - Screenshot correlation: matching DOM to visual regions
+        - UI testing: verifying visual state
+        - Debugging: "why can user see this but screen reader can't?"
+
+        Args:
+            selector: CSS selector scope ('body' for full page)
+            include_urls: Include href values (default False)
+            compact_tree: Remove structural noise (default True)
+            include_hidden: Include visually hidden content with markers (default False)
+
+        Returns:
+            YAML tree of visually rendered elements.
+            When include_hidden=True, hidden elements show [hidden:X] markers.
+
+        Comparison:
+            | Mechanism       | ARIA Tree  | Visual Tree |
+            |-----------------|------------|-------------|
+            | aria-hidden     | EXCLUDED   | INCLUDED    |
+            | opacity:0       | INCLUDED   | EXCLUDED    |
+            | sr-only/clip    | INCLUDED   | EXCLUDED    |
+            | display:none    | EXCLUDED   | EXCLUDED    |
+        """
+        driver = await service.get_browser()
+
+        # Execute visual tree script
+        snapshot_data = await asyncio.to_thread(
+            driver.execute_script, VISUAL_TREE_SCRIPT, selector, include_urls, include_hidden
+        )
+
+        if snapshot_data is None:
+            return f'Selector not found: {selector}'
+
+        # Compact tree transformation (same as ARIA snapshot)
+        def compact_visual_tree(node: dict[str, Any]) -> dict[str, Any] | None:
+            if node.get('type') == 'text':
+                return node
+
+            children = node.get('children', [])
+            compacted_children = []
+            for child in children:
+                compacted = compact_visual_tree(child)
+                if compacted is not None:
+                    compacted_children.append(compacted)
+
+            role = node.get('role', 'generic')
+            name = node.get('name', '')
+            has_description = bool(node.get('description'))
+            has_visibility_marker = bool(node.get('hidden'))
+
+            # Rule 1: Remove empty generics
+            if (
+                role == 'generic'
+                and not name
+                and not has_description
+                and not compacted_children
+                and not has_visibility_marker
+            ):
+                return None
+
+            # Rule 2: Collapse single-child generic chains
+            if (
+                role == 'generic'
+                and not name
+                and not has_description
+                and len(compacted_children) == 1
+                and not has_visibility_marker
+            ):
+                return compacted_children[0]
+
+            # Rule 3: Remove redundant text children
+            if name and compacted_children:
+                all_text = all(c.get('type') == 'text' for c in compacted_children)
+                if all_text:
+                    texts = [c.get('content', '') for c in compacted_children]
+                    concatenated = ' '.join(texts)
+                    import unicodedata
+
+                    def norm(s: str) -> str:
+                        return unicodedata.normalize('NFKC', s).strip()
+
+                    if norm(concatenated) == norm(name):
+                        compacted_children = []
+
+            result = dict(node)
+            if compacted_children:
+                result['children'] = compacted_children
+            elif 'children' in result:
+                del result['children']
+            return result
+
+        if compact_tree:
+            snapshot_data = compact_visual_tree(snapshot_data)
+            if snapshot_data is None:
+                return ''
+
+        # Serialize to YAML (same format as ARIA snapshot)
+        def serialize_visual_tree(node: dict[str, Any], indent: int = 0) -> str:
+            prefix = ' ' * indent
+
+            if node.get('type') == 'text':
+                return f'{prefix}- text: {node.get("content", "")}'
+
+            role = node.get('role', 'generic')
+            name = node.get('name', '')
+
+            attrs: list[str] = []
+            if node.get('hidden'):
+                attrs.append(f'hidden:{node["hidden"]}')
+            if node.get('level'):
+                attrs.append(f'level={node["level"]}')
+            if node.get('checked') is not None:
+                attrs.append('checked' if node['checked'] else 'unchecked')
+            if node.get('disabled'):
+                attrs.append('disabled')
+            if node.get('url'):
+                attrs.append(f'url={node["url"]}')
+
+            attr_str = f' [{", ".join(attrs)}]' if attrs else ''
+            name_str = f' "{name}"' if name else ''
+
+            children = node.get('children', [])
+            if children:
+                lines = [f'{prefix}- {role}{name_str}{attr_str}:']
+                for child in children:
+                    child_output = serialize_visual_tree(child, indent + 2)
+                    if child_output:
+                        lines.append(child_output)
+                return '\n'.join(lines)
+            else:
+                return f'{prefix}- {role}{name_str}{attr_str}'
+
+        return serialize_visual_tree(snapshot_data)
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Interactive Elements', readOnlyHint=True))
     async def get_interactive_elements(
