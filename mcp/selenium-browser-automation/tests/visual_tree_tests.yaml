@@ -291,9 +291,40 @@ test_13_offscreen_hidden:
           - "[hidden:offscreen]"
 
 # =============================================================================
+# Test 14: visibility:visible overrides inherited visibility:hidden
+# =============================================================================
+test_14_visibility_override:
+  description: |
+    Per CSS spec, a child with visibility:visible IS visible even when parent
+    has visibility:hidden. Same behavior as ARIA tree. The override button
+    should appear without any hidden marker.
+  selector: "#test-14-visibility-override .actual"
+  tests:
+    - id: "v14.1"
+      name: visibility_override_visible_in_default
+      include_hidden: false
+      expect:
+        includes:
+          - "Override Visible Button"  # This child IS visible
+        excludes:
+          - "Still Hidden Button"  # This sibling inherits parent's visibility:hidden
+
+    - id: "v14.2"
+      name: visibility_override_shows_sibling_hidden
+      include_hidden: true
+      expect:
+        includes:
+          - "Override Visible Button"  # Visible child - no hidden marker
+          - "Still Hidden Button"
+          - "[hidden:ancestor]"  # Sibling inherits hidden from parent
+        excludes:
+          # Override button should NOT have a hidden marker
+          - 'button "Override Visible Button" [hidden:'
+
+# =============================================================================
 # Summary
 # =============================================================================
-# Total: 11 test groups, 19 individual test cases
+# Total: 12 test groups, 21 individual test cases
 #
 # Key differences from ARIA tree (elements that behave OPPOSITE):
 #   - aria-hidden="true" -> INCLUDED in visual tree (excluded from ARIA)

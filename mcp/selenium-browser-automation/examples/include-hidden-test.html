@@ -37,7 +37,7 @@
         <h2>Test 1: aria-hidden="true"</h2>
         <p class="description">
             Elements with <code>aria-hidden="true"</code> are removed from accessibility tree.
-            Marker: <code>[hidden:aria]</code>
+            Marker: <code>[hidden:aria-hidden]</code>
         </p>
         <div class="actual">
             <button>Visible Button</button>
@@ -69,7 +69,7 @@
         <h2>Test 3: CSS display:none</h2>
         <p class="description">
             Elements with <code>display:none</code> are not rendered.
-            Marker: <code>[hidden:css]</code>
+            Marker: <code>[hidden:display-none]</code>
         </p>
         <div class="actual">
             <button>Displayed Button</button>
@@ -84,7 +84,7 @@
         <h2>Test 4: CSS visibility:hidden</h2>
         <p class="description">
             Elements with <code>visibility:hidden</code> take up space but are invisible.
-            Marker: <code>[hidden:css]</code>
+            Marker: <code>[hidden:visibility-hidden]</code>
         </p>
         <div class="actual">
             <button>Visible Button</button>
@@ -115,7 +115,7 @@
         <h2>Test 6: Combined Hiding</h2>
         <p class="description">
             Element hidden by both <code>aria-hidden="true"</code> AND <code>display:none</code>.
-            Marker: <code>[hidden:aria,css]</code> or <code>[hidden:css,aria]</code>
+            Marker: <code>[hidden:aria-hidden]</code> (first match wins)
         </p>
         <div class="actual">
             <button>Visible Button</button>
@@ -165,7 +165,7 @@
         <h2>Test 9: HTML5 hidden attribute</h2>
         <p class="description">
             The <code>hidden</code> attribute applies <code>display:none</code> by default.
-            Marker: <code>[hidden:css]</code>
+            Marker: <code>[hidden:display-none]</code>
         </p>
         <div class="actual">
             <button>Visible Button</button>
@@ -181,7 +181,7 @@
         <p class="description">
             Hidden containers should NOT be collapsed by compact_tree rules.
             When <code>include_hidden=true</code> AND <code>compact_tree=true</code>,
-            the generic wrapper div should be preserved (not collapsed) because it has <code>[hidden:aria]</code>.
+            the generic wrapper div should be preserved (not collapsed) because it has <code>[hidden:aria-hidden]</code>.
         </p>
         <div class="actual">
             <div aria-hidden="true">
@@ -233,6 +233,22 @@
             <button>Visible Button</button>
             <div style="position:absolute; left:-9999px">
                 <button>Offscreen Button</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Test 14: visibility:visible overrides inherited visibility:hidden -->
+    <section id="test-14-visibility-override" class="test-case">
+        <h2>Test 14: visibility:visible Override</h2>
+        <p class="description">
+            Per CSS spec, a child with <code>visibility:visible</code> IS visible even when
+            parent has <code>visibility:hidden</code>. This only applies to visibility inheritance,
+            not display:none or aria-hidden. The child should appear in both ARIA and visual trees.
+        </p>
+        <div class="actual">
+            <div style="visibility:hidden">
+                <button>Still Hidden Button</button>
+                <button style="visibility:visible">Override Visible Button</button>
             </div>
         </div>
     </section>

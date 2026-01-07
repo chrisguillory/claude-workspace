@@ -1697,6 +1697,10 @@ def register_tools(service: BrowserService) -> None:
         if snapshot_data is None:
             return f'Selector not found: {selector}'
 
+        # NFKC normalization for text comparison (same as ARIA snapshot)
+        def normalize_for_comparison(s: str) -> str:
+            return unicodedata.normalize('NFKC', s)
+
         # Compact tree transformation (same as ARIA snapshot)
         def compact_visual_tree(node: dict[str, Any]) -> dict[str, Any] | None:
             if node.get('type') == 'text':
@@ -1740,19 +1744,13 @@ def register_tools(service: BrowserService) -> None:
                 if all_text:
                     texts = [c.get('content', '') for c in compacted_children]
                     concatenated = ' '.join(texts)
-                    import unicodedata
-
-                    def norm(s: str) -> str:
-                        return unicodedata.normalize('NFKC', s).strip()
-
-                    if norm(concatenated) == norm(name):
+                    if normalize_for_comparison(concatenated) == normalize_for_comparison(name):
                         compacted_children = []
 
-            result = dict(node)
+            # Return node with updated children (don't mutate original)
+            result = {k: v for k, v in node.items() if k != 'children'}
             if compacted_children:
                 result['children'] = compacted_children
-            elif 'children' in result:
-                del result['children']
             return result
 
         if compact_tree:
@@ -1775,8 +1773,8 @@ def register_tools(service: BrowserService) -> None:
                 attrs.append(f'hidden:{node["hidden"]}')
             if node.get('level'):
                 attrs.append(f'level={node["level"]}')
-            if node.get('checked') is not None:
-                attrs.append('checked' if node['checked'] else 'unchecked')
+            if node.get('checked'):
+                attrs.append('checked')
             if node.get('disabled'):
                 attrs.append('disabled')
             if node.get('url'):
