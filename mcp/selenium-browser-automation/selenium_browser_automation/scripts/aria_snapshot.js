@@ -51,15 +51,14 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
             reasons.push('inert');
         }
 
-        // 3. CSS hiding - removes from visual rendering and accessibility tree
-        // Note: We include opacity:0 here because from AI consumer perspective,
-        // if something is invisible, it's "hidden" even if technically in AT.
-        // This helps AI agents understand visual state.
+        // 3. CSS hiding - removes element from accessibility tree
+        // Note: opacity:0 is intentionally NOT included because elements with
+        // opacity:0 ARE in the accessibility tree per W3C specs. This is how
+        // screen-reader-only patterns work (e.g., Amazon's .a-offscreen prices).
         try {
             const style = window.getComputedStyle(el);
             if (style.display === 'none' ||
-                style.visibility === 'hidden' ||
-                style.opacity === '0') {
+                style.visibility === 'hidden') {
                 reasons.push('css');
             }
         } catch (e) {
