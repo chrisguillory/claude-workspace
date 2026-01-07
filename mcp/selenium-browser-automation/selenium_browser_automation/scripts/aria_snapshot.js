@@ -288,9 +288,15 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         // Detect visibility state (checks ancestor state and element's own state)
         const visState = getVisibilityState(el, ancestorHidden, ancestorHiddenReason);
 
-        // Skip elements NOT in accessibility tree unless includeHidden is true
-        // Elements with visually-hidden markers ARE in AT and always included
-        if (!visState.inAT && !includeHidden) {
+        // For visibility:hidden/collapse, must traverse children for potential overrides.
+        // CSS allows visibility:visible children to override inherited visibility:hidden.
+        const isVisibilityHiddenType =
+            visState.marker === 'visibility-hidden' || visState.marker === 'visibility-collapse';
+
+        // Skip elements NOT in accessibility tree unless:
+        // 1. includeHidden is true, OR
+        // 2. Element has visibility:hidden/collapse (children may override)
+        if (!visState.inAT && !includeHidden && !isVisibilityHiddenType) {
             return null;
         }
 
@@ -368,6 +374,24 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         // Add children array if not empty
         if (children.length > 0) {
             node.children = children;
+        }
+
+        // For visibility:hidden without includeHidden, only include if we have visible children.
+        // Return the children directly (skip the hidden parent wrapper).
+        if (!visState.inAT && !includeHidden && isVisibilityHiddenType) {
+            // Filter to only visible children (those without hidden marker)
+            const visibleChildren = children.filter(c =>
+                c.type === 'text' || !c.hidden
+            );
+            if (visibleChildren.length === 0) {
+                return null;  // No visible children, skip this subtree
+            }
+            // Return visible children without hidden parent wrapper
+            if (visibleChildren.length === 1) {
+                return visibleChildren[0];
+            }
+            // Multiple visible children - wrap in structural generic
+            return { role: 'generic', children: visibleChildren };
         }
 
         return node;

@@ -248,8 +248,15 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
         // Check VISUAL visibility (different from ARIA visibility!)
         const visState = getVisualState(el, ancestorHidden, ancestorHiddenReason);
 
-        // Skip visually hidden elements unless includeHidden is true
-        if (!visState.visible && !includeHidden) {
+        // For visibility:hidden/collapse, must traverse children for potential overrides.
+        // CSS allows visibility:visible children to override inherited visibility:hidden.
+        const isVisibilityHiddenType =
+            visState.marker === 'visibility-hidden' || visState.marker === 'visibility-collapse';
+
+        // Skip visually hidden elements unless:
+        // 1. includeHidden is true, OR
+        // 2. Element has visibility:hidden/collapse (children may override)
+        if (!visState.visible && !includeHidden && !isVisibilityHiddenType) {
             return null;
         }
 
@@ -318,6 +325,24 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
 
         if (children.length > 0) {
             node.children = children;
+        }
+
+        // For visibility:hidden without includeHidden, only include if we have visible children.
+        // Return the children directly (skip the hidden parent wrapper).
+        if (!visState.visible && !includeHidden && isVisibilityHiddenType) {
+            // Filter to only visible children (those without hidden marker)
+            const visibleChildren = children.filter(c =>
+                c.type === 'text' || !c.hidden
+            );
+            if (visibleChildren.length === 0) {
+                return null;  // No visible children, skip this subtree
+            }
+            // Return visible children without hidden parent wrapper
+            if (visibleChildren.length === 1) {
+                return visibleChildren[0];
+            }
+            // Multiple visible children - wrap in structural generic
+            return { role: 'generic', children: visibleChildren };
         }
 
         return node;
