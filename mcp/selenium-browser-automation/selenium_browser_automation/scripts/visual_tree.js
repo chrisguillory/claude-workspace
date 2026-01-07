@@ -52,9 +52,10 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
 
     /**
      * Detect off-screen positioning patterns.
+     * Requires position:absolute or position:fixed as prerequisite.
      */
     function isOffscreenPositioned(style) {
-        if (style.position !== 'absolute') return false;
+        if (style.position !== 'absolute' && style.position !== 'fixed') return false;
         const threshold = 1000;
         for (const prop of ['left', 'right', 'top', 'bottom']) {
             const value = style[prop];
@@ -63,8 +64,9 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
                 if (Math.abs(num) > threshold) return true;
             }
         }
+        // Check transform translate (pattern matches translate(), translateX/Y/Z(), translate3d())
         if (style.transform && style.transform !== 'none') {
-            const match = style.transform.match(/translate[XYZ]?\(([^)]+)\)/);
+            const match = style.transform.match(/translate(?:3d|[XYZ])?\(([^)]+)\)/);
             if (match) {
                 const values = match[1].split(',').map(v => parseFloat(v));
                 if (values.some(v => Math.abs(v) > threshold)) return true;

@@ -56,10 +56,10 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
 
     /**
      * Detect off-screen positioning patterns.
-     * Requires position:absolute as prerequisite.
+     * Requires position:absolute or position:fixed as prerequisite.
      */
     function isOffscreenPositioned(style) {
-        if (style.position !== 'absolute') return false;
+        if (style.position !== 'absolute' && style.position !== 'fixed') return false;
 
         const threshold = 1000; // pixels - anything beyond this is "off-screen"
 
@@ -73,8 +73,9 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         }
 
         // Check transform translate (less common but used)
+        // Pattern matches: translate(), translateX/Y/Z(), translate3d()
         if (style.transform && style.transform !== 'none') {
-            const match = style.transform.match(/translate[XYZ]?\(([^)]+)\)/);
+            const match = style.transform.match(/translate(?:3d|[XYZ])?\(([^)]+)\)/);
             if (match) {
                 const values = match[1].split(',').map(v => parseFloat(v));
                 if (values.some(v => Math.abs(v) > threshold)) return true;
