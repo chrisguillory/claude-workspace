@@ -86,9 +86,30 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
      *   'opacity', 'clipped', 'offscreen', 'ancestor'
      *
      * Note: aria-hidden is NOT checked - it's an AT concept, not visual.
+     *
+     * @param {Element} el - The element to check
+     * @param {boolean} ancestorHidden - Whether an ancestor is hidden
+     * @param {string|null} ancestorHiddenReason - Why ancestor is hidden (for visibility override check)
      */
-    function getVisualState(el, ancestorHidden) {
-        // Ancestor already hidden - propagate
+    function getVisualState(el, ancestorHidden, ancestorHiddenReason) {
+        // Handle visibility:visible override of inherited visibility:hidden
+        // Per CSS spec, a child with visibility:visible IS visible even if parent has visibility:hidden
+        // This ONLY applies to visibility inheritance, not to display:none, opacity:0, etc.
+        if (ancestorHidden && (ancestorHiddenReason === 'visibility-hidden' || ancestorHiddenReason === 'visibility-collapse')) {
+            let style;
+            try {
+                style = window.getComputedStyle(el);
+            } catch (e) {
+                return { visible: false, marker: 'ancestor' };
+            }
+            // Child with visibility:visible overrides inherited visibility:hidden
+            if (style.visibility === 'visible') {
+                // Continue to check element's own conditions below (don't return ancestor marker)
+                ancestorHidden = false;
+            }
+        }
+
+        // Ancestor hidden (and not overridden) - propagate with 'ancestor' marker
         if (ancestorHidden) {
             return { visible: false, marker: 'ancestor' };
         }
@@ -208,7 +229,8 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
     }
 
     // Walk tree and build hierarchical snapshot
-    function walkTree(el, depth = 0, ancestorHidden = false) {
+    // ancestorHiddenReason: why ancestor is hidden (for visibility:visible override check)
+    function walkTree(el, depth = 0, ancestorHidden = false, ancestorHiddenReason = null) {
         if (depth > 50) return null;
 
         // Handle text nodes
@@ -224,7 +246,7 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
         if (SKIP_TAGS.includes(el.tagName)) return null;
 
         // Check VISUAL visibility (different from ARIA visibility!)
-        const visState = getVisualState(el, ancestorHidden);
+        const visState = getVisualState(el, ancestorHidden, ancestorHiddenReason);
 
         // Skip visually hidden elements unless includeHidden is true
         if (!visState.visible && !includeHidden) {
@@ -281,11 +303,14 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
 
         // Propagate hidden state to children
         const childAncestorHidden = !visState.visible || ancestorHidden;
+        // Track the reason for hiding (needed for visibility:visible override check)
+        // If this element is hidden, use its marker; otherwise propagate parent's reason
+        const childAncestorReason = !visState.visible ? visState.marker : ancestorHiddenReason;
 
         // Process children
         const children = [];
         for (const child of el.childNodes) {
-            const childNode = walkTree(child, depth + 1, childAncestorHidden);
+            const childNode = walkTree(child, depth + 1, childAncestorHidden, childAncestorReason);
             if (childNode) {
                 children.push(childNode);
             }

@@ -98,9 +98,30 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
      *
      * VisuallyHidden markers (IN accessibility tree but not visible):
      *   'opacity', 'clipped', 'offscreen'
+     *
+     * @param {Element} el - The element to check
+     * @param {boolean} ancestorHidden - Whether an ancestor is hidden
+     * @param {string|null} ancestorHiddenReason - Why ancestor is hidden (for visibility override check)
      */
-    function getVisibilityState(el, ancestorHidden) {
-        // Ancestor already hidden - propagate with 'ancestor' marker
+    function getVisibilityState(el, ancestorHidden, ancestorHiddenReason) {
+        // Handle visibility:visible override of inherited visibility:hidden
+        // Per CSS spec, a child with visibility:visible IS visible even if parent has visibility:hidden
+        // This ONLY applies to visibility inheritance, not to display:none, aria-hidden, inert, etc.
+        if (ancestorHidden && (ancestorHiddenReason === 'visibility-hidden' || ancestorHiddenReason === 'visibility-collapse')) {
+            let style;
+            try {
+                style = window.getComputedStyle(el);
+            } catch (e) {
+                return { inAT: false, marker: 'ancestor' };
+            }
+            // Child with visibility:visible overrides inherited visibility:hidden
+            if (style.visibility === 'visible') {
+                // Continue to check element's own conditions below (don't return ancestor marker)
+                ancestorHidden = false;
+            }
+        }
+
+        // Ancestor hidden (and not overridden) - propagate with 'ancestor' marker
         if (ancestorHidden) {
             return { inAT: false, marker: 'ancestor' };
         }
@@ -245,7 +266,8 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
 
     // Walk tree and build hierarchical snapshot (includes text nodes!)
     // ancestorHidden: true if any ancestor is not in accessibility tree
-    function walkTree(el, depth = 0, ancestorHidden = false) {
+    // ancestorHiddenReason: why ancestor is hidden (for visibility:visible override check)
+    function walkTree(el, depth = 0, ancestorHidden = false, ancestorHiddenReason = null) {
         if (depth > 50) return null; // Prevent infinite recursion
 
         // Handle text nodes
@@ -264,7 +286,7 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         if (SKIP_TAGS.includes(el.tagName)) return null;
 
         // Detect visibility state (checks ancestor state and element's own state)
-        const visState = getVisibilityState(el, ancestorHidden);
+        const visState = getVisibilityState(el, ancestorHidden, ancestorHiddenReason);
 
         // Skip elements NOT in accessibility tree unless includeHidden is true
         // Elements with visually-hidden markers ARE in AT and always included
@@ -330,11 +352,14 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         // Propagate hidden state to children
         // Children of hidden elements inherit the hidden state
         const childAncestorHidden = !visState.inAT || ancestorHidden;
+        // Track the reason for hiding (needed for visibility:visible override check)
+        // If this element is hidden, use its marker; otherwise propagate parent's reason
+        const childAncestorReason = !visState.inAT ? visState.marker : ancestorHiddenReason;
 
         // Process child NODES (not just elements - includes text!)
         const children = [];
         for (const child of el.childNodes) {
-            const childNode = walkTree(child, depth + 1, childAncestorHidden);
+            const childNode = walkTree(child, depth + 1, childAncestorHidden, childAncestorReason);
             if (childNode) {
                 children.push(childNode);
             }
