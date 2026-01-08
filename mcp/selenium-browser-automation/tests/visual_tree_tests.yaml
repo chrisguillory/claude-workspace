@@ -1,0 +1,339 @@
+# Test suite for get_visual_tree tool
+#
+# Usage:
+#   1. Start HTTP server: cd examples && python -m http.server 8888
+#   2. Navigate: navigate("http://localhost:8888/include-hidden-test.html")
+#   3. Run tests: get_visual_tree(selector, include_hidden=...)
+#   4. Verify output matches expected includes/excludes
+#
+# Key semantic difference from get_aria_snapshot:
+#   - Visual tree shows what SIGHTED USERS see
+#   - ARIA tree shows what ASSISTIVE TECHNOLOGY sees
+
+metadata:
+  description: Test suite for get_visual_tree tool
+  version: "1.0"
+  fixture: examples/include-hidden-test.html
+  fixture_url: http://localhost:8888/include-hidden-test.html
+  created: "2026-01-06"
+  notes: |
+    get_visual_tree() vs get_aria_snapshot() semantic differences:
+
+    | Mechanism       | ARIA Tree  | Visual Tree |
+    |-----------------|------------|-------------|
+    | aria-hidden     | EXCLUDED   | INCLUDED    |
+    | opacity:0       | INCLUDED   | EXCLUDED    |
+    | sr-only/clip    | INCLUDED   | EXCLUDED    |
+    | offscreen       | INCLUDED   | EXCLUDED    |
+    | inert           | EXCLUDED   | INCLUDED    |
+    | display:none    | EXCLUDED   | EXCLUDED    |
+
+# =============================================================================
+# Test 1: aria-hidden elements ARE VISIBLE in visual tree (opposite of ARIA!)
+# =============================================================================
+test_1_aria_hidden_visible:
+  description: |
+    aria-hidden="true" is an AT concept, not visual.
+    These elements ARE visible to sighted users, so they appear in visual tree.
+    This is the KEY difference from ARIA tree where they're excluded.
+  selector: "#test-1-aria-hidden .actual"
+  tests:
+    - id: "v1.1"
+      name: aria_hidden_INCLUDED_in_visual_tree
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+          - "ARIA Hidden Button"  # KEY: This appears in visual tree!
+        excludes:
+          - "[hidden:"  # No hidden marker - it's fully visible
+
+# =============================================================================
+# Test 2: inert elements ARE VISIBLE in visual tree (opposite of ARIA!)
+# =============================================================================
+test_2_inert_visible:
+  description: |
+    inert is an interaction concept, not visual.
+    Inert content IS visually rendered, just non-interactive.
+    Visual tree includes it, ARIA tree excludes it.
+  selector: "#test-2-inert .actual"
+  tests:
+    - id: "v2.1"
+      name: inert_INCLUDED_in_visual_tree
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Active Button"'
+          - "Inert Button"  # KEY: This appears in visual tree!
+          - "Inert Link"
+        excludes:
+          - "[hidden:"
+
+# =============================================================================
+# Test 3: display:none excluded from both trees
+# =============================================================================
+test_3_display_none:
+  description: display:none elements are hidden from both AT and sighted users
+  selector: "#test-3-display-none .actual"
+  tests:
+    - id: "v3.1"
+      name: display_none_excluded
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Displayed Button"'
+        excludes:
+          - "Display None Button"
+          - "[hidden:"
+
+    - id: "v3.2"
+      name: display_none_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Displayed Button"'
+          - "Display None Button"
+          - "[hidden:display-none]"
+
+# =============================================================================
+# Test 4: visibility:hidden excluded from both trees
+# =============================================================================
+test_4_visibility_hidden:
+  description: visibility:hidden elements are hidden from both AT and sighted users
+  selector: "#test-4-visibility-hidden .actual"
+  tests:
+    - id: "v4.1"
+      name: visibility_hidden_excluded
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+        excludes:
+          - "Visibility Hidden Button"
+
+    - id: "v4.2"
+      name: visibility_hidden_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - "Visibility Hidden Button"
+          - "[hidden:visibility-hidden]"
+
+# =============================================================================
+# Test 5: opacity:0 EXCLUDED from visual tree (opposite of ARIA!)
+# =============================================================================
+test_5_opacity_zero_hidden:
+  description: |
+    opacity:0 elements are invisible to sighted users.
+    Visual tree EXCLUDES them (they can't be seen).
+    ARIA tree INCLUDES them (they're in the accessibility tree).
+    This is the KEY difference.
+  selector: "#test-5-opacity-zero .actual"
+  tests:
+    - id: "v5.1"
+      name: opacity_zero_EXCLUDED_from_visual_tree
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Opaque Button"'
+        excludes:
+          - "Transparent Button"  # KEY: NOT in visual tree!
+          - "[hidden:"
+
+    - id: "v5.2"
+      name: opacity_zero_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - 'button "Opaque Button"'
+          - "Transparent Button"
+          - "[hidden:opacity]"
+
+# =============================================================================
+# Test 6: Combined hiding (aria-hidden + CSS)
+# =============================================================================
+test_6_combined:
+  description: |
+    Element with both aria-hidden and display:none.
+    In visual tree, aria-hidden is ignored, but display:none still hides it.
+  selector: "#test-6-combined .actual"
+  tests:
+    - id: "v6.1"
+      name: combined_excluded_due_to_display_none
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+        excludes:
+          - "Double Hidden Button"
+
+    - id: "v6.2"
+      name: combined_shows_display_none_marker
+      include_hidden: true
+      expect:
+        includes:
+          - "Double Hidden Button"
+          - "[hidden:display-none]"  # Note: NOT aria-hidden (visual concept)
+
+# =============================================================================
+# Test 7: sr-only EXCLUDED from visual tree (opposite of ARIA!)
+# =============================================================================
+test_7_sr_only_hidden:
+  description: |
+    sr-only pattern (clip/1px) is invisible to sighted users.
+    Visual tree EXCLUDES it (can't be seen).
+    ARIA tree INCLUDES it (it's there for screen readers).
+  selector: "#test-7-sr-only .actual"
+  tests:
+    - id: "v7.1"
+      name: sr_only_EXCLUDED_from_visual_tree
+      include_hidden: false
+      expect:
+        includes:
+          - "Icon Placeholder"  # aria-hidden span IS visible to sighted users!
+        excludes:
+          - "Screen Reader Only Text"  # KEY: sr-only NOT in visual tree
+
+    - id: "v7.2"
+      name: sr_only_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - "Screen Reader Only Text"
+          - "[hidden:clipped]"
+
+# =============================================================================
+# Test 8: Nested hiding with ancestor propagation
+# =============================================================================
+test_8_nested_hidden:
+  description: Children of visually hidden parents inherit hidden state
+  selector: "#test-8-nested .actual"
+  tests:
+    - id: "v8.1"
+      name: aria_hidden_parent_VISIBLE
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Outer Visible Button"'
+          # Note: aria-hidden parent and children ARE visible in visual tree!
+          - "Parent Hidden Button"
+        excludes:
+          - "Nested CSS Hidden Button"  # This one has display:none
+
+    - id: "v8.2"
+      name: nested_display_none_shows_marker
+      include_hidden: true
+      expect:
+        includes:
+          - "Nested CSS Hidden Button"
+          - "[hidden:display-none]"
+
+# =============================================================================
+# Test 9: HTML5 hidden attribute
+# =============================================================================
+test_9_html_hidden:
+  description: HTML5 hidden attribute applies display:none
+  selector: "#test-9-html-hidden .actual"
+  tests:
+    - id: "v9.1"
+      name: html_hidden_excluded
+      include_hidden: false
+      expect:
+        excludes:
+          - "HTML Hidden Button"
+
+# =============================================================================
+# Test 12: visibility:collapse
+# =============================================================================
+test_12_visibility_collapse:
+  description: visibility:collapse excluded from visual tree
+  selector: "#test-12-visibility-collapse .actual"
+  tests:
+    - id: "v12.1"
+      name: visibility_collapse_excluded
+      include_hidden: false
+      expect:
+        excludes:
+          - "Collapsed Button"
+
+    - id: "v12.2"
+      name: visibility_collapse_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - "[hidden:visibility-collapse]"
+
+# =============================================================================
+# Test 13: Offscreen positioning EXCLUDED from visual tree (opposite of ARIA!)
+# =============================================================================
+test_13_offscreen_hidden:
+  description: |
+    Elements positioned far off-screen are not visible to sighted users.
+    Visual tree EXCLUDES them.
+    ARIA tree INCLUDES them (they're technically in the AT).
+  selector: "#test-13-offscreen .actual"
+  tests:
+    - id: "v13.1"
+      name: offscreen_EXCLUDED_from_visual_tree
+      include_hidden: false
+      expect:
+        includes:
+          - 'button "Visible Button"'
+        excludes:
+          - "Offscreen Button"  # KEY: NOT in visual tree
+
+    - id: "v13.2"
+      name: offscreen_included_with_marker
+      include_hidden: true
+      expect:
+        includes:
+          - "Offscreen Button"
+          - "[hidden:offscreen]"
+
+# =============================================================================
+# Test 14: visibility:visible overrides inherited visibility:hidden
+# =============================================================================
+test_14_visibility_override:
+  description: |
+    Per CSS spec, a child with visibility:visible IS visible even when parent
+    has visibility:hidden. Same behavior as ARIA tree. The override button
+    should appear without any hidden marker.
+  selector: "#test-14-visibility-override .actual"
+  tests:
+    - id: "v14.1"
+      name: visibility_override_visible_in_default
+      include_hidden: false
+      expect:
+        includes:
+          - "Override Visible Button"  # This child IS visible
+        excludes:
+          - "Still Hidden Button"  # This sibling inherits parent's visibility:hidden
+
+    - id: "v14.2"
+      name: visibility_override_shows_sibling_hidden
+      include_hidden: true
+      expect:
+        includes:
+          - "Override Visible Button"  # Visible child - no hidden marker
+          - "Still Hidden Button"
+          - "[hidden:ancestor]"  # Sibling inherits hidden from parent
+        excludes:
+          # Override button should NOT have a hidden marker
+          - 'button "Override Visible Button" [hidden:'
+
+# =============================================================================
+# Summary
+# =============================================================================
+# Total: 12 test groups, 21 individual test cases
+#
+# Key differences from ARIA tree (elements that behave OPPOSITE):
+#   - aria-hidden="true" -> INCLUDED in visual tree (excluded from ARIA)
+#   - inert attribute -> INCLUDED in visual tree (excluded from ARIA)
+#   - opacity:0 -> EXCLUDED from visual tree (included in ARIA)
+#   - sr-only clip -> EXCLUDED from visual tree (included in ARIA)
+#   - offscreen -> EXCLUDED from visual tree (included in ARIA)
+#
+# Same behavior as ARIA tree:
+#   - display:none -> EXCLUDED from both
+#   - visibility:hidden -> EXCLUDED from both
+#   - visibility:collapse -> EXCLUDED from both

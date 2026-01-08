@@ -14,6 +14,7 @@ from pathlib import Path
 __all__ = [
     'TEXT_EXTRACTION_SCRIPT',
     'ARIA_SNAPSHOT_SCRIPT',
+    'VISUAL_TREE_SCRIPT',
     'NETWORK_MONITOR_SETUP_SCRIPT',
     'NETWORK_MONITOR_CHECK_SCRIPT',
     'WEB_VITALS_SCRIPT',
@@ -36,6 +37,7 @@ def _load_script(filename: str) -> str:
 # Load all scripts at import time (fail-fast validation)
 TEXT_EXTRACTION_SCRIPT: str = _load_script('text_extraction.js')
 ARIA_SNAPSHOT_SCRIPT: str = _load_script('aria_snapshot.js')
+VISUAL_TREE_SCRIPT: str = _load_script('visual_tree.js')
 NETWORK_MONITOR_SETUP_SCRIPT: str = _load_script('network_monitor_setup.js')
 NETWORK_MONITOR_CHECK_SCRIPT: str = _load_script('network_monitor_check.js')
 WEB_VITALS_SCRIPT: str = _load_script('web_vitals.js')
