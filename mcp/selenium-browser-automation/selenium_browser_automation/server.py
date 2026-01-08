@@ -97,6 +97,51 @@ from .scripts import (
     build_execute_javascript_async_script,
 )
 
+# Large output threshold for file saving.
+# When tool output exceeds this, save to file to preserve line structure.
+# Matches python-interpreter MCP server for consistency.
+# Without this, Claude Code's JSON-wrapped file saving escapes newlines,
+# making Read tool's line-based offset/limit useless.
+LARGE_OUTPUT_THRESHOLD = 25_000  # characters
+
+
+def _save_large_output_to_file(
+    content: str,
+    output_dir: Path,
+    prefix: str,
+    extension: str,
+) -> str:
+    """Save large output to file, return formatted response with path and preview.
+
+    Preserves natural line structure by writing directly to disk,
+    bypassing MCP JSON serialization that would escape newlines.
+
+    Args:
+        content: The full content to save
+        output_dir: Directory to save the file in
+        prefix: Filename prefix (e.g., "aria_snapshot")
+        extension: File extension without dot (e.g., "yaml")
+
+    Returns:
+        Formatted response string with file path, stats, and preview
+    """
+    timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')
+    filename = f'{prefix}_{timestamp}.{extension}'
+    file_path = output_dir / filename
+
+    file_path.write_text(content, encoding='utf-8')
+
+    line_count = content.count('\n') + 1
+    char_count = len(content)
+    preview = content[:2000]
+
+    return (
+        f'{prefix.replace("_", " ").title()} '
+        f'({char_count:,} chars, {line_count:,} lines) saved to:\n'
+        f'{file_path}\n\n'
+        f'Preview (first 2000 chars):\n{preview}'
+    )
+
 
 class PrintLogger:
     """Simple logger that logs to stderr (MCP servers must not write to stdout)."""
@@ -1226,12 +1271,28 @@ def register_tools(service: BrowserService) -> None:
 
         await logger.info(f'Extracted {char_count:,} characters from <{source_element}>')
 
+        # Save large text to file to preserve line structure
+        saved_to_file = False
+        file_path: str | None = None
+
+        if char_count > LARGE_OUTPUT_THRESHOLD:
+            timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')
+            filename = f'page_text_{timestamp}.txt'
+            output_path = service.state.screenshot_dir / filename
+            output_path.write_text(text, encoding='utf-8')
+
+            saved_to_file = True
+            file_path = str(output_path)
+            text = text[:2000]  # Preview only
+
         return PageTextResult(
             title=title,
             url=url,
             source_element=source_element,
             text=text,
             character_count=char_count,
+            saved_to_file=saved_to_file,
+            file_path=file_path,
             smart_info=smart_info,
         )
 
@@ -1308,7 +1369,17 @@ def register_tools(service: BrowserService) -> None:
                 + (f' (limited to {limit})' if limit and count > limit else '')
             )
 
-            return '\n'.join(html_parts)
+            html_output = '\n'.join(html_parts)
+
+            if len(html_output) > LARGE_OUTPUT_THRESHOLD:
+                return _save_large_output_to_file(
+                    html_output,
+                    service.state.screenshot_dir,
+                    'page_html',
+                    'html',
+                )
+
+            return html_output
 
         else:
             await logger.info('Extracting full page HTML source')
@@ -1319,6 +1390,14 @@ def register_tools(service: BrowserService) -> None:
                 raise fastmcp.exceptions.ToolError(f'Failed to get page source: {e}')
 
             await logger.info(f'Extracted {len(page_html):,} characters of HTML')
+
+            if len(page_html) > LARGE_OUTPUT_THRESHOLD:
+                return _save_large_output_to_file(
+                    page_html,
+                    service.state.screenshot_dir,
+                    'page_html',
+                    'html',
+                )
 
             return page_html
 
@@ -1647,7 +1726,17 @@ def register_tools(service: BrowserService) -> None:
 
             return '\n'.join(lines)
 
-        return serialize_aria_snapshot(snapshot_data)
+        yaml_output = serialize_aria_snapshot(snapshot_data)
+
+        if len(yaml_output) > LARGE_OUTPUT_THRESHOLD:
+            return _save_large_output_to_file(
+                yaml_output,
+                service.state.screenshot_dir,
+                'aria_snapshot',
+                'yaml',
+            )
+
+        return yaml_output
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Visual Tree', readOnlyHint=True))
     async def get_visual_tree(
@@ -1794,7 +1883,17 @@ def register_tools(service: BrowserService) -> None:
             else:
                 return f'{prefix}- {role}{name_str}{attr_str}'
 
-        return serialize_visual_tree(snapshot_data)
+        yaml_output = serialize_visual_tree(snapshot_data)
+
+        if len(yaml_output) > LARGE_OUTPUT_THRESHOLD:
+            return _save_large_output_to_file(
+                yaml_output,
+                service.state.screenshot_dir,
+                'visual_tree',
+                'yaml',
+            )
+
+        return yaml_output
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Interactive Elements', readOnlyHint=True))
     async def get_interactive_elements(
