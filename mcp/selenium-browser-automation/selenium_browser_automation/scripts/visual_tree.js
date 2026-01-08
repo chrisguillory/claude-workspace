@@ -287,13 +287,65 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
             }
         }
 
-        // Add checked state
-        if (['checkbox', 'radio', 'switch'].includes(role)) {
-            if (el.hasAttribute('aria-checked')) {
-                node.checked = el.getAttribute('aria-checked') === 'true';
-            } else if (el.tagName === 'INPUT') {
-                node.checked = el.checked;
+        // Add checked state for checkboxes/radios/switches
+        // Roles that use aria-checked attribute
+        const CHECKED_ROLES = ['checkbox', 'radio', 'switch', 'menuitemcheckbox', 'menuitemradio'];
+        // Roles that support mixed/indeterminate state (per WAI-ARIA spec)
+        const MIXED_ALLOWED = ['checkbox', 'menuitemcheckbox'];
+
+        if (CHECKED_ROLES.includes(role)) {
+            // For native HTML inputs, IGNORE aria-checked per ARIA in HTML spec
+            // Native semantics take precedence over ARIA attributes
+            if (el.tagName === 'INPUT' && ['checkbox', 'radio'].includes(el.type)) {
+                // Check indeterminate first (only checkboxes support this)
+                if (el.type === 'checkbox' && el.indeterminate) {
+                    node.checked = 'mixed';
+                } else {
+                    node.checked = el.checked;
+                }
             }
+            // For ARIA checkboxes (divs with role="checkbox", etc.)
+            else if (el.hasAttribute('aria-checked')) {
+                const val = el.getAttribute('aria-checked');
+                if (val === 'mixed') {
+                    // Mixed only valid for checkbox/menuitemcheckbox per spec
+                    // Treat as false for other roles
+                    node.checked = MIXED_ALLOWED.includes(role) ? 'mixed' : false;
+                } else {
+                    node.checked = val === 'true';
+                }
+            }
+            // Role present but missing required aria-checked = assume unchecked
+            else {
+                node.checked = false;
+            }
+        }
+
+        // Add selected state for selectable items (tabs, listbox options, tree items, etc.)
+        // These use aria-selected instead of aria-checked
+        const SELECTED_ROLES = ['option', 'tab', 'treeitem', 'gridcell', 'row', 'columnheader', 'rowheader'];
+        if (SELECTED_ROLES.includes(role)) {
+            if (el.hasAttribute('aria-selected')) {
+                node.selected = el.getAttribute('aria-selected') === 'true';
+            }
+            // Note: Unlike aria-checked, aria-selected is not required
+            // Absence means "not selectable" rather than "not selected"
+        }
+
+        // Add pressed state for toggle buttons
+        // aria-pressed supports true/false/mixed (for partially pressed button groups)
+        if (role === 'button' && el.hasAttribute('aria-pressed')) {
+            const val = el.getAttribute('aria-pressed');
+            if (val === 'mixed') {
+                node.pressed = 'mixed';
+            } else {
+                node.pressed = val === 'true';
+            }
+        }
+
+        // Add expanded state for disclosure widgets, accordions, menus, etc.
+        if (el.hasAttribute('aria-expanded')) {
+            node.expanded = el.getAttribute('aria-expanded') === 'true';
         }
 
         // Add disabled state

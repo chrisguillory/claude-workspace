@@ -1695,8 +1695,41 @@ def register_tools(service: BrowserService) -> None:
             attrs = []
             if 'level' in node:
                 attrs.append(f'level={node["level"]}')
-            if node.get('checked'):
-                attrs.append('checked')
+
+            # Checkbox/radio/switch checked state (always show for these roles)
+            if 'checked' in node:
+                val = node['checked']
+                if val == 'mixed':
+                    attrs.append('checked=mixed')
+                elif val:
+                    attrs.append('checked')
+                else:
+                    attrs.append('unchecked')
+
+            # Selected state for tabs, options, treeitems, etc.
+            if 'selected' in node:
+                if node['selected']:
+                    attrs.append('selected')
+                else:
+                    attrs.append('selected=false')
+
+            # Pressed state for toggle buttons
+            if 'pressed' in node:
+                val = node['pressed']
+                if val == 'mixed':
+                    attrs.append('pressed=mixed')
+                elif val:
+                    attrs.append('pressed')
+                else:
+                    attrs.append('pressed=false')
+
+            # Expanded state for disclosure widgets, accordions, etc.
+            if 'expanded' in node:
+                if node['expanded']:
+                    attrs.append('expanded')
+                else:
+                    attrs.append('expanded=false')
+
             if node.get('disabled'):
                 attrs.append('disabled')
             if node.get('url'):
@@ -1862,8 +1895,41 @@ def register_tools(service: BrowserService) -> None:
                 attrs.append(f'hidden:{node["hidden"]}')
             if node.get('level'):
                 attrs.append(f'level={node["level"]}')
-            if node.get('checked'):
-                attrs.append('checked')
+
+            # Checkbox/radio/switch checked state (always show for these roles)
+            if 'checked' in node:
+                val = node['checked']
+                if val == 'mixed':
+                    attrs.append('checked=mixed')
+                elif val:
+                    attrs.append('checked')
+                else:
+                    attrs.append('unchecked')
+
+            # Selected state for tabs, options, treeitems, etc.
+            if 'selected' in node:
+                if node['selected']:
+                    attrs.append('selected')
+                else:
+                    attrs.append('selected=false')
+
+            # Pressed state for toggle buttons
+            if 'pressed' in node:
+                val = node['pressed']
+                if val == 'mixed':
+                    attrs.append('pressed=mixed')
+                elif val:
+                    attrs.append('pressed')
+                else:
+                    attrs.append('pressed=false')
+
+            # Expanded state for disclosure widgets, accordions, etc.
+            if 'expanded' in node:
+                if node['expanded']:
+                    attrs.append('expanded')
+                else:
+                    attrs.append('expanded=false')
+
             if node.get('disabled'):
                 attrs.append('disabled')
             if node.get('url'):
