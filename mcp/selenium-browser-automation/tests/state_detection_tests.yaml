@@ -1,0 +1,423 @@
+# =============================================================================
+# State Detection Tests for ARIA Snapshot and Visual Tree
+# =============================================================================
+#
+# This test suite validates comprehensive state detection for accessibility
+# elements including checkboxes, radio buttons, switches, tabs, toggle buttons,
+# accordions, listboxes, trees, and grids.
+#
+# Usage:
+#   1. Start HTTP server: cd examples && python -m http.server 8888
+#   2. Navigate: navigate("http://localhost:8888/state-detection.html")
+#   3. Run tests: get_aria_snapshot(selector, ...)
+#   4. Verify output matches expected includes/excludes
+#
+# Version: 1.0
+# Created: 2026-01-08
+# =============================================================================
+
+metadata:
+  description: Test suite for comprehensive ARIA state detection
+  version: "1.0"
+  fixture: examples/state-detection.html
+  fixture_url: http://localhost:8888/state-detection.html
+  created: "2026-01-08"
+  notes: |
+    Tests state detection for:
+    - aria-checked (checkbox, radio, switch, menuitemcheckbox, menuitemradio)
+    - aria-selected (option, tab, treeitem, gridcell, row, columnheader, rowheader)
+    - aria-pressed (toggle buttons)
+    - aria-expanded (disclosure widgets, accordions, trees)
+    - Native HTML input states (checked, indeterminate)
+
+# =============================================================================
+# Test 1: Native HTML Checkboxes
+# =============================================================================
+test_1_native_checkboxes:
+  description: Native HTML checkbox inputs with various states
+  selector: "#test-1-native-checkboxes .demo"
+  tests:
+    - id: "1.1"
+      name: unchecked_checkbox
+      expect:
+        includes:
+          - 'checkbox "Unchecked checkbox" [unchecked]'
+        excludes:
+          - "[checked]"
+
+    - id: "1.2"
+      name: checked_checkbox
+      expect:
+        includes:
+          - 'checkbox "Checked checkbox" [checked]'
+        excludes:
+          - "[unchecked]"
+
+    - id: "1.3"
+      name: indeterminate_checkbox
+      expect:
+        includes:
+          - 'checkbox "Indeterminate checkbox" [checked=mixed]'
+        excludes:
+          - "[checked]"  # Should not be plain [checked]
+          - "[unchecked]"
+
+    - id: "1.4"
+      name: disabled_unchecked
+      expect:
+        includes:
+          - 'checkbox "Disabled unchecked" [unchecked, disabled]'
+
+    - id: "1.5"
+      name: disabled_checked
+      expect:
+        includes:
+          - 'checkbox "Disabled checked" [checked, disabled]'
+
+# =============================================================================
+# Test 2: Native HTML Radio Buttons
+# =============================================================================
+test_2_native_radios:
+  description: Native HTML radio button inputs
+  selector: "#test-2-native-radios .demo"
+  tests:
+    - id: "2.1"
+      name: unchecked_radio
+      expect:
+        includes:
+          - 'radio "Option 1" [unchecked]'
+
+    - id: "2.2"
+      name: checked_radio
+      expect:
+        includes:
+          - 'radio "Option 2 (selected)" [checked]'
+
+    - id: "2.3"
+      name: all_radio_states
+      expect:
+        includes:
+          - "[unchecked]"
+          - "[checked]"
+
+# =============================================================================
+# Test 3: ARIA Checkboxes (Custom Elements)
+# =============================================================================
+test_3_aria_checkboxes:
+  description: Custom checkbox elements with role="checkbox" and aria-checked
+  selector: "#test-3-aria-checkboxes .demo"
+  tests:
+    - id: "3.1"
+      name: aria_unchecked
+      expect:
+        includes:
+          - 'checkbox "ARIA unchecked" [unchecked]'
+
+    - id: "3.2"
+      name: aria_checked
+      expect:
+        includes:
+          - 'checkbox "ARIA checked" [checked]'
+
+    - id: "3.3"
+      name: aria_mixed
+      expect:
+        includes:
+          - 'checkbox "ARIA mixed (indeterminate)" [checked=mixed]'
+
+# =============================================================================
+# Test 4: Visually Hidden Checkboxes (Apple Pattern)
+# =============================================================================
+test_4_hidden_checkboxes:
+  description: Checkboxes with opacity:0 (in AT but visually hidden)
+  selector: "#test-4-hidden-checkboxes .demo"
+  tests:
+    - id: "4.1"
+      name: hidden_unchecked_with_marker
+      expect:
+        includes:
+          - "[unchecked"
+          - "visually-hidden:opacity"
+
+    - id: "4.2"
+      name: hidden_checked_with_marker
+      expect:
+        includes:
+          - "[checked"
+          - "visually-hidden:opacity"
+
+# =============================================================================
+# Test 5: Switch Role
+# =============================================================================
+test_5_switch:
+  description: Switch role elements (on/off toggles)
+  selector: "#test-5-switch .demo"
+  tests:
+    - id: "5.1"
+      name: switch_off
+      expect:
+        includes:
+          - 'switch "Notifications off" [unchecked]'
+
+    - id: "5.2"
+      name: switch_on
+      expect:
+        includes:
+          - 'switch "Dark mode on" [checked]'
+
+# =============================================================================
+# Test 6: Tabs with aria-selected
+# =============================================================================
+test_6_tabs:
+  description: Tab elements using aria-selected
+  selector: "#test-6-tabs .demo"
+  tests:
+    - id: "6.1"
+      name: selected_tab
+      expect:
+        includes:
+          - 'tab "Tab 1" [selected]'
+        excludes:
+          - 'tab "Tab 1" [selected=false]'
+
+    - id: "6.2"
+      name: unselected_tabs
+      expect:
+        includes:
+          - 'tab "Tab 2" [selected=false]'
+          - 'tab "Tab 3" [selected=false]'
+
+    - id: "6.3"
+      name: tablist_structure
+      expect:
+        includes:
+          - 'tablist "Content tabs"'
+
+# =============================================================================
+# Test 7: Listbox with aria-selected
+# =============================================================================
+test_7_listbox:
+  description: Listbox options using aria-selected
+  selector: "#test-7-listbox .demo"
+  tests:
+    - id: "7.1"
+      name: selected_option
+      expect:
+        includes:
+          - 'option "Green (selected)" [selected]'
+
+    - id: "7.2"
+      name: unselected_options
+      expect:
+        includes:
+          - 'option "Red" [selected=false]'
+          - 'option "Blue" [selected=false]'
+
+# =============================================================================
+# Test 8: Toggle Buttons with aria-pressed
+# =============================================================================
+test_8_toggle_buttons:
+  description: Toggle buttons using aria-pressed
+  selector: "#test-8-toggle-buttons .demo"
+  tests:
+    - id: "8.1"
+      name: unpressed_button
+      expect:
+        includes:
+          - 'button "Not pressed" [pressed=false]'
+
+    - id: "8.2"
+      name: pressed_button
+      expect:
+        includes:
+          - 'button "Pressed" [pressed]'
+        excludes:
+          - 'button "Pressed" [pressed=false]'
+
+    - id: "8.3"
+      name: mixed_pressed_button
+      expect:
+        includes:
+          - 'button "Mixed state" [pressed=mixed]'
+
+# =============================================================================
+# Test 9: Accordion with aria-expanded
+# =============================================================================
+test_9_accordion:
+  description: Disclosure widgets using aria-expanded
+  selector: "#test-9-accordion .demo"
+  tests:
+    - id: "9.1"
+      name: expanded_section
+      expect:
+        includes:
+          - 'button "Expanded Section" [expanded]'
+        excludes:
+          - 'button "Expanded Section" [expanded=false]'
+
+    - id: "9.2"
+      name: collapsed_section
+      expect:
+        includes:
+          - 'button "Collapsed Section" [expanded=false]'
+
+# =============================================================================
+# Test 10: Menu Items (menuitemcheckbox and menuitemradio)
+# =============================================================================
+test_10_menu_items:
+  description: Menu item checkboxes and radios
+  selector: "#test-10-menu-items .demo"
+  tests:
+    - id: "10.1"
+      name: menuitemcheckbox_checked
+      expect:
+        includes:
+          - 'menuitemcheckbox "Show toolbar" [checked]'
+
+    - id: "10.2"
+      name: menuitemcheckbox_unchecked
+      expect:
+        includes:
+          - 'menuitemcheckbox "Show sidebar" [unchecked]'
+
+    - id: "10.3"
+      name: menuitemcheckbox_mixed
+      expect:
+        includes:
+          - 'menuitemcheckbox "Show all panels" [checked=mixed]'
+
+    - id: "10.4"
+      name: menuitemradio_checked
+      expect:
+        includes:
+          - 'menuitemradio "Small icons" [checked]'
+
+    - id: "10.5"
+      name: menuitemradio_unchecked
+      expect:
+        includes:
+          - 'menuitemradio "Medium icons" [unchecked]'
+          - 'menuitemradio "Large icons" [unchecked]'
+
+# =============================================================================
+# Test 11: Treeview with aria-selected and aria-expanded
+# =============================================================================
+test_11_tree:
+  description: Tree items with aria-selected and aria-expanded
+  selector: "#test-11-tree .demo"
+  tests:
+    - id: "11.1"
+      name: selected_expanded_treeitem
+      expect:
+        includes:
+          - 'treeitem "Documents" [selected, expanded]'
+
+    - id: "11.2"
+      name: unselected_collapsed_treeitem
+      expect:
+        includes:
+          - 'treeitem "Pictures" [selected=false, expanded=false]'
+
+    - id: "11.3"
+      name: nested_treeitems
+      expect:
+        includes:
+          - 'treeitem "Report.pdf" [selected=false]'
+          - 'treeitem "Notes.txt" [selected=false]'
+
+# =============================================================================
+# Test 12: Grid Cells with aria-selected
+# =============================================================================
+test_12_grid:
+  description: Grid cells using aria-selected
+  selector: "#test-12-grid .demo"
+  tests:
+    - id: "12.1"
+      name: selected_columnheader
+      expect:
+        includes:
+          - 'columnheader "Value" [selected]'
+
+    - id: "12.2"
+      name: unselected_columnheader
+      expect:
+        includes:
+          - 'columnheader "Name" [selected=false]'
+
+    - id: "12.3"
+      name: selected_row
+      expect:
+        includes:
+          - 'row [selected]'
+
+    - id: "12.4"
+      name: selected_gridcell
+      expect:
+        includes:
+          - 'gridcell "100" [selected]'
+
+# =============================================================================
+# Test 13: Combined States
+# =============================================================================
+test_13_combined:
+  description: Elements with multiple state attributes
+  selector: "#test-13-combined .demo"
+  tests:
+    - id: "13.1"
+      name: pressed_and_expanded_button
+      expect:
+        includes:
+          - 'button "Pressed and Expanded" [pressed, expanded]'
+
+    - id: "13.2"
+      name: multiple_states_treeitem
+      expect:
+        includes:
+          - "[selected"
+          - "expanded"
+          - "disabled]"
+
+# =============================================================================
+# Test Summary Checklist
+# =============================================================================
+#
+# Checked State:
+#   [x] Native checkbox - unchecked
+#   [x] Native checkbox - checked
+#   [x] Native checkbox - indeterminate (via JS)
+#   [x] Native checkbox - disabled + checked/unchecked
+#   [x] Native radio - unchecked
+#   [x] Native radio - checked
+#   [x] ARIA checkbox - aria-checked="false"
+#   [x] ARIA checkbox - aria-checked="true"
+#   [x] ARIA checkbox - aria-checked="mixed"
+#   [x] Visually hidden checkbox (opacity:0)
+#   [x] Switch - aria-checked="false"
+#   [x] Switch - aria-checked="true"
+#   [x] menuitemcheckbox - all states
+#   [x] menuitemradio - checked/unchecked (no mixed)
+#
+# Selected State:
+#   [x] Tab - aria-selected="true"
+#   [x] Tab - aria-selected="false"
+#   [x] Option - aria-selected="true"
+#   [x] Option - aria-selected="false"
+#   [x] Treeitem - aria-selected="true/false"
+#   [x] Gridcell - aria-selected="true/false"
+#   [x] Row - aria-selected="true/false"
+#   [x] Columnheader - aria-selected="true/false"
+#
+# Pressed State:
+#   [x] Button - aria-pressed="false"
+#   [x] Button - aria-pressed="true"
+#   [x] Button - aria-pressed="mixed"
+#
+# Expanded State:
+#   [x] Button - aria-expanded="true"
+#   [x] Button - aria-expanded="false"
+#   [x] Treeitem - aria-expanded="true/false"
+#
+# Combined States:
+#   [x] pressed + expanded
+#   [x] selected + expanded + disabled
+# =============================================================================

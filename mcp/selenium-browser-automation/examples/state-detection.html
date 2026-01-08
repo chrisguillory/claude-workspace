@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARIA State Detection Test Fixture</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .test-section h2 {
+            margin-top: 0;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+        }
+        .demo {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .expected {
+            background: #e8f5e9;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            font-size: 12px;
+        }
+        /* Custom checkbox styling (Apple pattern - visually hidden but in AT) */
+        .visually-hidden-checkbox {
+            opacity: 0;
+            position: absolute;
+            width: 1px;
+            height: 1px;
+        }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        .checkbox-visual {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #666;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .checkbox-visual::after {
+            content: '';
+        }
+        input:checked + .checkbox-visual::after {
+            content: '\2713';
+            font-size: 16px;
+        }
+        /* Custom ARIA checkbox styling */
+        .aria-checkbox {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border: 2px solid #666;
+            border-radius: 4px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .aria-checkbox[aria-checked="true"] {
+            background: #4CAF50;
+            color: white;
+            border-color: #4CAF50;
+        }
+        .aria-checkbox[aria-checked="mixed"] {
+            background: #FF9800;
+            color: white;
+            border-color: #FF9800;
+        }
+        /* Tab styling */
+        .tablist {
+            display: flex;
+            border-bottom: 2px solid #ddd;
+        }
+        .tab {
+            padding: 10px 20px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+        }
+        .tab[aria-selected="true"] {
+            border-bottom-color: #2196F3;
+            font-weight: bold;
+        }
+        .tabpanel {
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-top: none;
+        }
+        .tabpanel[hidden] {
+            display: none;
+        }
+        /* Toggle button styling */
+        .toggle-btn {
+            padding: 10px 20px;
+            border: 2px solid #666;
+            border-radius: 4px;
+            background: #fff;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .toggle-btn[aria-pressed="true"] {
+            background: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+        .toggle-btn[aria-pressed="mixed"] {
+            background: #9C27B0;
+            color: white;
+            border-color: #9C27B0;
+        }
+        /* Accordion styling */
+        .accordion-header {
+            padding: 12px 20px;
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .accordion-header[aria-expanded="true"] {
+            background: #e3f2fd;
+        }
+        .accordion-panel {
+            padding: 15px 20px;
+            border: 1px solid #ddd;
+            border-top: none;
+        }
+        .accordion-panel[hidden] {
+            display: none;
+        }
+        /* Listbox styling */
+        .listbox {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px 0;
+            max-width: 300px;
+        }
+        .listbox-option {
+            padding: 8px 15px;
+            cursor: pointer;
+        }
+        .listbox-option[aria-selected="true"] {
+            background: #e3f2fd;
+        }
+        .listbox-option:hover {
+            background: #f5f5f5;
+        }
+        /* Menu styling */
+        .menubar {
+            display: flex;
+            background: #333;
+            padding: 0 10px;
+        }
+        .menuitem {
+            color: white;
+            padding: 10px 15px;
+            cursor: pointer;
+        }
+        .menu {
+            background: white;
+            border: 1px solid #ddd;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            padding: 5px 0;
+            min-width: 150px;
+        }
+        .menu [role="menuitemcheckbox"],
+        .menu [role="menuitemradio"] {
+            padding: 8px 15px;
+            cursor: pointer;
+            display: flex;
+            gap: 10px;
+        }
+        .menu [role="menuitemcheckbox"][aria-checked="true"]::before,
+        .menu [role="menuitemradio"][aria-checked="true"]::before {
+            content: '\2713';
+        }
+        .menu [role="menuitemcheckbox"][aria-checked="false"]::before,
+        .menu [role="menuitemradio"][aria-checked="false"]::before {
+            content: '\00A0\00A0';
+        }
+        .menu [role="menuitemcheckbox"][aria-checked="mixed"]::before {
+            content: '\2212';
+        }
+        /* Switch styling */
+        .switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+        .switch-track {
+            width: 50px;
+            height: 26px;
+            background: #ccc;
+            border-radius: 13px;
+            position: relative;
+            transition: background 0.2s;
+        }
+        .switch[aria-checked="true"] .switch-track {
+            background: #4CAF50;
+        }
+        .switch-thumb {
+            width: 22px;
+            height: 22px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: left 0.2s;
+        }
+        .switch[aria-checked="true"] .switch-thumb {
+            left: 26px;
+        }
+    </style>
+</head>
+<body>
+    <h1>ARIA State Detection Test Fixture</h1>
+    <p>This fixture tests comprehensive state detection for accessibility snapshots.</p>
+
+    <!-- Test 1: Native HTML Checkboxes -->
+    <section class="test-section" id="test-1-native-checkboxes">
+        <h2>Test 1: Native HTML Checkboxes</h2>
+        <p>Tests native checkbox inputs with various states.</p>
+
+        <div class="demo">
+            <div>
+                <label>
+                    <input type="checkbox" id="cb-unchecked"> Unchecked checkbox
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="cb-checked" checked> Checked checkbox
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="cb-indeterminate"> Indeterminate checkbox
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="cb-disabled" disabled> Disabled unchecked
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="cb-disabled-checked" checked disabled> Disabled checked
+                </label>
+            </div>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- checkbox "Unchecked checkbox" [unchecked]
+- checkbox "Checked checkbox" [checked]
+- checkbox "Indeterminate checkbox" [checked=mixed]
+- checkbox "Disabled unchecked" [unchecked, disabled]
+- checkbox "Disabled checked" [checked, disabled]
+        </div>
+
+        <script>
+            // Set indeterminate state via JavaScript (cannot be set via HTML)
+            document.getElementById('cb-indeterminate').indeterminate = true;
+        </script>
+    </section>
+
+    <!-- Test 2: Native HTML Radio Buttons -->
+    <section class="test-section" id="test-2-native-radios">
+        <h2>Test 2: Native HTML Radio Buttons</h2>
+        <p>Tests native radio inputs.</p>
+
+        <div class="demo">
+            <fieldset>
+                <legend>Select an option:</legend>
+                <div>
+                    <label>
+                        <input type="radio" name="radio-group" value="option1"> Option 1
+                    </label>
+                </div>
+                <div>
+                    <label>
+                        <input type="radio" name="radio-group" value="option2" checked> Option 2 (selected)
+                    </label>
+                </div>
+                <div>
+                    <label>
+                        <input type="radio" name="radio-group" value="option3"> Option 3
+                    </label>
+                </div>
+            </fieldset>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- radio "Option 1" [unchecked]
+- radio "Option 2 (selected)" [checked]
+- radio "Option 3" [unchecked]
+        </div>
+    </section>
+
+    <!-- Test 3: ARIA Checkboxes (custom divs) -->
+    <section class="test-section" id="test-3-aria-checkboxes">
+        <h2>Test 3: ARIA Checkboxes (Custom Elements)</h2>
+        <p>Tests custom checkboxes using role="checkbox" and aria-checked.</p>
+
+        <div class="demo">
+            <div role="checkbox" aria-checked="false" tabindex="0" class="aria-checkbox">
+                ARIA unchecked
+            </div>
+            <div role="checkbox" aria-checked="true" tabindex="0" class="aria-checkbox">
+                ARIA checked
+            </div>
+            <div role="checkbox" aria-checked="mixed" tabindex="0" class="aria-checkbox">
+                ARIA mixed (indeterminate)
+            </div>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- checkbox "ARIA unchecked" [unchecked]
+- checkbox "ARIA checked" [checked]
+- checkbox "ARIA mixed (indeterminate)" [checked=mixed]
+        </div>
+    </section>
+
+    <!-- Test 4: Visually Hidden Checkboxes (Apple Pattern) -->
+    <section class="test-section" id="test-4-hidden-checkboxes">
+        <h2>Test 4: Visually Hidden Checkboxes (Apple Pattern)</h2>
+        <p>Tests checkboxes with opacity:0 pattern (in AT but not visible).</p>
+
+        <div class="demo">
+            <label class="checkbox-label">
+                <input type="checkbox" class="visually-hidden-checkbox" aria-label="Hidden unchecked">
+                <span class="checkbox-visual"></span>
+                Hidden unchecked
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" class="visually-hidden-checkbox" aria-label="Hidden checked" checked>
+                <span class="checkbox-visual"></span>
+                Hidden checked
+            </label>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot (with visually-hidden marker):
+- checkbox "Hidden unchecked" [unchecked, visually-hidden:opacity]
+- checkbox "Hidden checked" [checked, visually-hidden:opacity]
+        </div>
+    </section>
+
+    <!-- Test 5: Switch Role -->
+    <section class="test-section" id="test-5-switch">
+        <h2>Test 5: Switch Role</h2>
+        <p>Tests switch role elements (on/off toggles).</p>
+
+        <div class="demo">
+            <div role="switch" aria-checked="false" tabindex="0" class="switch" aria-label="Notifications off">
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+                Notifications
+            </div>
+            <div role="switch" aria-checked="true" tabindex="0" class="switch" aria-label="Dark mode on">
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+                Dark mode
+            </div>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- switch "Notifications off" [unchecked]
+- switch "Dark mode on" [checked]
+
+Note: Switch role does NOT support mixed state per ARIA spec.
+        </div>
+    </section>
+
+    <!-- Test 6: Tabs with aria-selected -->
+    <section class="test-section" id="test-6-tabs">
+        <h2>Test 6: Tabs with aria-selected</h2>
+        <p>Tests tab elements using aria-selected.</p>
+
+        <div class="demo">
+            <div role="tablist" class="tablist" aria-label="Content tabs">
+                <button role="tab" aria-selected="true" aria-controls="panel1" id="tab1" class="tab">
+                    Tab 1
+                </button>
+                <button role="tab" aria-selected="false" aria-controls="panel2" id="tab2" class="tab">
+                    Tab 2
+                </button>
+                <button role="tab" aria-selected="false" aria-controls="panel3" id="tab3" class="tab">
+                    Tab 3
+                </button>
+            </div>
+            <div role="tabpanel" id="panel1" aria-labelledby="tab1" class="tabpanel">
+                Content for Tab 1
+            </div>
+            <div role="tabpanel" id="panel2" aria-labelledby="tab2" class="tabpanel" hidden>
+                Content for Tab 2
+            </div>
+            <div role="tabpanel" id="panel3" aria-labelledby="tab3" class="tabpanel" hidden>
+                Content for Tab 3
+            </div>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- tablist "Content tabs":
+  - tab "Tab 1" [selected]
+  - tab "Tab 2" [selected=false]
+  - tab "Tab 3" [selected=false]
+- tabpanel "Tab 1":
+  - text: Content for Tab 1
+        </div>
+    </section>
+
+    <!-- Test 7: Listbox with aria-selected -->
+    <section class="test-section" id="test-7-listbox">
+        <h2>Test 7: Listbox with aria-selected</h2>
+        <p>Tests listbox options using aria-selected.</p>
+
+        <div class="demo">
+            <div role="listbox" aria-label="Choose a color" class="listbox">
+                <div role="option" aria-selected="false" class="listbox-option">Red</div>
+                <div role="option" aria-selected="true" class="listbox-option">Green (selected)</div>
+                <div role="option" aria-selected="false" class="listbox-option">Blue</div>
+            </div>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- listbox "Choose a color":
+  - option "Red" [selected=false]
+  - option "Green (selected)" [selected]
+  - option "Blue" [selected=false]
+        </div>
+    </section>
+
+    <!-- Test 8: Toggle Buttons with aria-pressed -->
+    <section class="test-section" id="test-8-toggle-buttons">
+        <h2>Test 8: Toggle Buttons with aria-pressed</h2>
+        <p>Tests toggle buttons using aria-pressed.</p>
+
+        <div class="demo">
+            <button aria-pressed="false" class="toggle-btn">Not pressed</button>
+            <button aria-pressed="true" class="toggle-btn">Pressed</button>
+            <button aria-pressed="mixed" class="toggle-btn">Mixed state</button>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- button "Not pressed" [pressed=false]
+- button "Pressed" [pressed]
+- button "Mixed state" [pressed=mixed]
+        </div>
+    </section>
+
+    <!-- Test 9: Accordion with aria-expanded -->
+    <section class="test-section" id="test-9-accordion">
+        <h2>Test 9: Accordion with aria-expanded</h2>
+        <p>Tests disclosure widgets using aria-expanded.</p>
+
+        <div class="demo">
+            <div>
+                <button aria-expanded="true" aria-controls="acc-panel1" class="accordion-header">
+                    Expanded Section
+                    <span aria-hidden="true">&#9660;</span>
+                </button>
+                <div id="acc-panel1" class="accordion-panel">
+                    This content is visible because the section is expanded.
+                </div>
+            </div>
+            <div>
+                <button aria-expanded="false" aria-controls="acc-panel2" class="accordion-header">
+                    Collapsed Section
+                    <span aria-hidden="true">&#9654;</span>
+                </button>
+                <div id="acc-panel2" class="accordion-panel" hidden>
+                    This content is hidden because the section is collapsed.
+                </div>
+            </div>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- button "Expanded Section" [expanded]
+- generic:
+  - text: This content is visible...
+- button "Collapsed Section" [expanded=false]
+        </div>
+    </section>
+
+    <!-- Test 10: Menu with menuitemcheckbox and menuitemradio -->
+    <section class="test-section" id="test-10-menu-items">
+        <h2>Test 10: Menu Item Checkboxes and Radios</h2>
+        <p>Tests menuitemcheckbox and menuitemradio roles.</p>
+
+        <div class="demo">
+            <div role="menu" aria-label="View options" class="menu">
+                <div role="menuitemcheckbox" aria-checked="true" tabindex="0">Show toolbar</div>
+                <div role="menuitemcheckbox" aria-checked="false" tabindex="0">Show sidebar</div>
+                <div role="menuitemcheckbox" aria-checked="mixed" tabindex="0">Show all panels</div>
+                <hr role="separator">
+                <div role="menuitemradio" aria-checked="true" tabindex="0">Small icons</div>
+                <div role="menuitemradio" aria-checked="false" tabindex="0">Medium icons</div>
+                <div role="menuitemradio" aria-checked="false" tabindex="0">Large icons</div>
+            </div>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- menu "View options":
+  - menuitemcheckbox "Show toolbar" [checked]
+  - menuitemcheckbox "Show sidebar" [unchecked]
+  - menuitemcheckbox "Show all panels" [checked=mixed]
+  - separator
+  - menuitemradio "Small icons" [checked]
+  - menuitemradio "Medium icons" [unchecked]
+  - menuitemradio "Large icons" [unchecked]
+
+Note: menuitemradio does NOT support mixed state per ARIA spec.
+        </div>
+    </section>
+
+    <!-- Test 11: Treeview with aria-selected -->
+    <section class="test-section" id="test-11-tree">
+        <h2>Test 11: Treeview with aria-selected</h2>
+        <p>Tests tree items with aria-selected and aria-expanded.</p>
+
+        <div class="demo">
+            <ul role="tree" aria-label="File browser">
+                <li role="treeitem" aria-selected="true" aria-expanded="true">
+                    Documents
+                    <ul role="group">
+                        <li role="treeitem" aria-selected="false">Report.pdf</li>
+                        <li role="treeitem" aria-selected="false">Notes.txt</li>
+                    </ul>
+                </li>
+                <li role="treeitem" aria-selected="false" aria-expanded="false">
+                    Pictures
+                </li>
+            </ul>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- tree "File browser":
+  - treeitem "Documents" [selected, expanded]:
+    - group:
+      - treeitem "Report.pdf" [selected=false]
+      - treeitem "Notes.txt" [selected=false]
+  - treeitem "Pictures" [selected=false, expanded=false]
+        </div>
+    </section>
+
+    <!-- Test 12: Grid with aria-selected -->
+    <section class="test-section" id="test-12-grid">
+        <h2>Test 12: Grid Cells with aria-selected</h2>
+        <p>Tests grid cells using aria-selected.</p>
+
+        <div class="demo">
+            <table role="grid" aria-label="Data grid">
+                <thead>
+                    <tr role="row">
+                        <th role="columnheader" aria-selected="false">Name</th>
+                        <th role="columnheader" aria-selected="true">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr role="row" aria-selected="true">
+                        <td role="gridcell">Item 1</td>
+                        <td role="gridcell" aria-selected="true">100</td>
+                    </tr>
+                    <tr role="row" aria-selected="false">
+                        <td role="gridcell">Item 2</td>
+                        <td role="gridcell" aria-selected="false">200</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- grid "Data grid":
+  - row:
+    - columnheader "Name" [selected=false]
+    - columnheader "Value" [selected]
+  - row [selected]:
+    - gridcell "Item 1"
+    - gridcell "100" [selected]
+  - row [selected=false]:
+    - gridcell "Item 2"
+    - gridcell "200" [selected=false]
+        </div>
+    </section>
+
+    <!-- Test 13: Combined States -->
+    <section class="test-section" id="test-13-combined">
+        <h2>Test 13: Combined States</h2>
+        <p>Tests elements with multiple state attributes.</p>
+
+        <div class="demo">
+            <button aria-pressed="true" aria-expanded="true" aria-controls="combined-panel">
+                Pressed and Expanded
+            </button>
+            <div id="combined-panel">Panel content</div>
+
+            <div role="treeitem" aria-selected="true" aria-expanded="true" aria-disabled="true">
+                Selected, expanded, and disabled treeitem
+            </div>
+        </div>
+
+        <div class="expected">
+Expected ARIA snapshot:
+- button "Pressed and Expanded" [pressed, expanded]
+- treeitem "Selected, expanded, and disabled treeitem" [selected, expanded, disabled]
+        </div>
+    </section>
+
+    <!-- Test Summary -->
+    <section class="test-section" id="test-summary">
+        <h2>Test Summary</h2>
+        <p>This fixture covers:</p>
+        <ul>
+            <li><strong>checked state</strong>: checkbox, radio, switch, menuitemcheckbox, menuitemradio</li>
+            <li><strong>selected state</strong>: option, tab, treeitem, gridcell, row, columnheader, rowheader</li>
+            <li><strong>pressed state</strong>: button with aria-pressed</li>
+            <li><strong>expanded state</strong>: any element with aria-expanded</li>
+        </ul>
+
+        <h3>State Values</h3>
+        <table border="1" cellpadding="8" style="border-collapse: collapse;">
+            <tr>
+                <th>Attribute</th>
+                <th>Roles</th>
+                <th>Values</th>
+            </tr>
+            <tr>
+                <td>checked</td>
+                <td>checkbox, radio, switch, menuitemcheckbox, menuitemradio</td>
+                <td>true, false, mixed (checkbox/menuitemcheckbox only)</td>
+            </tr>
+            <tr>
+                <td>selected</td>
+                <td>option, tab, treeitem, gridcell, row, columnheader, rowheader</td>
+                <td>true, false</td>
+            </tr>
+            <tr>
+                <td>pressed</td>
+                <td>button</td>
+                <td>true, false, mixed</td>
+            </tr>
+            <tr>
+                <td>expanded</td>
+                <td>any</td>
+                <td>true, false</td>
+            </tr>
+        </table>
+    </section>
+</body>
+</html>
