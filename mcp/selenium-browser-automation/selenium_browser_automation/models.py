@@ -492,9 +492,13 @@ class PageTextResult(BaseModel):
     # Core content (always present)
     title: str
     url: str
-    text: str
-    character_count: int
+    text: str  # Full text if small, or preview (first 2000 chars) if saved to file
+    character_count: int  # Original text length (not preview length)
     source_element: str  # What was extracted: "main", "article", "body", or CSS selector
+
+    # Large output handling (when character_count > 25K threshold)
+    saved_to_file: bool = False  # True if text was saved to file
+    file_path: str | None = None  # Path to saved file (when saved_to_file=True)
 
     # Smart extraction transparency (only present for selector='auto')
     smart_info: SmartExtractionInfo | None = None
