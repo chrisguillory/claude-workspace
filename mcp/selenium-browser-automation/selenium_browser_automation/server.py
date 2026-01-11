@@ -1983,6 +1983,27 @@ def register_tools(service: BrowserService) -> None:
 
         Returns:
             list[InteractiveElement]: Filtered interactive elements with selectors for clicking
+
+        Detection Methods:
+            Elements are detected as interactive if ANY of these conditions are true:
+            - CSS cursor:pointer
+            - Native <button>, <a>, <input>, <select>, <textarea> elements
+            - Elements with role="button" or role="link"
+            - Elements with onclick property (native handler)
+            - Elements with React __reactProps containing onClick function
+
+        Known Limitations (what we CANNOT detect):
+            - addEventListener handlers (not exposed as element properties)
+            - Event delegation (parent element handles clicks for children)
+            - Vue/Angular/Svelte handlers (framework-specific, often hidden in production)
+            - CSS-only interactions (checkbox hack, :target navigation)
+            - Elements that become interactive after state changes
+            - Touch-only handlers (ontouchstart without onclick)
+
+        When detection fails, try:
+            1. Use get_aria_snapshot() to understand the page structure
+            2. Look for nearby buttons or the CHEVRON_RIGHT pattern
+            3. Scope search with selector_scope to reduce false positives
         """
         logger = PrintLogger(ctx)
         driver = await service.get_browser()
@@ -2016,7 +2037,15 @@ def register_tools(service: BrowserService) -> None:
                 const isLink = el.tagName === 'A' || el.getAttribute('role') === 'link';
                 const isInput = ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName);
 
-                const isInteractive = hasPointer || isButton || isLink || isInput;
+                // Check for click handlers (native onclick and React onClick)
+                const hasOnclick = el.onclick !== null;
+                const hasReactOnClick = Object.keys(el).some(k => {
+                    if (!k.startsWith('__reactProps')) return false;
+                    const props = el[k];
+                    return props && typeof props.onClick === 'function';
+                });
+
+                const isInteractive = hasPointer || isButton || isLink || isInput || hasOnclick || hasReactOnClick;
 
                 if (!isVisible || !isInteractive) return;
 

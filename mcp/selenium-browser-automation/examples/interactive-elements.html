@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Elements Test Fixture</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      padding: 2rem;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h2 { margin-top: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }
+    .test-section { margin: 1rem 0; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; }
+    .test-element { margin: 0.5rem 0; padding: 0.5rem; background: #f5f5f5; }
+
+    /* Styling for different interactive types */
+    .cursor-pointer { cursor: pointer; }
+    .onclick-div { background: #e3f2fd; }
+    .react-div { background: #fff3e0; }
+    .role-button { background: #e8f5e9; }
+
+    /* Hidden elements */
+    .display-none { display: none; }
+    .visibility-hidden { visibility: hidden; }
+    .opacity-zero { opacity: 0; }
+  </style>
+</head>
+<body>
+  <h1>Interactive Elements Test Fixture</h1>
+  <p>Tests for <code>get_interactive_elements</code> detection methods.</p>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 1: Native Interactive Elements -->
+  <!-- =================================================================== -->
+  <h2>1. Native Interactive Elements</h2>
+  <div class="test-section">
+    <div class="test-element">
+      <button id="native-button">Native Button</button>
+    </div>
+    <div class="test-element">
+      <a id="native-link" href="https://example.com">Native Link</a>
+    </div>
+    <div class="test-element">
+      <input id="native-input" type="text" placeholder="Native Input">
+    </div>
+    <div class="test-element">
+      <select id="native-select">
+        <option>Native Select</option>
+        <option>Option 2</option>
+      </select>
+    </div>
+    <div class="test-element">
+      <textarea id="native-textarea" placeholder="Native Textarea"></textarea>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 2: Cursor Pointer Detection -->
+  <!-- =================================================================== -->
+  <h2>2. Cursor Pointer Detection</h2>
+  <div class="test-section">
+    <div class="test-element">
+      <div id="cursor-pointer-div" class="cursor-pointer">
+        Div with cursor:pointer
+      </div>
+    </div>
+    <div class="test-element">
+      <span id="cursor-pointer-span" class="cursor-pointer">
+        Span with cursor:pointer
+      </span>
+    </div>
+    <div class="test-element">
+      <div id="no-cursor-div">
+        Div without cursor:pointer (not interactive)
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 3: Native onclick Handler Detection -->
+  <!-- =================================================================== -->
+  <h2>3. Native onclick Handler Detection</h2>
+  <div class="test-section">
+    <div class="test-element">
+      <div id="onclick-div" class="onclick-div">
+        Div with onclick handler
+      </div>
+    </div>
+    <div class="test-element">
+      <span id="onclick-span" class="onclick-div">
+        Span with onclick handler
+      </span>
+    </div>
+    <div class="test-element">
+      <div id="onclick-no-cursor" class="onclick-div" style="cursor: auto;">
+        Div with onclick but cursor:auto (like Rippling cards)
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 4: React onClick Handler Detection -->
+  <!-- =================================================================== -->
+  <h2>4. React onClick Handler Detection (Simulated)</h2>
+  <div class="test-section">
+    <div class="test-element">
+      <div id="react-onclick-div" class="react-div">
+        Div with simulated React onClick
+      </div>
+    </div>
+    <div class="test-element">
+      <div id="react-onclick-no-cursor" class="react-div" style="cursor: auto;">
+        React onClick with cursor:auto
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 5: ARIA Role Detection -->
+  <!-- =================================================================== -->
+  <h2>5. ARIA Role Detection</h2>
+  <div class="test-section">
+    <div class="test-element">
+      <div id="role-button" role="button" class="role-button">
+        Div with role="button"
+      </div>
+    </div>
+    <div class="test-element">
+      <div id="role-link" role="link" class="role-button">
+        Div with role="link"
+      </div>
+    </div>
+    <div class="test-element">
+      <div id="role-menuitem" role="menuitem" class="role-button">
+        Div with role="menuitem" (not detected by current logic)
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 6: Hidden Elements (Should NOT be detected) -->
+  <!-- =================================================================== -->
+  <h2>6. Hidden Elements (Should NOT be detected)</h2>
+  <div class="test-section">
+    <div class="test-element">
+      <button id="hidden-display-none" class="display-none">
+        Button with display:none
+      </button>
+    </div>
+    <div class="test-element">
+      <button id="hidden-visibility-hidden" class="visibility-hidden">
+        Button with visibility:hidden
+      </button>
+    </div>
+    <div class="test-element">
+      <button id="hidden-opacity-zero" class="opacity-zero">
+        Button with opacity:0
+      </button>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 7: Edge Cases -->
+  <!-- =================================================================== -->
+  <h2>7. Edge Cases</h2>
+  <div class="test-section">
+    <div class="test-element">
+      <div id="onclick-and-pointer" class="onclick-div cursor-pointer">
+        Div with BOTH onclick AND cursor:pointer
+      </div>
+    </div>
+    <div class="test-element">
+      <div id="nested-interactive">
+        <button id="nested-button">Button inside div</button>
+      </div>
+    </div>
+    <div class="test-element">
+      <div id="deep-nested-onclick" class="onclick-div">
+        <div>
+          <span>Deep nested text in onclick div</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- JavaScript: Attach onclick handlers and simulate React props -->
+  <!-- =================================================================== -->
+  <script>
+    // Attach native onclick handlers
+    document.getElementById('onclick-div').onclick = function() {
+      console.log('onclick-div clicked');
+    };
+    document.getElementById('onclick-span').onclick = function() {
+      console.log('onclick-span clicked');
+    };
+    document.getElementById('onclick-no-cursor').onclick = function() {
+      console.log('onclick-no-cursor clicked');
+    };
+    document.getElementById('onclick-and-pointer').onclick = function() {
+      console.log('onclick-and-pointer clicked');
+    };
+    document.getElementById('deep-nested-onclick').onclick = function() {
+      console.log('deep-nested-onclick clicked');
+    };
+
+    // Simulate React props structure (for testing __reactProps detection)
+    // In real React, these are added by the React runtime with a random suffix
+    const reactDiv = document.getElementById('react-onclick-div');
+    const reactDivNoCursor = document.getElementById('react-onclick-no-cursor');
+
+    // Simulate __reactProps$xxxxx structure
+    reactDiv['__reactProps$test123'] = {
+      onClick: function() { console.log('react click'); },
+      className: 'react-div'
+    };
+
+    reactDivNoCursor['__reactProps$test456'] = {
+      onClick: function() { console.log('react click no cursor'); },
+      style: { cursor: 'auto' }
+    };
+
+    // Helper function to verify detection
+    window.verifyInteractivity = function(elementId) {
+      const el = document.getElementById(elementId);
+      if (!el) return { error: 'Element not found' };
+
+      const style = window.getComputedStyle(el);
+      return {
+        id: elementId,
+        tagName: el.tagName,
+        hasPointer: style.cursor === 'pointer',
+        hasOnclick: el.onclick !== null,
+        hasReactOnClick: Object.keys(el).some(k => {
+          if (!k.startsWith('__reactProps')) return false;
+          const props = el[k];
+          return props && typeof props.onClick === 'function';
+        }),
+        isButton: el.tagName === 'BUTTON' || el.getAttribute('role') === 'button',
+        isLink: el.tagName === 'A' || el.getAttribute('role') === 'link',
+        isInput: ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName),
+        isVisible: style.display !== 'none' &&
+                   style.visibility !== 'hidden' &&
+                   style.opacity !== '0'
+      };
+    };
+
+    // Helper to list all interactive elements
+    window.listInteractiveElements = function() {
+      const results = [];
+      document.querySelectorAll('[id]').forEach(el => {
+        const info = window.verifyInteractivity(el.id);
+        const isInteractive = info.hasPointer || info.hasOnclick ||
+                              info.hasReactOnClick || info.isButton ||
+                              info.isLink || info.isInput;
+        if (isInteractive && info.isVisible) {
+          results.push(info);
+        }
+      });
+      return results;
+    };
+
+    console.log('Interactive Elements Test Fixture loaded');
+    console.log('Use window.verifyInteractivity("element-id") to check an element');
+    console.log('Use window.listInteractiveElements() to list all interactive elements');
+  </script>
+</body>
+</html>
