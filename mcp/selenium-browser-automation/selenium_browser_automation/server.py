@@ -846,10 +846,16 @@ def register_tools(service: BrowserService) -> None:
             Use export_har() for detailed HTTP transaction data (requires enable_har_capture=True).
 
         Note: Single-page apps may ignore URL parameters. Page elements control navigation state.
+
+        Blob URLs: blob:https://... URLs are supported but only work if the blob was created
+        in the current page context. Blob URLs are ephemeral in-memory resources (PDFs, images,
+        file downloads) and cannot be accessed from a different browsing context.
         """
-        valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:')
+        valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
         if not url.startswith(valid_prefixes):
-            raise fastmcp.exceptions.ValidationError('URL must start with http://, https://, file://, about:, or data:')
+            raise fastmcp.exceptions.ValidationError(
+                'URL must start with http://, https://, file://, about:, data:, or blob:'
+            )
 
         if enable_har_capture and not fresh_browser:
             raise fastmcp.exceptions.ValidationError(
@@ -962,11 +968,17 @@ def register_tools(service: BrowserService) -> None:
 
         Note:
             This tool always starts a fresh browser (implicit fresh_browser=True).
+
+        Blob URLs: blob:https://... URLs are supported but only work if the blob was created
+        in the current page context. Blob URLs are ephemeral in-memory resources (PDFs, images,
+        file downloads) and cannot be accessed from a different browsing context.
         """
         # Validate URL
-        valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:')
+        valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
         if not url.startswith(valid_prefixes):
-            raise fastmcp.exceptions.ValidationError('URL must start with http://, https://, file://, about:, or data:')
+            raise fastmcp.exceptions.ValidationError(
+                'URL must start with http://, https://, file://, about:, data:, or blob:'
+            )
 
         # Validate profile state source - exactly one required
         has_file = profile_state_file is not None
