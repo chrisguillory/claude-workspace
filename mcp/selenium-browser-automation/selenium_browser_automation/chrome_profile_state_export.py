@@ -40,6 +40,7 @@ import re
 import sqlite3
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -51,6 +52,11 @@ from ccl_chromium_reader import (
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
+from .applescript_session_storage import (
+    extract_live_session_storage,
+    is_applescript_available,
+    is_chrome_running,
+)
 from .indexeddb_dfindexeddb import export_indexeddb_with_schema
 from .models import (
     ChromeProfileStateExportResult,
@@ -194,6 +200,16 @@ def _extract_domain_from_origin(origin: str) -> str:
 
     # Already a bare domain
     return origin
+
+
+def _normalize_origin_url(origin: str) -> str:
+    """Normalize origin URL by stripping trailing slashes.
+
+    Chrome's sessionStorage LevelDB stores origins with trailing slashes
+    (e.g., 'https://example.com/'), but window.location.origin returns
+    them without (e.g., 'https://example.com'). Normalize to match browser API.
+    """
+    return origin.rstrip('/')
 
 
 def _domain_matches(host: str, pattern: str) -> bool:
@@ -518,7 +534,13 @@ def export_local_storage(
                 origin_storage[record.script_key] = value
 
             if origin_storage:
-                storage[storage_key] = origin_storage
+                # Normalize origin to match window.location.origin (no trailing slash)
+                normalized_key = _normalize_origin_url(storage_key)
+                if normalized_key in storage:
+                    # Merge with existing (collision from normalization)
+                    storage[normalized_key].update(origin_storage)
+                else:
+                    storage[normalized_key] = origin_storage
 
     return storage
 
@@ -528,15 +550,35 @@ def export_local_storage(
 # =============================================================================
 
 
-def export_session_storage(
+@dataclass
+class SessionStorageExportResult:
+    """Result from sessionStorage export with source metadata."""
+
+    storage: Mapping[str, Mapping[str, str]]
+    source: Literal['live', 'disk']
+    warning: str | None = None
+
+
+class AppleScriptNotEnabledError(Exception):
+    """Raised when Chrome is running but AppleScript JS execution is disabled.
+
+    This is a fail-first error that forces the user to either:
+    1. Enable Chrome > View > Developer > Allow JavaScript from Apple Events
+    2. Explicitly opt out with live_session_storage=False
+    """
+
+    pass
+
+
+def _export_session_storage_from_disk(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
 ) -> Mapping[str, Mapping[str, str]]:
-    """Export sessionStorage from Chrome's LevelDB.
+    """Export sessionStorage from Chrome's LevelDB files (may be stale).
 
-    Chrome persists sessionStorage to disk for session recovery, enabling
-    export from profile files. This contradicts browser specs but enables
-    useful automation workflows.
+    Chrome persists sessionStorage to disk for session recovery, but this data
+    may be stale as Chrome doesn't flush in real-time. Prefer live extraction
+    via AppleScript when possible.
 
     Args:
         profile_path: Path to Chrome profile directory
@@ -569,9 +611,91 @@ def export_session_storage(
                 origin_storage[record.key] = value
 
             if origin_storage:
-                storage[host] = origin_storage
+                # Normalize origin to match window.location.origin (no trailing slash)
+                normalized_host = _normalize_origin_url(host)
+                if normalized_host in storage:
+                    # Merge with existing (collision from normalization)
+                    storage[normalized_host].update(origin_storage)
+                else:
+                    storage[normalized_host] = origin_storage
 
     return storage
+
+
+def export_session_storage(
+    profile_path: Path,
+    origins_filter: Sequence[str] | None = None,
+    live_session_storage: bool = True,
+) -> SessionStorageExportResult:
+    """Export sessionStorage with fail-first live extraction.
+
+    On macOS, attempts to extract LIVE sessionStorage from open Chrome tabs
+    via AppleScript. This provides accurate, real-time data rather than
+    potentially stale disk-persisted data.
+
+    Fail-First Behavior (live_session_storage=True, the default):
+    - If Chrome is running but the AppleScript setting is disabled, FAILS
+      with AppleScriptNotEnabledError containing setup instructions.
+    - If Chrome is not running, falls back to disk with a warning.
+    - If not on macOS, falls back to disk silently.
+
+    Args:
+        profile_path: Path to Chrome profile directory
+        origins_filter: Optional origin patterns to include
+        live_session_storage: If True (default), attempt AppleScript extraction.
+            FAILS if Chrome is running but setting is disabled.
+            Falls back to disk only if Chrome is not running.
+
+    Returns:
+        SessionStorageExportResult with storage data, source indicator, and warnings.
+
+    Raises:
+        AppleScriptNotEnabledError: If Chrome is running but AppleScript JS
+            execution is disabled. User must enable:
+            Chrome > View > Developer > Allow JavaScript from Apple Events
+    """
+    if not live_session_storage:
+        # User explicitly opted out - use disk only
+        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
+        return SessionStorageExportResult(storage=disk_storage, source='disk')
+
+    if not is_applescript_available():
+        # Not on macOS - fall back to disk silently
+        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
+        return SessionStorageExportResult(storage=disk_storage, source='disk')
+
+    if not is_chrome_running():
+        # Chrome not running - fall back to disk with note
+        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
+        return SessionStorageExportResult(
+            storage=disk_storage,
+            source='disk',
+            warning='Chrome not running - sessionStorage from disk (may be stale)',
+        )
+
+    # Chrome IS running - try live extraction
+    live_result = extract_live_session_storage(origins_filter)
+
+    if live_result.success:
+        return SessionStorageExportResult(
+            storage=live_result.session_storage,
+            source='live',
+        )
+
+    # Chrome running but AppleScript failed - FAIL LOUDLY
+    if live_result.error_reason == 'JavaScript from Apple Events disabled':
+        raise AppleScriptNotEnabledError(
+            'Chrome is running but cannot extract live sessionStorage.\n\n'
+            'Enable this ONE-TIME Chrome setting:\n'
+            '  1. Open Chrome\n'
+            '  2. Go to: View > Developer > Allow JavaScript from Apple Events\n'
+            '  3. Check the box\n'
+            '  4. RESTART Chrome (required for setting to take effect)\n\n'
+            'Or set live_session_storage=False to use disk-based extraction (may be stale).'
+        )
+
+    # Other AppleScript failure
+    raise RuntimeError(f'AppleScript extraction failed: {live_result.error_reason}')
 
 
 # =============================================================================
@@ -585,6 +709,7 @@ def export_chrome_profile_state(
     include_session_storage: bool = True,
     include_indexeddb: bool = False,
     origins_filter: Sequence[str] | None = None,
+    live_session_storage: bool = True,
 ) -> ChromeProfileStateExportResult:
     """Export Chrome profile state to ProfileState JSON format.
 
@@ -597,9 +722,17 @@ def export_chrome_profile_state(
         include_session_storage: Include sessionStorage (default True)
         include_indexeddb: Include IndexedDB records (default False)
         origins_filter: Only export origins matching these patterns
+        live_session_storage: If True (default), attempt live sessionStorage extraction
+            via AppleScript when Chrome is running. FAILS if Chrome is running but
+            the setting is disabled. Falls back to disk only if Chrome is not running.
+            Set False to always use disk-based extraction (may be stale).
 
     Returns:
-        ChromeProfileStateExportResult with statistics
+        ChromeProfileStateExportResult with statistics and session_storage_source
+
+    Raises:
+        AppleScriptNotEnabledError: If live_session_storage=True, Chrome is running,
+            but "Allow JavaScript from Apple Events" setting is disabled.
 
     Example:
         # After logging into sites in Chrome...
@@ -631,8 +764,14 @@ def export_chrome_profile_state(
 
     # Export sessionStorage (optional, default on)
     session_storage: Mapping[str, Mapping[str, str]] = {}
+    session_storage_source: Literal['live', 'disk'] = 'disk'
+    warnings: list[str] = []
     if include_session_storage:
-        session_storage = export_session_storage(profile_path, filter_list)
+        ss_result = export_session_storage(profile_path, filter_list, live_session_storage)
+        session_storage = ss_result.storage
+        session_storage_source = ss_result.source
+        if ss_result.warning:
+            warnings.append(ss_result.warning)
 
     # Export IndexedDB with full schema (optional, default off - can be huge)
     indexeddb: dict[str, list[dict[str, Any]]] = {}
@@ -725,4 +864,6 @@ def export_chrome_profile_state(
         local_storage_keys=ls_keys,
         session_storage_keys=ss_keys,
         indexeddb_origins=len(indexeddb),
+        session_storage_source=session_storage_source,
+        warnings=warnings,
     )

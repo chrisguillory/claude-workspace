@@ -8,6 +8,10 @@ from typing import Any, Literal
 import pydantic
 import pydantic.alias_generators
 
+# Browser selection for Selenium automation
+# Use "chromium" to avoid AppleScript targeting conflicts when personal Chrome is running
+type Browser = Literal['chrome', 'chromium']
+
 
 class BaseModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
@@ -712,6 +716,13 @@ class ChromeProfileStateExportResult(BaseModel):
 
     IndexedDB includes full schema (version, key_path, auto_increment, indexes)
     via dfindexeddb library, enabling complete database restoration.
+
+    sessionStorage Extraction:
+        On macOS, attempts to extract LIVE sessionStorage from open Chrome tabs
+        via AppleScript (session_storage_source='live'). Falls back to disk
+        (session_storage_source='disk') if Chrome isn't running. FAILS if
+        Chrome is running but the setting is disabled - user must enable:
+        Chrome > View > Developer > Allow JavaScript from Apple Events
     """
 
     path: str
@@ -720,4 +731,5 @@ class ChromeProfileStateExportResult(BaseModel):
     local_storage_keys: int
     session_storage_keys: int
     indexeddb_origins: int
+    session_storage_source: Literal['live', 'disk'] = 'disk'
     warnings: Sequence[str] = []

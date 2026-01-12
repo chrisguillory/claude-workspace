@@ -52,6 +52,8 @@ from . import chrome_profile_state_export
 # Local imports
 from .chrome_profiles import list_all_profiles
 from .models import (
+    # Browser selection
+    Browser,
     # Navigation and page extraction
     ChromeProfilesResult,
     # Chrome profile state export
@@ -710,11 +712,18 @@ class BrowserService:
         self.state.pending_profile_state = None
         self.state.restored_origins.clear()
 
-    async def get_browser(self, enable_har_capture: bool = False) -> webdriver.Chrome:
+    async def get_browser(
+        self,
+        enable_har_capture: bool = False,
+        browser: Browser = 'chrome',
+    ) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
         Args:
             enable_har_capture: Enable Chrome performance logging for HAR export.
+            browser: Which browser to use - "chrome" (default) or "chromium".
+                    Use "chromium" to avoid AppleScript targeting conflicts when
+                    your personal Chrome is running (different bundle ID).
 
         Returns:
             WebDriver instance
@@ -724,6 +733,22 @@ class BrowserService:
 
         # CRITICAL: Stealth configuration to bypass Cloudflare bot detection
         opts = Options()
+
+        # Set binary location for Chromium (macOS-specific for now)
+        # TODO: Add cross-platform support (Linux: /usr/bin/chromium-browser, Windows: shutil.which)
+        if browser == 'chromium':
+            if sys.platform != 'darwin':
+                raise fastmcp.exceptions.ToolError(
+                    f'browser="chromium" is currently only supported on macOS (got {sys.platform})'
+                )
+            chromium_path = '/Applications/Chromium.app/Contents/MacOS/Chromium'
+            if not Path(chromium_path).exists():
+                raise fastmcp.exceptions.ToolError(
+                    f'Chromium not found at {chromium_path}. Install with: brew install --cask chromium'
+                )
+            opts.binary_location = chromium_path
+            print(f'[browser] Using Chromium: {chromium_path}', file=sys.stderr)
+
         opts.add_argument('--disable-blink-features=AutomationControlled')
         opts.add_argument('--window-size=1920,1080')
         opts.add_experimental_option('excludeSwitches', ['enable-automation'])
@@ -795,6 +820,7 @@ def register_tools(service: BrowserService) -> None:
         fresh_browser: bool = False,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        browser: Browser = 'chrome',
         ctx: Context[Any, Any, Any] | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -810,6 +836,9 @@ def register_tools(service: BrowserService) -> None:
             init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
+            browser: Which browser to use - "chrome" (default) or "chromium".
+                    Use "chromium" to avoid AppleScript targeting conflicts when
+                    your personal Chrome is running (different bundle ID).
 
         Example - API interception:
             navigate(
@@ -878,7 +907,7 @@ def register_tools(service: BrowserService) -> None:
         if fresh_browser:
             await service.close_browser()
 
-        driver = await service.get_browser(enable_har_capture=enable_har_capture)
+        driver = await service.get_browser(enable_har_capture=enable_har_capture, browser=browser)
 
         # Install user init scripts (after browser creation, before navigation)
         # Scripts registered here run on EVERY new document in this session
@@ -928,7 +957,9 @@ def register_tools(service: BrowserService) -> None:
         profile_state_file: str | None = None,
         chrome_profile: str | None = None,
         origins_filter: Sequence[str] | None = None,
+        live_session_storage: bool = True,
         # Browser configuration (all fresh_browser capabilities)
+        browser: Browser = 'chrome',
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
         ctx: Context[Any, Any, Any] | None = None,
@@ -952,6 +983,13 @@ def register_tools(service: BrowserService) -> None:
             chrome_profile: Chrome profile name to import from ("Default", "Profile 1", etc.)
             origins_filter: Only import origins matching these patterns (e.g., ["amazon.com"])
                            Works with both profile_state_file and chrome_profile.
+            live_session_storage: If True (default), extract live sessionStorage from running
+                Chrome tabs via AppleScript when using chrome_profile. FAILS if Chrome is
+                running but "Allow JavaScript from Apple Events" is disabled.
+                Only used with chrome_profile, ignored with profile_state_file.
+            browser: Which browser to use - "chrome" (default) or "chromium".
+                Use "chromium" to avoid AppleScript targeting conflicts when
+                your personal Chrome is running (different bundle ID).
             enable_har_capture: Enable performance logging for HAR export
             init_scripts: JavaScript to inject before every page load
 
@@ -1032,6 +1070,7 @@ def register_tools(service: BrowserService) -> None:
                     include_session_storage=True,
                     include_indexeddb=False,  # IndexedDB schema issues
                     origins_filter=filter_list,
+                    live_session_storage=live_session_storage,
                 )
 
                 profile_state = await _load_profile_state_from_file(str(temp_file_path))
@@ -1099,7 +1138,7 @@ def register_tools(service: BrowserService) -> None:
         await service.close_browser()
 
         # Get browser with configuration
-        driver = await service.get_browser(enable_har_capture=enable_har_capture)
+        driver = await service.get_browser(enable_har_capture=enable_har_capture, browser=browser)
 
         # Build and register storage init script for localStorage/sessionStorage
         # This runs BEFORE page JavaScript on every new document (Playwright-style)
@@ -4006,6 +4045,7 @@ Workflow:
         include_session_storage: bool = True,
         include_indexeddb: bool = False,
         origins_filter: Sequence[str] | None = None,
+        live_session_storage: bool = True,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ChromeProfileStateExportResult:
         """Export profile state from Chrome's profile files for use in automation.
@@ -4030,21 +4070,24 @@ Workflow:
             include_indexeddb: Include IndexedDB records (default False, can be 200MB+)
             origins_filter: Only export origins matching these patterns
                            (e.g., ["github.com", "google.com"])
+            live_session_storage: If True (default), extract live sessionStorage from
+                running Chrome tabs via AppleScript. FAILS if Chrome is running but
+                "Allow JavaScript from Apple Events" is disabled. Falls back to disk
+                only if Chrome is not running. Set False for disk-only (may be stale).
 
         Returns:
-            ChromeProfileStateExportResult with counts and any warnings
+            ChromeProfileStateExportResult with counts, session_storage_source, and warnings
 
         Storage Types (matches save_profile_state):
             - Cookies: Full attributes including sameSite
             - localStorage: All origins
-            - sessionStorage: All origins (Chrome persists to disk)
-            - IndexedDB: Records only (schema metadata not available)
+            - sessionStorage: Live from Chrome tabs (default) or from disk files
 
         Limitations:
             - macOS only (Windows/Linux untested)
             - First run prompts for Keychain access - click "Always Allow"
-            - IndexedDB exports records without schema (version, keyPath, indexes)
-            - For full IndexedDB support, use save_profile_state() from Selenium
+            - Live sessionStorage requires one-time Chrome setting:
+              View > Developer > Allow JavaScript from Apple Events
 
         Security:
             Output file created with 0o600 permissions (owner read/write only).
@@ -4065,6 +4108,7 @@ Workflow:
             include_session_storage=include_session_storage,
             include_indexeddb=include_indexeddb,
             origins_filter=filter_list,
+            live_session_storage=live_session_storage,
         )
 
         # Log summary
@@ -4072,14 +4116,16 @@ Workflow:
         if result.local_storage_keys > 0:
             parts.append(f'{result.local_storage_keys} localStorage keys')
         if result.session_storage_keys > 0:
-            parts.append(f'{result.session_storage_keys} sessionStorage keys')
+            source_label = 'live' if result.session_storage_source == 'live' else 'disk'
+            parts.append(f'{result.session_storage_keys} sessionStorage keys ({source_label})')
         if result.indexeddb_origins > 0:
             parts.append(f'{result.indexeddb_origins} IndexedDB origins')
 
         await logger.info(f'Exported {", ".join(parts)} across {result.origin_count} origins to {result.path}')
 
         if result.warnings:
-            await logger.info(f'Warnings: {len(result.warnings)}')
+            for warning in result.warnings:
+                await logger.info(f'Warning: {warning}')
 
         return ChromeProfileStateExportResult(
             path=result.path,
@@ -4088,6 +4134,7 @@ Workflow:
             local_storage_keys=result.local_storage_keys,
             session_storage_keys=result.session_storage_keys,
             indexeddb_origins=result.indexeddb_origins,
+            session_storage_source=result.session_storage_source,
             warnings=list(result.warnings),
         )
 
