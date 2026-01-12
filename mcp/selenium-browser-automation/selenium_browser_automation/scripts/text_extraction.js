@@ -17,6 +17,16 @@ function extractFromElement(root) {
     ]);
     const PREFORMATTED_ELEMENTS = new Set(['PRE', 'CODE', 'TEXTAREA']);
 
+    // Block-level elements that create visual separation
+    // These should have spaces between their content and adjacent content
+    const BLOCK_ELEMENTS = new Set([
+        'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DETAILS', 'DIALOG',
+        'DIV', 'DL', 'DT', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM',
+        'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HGROUP', 'HR', 'LI',
+        'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TBODY', 'TD',
+        'TFOOT', 'TH', 'THEAD', 'TR', 'UL', 'BUTTON', 'OPTION', 'SUMMARY'
+    ]);
+
     const parts = [];
     let depth = 0;
     let inPreformatted = 0;
@@ -38,7 +48,7 @@ function extractFromElement(root) {
                     const marker = alt && alt.trim()
                         ? '__IMG_ALT__' + alt.trim() + '__END_IMG__'
                         : '__IMG_ALT__(no alt)__END_IMG__';
-                    parts.push({text: marker, pre: false});
+                    parts.push({text: marker, pre: false, block: false});
                     return;  // IMG has no children to walk
                 }
 
@@ -46,6 +56,7 @@ function extractFromElement(root) {
                     (window.getComputedStyle &&
                      ['pre', 'pre-wrap', 'pre-line'].includes(
                          window.getComputedStyle(node).whiteSpace));
+                const isBlock = BLOCK_ELEMENTS.has(tagName);
 
                 if (isPre) inPreformatted++;
 
@@ -60,11 +71,17 @@ function extractFromElement(root) {
                 }
 
                 if (isPre) inPreformatted--;
+
+                // After processing a block element's children, mark boundary
+                // This ensures "<button>A</button><button>B</button>" becomes "A B"
+                if (isBlock && parts.length > 0) {
+                    parts[parts.length - 1].blockEnd = true;
+                }
             }
             else if (node.nodeType === Node.TEXT_NODE) {
                 const text = node.textContent;
                 if (text) {
-                    parts.push({text, pre: inPreformatted > 0});
+                    parts.push({text, pre: inPreformatted > 0, block: false});
                 }
             }
             else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
@@ -79,15 +96,27 @@ function extractFromElement(root) {
 
     walk(root);
 
+    // Join parts, adding spaces only at block boundaries
+    // - Block elements (div, button, p, etc.) get spaces between them
+    // - Inline elements (span, strong, em) stay adjacent: "Hello<b>World</b>" -> "HelloWorld"
     let result = '';
-    for (const part of parts) {
-        if (part.pre) {
-            result += part.text;
-        } else {
-            result += part.text.replace(/[\s\n\r\t\u00A0]+/g, ' ');
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        let text = part.pre ? part.text : part.text.replace(/[\s\n\r\t\u00A0]+/g, ' ');
+
+        // Add space before this part if previous part ended a block
+        if (i > 0 && parts[i - 1].blockEnd) {
+            // Ensure space between block boundaries
+            if (result.length > 0 && !result.endsWith(' ') && text.length > 0 && !text.startsWith(' ')) {
+                result += ' ';
+            }
         }
+
+        result += text;
     }
-    result = result.trim();
+
+    // Final normalization: collapse multiple spaces, trim
+    result = result.replace(/ +/g, ' ').trim();
 
     const MAX_SIZE = 5 * 1024 * 1024;
     if (result.length > MAX_SIZE) {

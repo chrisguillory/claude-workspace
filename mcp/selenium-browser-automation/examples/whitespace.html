@@ -217,6 +217,27 @@ List item 3"</div>
     </div>
   </section>
 
+  <!-- ===================================================================== -->
+  <!-- TEST 10: Adjacent Block Elements (Spaces Required)                    -->
+  <!-- ===================================================================== -->
+
+  <section id="test-10" class="test-case">
+    <h2>Test 10: Adjacent Block Elements</h2>
+
+    <div class="expected">Expected: Spaces ADDED between adjacent block elements:
+- "Home Settings Profile" (buttons separated)
+- "Cell1 Cell2 Cell3" (table cells separated)
+- "Item1 Item2 Item3" (list items separated)</div>
+
+    <div class="actual">
+      <!-- Block elements should have spaces between them even without source whitespace -->
+      <p>Whitespace Test 10 passed:</p>
+      <div style="display:flex;gap:0;"><button>Home</button><button>Settings</button><button>Profile</button></div>
+      <table><tr><td>Cell1</td><td>Cell2</td><td>Cell3</td></tr></table>
+      <ul style="margin:0;padding:0;list-style:none;"><li>Item1</li><li>Item2</li><li>Item3</li></ul>
+    </div>
+  </section>
+
   <footer style="margin-top: 40px; padding: 20px; background: #f0f0f0; border-radius: 8px;">
     <h2>Validation Checklist</h2>
     <ul>
@@ -228,7 +249,8 @@ List item 3"</div>
       <li>"Whitespace Test 6 passed" - list item breaks</li>
       <li>"Whitespace Test 7 passed" - inline elements</li>
       <li>"Whitespace Test 8 passed" - CJK text preserved</li>
-      <li>"Whitespace Test 9 passed" - no artificial spaces between adjacent elements</li>
+      <li>"Whitespace Test 9 passed" - no artificial spaces between adjacent inline elements</li>
+      <li>"Whitespace Test 10 passed" - spaces added between adjacent block elements</li>
     </ul>
   </footer>
 
