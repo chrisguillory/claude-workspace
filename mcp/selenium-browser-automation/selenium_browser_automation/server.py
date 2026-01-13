@@ -16,6 +16,8 @@ from __future__ import annotations
 # Standard Library
 import asyncio
 import base64
+import contextlib
+import io
 import json
 import re
 import signal
@@ -26,7 +28,6 @@ import time
 import typing
 import unicodedata
 from collections.abc import Sequence
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar
@@ -35,6 +36,7 @@ from urllib.parse import parse_qs, urlparse
 # Third-Party Libraries
 import fastmcp.exceptions
 import httpx
+from local_lib.utils import Timer
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel
@@ -1011,6 +1013,8 @@ def register_tools(service: BrowserService) -> None:
         in the current page context. Blob URLs are ephemeral in-memory resources (PDFs, images,
         file downloads) and cannot be accessed from a different browsing context.
         """
+        timer = Timer()
+
         # Validate URL
         valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
         if not url.startswith(valid_prefixes):
@@ -1063,15 +1067,20 @@ def register_tools(service: BrowserService) -> None:
                 temp_file_path = Path(temp_dir) / 'profile_state.json'
                 filter_list = list(origins_filter) if origins_filter else None
 
-                await asyncio.to_thread(
-                    chrome_profile_state_export.export_chrome_profile_state,
-                    output_file=str(temp_file_path),
-                    chrome_profile=chrome_profile,
-                    include_session_storage=True,
-                    include_indexeddb=False,  # IndexedDB schema issues
-                    origins_filter=filter_list,
-                    live_session_storage=live_session_storage,
-                )
+                # Use Python-level stdout redirect to capture ccl_chromium_reader's
+                # "Error decoding..." print statements without affecting MCP's fd-level I/O
+                def _export_with_stdout_captured() -> None:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        chrome_profile_state_export.export_chrome_profile_state(
+                            output_file=str(temp_file_path),
+                            chrome_profile=chrome_profile,
+                            include_session_storage=True,
+                            include_indexeddb=False,  # IndexedDB schema issues
+                            origins_filter=filter_list,
+                            live_session_storage=live_session_storage,
+                        )
+
+                await asyncio.to_thread(_export_with_stdout_captured)
 
                 profile_state = await _load_profile_state_from_file(str(temp_file_path))
 
@@ -1199,7 +1208,11 @@ def register_tools(service: BrowserService) -> None:
         # Restore storage for current origin immediately
         await _restore_pending_profile_state_for_current_origin(service, driver)
 
-        return NavigationResult(current_url=driver.current_url, title=driver.title)
+        return NavigationResult(
+            current_url=driver.current_url,
+            title=driver.title,
+            elapsed_seconds=round(timer.elapsed(), 3),
+        )
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -4162,7 +4175,7 @@ def _sync_cleanup(state: BrowserState) -> None:
     print('✓ Signal cleanup complete, exiting', file=sys.stderr)
 
 
-@asynccontextmanager
+@contextlib.asynccontextmanager
 async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     """Manage browser lifecycle - initialization before requests, cleanup after shutdown."""
     state = await BrowserState.create()

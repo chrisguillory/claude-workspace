@@ -328,10 +328,8 @@ end tell
     if not output:
         return {}
 
-    try:
-        return json.loads(output)
-    except json.JSONDecodeError:
-        return None
+    parsed: dict[str, str] = json.loads(output)
+    return parsed
 
 
 def _get_origin_from_url(url: str) -> str | None:
