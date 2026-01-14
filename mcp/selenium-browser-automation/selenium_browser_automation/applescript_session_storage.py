@@ -29,6 +29,22 @@ class SeleniumChromeConflictError(Exception):
     pass
 
 
+class AppleScriptTabTimeoutError(Exception):
+    """Raised when AppleScript JS execution times out on a specific tab.
+
+    This typically happens with background/suspended tabs that Chrome has throttled.
+    """
+
+    def __init__(self, window: int, tab: int, url: str) -> None:
+        self.window = window
+        self.tab = tab
+        self.url = url
+        super().__init__(
+            f'AppleScript timed out on window {window}, tab {tab} ({url}). '
+            f'Tab may be suspended/background. Try switching to this tab in Chrome first.'
+        )
+
+
 @dataclass
 class AppleScriptExtractionResult:
     """Result from attempting AppleScript sessionStorage extraction."""
@@ -107,7 +123,6 @@ def is_selenium_chrome_running() -> bool:
 
 def extract_live_session_storage(
     origins_filter: Sequence[str] | None = None,
-    timeout_seconds: float = 30.0,
 ) -> AppleScriptExtractionResult:
     """Extract live sessionStorage from running Chrome tabs via AppleScript.
 
@@ -120,7 +135,6 @@ def extract_live_session_storage(
         origins_filter: Only extract from tabs matching these domains.
                        Example: ["amazon.com", "github.com"]
                        If None, extracts from ALL open tabs (slow).
-        timeout_seconds: Maximum time for entire extraction.
 
     Returns:
         AppleScriptExtractionResult with sessionStorage data or error info.
@@ -155,7 +169,7 @@ def extract_live_session_storage(
             'Options:\n'
             '  1. Use browser="chromium" for Selenium to avoid conflicts\n'
             '  2. Close the Selenium browser before extracting from personal Chrome\n'
-            '  3. Set live_session_storage=False to skip live extraction (uses disk, may be stale)'
+            '  3. Set live_session_storage_via_applescript=False to skip live extraction (uses disk, may be stale)'
         )
 
     # Test if JavaScript execution is enabled
@@ -206,7 +220,15 @@ def extract_live_session_storage(
         if not origin:
             continue
 
-        storage = _extract_session_storage_from_tab(window_idx, tab_idx)
+        try:
+            storage = _extract_session_storage_from_tab(window_idx, tab_idx)
+        except subprocess.TimeoutExpired as e:
+            raise AppleScriptTabTimeoutError(
+                window=window_idx,
+                tab=tab_idx,
+                url=url,
+            ) from e
+
         if storage is not None:
             # Normalize origin (strip trailing slash to match window.location.origin)
             normalized_origin = origin.rstrip('/')
@@ -236,12 +258,16 @@ def _test_javascript_execution() -> bool:
 
     Returns True if we can execute JavaScript in Chrome tabs.
     Returns False if the setting "Allow JavaScript from Apple Events" is disabled.
+
+    Uses the active tab of the front window because Chrome suspends background tabs,
+    which causes AppleScript JS execution to hang indefinitely. The active tab is
+    guaranteed to not be suspended since it's currently visible.
     """
     script = """
 tell application "Google Chrome"
     if (count of windows) > 0 then
-        if (count of tabs of window 1) > 0 then
-            execute tab 1 of window 1 javascript "1+1"
+        if (count of tabs of front window) > 0 then
+            execute (active tab of front window) javascript "1+1"
             return "ok"
         end if
     end if
