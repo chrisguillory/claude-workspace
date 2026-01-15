@@ -459,6 +459,7 @@ class NavigationResult(BaseModel):
     current_url: str
     title: str
     resources: ResourceCapture | None = None
+    elapsed_seconds: float | None = None  # Time taken for the operation in seconds
 
 
 class InteractiveElement(BaseModel):

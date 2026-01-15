@@ -16,6 +16,8 @@ from __future__ import annotations
 # Standard Library
 import asyncio
 import base64
+import contextlib
+import io
 import json
 import re
 import signal
@@ -26,7 +28,6 @@ import time
 import typing
 import unicodedata
 from collections.abc import Sequence
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar
@@ -35,6 +36,7 @@ from urllib.parse import parse_qs, urlparse
 # Third-Party Libraries
 import fastmcp.exceptions
 import httpx
+from local_lib.utils import Timer
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel
@@ -957,7 +959,7 @@ def register_tools(service: BrowserService) -> None:
         profile_state_file: str | None = None,
         chrome_profile: str | None = None,
         origins_filter: Sequence[str] | None = None,
-        live_session_storage: bool = True,
+        live_session_storage_via_applescript: bool = False,
         # Browser configuration (all fresh_browser capabilities)
         browser: Browser = 'chrome',
         enable_har_capture: bool = False,
@@ -983,9 +985,11 @@ def register_tools(service: BrowserService) -> None:
             chrome_profile: Chrome profile name to import from ("Default", "Profile 1", etc.)
             origins_filter: Only import origins matching these patterns (e.g., ["amazon.com"])
                            Works with both profile_state_file and chrome_profile.
-            live_session_storage: If True (default), extract live sessionStorage from running
-                Chrome tabs via AppleScript when using chrome_profile. FAILS if Chrome is
-                running but "Allow JavaScript from Apple Events" is disabled.
+            live_session_storage_via_applescript: If True, extract live sessionStorage from running
+                Chrome tabs via AppleScript when using chrome_profile. Default False.
+                WARNING: AppleScript extracts from ALL Chrome windows regardless of profile.
+                If multiple profiles are open, sessionStorage may include data from other profiles.
+                Requires Chrome setting: View > Developer > Allow JavaScript from Apple Events.
                 Only used with chrome_profile, ignored with profile_state_file.
             browser: Which browser to use - "chrome" (default) or "chromium".
                 Use "chromium" to avoid AppleScript targeting conflicts when
@@ -1011,6 +1015,8 @@ def register_tools(service: BrowserService) -> None:
         in the current page context. Blob URLs are ephemeral in-memory resources (PDFs, images,
         file downloads) and cannot be accessed from a different browsing context.
         """
+        timer = Timer()
+
         # Validate URL
         valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
         if not url.startswith(valid_prefixes):
@@ -1063,16 +1069,20 @@ def register_tools(service: BrowserService) -> None:
                 temp_file_path = Path(temp_dir) / 'profile_state.json'
                 filter_list = list(origins_filter) if origins_filter else None
 
-                await asyncio.to_thread(
-                    chrome_profile_state_export.export_chrome_profile_state,
-                    output_file=str(temp_file_path),
-                    chrome_profile=chrome_profile,
-                    include_session_storage=True,
-                    include_indexeddb=False,  # IndexedDB schema issues
-                    origins_filter=filter_list,
-                    live_session_storage=live_session_storage,
-                )
+                # Use Python-level stdout redirect to capture ccl_chromium_reader's
+                # "Error decoding..." print statements without affecting MCP's fd-level I/O
+                def _export_with_stdout_captured() -> None:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        chrome_profile_state_export.export_chrome_profile_state(
+                            output_file=str(temp_file_path),
+                            chrome_profile=chrome_profile,
+                            include_session_storage=True,
+                            include_indexeddb=False,  # IndexedDB schema issues
+                            origins_filter=filter_list,
+                            live_session_storage_via_applescript=live_session_storage_via_applescript,
+                        )
 
+                await asyncio.to_thread(_export_with_stdout_captured)
                 profile_state = await _load_profile_state_from_file(str(temp_file_path))
 
             print(
@@ -1199,7 +1209,11 @@ def register_tools(service: BrowserService) -> None:
         # Restore storage for current origin immediately
         await _restore_pending_profile_state_for_current_origin(service, driver)
 
-        return NavigationResult(current_url=driver.current_url, title=driver.title)
+        return NavigationResult(
+            current_url=driver.current_url,
+            title=driver.title,
+            elapsed_seconds=round(timer.elapsed(), 3),
+        )
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -4045,7 +4059,7 @@ Workflow:
         include_session_storage: bool = True,
         include_indexeddb: bool = False,
         origins_filter: Sequence[str] | None = None,
-        live_session_storage: bool = True,
+        live_session_storage_via_applescript: bool = False,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ChromeProfileStateExportResult:
         """Export profile state from Chrome's profile files for use in automation.
@@ -4070,10 +4084,13 @@ Workflow:
             include_indexeddb: Include IndexedDB records (default False, can be 200MB+)
             origins_filter: Only export origins matching these patterns
                            (e.g., ["github.com", "google.com"])
-            live_session_storage: If True (default), extract live sessionStorage from
-                running Chrome tabs via AppleScript. FAILS if Chrome is running but
-                "Allow JavaScript from Apple Events" is disabled. Falls back to disk
-                only if Chrome is not running. Set False for disk-only (may be stale).
+            live_session_storage_via_applescript: If True, extract live sessionStorage
+                from running Chrome tabs via AppleScript. Defaults to False because
+                Chrome suspends background tabs, causing AppleScript to hang on
+                inactive tabs. WARNING: AppleScript extracts from ALL Chrome windows
+                regardless of profile. If multiple profiles are open, sessionStorage
+                may include data from other profiles. Requires one-time Chrome setting:
+                View > Developer > Allow JavaScript from Apple Events.
 
         Returns:
             ChromeProfileStateExportResult with counts, session_storage_source, and warnings
@@ -4108,7 +4125,7 @@ Workflow:
             include_session_storage=include_session_storage,
             include_indexeddb=include_indexeddb,
             origins_filter=filter_list,
-            live_session_storage=live_session_storage,
+            live_session_storage_via_applescript=live_session_storage_via_applescript,
         )
 
         # Log summary
@@ -4162,7 +4179,7 @@ def _sync_cleanup(state: BrowserState) -> None:
     print('✓ Signal cleanup complete, exiting', file=sys.stderr)
 
 
-@asynccontextmanager
+@contextlib.asynccontextmanager
 async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     """Manage browser lifecycle - initialization before requests, cleanup after shutdown."""
     state = await BrowserState.create()
