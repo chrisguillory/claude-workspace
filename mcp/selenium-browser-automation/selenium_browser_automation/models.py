@@ -131,11 +131,13 @@ class ChromeLocalState(BaseModel):
     # Top-level Chrome settings and state fields (alphabetically sorted)
     accessibility: dict[str, Any] | None = None
     app_shims: dict[str, Any] | None = None
+    app_shims_cdhash_hmac_key: str | None = None
     autofill: dict[str, Any] | None = None
     background_tracing: dict[str, Any] | None = None
     breadcrumbs: dict[str, Any] | None = None
     browser: dict[str, Any] | None = None
     cloned_install: dict[str, Any] | None = None  # Chrome 120+ install tracking
+    glic: dict[str, Any] | None = None  # Glic multi-instance settings
     hardware_acceleration_mode_previous: bool | None = None
     legacy: dict[str, Any] | None = None
     local: dict[str, Any] | None = None
