@@ -44,7 +44,7 @@ hook_data = SessionEndHookInput.model_validate_json(sys.stdin.read())
 # Update session tracking (atomic with file locking)
 with SessionManager(hook_data.cwd) as manager:
     if Path(hook_data.transcript_path).exists():
-        manager.end_session(hook_data.session_id)
+        manager.end_session(hook_data.session_id, reason=hook_data.reason)
         print(f'Completed in {timer.elapsed_ms()} ms')
         print(repr(hook_data))
     else:

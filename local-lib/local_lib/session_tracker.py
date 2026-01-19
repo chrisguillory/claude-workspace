@@ -74,6 +74,8 @@ class SessionMetadata(BaseModel):
     ended_at: JsonDatetime | None = None  # When SessionEnd fired
     parent_id: str | None = None  # Extracted from transcript file
     crash_detected_at: JsonDatetime | None = None  # When crash detected
+    startup_model: str | None = None  # Initial AI model (only set on startup, not resume)
+    end_reason: str | None = None  # Why session ended (prompt_input_exit, clear, logout, other)
 
 
 class SessionManager:
@@ -124,6 +126,7 @@ class SessionManager:
         source: SessionSource,
         claude_pid: int,
         parent_id: str | None,
+        startup_model: str | None = None,
     ) -> None:
         """Start a new session or restart an exited/completed/crashed session.
 
@@ -133,6 +136,7 @@ class SessionManager:
             source: Session source (startup, resume, compact, clear)
             claude_pid: Claude process PID
             parent_id: Parent conversation UUID if available
+            startup_model: Initial AI model (only provided on startup, not resume)
         """
         if self._db is None:
             raise RuntimeError("SessionManager must be used within 'with' context")
@@ -153,6 +157,7 @@ class SessionManager:
                         ended_at=None,
                         crash_detected_at=None,
                         parent_id=parent_id if parent_id is not None else existing_session.metadata.parent_id,
+                        startup_model=existing_session.metadata.startup_model,  # Preserve from original
                     ),
                 )
                 # Replace in sessions list
@@ -170,6 +175,7 @@ class SessionManager:
                 claude_pid=claude_pid,
                 started_at=datetime.now(UTC).astimezone(),
                 parent_id=parent_id,
+                startup_model=startup_model,
             ),
         )
 
@@ -201,11 +207,12 @@ class SessionManager:
         self._db.sessions = [s for s in self._db.sessions if s.session_id != session_id]
         return len(self._db.sessions) < original_count
 
-    def end_session(self, session_id: str) -> None:
+    def end_session(self, session_id: str, reason: str | None = None) -> None:
         """Mark a session as exited.
 
         Args:
             session_id: Session UUID to end
+            reason: Why session ended (prompt_input_exit, clear, logout, other)
         """
         if self._db is None:
             raise RuntimeError("SessionManager must be used within 'with' context")
@@ -226,6 +233,8 @@ class SessionManager:
                         ended_at=datetime.now(UTC).astimezone(),
                         parent_id=existing_session.metadata.parent_id,
                         crash_detected_at=existing_session.metadata.crash_detected_at,
+                        startup_model=existing_session.metadata.startup_model,
+                        end_reason=reason,
                     ),
                 )
                 # Replace in sessions list

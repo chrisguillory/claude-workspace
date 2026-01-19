@@ -116,6 +116,7 @@ with SessionManager(project_dir) as manager:
         source=hook_data.source,
         claude_pid=claude_pid,
         parent_id=parent_id,
+        startup_model=hook_data.model,
     )
 
 # Print session information
