@@ -69,6 +69,7 @@ class SessionStartHookInput(BaseModel):
     transcript_path: str
     hook_event_name: str
     source: SessionSource
+    model: str | None = None  # Added in Claude Code v2.1.9 (only on startup, not resume)
 
 
 # Read and validate hook input from stdin
@@ -107,7 +108,8 @@ if transcript_file.exists():
 
 # Track session using SessionManager (atomic with file locking)
 with SessionManager(project_dir) as manager:
-    manager.detect_crashed_sessions()
+    crashed_ids = manager.detect_crashed_sessions()
+    pruned_ids = manager.prune_orphaned_sessions()
     manager.start_session(
         session_id=hook_data.session_id,
         transcript_path=hook_data.transcript_path,
@@ -116,10 +118,13 @@ with SessionManager(project_dir) as manager:
         parent_id=parent_id,
     )
 
-# Print all session information (comprehensive - don't prematurely optimize)
-# Note: Claude Code sees this output in system reminders during the session
+# Print session information
 print(f'Completed in {timer.elapsed_ms()} ms')
 print(repr(hook_data))
 print(f'claude_pid: {claude_pid}')
 print(f'parent_id: {parent_id}')
 print(f'encoding_verified: {encoding_matches}')
+if crashed_ids:
+    print(f'crashed_sessions: {crashed_ids}')
+if pruned_ids:
+    print(f'pruned_orphaned_sessions: {pruned_ids}')

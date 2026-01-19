@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pydantic
 from local_lib.session_tracker import SessionManager
@@ -40,10 +41,12 @@ class SessionEndHookInput(BaseModel):
 # Read and validate hook input from stdin
 hook_data = SessionEndHookInput.model_validate_json(sys.stdin.read())
 
-# Mark session as ended using SessionManager (atomic with file locking)
+# Update session tracking (atomic with file locking)
 with SessionManager(hook_data.cwd) as manager:
-    manager.end_session(hook_data.session_id)
-
-# Print all session information (comprehensive - don't prematurely optimize)
-print(f'Completed in {timer.elapsed_ms()} ms')
-print(repr(hook_data))
+    if Path(hook_data.transcript_path).exists():
+        manager.end_session(hook_data.session_id)
+        print(f'Completed in {timer.elapsed_ms()} ms')
+        print(repr(hook_data))
+    else:
+        manager.remove_empty_session(hook_data.session_id, hook_data.transcript_path)
+        print(f'Session {hook_data.session_id} removed (no transcript) in {timer.elapsed_ms()} ms')
