@@ -76,6 +76,7 @@ class SessionMetadata(BaseModel):
     crash_detected_at: JsonDatetime | None = None  # When crash detected
     startup_model: str | None = None  # Initial AI model (only set on startup, not resume)
     end_reason: str | None = None  # Why session ended (prompt_input_exit, clear, logout, other)
+    claude_version: str | None = None  # Claude Code CLI version (from executable symlink path)
 
 
 class SessionManager:
@@ -127,6 +128,7 @@ class SessionManager:
         claude_pid: int,
         parent_id: str | None,
         startup_model: str | None = None,
+        claude_version: str | None = None,
     ) -> None:
         """Start a new session or restart an exited/completed/crashed session.
 
@@ -137,6 +139,7 @@ class SessionManager:
             claude_pid: Claude process PID
             parent_id: Parent conversation UUID if available
             startup_model: Initial AI model (only provided on startup, not resume)
+            claude_version: Claude Code CLI version (from executable symlink path)
         """
         if self._db is None:
             raise RuntimeError("SessionManager must be used within 'with' context")
@@ -158,6 +161,7 @@ class SessionManager:
                         crash_detected_at=None,
                         parent_id=parent_id if parent_id is not None else existing_session.metadata.parent_id,
                         startup_model=existing_session.metadata.startup_model,  # Preserve from original
+                        claude_version=claude_version if claude_version is not None else existing_session.metadata.claude_version,
                     ),
                 )
                 # Replace in sessions list
@@ -176,6 +180,7 @@ class SessionManager:
                 started_at=datetime.now(UTC).astimezone(),
                 parent_id=parent_id,
                 startup_model=startup_model,
+                claude_version=claude_version,
             ),
         )
 
@@ -235,6 +240,7 @@ class SessionManager:
                         crash_detected_at=existing_session.metadata.crash_detected_at,
                         startup_model=existing_session.metadata.startup_model,
                         end_reason=reason,
+                        claude_version=existing_session.metadata.claude_version,
                     ),
                 )
                 # Replace in sessions list
@@ -272,6 +278,8 @@ class SessionManager:
                         ended_at=session.metadata.ended_at,
                         parent_id=session.metadata.parent_id,
                         crash_detected_at=datetime.now(UTC).astimezone(),
+                        startup_model=session.metadata.startup_model,
+                        claude_version=session.metadata.claude_version,
                     ),
                 )
                 updated_sessions.append(crashed_session)

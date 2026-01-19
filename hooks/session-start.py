@@ -2,6 +2,7 @@
 # /// script
 # dependencies = [
 #   "pydantic>=2.0.0",
+#   "packaging",
 #   "local_lib",
 # ]
 #
@@ -17,9 +18,12 @@ import sys
 from pathlib import Path
 
 import pydantic
+import packaging.version
+
 from local_lib.session_tracker import SessionManager
 from local_lib.types import SessionSource
 from local_lib.utils import Timer
+import psutil
 
 # Start timing
 timer = Timer()
@@ -53,6 +57,27 @@ def find_claude_pid() -> int | None:
         current = ppid
 
     return None
+
+
+def get_claude_version(claude_pid: int) -> str:
+    """Extract Claude Code version from the running process's executable path.
+
+    Uses psutil to get the actual executable path of the Claude process,
+    which contains the version (e.g., ~/.local/share/claude/versions/2.1.12).
+
+    Args:
+        claude_pid: PID of the running Claude process
+
+    Returns:
+        Version string (e.g., "2.1.12")
+
+    Raises:
+        packaging.version.InvalidVersion: If path doesn't contain valid version
+        psutil.NoSuchProcess: If the process no longer exists
+    """
+    exe_path = Path(psutil.Process(claude_pid).exe())
+    version = packaging.version.Version(exe_path.name)
+    return str(version)
 
 
 class BaseModel(pydantic.BaseModel):
@@ -106,6 +131,9 @@ if transcript_file.exists():
             if 'leafUuid' in metadata:
                 parent_id = metadata['leafUuid']
 
+# Get Claude version from running process
+claude_version = get_claude_version(claude_pid)
+
 # Track session using SessionManager (atomic with file locking)
 with SessionManager(project_dir) as manager:
     crashed_ids = manager.detect_crashed_sessions()
@@ -117,12 +145,14 @@ with SessionManager(project_dir) as manager:
         claude_pid=claude_pid,
         parent_id=parent_id,
         startup_model=hook_data.model,
+        claude_version=claude_version,
     )
 
 # Print session information
 print(f'Completed in {timer.elapsed_ms()} ms')
 print(repr(hook_data))
 print(f'claude_pid: {claude_pid}')
+print(f'claude_version: {claude_version}')
 print(f'parent_id: {parent_id}')
 print(f'encoding_verified: {encoding_matches}')
 if crashed_ids:
