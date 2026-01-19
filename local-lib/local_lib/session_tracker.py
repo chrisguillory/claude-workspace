@@ -176,6 +176,31 @@ class SessionManager:
         # Append to sessions
         self._db.sessions = [*self._db.sessions, new_session]
 
+    def remove_empty_session(self, session_id: str, transcript_path: str) -> bool:
+        """Remove a session that has no transcript file.
+
+        Use when session ends without user interaction (no messages sent).
+
+        Args:
+            session_id: Session UUID to remove
+            transcript_path: Path to transcript file (validated to not exist)
+
+        Returns:
+            True if session was found and removed, False if session not found
+
+        Raises:
+            ValueError: If transcript file exists (session has content)
+        """
+        if self._db is None:
+            raise RuntimeError("SessionManager must be used within 'with' context")
+
+        if Path(transcript_path).exists():
+            raise ValueError(f'Cannot remove session with existing transcript: {transcript_path}')
+
+        original_count = len(self._db.sessions)
+        self._db.sessions = [s for s in self._db.sessions if s.session_id != session_id]
+        return len(self._db.sessions) < original_count
+
     def end_session(self, session_id: str) -> None:
         """Mark a session as exited.
 
@@ -247,6 +272,29 @@ class SessionManager:
 
         self._db.sessions = updated_sessions
         return crashed_ids
+
+    def prune_orphaned_sessions(self) -> Sequence[str]:
+        """Remove sessions whose transcript files no longer exist.
+
+        Checks all sessions regardless of state and removes any with missing transcripts.
+
+        Returns:
+            Sequence of removed session IDs
+        """
+        if self._db is None:
+            raise RuntimeError("SessionManager must be used within 'with' context")
+
+        removed_ids: list[str] = []
+        kept_sessions: list[Session] = []
+
+        for session in self._db.sessions:
+            if Path(session.transcript_path).exists():
+                kept_sessions.append(session)
+            else:
+                removed_ids.append(session.session_id)
+
+        self._db.sessions = kept_sessions
+        return removed_ids
 
 
 # Deprecated: Old functional API - use SessionManager instead
