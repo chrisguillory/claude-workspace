@@ -1,0 +1,30 @@
+[project]
+name = "document-search-mcp"
+version = "0.1.0"
+description = "Document Search MCP Server - Semantic search over local documents"
+requires-python = ">=3.13"
+dependencies = [
+    "google-genai>=1.59.0",
+    "langchain-text-splitters>=1.1.0",
+    "local-lib",
+    "more-itertools>=10.8.0",
+    "pydantic>=2.12.5",
+    "qdrant-client>=1.16.2",
+    "tenacity>=9.1.2",
+]
+
+[project.scripts]
+mcp-docsearch-server = "document_search.server:main"
+
+[tool.uv.sources]
+local-lib = { workspace = true }
+
+[tool.hatch.build]
+include = ["document_search/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

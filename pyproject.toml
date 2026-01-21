@@ -16,6 +16,7 @@ package = false
 members = [
     "local-lib",
     "mcp/browser-automation",
+    "mcp/document-search",
     "mcp/python-interpreter",
     "mcp/selenium-browser-automation",
     # "hooks" - decide later if hooks should be workspace member or stay inline
