@@ -17,13 +17,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pydantic
 import packaging.version
-
+import psutil
+import pydantic
 from local_lib.session_tracker import SessionManager
 from local_lib.types import SessionSource
 from local_lib.utils import Timer
-import psutil
 
 # Start timing
 timer = Timer()
