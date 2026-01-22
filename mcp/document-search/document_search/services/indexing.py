@@ -141,6 +141,14 @@ class IndexingService:
         # Embedding cache: text_hash -> embedding (deduplication within indexing run)
         self._embedding_cache: dict[str, tuple[float, ...]] = {}
 
+    def shutdown(self) -> None:
+        """Shutdown services and release resources.
+
+        Shuts down the ProcessPoolExecutor used for PDF chunking.
+        Should be called when the service is no longer needed.
+        """
+        self._chunking.shutdown()
+
     async def index_directory(
         self,
         directory: Path,

@@ -261,7 +261,8 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     # Server is ready - yield control back to FastMCP
     yield
 
-    # Cleanup (nothing to clean up currently)
+    # Cleanup ProcessPoolExecutor and other resources
+    state.indexing_service.shutdown()
     print('✓ Document Search MCP server shutdown', file=sys.stderr)
 
 

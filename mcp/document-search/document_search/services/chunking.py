@@ -4,26 +4,24 @@ Handles different file types with appropriate chunking strategies:
 - Markdown: Structure-aware splitting by headers
 - Text: Recursive character splitting
 - JSON: Logical structure-based splitting
-- PDF: Page-aware semantic chunking with parallel processing
+- PDF: Page-aware semantic chunking with ProcessPoolExecutor
 - CSV: Context-aware row grouping with header context
 
-PDF processing uses PyMuPDF for extraction with pdfplumber for tables.
-Parallel page processing controlled via semaphore for memory efficiency.
+PDF processing uses ProcessPoolExecutor to bypass the GIL for CPU-bound
+PyMuPDF/pdfplumber operations (see pdf_extraction.py for subprocess work).
 """
 
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 import logging
+import os
 import re
-import threading
 from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
-
-import fitz  # PyMuPDF
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -45,44 +43,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_CHUNK_SIZE = 1500  # ~375-500 tokens at 3-4 chars/token
 DEFAULT_CHUNK_OVERLAP = 300  # 20% overlap
 
-# PDF processing constants
-PDF_MAX_CONCURRENT_PAGES = 8  # Parallel page processing
-PDF_OCR_CHAR_THRESHOLD = 100  # If extracted text < this, try OCR
-PDF_HEADER_FOOTER_SAMPLE_PAGES = 5  # Pages to analyze for header/footer
-PDF_HEADER_REGION_RATIO = 0.12  # Top 12% of page is header region
-PDF_FOOTER_REGION_RATIO = 0.12  # Bottom 12% of page is footer region
-PDF_MIN_REPEAT_COUNT = 2  # Minimum repeats to consider as header/footer
-
 # CSV processing constants
 CSV_MIN_GROUP_SIZE = 5  # Minimum rows per chunk
 CSV_MAX_GROUP_SIZE = 15  # Maximum rows per chunk
 CSV_CHUNK_SIZE_TARGET = 1000  # Target chunk size for adaptive grouping
 CSV_ENCODINGS = ['utf-8', 'utf-8-sig', 'latin-1', 'iso-8859-1', 'cp1252']
-
-# PDF type detection
-type PDFType = Literal['text', 'scanned', 'mixed', 'image_heavy']
-
-
-@dataclasses.dataclass
-class _PDFAnalysis:
-    """Analysis results for a PDF document."""
-
-    pdf_type: PDFType
-    header_pattern: str
-    footer_pattern: str
-    bookmarks: dict[int, str]  # page_num -> bookmark title
-    page_count: int
-
-
-@dataclasses.dataclass
-class _PDFPageResult:
-    """Result of processing a single PDF page."""
-
-    page_num: int
-    text: str
-    table_markdown: str | None = None
-    required_ocr: bool = False
-    error: str | None = None
 
 
 class ChunkingService:
@@ -102,21 +67,26 @@ class ChunkingService:
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
         *,
-        pdf_max_concurrent: int = PDF_MAX_CONCURRENT_PAGES,
+        pdf_process_workers: int | None = None,
     ) -> ChunkingService:
         """Create chunking service in async context.
 
-        Preferred factory method - ensures semaphore is bound to correct event loop.
+        Preferred factory method - ensures proper initialization.
 
         Args:
             chunk_size: Target chunk size in characters.
             chunk_overlap: Overlap between chunks for context continuity.
-            pdf_max_concurrent: Max concurrent PDF page processing.
+            pdf_process_workers: Max workers for PDF ProcessPoolExecutor.
+                Defaults to cpu_count (main process only does async I/O).
         """
+        if pdf_process_workers is None:
+            # Use all CPU cores - main process only does async I/O, not CPU work
+            pdf_process_workers = os.cpu_count() or 4
+
         return cls(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            _pdf_semaphore=asyncio.Semaphore(pdf_max_concurrent),
+            _process_pool=ProcessPoolExecutor(max_workers=pdf_process_workers),
         )
 
     def __init__(
@@ -124,18 +94,18 @@ class ChunkingService:
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
         *,
-        _pdf_semaphore: asyncio.Semaphore,
+        _process_pool: ProcessPoolExecutor,
     ) -> None:
         """Initialize chunking service. Use create() for async context safety.
 
         Args:
             chunk_size: Target chunk size in characters.
             chunk_overlap: Overlap between chunks for context continuity.
-            _pdf_semaphore: Internal - use create() instead.
+            _process_pool: ProcessPoolExecutor for CPU-bound PDF work.
         """
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
-        self._pdf_semaphore = _pdf_semaphore
+        self._process_pool = _process_pool
 
         # Reusable splitters
         self._text_splitter = RecursiveCharacterTextSplitter(
@@ -153,6 +123,22 @@ class ChunkingService:
             ],
             strip_headers=False,
         )
+
+    def shutdown(self) -> None:
+        """Shutdown the ProcessPoolExecutor and release resources.
+
+        Should be called when the service is no longer needed.
+        Also called automatically when used as a context manager.
+        """
+        self._process_pool.shutdown(wait=True)
+
+    async def __aenter__(self) -> ChunkingService:
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: object) -> None:
+        """Async context manager exit - shutdown ProcessPoolExecutor."""
+        self.shutdown()
 
     async def chunk_file(self, path: Path) -> Sequence[Chunk]:
         """Chunk a single file based on its type.
@@ -251,391 +237,61 @@ class ChunkingService:
     # =========================================================================
 
     async def _chunk_pdf(self, path: Path) -> Sequence[Chunk]:
-        """Chunk PDF using page-aware semantic approach with parallel processing.
+        """Chunk PDF using page-aware semantic approach with ProcessPoolExecutor.
 
-        Phases:
-        1. Analyze PDF (type detection, header/footer, bookmarks)
-        2. Process pages in parallel (extract text, OCR if needed, tables)
-        3. Remove headers/footers, apply semantic chunking
-        4. Build chunks with page number metadata
+        Uses ProcessPoolExecutor for CPU-bound PyMuPDF/pdfplumber work.
+        This bypasses the GIL for ~4x speedup on multi-core systems.
 
-        Thread safety: PyMuPDF Document is not thread-safe. We use a threading.Lock
-        to serialize access when processing pages in parallel via asyncio.to_thread.
+        The extraction runs in a subprocess, returning structured data.
+        Chunking (text splitting) happens in the main process.
         """
+        from document_search.services.pdf_extraction import extract_pdf
+
+        # Run CPU-heavy extraction in subprocess
+        loop = asyncio.get_running_loop()
+        extraction = await loop.run_in_executor(self._process_pool, extract_pdf, str(path))
+
+        if extraction.page_count == 0:
+            logger.warning(f'PDF has no pages: {path}')
+            return []
+
+        logger.debug(f'PDF extraction: type={extraction.pdf_type}, pages={extraction.page_count}')
+
+        # Build chunks from extracted pages (lightweight, main process)
         chunks: list[Chunk] = []
+        for page_data in extraction.pages:
+            if not page_data.text.strip():
+                continue
 
-        # Lock for thread-safe access to PyMuPDF Document (not thread-safe)
-        doc_lock = threading.Lock()
+            # Get heading context from bookmarks
+            heading_context = extraction.bookmarks.get(page_data.page_num)
 
-        # Open PDF in main thread for analysis
-        doc = await asyncio.to_thread(fitz.open, str(path))
-        try:
-            if doc.page_count == 0:
-                logger.warning(f'PDF has no pages: {path}')
-                return chunks
+            # Combine text with table markdown if present
+            text = page_data.text
+            if page_data.table_markdown:
+                text = f'{text}\n\n{page_data.table_markdown}'
 
-            # Phase 1: Analyze PDF (single-threaded, no lock needed)
-            analysis = await asyncio.to_thread(self._analyze_pdf, doc)
-            logger.debug(
-                f'PDF analysis: type={analysis.pdf_type}, pages={analysis.page_count}, '
-                f'header="{analysis.header_pattern[:30]}..." footer="{analysis.footer_pattern[:30]}..."'
-            )
+            # Sub-chunk if needed
+            page_chunks = self._text_splitter.split_text(text)
 
-            # Phase 2: Process pages in parallel (lock serializes doc access)
-            page_results = await self._process_pdf_pages_parallel(doc, analysis, doc_lock)
-
-            # Phase 3 & 4: Build chunks from page results
-            for result in page_results:
-                if result.error:
-                    logger.warning(f'Page {result.page_num + 1} error: {result.error}')
-                    continue
-
-                if not result.text.strip():
-                    continue
-
-                # Get heading context from bookmarks
-                heading_context = analysis.bookmarks.get(result.page_num)
-
-                # Combine text with table markdown if present
-                text = result.text
-                if result.table_markdown:
-                    text = f'{text}\n\n{result.table_markdown}'
-
-                # Sub-chunk if needed
-                page_chunks = self._text_splitter.split_text(text)
-
-                for chunk_text in page_chunks:
-                    metadata = ChunkMetadata(
-                        start_char=0,
-                        end_char=len(chunk_text),
-                        page_number=result.page_num + 1,  # 1-indexed
-                        heading_context=heading_context,
+            for chunk_text in page_chunks:
+                metadata = ChunkMetadata(
+                    start_char=0,
+                    end_char=len(chunk_text),
+                    page_number=page_data.page_num + 1,  # 1-indexed
+                    heading_context=heading_context,
+                )
+                chunks.append(
+                    Chunk(
+                        text=chunk_text,
+                        source_path=str(path),
+                        chunk_index=len(chunks),
+                        file_type='pdf',
+                        metadata=metadata,
                     )
-                    chunks.append(
-                        Chunk(
-                            text=chunk_text,
-                            source_path=str(path),
-                            chunk_index=len(chunks),
-                            file_type='pdf',
-                            metadata=metadata,
-                        )
-                    )
-
-            return chunks
-
-        finally:
-            await asyncio.to_thread(doc.close)
-
-    def _analyze_pdf(self, doc: fitz.Document) -> _PDFAnalysis:
-        """Analyze PDF for type, headers/footers, and bookmarks.
-
-        Runs synchronously - called from thread pool.
-        """
-        # Detect PDF type by sampling pages
-        pdf_type = self._detect_pdf_type(doc)
-
-        # Detect repeating headers and footers
-        header_pattern, footer_pattern = self._detect_header_footer(doc)
-
-        # Extract bookmarks (table of contents)
-        bookmarks = self._extract_bookmarks(doc)
-
-        return _PDFAnalysis(
-            pdf_type=pdf_type,
-            header_pattern=header_pattern,
-            footer_pattern=footer_pattern,
-            bookmarks=bookmarks,
-            page_count=doc.page_count,
-        )
-
-    def _detect_pdf_type(self, doc: fitz.Document) -> PDFType:
-        """Detect PDF type by sampling pages."""
-        sample_size = min(PDF_HEADER_FOOTER_SAMPLE_PAGES, doc.page_count)
-        text_pages = 0
-        image_pages = 0
-
-        for page_num in range(sample_size):
-            page = doc[page_num]
-            text = page.get_text().strip()
-            images = page.get_images()
-
-            text_len = len(text)
-            image_count = len(images)
-
-            if text_len > 500:
-                text_pages += 1
-            elif text_len < PDF_OCR_CHAR_THRESHOLD and image_count > 0:
-                image_pages += 1
-
-        if text_pages == sample_size:
-            return 'text'
-        if image_pages == sample_size:
-            return 'scanned'
-        if image_pages > 0 and text_pages > 0:
-            return 'mixed'
-        return 'image_heavy'
-
-    def _detect_header_footer(self, doc: fitz.Document) -> tuple[str, str]:
-        """Detect repeating header and footer text patterns."""
-        sample_size = min(PDF_HEADER_FOOTER_SAMPLE_PAGES, doc.page_count)
-        header_candidates: dict[str, int] = {}
-        footer_candidates: dict[str, int] = {}
-
-        for page_num in range(sample_size):
-            page = doc[page_num]
-            page_height = page.rect.height
-            header_region = page_height * PDF_HEADER_REGION_RATIO
-            footer_region = page_height * (1 - PDF_FOOTER_REGION_RATIO)
-
-            blocks = page.get_text('dict')['blocks']
-
-            for block in blocks:
-                if 'lines' not in block:
-                    continue
-
-                bbox = block['bbox']
-                text = ''.join(span['text'] for line in block['lines'] for span in line['spans']).strip()
-
-                if not text or len(text) < 3:
-                    continue
-
-                # Normalize for comparison (remove page numbers)
-                normalized = re.sub(r'\b\d+\b', '#', text)
-
-                if bbox[1] < header_region:
-                    header_candidates[normalized] = header_candidates.get(normalized, 0) + 1
-                elif bbox[3] > footer_region:
-                    footer_candidates[normalized] = footer_candidates.get(normalized, 0) + 1
-
-        # Find patterns that repeat enough times
-        header_pattern = ''
-        footer_pattern = ''
-
-        for text, count in header_candidates.items():
-            if count >= PDF_MIN_REPEAT_COUNT and len(text) > len(header_pattern):
-                header_pattern = text
-
-        for text, count in footer_candidates.items():
-            if count >= PDF_MIN_REPEAT_COUNT and len(text) > len(footer_pattern):
-                footer_pattern = text
-
-        return header_pattern, footer_pattern
-
-    def _extract_bookmarks(self, doc: fitz.Document) -> dict[int, str]:
-        """Extract PDF bookmarks/outline mapped to page numbers."""
-        bookmarks: dict[int, str] = {}
-
-        try:
-            toc = doc.get_toc()  # [level, title, page_number, ...]
-            for entry in toc:
-                if len(entry) >= 3:
-                    _, title, page_num = entry[0], entry[1], entry[2]
-                    # Only keep first bookmark per page (most specific heading)
-                    if page_num - 1 not in bookmarks:
-                        bookmarks[page_num - 1] = title
-        except Exception:
-            pass  # Some PDFs have malformed TOC
-
-        return bookmarks
-
-    async def _process_pdf_pages_parallel(
-        self,
-        doc: fitz.Document,
-        analysis: _PDFAnalysis,
-        doc_lock: threading.Lock,
-    ) -> list[_PDFPageResult]:
-        """Process all PDF pages in parallel with semaphore for memory control.
-
-        Args:
-            doc: PyMuPDF Document (not thread-safe).
-            analysis: PDF analysis results.
-            doc_lock: Lock to serialize access to doc object.
-        """
-
-        async def process_page(page_num: int) -> _PDFPageResult:
-            async with self._pdf_semaphore:
-                return await asyncio.to_thread(
-                    self._process_single_page,
-                    doc,
-                    page_num,
-                    analysis,
-                    doc_lock,
                 )
 
-        # Fire all pages concurrently
-        results = await asyncio.gather(
-            *[process_page(i) for i in range(doc.page_count)],
-            return_exceptions=True,
-        )
-
-        # Handle exceptions
-        processed: list[_PDFPageResult] = []
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                processed.append(
-                    _PDFPageResult(
-                        page_num=i,
-                        text='',
-                        error=str(result),
-                    )
-                )
-            else:
-                processed.append(result)
-
-        return processed
-
-    def _process_single_page(
-        self,
-        doc: fitz.Document,
-        page_num: int,
-        analysis: _PDFAnalysis,
-        doc_lock: threading.Lock,
-    ) -> _PDFPageResult:
-        """Process a single PDF page (synchronous, runs in thread pool).
-
-        Uses doc_lock to serialize access to PyMuPDF Document which is not thread-safe.
-        """
-        required_ocr = False
-
-        # Lock required for all PyMuPDF doc/page operations
-        with doc_lock:
-            page = doc[page_num]
-            text = page.get_text()
-
-            # Try OCR for scanned pages
-            if len(text.strip()) < PDF_OCR_CHAR_THRESHOLD and analysis.pdf_type in ('scanned', 'mixed'):
-                try:
-                    # PyMuPDF OCR (requires Tesseract)
-                    text = page.get_textpage_ocr(full=True).get_text()
-                    required_ocr = True
-                except Exception as e:
-                    logger.debug(f'OCR failed for page {page_num}: {e}')
-                    # Continue with whatever text we have
-
-            # Check for tables while holding lock (needs page object)
-            might_have_table = self._page_might_have_table(page, text)
-
-        # These operations don't need the lock (no doc access)
-        text = self._remove_header_footer(
-            text,
-            analysis.header_pattern,
-            analysis.footer_pattern,
-        )
-
-        # Table extraction uses pdfplumber (separate file handle, thread-safe)
-        table_markdown = None
-        if might_have_table:
-            table_markdown = self._extract_tables_from_page(doc, page_num, doc_lock)
-
-        return _PDFPageResult(
-            page_num=page_num,
-            text=text,
-            table_markdown=table_markdown,
-            required_ocr=required_ocr,
-        )
-
-    def _remove_header_footer(self, text: str, header: str, footer: str) -> str:
-        """Remove detected header/footer patterns from text."""
-        if not header and not footer:
-            return text
-
-        lines = text.split('\n')
-        result_lines: list[str] = []
-
-        for line in lines:
-            line_stripped = line.strip()
-            normalized = re.sub(r'\b\d+\b', '#', line_stripped)
-
-            # Skip if matches header or footer pattern
-            if header and normalized == header:
-                continue
-            if footer and normalized == footer:
-                continue
-
-            # Also skip common page number patterns
-            if re.match(r'^(Page\s+)?\d+(\s+of\s+\d+)?$', line_stripped, re.IGNORECASE):
-                continue
-
-            result_lines.append(line)
-
-        return '\n'.join(result_lines)
-
-    def _page_might_have_table(self, page: fitz.Page, text: str) -> bool:
-        """Heuristic to detect if page might contain a table."""
-        # Check for table-like patterns in text
-        lines = text.strip().split('\n')
-        if len(lines) < 3:
-            return False
-
-        # Count lines with consistent delimiter patterns
-        tab_lines = sum(1 for line in lines if '\t' in line or '  ' in line)
-        pipe_lines = sum(1 for line in lines if '|' in line)
-
-        # If many lines have consistent patterns, might be table
-        return tab_lines > len(lines) * 0.3 or pipe_lines > len(lines) * 0.3
-
-    def _extract_tables_from_page(
-        self,
-        doc: fitz.Document,
-        page_num: int,
-        doc_lock: threading.Lock,
-    ) -> str | None:
-        """Extract tables from PDF page using pdfplumber.
-
-        Note: pdfplumber opens its own file handle, so it's thread-safe.
-        We only need doc_lock to access doc.name.
-
-        TODO: Performance - this reopens the PDF for each page with tables.
-        Could batch table extraction by opening pdfplumber once per PDF.
-        """
-        import pdfplumber
-
-        try:
-            # Get the PDF path from doc (needs lock for thread safety)
-            with doc_lock:
-                pdf_path = doc.name
-            if not pdf_path:
-                return None
-
-            # pdfplumber uses its own file handle - no lock needed
-            with pdfplumber.open(pdf_path) as pdf:
-                if page_num >= len(pdf.pages):
-                    return None
-
-                page = pdf.pages[page_num]
-                tables = page.extract_tables()
-
-                if not tables:
-                    return None
-
-                markdown_parts: list[str] = []
-                for table in tables:
-                    if not table or len(table) < 2:
-                        continue
-
-                    # First row as headers
-                    headers = [str(cell or '') for cell in table[0]]
-                    rows = table[1:]
-
-                    # Build markdown table
-                    md_lines = ['| ' + ' | '.join(headers) + ' |']
-                    md_lines.append('| ' + ' | '.join(['---'] * len(headers)) + ' |')
-
-                    for row in rows:
-                        cells = [str(cell or '').replace('\n', ' ') for cell in row]
-                        # Pad or truncate to match header count
-                        while len(cells) < len(headers):
-                            cells.append('')
-                        cells = cells[: len(headers)]
-                        md_lines.append('| ' + ' | '.join(cells) + ' |')
-
-                    markdown_parts.append('\n'.join(md_lines))
-
-                return '\n\n'.join(markdown_parts) if markdown_parts else None
-
-        except Exception as e:
-            logger.debug(f'Table extraction failed for page {page_num}: {e}')
-            return None
+        return chunks
 
     # =========================================================================
     # CSV Chunking Implementation
