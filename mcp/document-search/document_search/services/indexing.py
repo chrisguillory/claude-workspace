@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -24,7 +25,8 @@ from typing import TypedDict
 from uuid import UUID
 
 import more_itertools
-from tenacity import retry, stop_after_attempt, wait_exponential
+import tenacity
+from local_lib.utils import Timer
 
 from document_search.clients.gemini import GeminiClient
 from document_search.clients.qdrant import QdrantClient
@@ -55,8 +57,8 @@ EMBEDDING_BATCH_SIZE = 100  # Gemini API limit
 FILES_PER_BATCH = 20  # Process files in batches for memory efficiency
 QDRANT_UPSERT_BATCH = 1000  # Qdrant can handle large batches
 
-# Concurrency control - follows GeminiClient pattern (semaphore at service level)
-FILE_CHUNKING_CONCURRENCY = 8  # Parallel file chunking within a batch
+# Timeout for file chunking operations (detects deadlocks)
+FILE_CHUNK_TIMEOUT_SECONDS = 60
 
 
 class _BatchResult(TypedDict):
@@ -102,17 +104,13 @@ class IndexingService:
         state_path: Path = DEFAULT_STATE_PATH,
         batch_size: int = 50,
     ) -> IndexingService:
-        """Create indexing service in async context.
-
-        Preferred factory method - ensures semaphore is bound to correct event loop.
-        """
+        """Create indexing service in async context."""
         return cls(
             chunking_service=chunking_service,
             embedding_service=embedding_service,
             repository=repository,
             state_path=state_path,
             batch_size=batch_size,
-            _file_chunking_semaphore=asyncio.Semaphore(FILE_CHUNKING_CONCURRENCY),
         )
 
     def __init__(
@@ -123,9 +121,8 @@ class IndexingService:
         *,
         state_path: Path = DEFAULT_STATE_PATH,
         batch_size: int = 50,
-        _file_chunking_semaphore: asyncio.Semaphore,
     ) -> None:
-        """Initialize indexing service. Use create() for async context safety.
+        """Initialize indexing service.
 
         Args:
             chunking_service: Service for splitting files into chunks.
@@ -133,7 +130,6 @@ class IndexingService:
             repository: Repository for vector storage.
             state_path: Path to persist indexing state.
             batch_size: Number of texts per embedding API call.
-            _file_chunking_semaphore: Internal - use create() instead.
         """
         self._chunking = chunking_service
         self._embedding = embedding_service
@@ -141,7 +137,6 @@ class IndexingService:
         self._state_path = state_path
         self._batch_size = batch_size
         self._state: DirectoryIndexState | None = None
-        self._file_chunking_semaphore = _file_chunking_semaphore
 
         # Embedding cache: text_hash -> embedding (deduplication within indexing run)
         self._embedding_cache: dict[str, tuple[float, ...]] = {}
@@ -174,7 +169,7 @@ class IndexingService:
         self._repo.ensure_collection(EMBEDDING_DIMENSION)
         self._state = self._load_state(directory)
 
-        start_time = time.time()
+        timer = Timer()
         errors: list[FileProcessingError] = []
         files_processed = 0
         files_skipped = 0
@@ -206,7 +201,7 @@ class IndexingService:
                     chunks_created=0,
                     embeddings_pending=len(files_to_index),
                     current_phase='scanning',
-                    elapsed_seconds=time.time() - start_time,
+                    elapsed_seconds=timer.elapsed(),
                 )
             )
 
@@ -218,7 +213,7 @@ class IndexingService:
                 batch_files,
                 directory,
                 on_progress,
-                start_time,
+                timer,
                 files_total,
                 files_processed,
                 files_skipped,
@@ -245,7 +240,7 @@ class IndexingService:
                         embeddings_pending=len(files_to_index) - batch_start - len(batch_files),
                         current_phase='storing',
                         errors_so_far=len(errors),
-                        elapsed_seconds=time.time() - start_time,
+                        elapsed_seconds=timer.elapsed(),
                     )
                 )
 
@@ -269,6 +264,7 @@ class IndexingService:
             chunks_deleted=chunks_deleted,
             embeddings_created=chunks_created,
             tokens_used=tokens_used,
+            elapsed_seconds=timer.elapsed(),
             errors=tuple(errors),
         )
 
@@ -295,11 +291,12 @@ class IndexingService:
         self._state = self._load_state(directory)
 
         # Process as a batch of 1
+        timer = Timer()
         batch_result = await self._process_file_batch(
             files=[file_path],
             directory=directory,
             on_progress=None,
-            start_time=time.time(),
+            timer=timer,
             files_total=1,
             files_processed_so_far=0,
             files_skipped=0,
@@ -316,6 +313,7 @@ class IndexingService:
             chunks_deleted=batch_result['chunks_deleted'],
             embeddings_created=batch_result['chunks_created'],
             tokens_used=batch_result['tokens_used'],
+            elapsed_seconds=timer.elapsed(),
             errors=tuple(batch_result['errors']),
         )
 
@@ -332,49 +330,72 @@ class IndexingService:
             'points_count': info.points_count,
         }
 
-    async def _chunk_file_with_semaphore(
+    async def _chunk_file_with_timeout(
         self,
         file_path: Path,
         directory: Path,
     ) -> _PendingFile | FileProcessingError | None:
-        """Chunk a single file with concurrency control.
+        """Chunk a single file with timeout protection.
 
-        Uses semaphore to limit concurrent file chunking operations,
-        following the same pattern as GeminiClient for embeddings.
+        No outer semaphore - PDF_SEMAPHORE in ChunkingService provides sufficient
+        backpressure. Timeout fails loudly to detect deadlocks.
 
         Returns:
             _PendingFile on success, FileProcessingError on failure, None if empty.
+
+        Raises:
+            asyncio.TimeoutError: If chunking exceeds timeout (potential deadlock).
         """
         rel_path = str(file_path.relative_to(directory))
 
-        async with self._file_chunking_semaphore:
-            try:
-                chunks = list(await self._chunking.chunk_file(file_path))
-                if not chunks:
-                    return None
+        try:
+            # Timeout fails loudly - don't catch TimeoutError
+            chunks = list(
+                await asyncio.wait_for(
+                    self._chunking.chunk_file(file_path),
+                    timeout=FILE_CHUNK_TIMEOUT_SECONDS,
+                )
+            )
+            if not chunks:
+                return None
 
-                return _PendingFile(
-                    file_path=file_path,
-                    rel_path=rel_path,
-                    file_hash=_file_hash(file_path),
-                    file_size=file_path.stat().st_size,
-                    chunks=chunks,
-                    chunk_ids=[_deterministic_chunk_id(str(file_path), c.chunk_index, c.text) for c in chunks],
-                )
-            except Exception as e:
-                return FileProcessingError(
-                    file_path=str(file_path),
-                    error_type=type(e).__name__,
-                    message=str(e),
-                    recoverable=not isinstance(e, (PermissionError, IsADirectoryError)),
-                )
+            return _PendingFile(
+                file_path=file_path,
+                rel_path=rel_path,
+                file_hash=_file_hash(file_path),
+                file_size=file_path.stat().st_size,
+                chunks=chunks,
+                chunk_ids=[_deterministic_chunk_id(str(file_path), c.chunk_index, c.text) for c in chunks],
+            )
+        except TimeoutError:
+            # Don't catch - let it bubble and crash loudly
+            print(
+                f'[DEADLOCK] File chunking timeout ({FILE_CHUNK_TIMEOUT_SECONDS}s): {file_path}',
+                file=sys.stderr,
+                flush=True,
+            )
+            raise
+        except (
+            FileNotFoundError,
+            PermissionError,
+            IsADirectoryError,
+            UnicodeDecodeError,
+            OSError,
+        ) as e:
+            # Expected file I/O errors - recoverable
+            return FileProcessingError(
+                file_path=str(file_path),
+                error_type=type(e).__name__,
+                message=str(e),
+                recoverable=not isinstance(e, (PermissionError, IsADirectoryError)),
+            )
 
     async def _process_file_batch(
         self,
         files: Sequence[Path],
         directory: Path,
         on_progress: ProgressCallback | None,
-        start_time: float,
+        timer: Timer,
         files_total: int,
         files_processed_so_far: int,
         files_skipped: int,
@@ -405,13 +426,13 @@ class IndexingService:
                     chunks_created=chunks_created_so_far,
                     embeddings_pending=len(files),
                     current_phase='chunking',
-                    elapsed_seconds=time.time() - start_time,
+                    elapsed_seconds=timer.elapsed(),
                 )
             )
 
         # Fire all file chunking tasks concurrently - semaphore controls actual parallelism
         results = await asyncio.gather(
-            *[self._chunk_file_with_semaphore(file_path, directory) for file_path in files],
+            *[self._chunk_file_with_timeout(file_path, directory) for file_path in files],
             return_exceptions=True,
         )
 
@@ -463,7 +484,7 @@ class IndexingService:
                     chunks_created=chunks_created_so_far,
                     embeddings_pending=len(all_texts),
                     current_phase='embedding',
-                    elapsed_seconds=time.time() - start_time,
+                    elapsed_seconds=timer.elapsed(),
                 )
             )
 
@@ -585,9 +606,21 @@ class IndexingService:
         current_hash = _file_hash(path)
         return current_hash != file_state.file_hash
 
-    @retry(
-        wait=wait_exponential(multiplier=1, min=2, max=60),
-        stop=stop_after_attempt(5),
+    @staticmethod
+    def _log_retry(retry_state: tenacity.RetryCallState) -> None:
+        """Log retry attempts for visibility."""
+        exc = retry_state.outcome.exception() if retry_state.outcome else 'unknown'
+        wait = retry_state.next_action.sleep if retry_state.next_action else 0
+        print(
+            f'[RETRY] Embedding attempt {retry_state.attempt_number} failed: {exc}. Waiting {wait:.1f}s...',
+            file=sys.stderr,
+            flush=True,
+        )
+
+    @tenacity.retry(
+        wait=tenacity.wait_exponential(multiplier=1, min=2, max=60),
+        stop=tenacity.stop_after_attempt(5),
+        before_sleep=lambda rs: IndexingService._log_retry(rs),
         reraise=True,
     )
     async def _embed_batch_with_retry(self, texts: Sequence[str]) -> list[tuple[float, ...]]:

@@ -78,6 +78,7 @@ class IndexingResult(StrictModel):
     chunks_deleted: int  # Old chunks soft-deleted
     embeddings_created: int
     tokens_used: int  # Approximate, for cost tracking
+    elapsed_seconds: float  # Total indexing time
     errors: tuple[FileProcessingError, ...]
 
     @property

@@ -3,8 +3,8 @@
 Thin wrapper around google-genai. Handles API calls only - no business logic.
 Type translation happens in the service layer.
 
-Rate limiting is handled internally via semaphore - callers can fire all
-requests without worrying about concurrency limits.
+Uses native async API (client.aio) for true concurrent requests.
+Rate limiting is handled internally via semaphore.
 """
 
 from __future__ import annotations
@@ -27,12 +27,12 @@ def _load_api_key() -> str:
 class GeminiClient:
     """Low-level Gemini API client with internal rate limiting.
 
-    Concurrency is controlled internally via semaphore. Callers can fire
-    unlimited concurrent requests - the client handles queuing.
+    Uses native async API (client.aio) for true concurrent HTTP requests.
+    Concurrency is controlled via semaphore to respect API rate limits.
     """
 
     DEFAULT_MODEL = 'text-embedding-004'
-    DEFAULT_MAX_CONCURRENT = 1_000  # High limit; let API rate limits be the constraint
+    DEFAULT_MAX_CONCURRENT = 200  # Aggressive - may hit rate limits
 
     def __init__(
         self,
@@ -43,8 +43,7 @@ class GeminiClient:
 
         Args:
             api_key: Gemini API key. If None, loads from standard location.
-            max_concurrent: Max concurrent API requests. Default 1000 (API rate
-                limits govern actual concurrency).
+            max_concurrent: Max concurrent API requests. Default 50 for Tier 1.
         """
         self._api_key = api_key or _load_api_key()
         self._client = genai.Client(api_key=self._api_key)
@@ -59,8 +58,8 @@ class GeminiClient:
     ) -> list[list[float]]:
         """Embed texts using Gemini API.
 
-        Rate limiting handled internally - callers can fire unlimited
-        concurrent requests without worrying about API limits.
+        Uses native async API for true concurrent requests.
+        Rate limiting handled internally via semaphore.
 
         Args:
             texts: Texts to embed (max 100 per API call).
@@ -74,25 +73,9 @@ class GeminiClient:
             google.genai.errors.ClientError: On API errors.
         """
         async with self._semaphore:
-            # Run blocking SDK call in thread pool
-            return await asyncio.to_thread(
-                self._embed_sync,
-                texts,
-                task_type=task_type,
+            result = await self._client.aio.models.embed_content(
                 model=model,
+                contents=list(texts),
+                config={'task_type': task_type},
             )
-
-    def _embed_sync(
-        self,
-        texts: Sequence[str],
-        *,
-        task_type: str,
-        model: str,
-    ) -> list[list[float]]:
-        """Synchronous embed implementation."""
-        result = self._client.models.embed_content(
-            model=model,
-            contents=list(texts),
-            config={'task_type': task_type},
-        )
-        return [list(e.values) for e in result.embeddings]
+            return [list(e.values) for e in result.embeddings]
