@@ -233,7 +233,6 @@ import sys
 import tempfile
 import traceback
 import typing
-import uuid
 
 # Third-party imports
 import attrs
@@ -250,6 +249,7 @@ import pydantic
 import uvicorn
 
 # Local library imports
+from local_lib.session_tracker import SESSIONS_PATH, SessionDatabase
 from local_lib.utils import DualLogger, encode_project_path, humanize_seconds
 
 
@@ -320,92 +320,62 @@ class ClaudeContext:
     socket_path: pathlib.Path
 
 
-async def _discover_session_id(session_marker: str) -> str:
-    """Discover Claude Code session ID via self-referential marker search in debug logs.
+def _discover_session_id(claude_pid: int) -> str:
+    """Discover Claude Code session ID from claude-workspace sessions.json.
 
-    Workaround for lack of official session discovery API. Claude Code's stdio transport
-    provides no session context to MCP servers. The /status command exists for interactive
-    use, and the Agent SDK exposes session_id, but CLI MCP servers have no API.
+    Looks up the active session matching the given Claude PID in the sessions
+    database maintained by claude-workspace hooks.
 
     Related: https://github.com/anthropics/claude-code/issues/1335
              https://github.com/anthropics/claude-code/issues/1407
              https://github.com/anthropics/claude-code/issues/5262
 
     Args:
-        session_marker: Unique marker string to search for in debug logs
+        claude_pid: PID of the Claude process (from _find_claude_context)
 
     Returns:
         Session ID (UUID string)
 
     Raises:
-        RuntimeError: If debug directory doesn't exist or session ID cannot be found after retries
+        RuntimeError: If sessions.json doesn't exist, no matching session found,
+                      or multiple active sessions match the PID
     """
-    debug_dir = pathlib.Path.home() / '.claude' / 'debug'
-    if not debug_dir.exists():
-        raise RuntimeError(f'Claude debug directory not found: {debug_dir}')
+    import json
+    import time
 
-    # Retry up to 10 times to handle race condition where log hasn't flushed yet
-    # Claude Code buffers log writes, so we need longer waits (200ms × 10 = ~2s max)
-    print(
-        f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Starting session discovery for marker: {session_marker}',
-        file=sys.stderr,
-        flush=True,
+    # Retry loop - SessionStart hook may not have finished writing yet
+    max_retries = 20
+    retry_delay = 0.05  # 50ms between retries
+
+    for attempt in range(max_retries):
+        if not SESSIONS_PATH.exists():
+            time.sleep(retry_delay)
+            continue
+
+        with SESSIONS_PATH.open() as f:
+            data = json.load(f)
+
+        db = SessionDatabase.model_validate(data)
+
+        # Find active sessions matching our Claude PID
+        matching = [s for s in db.sessions if s.state == 'active' and s.metadata.claude_pid == claude_pid]
+
+        if len(matching) == 1:
+            return matching[0].session_id
+
+        if len(matching) > 1:
+            # Multiple active sessions with same PID - shouldn't happen
+            session_ids = [s.session_id for s in matching]
+            raise RuntimeError(f'Multiple active sessions found for Claude PID {claude_pid}: {session_ids}')
+
+        # No match yet - hook may still be writing
+        time.sleep(retry_delay)
+
+    # All retries exhausted
+    raise RuntimeError(
+        f'Could not find active session for Claude PID {claude_pid} in {SESSIONS_PATH} '
+        f'after {max_retries} attempts. Ensure claude-workspace SessionStart hook is configured.'
     )
-
-    for attempt in range(20):
-        print(
-            f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Attempt {attempt + 1}/20',
-            file=sys.stderr,
-            flush=True,
-        )
-
-        result = subprocess.run(
-            [
-                'rg',
-                '-l',
-                '--fixed-strings',
-                '--glob',
-                '*.txt',
-                session_marker,
-                debug_dir.as_posix(),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-
-        print(
-            f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] rg returncode={result.returncode}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}',
-            file=sys.stderr,
-            flush=True,
-        )
-
-        if result.returncode == 0 and result.stdout.strip():
-            # rg found the marker - extract session ID from first matching file
-            first_match = result.stdout.strip().split('\n')[0]
-            session_id = pathlib.Path(first_match).stem
-            print(
-                f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] SUCCESS - Found session ID: {session_id}',
-                file=sys.stderr,
-                flush=True,
-            )
-            return session_id
-
-        # Not found yet - wait briefly before retrying (except on last attempt)
-        if attempt < 19:
-            print(
-                f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] Not found, sleeping 50ms before retry',
-                file=sys.stderr,
-                flush=True,
-            )
-            await asyncio.sleep(0.05)
-
-    print(
-        f'[{datetime.datetime.now(datetime.UTC).astimezone().isoformat()}] FAILED after 20 attempts',
-        file=sys.stderr,
-        flush=True,
-    )
-    raise RuntimeError(f'Could not find session marker in any debug log files in {debug_dir} after 20 attempts')
 
 
 @functools.cache
@@ -496,21 +466,18 @@ class ServerState:
     """Container for all server state - initialized once at startup, never Optional."""
 
     @classmethod
-    async def create(cls) -> typing.Self:
+    def create(cls) -> typing.Self:
         """Factory method to create and initialize server state - fails fast if anything goes wrong."""
         # Capture server start time
         started_at = datetime.datetime.now(datetime.UTC)
 
-        # Discover session ID via self-referential marker search
-        session_marker = f'SESSION_MARKER_{uuid.uuid4()}'
-        print(session_marker, file=sys.stderr, flush=True)
-
-        session_id = await _discover_session_id(session_marker)
-        print(f'✓ Discovered session ID: {session_id}', file=sys.stderr, flush=True)
-
         # Find Claude context (PID, project directory) by walking process tree
         claude_context = _find_claude_context()
         print(f'Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}')
+
+        # Discover session ID from claude-workspace sessions.json
+        session_id = _discover_session_id(claude_context.claude_pid)
+        print(f'✓ Discovered session ID: {session_id}', file=sys.stderr, flush=True)
 
         # Compute transcript path using Claude Code's path encoding convention
         # Note: Claude Code creates the transcript file before starting MCP servers,
@@ -835,7 +802,7 @@ async def lifespan(
     server_instance: mcp.server.fastmcp.FastMCP,
 ) -> typing.AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
-    state = await ServerState.create()
+    state = ServerState.create()
     service = PythonInterpreterService(state)
     register_tools(service)
 

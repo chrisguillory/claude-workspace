@@ -161,7 +161,9 @@ class SessionManager:
                         crash_detected_at=None,
                         parent_id=parent_id if parent_id is not None else existing_session.metadata.parent_id,
                         startup_model=existing_session.metadata.startup_model,  # Preserve from original
-                        claude_version=claude_version if claude_version is not None else existing_session.metadata.claude_version,
+                        claude_version=claude_version
+                        if claude_version is not None
+                        else existing_session.metadata.claude_version,
                     ),
                 )
                 # Replace in sessions list
