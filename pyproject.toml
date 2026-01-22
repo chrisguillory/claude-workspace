@@ -85,8 +85,10 @@ init_typed = true
 [dependency-groups]
 dev = [
     "mypy>=1.19.1",
+    "pandas-stubs>=2.3.3.260113",
     "pre-commit>=4.5.1",
     "pydantic>=2.12.5", # Required for pydantic.mypy plugin
+    "pymupdf-stubs>=1.26.1.post1",
     "ruff>=0.14.10",
     "types-psutil>=7.2.1.20251231",
     "types-pyyaml>=6.0.12.20250915",

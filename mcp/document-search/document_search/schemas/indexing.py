@@ -15,7 +15,8 @@ from local_lib.types import JsonDatetime, JsonUuid
 from document_search.schemas.base import StrictModel
 
 # Current chunking strategy version - bump when ChunkingService changes
-CHUNK_STRATEGY_VERSION = 1
+# v2: Added PDF and CSV chunking support with parallel processing
+CHUNK_STRATEGY_VERSION = 2
 
 
 class FileIndexState(StrictModel):

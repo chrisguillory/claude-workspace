@@ -4,11 +4,15 @@ version = "0.1.0"
 description = "Document Search MCP Server - Semantic search over local documents"
 requires-python = ">=3.13"
 dependencies = [
+    "fastmcp>=2.12.5",
     "google-genai>=1.59.0",
     "langchain-text-splitters>=1.1.0",
     "local-lib",
     "more-itertools>=10.8.0",
+    "pandas>=2.3.3",
+    "pdfplumber>=0.11.9",
     "pydantic>=2.12.5",
+    "pymupdf>=1.26.7",
     "qdrant-client>=1.16.2",
     "tenacity>=9.1.2",
 ]

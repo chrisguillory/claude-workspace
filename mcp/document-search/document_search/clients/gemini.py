@@ -43,7 +43,8 @@ class GeminiClient:
 
         Args:
             api_key: Gemini API key. If None, loads from standard location.
-            max_concurrent: Max concurrent API requests (default 5).
+            max_concurrent: Max concurrent API requests. Default 1000 (API rate
+                limits govern actual concurrency).
         """
         self._api_key = api_key or _load_api_key()
         self._client = genai.Client(api_key=self._api_key)

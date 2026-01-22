@@ -29,7 +29,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from document_search.clients.gemini import GeminiClient
 from document_search.clients.qdrant import QdrantClient
 from document_search.repositories.document_vector import DocumentVectorRepository
-from document_search.schemas.chunking import Chunk, get_file_type
+from document_search.schemas.chunking import EXTENSION_MAP, Chunk, get_file_type
 from document_search.schemas.embeddings import EmbedBatchRequest
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
@@ -54,6 +54,9 @@ DEFAULT_STATE_PATH = Path.home() / '.claude-workspace' / 'cache' / 'document_sea
 EMBEDDING_BATCH_SIZE = 100  # Gemini API limit
 FILES_PER_BATCH = 20  # Process files in batches for memory efficiency
 QDRANT_UPSERT_BATCH = 1000  # Qdrant can handle large batches
+
+# Concurrency control - follows GeminiClient pattern (semaphore at service level)
+FILE_CHUNKING_CONCURRENCY = 8  # Parallel file chunking within a batch
 
 
 class _BatchResult(TypedDict):
@@ -89,6 +92,29 @@ class IndexingService:
     - Error collection and categorization
     """
 
+    @classmethod
+    async def create(
+        cls,
+        chunking_service: ChunkingService,
+        embedding_service: EmbeddingService,
+        repository: DocumentVectorRepository,
+        *,
+        state_path: Path = DEFAULT_STATE_PATH,
+        batch_size: int = 50,
+    ) -> IndexingService:
+        """Create indexing service in async context.
+
+        Preferred factory method - ensures semaphore is bound to correct event loop.
+        """
+        return cls(
+            chunking_service=chunking_service,
+            embedding_service=embedding_service,
+            repository=repository,
+            state_path=state_path,
+            batch_size=batch_size,
+            _file_chunking_semaphore=asyncio.Semaphore(FILE_CHUNKING_CONCURRENCY),
+        )
+
     def __init__(
         self,
         chunking_service: ChunkingService,
@@ -96,9 +122,10 @@ class IndexingService:
         repository: DocumentVectorRepository,
         *,
         state_path: Path = DEFAULT_STATE_PATH,
-        batch_size: int = 50,  # Embeddings per API call (conservative, max is 100)
+        batch_size: int = 50,
+        _file_chunking_semaphore: asyncio.Semaphore,
     ) -> None:
-        """Initialize indexing service.
+        """Initialize indexing service. Use create() for async context safety.
 
         Args:
             chunking_service: Service for splitting files into chunks.
@@ -106,6 +133,7 @@ class IndexingService:
             repository: Repository for vector storage.
             state_path: Path to persist indexing state.
             batch_size: Number of texts per embedding API call.
+            _file_chunking_semaphore: Internal - use create() instead.
         """
         self._chunking = chunking_service
         self._embedding = embedding_service
@@ -113,6 +141,10 @@ class IndexingService:
         self._state_path = state_path
         self._batch_size = batch_size
         self._state: DirectoryIndexState | None = None
+        self._file_chunking_semaphore = _file_chunking_semaphore
+
+        # Embedding cache: text_hash -> embedding (deduplication within indexing run)
+        self._embedding_cache: dict[str, tuple[float, ...]] = {}
 
     async def index_directory(
         self,
@@ -150,8 +182,10 @@ class IndexingService:
         chunks_deleted = 0
         tokens_used = 0
 
-        # PHASE 1: Scan and identify files
-        all_files = [f for f in directory.glob('**/*') if f.is_file() and get_file_type(f) is not None]
+        # PHASE 1: Scan and identify files (use extension-specific globs for efficiency)
+        all_files: list[Path] = []
+        for ext in EXTENSION_MAP:
+            all_files.extend(f for f in directory.glob(f'**/*{ext}') if f.is_file())
         files_total = len(all_files)
 
         files_to_index: list[Path] = []
@@ -298,6 +332,43 @@ class IndexingService:
             'points_count': info.points_count,
         }
 
+    async def _chunk_file_with_semaphore(
+        self,
+        file_path: Path,
+        directory: Path,
+    ) -> _PendingFile | FileProcessingError | None:
+        """Chunk a single file with concurrency control.
+
+        Uses semaphore to limit concurrent file chunking operations,
+        following the same pattern as GeminiClient for embeddings.
+
+        Returns:
+            _PendingFile on success, FileProcessingError on failure, None if empty.
+        """
+        rel_path = str(file_path.relative_to(directory))
+
+        async with self._file_chunking_semaphore:
+            try:
+                chunks = list(await self._chunking.chunk_file(file_path))
+                if not chunks:
+                    return None
+
+                return _PendingFile(
+                    file_path=file_path,
+                    rel_path=rel_path,
+                    file_hash=_file_hash(file_path),
+                    file_size=file_path.stat().st_size,
+                    chunks=chunks,
+                    chunk_ids=[_deterministic_chunk_id(str(file_path), c.chunk_index, c.text) for c in chunks],
+                )
+            except Exception as e:
+                return FileProcessingError(
+                    file_path=str(file_path),
+                    error_type=type(e).__name__,
+                    message=str(e),
+                    recoverable=not isinstance(e, (PermissionError, IsADirectoryError)),
+                )
+
     async def _process_file_batch(
         self,
         files: Sequence[Path],
@@ -312,7 +383,7 @@ class IndexingService:
         """Process a batch of files: chunk → embed → upsert → delete old → update state.
 
         Key design choices:
-        - Chunk all files first (CPU-bound, fast)
+        - Chunk files in parallel (semaphore controls concurrency)
         - Batch embed across files (fewer API calls)
         - Upsert new chunks BEFORE deleting old (atomicity)
         - Update state after successful upsert (crash recovery)
@@ -323,7 +394,7 @@ class IndexingService:
         errors: list[FileProcessingError] = []
         pending_files: list[_PendingFile] = []
 
-        # STEP 1: Chunk all files in batch
+        # STEP 1: Chunk all files in batch (PARALLEL with semaphore)
         if on_progress:
             on_progress(
                 IndexingProgress(
@@ -338,32 +409,30 @@ class IndexingService:
                 )
             )
 
-        for file_path in files:
-            rel_path = str(file_path.relative_to(directory))
-            try:
-                chunks = list(self._chunking.chunk_file(file_path))
-                if not chunks:
-                    continue
+        # Fire all file chunking tasks concurrently - semaphore controls actual parallelism
+        results = await asyncio.gather(
+            *[self._chunk_file_with_semaphore(file_path, directory) for file_path in files],
+            return_exceptions=True,
+        )
 
-                pf = _PendingFile(
-                    file_path=file_path,
-                    rel_path=rel_path,
-                    file_hash=_file_hash(file_path),
-                    file_size=file_path.stat().st_size,
-                    chunks=chunks,
-                    chunk_ids=[_deterministic_chunk_id(str(file_path), c.chunk_index, c.text) for c in chunks],
-                )
-                pending_files.append(pf)
-
-            except Exception as e:
+        # Collect results: separate pending files from errors
+        for result in results:
+            if result is None:
+                continue  # Empty file, skip
+            if isinstance(result, FileProcessingError):
+                errors.append(result)
+            elif isinstance(result, Exception):
+                # Unexpected exception from gather (shouldn't happen with return_exceptions=True)
                 errors.append(
                     FileProcessingError(
-                        file_path=str(file_path),
-                        error_type=type(e).__name__,
-                        message=str(e),
-                        recoverable=not isinstance(e, (PermissionError, IsADirectoryError)),
+                        file_path='unknown',
+                        error_type=type(result).__name__,
+                        message=str(result),
+                        recoverable=True,
                     )
                 )
+            elif isinstance(result, _PendingFile):
+                pending_files.append(result)
 
         if not pending_files:
             return {
@@ -425,6 +494,10 @@ class IndexingService:
         # Key: Delete by specific IDs, not source_path, to avoid deleting new chunks.
         # Chunk IDs are deterministic (source_path + index + content_hash), so
         # changed content = different IDs. We delete only the OLD IDs from state.
+        #
+        # Note: chunks_deleted is the EXPECTED count from state, not actual deletion
+        # count from Qdrant. Some chunks may already be deleted or never existed.
+        # State is authoritative for tracking purposes.
         chunks_deleted = 0
         old_chunk_ids: list[UUID] = []
         for pf in pending_files:
@@ -527,8 +600,9 @@ class IndexingService:
         self,
         all_texts: Sequence[str],
     ) -> tuple[list[tuple[float, ...]], int, list[float]]:
-        """Embed all texts concurrently.
+        """Embed all texts concurrently with deduplication.
 
+        Skips embedding for texts already in cache (same content = same embedding).
         Fires all batches at once - client handles rate limiting internally.
 
         Args:
@@ -537,37 +611,70 @@ class IndexingService:
         Returns:
             Tuple of (embeddings, tokens_used, batch_times_seconds).
         """
-        batches = list(more_itertools.chunked(all_texts, EMBEDDING_BATCH_SIZE))
+        # Deduplicate: hash each text, identify which need embedding
+        text_hashes = [hashlib.sha256(t.encode()).hexdigest() for t in all_texts]
+        uncached_indices: list[int] = []
+        uncached_texts: list[str] = []
+
+        for i, (text, h) in enumerate(zip(all_texts, text_hashes)):
+            if h not in self._embedding_cache:
+                uncached_indices.append(i)
+                uncached_texts.append(text)
+
+        cache_hits = len(all_texts) - len(uncached_texts)
+        if cache_hits > 0:
+            # Log deduplication stats (visible in debug)
+            pass  # Could add logging here if desired
+
+        # Embed only uncached texts
         batch_times: list[float] = []
+        new_embeddings: list[tuple[float, ...]] = []
 
-        async def embed_batch_timed(batch: Sequence[str]) -> list[tuple[float, ...]]:
-            """Embed single batch with timing."""
-            t0 = time.perf_counter()
-            result = await self._embed_batch_with_retry(list(batch))
-            batch_times.append(time.perf_counter() - t0)
-            return result
+        if uncached_texts:
+            batches = list(more_itertools.chunked(uncached_texts, EMBEDDING_BATCH_SIZE))
 
-        # Fire all batches concurrently - client handles rate limiting
-        results = await asyncio.gather(*[embed_batch_timed(batch) for batch in batches])
+            async def embed_batch_timed(batch: Sequence[str]) -> list[tuple[float, ...]]:
+                """Embed single batch with timing."""
+                t0 = time.perf_counter()
+                result = await self._embed_batch_with_retry(list(batch))
+                batch_times.append(time.perf_counter() - t0)
+                return result
 
-        # Flatten results and calculate tokens
-        all_embeddings: list[tuple[float, ...]] = []
-        tokens_used = 0
-        for batch, batch_result in zip(batches, results):
-            if len(batch_result) != len(batch):
-                raise RuntimeError(f'Embedding API returned {len(batch_result)} embeddings for {len(batch)} texts')
-            all_embeddings.extend(batch_result)
-            tokens_used += sum(len(t) for t in batch) // 3
+            # Fire all batches concurrently - client handles rate limiting
+            results = await asyncio.gather(*[embed_batch_timed(batch) for batch in batches])
+
+            # Flatten and cache new embeddings
+            for batch_result in results:
+                new_embeddings.extend(batch_result)
+
+            # Verify embedding count matches (guards against API returning wrong count)
+            if len(new_embeddings) != len(uncached_indices):
+                raise RuntimeError(
+                    f'Embedding count mismatch: expected {len(uncached_indices)}, '
+                    f'got {len(new_embeddings)}. Check Gemini API response.'
+                )
+
+            # Update cache with new embeddings
+            for idx, emb in zip(uncached_indices, new_embeddings, strict=True):
+                self._embedding_cache[text_hashes[idx]] = emb
+
+        # Build final result in original order (all now in cache)
+        all_embeddings: list[tuple[float, ...]] = [self._embedding_cache[h] for h in text_hashes]
+
+        # Calculate tokens only for texts we actually embedded
+        tokens_used = sum(len(t) for t in uncached_texts) // 3
 
         return all_embeddings, tokens_used, batch_times
 
 
-def create_indexing_service(
+async def create_indexing_service(
     *,
     qdrant_url: str = 'http://localhost:6333',
     state_path: Path = DEFAULT_STATE_PATH,
 ) -> IndexingService:
     """Factory function to create IndexingService with default dependencies.
+
+    Must be called from async context - ensures semaphores are bound correctly.
 
     Args:
         qdrant_url: URL of Qdrant server.
@@ -579,11 +686,11 @@ def create_indexing_service(
     gemini_client = GeminiClient()
     qdrant_client = QdrantClient(url=qdrant_url)
 
-    chunking_service = ChunkingService()
+    chunking_service = await ChunkingService.create()
     embedding_service = EmbeddingService(gemini_client)
     repository = DocumentVectorRepository(qdrant_client)
 
-    return IndexingService(
+    return await IndexingService.create(
         chunking_service=chunking_service,
         embedding_service=embedding_service,
         repository=repository,

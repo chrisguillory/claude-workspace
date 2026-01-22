@@ -11,6 +11,12 @@ autocomplete.
 
 - `ccl_chromium_reader/` - LocalStoreDb and SessionStoreDb for Chrome browser data extraction
 - `dfindexeddb/` - FolderReader and record types for Chrome IndexedDB parsing
+- `fitz/` - PyMuPDF Document/Page types (supplements incomplete pymupdf-stubs, see [#3361](https://github.com/pymupdf/PyMuPDF/issues/3361))
+- `google/` - google-genai Client for Gemini API
+- `langchain_text_splitters/` - Text splitters for chunking
+- `pdfplumber/` - PDF table extraction (py.typed missing from wheel, see [#698](https://github.com/jsvine/pdfplumber/issues/698))
+- `qdrant_client/` - Qdrant vector database client
+- `tenacity/` - Retry decorators
 
 ## Guidelines
 
