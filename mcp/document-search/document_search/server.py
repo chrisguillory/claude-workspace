@@ -33,6 +33,7 @@ from document_search.schemas.vectors import SearchQuery, SearchResult
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.indexing import IndexingService
+from document_search.services.reranker import RerankerService
 from document_search.services.sparse_embedding import SparseEmbeddingService
 
 # Embedding dimension for Gemini
@@ -46,6 +47,7 @@ class ServerState:
     indexing_service: IndexingService
     embedding_service: EmbeddingService
     sparse_embedding_service: SparseEmbeddingService
+    reranker_service: RerankerService
     repository: DocumentVectorRepository
     qdrant_url: str
 
@@ -61,6 +63,7 @@ class ServerState:
         chunking_service = await ChunkingService.create()
         embedding_service = EmbeddingService(gemini_client)
         sparse_embedding_service = SparseEmbeddingService()
+        reranker_service = RerankerService()
         repository = DocumentVectorRepository(qdrant_client)
 
         indexing_service = await IndexingService.create(
@@ -74,6 +77,7 @@ class ServerState:
             indexing_service=indexing_service,
             embedding_service=embedding_service,
             sparse_embedding_service=sparse_embedding_service,
+            reranker_service=reranker_service,
             repository=repository,
             qdrant_url=qdrant_url,
         )
@@ -197,20 +201,31 @@ def register_tools(state: ServerState) -> None:
         # Sparse embedding (BM25 keyword matching)
         sparse_indices, sparse_values = state.sparse_embedding_service.embed(query)
 
+        # Fetch more candidates for reranking (3x limit, max 50)
+        effective_limit = min(max(limit, 1), 100)
+        rerank_candidates = min(effective_limit * 3, 50)
+
         # Build hybrid search query
         search_query = SearchQuery(
             dense_vector=embed_response.values,
             sparse_indices=sparse_indices,
             sparse_values=sparse_values,
-            limit=min(max(limit, 1), 100),
+            limit=rerank_candidates,
             file_types=tuple(typing.cast(FileType, ft) for ft in file_types) if file_types else None,
             source_path_prefix=path_prefix,
         )
 
-        # Hybrid search with RRF fusion
+        # Layer 1: Hybrid search with RRF fusion
         result = state.repository.search(search_query)
 
-        await logger.info(f'Found {result.total} results')
+        # Layer 2: Cross-encoder reranking
+        result = await state.reranker_service.rerank(
+            query=query,
+            result=result,
+            top_k=effective_limit,
+        )
+
+        await logger.info(f'Found {result.total} results (reranked top {effective_limit})')
 
         return result
 
