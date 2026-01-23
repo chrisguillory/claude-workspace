@@ -1,0 +1,39 @@
+{
+  "company": "TechStartup Inc",
+  "founded": 2023,
+  "headquarters": {
+    "city": "San Francisco",
+    "state": "CA",
+    "country": "USA"
+  },
+  "products": [
+    {
+      "name": "CloudSync Pro",
+      "price": 29.99,
+      "features": [
+        "Real-time sync",
+        "256-bit encryption",
+        "Unlimited storage"
+      ]
+    },
+    {
+      "name": "DataVault Enterprise",
+      "price": 199.99,
+      "features": [
+        "Multi-tenant",
+        "HIPAA compliant",
+        "24/7 support"
+      ]
+    }
+  ],
+  "team": {
+    "ceo": "Jennifer Martinez",
+    "cto": "David Kim",
+    "employees": 47
+  },
+  "funding": {
+    "series_a": 5000000,
+    "series_b": 25000000,
+    "total_raised": 30000000
+  }
+}

@@ -96,7 +96,7 @@ def register_tools(state: ServerState) -> None:
         ),
     )
     async def index_directory(
-        path: str,
+        path: str | None = None,
         full_reindex: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
@@ -106,7 +106,8 @@ def register_tools(state: ServerState) -> None:
         since the last indexing run. Supports markdown, text, JSON, and PDF files.
 
         Args:
-            path: Path to directory to index (absolute, relative, or with ~ expansion).
+            path: Path to directory to index. Defaults to current working directory
+                if not specified. Supports absolute, relative, or ~ expansion.
             full_reindex: If True, reindex all files regardless of whether they've changed.
             ctx: MCP context for logging.
 
@@ -117,7 +118,12 @@ def register_tools(state: ServerState) -> None:
             raise ValueError('MCP context required')
 
         logger = DualLogger(ctx)
-        directory = Path(path).expanduser().resolve()
+
+        # Default to current working directory
+        if path is None:
+            directory = Path.cwd()
+        else:
+            directory = Path(path).expanduser().resolve()
 
         if not directory.is_dir():
             raise ValueError(f'Not a directory: {directory}')

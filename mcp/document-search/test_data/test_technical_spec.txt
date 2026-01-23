@@ -1,0 +1,31 @@
+Technical Specification Document
+Version 2.4.1 - January 2025
+
+INTRODUCTION
+
+This document describes the technical specifications for the XR-7000 Industrial Controller. The XR-7000 is designed for high-reliability applications in manufacturing environments where continuous operation is critical.
+
+HARDWARE SPECIFICATIONS
+
+The main processing unit contains a quad-core ARM Cortex-A72 processor running at 1.8GHz with 8GB of DDR4 RAM. The system includes 64GB of industrial-grade eMMC storage with wear leveling for extended lifespan in write-intensive applications.
+
+Communication interfaces include dual Gigabit Ethernet ports with hardware timestamping for precise time synchronization, four RS-485 serial ports for legacy equipment integration, and a CAN bus interface for industrial automation protocols.
+
+POWER REQUIREMENTS
+
+Input voltage: 24V DC (20-28V tolerance)
+Power consumption: 15W typical, 25W maximum
+Operating temperature: -40C to +85C
+Humidity: 5% to 95% non-condensing
+
+SAFETY CERTIFICATIONS
+
+The XR-7000 has been certified to the following standards:
+- IEC 61508 SIL 2 for functional safety
+- UL 508 for industrial control equipment
+- CE marking for European compliance
+- FCC Part 15 Class A for EMC compliance
+
+WARRANTY INFORMATION
+
+Standard warranty period is 3 years from date of manufacture. Extended warranty options are available for mission-critical deployments. Contact sales@xrcontrol.com for pricing.
