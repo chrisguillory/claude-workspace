@@ -327,7 +327,7 @@ class IndexingService:
                     chunks_created=0,
                     embeddings_pending=len(files_to_index),
                     current_phase='scanning',
-                    elapsed_seconds=timer.elapsed(),
+                    elapsed_seconds=round(timer.elapsed(), 3),
                 )
             )
 
@@ -391,7 +391,7 @@ class IndexingService:
             chunks_created=chunks_created,
             chunks_deleted=chunks_deleted,
             embeddings_created=chunks_created,
-            elapsed_seconds=timer.elapsed(),
+            elapsed_seconds=round(timer.elapsed(), 3),
             errors=tuple(errors),
         )
 

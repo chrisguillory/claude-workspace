@@ -42,3 +42,5 @@ claude mcp add --scope user document-search -- mcp-docsearch-server
 * Use `pyrate-limiter` for proactive throttling (instead of `tenacity` retry with exponential backoff on API errors)
 * Progress callbacks during file processing - currently `on_progress` is only called during scanning phase; for CLI
   usage, periodic updates during the worker processing phase would improve user experience
+* Collection verification on startup - detect when Qdrant collection is empty/missing but state file exists (e.g.,
+  after Docker container deletion); currently this mismatch causes files to be skipped despite missing vectors
