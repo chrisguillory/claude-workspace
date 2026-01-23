@@ -52,6 +52,9 @@ CSV_MAX_GROUP_SIZE = 15  # Maximum rows per chunk
 CSV_CHUNK_SIZE_TARGET = 1000  # Target chunk size for adaptive grouping
 CSV_ENCODINGS = ['utf-8', 'utf-8-sig', 'latin-1', 'iso-8859-1', 'cp1252']
 
+# Chunk filtering
+MIN_CHUNK_LENGTH = 50  # Characters - filters boilerplate like page footers
+
 
 class ChunkingService:
     """Chunks documents by file type with async processing for I/O-bound operations.
@@ -143,6 +146,10 @@ class ChunkingService:
         """Async context manager exit - shutdown ProcessPoolExecutor."""
         self.shutdown()
 
+    def _filter_short_chunks(self, chunks: Sequence[Chunk]) -> Sequence[Chunk]:
+        """Filter out chunks below minimum length threshold."""
+        return [c for c in chunks if len(c.text.strip()) >= MIN_CHUNK_LENGTH]
+
     async def chunk_file(self, path: Path) -> Sequence[Chunk]:
         """Chunk a single file based on its type.
 
@@ -163,7 +170,8 @@ class ChunkingService:
         if file_type is None:
             raise ValueError(f'Unsupported file type: {path.suffix}')
 
-        return await self._chunk_by_type(path, file_type)
+        chunks = await self._chunk_by_type(path, file_type)
+        return self._filter_short_chunks(chunks)
 
     async def _chunk_by_type(self, path: Path, file_type: FileType) -> Sequence[Chunk]:
         """Route to appropriate chunker based on file type."""
@@ -558,11 +566,53 @@ class ChunkingService:
         ]
 
     def _chunk_email(self, content: str, source_path: str) -> Sequence[Chunk]:
-        """Chunk .eml email files.
+        """Chunk .eml email files by extracting meaningful content.
 
-        Basic implementation: treat as text for now.
-        TODO: Parse headers, body, and attachments separately.
+        Parses MIME structure to extract:
+        - Subject, From, To, Date headers
+        - Plain text body (preferred) or HTML body (fallback)
+        - Skips: MIME boundaries, base64 attachments, Content-Type headers
         """
-        # For now, treat email as plain text
-        # Future: use email.parser to extract structured data
-        return self._chunk_text(content, source_path)
+        import email
+        from email.policy import default
+
+        msg = email.message_from_string(content, policy=default)
+
+        # Extract headers worth indexing
+        parts: list[str] = []
+        for header in ('Subject', 'From', 'To', 'Date'):
+            value = msg.get(header)
+            if value:
+                parts.append(f'{header}: {value}')
+
+        # Extract body content
+        if msg.is_multipart():
+            # Try plain text first
+            for part in msg.walk():
+                if part.get_content_type() == 'text/plain':
+                    body = part.get_content()
+                    if isinstance(body, str):
+                        parts.append(body)
+                        break
+            else:
+                # No plain text found, try HTML
+                for part in msg.walk():
+                    if part.get_content_type() == 'text/html':
+                        body = part.get_content()
+                        if isinstance(body, str):
+                            # Basic HTML tag stripping
+                            text = re.sub(r'<[^>]+>', ' ', body)
+                            text = re.sub(r'\s+', ' ', text).strip()
+                            parts.append(text)
+                            break
+        else:
+            body = msg.get_content()
+            if isinstance(body, str):
+                parts.append(body)
+
+        # Chunk the extracted content
+        email_text = '\n\n'.join(parts)
+        if not email_text.strip():
+            return []
+
+        return self._chunk_text(email_text, source_path)
