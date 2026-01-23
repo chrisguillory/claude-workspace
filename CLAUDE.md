@@ -317,6 +317,12 @@ uv run pre-commit run --all-files
 
 If hooks auto-fix files (ruff format), re-stage and run again until clean.
 
+If mypy fails with missing import errors for workspace member dependencies, sync all packages:
+
+```bash
+uv sync --all-groups --all-packages
+```
+
 ### Commit Workflow
 
 **Critical**: Run pre-commit BEFORE writing commit messages. A failed commit wastes all tokens spent generating the message.
