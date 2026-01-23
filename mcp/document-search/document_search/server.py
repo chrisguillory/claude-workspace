@@ -97,7 +97,7 @@ def register_tools(state: ServerState) -> None:
         since the last indexing run. Supports markdown, text, JSON, and PDF files.
 
         Args:
-            path: Absolute path to directory to index.
+            path: Path to directory to index (absolute, relative, or with ~ expansion).
             full_reindex: If True, reindex all files regardless of whether they've changed.
             ctx: MCP context for logging.
 

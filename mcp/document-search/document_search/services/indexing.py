@@ -64,7 +64,6 @@ class _PendingFile:
     """Tracks a file through the indexing pipeline."""
 
     file_path: Path
-    rel_path: str
     file_hash: str = ''
     file_size: int = 0
     chunks: list[Chunk] = field(default_factory=list)
@@ -148,8 +147,7 @@ class IndexingService:
 
     async def _file_worker(
         self,
-        queue: asyncio.Queue[tuple[Path, str]],
-        directory: Path,
+        queue: asyncio.Queue[Path],
         worker_id: int,
         results: dict[str, _PendingFile | FileProcessingError],
     ) -> None:
@@ -160,16 +158,17 @@ class IndexingService:
         """
         while True:
             try:
-                file_path, rel_path = await queue.get()
+                file_path = await queue.get()
             except asyncio.CancelledError:
                 return
 
+            file_key = str(file_path)
             try:
-                result = await self._process_single_file(file_path, rel_path, directory)
-                results[rel_path] = result
+                result = await self._process_single_file(file_path)
+                results[file_key] = result
             except Exception as e:
-                results[rel_path] = FileProcessingError(
-                    file_path=str(file_path),
+                results[file_key] = FileProcessingError(
+                    file_path=file_key,
                     error_type=type(e).__name__,
                     message=str(e),
                     recoverable=True,
@@ -177,12 +176,7 @@ class IndexingService:
             finally:
                 queue.task_done()
 
-    async def _process_single_file(
-        self,
-        file_path: Path,
-        rel_path: str,
-        directory: Path,
-    ) -> _PendingFile:
+    async def _process_single_file(self, file_path: Path) -> _PendingFile:
         """Process a single file end-to-end: chunk → embed → upsert → state.
 
         Uses EmbeddingBatchLoader to coalesce embedding requests across workers.
@@ -191,13 +185,14 @@ class IndexingService:
         Returns the completed _PendingFile with all data populated.
         """
         start_time = time.perf_counter()
+        file_key = str(file_path)
 
         # Step 1: Chunk the file
-        pending = await self._chunk_file_with_timeout(file_path, directory)
+        pending = await self._chunk_file_with_timeout(file_path)
         if pending is None:
             # Empty or unsupported file - nothing to index, skip silently
             logger.debug(f'[SKIP] {file_path.name}: empty or unsupported')
-            return _PendingFile(file_path=file_path, rel_path=rel_path)
+            return _PendingFile(file_path=file_path)
         if isinstance(pending, FileProcessingError):
             raise RuntimeError(pending.message)
 
@@ -233,7 +228,7 @@ class IndexingService:
             raise RuntimeError('State lock not initialized - call index_directory first')
 
         async with self._state_lock:
-            old_state = self._state.files.get(rel_path) if self._state else None
+            old_state = self._state.files.get(file_key) if self._state else None
 
         # Step 5: Delete old chunks (I/O - outside lock)
         if old_state:
@@ -243,8 +238,8 @@ class IndexingService:
         async with self._state_lock:
             if self._state is not None:
                 new_files = dict(self._state.files)
-                new_files[rel_path] = FileIndexState(
-                    file_path=str(file_path),
+                new_files[file_key] = FileIndexState(
+                    file_path=file_key,
                     file_hash=pending.file_hash,
                     file_size=pending.file_size,
                     chunk_count=len(pending.chunks),
@@ -311,8 +306,7 @@ class IndexingService:
 
         files_to_index: list[Path] = []
         for file_path in all_files:
-            rel_path = str(file_path.relative_to(directory))
-            if full_reindex or self._needs_indexing(file_path, rel_path):
+            if full_reindex or self._needs_indexing(file_path):
                 files_to_index.append(file_path)
             else:
                 files_skipped += 1
@@ -339,10 +333,9 @@ class IndexingService:
         self._state_lock = asyncio.Lock()
 
         # Create queue and populate with files
-        queue: asyncio.Queue[tuple[Path, str]] = asyncio.Queue()
+        queue: asyncio.Queue[Path] = asyncio.Queue()
         for file_path in files_to_index:
-            rel_path = str(file_path.relative_to(directory))
-            await queue.put((file_path, rel_path))
+            await queue.put(file_path)
 
         # Results collected by workers
         results: dict[str, _PendingFile | FileProcessingError] = {}
@@ -351,7 +344,7 @@ class IndexingService:
         logger.info(f'[INDEX] Starting {NUM_FILE_WORKERS} workers for {len(files_to_index)} files')
         workers: list[asyncio.Task[None]] = []
         for i in range(min(NUM_FILE_WORKERS, len(files_to_index))):
-            task = asyncio.create_task(self._file_worker(queue, directory, i, results))
+            task = asyncio.create_task(self._file_worker(queue, i, results))
             workers.append(task)
 
         # Wait for all files to be processed
@@ -362,7 +355,7 @@ class IndexingService:
             task.cancel()
 
         # Collect results
-        for rel_path, result in results.items():
+        for result in results.values():
             if isinstance(result, FileProcessingError):
                 errors.append(result)
             elif isinstance(result, _PendingFile):
@@ -411,7 +404,6 @@ class IndexingService:
     async def _chunk_file_with_timeout(
         self,
         file_path: Path,
-        directory: Path,
     ) -> _PendingFile | FileProcessingError | None:
         """Chunk a single file with timeout protection.
 
@@ -424,8 +416,6 @@ class IndexingService:
         Raises:
             asyncio.TimeoutError: If chunking exceeds timeout (potential deadlock).
         """
-        rel_path = str(file_path.relative_to(directory))
-
         try:
             # Timeout fails loudly - don't catch TimeoutError
             chunks = list(
@@ -439,7 +429,6 @@ class IndexingService:
 
             return _PendingFile(
                 file_path=file_path,
-                rel_path=rel_path,
                 file_hash=_file_hash(file_path),
                 file_size=file_path.stat().st_size,
                 chunks=chunks,
@@ -469,12 +458,13 @@ class IndexingService:
             )
 
     def _load_state(self, directory: Path) -> DirectoryIndexState:
-        """Load or create indexing state for directory."""
+        """Load or create indexing state for directory.
+
+        State is shared across all directories - files are keyed by absolute path.
+        """
         if self._state_path.exists():
             data = json.loads(self._state_path.read_text())
-            state = DirectoryIndexState.model_validate(data)
-            if state.directory_path == str(directory):
-                return state
+            return DirectoryIndexState.model_validate(data)
 
         return DirectoryIndexState(
             directory_path=str(directory),
@@ -490,12 +480,12 @@ class IndexingService:
         # Use model_dump with mode='json' for datetime serialization
         self._state_path.write_text(json.dumps(self._state.model_dump(mode='json'), indent=2))
 
-    def _needs_indexing(self, path: Path, rel_path: str) -> bool:
+    def _needs_indexing(self, path: Path) -> bool:
         """Check if file needs (re)indexing based on content hash."""
         if self._state is None:
             return True
 
-        file_state = self._state.files.get(rel_path)
+        file_state = self._state.files.get(str(path))
         if file_state is None:
             return True  # Never indexed
 
