@@ -77,14 +77,8 @@ class IndexingResult(StrictModel):
     chunks_created: int
     chunks_deleted: int  # Old chunks soft-deleted
     embeddings_created: int
-    tokens_used: int  # Approximate, for cost tracking
     elapsed_seconds: float  # Total indexing time
     errors: tuple[FileProcessingError, ...]
-
-    @property
-    def api_cost_usd(self) -> float:
-        """Estimated Gemini API cost for embeddings."""
-        return self.tokens_used / 1_000_000 * 0.05
 
     @property
     def success_rate(self) -> float:

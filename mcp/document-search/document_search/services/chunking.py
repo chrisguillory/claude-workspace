@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -25,6 +26,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pandas as pd
+
 from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
@@ -36,6 +38,7 @@ from document_search.schemas.chunking import (
     FileType,
     get_file_type,
 )
+from document_search.services.pdf_extraction import extract_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -162,38 +165,6 @@ class ChunkingService:
 
         return await self._chunk_by_type(path, file_type)
 
-    async def chunk_directory(
-        self,
-        directory: Path,
-        *,
-        recursive: bool = True,
-    ) -> Sequence[Chunk]:
-        """Chunk all supported files in a directory.
-
-        Args:
-            directory: Directory to scan.
-            recursive: If True, scan subdirectories.
-
-        Returns:
-            Sequence of all chunks from all files.
-        """
-        if not directory.is_dir():
-            raise ValueError(f'Not a directory: {directory}')
-
-        all_chunks: list[Chunk] = []
-        pattern = '**/*' if recursive else '*'
-
-        for path in directory.glob(pattern):
-            if not path.is_file():
-                continue
-            if get_file_type(path) is None:
-                continue
-
-            chunks = await self.chunk_file(path)
-            all_chunks.extend(chunks)
-
-        return all_chunks
-
     async def _chunk_by_type(self, path: Path, file_type: FileType) -> Sequence[Chunk]:
         """Route to appropriate chunker based on file type."""
         match file_type:
@@ -245,17 +216,18 @@ class ChunkingService:
         The extraction runs in a subprocess, returning structured data.
         Chunking (text splitting) happens in the main process.
         """
-        from document_search.services.pdf_extraction import extract_pdf
-
         # Run CPU-heavy extraction in subprocess
+        start = time.perf_counter()
+        logger.debug(f'[PDF] Starting: {path.name}')
         loop = asyncio.get_running_loop()
         extraction = await loop.run_in_executor(self._process_pool, extract_pdf, str(path))
+        elapsed = time.perf_counter() - start
 
         if extraction.page_count == 0:
             logger.warning(f'PDF has no pages: {path}')
             return []
 
-        logger.debug(f'PDF extraction: type={extraction.pdf_type}, pages={extraction.page_count}')
+        logger.debug(f'[PDF] {path.name}: {extraction.page_count} pages, type={extraction.pdf_type}, {elapsed:.2f}s')
 
         # Build chunks from extracted pages (lightweight, main process)
         chunks: list[Chunk] = []

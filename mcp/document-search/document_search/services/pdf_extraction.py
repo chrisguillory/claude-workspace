@@ -104,7 +104,8 @@ def extract_pdf(path: str) -> PDFExtractionResult:
 
             # Try OCR for scanned pages
             if len(text.strip()) < PDF_OCR_CHAR_THRESHOLD and pdf_type in ('scanned', 'mixed'):
-                text = page.get_textpage_ocr(full=True).get_text()
+                ocr_page = page.get_textpage_ocr(full=True)
+                text = ocr_page.extractText()  # type: ignore[attr-defined]  # PyMuPDF stubs incomplete
 
             # Remove header/footer
             text = _remove_header_footer(text, header_pattern, footer_pattern)

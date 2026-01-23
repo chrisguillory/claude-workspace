@@ -15,24 +15,21 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import os
 import sys
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict
 from uuid import UUID
 
-import more_itertools
-import tenacity
 from local_lib.utils import Timer
 
 from document_search.clients.gemini import GeminiClient
 from document_search.clients.qdrant import QdrantClient
 from document_search.repositories.document_vector import DocumentVectorRepository
-from document_search.schemas.chunking import EXTENSION_MAP, Chunk, get_file_type
-from document_search.schemas.embeddings import EmbedBatchRequest
+from document_search.schemas.chunking import EXTENSION_MAP, Chunk
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
     DirectoryIndexState,
@@ -45,6 +42,9 @@ from document_search.schemas.indexing import (
 from document_search.schemas.vectors import VectorPoint
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
+from document_search.services.embedding_batch_loader import EmbeddingBatchLoader
+
+logger = logging.getLogger(__name__)
 
 # Gemini embedding dimension
 EMBEDDING_DIMENSION = 768
@@ -52,23 +52,11 @@ EMBEDDING_DIMENSION = 768
 # Default state file location
 DEFAULT_STATE_PATH = Path.home() / '.claude-workspace' / 'cache' / 'document_search_index_state.json'
 
-# Batch sizes for efficient processing
-EMBEDDING_BATCH_SIZE = 100  # Gemini API limit
-FILES_PER_BATCH = 20  # Process files in batches for memory efficiency
-QDRANT_UPSERT_BATCH = 1000  # Qdrant can handle large batches
+# Worker configuration - I/O-bound workers can exceed CPU count
+NUM_FILE_WORKERS = min(32, (os.cpu_count() or 4) * 2)
 
 # Timeout for file chunking operations (detects deadlocks)
 FILE_CHUNK_TIMEOUT_SECONDS = 60
-
-
-class _BatchResult(TypedDict):
-    """Result of processing a batch of files."""
-
-    files_processed: int
-    chunks_created: int
-    chunks_deleted: int
-    tokens_used: int
-    errors: list[FileProcessingError]
 
 
 @dataclass
@@ -102,44 +90,53 @@ class IndexingService:
         repository: DocumentVectorRepository,
         *,
         state_path: Path = DEFAULT_STATE_PATH,
-        batch_size: int = 50,
+        coalesce_delay: float = 0.01,
     ) -> IndexingService:
-        """Create indexing service in async context."""
-        return cls(
-            chunking_service=chunking_service,
-            embedding_service=embedding_service,
-            repository=repository,
-            state_path=state_path,
-            batch_size=batch_size,
-        )
-
-    def __init__(
-        self,
-        chunking_service: ChunkingService,
-        embedding_service: EmbeddingService,
-        repository: DocumentVectorRepository,
-        *,
-        state_path: Path = DEFAULT_STATE_PATH,
-        batch_size: int = 50,
-    ) -> None:
-        """Initialize indexing service.
+        """Create indexing service in async context.
 
         Args:
             chunking_service: Service for splitting files into chunks.
             embedding_service: Service for creating embeddings.
             repository: Repository for vector storage.
             state_path: Path to persist indexing state.
-            batch_size: Number of texts per embedding API call.
+            coalesce_delay: Seconds to wait for embedding request coalescing (default 10ms).
+        """
+        # Create batch loader that coalesces embedding requests across workers
+        batch_loader = EmbeddingBatchLoader(embedding_service, coalesce_delay=coalesce_delay)
+
+        return cls(
+            chunking_service=chunking_service,
+            embedding_service=embedding_service,
+            batch_loader=batch_loader,
+            repository=repository,
+            state_path=state_path,
+        )
+
+    def __init__(
+        self,
+        chunking_service: ChunkingService,
+        embedding_service: EmbeddingService,
+        batch_loader: EmbeddingBatchLoader,
+        repository: DocumentVectorRepository,
+        *,
+        state_path: Path = DEFAULT_STATE_PATH,
+    ) -> None:
+        """Initialize indexing service.
+
+        Args:
+            chunking_service: Service for splitting files into chunks.
+            embedding_service: Service for creating embeddings.
+            batch_loader: Batch loader for coalescing embedding requests.
+            repository: Repository for vector storage.
+            state_path: Path to persist indexing state.
         """
         self._chunking = chunking_service
         self._embedding = embedding_service
+        self._batch_loader = batch_loader
         self._repo = repository
         self._state_path = state_path
-        self._batch_size = batch_size
         self._state: DirectoryIndexState | None = None
-
-        # Embedding cache: text_hash -> embedding (deduplication within indexing run)
-        self._embedding_cache: dict[str, tuple[float, ...]] = {}
+        self._state_lock: asyncio.Lock | None = None  # Initialized in async context
 
     def shutdown(self) -> None:
         """Shutdown services and release resources.
@@ -148,6 +145,128 @@ class IndexingService:
         Should be called when the service is no longer needed.
         """
         self._chunking.shutdown()
+
+    async def _file_worker(
+        self,
+        queue: asyncio.Queue[tuple[Path, str]],
+        directory: Path,
+        worker_id: int,
+        results: dict[str, _PendingFile | FileProcessingError],
+    ) -> None:
+        """Worker that processes files from queue one at a time.
+
+        Each file goes through: chunk → embed → upsert → update state.
+        This enables pipeline parallelism - file N embeds while file N+1 chunks.
+        """
+        while True:
+            try:
+                file_path, rel_path = await queue.get()
+            except asyncio.CancelledError:
+                return
+
+            try:
+                result = await self._process_single_file(file_path, rel_path, directory)
+                results[rel_path] = result
+            except Exception as e:
+                results[rel_path] = FileProcessingError(
+                    file_path=str(file_path),
+                    error_type=type(e).__name__,
+                    message=str(e),
+                    recoverable=True,
+                )
+            finally:
+                queue.task_done()
+
+    async def _process_single_file(
+        self,
+        file_path: Path,
+        rel_path: str,
+        directory: Path,
+    ) -> _PendingFile:
+        """Process a single file end-to-end: chunk → embed → upsert → state.
+
+        Uses EmbeddingBatchLoader to coalesce embedding requests across workers.
+        Lock scope is minimized - I/O happens outside the lock.
+
+        Returns the completed _PendingFile with all data populated.
+        """
+        start_time = time.perf_counter()
+
+        # Step 1: Chunk the file
+        pending = await self._chunk_file_with_timeout(file_path, directory)
+        if pending is None:
+            # Empty or unsupported file - nothing to index, skip silently
+            logger.debug(f'[SKIP] {file_path.name}: empty or unsupported')
+            return _PendingFile(file_path=file_path, rel_path=rel_path)
+        if isinstance(pending, FileProcessingError):
+            raise RuntimeError(pending.message)
+
+        chunk_time = time.perf_counter() - start_time
+
+        if not pending.chunks:
+            # File parsed but produced no chunks - skip silently
+            return pending
+
+        # Step 2: Embed chunks using batch loader (coalesces with other workers)
+        embed_start = time.perf_counter()
+
+        # Fire all embedding requests concurrently - batch loader coalesces them
+        embed_tasks = [self._batch_loader.embed(chunk.text) for chunk in pending.chunks]
+        embed_responses = await asyncio.gather(*embed_tasks)
+
+        # Extract embeddings from responses
+        pending.embeddings = [tuple(resp.values) for resp in embed_responses]
+        embed_time = time.perf_counter() - embed_start
+
+        # Step 3: Create points and upsert (I/O - outside lock)
+        upsert_start = time.perf_counter()
+        points: list[VectorPoint] = []
+        for chunk, embedding, chunk_id in zip(pending.chunks, pending.embeddings, pending.chunk_ids):
+            point = VectorPoint.from_chunk(chunk, embedding, chunk_id)
+            points.append(point)
+
+        self._repo.upsert(points)
+        upsert_time = time.perf_counter() - upsert_start
+
+        # Step 4: Read old state under lock
+        if self._state_lock is None:
+            raise RuntimeError('State lock not initialized - call index_directory first')
+
+        async with self._state_lock:
+            old_state = self._state.files.get(rel_path) if self._state else None
+
+        # Step 5: Delete old chunks (I/O - outside lock)
+        if old_state:
+            self._repo.delete(list(old_state.chunk_ids))
+
+        # Step 6: Update state under lock
+        async with self._state_lock:
+            if self._state is not None:
+                new_files = dict(self._state.files)
+                new_files[rel_path] = FileIndexState(
+                    file_path=str(file_path),
+                    file_hash=pending.file_hash,
+                    file_size=pending.file_size,
+                    chunk_count=len(pending.chunks),
+                    chunk_ids=tuple(pending.chunk_ids),
+                    indexed_at=datetime.now(UTC),
+                    chunk_strategy_version=CHUNK_STRATEGY_VERSION,
+                )
+                self._state = DirectoryIndexState(
+                    directory_path=self._state.directory_path,
+                    files=new_files,
+                    last_full_scan=self._state.last_full_scan,
+                    total_files=self._state.total_files,
+                    total_chunks=self._state.total_chunks,
+                )
+
+        total_time = time.perf_counter() - start_time
+        logger.debug(
+            f'[FILE] {file_path.name}: {len(pending.chunks)} chunks '
+            f'(chunk: {chunk_time:.2f}s, embed: {embed_time:.2f}s, upsert: {upsert_time:.2f}s, total: {total_time:.2f}s)'
+        )
+
+        return pending
 
     async def index_directory(
         self,
@@ -183,7 +302,6 @@ class IndexingService:
         files_skipped = 0
         chunks_created = 0
         chunks_deleted = 0
-        tokens_used = 0
 
         # PHASE 1: Scan and identify files (use extension-specific globs for efficiency)
         all_files: list[Path] = []
@@ -213,44 +331,46 @@ class IndexingService:
                 )
             )
 
-        # PHASE 2: Process files in batches
-        for batch_start in range(0, len(files_to_index), FILES_PER_BATCH):
-            batch_files = files_to_index[batch_start : batch_start + FILES_PER_BATCH]
+        # PHASE 2: Process files with concurrent workers
+        # Each worker processes one file end-to-end (chunk → embed → upsert)
+        # This enables pipeline parallelism: file N embeds while file N+1 chunks
 
-            batch_result = await self._process_file_batch(
-                batch_files,
-                directory,
-                on_progress,
-                timer,
-                files_total,
-                files_processed,
-                files_skipped,
-                chunks_created,
-            )
+        # Initialize state lock for this run
+        self._state_lock = asyncio.Lock()
 
-            files_processed += batch_result['files_processed']
-            chunks_created += batch_result['chunks_created']
-            chunks_deleted += batch_result['chunks_deleted']
-            tokens_used += batch_result['tokens_used']
-            errors.extend(batch_result['errors'])
+        # Create queue and populate with files
+        queue: asyncio.Queue[tuple[Path, str]] = asyncio.Queue()
+        for file_path in files_to_index:
+            rel_path = str(file_path.relative_to(directory))
+            await queue.put((file_path, rel_path))
 
-            # Checkpoint state after each batch
-            self._save_state()
+        # Results collected by workers
+        results: dict[str, _PendingFile | FileProcessingError] = {}
 
-            if on_progress:
-                on_progress(
-                    IndexingProgress(
-                        files_scanned=files_total,
-                        files_total=files_total,
-                        files_processed=files_processed,
-                        files_skipped=files_skipped,
-                        chunks_created=chunks_created,
-                        embeddings_pending=len(files_to_index) - batch_start - len(batch_files),
-                        current_phase='storing',
-                        errors_so_far=len(errors),
-                        elapsed_seconds=timer.elapsed(),
-                    )
-                )
+        # Start workers
+        logger.info(f'[INDEX] Starting {NUM_FILE_WORKERS} workers for {len(files_to_index)} files')
+        workers: list[asyncio.Task[None]] = []
+        for i in range(min(NUM_FILE_WORKERS, len(files_to_index))):
+            task = asyncio.create_task(self._file_worker(queue, directory, i, results))
+            workers.append(task)
+
+        # Wait for all files to be processed
+        await queue.join()
+
+        # Cancel workers (they're waiting on empty queue)
+        for task in workers:
+            task.cancel()
+
+        # Collect results
+        for rel_path, result in results.items():
+            if isinstance(result, FileProcessingError):
+                errors.append(result)
+            elif isinstance(result, _PendingFile):
+                files_processed += 1
+                chunks_created += len(result.chunks)
+
+        # Save state checkpoint
+        self._save_state()
 
         # Final state update
         # total_chunks is cumulative: previous + created - deleted
@@ -271,58 +391,8 @@ class IndexingService:
             chunks_created=chunks_created,
             chunks_deleted=chunks_deleted,
             embeddings_created=chunks_created,
-            tokens_used=tokens_used,
             elapsed_seconds=timer.elapsed(),
             errors=tuple(errors),
-        )
-
-    async def index_file(self, file_path: Path) -> IndexingResult:
-        """Index a single file.
-
-        Args:
-            file_path: Path to file.
-
-        Returns:
-            IndexingResult for the single file.
-        """
-        if not file_path.is_file():
-            raise ValueError(f'Not a file: {file_path}')
-
-        file_type = get_file_type(file_path)
-        if file_type is None:
-            raise ValueError(f'Unsupported file type: {file_path.suffix}')
-
-        self._repo.ensure_collection(EMBEDDING_DIMENSION)
-
-        # Use parent directory for state tracking
-        directory = file_path.parent
-        self._state = self._load_state(directory)
-
-        # Process as a batch of 1
-        timer = Timer()
-        batch_result = await self._process_file_batch(
-            files=[file_path],
-            directory=directory,
-            on_progress=None,
-            timer=timer,
-            files_total=1,
-            files_processed_so_far=0,
-            files_skipped=0,
-            chunks_created_so_far=0,
-        )
-
-        self._save_state()
-
-        return IndexingResult(
-            files_scanned=1,
-            files_processed=batch_result['files_processed'],
-            files_skipped=0,
-            chunks_created=batch_result['chunks_created'],
-            chunks_deleted=batch_result['chunks_deleted'],
-            embeddings_created=batch_result['chunks_created'],
-            tokens_used=batch_result['tokens_used'],
-            elapsed_seconds=timer.elapsed(),
-            errors=tuple(batch_result['errors']),
         )
 
     def get_index_stats(self) -> dict[str, int | str]:
@@ -398,175 +468,6 @@ class IndexingService:
                 recoverable=not isinstance(e, (PermissionError, IsADirectoryError)),
             )
 
-    async def _process_file_batch(
-        self,
-        files: Sequence[Path],
-        directory: Path,
-        on_progress: ProgressCallback | None,
-        timer: Timer,
-        files_total: int,
-        files_processed_so_far: int,
-        files_skipped: int,
-        chunks_created_so_far: int,
-    ) -> _BatchResult:
-        """Process a batch of files: chunk → embed → upsert → delete old → update state.
-
-        Key design choices:
-        - Chunk files in parallel (semaphore controls concurrency)
-        - Batch embed across files (fewer API calls)
-        - Upsert new chunks BEFORE deleting old (atomicity)
-        - Update state after successful upsert (crash recovery)
-
-        Returns:
-            Dict with files_processed, chunks_created, chunks_deleted, tokens_used, errors.
-        """
-        errors: list[FileProcessingError] = []
-        pending_files: list[_PendingFile] = []
-
-        # STEP 1: Chunk all files in batch (PARALLEL with semaphore)
-        if on_progress:
-            on_progress(
-                IndexingProgress(
-                    files_scanned=files_total,
-                    files_total=files_total,
-                    files_processed=files_processed_so_far,
-                    files_skipped=files_skipped,
-                    chunks_created=chunks_created_so_far,
-                    embeddings_pending=len(files),
-                    current_phase='chunking',
-                    elapsed_seconds=timer.elapsed(),
-                )
-            )
-
-        # Fire all file chunking tasks concurrently - semaphore controls actual parallelism
-        results = await asyncio.gather(
-            *[self._chunk_file_with_timeout(file_path, directory) for file_path in files],
-            return_exceptions=True,
-        )
-
-        # Collect results: separate pending files from errors
-        for result in results:
-            if result is None:
-                continue  # Empty file, skip
-            if isinstance(result, FileProcessingError):
-                errors.append(result)
-            elif isinstance(result, Exception):
-                # Unexpected exception from gather (shouldn't happen with return_exceptions=True)
-                errors.append(
-                    FileProcessingError(
-                        file_path='unknown',
-                        error_type=type(result).__name__,
-                        message=str(result),
-                        recoverable=True,
-                    )
-                )
-            elif isinstance(result, _PendingFile):
-                pending_files.append(result)
-
-        if not pending_files:
-            return {
-                'files_processed': 0,
-                'chunks_created': 0,
-                'chunks_deleted': 0,
-                'tokens_used': 0,
-                'errors': errors,
-            }
-
-        # STEP 2: Flatten chunks for batch embedding
-        all_chunk_refs: list[tuple[_PendingFile, int]] = []  # (file, chunk_index)
-        all_texts: list[str] = []
-
-        for pf in pending_files:
-            for idx, chunk in enumerate(pf.chunks):
-                all_chunk_refs.append((pf, idx))
-                all_texts.append(chunk.text)
-
-        # STEP 3: Batch embed (fewer API calls)
-        if on_progress:
-            on_progress(
-                IndexingProgress(
-                    files_scanned=files_total,
-                    files_total=files_total,
-                    files_processed=files_processed_so_far,
-                    files_skipped=files_skipped,
-                    chunks_created=chunks_created_so_far,
-                    embeddings_pending=len(all_texts),
-                    current_phase='embedding',
-                    elapsed_seconds=timer.elapsed(),
-                )
-            )
-
-        # Fire all batches concurrently - client handles rate limiting
-        all_embeddings, tokens_used, batch_times = await self._embed_all_concurrent(all_texts)
-
-        # Timing available in batch_times for analysis if needed
-        # avg_time = sum(batch_times) / len(batch_times) if batch_times else 0
-        # wall_time ≈ max(batch_times) due to concurrent execution
-
-        # Distribute embeddings back to pending files
-        for (pf, idx), embedding in zip(all_chunk_refs, all_embeddings):
-            pf.embeddings.append(embedding)
-
-        # STEP 4: Create points and batch upsert
-        all_points: list[VectorPoint] = []
-        for pf in pending_files:
-            for chunk, embedding, chunk_id in zip(pf.chunks, pf.embeddings, pf.chunk_ids):
-                point = VectorPoint.from_chunk(chunk, embedding, chunk_id)
-                all_points.append(point)
-
-        # Upsert in batches to avoid timeout
-        for batch_start in range(0, len(all_points), QDRANT_UPSERT_BATCH):
-            batch_points = all_points[batch_start : batch_start + QDRANT_UPSERT_BATCH]
-            self._repo.upsert(batch_points)
-
-        # STEP 5: Delete OLD chunks by ID AFTER successful upsert (atomicity!)
-        # Key: Delete by specific IDs, not source_path, to avoid deleting new chunks.
-        # Chunk IDs are deterministic (source_path + index + content_hash), so
-        # changed content = different IDs. We delete only the OLD IDs from state.
-        #
-        # Note: chunks_deleted is the EXPECTED count from state, not actual deletion
-        # count from Qdrant. Some chunks may already be deleted or never existed.
-        # State is authoritative for tracking purposes.
-        chunks_deleted = 0
-        old_chunk_ids: list[UUID] = []
-        for pf in pending_files:
-            old_state = self._state.files.get(pf.rel_path) if self._state else None
-            if old_state:
-                chunks_deleted += old_state.chunk_count
-                old_chunk_ids.extend(old_state.chunk_ids)
-
-        if old_chunk_ids:
-            self._repo.delete(old_chunk_ids)
-
-        # STEP 6: Update state for all processed files
-        if self._state is not None:
-            new_files = dict(self._state.files)
-            for pf in pending_files:
-                new_files[pf.rel_path] = FileIndexState(
-                    file_path=str(pf.file_path),
-                    file_hash=pf.file_hash,
-                    file_size=pf.file_size,
-                    chunk_count=len(pf.chunks),
-                    chunk_ids=tuple(pf.chunk_ids),
-                    indexed_at=datetime.now(UTC),
-                    chunk_strategy_version=CHUNK_STRATEGY_VERSION,
-                )
-            self._state = DirectoryIndexState(
-                directory_path=self._state.directory_path,
-                files=new_files,
-                last_full_scan=self._state.last_full_scan,
-                total_files=self._state.total_files,
-                total_chunks=self._state.total_chunks,
-            )
-
-        return {
-            'files_processed': len(pending_files),
-            'chunks_created': len(all_points),
-            'chunks_deleted': chunks_deleted,
-            'tokens_used': tokens_used,
-            'errors': errors,
-        }
-
     def _load_state(self, directory: Path) -> DirectoryIndexState:
         """Load or create indexing state for directory."""
         if self._state_path.exists():
@@ -613,99 +514,6 @@ class IndexingService:
         # Check content hash
         current_hash = _file_hash(path)
         return current_hash != file_state.file_hash
-
-    @staticmethod
-    def _log_retry(retry_state: tenacity.RetryCallState) -> None:
-        """Log retry attempts for visibility."""
-        exc = retry_state.outcome.exception() if retry_state.outcome else 'unknown'
-        wait = retry_state.next_action.sleep if retry_state.next_action else 0
-        print(
-            f'[RETRY] Embedding attempt {retry_state.attempt_number} failed: {exc}. Waiting {wait:.1f}s...',
-            file=sys.stderr,
-            flush=True,
-        )
-
-    @tenacity.retry(
-        wait=tenacity.wait_exponential(multiplier=1, min=2, max=60),
-        stop=tenacity.stop_after_attempt(5),
-        before_sleep=lambda rs: IndexingService._log_retry(rs),
-        reraise=True,
-    )
-    async def _embed_batch_with_retry(self, texts: Sequence[str]) -> list[tuple[float, ...]]:
-        """Embed texts with exponential backoff on rate limit."""
-        request = EmbedBatchRequest(texts=list(texts))
-        response = await self._embedding.embed_batch(request)
-        return [emb.values for emb in response.embeddings]
-
-    async def _embed_all_concurrent(
-        self,
-        all_texts: Sequence[str],
-    ) -> tuple[list[tuple[float, ...]], int, list[float]]:
-        """Embed all texts concurrently with deduplication.
-
-        Skips embedding for texts already in cache (same content = same embedding).
-        Fires all batches at once - client handles rate limiting internally.
-
-        Args:
-            all_texts: All texts to embed.
-
-        Returns:
-            Tuple of (embeddings, tokens_used, batch_times_seconds).
-        """
-        # Deduplicate: hash each text, identify which need embedding
-        text_hashes = [hashlib.sha256(t.encode()).hexdigest() for t in all_texts]
-        uncached_indices: list[int] = []
-        uncached_texts: list[str] = []
-
-        for i, (text, h) in enumerate(zip(all_texts, text_hashes)):
-            if h not in self._embedding_cache:
-                uncached_indices.append(i)
-                uncached_texts.append(text)
-
-        cache_hits = len(all_texts) - len(uncached_texts)
-        if cache_hits > 0:
-            # Log deduplication stats (visible in debug)
-            pass  # Could add logging here if desired
-
-        # Embed only uncached texts
-        batch_times: list[float] = []
-        new_embeddings: list[tuple[float, ...]] = []
-
-        if uncached_texts:
-            batches = list(more_itertools.chunked(uncached_texts, EMBEDDING_BATCH_SIZE))
-
-            async def embed_batch_timed(batch: Sequence[str]) -> list[tuple[float, ...]]:
-                """Embed single batch with timing."""
-                t0 = time.perf_counter()
-                result = await self._embed_batch_with_retry(list(batch))
-                batch_times.append(time.perf_counter() - t0)
-                return result
-
-            # Fire all batches concurrently - client handles rate limiting
-            results = await asyncio.gather(*[embed_batch_timed(batch) for batch in batches])
-
-            # Flatten and cache new embeddings
-            for batch_result in results:
-                new_embeddings.extend(batch_result)
-
-            # Verify embedding count matches (guards against API returning wrong count)
-            if len(new_embeddings) != len(uncached_indices):
-                raise RuntimeError(
-                    f'Embedding count mismatch: expected {len(uncached_indices)}, '
-                    f'got {len(new_embeddings)}. Check Gemini API response.'
-                )
-
-            # Update cache with new embeddings
-            for idx, emb in zip(uncached_indices, new_embeddings, strict=True):
-                self._embedding_cache[text_hashes[idx]] = emb
-
-        # Build final result in original order (all now in cache)
-        all_embeddings: list[tuple[float, ...]] = [self._embedding_cache[h] for h in text_hashes]
-
-        # Calculate tokens only for texts we actually embedded
-        tokens_used = sum(len(t) for t in uncached_texts) // 3
-
-        return all_embeddings, tokens_used, batch_times
 
 
 async def create_indexing_service(

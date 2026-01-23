@@ -5,6 +5,7 @@ Wraps GenericBatchLoader with Gemini API constraints (100 items max per batch).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 
 from local_lib.batch_loader import GenericBatchLoader
@@ -14,6 +15,8 @@ from document_search.schemas.embeddings import (
     EmbedResponse,
 )
 from document_search.services.embedding import EmbeddingService
+
+logger = logging.getLogger(__name__)
 
 # Gemini API limit
 GEMINI_BATCH_SIZE = 100
@@ -47,6 +50,8 @@ class EmbeddingBatchLoader(GenericBatchLoader[str, EmbedResponse]):
 
     async def _bulk_embed(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
         """Embed a batch of texts."""
+        total_chars = sum(len(t) for t in texts)
+        logger.debug(f'[BATCH] Embedding {len(texts)} texts ({total_chars:,} chars)')
         request = EmbedBatchRequest(texts=texts)
         response = await self._service.embed_batch(request)
         return response.embeddings

@@ -40,5 +40,5 @@ claude mcp add --scope user document-search -- mcp-docsearch-server
 * SQLite for state persistence (instead of JSON file) - enables atomic single-row updates, crash recovery without
   full-file rewrites, and queryable index metadata; current JSON approach scales poorly beyond 10K files
 * Use `pyrate-limiter` for proactive throttling (instead of `tenacity` retry with exponential backoff on API errors)
-* Phase-based architecture in IndexingService - Sequential phases (read → chunk → embed) with phase-specific semaphores;
-  prevents nested semaphore deadlock; separate thread pools for PDF vs embedding
+* Progress callbacks during file processing - currently `on_progress` is only called during scanning phase; for CLI
+  usage, periodic updates during the worker processing phase would improve user experience

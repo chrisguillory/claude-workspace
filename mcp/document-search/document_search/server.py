@@ -10,7 +10,10 @@ Tools:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import logging
+import sys
 import typing
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -125,8 +128,6 @@ def register_tools(state: ServerState) -> None:
 
         # The on_progress callback is sync in IndexingService, so wrap it
         def sync_progress(progress: IndexingProgress) -> None:
-            import asyncio
-
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(on_progress(progress))
@@ -244,7 +245,18 @@ def register_tools(state: ServerState) -> None:
 @contextlib.asynccontextmanager
 async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
-    import sys
+
+    # Configure logging with timestamps to stderr for performance observability
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
+        datefmt='%H:%M:%S',
+        stream=sys.stderr,
+    )
+    # Silence noisy third-party loggers
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('httpcore').setLevel(logging.WARNING)
+    logging.getLogger('google').setLevel(logging.WARNING)
 
     # Initialize state with all services (async for semaphore binding)
     state = await ServerState.create()
