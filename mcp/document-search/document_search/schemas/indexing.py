@@ -16,7 +16,8 @@ from document_search.schemas.base import StrictModel
 
 # Current chunking strategy version - bump when ChunkingService changes
 # v2: Added PDF and CSV chunking support with parallel processing
-CHUNK_STRATEGY_VERSION = 2
+# v3: Hybrid search (BM25 sparse vectors), email MIME parsing, min chunk filter
+CHUNK_STRATEGY_VERSION = 3
 
 
 class FileIndexState(StrictModel):

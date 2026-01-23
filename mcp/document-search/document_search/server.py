@@ -205,6 +205,9 @@ def register_tools(state: ServerState) -> None:
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 50)
 
+        # Resolve path_prefix to handle ~ and relative paths
+        resolved_path_prefix = str(Path(path_prefix).expanduser().resolve()) if path_prefix else None
+
         # Build hybrid search query
         search_query = SearchQuery(
             dense_vector=embed_response.values,
@@ -212,7 +215,7 @@ def register_tools(state: ServerState) -> None:
             sparse_values=sparse_values,
             limit=rerank_candidates,
             file_types=tuple(typing.cast(FileType, ft) for ft in file_types) if file_types else None,
-            source_path_prefix=path_prefix,
+            source_path_prefix=resolved_path_prefix,
         )
 
         # Layer 1: Hybrid search with RRF fusion
