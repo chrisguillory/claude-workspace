@@ -1,68 +1,77 @@
-"""Type stubs for qdrant_client.models."""
+"""Type stubs for qdrant_client.models.
+
+Re-exports all types from qdrant_client.http.models for convenience.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from enum import Enum
-from typing import Any
-
-class Distance(str, Enum):
-    COSINE = 'Cosine'
-    EUCLID = 'Euclid'
-    DOT = 'Dot'
-    MANHATTAN = 'Manhattan'
-
-class VectorParams:
-    size: int
-    distance: Distance
-    def __init__(self, size: int, distance: Distance, **kwargs: Any) -> None: ...
-
-class PointStruct:
-    id: str | int
-    vector: Sequence[float]
-    payload: Mapping[str, Any]
-    def __init__(
-        self,
-        id: str | int,
-        vector: Sequence[float],
-        payload: Mapping[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None: ...
-
-class MatchAny:
-    any: Sequence[str]
-    def __init__(self, any: Sequence[str], **kwargs: Any) -> None: ...
-
-class MatchText:
-    text: str
-    def __init__(self, text: str, **kwargs: Any) -> None: ...
-
-class MatchValue:
-    value: str | int | bool
-    def __init__(self, value: str | int | bool, **kwargs: Any) -> None: ...
-
-class FieldCondition:
-    key: str
-    match: MatchAny | MatchText | MatchValue
-    def __init__(
-        self,
-        key: str,
-        match: MatchAny | MatchText | MatchValue,
-        **kwargs: Any,
-    ) -> None: ...
-
-class Filter:
-    must: Sequence[FieldCondition] | None
-    should: Sequence[FieldCondition] | None
-    must_not: Sequence[FieldCondition] | None
-    def __init__(
-        self,
-        must: Sequence[FieldCondition] | None = None,
-        should: Sequence[FieldCondition] | None = None,
-        must_not: Sequence[FieldCondition] | None = None,
-        **kwargs: Any,
-    ) -> None: ...
-
-class FilterSelector:
-    filter: Filter
-    def __init__(self, filter: Filter, **kwargs: Any) -> None: ...
+# Re-export all types from http.models
+from qdrant_client.http.models import (
+    Condition as Condition,
+)
+from qdrant_client.http.models import (
+    Distance as Distance,
+)
+from qdrant_client.http.models import (
+    FieldCondition as FieldCondition,
+)
+from qdrant_client.http.models import (
+    Filter as Filter,
+)
+from qdrant_client.http.models import (
+    FilterSelector as FilterSelector,
+)
+from qdrant_client.http.models import (
+    Fusion as Fusion,
+)
+from qdrant_client.http.models import (
+    FusionQuery as FusionQuery,
+)
+from qdrant_client.http.models import (
+    HasIdCondition as HasIdCondition,
+)
+from qdrant_client.http.models import (
+    HasVectorCondition as HasVectorCondition,
+)
+from qdrant_client.http.models import (
+    IsEmptyCondition as IsEmptyCondition,
+)
+from qdrant_client.http.models import (
+    IsNullCondition as IsNullCondition,
+)
+from qdrant_client.http.models import (
+    MatchAny as MatchAny,
+)
+from qdrant_client.http.models import (
+    MatchText as MatchText,
+)
+from qdrant_client.http.models import (
+    MatchValue as MatchValue,
+)
+from qdrant_client.http.models import (
+    Modifier as Modifier,
+)
+from qdrant_client.http.models import (
+    NestedCondition as NestedCondition,
+)
+from qdrant_client.http.models import (
+    PointStruct as PointStruct,
+)
+from qdrant_client.http.models import (
+    Prefetch as Prefetch,
+)
+from qdrant_client.http.models import (
+    SparseVector as SparseVector,
+)
+from qdrant_client.http.models import (
+    SparseVectorParams as SparseVectorParams,
+)
+from qdrant_client.http.models import (
+    Vector as Vector,
+)
+from qdrant_client.http.models import (
+    VectorParams as VectorParams,
+)
+from qdrant_client.http.models import (
+    VectorStruct as VectorStruct,
+)

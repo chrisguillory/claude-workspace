@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from qdrant_client.models import Filter, PointStruct, VectorParams
+from qdrant_client.models import (
+    Filter,
+    PointStruct,
+    SparseVectorParams,
+    VectorParams,
+)
 
 class VectorsConfig:
     size: int
 
 class VectorsParams:
-    vectors: VectorsConfig
+    vectors: VectorsConfig | dict[str, VectorsConfig]
 
 class CollectionConfig:
     params: VectorsParams
@@ -35,6 +40,9 @@ class Record:
     payload: dict[str, Any]
     vector: Sequence[float] | None
 
+class QueryResponse:
+    points: Sequence[ScoredPoint]
+
 class QdrantClient:
     def __init__(self, url: str | None = None, **kwargs: Any) -> None: ...
     def get_collections(self) -> CollectionsResponse: ...
@@ -42,7 +50,8 @@ class QdrantClient:
     def create_collection(
         self,
         collection_name: str,
-        vectors_config: VectorParams,
+        vectors_config: VectorParams | Mapping[str, VectorParams] | None = None,
+        sparse_vectors_config: Mapping[str, SparseVectorParams] | None = None,
         **kwargs: Any,
     ) -> bool: ...
     def upsert(
@@ -60,6 +69,15 @@ class QdrantClient:
         query_filter: Filter | None = None,
         **kwargs: Any,
     ) -> list[ScoredPoint]: ...
+    def query_points(
+        self,
+        collection_name: str,
+        prefetch: Sequence[Any] | None = None,
+        query: Any = None,
+        limit: int = 10,
+        score_threshold: float | None = None,
+        **kwargs: Any,
+    ) -> QueryResponse: ...
     def retrieve(
         self,
         collection_name: str,

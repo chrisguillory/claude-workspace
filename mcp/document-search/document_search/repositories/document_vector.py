@@ -45,10 +45,10 @@ class DocumentVectorRepository:
         self._client.ensure_collection(vector_dimension)
 
     def upsert(self, points: Sequence[VectorPoint]) -> int:
-        """Store or update document vectors.
+        """Store or update document vectors with hybrid embeddings.
 
         Args:
-            points: Typed vector points to store.
+            points: Typed vector points to store (dense + sparse vectors).
 
         Returns:
             Number of points upserted.
@@ -56,7 +56,9 @@ class DocumentVectorRepository:
         raw_points = [
             (
                 point.id,
-                list(point.vector),
+                list(point.dense_vector),
+                list(point.sparse_indices),
+                list(point.sparse_values),
                 {
                     'source_path': point.source_path,
                     'chunk_index': point.chunk_index,
@@ -74,10 +76,10 @@ class DocumentVectorRepository:
         return self._client.upsert(raw_points)
 
     def search(self, query: SearchQuery) -> SearchResult:
-        """Search for similar documents.
+        """Hybrid search for similar documents using RRF fusion.
 
         Args:
-            query: Typed search query with vector and filters.
+            query: Typed search query with dense + sparse vectors and filters.
 
         Returns:
             Typed search results.
@@ -92,7 +94,9 @@ class DocumentVectorRepository:
         fetch_limit = query.limit * 3 if query.source_path_prefix else query.limit
 
         raw_results = self._client.search(
-            vector=list(query.vector),
+            dense_vector=list(query.dense_vector),
+            sparse_indices=list(query.sparse_indices),
+            sparse_values=list(query.sparse_values),
             limit=fetch_limit,
             score_threshold=query.score_threshold,
             file_types=file_types,

@@ -33,6 +33,7 @@ from document_search.schemas.vectors import SearchQuery, SearchResult
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.indexing import IndexingService
+from document_search.services.sparse_embedding import SparseEmbeddingService
 
 # Embedding dimension for Gemini
 EMBEDDING_DIMENSION = 768
@@ -44,6 +45,7 @@ class ServerState:
 
     indexing_service: IndexingService
     embedding_service: EmbeddingService
+    sparse_embedding_service: SparseEmbeddingService
     repository: DocumentVectorRepository
     qdrant_url: str
 
@@ -58,17 +60,20 @@ class ServerState:
 
         chunking_service = await ChunkingService.create()
         embedding_service = EmbeddingService(gemini_client)
+        sparse_embedding_service = SparseEmbeddingService()
         repository = DocumentVectorRepository(qdrant_client)
 
         indexing_service = await IndexingService.create(
             chunking_service=chunking_service,
             embedding_service=embedding_service,
+            sparse_embedding_service=sparse_embedding_service,
             repository=repository,
         )
 
         return cls(
             indexing_service=indexing_service,
             embedding_service=embedding_service,
+            sparse_embedding_service=sparse_embedding_service,
             repository=repository,
             qdrant_url=qdrant_url,
         )
@@ -163,10 +168,11 @@ def register_tools(state: ServerState) -> None:
         path_prefix: str | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
-        """Search indexed documents using natural language query.
+        """Search indexed documents using hybrid semantic + keyword search.
 
-        Performs semantic search using Gemini embeddings to find documents
-        similar in meaning to the query, not just keyword matches.
+        Uses Reciprocal Rank Fusion (RRF) to combine:
+        - Dense vectors: Semantic similarity via Gemini embeddings
+        - Sparse vectors: BM25 keyword matching
 
         Args:
             query: Natural language search query.
@@ -184,19 +190,24 @@ def register_tools(state: ServerState) -> None:
         logger = DualLogger(ctx)
         await logger.info(f'Searching: "{query[:50]}..."' if len(query) > 50 else f'Searching: "{query}"')
 
-        # Embed the query
+        # Dense embedding (semantic similarity)
         embed_request = EmbedRequest(text=query, task_type='RETRIEVAL_QUERY')
         embed_response = await state.embedding_service.embed(embed_request)
 
-        # Build search query
+        # Sparse embedding (BM25 keyword matching)
+        sparse_indices, sparse_values = state.sparse_embedding_service.embed(query)
+
+        # Build hybrid search query
         search_query = SearchQuery(
-            vector=embed_response.values,
+            dense_vector=embed_response.values,
+            sparse_indices=sparse_indices,
+            sparse_values=sparse_values,
             limit=min(max(limit, 1), 100),
             file_types=tuple(typing.cast(FileType, ft) for ft in file_types) if file_types else None,
             source_path_prefix=path_prefix,
         )
 
-        # Search
+        # Hybrid search with RRF fusion
         result = state.repository.search(search_query)
 
         await logger.info(f'Found {result.total} results')

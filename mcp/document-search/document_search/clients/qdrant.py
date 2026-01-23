@@ -11,14 +11,20 @@ from typing import Any, TypedDict
 from uuid import UUID
 
 from qdrant_client import QdrantClient as _QdrantClient
-from qdrant_client.models import (
+from qdrant_client.http.models import (
     Distance,
     FieldCondition,
     Filter,
     FilterSelector,
+    Fusion,
+    FusionQuery,
     MatchAny,
     MatchValue,
+    Modifier,
     PointStruct,
+    Prefetch,
+    SparseVector,
+    SparseVectorParams,
     VectorParams,
 )
 
@@ -70,10 +76,14 @@ class QdrantClient:
         self._client = _QdrantClient(url=url)
 
     def ensure_collection(self, vector_dimension: int) -> None:
-        """Create collection if it doesn't exist.
+        """Create collection with hybrid search support if it doesn't exist.
+
+        Creates a collection with:
+        - Dense vectors: Semantic embeddings (Gemini, 768 dimensions)
+        - Sparse vectors: BM25 keyword embeddings (fastembed)
 
         Args:
-            vector_dimension: Size of embedding vectors (e.g., 768 for Gemini).
+            vector_dimension: Size of dense embedding vectors (e.g., 768 for Gemini).
         """
         collections = self._client.get_collections().collections
         exists = any(c.name == self._collection_name for c in collections)
@@ -81,20 +91,27 @@ class QdrantClient:
         if not exists:
             self._client.create_collection(
                 collection_name=self._collection_name,
-                vectors_config=VectorParams(
-                    size=vector_dimension,
-                    distance=Distance.COSINE,
-                ),
+                vectors_config={
+                    'dense': VectorParams(
+                        size=vector_dimension,
+                        distance=Distance.COSINE,
+                    ),
+                },
+                sparse_vectors_config={
+                    'sparse': SparseVectorParams(
+                        modifier=Modifier.IDF,
+                    ),
+                },
             )
 
     def upsert(
         self,
-        points: Sequence[tuple[UUID, Sequence[float], Mapping[str, Any]]],
+        points: Sequence[tuple[UUID, Sequence[float], Sequence[int], Sequence[float], Mapping[str, Any]]],
     ) -> int:
-        """Insert or update points.
+        """Insert or update points with hybrid vectors.
 
         Args:
-            points: Sequence of (id, vector, payload) tuples.
+            points: Sequence of (id, dense_vector, sparse_indices, sparse_values, payload) tuples.
 
         Returns:
             Number of points upserted.
@@ -102,10 +119,16 @@ class QdrantClient:
         point_structs = [
             PointStruct(
                 id=str(point_id),
-                vector=list(vector),
+                vector={
+                    'dense': list(dense_vector),
+                    'sparse': SparseVector(
+                        indices=list(sparse_indices),
+                        values=list(sparse_values),
+                    ),
+                },
                 payload=dict(payload),
             )
-            for point_id, vector, payload in points
+            for point_id, dense_vector, sparse_indices, sparse_values, payload in points
         ]
 
         self._client.upsert(
@@ -116,15 +139,19 @@ class QdrantClient:
 
     def search(
         self,
-        vector: Sequence[float],
+        dense_vector: Sequence[float],
+        sparse_indices: Sequence[int],
+        sparse_values: Sequence[float],
         limit: int = 10,
         score_threshold: float | None = None,
         file_types: Sequence[str] | None = None,
     ) -> Sequence[SearchResultDict]:
-        """Search for similar vectors.
+        """Hybrid search combining dense and sparse vectors with RRF fusion.
 
         Args:
-            vector: Query vector.
+            dense_vector: Semantic query vector (Gemini embedding).
+            sparse_indices: BM25 sparse vector indices.
+            sparse_values: BM25 sparse vector values.
             limit: Maximum results.
             score_threshold: Minimum similarity score.
             file_types: Filter by file types.
@@ -133,6 +160,7 @@ class QdrantClient:
             List of results with id, score, and payload.
 
         Note:
+            Uses Reciprocal Rank Fusion (RRF) to combine dense and sparse results.
             Path prefix filtering is handled at the repository layer via
             post-filtering, as Qdrant doesn't support native prefix matching.
         """
@@ -143,12 +171,30 @@ class QdrantClient:
 
         query_filter = Filter(must=conditions) if conditions else None
 
+        # Hybrid search with RRF fusion
+        # Prefetch 50 candidates from each search, fuse with RRF, return top `limit`
         results = self._client.query_points(
             collection_name=self._collection_name,
-            query=list(vector),
+            prefetch=[
+                Prefetch(
+                    query=list(dense_vector),
+                    using='dense',
+                    limit=50,
+                    filter=query_filter,
+                ),
+                Prefetch(
+                    query=SparseVector(
+                        indices=list(sparse_indices),
+                        values=list(sparse_values),
+                    ),
+                    using='sparse',
+                    limit=50,
+                    filter=query_filter,
+                ),
+            ],
+            query=FusionQuery(fusion=Fusion.RRF),
             limit=limit,
             score_threshold=score_threshold,
-            query_filter=query_filter,
         )
 
         return [
@@ -251,9 +297,20 @@ class QdrantClient:
             return None
 
         info = self._client.get_collection(self._collection_name)
+
+        # Handle both named vectors (dict) and single vector config
+        vectors_config = info.config.params.vectors
+        if isinstance(vectors_config, dict):
+            # Named vectors - get dense vector dimension
+            dense_config = vectors_config.get('dense')
+            vector_dimension = dense_config.size if dense_config else 0
+        else:
+            # Single vector config (legacy)
+            vector_dimension = vectors_config.size
+
         return CollectionInfoDict(
             name=self._collection_name,
-            vector_dimension=info.config.params.vectors.size,
+            vector_dimension=vector_dimension,
             points_count=info.points_count or 0,
             status=str(info.status),
         )

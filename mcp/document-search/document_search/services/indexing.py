@@ -43,6 +43,7 @@ from document_search.schemas.vectors import VectorPoint
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.embedding_batch_loader import EmbeddingBatchLoader
+from document_search.services.sparse_embedding import SparseEmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class _PendingFile:
     chunks: list[Chunk] = field(default_factory=list)
     chunk_ids: list[UUID] = field(default_factory=list)
     embeddings: list[tuple[float, ...]] = field(default_factory=list)
+    sparse_embeddings: list[tuple[tuple[int, ...], tuple[float, ...]]] = field(default_factory=list)
 
 
 class IndexingService:
@@ -86,6 +88,7 @@ class IndexingService:
         cls,
         chunking_service: ChunkingService,
         embedding_service: EmbeddingService,
+        sparse_embedding_service: SparseEmbeddingService,
         repository: DocumentVectorRepository,
         *,
         state_path: Path = DEFAULT_STATE_PATH,
@@ -95,7 +98,8 @@ class IndexingService:
 
         Args:
             chunking_service: Service for splitting files into chunks.
-            embedding_service: Service for creating embeddings.
+            embedding_service: Service for creating dense embeddings.
+            sparse_embedding_service: Service for creating BM25 sparse embeddings.
             repository: Repository for vector storage.
             state_path: Path to persist indexing state.
             coalesce_delay: Seconds to wait for embedding request coalescing (default 10ms).
@@ -106,6 +110,7 @@ class IndexingService:
         return cls(
             chunking_service=chunking_service,
             embedding_service=embedding_service,
+            sparse_embedding_service=sparse_embedding_service,
             batch_loader=batch_loader,
             repository=repository,
             state_path=state_path,
@@ -115,6 +120,7 @@ class IndexingService:
         self,
         chunking_service: ChunkingService,
         embedding_service: EmbeddingService,
+        sparse_embedding_service: SparseEmbeddingService,
         batch_loader: EmbeddingBatchLoader,
         repository: DocumentVectorRepository,
         *,
@@ -124,13 +130,15 @@ class IndexingService:
 
         Args:
             chunking_service: Service for splitting files into chunks.
-            embedding_service: Service for creating embeddings.
+            embedding_service: Service for creating dense embeddings.
+            sparse_embedding_service: Service for creating BM25 sparse embeddings.
             batch_loader: Batch loader for coalescing embedding requests.
             repository: Repository for vector storage.
             state_path: Path to persist indexing state.
         """
         self._chunking = chunking_service
         self._embedding = embedding_service
+        self._sparse_embedding = sparse_embedding_service
         self._batch_loader = batch_loader
         self._repo = repository
         self._state_path = state_path
@@ -202,22 +210,29 @@ class IndexingService:
             # File parsed but produced no chunks - skip silently
             return pending
 
-        # Step 2: Embed chunks using batch loader (coalesces with other workers)
+        # Step 2: Embed chunks (dense + sparse)
         embed_start = time.perf_counter()
 
-        # Fire all embedding requests concurrently - batch loader coalesces them
+        # Dense embeddings: Fire all requests concurrently - batch loader coalesces them
         embed_tasks = [self._batch_loader.embed(chunk.text) for chunk in pending.chunks]
         embed_responses = await asyncio.gather(*embed_tasks)
-
-        # Extract embeddings from responses
         pending.embeddings = [tuple(resp.values) for resp in embed_responses]
+
+        # Sparse embeddings: BM25 keyword vectors (synchronous, fast)
+        chunk_texts = [chunk.text for chunk in pending.chunks]
+        sparse_results = self._sparse_embedding.embed_batch(chunk_texts)
+        pending.sparse_embeddings = [(tuple(indices), tuple(values)) for indices, values in sparse_results]
+
         embed_time = time.perf_counter() - embed_start
 
         # Step 3: Create points and upsert (I/O - outside lock)
         upsert_start = time.perf_counter()
         points: list[VectorPoint] = []
-        for chunk, embedding, chunk_id in zip(pending.chunks, pending.embeddings, pending.chunk_ids):
-            point = VectorPoint.from_chunk(chunk, embedding, chunk_id)
+        for chunk, embedding, sparse_emb, chunk_id in zip(
+            pending.chunks, pending.embeddings, pending.sparse_embeddings, pending.chunk_ids
+        ):
+            sparse_indices, sparse_values = sparse_emb
+            point = VectorPoint.from_chunk(chunk, embedding, sparse_indices, sparse_values, chunk_id)
             points.append(point)
 
         self._repo.upsert(points)
@@ -527,11 +542,13 @@ async def create_indexing_service(
 
     chunking_service = await ChunkingService.create()
     embedding_service = EmbeddingService(gemini_client)
+    sparse_embedding_service = SparseEmbeddingService()
     repository = DocumentVectorRepository(qdrant_client)
 
     return await IndexingService.create(
         chunking_service=chunking_service,
         embedding_service=embedding_service,
+        sparse_embedding_service=sparse_embedding_service,
         repository=repository,
         state_path=state_path,
     )

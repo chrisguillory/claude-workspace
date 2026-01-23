@@ -17,14 +17,18 @@ from document_search.schemas.chunking import Chunk, FileType
 
 
 class VectorPoint(StrictModel):
-    """A point to store in Qdrant.
+    """A point to store in Qdrant with hybrid vectors.
 
-    Combines a chunk with its embedding vector for storage.
+    Combines a chunk with dense (semantic) and sparse (BM25) embeddings.
     The chunk data is stored as payload for retrieval.
     """
 
     id: UUID
-    vector: Sequence[float]
+    # Dense vector for semantic similarity (Gemini embeddings)
+    dense_vector: Sequence[float]
+    # Sparse vector for keyword matching (BM25)
+    sparse_indices: Sequence[int]
+    sparse_values: Sequence[float]
     # Payload contains chunk data for retrieval
     source_path: str
     chunk_index: int
@@ -38,11 +42,20 @@ class VectorPoint(StrictModel):
     json_path: str | None = None
 
     @classmethod
-    def from_chunk(cls, chunk: Chunk, vector: Sequence[float], point_id: UUID) -> VectorPoint:
-        """Create VectorPoint from Chunk and embedding."""
+    def from_chunk(
+        cls,
+        chunk: Chunk,
+        dense_vector: Sequence[float],
+        sparse_indices: Sequence[int],
+        sparse_values: Sequence[float],
+        point_id: UUID,
+    ) -> VectorPoint:
+        """Create VectorPoint from Chunk and embeddings."""
         return cls(
             id=point_id,
-            vector=vector,
+            dense_vector=dense_vector,
+            sparse_indices=sparse_indices,
+            sparse_values=sparse_values,
             source_path=chunk.source_path,
             chunk_index=chunk.chunk_index,
             file_type=chunk.file_type,
@@ -56,9 +69,13 @@ class VectorPoint(StrictModel):
 
 
 class SearchQuery(StrictModel):
-    """Vector similarity search query."""
+    """Hybrid vector similarity search query."""
 
-    vector: Sequence[float]
+    # Dense vector for semantic similarity (Gemini embeddings)
+    dense_vector: Sequence[float]
+    # Sparse vector for keyword matching (BM25)
+    sparse_indices: Sequence[int]
+    sparse_values: Sequence[float]
     limit: Annotated[int, pydantic.Field(ge=1, le=100)] = 10
     score_threshold: float | None = None
     # Optional filters
