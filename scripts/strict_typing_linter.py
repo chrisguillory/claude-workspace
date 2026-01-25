@@ -51,43 +51,127 @@ from typing import Literal
 # Configuration - What to check (not WHERE to check - that's the caller's job)
 # =============================================================================
 
-# Types that trigger mutable-type errors
+# Builtin mutable types (lowercase) - always flagged
 MUTABLE_TYPES: Set[str] = {
-    # Lowercase built-ins (Python 3.9+) - concrete mutable types
     'list',
     'dict',
     'set',
-    # Uppercase from typing module (legacy, deprecated in 3.9+)
-    'List',
-    'Dict',
-    # Note: typing.Set is NOT here because it's an alias for collections.abc.Set
-    # (the abstract interface), not the concrete set type
 }
 
 # Types that trigger loose-typing errors
 LOOSE_TYPES: Set[str] = {
-    'Any',  # Escape hatch that hides structure
+    'Any',
 }
 
-# Combined forbidden types
+# Combined forbidden types (short names only)
 FORBIDDEN_TYPES: Set[str] = MUTABLE_TYPES | LOOSE_TYPES
 
-# Types that are always allowed (don't recurse into these looking for violations)
-ALLOWED_CONTAINERS: Set[str] = {
-    'Mapping',
-    'Sequence',
-    'Set',  # collections.abc.Set (abstract interface for set-like types)
-    'tuple',
-    'frozenset',
-    'FrozenSet',  # typing module variant
+# Fully qualified mutable types (typing module aliases for builtins + explicit mutable interfaces)
+QUALIFIED_MUTABLE: Set[str] = {
+    'typing.List',
+    'typing.Dict',
+    'typing.Set',
+    'typing.MutableMapping',
+    'typing.MutableSequence',
+    'typing.MutableSet',
+    'collections.abc.MutableMapping',
+    'collections.abc.MutableSequence',
+    'collections.abc.MutableSet',
 }
 
-# Types that indicate "check nested contents" even though container is allowed
-# e.g., Mapping[str, list[int]] - Mapping is allowed, but check the value type
-TRANSPARENT_CONTAINERS: Set[str] = {
-    'Mapping',
-    'Sequence',  # Check what's inside these
+# Fully qualified allowed types (abstract interfaces)
+QUALIFIED_ALLOWED: Set[str] = {
+    'collections.abc.Set',
+    'collections.abc.Mapping',
+    'collections.abc.Sequence',
+    'typing.AbstractSet',
+    'typing.Mapping',
+    'typing.Sequence',
 }
+
+# Fully qualified transparent types (check nested contents)
+QUALIFIED_TRANSPARENT: Set[str] = {
+    'collections.abc.Mapping',
+    'collections.abc.Sequence',
+    'typing.Mapping',
+    'typing.Sequence',
+}
+
+# Immutable containers that don't need content checking
+# Note: tuple is NOT here - we check its contents because tuple[list, int] is still problematic
+# frozenset elements must be hashable, so mutable types are impossible anyway
+ALLOWED_CONTAINERS: Set[str] = {
+    'frozenset',
+    'FrozenSet',
+}
+
+# Position-aware allowlist for Any in generic type parameters (library boundaries)
+# Maps fully qualified type name to positions where Any is acceptable (0-indexed)
+# None = all positions allowed, tuple of ints = only those positions allowed
+# Names are resolved via import map, so only canonical names needed here
+ANY_ALLOWED_POSITIONS: Mapping[str, Sequence[int] | None] = {
+    # FastMCP Context[ServerSessionT, LifespanContextT, RequestT] - all positions
+    'mcp.server.fastmcp.Context': None,
+    # Generator[YieldType, SendType, ReturnType] - SendType and ReturnType often unused
+    'typing.Generator': (1, 2),
+    'collections.abc.Generator': (1, 2),
+    # AsyncGenerator[YieldType, SendType] - SendType often unused
+    'typing.AsyncGenerator': (1,),
+    'collections.abc.AsyncGenerator': (1,),
+}
+
+
+def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
+    """Build a mapping from local names to fully qualified names from imports.
+
+    Examples:
+        import typing -> {'typing': 'typing'}
+        import typing as t -> {'t': 'typing'}
+        from typing import Generator -> {'Generator': 'typing.Generator'}
+        from typing import Generator as Gen -> {'Gen': 'typing.Generator'}
+    """
+    import_map: dict[str, str] = {}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local_name = alias.asname or alias.name
+                import_map[local_name] = alias.name
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                for alias in node.names:
+                    local_name = alias.asname or alias.name
+                    import_map[local_name] = f'{node.module}.{alias.name}'
+
+    return import_map
+
+
+def _resolve_qualified_name(node: ast.expr, import_map: Mapping[str, str]) -> str:
+    """Resolve a type node to its fully qualified canonical name.
+
+    Uses the import map to resolve local names to their fully qualified origins.
+    For attribute access (e.g., typing.Generator), resolves the base module.
+    """
+    if isinstance(node, ast.Name):
+        # Simple name - look up in import map
+        return import_map.get(node.id, node.id)
+
+    elif isinstance(node, ast.Attribute):
+        # Qualified name like typing.Generator or t.Generator
+        # Get the base (could be a module alias)
+        base_node = node.value
+        if isinstance(base_node, ast.Name):
+            # Resolve the base module name
+            resolved_base = import_map.get(base_node.id, base_node.id)
+            return f'{resolved_base}.{node.attr}'
+        else:
+            # Nested attributes - recursively resolve
+            resolved_base = _resolve_qualified_name(base_node, import_map)
+            return f'{resolved_base}.{node.attr}'
+
+    return ''
+
 
 # Directive prefix uses the script filename for discoverability - readers immediately
 # know which tool owns the directive, and searching for the filename finds both the
@@ -190,13 +274,15 @@ class AnnotationChecker(ast.NodeVisitor):
         'dict': 'Mapping[K, V]',
         'Dict': 'Mapping[K, V]',
         'set': 'Set[T] (from collections.abc)',
+        'Set': 'Set[T] (from collections.abc)',
         # Loose type suggestions
         'Any': 'a specific type (TypedDict, StrictModel, or concrete type)',
     }
 
-    def __init__(self, filepath: Path, source_lines: Sequence[str]) -> None:
+    def __init__(self, filepath: Path, source_lines: Sequence[str], import_map: Mapping[str, str]) -> None:
         self.filepath = filepath
         self.source_lines = source_lines
+        self.import_map = import_map
         self.violations: list[Violation] = []  # Internal - OK to be mutable
         self._function_depth = 0  # Track nesting depth in functions
         self._skip_class_fields = False  # Skip field checking for non-frozen dataclasses
@@ -210,6 +296,26 @@ class AnnotationChecker(ast.NodeVisitor):
         elif isinstance(node, ast.Subscript):
             return self._get_type_name(node.value)
         return ''
+
+    def _classify_by_qualified_name(self, node: ast.expr) -> Literal['mutable', 'transparent', 'allowed', 'unknown']:
+        """Classify type using fully qualified name resolution.
+
+        Used to disambiguate types like 'Set' which could be:
+        - typing.Set (mutable, deprecated)
+        - collections.abc.Set (abstract interface, allowed)
+
+        Returns 'unknown' when qualified name doesn't provide disambiguation,
+        signaling the caller to fall back to short name matching.
+        """
+        qualified = _resolve_qualified_name(node, self.import_map)
+
+        if qualified in QUALIFIED_MUTABLE:
+            return 'mutable'
+        if qualified in QUALIFIED_TRANSPARENT:
+            return 'transparent'
+        if qualified in QUALIFIED_ALLOWED:
+            return 'allowed'
+        return 'unknown'
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Handle class definitions, skipping non-frozen dataclasses."""
@@ -310,32 +416,67 @@ class AnnotationChecker(ast.NodeVisitor):
         """Recursively find if annotation contains a forbidden type.
 
         Returns the forbidden type name if found, None otherwise.
+        Uses qualified name resolution for all types.
         """
         if isinstance(node, ast.Name):
-            # Simple name like 'list' or 'Sequence'
+            # Resolve and classify
+            classification = self._classify_by_qualified_name(node)
+            if classification == 'mutable':
+                return node.id
+            if classification in ('transparent', 'allowed'):
+                return None
+
+            # Fall back to short name for builtins
             if node.id in FORBIDDEN_TYPES:
                 return node.id
             return None
 
         elif isinstance(node, ast.Subscript):
-            # Generic like 'list[str]' or 'Mapping[str, Any]'
             container_name = self._get_type_name(node.value)
 
-            # If the container itself is forbidden, report immediately
+            # Resolve and classify the container
+            classification = self._classify_by_qualified_name(node.value)
+            if classification == 'mutable':
+                return container_name
+            if classification == 'transparent':
+                return self._find_forbidden_in_slice(node.slice)
+            if classification == 'allowed':
+                return None
+
+            # Fall back to short name checks for builtins
             if container_name in FORBIDDEN_TYPES:
                 return container_name
 
-            # If it's a transparent container, check nested contents
-            if container_name in TRANSPARENT_CONTAINERS:
-                return self._find_forbidden_in_slice(node.slice)
-
-            # If it's an allowed container (tuple, frozenset), stop checking
+            # Immutable containers that don't need content checking
             if container_name in ALLOWED_CONTAINERS:
                 return None
 
-            # For Union, Optional, etc. - check all components
-            if container_name in ('Union', 'Optional'):
+            # Resolve qualified name for remaining checks
+            resolved_name = _resolve_qualified_name(node.value, self.import_map)
+
+            # Union, Optional - check all components
+            if resolved_name in (
+                'typing.Union',
+                'typing.Optional',
+                'typing_extensions.Union',
+                'typing_extensions.Optional',
+            ):
                 return self._find_forbidden_in_slice(node.slice)
+
+            # Literal types contain values, not type annotations - skip entirely
+            if resolved_name in ('typing.Literal', 'typing_extensions.Literal'):
+                return None
+
+            # Annotated types: only check the first argument (the actual type), skip metadata
+            if resolved_name in ('typing.Annotated', 'typing_extensions.Annotated'):
+                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
+                    return self._find_forbidden_type(node.slice.elts[0])
+                return self._find_forbidden_type(node.slice)
+
+            # Position-aware Any allowances for library types
+            if resolved_name in ANY_ALLOWED_POSITIONS:
+                allowed_positions = ANY_ALLOWED_POSITIONS[resolved_name]
+                return self._find_forbidden_in_slice_with_positions(node.slice, allowed_positions)
 
             # Unknown container - recurse into slice to be safe
             return self._find_forbidden_in_slice(node.slice)
@@ -348,7 +489,14 @@ class AnnotationChecker(ast.NodeVisitor):
             return self._find_forbidden_type(node.right)
 
         elif isinstance(node, ast.Attribute):
-            # Qualified name like 'typing.List'
+            # Qualified name like 'typing.List' - resolve and classify
+            classification = self._classify_by_qualified_name(node)
+            if classification == 'mutable':
+                return node.attr
+            if classification in ('transparent', 'allowed'):
+                return None
+
+            # Fall back to short name for builtins
             if node.attr in FORBIDDEN_TYPES:
                 return node.attr
             return None
@@ -361,6 +509,14 @@ class AnnotationChecker(ast.NodeVisitor):
 
         elif isinstance(node, ast.Tuple):
             # Multiple types (e.g., in Union slice)
+            for element in node.elts:
+                violation = self._find_forbidden_type(element)
+                if violation:
+                    return violation
+            return None
+
+        elif isinstance(node, ast.List):
+            # Callable parameter lists: Callable[[int, str], ReturnType]
             for element in node.elts:
                 violation = self._find_forbidden_type(element)
                 if violation:
@@ -382,15 +538,171 @@ class AnnotationChecker(ast.NodeVisitor):
             # Single type arg like Sequence[str]
             return self._find_forbidden_type(node)
 
+    def _find_forbidden_in_slice_with_positions(
+        self, node: ast.expr, allowed_positions: Sequence[int] | None
+    ) -> str | None:
+        """Check for forbidden types in a subscript slice with position-aware Any allowances.
+
+        Args:
+            node: The slice node (single type or tuple of types)
+            allowed_positions: Positions where Any is allowed (0-indexed), or None for all
+
+        Returns:
+            The forbidden type name if found, None otherwise.
+        """
+        if allowed_positions is None:
+            # All positions allow Any - only check for mutable types
+            if isinstance(node, ast.Tuple):
+                for element in node.elts:
+                    violation = self._find_forbidden_type_no_any(element)
+                    if violation:
+                        return violation
+                return None
+            else:
+                return self._find_forbidden_type_no_any(node)
+
+        # Check each position, skipping Any at allowed positions
+        if isinstance(node, ast.Tuple):
+            for i, element in enumerate(node.elts):
+                if i in allowed_positions:
+                    # This position allows Any - only check for mutable types
+                    violation = self._find_forbidden_type_no_any(element)
+                else:
+                    # Check for all forbidden types including Any
+                    violation = self._find_forbidden_type(element)
+                if violation:
+                    return violation
+            return None
+        else:
+            # Single type arg at position 0
+            if 0 in allowed_positions:
+                return self._find_forbidden_type_no_any(node)
+            else:
+                return self._find_forbidden_type(node)
+
+    def _find_forbidden_type_no_any(self, node: ast.expr) -> str | None:
+        """Like _find_forbidden_type but only checks mutable types, not Any.
+
+        Uses qualified name resolution consistently with _find_forbidden_type.
+        """
+        if isinstance(node, ast.Name):
+            # Use qualified resolution first
+            classification = self._classify_by_qualified_name(node)
+            if classification == 'mutable':
+                return node.id
+            if classification in ('transparent', 'allowed'):
+                return None
+            # Fall back to short name for builtins
+            if node.id in MUTABLE_TYPES:
+                return node.id
+            return None
+
+        elif isinstance(node, ast.Subscript):
+            container_name = self._get_type_name(node.value)
+
+            # Use qualified resolution first
+            classification = self._classify_by_qualified_name(node.value)
+            if classification == 'mutable':
+                return container_name
+            if classification == 'transparent':
+                return self._find_forbidden_in_slice_no_any(node.slice)
+            if classification == 'allowed':
+                return None
+
+            # Fall back to short name for builtins
+            if container_name in MUTABLE_TYPES:
+                return container_name
+
+            # Immutable containers
+            if container_name in ALLOWED_CONTAINERS:
+                return None
+
+            # Resolve qualified name for remaining checks
+            resolved_name = _resolve_qualified_name(node.value, self.import_map)
+
+            # Union, Optional - check all components
+            if resolved_name in (
+                'typing.Union',
+                'typing.Optional',
+                'typing_extensions.Union',
+                'typing_extensions.Optional',
+            ):
+                return self._find_forbidden_in_slice_no_any(node.slice)
+
+            # Literal types contain values, not type annotations - skip entirely
+            if resolved_name in ('typing.Literal', 'typing_extensions.Literal'):
+                return None
+
+            # Annotated types: only check the first argument (the actual type), skip metadata
+            if resolved_name in ('typing.Annotated', 'typing_extensions.Annotated'):
+                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
+                    return self._find_forbidden_type_no_any(node.slice.elts[0])
+                return self._find_forbidden_type_no_any(node.slice)
+
+            # Recurse into slice for unknown containers
+            return self._find_forbidden_in_slice_no_any(node.slice)
+
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            left_violation = self._find_forbidden_type_no_any(node.left)
+            if left_violation:
+                return left_violation
+            return self._find_forbidden_type_no_any(node.right)
+
+        elif isinstance(node, ast.Attribute):
+            # Use qualified resolution
+            classification = self._classify_by_qualified_name(node)
+            if classification == 'mutable':
+                return node.attr
+            if classification in ('transparent', 'allowed'):
+                return None
+            # Fall back to short name for builtins
+            if node.attr in MUTABLE_TYPES:
+                return node.attr
+            return None
+
+        elif isinstance(node, ast.Tuple):
+            for element in node.elts:
+                violation = self._find_forbidden_type_no_any(element)
+                if violation:
+                    return violation
+            return None
+
+        elif isinstance(node, ast.List):
+            # Callable parameter lists: Callable[[int, str], ReturnType]
+            for element in node.elts:
+                violation = self._find_forbidden_type_no_any(element)
+                if violation:
+                    return violation
+            return None
+
+        elif isinstance(node, ast.Constant):
+            # String annotation (forward reference or PEP 563)
+            if isinstance(node.value, str):
+                return self._check_string_annotation_no_any(node.value)
+            return None
+
+        return None
+
+    def _find_forbidden_in_slice_no_any(self, node: ast.expr) -> str | None:
+        """Like _find_forbidden_in_slice but only checks mutable types."""
+        if isinstance(node, ast.Tuple):
+            for element in node.elts:
+                violation = self._find_forbidden_type_no_any(element)
+                if violation:
+                    return violation
+            return None
+        else:
+            return self._find_forbidden_type_no_any(node)
+
     def _check_string_annotation(self, annotation_str: str) -> str | None:
         """Parse and check a string annotation for forbidden types."""
-        try:
-            # Parse the string as a Python expression
-            expr_node = ast.parse(annotation_str, mode='eval').body
-            return self._find_forbidden_type(expr_node)
-        except SyntaxError:
-            # Invalid annotation - let other tools catch this
-            return None
+        expr_node = ast.parse(annotation_str, mode='eval').body
+        return self._find_forbidden_type(expr_node)
+
+    def _check_string_annotation_no_any(self, annotation_str: str) -> str | None:
+        """Parse and check a string annotation for mutable types only (not Any)."""
+        expr_node = ast.parse(annotation_str, mode='eval').body
+        return self._find_forbidden_type_no_any(expr_node)
 
     # Mapping from violation kind to directive code
     _DIRECTIVE_CODES: Mapping[str, str] = {
@@ -451,15 +763,14 @@ def _get_strict_module_ordering(init_path: Path) -> bool:
 
     Raises:
         ValueError: If unrecognized __strict_* variable found (fail-fast on typos)
+        OSError: If file cannot be read
+        SyntaxError: If file contains invalid Python syntax
     """
     if not init_path.exists():
         return False
 
-    try:
-        source = init_path.read_text(encoding='utf-8')
-        tree = ast.parse(source, filename=str(init_path))
-    except (OSError, SyntaxError):
-        return False
+    source = init_path.read_text(encoding='utf-8')
+    tree = ast.parse(source, filename=str(init_path))
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -627,23 +938,16 @@ def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[s
 
 def check_file(filepath: Path, strict_ordering_packages: Set[Path]) -> Sequence[Violation]:
     """Check a single file for all violations."""
-    try:
-        source = filepath.read_text(encoding='utf-8')
-    except (OSError, UnicodeDecodeError) as e:
-        print(f'Warning: Could not read {filepath}: {e}', file=sys.stderr)
-        return []
-
-    try:
-        tree = ast.parse(source, filename=str(filepath))
-    except SyntaxError as e:
-        print(f'Warning: Syntax error in {filepath}: {e}', file=sys.stderr)
-        return []
-
+    source = filepath.read_text(encoding='utf-8')
+    tree = ast.parse(source, filename=str(filepath))
     source_lines = source.splitlines()
     violations: list[Violation] = []
 
+    # Build import map for resolving type names
+    import_map = _build_import_map(tree)
+
     # Type checking
-    type_checker = AnnotationChecker(filepath, source_lines)
+    type_checker = AnnotationChecker(filepath, source_lines, import_map)
     type_checker.visit(tree)
     violations.extend(type_checker.violations)
 
