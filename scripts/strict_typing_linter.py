@@ -1,24 +1,32 @@
 #!/usr/bin/env -S uv run
-"""Check for mutable and loose type patterns in annotations.
+"""Strict typing linter for Python annotations.
 
-This script enforces immutable interface types:
+This script enforces immutable interface types and module organization:
 1. IMMUTABLE TYPES: Use Sequence/Mapping/Set instead of list/dict/set
 2. STRICT TYPING: No Any, Mapping[str, Any], Sequence[Any] etc.
+3. MODULE ORDERING (opt-in): Public before private, classes before functions
 
-Checks ALL function/method parameters and class field annotations.
+Checks ALL function/method parameters, return types, and class field annotations.
 Skips non-frozen dataclasses (mutable by design).
 Respects .gitignore when scanning directories.
+
+Module ordering is opt-in via __strict_module_ordering__ = True in package __init__.py.
+When enabled, all submodules in that package must:
+- Define __all__
+- Order definitions: __all__ items first, then public, then private
+- Within each group: classes before functions
 
 Design Philosophy:
     - Error-only, no auto-fix: Forces conscious decision at each occurrence
     - Pure analysis: Checks exactly the files it's given (no internal filtering)
     - Escape hatches:
-      - # check_schema_typing.py: mutable-type - suppress mutable type violations
-      - # check_schema_typing.py: loose-typing - suppress loose typing violations
+      - # strict_typing_linter.py: mutable-type - suppress mutable type violations
+      - # strict_typing_linter.py: loose-typing - suppress loose typing violations
+      - # strict_typing_linter.py: ordering - suppress ordering violations
 
 Usage:
-    ./scripts/check_schema_typing.py <files...>
-    ./scripts/check_schema_typing.py .          # All .py files in cwd
+    ./scripts/strict_typing_linter.py <files...>
+    ./scripts/strict_typing_linter.py .          # All .py files in cwd
 
 File selection is handled by the caller (pre-commit, shell globs, etc.).
 This script is a pure analysis function - it checks what it's given.
@@ -81,6 +89,11 @@ TRANSPARENT_CONTAINERS: Set[str] = {
     'Sequence',  # Check what's inside these
 }
 
+# Directive prefix uses the script filename for discoverability - readers immediately
+# know which tool owns the directive, and searching for the filename finds both the
+# script and all its annotations in the codebase.
+DIRECTIVE_PREFIX = '# strict_typing_linter.py:'
+
 
 # =============================================================================
 # Data Types
@@ -88,23 +101,43 @@ TRANSPARENT_CONTAINERS: Set[str] = {
 
 
 # Type aliases for constrained string values
-type ViolationKind = Literal['mutable', 'loose']
-type FieldContext = Literal['field', 'parameter']
-type DirectiveCode = Literal['mutable-type', 'loose-typing']
+type FieldContext = Literal['field', 'parameter', 'return']
+type DirectiveCode = Literal['mutable-type', 'loose-typing', 'ordering']
+
+# Violation kind literals - used in discriminated unions
+type TypeViolationKind = Literal['mutable', 'loose']
+type OrderingViolationKind = Literal['ordering', 'missing-all']
+type ViolationKind = TypeViolationKind | OrderingViolationKind
 
 
 @dataclass(frozen=True)
-class Violation:
-    """A single type violation (mutable or loose)."""
+class TypeViolation:
+    """A type annotation violation (mutable or loose types)."""
 
     filepath: Path
     line: int
     column: int
     context: FieldContext
     bad_type: str
-    violation_kind: ViolationKind
+    kind: Literal['mutable', 'loose']
     source_line: str
     suggestion: str
+
+
+@dataclass(frozen=True)
+class OrderingViolation:
+    """A module ordering violation."""
+
+    filepath: Path
+    line: int
+    kind: Literal['ordering', 'missing-all']
+    message: str
+    source_line: str
+    suggestion: str
+
+
+# Discriminated union of all violation types
+type Violation = TypeViolation | OrderingViolation
 
 
 # =============================================================================
@@ -124,7 +157,10 @@ def _is_frozen_dataclass(node: ast.ClassDef) -> bool | None:
         # @dataclass (no args)
         if isinstance(decorator, ast.Name) and decorator.id == 'dataclass':
             return False
-        # @dataclass(...) with args
+        # @dataclasses.dataclass (qualified name, no args)
+        if isinstance(decorator, ast.Attribute) and decorator.attr == 'dataclass':
+            return False
+        # @dataclass(...) or @dataclasses.dataclass(...) with args
         if isinstance(decorator, ast.Call):
             func = decorator.func
             if isinstance(func, ast.Name) and func.id == 'dataclass':
@@ -144,10 +180,10 @@ def _is_frozen_dataclass(node: ast.ClassDef) -> bool | None:
     return None
 
 
-class SchemaTypeChecker(ast.NodeVisitor):
+class AnnotationChecker(ast.NodeVisitor):
     """AST visitor that checks for mutable and loose types in annotations."""
 
-    SUGGESTIONS: dict[str, str] = {
+    SUGGESTIONS: Mapping[str, str] = {
         # Mutable type suggestions
         'list': 'Sequence[T] or tuple[T, ...]',
         'List': 'Sequence[T] or tuple[T, ...]',
@@ -213,6 +249,10 @@ class SchemaTypeChecker(ast.NodeVisitor):
         # Check ALL function parameters
         self._check_function_parameters(node)
 
+        # Check return type annotation
+        if node.returns:
+            self._check_annotation(node.returns, node.lineno, 'return')
+
         # Track that we're in a function body
         self._function_depth += 1
 
@@ -226,18 +266,23 @@ class SchemaTypeChecker(ast.NodeVisitor):
         all_args = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
 
         for arg in all_args:
-            # Skip 'self' and 'cls' parameters
-            if arg.arg in ('self', 'cls'):
-                continue
             if arg.annotation:
                 self._check_annotation(arg.annotation, arg.lineno, 'parameter')
+
+        # Check *args annotation
+        if node.args.vararg and node.args.vararg.annotation:
+            self._check_annotation(node.args.vararg.annotation, node.args.vararg.lineno, 'parameter')
+
+        # Check **kwargs annotation
+        if node.args.kwarg and node.args.kwarg.annotation:
+            self._check_annotation(node.args.kwarg.annotation, node.args.kwarg.lineno, 'parameter')
 
     def _check_annotation(self, node: ast.expr, lineno: int, context: FieldContext) -> None:
         """Check if an annotation contains forbidden types."""
         bad_type = self._find_forbidden_type(node)
         if bad_type:
             # Determine violation kind
-            kind: ViolationKind = 'loose' if bad_type in LOOSE_TYPES else 'mutable'
+            kind: TypeViolationKind = 'loose' if bad_type in LOOSE_TYPES else 'mutable'
 
             # Check for directive comment with appropriate code
             if self._has_directive(lineno, kind):
@@ -249,13 +294,13 @@ class SchemaTypeChecker(ast.NodeVisitor):
                 source_line = self.source_lines[lineno - 1].strip()
 
             self.violations.append(
-                Violation(
+                TypeViolation(
                     filepath=self.filepath,
                     line=lineno,
                     column=getattr(node, 'col_offset', 0),
                     context=context,
                     bad_type=bad_type,
-                    violation_kind=kind,
+                    kind=kind,
                     source_line=source_line,
                     suggestion=self.SUGGESTIONS.get(bad_type, 'a more specific type'),
                 )
@@ -348,15 +393,12 @@ class SchemaTypeChecker(ast.NodeVisitor):
             return None
 
     # Mapping from violation kind to directive code
-    _DIRECTIVE_CODES: Mapping[ViolationKind, DirectiveCode] = {
+    _DIRECTIVE_CODES: Mapping[str, str] = {
         'mutable': 'mutable-type',
         'loose': 'loose-typing',
     }
 
-    # The directive prefix - uses the script filename for maximum clarity
-    _DIRECTIVE_PREFIX = '# check_schema_typing.py:'
-
-    def _has_directive(self, lineno: int, violation_kind: ViolationKind) -> bool:
+    def _has_directive(self, lineno: int, violation_kind: Literal['mutable', 'loose']) -> bool:
         """Check if line has a directive comment for this check.
 
         Args:
@@ -370,13 +412,13 @@ class SchemaTypeChecker(ast.NodeVisitor):
             line = self.source_lines[lineno - 1]
 
             # Look for our directive prefix
-            prefix_lower = self._DIRECTIVE_PREFIX.lower()
+            prefix_lower = DIRECTIVE_PREFIX.lower()
             if prefix_lower not in line.lower():
                 return False
 
             # Find the directive part
             directive_idx = line.lower().find(prefix_lower)
-            codes_part = line[directive_idx + len(self._DIRECTIVE_PREFIX) :].strip()
+            codes_part = line[directive_idx + len(DIRECTIVE_PREFIX) :].strip()
 
             # Strip trailing comment (# explanation)
             if ' #' in codes_part:
@@ -394,12 +436,197 @@ class SchemaTypeChecker(ast.NodeVisitor):
 
 
 # =============================================================================
+# Module Ordering Checks (opt-in via __strict_module_ordering__)
+# =============================================================================
+
+
+# Recognized __strict_* variables (fail-fast on typos)
+RECOGNIZED_STRICT_VARS: Set[str] = {
+    '__strict_module_ordering__',
+}
+
+
+def _get_strict_module_ordering(init_path: Path) -> bool:
+    """Check if __init__.py opts into strict module ordering.
+
+    Raises:
+        ValueError: If unrecognized __strict_* variable found (fail-fast on typos)
+    """
+    if not init_path.exists():
+        return False
+
+    try:
+        source = init_path.read_text(encoding='utf-8')
+        tree = ast.parse(source, filename=str(init_path))
+    except (OSError, SyntaxError):
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    name = target.id
+                    # Fail-fast on unrecognized __strict_* variables
+                    if name.startswith('__strict_') and name.endswith('__'):
+                        if name not in RECOGNIZED_STRICT_VARS:
+                            raise ValueError(
+                                f'{init_path}:{node.lineno}: Unrecognized strict variable '
+                                f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?"
+                            )
+                        if name == '__strict_module_ordering__':
+                            if isinstance(node.value, ast.Constant):
+                                return node.value.value is True
+    return False
+
+
+def _extract_all_names(tree: ast.Module) -> Set[str] | None:
+    """Extract names from __all__ if defined."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == '__all__':
+                    if isinstance(node.value, ast.List):
+                        names = set()
+                        for elt in node.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                names.add(elt.value)
+                        return names
+    return None
+
+
+@dataclass(frozen=True)
+class _Definition:
+    """A top-level definition in a module."""
+
+    name: str
+    line: int
+    is_class: bool
+    is_private: bool
+    in_all: bool
+
+    @property
+    def sort_key(self) -> tuple[int, int, int]:
+        """Sort key: (in_all, is_private, is_function)."""
+        all_group = 0 if self.in_all else 1
+        private_group = 1 if self.is_private else 0
+        type_group = 0 if self.is_class else 1
+        return (all_group, private_group, type_group)
+
+
+def _extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequence[_Definition]:
+    """Extract top-level class and function definitions."""
+    definitions = []
+    all_names = all_names or set()
+
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            definitions.append(
+                _Definition(
+                    name=node.name,
+                    line=node.lineno,
+                    is_class=True,
+                    is_private=node.name.startswith('_'),
+                    in_all=node.name in all_names,
+                )
+            )
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            definitions.append(
+                _Definition(
+                    name=node.name,
+                    line=node.lineno,
+                    is_class=False,
+                    is_private=node.name.startswith('_'),
+                    in_all=node.name in all_names,
+                )
+            )
+
+    return definitions
+
+
+def _has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
+    """Check if line has ordering suppression directive."""
+    if 0 < lineno <= len(source_lines):
+        line = source_lines[lineno - 1].lower()
+        if DIRECTIVE_PREFIX.lower() in line:
+            idx = line.find(DIRECTIVE_PREFIX.lower())
+            codes_part = line[idx + len(DIRECTIVE_PREFIX) :]
+            codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
+            return 'ordering' in codes
+    return False
+
+
+def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequence[str]) -> Sequence[OrderingViolation]:
+    """Check module ordering: __all__ items first, public before private, classes before functions."""
+    violations: list[OrderingViolation] = []
+
+    all_names = _extract_all_names(tree)
+    definitions = _extract_definitions(tree, all_names)
+
+    if not definitions:
+        return violations
+
+    expected_order = sorted(definitions, key=lambda d: d.sort_key)
+
+    for actual, expected in zip(definitions, expected_order):
+        if actual.name != expected.name:
+            if _has_ordering_directive(source_lines, actual.line):
+                continue
+
+            # Describe what's wrong
+            if expected.in_all and not actual.in_all:
+                reason = f"'{actual.name}' should come after __all__ items"
+            elif not expected.is_private and actual.is_private:
+                reason = f"private '{actual.name}' should come after public definitions"
+            elif expected.is_class and not actual.is_class:
+                reason = f"function '{actual.name}' should come after classes"
+            else:
+                reason = f"'{actual.name}' is out of order (expected '{expected.name}' here)"
+
+            violations.append(
+                OrderingViolation(
+                    filepath=filepath,
+                    line=actual.line,
+                    kind='ordering',
+                    message=reason,
+                    source_line=source_lines[actual.line - 1].strip() if actual.line <= len(source_lines) else '',
+                    suggestion='Reorder: __all__ items (classes→functions) → public (classes→functions) → private (classes→functions)',
+                )
+            )
+            break  # Report first violation only
+
+    return violations
+
+
+def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[str]) -> Sequence[OrderingViolation]:
+    """Check that __all__ is defined."""
+    all_names = _extract_all_names(tree)
+    if all_names is None:
+        line = 1
+        for node in tree.body:
+            if not isinstance(node, (ast.Import, ast.ImportFrom, ast.Expr)):
+                line = node.lineno
+                break
+
+        return [
+            OrderingViolation(
+                filepath=filepath,
+                line=line,
+                kind='missing-all',
+                message='__all__ is not defined',
+                source_line=source_lines[line - 1].strip() if line <= len(source_lines) else '',
+                suggestion='Add __all__ = [...] to explicitly declare public API',
+            )
+        ]
+    return []
+
+
+# =============================================================================
 # File Processing
 # =============================================================================
 
 
-def check_file(filepath: Path) -> list[Violation]:
-    """Check a single file for mutable type violations."""
+def check_file(filepath: Path, strict_ordering_packages: Set[Path]) -> Sequence[Violation]:
+    """Check a single file for all violations."""
     try:
         source = filepath.read_text(encoding='utf-8')
     except (OSError, UnicodeDecodeError) as e:
@@ -413,13 +640,23 @@ def check_file(filepath: Path) -> list[Violation]:
         return []
 
     source_lines = source.splitlines()
-    checker = SchemaTypeChecker(filepath, source_lines)
-    checker.visit(tree)
+    violations: list[Violation] = []
 
-    return checker.violations
+    # Type checking
+    type_checker = AnnotationChecker(filepath, source_lines)
+    type_checker.visit(tree)
+    violations.extend(type_checker.violations)
+
+    # Module ordering (if package opted in)
+    package_dir = filepath.parent
+    if package_dir in strict_ordering_packages and filepath.name != '__init__.py':
+        violations.extend(check_all_defined(filepath, tree, source_lines))
+        violations.extend(check_module_ordering(filepath, tree, source_lines))
+
+    return violations
 
 
-def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> set[Path]:
+def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Path]:
     """Use git check-ignore to identify ignored files.
 
     Returns set of ignored paths, or empty set if not a git repo or git unavailable.
@@ -444,17 +681,32 @@ def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> set[P
         return set()
 
 
-def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: bool = True) -> list[Path]:
+def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: bool = True) -> Sequence[Path]:
     """Find all .py files recursively under root, skipping excluded directories."""
-    all_files = sorted(
-        path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts)
-    )
+    all_files = sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
 
     if respect_gitignore:
         ignored = _get_git_ignored_files(all_files, root)
         all_files = [f for f in all_files if f not in ignored]
 
     return all_files
+
+
+def _discover_strict_ordering_packages(files: Sequence[Path]) -> Set[Path]:
+    """Find packages that have opted into strict module ordering.
+
+    Scans all __init__.py files in the file list for __strict_module_ordering__ = True.
+    Raises ValueError on unrecognized __strict_* variables (fail-fast on typos).
+    """
+    packages: set[Path] = set()
+    init_files = {f for f in files if f.name == '__init__.py'}
+
+    for init_path in init_files:
+        # _get_strict_module_ordering raises ValueError on unrecognized __strict_* vars
+        if _get_strict_module_ordering(init_path):
+            packages.add(init_path.parent)
+
+    return packages
 
 
 # =============================================================================
@@ -464,20 +716,24 @@ def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: boo
 
 def format_violation(v: Violation) -> str:
     """Format a violation for display."""
-    if v.violation_kind == 'loose':
-        type_desc = 'Loose type'
-        directive_code = 'loose-typing'
-    else:
-        type_desc = 'Mutable type'
-        directive_code = 'mutable-type'
-
-    return (
-        f'{v.filepath}:{v.line}:{v.column}: error: '
-        f"{type_desc} '{v.bad_type}' in {v.context} annotation\n"
-        f'    {v.source_line}\n'
-        f'    Suggestion: Use {v.suggestion}\n'
-        f'    Silence with: # check_schema_typing.py: {directive_code}'
-    )
+    if isinstance(v, TypeViolation):
+        type_desc = 'Loose type' if v.kind == 'loose' else 'Mutable type'
+        directive_code = 'loose-typing' if v.kind == 'loose' else 'mutable-type'
+        return (
+            f'{v.filepath}:{v.line}:{v.column}: error: '
+            f"{type_desc} '{v.bad_type}' in {v.context} annotation\n"
+            f'    {v.source_line}\n'
+            f'    Suggestion: {v.suggestion}\n'
+            f'    Silence with: {DIRECTIVE_PREFIX} {directive_code}'
+        )
+    else:  # OrderingViolation
+        directive_code = 'ordering'
+        return (
+            f'{v.filepath}:{v.line}: error: {v.message}\n'
+            f'    {v.source_line}\n'
+            f'    Suggestion: {v.suggestion}\n'
+            f'    Silence with: {DIRECTIVE_PREFIX} {directive_code}'
+        )
 
 
 # =============================================================================
@@ -486,9 +742,11 @@ def format_violation(v: Violation) -> str:
 
 
 # Map from directive codes to violation kinds for --ignore flag
-_CODE_TO_KIND: dict[str, ViolationKind] = {
-    'mutable-type': 'mutable',
-    'loose-typing': 'loose',
+# 'ordering' maps to both 'ordering' and 'missing-all' since they're both ordering-related
+_CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
+    'mutable-type': {'mutable'},
+    'loose-typing': {'loose'},
+    'ordering': {'ordering', 'missing-all'},
 }
 
 
@@ -515,8 +773,8 @@ def main() -> int:
         nargs='*',
         default=[],
         metavar='CODE',
-        choices=['mutable-type', 'loose-typing'],
-        help='Violation codes to ignore (mutable-type, loose-typing)',
+        choices=['mutable-type', 'loose-typing', 'ordering'],
+        help='Violation codes to ignore (mutable-type, loose-typing, ordering)',
     )
     parser.add_argument(
         '--no-gitignore',
@@ -526,7 +784,9 @@ def main() -> int:
 
     args = parser.parse_args()
     exclude_dirs = set(args.exclude)
-    ignored_kinds: set[ViolationKind] = {_CODE_TO_KIND[code] for code in args.ignore}
+    ignored_kinds: set[ViolationKind] = set()
+    for code in args.ignore:
+        ignored_kinds.update(_CODE_TO_KINDS[code])
     respect_gitignore = not args.no_gitignore
 
     # Collect files to check
@@ -543,15 +803,19 @@ def main() -> int:
     if not files:
         return 0
 
+    # Discover packages with strict module ordering enabled
+    # Raises ValueError on unrecognized __strict_* variables (fail-fast on typos)
+    strict_ordering_packages = _discover_strict_ordering_packages(files)
+
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
-        violations = check_file(filepath)
+        violations = check_file(filepath, strict_ordering_packages)
         all_violations.extend(violations)
 
     # Filter out ignored violation kinds
     if ignored_kinds:
-        all_violations = [v for v in all_violations if v.violation_kind not in ignored_kinds]
+        all_violations = [v for v in all_violations if v.kind not in ignored_kinds]
 
     # Report violations
     if all_violations:
@@ -560,13 +824,16 @@ def main() -> int:
             print()
 
         file_count = len({v.filepath for v in all_violations})
-        mutable_count = sum(1 for v in all_violations if v.violation_kind == 'mutable')
-        loose_count = sum(1 for v in all_violations if v.violation_kind == 'loose')
+        mutable_count = sum(1 for v in all_violations if v.kind == 'mutable')
+        loose_count = sum(1 for v in all_violations if v.kind == 'loose')
+        ordering_count = sum(1 for v in all_violations if v.kind in ('ordering', 'missing-all'))
         summary_parts = []
         if mutable_count:
             summary_parts.append(f'{mutable_count} mutable')
         if loose_count:
             summary_parts.append(f'{loose_count} loose')
+        if ordering_count:
+            summary_parts.append(f'{ordering_count} ordering')
         print(f'Found {len(all_violations)} violation(s) ({", ".join(summary_parts)}) in {file_count} file(s).')
         return 1
 
