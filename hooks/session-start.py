@@ -1,4 +1,9 @@
 #!/usr/bin/env -S uv run --quiet --script
+"""SessionStart hook for Claude Code session tracking.
+
+See: https://code.claude.com/docs/en/hooks#sessionstart
+"""
+
 # /// script
 # dependencies = [
 #   "pydantic>=2.0.0",
@@ -19,9 +24,8 @@ from pathlib import Path
 
 import packaging.version
 import psutil
-import pydantic
+from local_lib.schemas.hooks import SessionStartHookInput
 from local_lib.session_tracker import SessionManager
-from local_lib.types import SessionSource
 from local_lib.utils import Timer
 
 # Start timing
@@ -77,23 +81,6 @@ def get_claude_version(claude_pid: int) -> str:
     exe_path = Path(psutil.Process(claude_pid).exe())
     version = packaging.version.Version(exe_path.name)
     return str(version)
-
-
-class BaseModel(pydantic.BaseModel):
-    """Base model with strict validation - no extra fields, all fields required unless Optional."""
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
-
-
-class SessionStartHookInput(BaseModel):
-    """SessionStart hook input schema"""
-
-    session_id: str
-    cwd: str
-    transcript_path: str
-    hook_event_name: str
-    source: SessionSource
-    model: str | None = None  # Added in Claude Code v2.1.9 (only on startup, not resume)
 
 
 # Read and validate hook input from stdin

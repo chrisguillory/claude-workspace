@@ -72,7 +72,8 @@ class ErrorCategory(StrictModel):
 class IndexingResult(StrictModel):
     """Result of directory indexing operation."""
 
-    files_scanned: int  # Total files found
+    files_scanned: int  # Total files found (after gitignore filtering)
+    files_ignored: int = 0  # Files filtered by gitignore
     files_processed: int  # Files actually indexed (excludes skipped/cached)
     files_skipped: int  # Unchanged files (hash match)
     chunks_created: int

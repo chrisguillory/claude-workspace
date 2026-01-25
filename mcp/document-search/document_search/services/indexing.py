@@ -17,8 +17,10 @@ import hashlib
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,6 +60,51 @@ NUM_FILE_WORKERS = min(32, (os.cpu_count() or 4) * 2)
 
 # Timeout for file chunking operations (detects deadlocks)
 FILE_CHUNK_TIMEOUT_SECONDS = 60
+
+
+def _get_git_ignored_files(
+    file_paths: Sequence[Path],
+    directory: Path,
+    *,
+    strict: bool = False,
+) -> set[Path]:
+    """Use git check-ignore to identify ignored files.
+
+    Respects all gitignore rules: root, nested (e.g., .mypy_cache/.gitignore),
+    .git/info/exclude, and global gitignore.
+
+    Args:
+        file_paths: List of file paths to check.
+        directory: Working directory for git command.
+        strict: If True, raise on non-git repos. If False, return empty set.
+
+    Returns:
+        Set of paths that are git-ignored.
+
+    Raises:
+        FileNotFoundError: If git is not installed (always raised).
+        subprocess.TimeoutExpired: If git check-ignore takes too long (always raised).
+        RuntimeError: If directory is not a git repository (only if strict=True).
+    """
+    if not file_paths:
+        return set()
+
+    result = subprocess.run(
+        ['git', 'check-ignore', '--stdin'],
+        input='\n'.join(str(p) for p in file_paths),
+        capture_output=True,
+        text=True,
+        cwd=directory,
+        timeout=30,
+    )
+
+    # Exit codes: 0 = some ignored, 1 = none ignored, 128 = not a git repo
+    if result.returncode == 128:
+        if strict:
+            raise RuntimeError(f'Not a git repository: {directory}')
+        return set()
+
+    return {Path(line) for line in result.stdout.splitlines() if line}
 
 
 @dataclass
@@ -283,6 +330,7 @@ class IndexingService:
         directory: Path,
         *,
         full_reindex: bool = False,
+        respect_gitignore: bool | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> IndexingResult:
         """Index all supported files in a directory using batched processing.
@@ -295,6 +343,10 @@ class IndexingService:
         Args:
             directory: Directory to index.
             full_reindex: If True, reindex all files regardless of hash.
+            respect_gitignore: Git ignore filtering behavior:
+                - None (default): Auto-detect. Filter if git repo, skip silently if not.
+                - True: Require git filtering. Raises RuntimeError if not a git repo.
+                - False: Skip git filtering entirely.
             on_progress: Optional callback for progress updates.
 
         Returns:
@@ -310,6 +362,7 @@ class IndexingService:
         errors: list[FileProcessingError] = []
         files_processed = 0
         files_skipped = 0
+        files_ignored = 0
         chunks_created = 0
         chunks_deleted = 0
 
@@ -317,7 +370,17 @@ class IndexingService:
         all_files: list[Path] = []
         for ext in EXTENSION_MAP:
             all_files.extend(f for f in directory.glob(f'**/*{ext}') if f.is_file())
+
+        files_found = len(all_files)
+
+        # Filter git-ignored files
+        if respect_gitignore is not False:
+            ignored_files = _get_git_ignored_files(all_files, directory, strict=(respect_gitignore is True))
+            all_files = [f for f in all_files if f not in ignored_files]
+            files_ignored = len(ignored_files)
+
         files_total = len(all_files)
+        logger.info(f'[INDEX] Scanned {files_found} files, {files_ignored} git-ignored, {files_total} to consider')
 
         files_to_index: list[Path] = []
         for file_path in all_files:
@@ -394,6 +457,7 @@ class IndexingService:
 
         return IndexingResult(
             files_scanned=files_total,
+            files_ignored=files_ignored,
             files_processed=files_processed,
             files_skipped=files_skipped,
             chunks_created=chunks_created,
