@@ -44,3 +44,11 @@ claude mcp add --scope user document-search -- mcp-docsearch-server
   usage, periodic updates during the worker processing phase would improve user experience
 * Collection verification on startup - detect when Qdrant collection is empty/missing but state file exists (e.g.,
   after Docker container deletion); currently this mismatch causes files to be skipped despite missing vectors
+* Query transformation techniques for improved retrieval:
+  - **HyDE** (Hypothetical Document Embeddings) - generate a hypothetical answer, embed that instead of the query;
+    bridges the query-document style gap in embedding space
+  - **Query expansion** - add synonyms, related terms, or rephrase the query to capture more relevant results
+  - **Multi-query** - generate multiple query variations, retrieve for each, merge results; improves recall for
+    ambiguous queries
+  - **Step-back prompting** - abstract the query to a higher-level concept before retrieval; helps with specific
+    questions that need general background
