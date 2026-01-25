@@ -114,7 +114,9 @@ class QdrantClient:
 
     def upsert(
         self,
-        points: Sequence[tuple[UUID, Sequence[float], Sequence[int], Sequence[float], Mapping[str, Any]]],
+        points: Sequence[  # strict_typing_linter.py: loose-typing # Qdrant payload
+            tuple[UUID, Sequence[float], Sequence[int], Sequence[float], Mapping[str, Any]]
+        ],
     ) -> int:
         """Insert or update points with hybrid vectors.
 
@@ -257,7 +259,9 @@ class QdrantClient:
             if hit.payload is not None
         ]
 
-    def get(self, point_ids: Sequence[UUID]) -> list[dict[str, Any]]:
+    def get(  # strict_typing_linter.py: loose-typing # Qdrant payload
+        self, point_ids: Sequence[UUID]
+    ) -> Sequence[Mapping[str, Any]]:
         """Retrieve points by ID.
 
         Args:
@@ -436,7 +440,7 @@ class QdrantClient:
         )
         logger.debug('Created file_type keyword index')
 
-    def facet_by_file_type(self) -> dict[str, int]:
+    def facet_by_file_type(self) -> Mapping[str, int]:
         """Get chunk counts by file type using Facet API.
 
         Returns:
@@ -476,7 +480,7 @@ class QdrantClient:
         path_prefix: str | None = None,
         file_type: str | None = None,
         limit: int | None = None,
-    ) -> list[tuple[str, str, int]]:
+    ) -> Sequence[tuple[str, str, int]]:
         """Get unique source_paths with file types and chunk counts.
 
         Uses scroll API to iterate all points and aggregate by source_path.

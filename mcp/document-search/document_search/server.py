@@ -15,7 +15,7 @@ import contextlib
 import logging
 import sys
 import typing
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -182,7 +182,7 @@ def register_tools(state: ServerState) -> None:
         query: str,
         limit: int = 10,
         search_type: SearchType = 'hybrid',
-        file_types: list[str] | None = None,
+        file_types: Sequence[str] | None = None,
         path_prefix: str | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
@@ -281,7 +281,7 @@ def register_tools(state: ServerState) -> None:
     )
     async def get_index_stats(
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
-    ) -> dict[str, int | str]:
+    ) -> Mapping[str, int | str]:
         """Get statistics about the current document index.
 
         Returns information about the Qdrant collection including

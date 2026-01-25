@@ -19,7 +19,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +39,8 @@ from document_search.schemas.chunking import (
     get_file_type,
 )
 from document_search.services.pdf_extraction import extract_pdf
+
+__all__ = ['ChunkingService']
 
 logger = logging.getLogger(__name__)
 
@@ -375,7 +377,7 @@ class ChunkingService:
 
         return chunks
 
-    def _detect_csv_types(self, df: pd.DataFrame) -> dict[str, str]:
+    def _detect_csv_types(self, df: pd.DataFrame) -> Mapping[str, str]:
         """Detect likely data types for CSV columns."""
         type_map: dict[str, str] = {}
 

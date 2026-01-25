@@ -17,11 +17,14 @@ Dependencies:
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 import fitz  # PyMuPDF
 import pdfplumber
+
+__all__ = ['PDFPageData', 'PDFExtractionResult', 'extract_pdf']
 
 # Constants (duplicated from chunking.py to avoid import issues in subprocess)
 PDF_OCR_CHAR_THRESHOLD = 100
@@ -33,7 +36,7 @@ PDF_MIN_REPEAT_COUNT = 2
 type PDFType = Literal['text', 'scanned', 'mixed', 'image_heavy']
 
 
-@dataclass
+@dataclass(frozen=True)
 class PDFPageData:
     """Data extracted from a single PDF page."""
 
@@ -43,15 +46,15 @@ class PDFPageData:
     table_markdown: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class PDFExtractionResult:
     """Complete extraction result for a PDF file."""
 
     path: str
     page_count: int
     pdf_type: PDFType
-    pages: list[PDFPageData]
-    bookmarks: dict[int, str]  # page_num -> bookmark title
+    pages: Sequence[PDFPageData]
+    bookmarks: Mapping[int, str]  # page_num -> bookmark title
     header_pattern: str
     footer_pattern: str
 
@@ -211,7 +214,7 @@ def _detect_header_footer(doc: fitz.Document) -> tuple[str, str]:
     return header_pattern, footer_pattern
 
 
-def _extract_bookmarks(doc: fitz.Document) -> dict[int, str]:
+def _extract_bookmarks(doc: fitz.Document) -> Mapping[int, str]:
     """Extract PDF bookmarks/outline mapped to page numbers."""
     bookmarks: dict[int, str] = {}
 
@@ -267,7 +270,7 @@ def _page_might_have_table(text: str) -> bool:
     return tab_lines > len(lines) * 0.3 or pipe_lines > len(lines) * 0.3
 
 
-def _extract_all_tables(pdf_path: str) -> dict[int, str]:
+def _extract_all_tables(pdf_path: str) -> Mapping[int, str]:
     """Extract tables from all pages of a PDF using pdfplumber.
 
     Opens the PDF once and extracts tables from all pages.

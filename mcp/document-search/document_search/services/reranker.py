@@ -8,6 +8,8 @@ from rerankers import Reranker
 
 from document_search.schemas import SearchHit, SearchResult
 
+__all__ = ['RerankerService']
+
 
 class RerankerService:
     """Cross-encoder reranker using ms-marco model."""

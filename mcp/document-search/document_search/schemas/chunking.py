@@ -10,7 +10,7 @@ Future support (TODOs preserved for context):
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -40,7 +40,7 @@ type FileType = Literal[
 # - 'svg': Vector graphics. ~2 files. Could extract text or use multimodal.
 
 # Extension to FileType mapping
-EXTENSION_MAP: dict[str, FileType] = {
+EXTENSION_MAP: Mapping[str, FileType] = {
     # Markdown
     '.md': 'markdown',
     '.markdown': 'markdown',

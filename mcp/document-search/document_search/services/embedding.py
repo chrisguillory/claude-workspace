@@ -13,6 +13,8 @@ from document_search.schemas.embeddings import (
     EmbedResponse,
 )
 
+__all__ = ['EmbeddingService']
+
 
 class EmbeddingService:
     """Typed embedding service.

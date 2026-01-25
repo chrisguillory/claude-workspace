@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,6 +47,8 @@ from document_search.services.embedding import EmbeddingService
 from document_search.services.embedding_batch_loader import EmbeddingBatchLoader
 from document_search.services.sparse_embedding import SparseEmbeddingService
 
+__all__ = ['IndexingService', 'create_indexing_service']
+
 logger = logging.getLogger(__name__)
 
 # Gemini embedding dimension
@@ -60,64 +62,6 @@ NUM_FILE_WORKERS = min(32, (os.cpu_count() or 4) * 2)
 
 # Timeout for file chunking operations (detects deadlocks)
 FILE_CHUNK_TIMEOUT_SECONDS = 60
-
-
-def _get_git_ignored_files(
-    file_paths: Sequence[Path],
-    directory: Path,
-    *,
-    strict: bool = False,
-) -> set[Path]:
-    """Use git check-ignore to identify ignored files.
-
-    Respects all gitignore rules: root, nested (e.g., .mypy_cache/.gitignore),
-    .git/info/exclude, and global gitignore.
-
-    Args:
-        file_paths: List of file paths to check.
-        directory: Working directory for git command.
-        strict: If True, raise on non-git repos. If False, return empty set.
-
-    Returns:
-        Set of paths that are git-ignored.
-
-    Raises:
-        FileNotFoundError: If git is not installed (always raised).
-        subprocess.TimeoutExpired: If git check-ignore takes too long (always raised).
-        RuntimeError: If directory is not a git repository (only if strict=True).
-    """
-    if not file_paths:
-        return set()
-
-    result = subprocess.run(
-        ['git', 'check-ignore', '--stdin'],
-        input='\n'.join(str(p) for p in file_paths),
-        capture_output=True,
-        text=True,
-        cwd=directory,
-        timeout=30,
-    )
-
-    # Exit codes: 0 = some ignored, 1 = none ignored, 128 = not a git repo
-    if result.returncode == 128:
-        if strict:
-            raise RuntimeError(f'Not a git repository: {directory}')
-        return set()
-
-    return {Path(line) for line in result.stdout.splitlines() if line}
-
-
-@dataclass
-class _PendingFile:
-    """Tracks a file through the indexing pipeline."""
-
-    file_path: Path
-    file_hash: str = ''
-    file_size: int = 0
-    chunks: list[Chunk] = field(default_factory=list)
-    chunk_ids: list[UUID] = field(default_factory=list)
-    embeddings: list[tuple[float, ...]] = field(default_factory=list)
-    sparse_embeddings: list[tuple[tuple[int, ...], tuple[float, ...]]] = field(default_factory=list)
 
 
 class IndexingService:
@@ -204,7 +148,9 @@ class IndexingService:
         self,
         queue: asyncio.Queue[Path],
         worker_id: int,
-        results: dict[str, _PendingFile | FileProcessingError],
+        results: dict[  # strict_typing_linter.py: mutable-type # Mutated in-place
+            str, _PendingFile | FileProcessingError
+        ],
     ) -> None:
         """Worker that processes files from queue one at a time.
 
@@ -491,7 +437,7 @@ class IndexingService:
             errors=tuple(errors),
         )
 
-    def get_index_stats(self) -> dict[str, int | str]:
+    def get_index_stats(self) -> Mapping[str, int | str]:
         """Get current index statistics."""
         info = self._repo.get_collection_info()
         if info is None:
@@ -640,6 +586,64 @@ async def create_indexing_service(
         repository=repository,
         state_path=state_path,
     )
+
+
+@dataclass
+class _PendingFile:
+    """Tracks a file through the indexing pipeline."""
+
+    file_path: Path
+    file_hash: str = ''
+    file_size: int = 0
+    chunks: list[Chunk] = field(default_factory=list)
+    chunk_ids: list[UUID] = field(default_factory=list)
+    embeddings: list[tuple[float, ...]] = field(default_factory=list)
+    sparse_embeddings: list[tuple[tuple[int, ...], tuple[float, ...]]] = field(default_factory=list)
+
+
+def _get_git_ignored_files(
+    file_paths: Sequence[Path],
+    directory: Path,
+    *,
+    strict: bool = False,
+) -> Set[Path]:
+    """Use git check-ignore to identify ignored files.
+
+    Respects all gitignore rules: root, nested (e.g., .mypy_cache/.gitignore),
+    .git/info/exclude, and global gitignore.
+
+    Args:
+        file_paths: List of file paths to check.
+        directory: Working directory for git command.
+        strict: If True, raise on non-git repos. If False, return empty set.
+
+    Returns:
+        Set of paths that are git-ignored.
+
+    Raises:
+        FileNotFoundError: If git is not installed (always raised).
+        subprocess.TimeoutExpired: If git check-ignore takes too long (always raised).
+        RuntimeError: If directory is not a git repository (only if strict=True).
+    """
+    if not file_paths:
+        return set()
+
+    result = subprocess.run(
+        ['git', 'check-ignore', '--stdin'],
+        input='\n'.join(str(p) for p in file_paths),
+        capture_output=True,
+        text=True,
+        cwd=directory,
+        timeout=30,
+    )
+
+    # Exit codes: 0 = some ignored, 1 = none ignored, 128 = not a git repo
+    if result.returncode == 128:
+        if strict:
+            raise RuntimeError(f'Not a git repository: {directory}')
+        return set()
+
+    return {Path(line) for line in result.stdout.splitlines() if line}
 
 
 def _file_hash(path: Path) -> str:

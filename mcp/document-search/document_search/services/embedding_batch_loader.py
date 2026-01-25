@@ -16,6 +16,8 @@ from document_search.schemas.embeddings import (
 )
 from document_search.services.embedding import EmbeddingService
 
+__all__ = ['EmbeddingBatchLoader', 'GEMINI_BATCH_SIZE']
+
 logger = logging.getLogger(__name__)
 
 # Gemini API limit

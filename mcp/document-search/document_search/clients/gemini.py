@@ -55,7 +55,7 @@ class GeminiClient:
         *,
         task_type: str = 'RETRIEVAL_DOCUMENT',
         model: str = DEFAULT_MODEL,
-    ) -> list[list[float]]:
+    ) -> Sequence[Sequence[float]]:
         """Embed texts using Gemini API.
 
         Uses native async API for true concurrent requests.

@@ -35,3 +35,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: strict-typing-linter
+        name: strict-typing-linter
+        description: Check for mutable/loose types in document-search
+        entry: ./scripts/strict_typing_linter.py mcp/document-search/
+        language: system
+        pass_filenames: false
+        always_run: true
