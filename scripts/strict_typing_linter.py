@@ -1003,6 +1003,53 @@ def check_all_trailing_comma(
     return violations
 
 
+def check_class_method_ordering(
+    filepath: Path,
+    tree: ast.Module,
+    source_lines: Sequence[str],
+) -> Sequence[OrderingViolation]:
+    """Check that public methods come before private methods within classes."""
+    violations: list[OrderingViolation] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+
+        # Extract methods from class body
+        methods: list[tuple[str, int, bool]] = []  # (name, line, is_private)
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                is_private = item.name.startswith('_') and not (item.name.startswith('__') and item.name.endswith('__'))
+                methods.append((item.name, item.lineno, is_private))
+
+        if not methods:
+            continue
+
+        # Check ordering: public methods should come before private methods
+        seen_private = False
+        for name, line, is_private in methods:
+            if is_private:
+                seen_private = True
+            elif seen_private:
+                # Public method after private method - violation
+                if _has_ordering_directive(source_lines, line):
+                    continue
+
+                violations.append(
+                    OrderingViolation(
+                        filepath=filepath,
+                        line=line,
+                        kind='ordering',
+                        message=f"public method '{name}' should come before private methods in class '{node.name}'",
+                        source_line=source_lines[line - 1].strip() if line <= len(source_lines) else '',
+                        suggestion='Reorder: dunder methods → public methods → private methods',
+                    )
+                )
+                break  # Report first violation per class only
+
+    return violations
+
+
 # =============================================================================
 # File Processing
 # =============================================================================
@@ -1029,6 +1076,7 @@ def check_file(filepath: Path, strict_ordering_packages: Set[Path]) -> Sequence[
         violations.extend(check_all_defined(filepath, tree, source_lines))
         violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
         violations.extend(check_module_ordering(filepath, tree, source_lines))
+        violations.extend(check_class_method_ordering(filepath, tree, source_lines))
 
     return violations
 

@@ -150,10 +150,6 @@ class ChunkingService:
         """Async context manager exit - shutdown ProcessPoolExecutor."""
         self.shutdown()
 
-    def _filter_short_chunks(self, chunks: Sequence[Chunk]) -> Sequence[Chunk]:
-        """Filter out chunks below minimum length threshold."""
-        return [c for c in chunks if len(c.text.strip()) >= MIN_CHUNK_LENGTH]
-
     async def chunk_file(self, path: Path) -> Sequence[Chunk]:
         """Chunk a single file based on its type.
 
@@ -176,6 +172,10 @@ class ChunkingService:
 
         chunks = await self._chunk_by_type(path, file_type)
         return self._filter_short_chunks(chunks)
+
+    def _filter_short_chunks(self, chunks: Sequence[Chunk]) -> Sequence[Chunk]:
+        """Filter out chunks below minimum length threshold."""
+        return [c for c in chunks if len(c.text.strip()) >= MIN_CHUNK_LENGTH]
 
     async def _chunk_by_type(self, path: Path, file_type: FileType) -> Sequence[Chunk]:
         """Route to appropriate chunker based on file type."""

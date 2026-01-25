@@ -53,14 +53,6 @@ class EmbeddingBatchLoader(GenericBatchLoader[str, EmbedResponse]):
             coalesce_delay=coalesce_delay,
         )
 
-    async def _bulk_embed(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
-        """Embed a batch of texts."""
-        total_chars = sum(len(t) for t in texts)
-        logger.debug(f'[BATCH] Embedding {len(texts)} texts ({total_chars:,} chars)')
-        request = EmbedBatchRequest(texts=texts)
-        response = await self._service.embed_batch(request)
-        return response.embeddings
-
     async def embed(self, text: str) -> EmbedResponse:
         """Embed a single text, batched with concurrent requests.
 
@@ -71,3 +63,11 @@ class EmbeddingBatchLoader(GenericBatchLoader[str, EmbedResponse]):
             Embedding response.
         """
         return await self.load(text)
+
+    async def _bulk_embed(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
+        """Embed a batch of texts."""
+        total_chars = sum(len(t) for t in texts)
+        logger.debug(f'[BATCH] Embedding {len(texts)} texts ({total_chars:,} chars)')
+        request = EmbedBatchRequest(texts=texts)
+        response = await self._service.embed_batch(request)
+        return response.embeddings
