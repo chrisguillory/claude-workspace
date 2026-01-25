@@ -1,4 +1,8 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# dependencies = []
+# ///
 """Strict typing linter for Python annotations.
 
 This script enforces immutable interface types and module organization:
@@ -40,8 +44,10 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import subprocess
 import sys
+import tokenize
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
@@ -190,7 +196,7 @@ type DirectiveCode = Literal['mutable-type', 'loose-typing', 'ordering']
 
 # Violation kind literals - used in discriminated unions
 type TypeViolationKind = Literal['mutable', 'loose']
-type OrderingViolationKind = Literal['ordering', 'missing-all']
+type OrderingViolationKind = Literal['ordering', 'missing-all', 'trailing-comma']
 type ViolationKind = TypeViolationKind | OrderingViolationKind
 
 
@@ -214,7 +220,7 @@ class OrderingViolation:
 
     filepath: Path
     line: int
-    kind: Literal['ordering', 'missing-all']
+    kind: Literal['ordering', 'missing-all', 'trailing-comma']
     message: str
     source_line: str
     suggestion: str
@@ -931,6 +937,72 @@ def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[s
     return []
 
 
+def _has_trailing_comma(source_lines: Sequence[str], list_node: ast.List) -> bool:
+    """Check if list has trailing comma. Uses tokenize to handle comments correctly."""
+    if not list_node.elts:
+        return True  # Empty list - no check needed
+
+    start_line, end_line = list_node.lineno, list_node.end_lineno
+    if start_line is None or end_line is None:
+        return True
+
+    source_chunk = '\n'.join(source_lines[start_line - 1 : end_line])
+
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source_chunk).readline))
+    except tokenize.TokenError:
+        return True  # Can't tokenize - assume OK
+
+    bracket_depth = 0
+    last_at_depth_1: tokenize.TokenInfo | None = None
+
+    for tok in tokens:
+        if tok.type == tokenize.OP:
+            if tok.string == '[':
+                bracket_depth += 1
+            elif tok.string == ']':
+                bracket_depth -= 1
+                if bracket_depth == 0:
+                    return last_at_depth_1 is not None and last_at_depth_1.string == ','
+            elif tok.string == ',' and bracket_depth == 1:
+                last_at_depth_1 = tok
+        elif tok.type in (tokenize.STRING, tokenize.NAME) and bracket_depth == 1:
+            last_at_depth_1 = tok
+
+    return True  # Unexpected structure - assume OK
+
+
+def check_all_trailing_comma(
+    filepath: Path,
+    tree: ast.Module,
+    source_lines: Sequence[str],
+) -> Sequence[OrderingViolation]:
+    """Check that __all__ has trailing comma when it has 1+ items."""
+    violations: list[OrderingViolation] = []
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == '__all__':
+                    if isinstance(node.value, ast.List) and node.value.elts:
+                        if _has_ordering_directive(source_lines, node.lineno):
+                            continue
+                        if not _has_trailing_comma(source_lines, node.value):
+                            violations.append(
+                                OrderingViolation(
+                                    filepath=filepath,
+                                    line=node.lineno,
+                                    kind='trailing-comma',
+                                    message='__all__ list should have trailing comma',
+                                    source_line=source_lines[node.lineno - 1].strip()
+                                    if node.lineno <= len(source_lines)
+                                    else '',
+                                    suggestion='Add trailing comma after last item',
+                                )
+                            )
+    return violations
+
+
 # =============================================================================
 # File Processing
 # =============================================================================
@@ -955,6 +1027,7 @@ def check_file(filepath: Path, strict_ordering_packages: Set[Path]) -> Sequence[
     package_dir = filepath.parent
     if package_dir in strict_ordering_packages and filepath.name != '__init__.py':
         violations.extend(check_all_defined(filepath, tree, source_lines))
+        violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
         violations.extend(check_module_ordering(filepath, tree, source_lines))
 
     return violations
@@ -1050,7 +1123,7 @@ def format_violation(v: Violation) -> str:
 _CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
     'mutable-type': {'mutable'},
     'loose-typing': {'loose'},
-    'ordering': {'ordering', 'missing-all'},
+    'ordering': {'ordering', 'missing-all', 'trailing-comma'},
 }
 
 
@@ -1130,7 +1203,7 @@ def main() -> int:
         file_count = len({v.filepath for v in all_violations})
         mutable_count = sum(1 for v in all_violations if v.kind == 'mutable')
         loose_count = sum(1 for v in all_violations if v.kind == 'loose')
-        ordering_count = sum(1 for v in all_violations if v.kind in ('ordering', 'missing-all'))
+        ordering_count = sum(1 for v in all_violations if v.kind in ('ordering', 'missing-all', 'trailing-comma'))
         summary_parts = []
         if mutable_count:
             summary_parts.append(f'{mutable_count} mutable')

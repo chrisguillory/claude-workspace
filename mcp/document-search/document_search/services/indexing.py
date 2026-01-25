@@ -47,7 +47,10 @@ from document_search.services.embedding import EmbeddingService
 from document_search.services.embedding_batch_loader import EmbeddingBatchLoader
 from document_search.services.sparse_embedding import SparseEmbeddingService
 
-__all__ = ['IndexingService', 'create_indexing_service']
+__all__ = [
+    'IndexingService',
+    'create_indexing_service',
+]
 
 logger = logging.getLogger(__name__)
 

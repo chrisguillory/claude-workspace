@@ -9,7 +9,9 @@ from collections.abc import Sequence
 
 from fastembed import SparseTextEmbedding
 
-__all__ = ['SparseEmbeddingService']
+__all__ = [
+    'SparseEmbeddingService',
+]
 
 
 class SparseEmbeddingService:

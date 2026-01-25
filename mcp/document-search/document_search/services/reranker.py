@@ -8,7 +8,9 @@ from rerankers import Reranker
 
 from document_search.schemas import SearchHit, SearchResult
 
-__all__ = ['RerankerService']
+__all__ = [
+    'RerankerService',
+]
 
 
 class RerankerService:

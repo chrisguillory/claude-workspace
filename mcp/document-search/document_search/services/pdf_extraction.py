@@ -24,7 +24,11 @@ from typing import Literal
 import fitz  # PyMuPDF
 import pdfplumber
 
-__all__ = ['PDFPageData', 'PDFExtractionResult', 'extract_pdf']
+__all__ = [
+    'PDFPageData',
+    'PDFExtractionResult',
+    'extract_pdf',
+]
 
 # Constants (duplicated from chunking.py to avoid import issues in subprocess)
 PDF_OCR_CHAR_THRESHOLD = 100

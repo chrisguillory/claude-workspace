@@ -40,7 +40,9 @@ from document_search.schemas.chunking import (
 )
 from document_search.services.pdf_extraction import extract_pdf
 
-__all__ = ['ChunkingService']
+__all__ = [
+    'ChunkingService',
+]
 
 logger = logging.getLogger(__name__)
 
