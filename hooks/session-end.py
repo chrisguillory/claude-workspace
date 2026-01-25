@@ -33,6 +33,7 @@ with SessionManager(hook_data.cwd) as manager:
     if Path(hook_data.transcript_path).exists():
         manager.end_session(hook_data.session_id, reason=hook_data.reason)
         print(f'Completed in {timer.elapsed_ms()} ms')
+        print(f'session_id: {hook_data.session_id}')
         print(repr(hook_data))
     else:
         manager.remove_empty_session(hook_data.session_id, hook_data.transcript_path)

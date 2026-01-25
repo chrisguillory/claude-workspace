@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import packaging.version
@@ -83,6 +84,24 @@ def get_claude_version(claude_pid: int) -> str:
     return str(version)
 
 
+def get_process_created_at(claude_pid: int) -> datetime:
+    """Get the process creation time from the OS via psutil.
+
+    This is authoritative - it comes directly from the OS, not from cached data.
+
+    Args:
+        claude_pid: PID of the running Claude process
+
+    Returns:
+        datetime when the OS created the process (timezone-aware, local time)
+
+    Raises:
+        psutil.NoSuchProcess: If the process no longer exists
+    """
+    create_time = psutil.Process(claude_pid).create_time()
+    return datetime.fromtimestamp(create_time, UTC).astimezone()
+
+
 # Read and validate hook input from stdin
 hook_data = SessionStartHookInput.model_validate_json(sys.stdin.read())
 
@@ -117,8 +136,9 @@ if transcript_file.exists():
             if 'leafUuid' in metadata:
                 parent_id = metadata['leafUuid']
 
-# Get Claude version from running process
+# Get Claude version and process creation time from running process
 claude_version = get_claude_version(claude_pid)
+process_created_at = get_process_created_at(claude_pid)
 
 # Track session using SessionManager (atomic with file locking)
 with SessionManager(project_dir) as manager:
@@ -132,6 +152,7 @@ with SessionManager(project_dir) as manager:
         parent_id=parent_id,
         startup_model=hook_data.model,
         claude_version=claude_version,
+        process_created_at=process_created_at,
     )
 
 # Print session information
@@ -139,6 +160,7 @@ print(f'Completed in {timer.elapsed_ms()} ms')
 print(repr(hook_data))
 print(f'claude_pid: {claude_pid}')
 print(f'claude_version: {claude_version}')
+print(f'process_created_at: {process_created_at}')
 print(f'parent_id: {parent_id}')
 print(f'encoding_verified: {encoding_matches}')
 if crashed_ids:
