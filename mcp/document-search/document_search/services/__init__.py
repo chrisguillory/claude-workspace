@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-__strict_module_ordering__ = True
-
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.embedding_batch_loader import EmbeddingBatchLoader

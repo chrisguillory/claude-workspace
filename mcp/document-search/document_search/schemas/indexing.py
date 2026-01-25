@@ -14,6 +14,17 @@ from local_lib.types import JsonDatetime, JsonUuid
 
 from document_search.schemas.base import StrictModel
 
+__all__ = [
+    'CHUNK_STRATEGY_VERSION',
+    'DirectoryIndexState',
+    'ErrorCategory',
+    'FileIndexState',
+    'FileProcessingError',
+    'IndexingProgress',
+    'IndexingResult',
+    'ProgressCallback',
+]
+
 # Current chunking strategy version - bump when ChunkingService changes
 # v2: Added PDF and CSV chunking support with parallel processing
 # v3: Hybrid search (BM25 sparse vectors), email MIME parsing, min chunk filter

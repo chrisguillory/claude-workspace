@@ -18,6 +18,15 @@ import pydantic
 
 from document_search.schemas.base import StrictModel
 
+__all__ = [
+    'EXTENSION_MAP',
+    'Chunk',
+    'ChunkMetadata',
+    'ChunkResult',
+    'FileType',
+    'get_file_type',
+]
+
 # Supported file types for document search.
 # Code files (.py, .js, .ts, etc.) handled by separate code search system.
 type FileType = Literal[
@@ -63,11 +72,6 @@ EXTENSION_MAP: Mapping[str, FileType] = {
 }
 
 
-def get_file_type(path: Path) -> FileType | None:
-    """Get FileType for a path, or None if unsupported."""
-    return EXTENSION_MAP.get(path.suffix.lower())
-
-
 class ChunkMetadata(StrictModel):
     """Position and context info for chunk provenance."""
 
@@ -100,3 +104,8 @@ class ChunkResult(StrictModel):
 
     chunk: Chunk
     embedding: Sequence[float]
+
+
+def get_file_type(path: Path) -> FileType | None:
+    """Get FileType for a path, or None if unsupported."""
+    return EXTENSION_MAP.get(path.suffix.lower())

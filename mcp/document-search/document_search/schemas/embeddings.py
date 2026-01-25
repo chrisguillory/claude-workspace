@@ -16,6 +16,15 @@ import pydantic
 
 from document_search.schemas.base import StrictModel
 
+__all__ = [
+    'EmbedBatchRequest',
+    'EmbedBatchResponse',
+    'EmbedRequest',
+    'EmbedResponse',
+    'MAX_TEXT_CHARS',
+    'TaskType',
+]
+
 # Task type for embedding optimization.
 # RETRIEVAL_DOCUMENT for indexing, RETRIEVAL_QUERY for search queries.
 type TaskType = Literal[

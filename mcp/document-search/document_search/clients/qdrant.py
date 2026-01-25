@@ -32,6 +32,12 @@ from qdrant_client.http.models import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    'CollectionInfoDict',
+    'QdrantClient',
+    'SearchResultDict',
+]
+
 
 class CollectionInfoDict(TypedDict):
     """Raw collection metadata from Qdrant."""
@@ -417,29 +423,6 @@ class QdrantClient:
 
     # Visibility methods for index introspection
 
-    def _ensure_file_type_index(self) -> None:
-        """Create keyword index on file_type for faceting if not exists.
-
-        This is idempotent - checks if index exists before creating.
-        Index creation happens asynchronously in the background.
-        """
-        if not self.collection_exists():
-            return
-
-        # Check if file_type index already exists in payload schema
-        info = self._client.get_collection(self._collection_name)
-        payload_schema = getattr(info, 'payload_schema', {}) or {}
-        if 'file_type' in payload_schema:
-            logger.debug('file_type index already exists')
-            return
-
-        self._client.create_payload_index(
-            collection_name=self._collection_name,
-            field_name='file_type',
-            field_schema=PayloadSchemaType.KEYWORD,
-        )
-        logger.debug('Created file_type keyword index')
-
     def facet_by_file_type(self) -> Mapping[str, int]:
         """Get chunk counts by file type using Facet API.
 
@@ -547,3 +530,26 @@ class QdrantClient:
             sorted_paths = sorted_paths[:limit]
 
         return sorted_paths
+
+    def _ensure_file_type_index(self) -> None:
+        """Create keyword index on file_type for faceting if not exists.
+
+        This is idempotent - checks if index exists before creating.
+        Index creation happens asynchronously in the background.
+        """
+        if not self.collection_exists():
+            return
+
+        # Check if file_type index already exists in payload schema
+        info = self._client.get_collection(self._collection_name)
+        payload_schema = getattr(info, 'payload_schema', {}) or {}
+        if 'file_type' in payload_schema:
+            logger.debug('file_type index already exists')
+            return
+
+        self._client.create_payload_index(
+            collection_name=self._collection_name,
+            field_name='file_type',
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
+        logger.debug('Created file_type keyword index')

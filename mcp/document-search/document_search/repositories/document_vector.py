@@ -24,6 +24,10 @@ from document_search.schemas.vectors import (
     VectorPoint,
 )
 
+__all__ = [
+    'DocumentVectorRepository',
+]
+
 
 class DocumentVectorRepository:
     """Repository for document vector storage and retrieval.

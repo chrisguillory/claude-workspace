@@ -15,13 +15,9 @@ from pathlib import Path
 
 from google import genai
 
-
-def _load_api_key() -> str:
-    """Load API key from standard location."""
-    key_path = Path.home() / '.claude-workspace' / 'secrets' / 'document_search_api_key'
-    if not key_path.exists():
-        raise FileNotFoundError(f'API key not found at {key_path}')
-    return key_path.read_text().strip()
+__all__ = [
+    'GeminiClient',
+]
 
 
 class GeminiClient:
@@ -79,3 +75,11 @@ class GeminiClient:
                 config={'task_type': task_type},
             )
             return [list(e.values) for e in result.embeddings]
+
+
+def _load_api_key() -> str:
+    """Load API key from standard location."""
+    key_path = Path.home() / '.claude-workspace' / 'secrets' / 'document_search_api_key'
+    if not key_path.exists():
+        raise FileNotFoundError(f'API key not found at {key_path}')
+    return key_path.read_text().strip()

@@ -1070,9 +1070,8 @@ def check_file(filepath: Path, strict_ordering_packages: Set[Path]) -> Sequence[
     type_checker.visit(tree)
     violations.extend(type_checker.violations)
 
-    # Module ordering (if package opted in)
-    package_dir = filepath.parent
-    if package_dir in strict_ordering_packages and filepath.name != '__init__.py':
+    # Module ordering (if package or any parent opted in - recursive inheritance)
+    if _is_under_strict_package(filepath, strict_ordering_packages) and filepath.name != '__init__.py':
         violations.extend(check_all_defined(filepath, tree, source_lines))
         violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
         violations.extend(check_module_ordering(filepath, tree, source_lines))
@@ -1122,6 +1121,9 @@ def _discover_strict_ordering_packages(files: Sequence[Path]) -> Set[Path]:
 
     Scans all __init__.py files in the file list for __strict_module_ordering__ = True.
     Raises ValueError on unrecognized __strict_* variables (fail-fast on typos).
+
+    Strictness is inherited: if a parent package has the flag, all child packages
+    are also considered strict.
     """
     packages: set[Path] = set()
     init_files = {f for f in files if f.name == '__init__.py'}
@@ -1132,6 +1134,11 @@ def _discover_strict_ordering_packages(files: Sequence[Path]) -> Set[Path]:
             packages.add(init_path.parent)
 
     return packages
+
+
+def _is_under_strict_package(filepath: Path, strict_packages: Set[Path]) -> bool:
+    """Check if filepath is under any strict ordering package (recursive inheritance)."""
+    return any(parent in strict_packages for parent in filepath.parents)
 
 
 # =============================================================================

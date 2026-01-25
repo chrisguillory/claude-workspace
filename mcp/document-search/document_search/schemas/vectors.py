@@ -15,21 +15,32 @@ import pydantic
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import Chunk, FileType
 
-"""
-Search strategy type - explicit naming to avoid terminology confusion.
+__all__ = [
+    'CollectionInfo',
+    'FileIndexReason',
+    'FileIndexStatus',
+    'IndexBreakdown',
+    'IndexedFile',
+    'SearchHit',
+    'SearchQuery',
+    'SearchResult',
+    'SearchType',
+    'VectorPoint',
+]
 
-- 'hybrid': Dense + sparse vectors with RRF fusion. Industry standard approach that
-  combines the precision of keyword matching with conceptual understanding from
-  embeddings. Recommended for most queries. This is the default.
-
-- 'lexical': BM25 sparse vectors only. Traditional keyword/full-text search that
-  matches on word tokens (lexemes). Best for exact term matching, symbol lookup,
-  and identifier search where you want precise matches without conceptual noise.
-
-- 'embedding': Dense vectors only (Gemini embeddings). Pure neural similarity search.
-  Primarily useful for debugging or comparing search strategies. In practice,
-  hybrid mode provides better results for most use cases.
-"""
+# Search strategy type - explicit naming to avoid terminology confusion.
+#
+# - 'hybrid': Dense + sparse vectors with RRF fusion. Industry standard approach that
+#   combines the precision of keyword matching with conceptual understanding from
+#   embeddings. Recommended for most queries. This is the default.
+#
+# - 'lexical': BM25 sparse vectors only. Traditional keyword/full-text search that
+#   matches on word tokens (lexemes). Best for exact term matching, symbol lookup,
+#   and identifier search where you want precise matches without conceptual noise.
+#
+# - 'embedding': Dense vectors only (Gemini embeddings). Pure neural similarity search.
+#   Primarily useful for debugging or comparing search strategies. In practice,
+#   hybrid mode provides better results for most use cases.
 type SearchType = Literal['hybrid', 'lexical', 'embedding']
 
 

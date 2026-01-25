@@ -43,6 +43,11 @@ from document_search.services.indexing import IndexingService
 from document_search.services.reranker import RerankerService
 from document_search.services.sparse_embedding import SparseEmbeddingService
 
+__all__ = [
+    'EMBEDDING_DIMENSION',
+    'ServerState',
+]
+
 # Embedding dimension for Gemini
 EMBEDDING_DIMENSION = 768
 

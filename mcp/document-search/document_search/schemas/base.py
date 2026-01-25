@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import pydantic
 
+__all__ = [
+    'StrictModel',
+]
+
 
 class StrictModel(pydantic.BaseModel):
     """Base model with strict validation.
