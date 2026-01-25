@@ -20,6 +20,15 @@ class Modifier(str, Enum):
     NONE = 'none'
     IDF = 'idf'
 
+class PayloadSchemaType(str, Enum):
+    KEYWORD = 'keyword'
+    INTEGER = 'integer'
+    FLOAT = 'float'
+    GEO = 'geo'
+    TEXT = 'text'
+    BOOL = 'bool'
+    DATETIME = 'datetime'
+
 class Fusion(str, Enum):
     RRF = 'rrf'
 

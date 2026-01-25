@@ -43,6 +43,16 @@ class Record:
 class QueryResponse:
     points: Sequence[ScoredPoint]
 
+class CountResult:
+    count: int
+
+class FacetHit:
+    value: str | int | bool
+    count: int
+
+class FacetResponse:
+    hits: Sequence[FacetHit]
+
 class QdrantClient:
     def __init__(self, url: str | None = None, **kwargs: Any) -> None: ...
     def get_collections(self) -> CollectionsResponse: ...
@@ -90,6 +100,36 @@ class QdrantClient:
         self,
         collection_name: str,
         points_selector: Sequence[str | int] | Any,
+        **kwargs: Any,
+    ) -> Any: ...
+    def count(
+        self,
+        collection_name: str,
+        count_filter: Filter | None = None,
+        **kwargs: Any,
+    ) -> CountResult: ...
+    def scroll(
+        self,
+        collection_name: str,
+        scroll_filter: Filter | None = None,
+        limit: int = 10,
+        offset: str | int | None = None,
+        with_payload: bool | Sequence[str] = True,
+        with_vectors: bool = False,
+        **kwargs: Any,
+    ) -> tuple[list[Record], str | int | None]: ...
+    def facet(
+        self,
+        collection_name: str,
+        key: str,
+        limit: int = 10,
+        **kwargs: Any,
+    ) -> FacetResponse: ...
+    def create_payload_index(
+        self,
+        collection_name: str,
+        field_name: str,
+        field_schema: Any = None,
         **kwargs: Any,
     ) -> Any: ...
     def __getattr__(self, name: str) -> Any: ...

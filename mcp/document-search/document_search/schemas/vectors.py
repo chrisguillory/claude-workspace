@@ -6,14 +6,31 @@ the interface between the service layer and the Qdrant client.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Annotated
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Literal
 from uuid import UUID
 
 import pydantic
 
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import Chunk, FileType
+
+"""
+Search strategy type - explicit naming to avoid terminology confusion.
+
+- 'hybrid': Dense + sparse vectors with RRF fusion. Industry standard approach that
+  combines the precision of keyword matching with conceptual understanding from
+  embeddings. Recommended for most queries. This is the default.
+
+- 'lexical': BM25 sparse vectors only. Traditional keyword/full-text search that
+  matches on word tokens (lexemes). Best for exact term matching, symbol lookup,
+  and identifier search where you want precise matches without conceptual noise.
+
+- 'embedding': Dense vectors only (Gemini embeddings). Pure neural similarity search.
+  Primarily useful for debugging or comparing search strategies. In practice,
+  hybrid mode provides better results for most use cases.
+"""
+type SearchType = Literal['hybrid', 'lexical', 'embedding']
 
 
 class VectorPoint(StrictModel):
@@ -69,13 +86,14 @@ class VectorPoint(StrictModel):
 
 
 class SearchQuery(StrictModel):
-    """Hybrid vector similarity search query."""
+    """Vector similarity search query with configurable strategy."""
 
-    # Dense vector for semantic similarity (Gemini embeddings)
-    dense_vector: Sequence[float]
-    # Sparse vector for keyword matching (BM25)
-    sparse_indices: Sequence[int]
-    sparse_values: Sequence[float]
+    search_type: SearchType = 'hybrid'
+    # Dense vector for embedding similarity (required for hybrid/embedding modes)
+    dense_vector: Sequence[float] | None = None
+    # Sparse vector for keyword matching (required for hybrid/lexical modes)
+    sparse_indices: Sequence[int] | None = None
+    sparse_values: Sequence[float] | None = None
     limit: Annotated[int, pydantic.Field(ge=1, le=100)] = 10
     score_threshold: float | None = None
     # Optional filters
@@ -113,3 +131,35 @@ class CollectionInfo(StrictModel):
     vector_dimension: int
     points_count: int
     status: str
+
+
+# Visibility schemas for index introspection
+
+
+class IndexBreakdown(StrictModel):
+    """Overview of what's in the document index."""
+
+    total_chunks: int
+    by_file_type: Mapping[str, int]
+    unique_files: int
+    supported_types: Sequence[str]
+
+
+type FileIndexReason = Literal['indexed', 'not_found', 'unsupported_type']
+
+
+class FileIndexStatus(StrictModel):
+    """Status of whether a specific file is indexed."""
+
+    indexed: bool
+    reason: FileIndexReason
+    chunk_count: int
+    file_type: FileType | None
+
+
+class IndexedFile(StrictModel):
+    """A file in the index with its chunk count."""
+
+    path: str
+    chunk_count: int
+    file_type: FileType

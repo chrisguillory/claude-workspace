@@ -6,6 +6,7 @@ Type translation happens in the repository layer.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, TypedDict
 from uuid import UUID
@@ -21,12 +22,15 @@ from qdrant_client.http.models import (
     MatchAny,
     MatchValue,
     Modifier,
+    PayloadSchemaType,
     PointStruct,
     Prefetch,
     SparseVector,
     SparseVectorParams,
     VectorParams,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CollectionInfoDict(TypedDict):
@@ -81,6 +85,7 @@ class QdrantClient:
         Creates a collection with:
         - Dense vectors: Semantic embeddings (Gemini, 768 dimensions)
         - Sparse vectors: BM25 keyword embeddings (fastembed)
+        - Keyword index on file_type for faceting
 
         Args:
             vector_dimension: Size of dense embedding vectors (e.g., 768 for Gemini).
@@ -103,6 +108,9 @@ class QdrantClient:
                     ),
                 },
             )
+
+        # Ensure keyword index on file_type for faceting (idempotent)
+        self._ensure_file_type_index()
 
     def upsert(
         self,
@@ -139,19 +147,24 @@ class QdrantClient:
 
     def search(
         self,
-        dense_vector: Sequence[float],
-        sparse_indices: Sequence[int],
-        sparse_values: Sequence[float],
+        search_type: str = 'hybrid',
+        dense_vector: Sequence[float] | None = None,
+        sparse_indices: Sequence[int] | None = None,
+        sparse_values: Sequence[float] | None = None,
         limit: int = 10,
         score_threshold: float | None = None,
         file_types: Sequence[str] | None = None,
     ) -> Sequence[SearchResultDict]:
-        """Hybrid search combining dense and sparse vectors with RRF fusion.
+        """Search with configurable strategy.
 
         Args:
-            dense_vector: Semantic query vector (Gemini embedding).
-            sparse_indices: BM25 sparse vector indices.
-            sparse_values: BM25 sparse vector values.
+            search_type: Search strategy:
+                - 'hybrid': Dense + sparse with RRF fusion. Recommended for most queries.
+                - 'lexical': BM25 sparse only. Best for exact term/symbol matching.
+                - 'embedding': Dense only. Primarily for debugging/comparison.
+            dense_vector: Gemini embedding (required for hybrid/embedding).
+            sparse_indices: BM25 sparse indices (required for hybrid/lexical).
+            sparse_values: BM25 sparse values (required for hybrid/lexical).
             limit: Maximum results.
             score_threshold: Minimum similarity score.
             file_types: Filter by file types.
@@ -160,7 +173,6 @@ class QdrantClient:
             List of results with id, score, and payload.
 
         Note:
-            Uses Reciprocal Rank Fusion (RRF) to combine dense and sparse results.
             Path prefix filtering is handled at the repository layer via
             post-filtering, as Qdrant doesn't support native prefix matching.
         """
@@ -171,31 +183,61 @@ class QdrantClient:
 
         query_filter = Filter(must=conditions) if conditions else None
 
-        # Hybrid search with RRF fusion
-        # Prefetch 50 candidates from each search, fuse with RRF, return top `limit`
-        results = self._client.query_points(
-            collection_name=self._collection_name,
-            prefetch=[
-                Prefetch(
-                    query=list(dense_vector),
-                    using='dense',
-                    limit=50,
-                    filter=query_filter,
+        # Execute search based on strategy
+        if search_type == 'lexical':
+            # BM25 sparse vectors only - keyword/full-text matching
+            if sparse_indices is None or sparse_values is None:
+                raise ValueError('lexical search requires sparse_indices and sparse_values')
+            results = self._client.query_points(
+                collection_name=self._collection_name,
+                query=SparseVector(
+                    indices=list(sparse_indices),
+                    values=list(sparse_values),
                 ),
-                Prefetch(
-                    query=SparseVector(
-                        indices=list(sparse_indices),
-                        values=list(sparse_values),
+                using='sparse',
+                limit=limit,
+                score_threshold=score_threshold,
+                query_filter=query_filter,
+            )
+        elif search_type == 'embedding':
+            # Dense vectors only - neural similarity
+            if dense_vector is None:
+                raise ValueError('embedding search requires dense_vector')
+            results = self._client.query_points(
+                collection_name=self._collection_name,
+                query=list(dense_vector),
+                using='dense',
+                limit=limit,
+                score_threshold=score_threshold,
+                query_filter=query_filter,
+            )
+        else:
+            # Hybrid: RRF fusion of dense + sparse (default)
+            if dense_vector is None or sparse_indices is None or sparse_values is None:
+                raise ValueError('hybrid search requires dense_vector, sparse_indices, and sparse_values')
+            results = self._client.query_points(
+                collection_name=self._collection_name,
+                prefetch=[
+                    Prefetch(
+                        query=list(dense_vector),
+                        using='dense',
+                        limit=50,
+                        filter=query_filter,
                     ),
-                    using='sparse',
-                    limit=50,
-                    filter=query_filter,
-                ),
-            ],
-            query=FusionQuery(fusion=Fusion.RRF),
-            limit=limit,
-            score_threshold=score_threshold,
-        )
+                    Prefetch(
+                        query=SparseVector(
+                            indices=list(sparse_indices),
+                            values=list(sparse_values),
+                        ),
+                        using='sparse',
+                        limit=50,
+                        filter=query_filter,
+                    ),
+                ],
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=limit,
+                score_threshold=score_threshold,
+            )
 
         return [
             SearchResultDict(
@@ -212,6 +254,7 @@ class QdrantClient:
                 json_path=hit.payload.get('json_path'),
             )
             for hit in results.points
+            if hit.payload is not None
         ]
 
     def get(self, point_ids: Sequence[UUID]) -> list[dict[str, Any]]:
@@ -236,6 +279,7 @@ class QdrantClient:
                 **point.payload,
             }
             for point in results
+            if point.payload is not None
         ]
 
     def delete(self, point_ids: Sequence[UUID]) -> int:
@@ -276,6 +320,56 @@ class QdrantClient:
             ),
         )
 
+    def delete_by_source_path_prefix(self, prefix: str) -> int:
+        """Delete all points where source_path starts with prefix.
+
+        Used for full_reindex to clean slate a directory before re-indexing.
+        Scrolls entire collection since Qdrant doesn't support prefix filtering.
+
+        Args:
+            prefix: Directory path prefix. Matches files within this directory.
+                    /a/b matches /a/b/c.md but NOT /a/b-other/x.md
+
+        Returns:
+            Number of points deleted.
+        """
+        prefix = prefix.rstrip('/')
+        deleted = 0
+        offset = None
+
+        while True:
+            results, offset = self._client.scroll(
+                collection_name=self._collection_name,
+                limit=1000,
+                offset=offset,
+                with_payload=['source_path'],
+                with_vectors=False,
+            )
+
+            if not results:
+                break
+
+            ids_to_delete = []
+            for point in results:
+                if point.payload is None:
+                    continue
+                path = point.payload.get('source_path', '')
+                # Match exact prefix OR path within prefix directory
+                if path == prefix or path.startswith(prefix + '/'):
+                    ids_to_delete.append(point.id)
+
+            if ids_to_delete:
+                self._client.delete(
+                    collection_name=self._collection_name,
+                    points_selector=ids_to_delete,
+                )
+                deleted += len(ids_to_delete)
+
+            if offset is None:
+                break
+
+        return deleted
+
     def count(self) -> int:
         """Get total point count in collection."""
         info = self._client.get_collection(self._collection_name)
@@ -304,9 +398,11 @@ class QdrantClient:
             # Named vectors - get dense vector dimension
             dense_config = vectors_config.get('dense')
             vector_dimension = dense_config.size if dense_config else 0
-        else:
+        elif vectors_config is not None:
             # Single vector config (legacy)
             vector_dimension = vectors_config.size
+        else:
+            vector_dimension = 0
 
         return CollectionInfoDict(
             name=self._collection_name,
@@ -314,3 +410,136 @@ class QdrantClient:
             points_count=info.points_count or 0,
             status=str(info.status),
         )
+
+    # Visibility methods for index introspection
+
+    def _ensure_file_type_index(self) -> None:
+        """Create keyword index on file_type for faceting if not exists.
+
+        This is idempotent - checks if index exists before creating.
+        Index creation happens asynchronously in the background.
+        """
+        if not self.collection_exists():
+            return
+
+        # Check if file_type index already exists in payload schema
+        info = self._client.get_collection(self._collection_name)
+        payload_schema = getattr(info, 'payload_schema', {}) or {}
+        if 'file_type' in payload_schema:
+            logger.debug('file_type index already exists')
+            return
+
+        self._client.create_payload_index(
+            collection_name=self._collection_name,
+            field_name='file_type',
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
+        logger.debug('Created file_type keyword index')
+
+    def facet_by_file_type(self) -> dict[str, int]:
+        """Get chunk counts by file type using Facet API.
+
+        Returns:
+            Mapping of file_type to chunk count.
+        """
+        result = self._client.facet(
+            collection_name=self._collection_name,
+            key='file_type',
+            limit=100,  # More than enough for our ~7 file types
+        )
+        return {str(hit.value): hit.count for hit in result.hits}
+
+    def count_by_source_path(self, source_path: str) -> int:
+        """Count chunks for a specific source file.
+
+        Args:
+            source_path: Exact path to check.
+
+        Returns:
+            Number of chunks indexed for this file (0 if not indexed).
+        """
+        result = self._client.count(
+            collection_name=self._collection_name,
+            count_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key='source_path',
+                        match=MatchValue(value=source_path),
+                    )
+                ]
+            ),
+        )
+        return result.count
+
+    def get_unique_source_paths(
+        self,
+        path_prefix: str | None = None,
+        file_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[tuple[str, str, int]]:
+        """Get unique source_paths with file types and chunk counts.
+
+        Uses scroll API to iterate all points and aggregate by source_path.
+        Results are sorted by chunk count descending.
+
+        Args:
+            path_prefix: Filter to paths starting with this prefix.
+            file_type: Filter to this file type.
+            limit: Maximum number of files to return.
+
+        Returns:
+            List of (source_path, file_type, chunk_count) tuples.
+        """
+        # Build filter if needed
+        conditions = []
+        if file_type:
+            conditions.append(FieldCondition(key='file_type', match=MatchValue(value=file_type)))
+        scroll_filter = Filter(must=conditions) if conditions else None
+
+        # Aggregate by source_path
+        path_data: dict[str, tuple[str, int]] = {}  # path -> (file_type, count)
+        offset = None
+
+        while True:
+            results, offset = self._client.scroll(
+                collection_name=self._collection_name,
+                scroll_filter=scroll_filter,
+                limit=5000,
+                offset=offset,
+                with_payload=['source_path', 'file_type'],
+                with_vectors=False,
+            )
+
+            if not results:
+                break
+
+            for point in results:
+                if point.payload is None:
+                    continue
+                path = point.payload.get('source_path', '')
+                ftype = point.payload.get('file_type', '')
+
+                # Apply path_prefix filter client-side (Qdrant doesn't support prefix)
+                if path_prefix and not (path == path_prefix or path.startswith(path_prefix + '/')):
+                    continue
+
+                if path in path_data:
+                    _, count = path_data[path]
+                    path_data[path] = (ftype, count + 1)
+                else:
+                    path_data[path] = (ftype, 1)
+
+            if offset is None:
+                break
+
+        # Sort by count descending and apply limit
+        sorted_paths = sorted(
+            [(path, ftype, count) for path, (ftype, count) in path_data.items()],
+            key=lambda x: x[2],
+            reverse=True,
+        )
+
+        if limit:
+            sorted_paths = sorted_paths[:limit]
+
+        return sorted_paths

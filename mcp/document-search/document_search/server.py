@@ -15,7 +15,7 @@ import contextlib
 import logging
 import sys
 import typing
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,7 +29,14 @@ from document_search.repositories.document_vector import DocumentVectorRepositor
 from document_search.schemas.chunking import FileType
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import IndexingProgress, IndexingResult
-from document_search.schemas.vectors import SearchQuery, SearchResult
+from document_search.schemas.vectors import (
+    FileIndexStatus,
+    IndexBreakdown,
+    IndexedFile,
+    SearchQuery,
+    SearchResult,
+    SearchType,
+)
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.indexing import IndexingService
@@ -174,21 +181,27 @@ def register_tools(state: ServerState) -> None:
     async def search_documents(
         query: str,
         limit: int = 10,
+        search_type: SearchType = 'hybrid',
         file_types: list[str] | None = None,
         path_prefix: str | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
-        """Search indexed documents using hybrid semantic + keyword search.
-
-        Uses Reciprocal Rank Fusion (RRF) to combine:
-        - Dense vectors: Semantic similarity via Gemini embeddings
-        - Sparse vectors: BM25 keyword matching
+        """Search indexed documents with configurable search strategy.
 
         Args:
             query: Natural language search query.
             limit: Maximum number of results to return (1-100).
+            search_type: Search strategy:
+                - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
+                  Combines semantic similarity with keyword matching.
+                  Recommended for most queries.
+                - 'lexical': BM25 keyword matching only. Best for exact term
+                  matching, symbol lookup, and identifier search.
+                - 'embedding': Dense vector similarity only. Useful for
+                  conceptual/semantic queries or debugging.
             file_types: Filter by file types (e.g., ['markdown', 'pdf']).
-            path_prefix: Filter to files under this path prefix.
+            path_prefix: Filter to files under this path prefix. Defaults to current
+                working directory if not specified.
             ctx: MCP context for logging.
 
         Returns:
@@ -198,25 +211,44 @@ def register_tools(state: ServerState) -> None:
             raise ValueError('MCP context required')
 
         logger = DualLogger(ctx)
-        await logger.info(f'Searching: "{query[:50]}..."' if len(query) > 50 else f'Searching: "{query}"')
+        await logger.info(
+            f'Searching ({search_type}): "{query[:50]}..."'
+            if len(query) > 50
+            else f'Searching ({search_type}): "{query}"'
+        )
 
-        # Dense embedding (semantic similarity)
-        embed_request = EmbedRequest(text=query, task_type='RETRIEVAL_QUERY')
-        embed_response = await state.embedding_service.embed(embed_request)
-
-        # Sparse embedding (BM25 keyword matching)
-        sparse_indices, sparse_values = state.sparse_embedding_service.embed(query)
+        # Compute embeddings based on search type
+        if search_type == 'hybrid':
+            # Both dense and sparse embeddings
+            embed_request = EmbedRequest(text=query, task_type='RETRIEVAL_QUERY')
+            embed_response = await state.embedding_service.embed(embed_request)
+            dense_vector: Sequence[float] | None = embed_response.values
+            sparse_indices, sparse_values = state.sparse_embedding_service.embed(query)
+        elif search_type == 'lexical':
+            # Sparse only (BM25 keyword matching)
+            dense_vector = None
+            sparse_indices, sparse_values = state.sparse_embedding_service.embed(query)
+        elif search_type == 'embedding':
+            # Dense only (semantic similarity)
+            embed_request = EmbedRequest(text=query, task_type='RETRIEVAL_QUERY')
+            embed_response = await state.embedding_service.embed(embed_request)
+            dense_vector = embed_response.values
+            sparse_indices = None
+            sparse_values = None
+        else:
+            raise NotImplementedError
 
         # Fetch more candidates for reranking (3x limit, max 50)
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 50)
 
-        # Resolve path_prefix to handle ~ and relative paths
-        resolved_path_prefix = str(Path(path_prefix).expanduser().resolve()) if path_prefix else None
+        # Resolve path_prefix to handle ~ and relative paths (defaults to CWD)
+        resolved_path_prefix = str(Path(path_prefix).expanduser().resolve() if path_prefix else Path.cwd())
 
-        # Build hybrid search query
+        # Build search query
         search_query = SearchQuery(
-            dense_vector=embed_response.values,
+            search_type=search_type,
+            dense_vector=dense_vector,
             sparse_indices=sparse_indices,
             sparse_values=sparse_values,
             limit=rerank_candidates,
@@ -224,7 +256,7 @@ def register_tools(state: ServerState) -> None:
             source_path_prefix=resolved_path_prefix,
         )
 
-        # Layer 1: Hybrid search with RRF fusion
+        # Layer 1: Search with specified strategy
         result = state.repository.search(search_query)
 
         # Layer 2: Cross-encoder reranking
@@ -275,6 +307,139 @@ def register_tools(state: ServerState) -> None:
             await logger.info(f'Index has {stats.get("points_count", 0)} vectors')
 
         return stats
+
+    # Visibility tools for index introspection
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Get Index Breakdown',
+            destructiveHint=False,
+            idempotentHint=True,
+            readOnlyHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def get_index_breakdown(
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
+    ) -> IndexBreakdown:
+        """Get overview of what's in the document index.
+
+        Returns breakdown by file type, unique file count, and supported types.
+        Useful for understanding index composition and verifying what's been indexed.
+
+        Args:
+            ctx: MCP context for logging.
+
+        Returns:
+            IndexBreakdown with total chunks, by_file_type counts, unique_files count,
+            and list of supported_types.
+        """
+        if ctx is None:
+            raise ValueError('MCP context required')
+
+        logger = DualLogger(ctx)
+        await logger.info('Getting index breakdown')
+
+        breakdown = state.repository.get_index_breakdown()
+
+        await logger.info(
+            f'Index: {breakdown.total_chunks} chunks, '
+            f'{breakdown.unique_files} files, '
+            f'{len(breakdown.by_file_type)} types'
+        )
+
+        return breakdown
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Is File Indexed',
+            destructiveHint=False,
+            idempotentHint=True,
+            readOnlyHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def is_file_indexed(
+        path: str,
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
+    ) -> FileIndexStatus:
+        """Check if a specific file is indexed.
+
+        Use this to understand why a file might not appear in search results.
+        Returns whether the file is indexed, and if not, the reason why
+        (unsupported file type or not found in index).
+
+        Args:
+            path: Absolute path to the file to check.
+            ctx: MCP context for logging.
+
+        Returns:
+            FileIndexStatus with indexed flag, reason, chunk_count, and file_type.
+        """
+        if ctx is None:
+            raise ValueError('MCP context required')
+
+        logger = DualLogger(ctx)
+
+        # Resolve path
+        resolved_path = str(Path(path).expanduser().resolve())
+
+        status = state.repository.is_file_indexed(resolved_path)
+
+        if status.indexed:
+            await logger.info(f'File indexed: {resolved_path} ({status.chunk_count} chunks)')
+        else:
+            await logger.info(f'File not indexed: {resolved_path} (reason: {status.reason})')
+
+        return status
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='List Indexed Files',
+            destructiveHint=False,
+            idempotentHint=True,
+            readOnlyHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def list_indexed_files(
+        path_prefix: str | None = None,
+        file_type: str | None = None,
+        limit: int = 50,
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
+    ) -> Sequence[IndexedFile]:
+        """List files in the index with optional filtering.
+
+        Returns files sorted by chunk count (descending), so you can see which
+        files contribute most to the index. Useful for auditing indexed content.
+
+        Args:
+            path_prefix: Filter to files under this path prefix. Defaults to current
+                working directory if not specified.
+            file_type: Filter to this file type (e.g., 'markdown', 'pdf') (optional).
+            limit: Maximum number of files to return (default 50).
+            ctx: MCP context for logging.
+
+        Returns:
+            List of IndexedFile with path, chunk_count, and file_type.
+        """
+        if ctx is None:
+            raise ValueError('MCP context required')
+
+        logger = DualLogger(ctx)
+
+        # Resolve path_prefix (defaults to CWD for consistency with index_directory)
+        resolved_prefix = str(Path(path_prefix).expanduser().resolve() if path_prefix else Path.cwd())
+
+        files = state.repository.list_indexed_files(
+            path_prefix=resolved_prefix,
+            file_type=file_type,
+            limit=limit,
+        )
+
+        await logger.info(f'Listed {len(files)} indexed files')
+
+        return files
 
 
 @contextlib.asynccontextmanager

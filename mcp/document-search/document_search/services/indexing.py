@@ -382,6 +382,30 @@ class IndexingService:
         files_total = len(all_files)
         logger.info(f'[INDEX] Scanned {files_found} files, {files_ignored} git-ignored, {files_total} to consider')
 
+        # FULL REINDEX: Clean slate - delete ALL existing chunks for this directory
+        # This removes orphaned chunks from files that are now gitignored/deleted
+        if full_reindex:
+            chunks_deleted = self._repo.delete_by_source_path_prefix(str(directory))
+            if chunks_deleted > 0:
+                logger.info(f'[INDEX] Deleted {chunks_deleted} existing chunks for clean slate')
+
+            # Also clear state entries for this directory (will be rebuilt during indexing)
+            if self._state:
+                dir_prefix = str(directory)
+                new_files = {
+                    k: v
+                    for k, v in self._state.files.items()
+                    if not (k == dir_prefix or k.startswith(dir_prefix + '/'))
+                }
+                self._state = DirectoryIndexState(
+                    directory_path=self._state.directory_path,
+                    files=new_files,
+                    last_full_scan=self._state.last_full_scan,
+                    total_chunks=self._state.total_chunks - chunks_deleted,
+                    total_files=len(new_files),
+                    metadata_version=self._state.metadata_version,
+                )
+
         files_to_index: list[Path] = []
         for file_path in all_files:
             if full_reindex or self._needs_indexing(file_path):
