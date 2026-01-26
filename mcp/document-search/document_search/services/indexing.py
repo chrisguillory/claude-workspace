@@ -57,7 +57,7 @@ EMBEDDING_DIMENSION = 768
 DEFAULT_STATE_PATH = Path.home() / '.claude-workspace' / 'cache' / 'document_search_index_state.json'
 
 # Pipeline worker configuration - each stage is independently tunable
-NUM_CHUNK_WORKERS = 8  # CPU-bound, limited by disk I/O
+NUM_CHUNK_WORKERS = 16  # CPU-bound, limited by disk I/O
 NUM_EMBED_WORKERS = 64  # I/O-bound, feeds Gemini API
 NUM_UPSERT_WORKERS = 16  # I/O-bound, feeds Qdrant API
 
@@ -264,6 +264,9 @@ class IndexingService:
         results: dict[str, int | FileProcessingError] = {}  # path -> chunk_count or error
         results_lock = asyncio.Lock()
 
+        # Queue depth monitor for bottleneck analysis
+        monitor = _QueueMonitor(file_queue, embed_queue, upsert_queue, results)
+
         # Populate file queue
         for path in files_to_index:
             await file_queue.put(path)
@@ -273,6 +276,9 @@ class IndexingService:
             f'{NUM_EMBED_WORKERS} embed, {NUM_UPSERT_WORKERS} upsert '
             f'for {len(files_to_index)} files'
         )
+
+        # Start queue monitor
+        monitor.start()
 
         # Start workers for each stage
         chunk_tasks = [
@@ -320,7 +326,8 @@ class IndexingService:
                             raise exc
                         # Worker exited without exception (shouldn't happen normally)
         finally:
-            # Cancel all workers and waiter
+            # Stop monitor and cancel all workers
+            monitor.stop()
             waiter.cancel()
             for task in all_worker_tasks:
                 task.cancel()
@@ -641,6 +648,53 @@ class _EmbeddedFile:
     chunk_ids: list[UUID]
     dense_embeddings: list[tuple[float, ...]]
     sparse_embeddings: list[tuple[tuple[int, ...], tuple[float, ...]]]
+
+
+class _QueueMonitor:
+    """Monitor queue depths for pipeline bottleneck analysis.
+
+    Logs periodic snapshots showing where work is accumulating:
+    - files: remaining files to chunk
+    - embed: chunks waiting for embedding (high = chunk keeping up)
+    - upsert: embedded chunks waiting for storage (high = embed keeping up)
+    """
+
+    def __init__(
+        self,
+        file_queue: asyncio.Queue[Path],
+        embed_queue: asyncio.Queue[_ChunkedFile],
+        upsert_queue: asyncio.Queue[_EmbeddedFile],
+        results: dict[str, int | FileProcessingError],  # strict_typing_linter.py: mutable-type
+        log_interval: float = 5.0,
+    ) -> None:
+        self._file_queue = file_queue
+        self._embed_queue = embed_queue
+        self._upsert_queue = upsert_queue
+        self._results = results
+        self._log_interval = log_interval
+        self._task: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        """Start monitoring."""
+        if self._task is None:
+            self._task = asyncio.create_task(self._monitor_loop())
+
+    def stop(self) -> None:
+        """Stop monitoring."""
+        if self._task:
+            self._task.cancel()
+            self._task = None
+
+    async def _monitor_loop(self) -> None:
+        """Log queue depths periodically."""
+        while True:
+            await asyncio.sleep(self._log_interval)
+            done = len(self._results)
+            logger.info(
+                f'[QUEUES] files={self._file_queue.qsize()} '
+                f'embed={self._embed_queue.qsize()}/{EMBED_QUEUE_SIZE} '
+                f'upsert={self._upsert_queue.qsize()}/{UPSERT_QUEUE_SIZE} done={done}'
+            )
 
 
 def _get_git_ignored_files(

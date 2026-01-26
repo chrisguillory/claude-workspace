@@ -38,10 +38,10 @@ class GeminiClient:
     # Concurrency control - semaphore limits concurrent API calls
     DEFAULT_MAX_CONCURRENT = 400  # Tuned for throughput - Gemini handles well
 
-    # HTTP client configuration (google-genai defaults, explicit for tuning)
+    # HTTP client configuration (tuned for high throughput)
     DEFAULT_TIMEOUT_MS = 5000  # request timeout in milliseconds (google-genai default)
-    DEFAULT_MAX_CONNECTIONS = 100  # max simultaneous connections (google-genai default)
-    DEFAULT_MAX_KEEPALIVE = 20  # connections kept alive for reuse (google-genai default)
+    DEFAULT_MAX_CONNECTIONS = 400  # match semaphore to avoid connection queuing
+    DEFAULT_MAX_KEEPALIVE = 400  # keep all connections alive for reuse
     DEFAULT_KEEPALIVE_EXPIRY = 5.0  # seconds before idle close (google-genai default)
 
     def __init__(

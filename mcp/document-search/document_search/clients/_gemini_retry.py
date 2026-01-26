@@ -19,7 +19,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # Server error codes that are transient and worth retrying
-RETRYABLE_STATUS_CODES = {502, 503, 504}
+RETRYABLE_STATUS_CODES = {500, 502, 503, 504}
 
 
 def is_retryable_gemini_error(exc: BaseException) -> bool:
