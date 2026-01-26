@@ -38,5 +38,10 @@ class Client:
 
     models: Models
 
-    def __init__(self, *, api_key: str) -> None: ...
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        http_options: Any | None = None,
+    ) -> None: ...
     def __getattr__(self, name: str) -> Any: ...

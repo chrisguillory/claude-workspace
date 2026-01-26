@@ -9,12 +9,17 @@ _F = TypeVar('_F', bound=Callable[..., Any])
 
 def retry(
     *,
+    retry: Any = None,
     wait: Any = None,
     stop: Any = None,
     reraise: bool = False,
     before_sleep: Callable[[RetryCallState], None] | None = None,
     **kwargs: Any,
 ) -> Callable[[_F], _F]: ...
+def retry_if_exception_type(
+    exception_types: type[BaseException] | tuple[type[BaseException], ...] = ...,
+) -> Any: ...
+def retry_if_exception(predicate: Callable[[BaseException], bool]) -> Any: ...
 def wait_exponential(
     multiplier: float = 1,
     min: float = 0,

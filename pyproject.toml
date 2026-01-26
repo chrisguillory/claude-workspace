@@ -51,6 +51,7 @@ ignore = [
     "DTZ011",  # date.today() without timezone is fine for date-only ops
     "E501",    # line length handled by formatter
     "SIM102",  # allow nested if statements
+    "SIM103",  # allow explicit if-return-false for clarity
     "SIM108",  # allow if-else over ternary
 ]
 

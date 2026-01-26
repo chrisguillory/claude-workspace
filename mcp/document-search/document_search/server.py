@@ -262,7 +262,7 @@ def register_tools(state: ServerState) -> None:
         )
 
         # Layer 1: Search with specified strategy
-        result = state.repository.search(search_query)
+        result = await state.repository.search(search_query)
 
         # Layer 2: Cross-encoder reranking
         result = await state.reranker_service.rerank(
@@ -304,7 +304,7 @@ def register_tools(state: ServerState) -> None:
         logger = DualLogger(ctx)
         await logger.info('Getting index stats')
 
-        stats = state.indexing_service.get_index_stats()
+        stats = await state.indexing_service.get_index_stats()
 
         if stats.get('status') == 'not_initialized':
             await logger.warning('Index not initialized - run index_directory first')
@@ -345,7 +345,7 @@ def register_tools(state: ServerState) -> None:
         logger = DualLogger(ctx)
         await logger.info('Getting index breakdown')
 
-        breakdown = state.repository.get_index_breakdown()
+        breakdown = await state.repository.get_index_breakdown()
 
         await logger.info(
             f'Index: {breakdown.total_chunks} chunks, '
@@ -389,7 +389,7 @@ def register_tools(state: ServerState) -> None:
         # Resolve path
         resolved_path = str(Path(path).expanduser().resolve())
 
-        status = state.repository.is_file_indexed(resolved_path)
+        status = await state.repository.is_file_indexed(resolved_path)
 
         if status.indexed:
             await logger.info(f'File indexed: {resolved_path} ({status.chunk_count} chunks)')
@@ -436,7 +436,7 @@ def register_tools(state: ServerState) -> None:
         # Resolve path_prefix (defaults to CWD for consistency with index_directory)
         resolved_prefix = str(Path(path_prefix).expanduser().resolve() if path_prefix else Path.cwd())
 
-        files = state.repository.list_indexed_files(
+        files = await state.repository.list_indexed_files(
             path_prefix=resolved_prefix,
             file_type=file_type,
             limit=limit,
@@ -467,7 +467,7 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     state = await ServerState.create()
 
     # Ensure Qdrant collection exists
-    state.repository.ensure_collection(EMBEDDING_DIMENSION)
+    await state.repository.ensure_collection(EMBEDDING_DIMENSION)
 
     # Register tools with closure over state
     register_tools(state)

@@ -2,14 +2,21 @@
 
 Typed interface over the Qdrant client. All public methods accept and return
 strict Pydantic models from schemas.vectors.
+
+Uses BatchLoader pattern for upserts to coalesce concurrent requests.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import typing
 from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID
+
+import attrs
+from local_lib.batch_loader import GenericBatchLoader
 
 from document_search.clients.qdrant import QdrantClient
 from document_search.schemas.chunking import EXTENSION_MAP, FileType
@@ -28,12 +35,16 @@ __all__ = [
     'DocumentVectorRepository',
 ]
 
+logger = logging.getLogger(__name__)
+
 
 class DocumentVectorRepository:
     """Repository for document vector storage and retrieval.
 
     Provides typed interface for storing document chunks with their
     embeddings and searching by vector similarity.
+
+    Uses UpsertLoader for automatic batching of concurrent upsert requests.
     """
 
     def __init__(self, client: QdrantClient) -> None:
@@ -43,17 +54,20 @@ class DocumentVectorRepository:
             client: Qdrant client instance.
         """
         self._client = client
+        self._upsert_loader = UpsertLoader(client)
 
-    def ensure_collection(self, vector_dimension: int) -> None:
+    async def ensure_collection(self, vector_dimension: int) -> None:
         """Ensure collection exists with correct configuration.
 
         Args:
             vector_dimension: Size of embedding vectors (768 for Gemini).
         """
-        self._client.ensure_collection(vector_dimension)
+        await self._client.ensure_collection(vector_dimension)
 
-    def upsert(self, points: Sequence[VectorPoint]) -> int:
-        """Store or update document vectors with hybrid embeddings.
+    async def upsert(self, points: Sequence[VectorPoint]) -> int:
+        """Store or update document vectors with hybrid embeddings (automatically batched).
+
+        Points are batched with concurrent requests from other callers for efficiency.
 
         Args:
             points: Typed vector points to store (dense + sparse vectors).
@@ -61,29 +75,11 @@ class DocumentVectorRepository:
         Returns:
             Number of points upserted.
         """
-        raw_points = [
-            (
-                point.id,
-                list(point.dense_vector),
-                list(point.sparse_indices),
-                list(point.sparse_values),
-                {
-                    'source_path': point.source_path,
-                    'chunk_index': point.chunk_index,
-                    'file_type': point.file_type,
-                    'text': point.text,
-                    'start_char': point.start_char,
-                    'end_char': point.end_char,
-                    'heading_context': point.heading_context,
-                    'page_number': point.page_number,
-                    'json_path': point.json_path,
-                },
-            )
-            for point in points
-        ]
-        return self._client.upsert(raw_points)
+        tasks = [self._upsert_loader.load(UpsertLoader.Request(point=point)) for point in points]
+        results = await asyncio.gather(*tasks)
+        return sum(results)
 
-    def search(self, query: SearchQuery) -> SearchResult:
+    async def search(self, query: SearchQuery) -> SearchResult:
         """Search documents using configurable strategy.
 
         Args:
@@ -101,7 +97,7 @@ class DocumentVectorRepository:
         # Request extra results if we'll be post-filtering by path prefix
         fetch_limit = query.limit * 3 if query.source_path_prefix else query.limit
 
-        raw_results = self._client.search(
+        raw_results = await self._client.search(
             search_type=query.search_type,
             dense_vector=list(query.dense_vector) if query.dense_vector else None,
             sparse_indices=list(query.sparse_indices) if query.sparse_indices else None,
@@ -136,7 +132,7 @@ class DocumentVectorRepository:
 
         return SearchResult(hits=hits, total=len(hits))
 
-    def get(self, point_ids: Sequence[UUID]) -> Sequence[SearchHit]:
+    async def get(self, point_ids: Sequence[UUID]) -> Sequence[SearchHit]:
         """Retrieve documents by ID.
 
         Args:
@@ -145,7 +141,7 @@ class DocumentVectorRepository:
         Returns:
             Typed document data (without scores).
         """
-        raw_results = self._client.get(point_ids)
+        raw_results = await self._client.get(point_ids)
 
         return [
             SearchHit(
@@ -164,7 +160,7 @@ class DocumentVectorRepository:
             for result in raw_results
         ]
 
-    def delete(self, point_ids: Sequence[UUID]) -> int:
+    async def delete(self, point_ids: Sequence[UUID]) -> int:
         """Delete documents by ID.
 
         Args:
@@ -173,9 +169,9 @@ class DocumentVectorRepository:
         Returns:
             Number of points deleted.
         """
-        return self._client.delete(point_ids)
+        return await self._client.delete(point_ids)
 
-    def delete_by_source_path_prefix(self, prefix: str) -> int:
+    async def delete_by_source_path_prefix(self, prefix: str) -> int:
         """Delete all vectors for files under a directory prefix.
 
         Used for full_reindex to remove all existing chunks before re-indexing.
@@ -187,19 +183,19 @@ class DocumentVectorRepository:
         Returns:
             Number of points deleted.
         """
-        return self._client.delete_by_source_path_prefix(prefix)
+        return await self._client.delete_by_source_path_prefix(prefix)
 
-    def count(self) -> int:
+    async def count(self) -> int:
         """Get total document count."""
-        return self._client.count()
+        return await self._client.count()
 
-    def get_collection_info(self) -> CollectionInfo | None:
+    async def get_collection_info(self) -> CollectionInfo | None:
         """Get collection metadata.
 
         Returns:
             Collection info if exists, None otherwise.
         """
-        info = self._client.get_collection_info()
+        info = await self._client.get_collection_info()
         if info is None:
             return None
 
@@ -212,18 +208,18 @@ class DocumentVectorRepository:
 
     # Visibility methods for index introspection
 
-    def get_index_breakdown(self) -> IndexBreakdown:
+    async def get_index_breakdown(self) -> IndexBreakdown:
         """Get overview of what's in the document index.
 
         Returns:
             IndexBreakdown with total chunks, breakdown by file type,
             unique file count, and list of supported types.
         """
-        total_chunks = self._client.count()
-        by_file_type = self._client.facet_by_file_type()
+        total_chunks = await self._client.count()
+        by_file_type = await self._client.facet_by_file_type()
 
         # Get unique file count via scroll (more efficient than full path list)
-        unique_paths = self._client.get_unique_source_paths()
+        unique_paths = await self._client.get_unique_source_paths()
         unique_files = len(unique_paths)
 
         # Get supported types from EXTENSION_MAP (static)
@@ -236,7 +232,7 @@ class DocumentVectorRepository:
             supported_types=supported_types,
         )
 
-    def is_file_indexed(self, path: str) -> FileIndexStatus:
+    async def is_file_indexed(self, path: str) -> FileIndexStatus:
         """Check if a specific file is indexed.
 
         Args:
@@ -259,7 +255,7 @@ class DocumentVectorRepository:
             )
 
         # Check if file has chunks in the index
-        chunk_count = self._client.count_by_source_path(path)
+        chunk_count = await self._client.count_by_source_path(path)
 
         if chunk_count == 0:
             return FileIndexStatus(
@@ -276,7 +272,7 @@ class DocumentVectorRepository:
             file_type=file_type,
         )
 
-    def list_indexed_files(
+    async def list_indexed_files(
         self,
         path_prefix: str | None = None,
         file_type: str | None = None,
@@ -292,7 +288,7 @@ class DocumentVectorRepository:
         Returns:
             List of IndexedFile sorted by chunk count descending.
         """
-        raw_paths = self._client.get_unique_source_paths(
+        raw_paths = await self._client.get_unique_source_paths(
             path_prefix=path_prefix,
             file_type=file_type,
             limit=limit,
@@ -302,3 +298,52 @@ class DocumentVectorRepository:
             IndexedFile(path=path, chunk_count=count, file_type=typing.cast(FileType, ftype))
             for path, ftype, count in raw_paths
         ]
+
+
+class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):
+    """BatchLoader for Qdrant upserts with automatic batching.
+
+    Concurrency control is handled by QdrantClient's semaphore.
+    """
+
+    @attrs.define(frozen=True, kw_only=True)
+    class Request:
+        """Hashable request for batching."""
+
+        point: VectorPoint
+
+    def __init__(self, client: QdrantClient) -> None:
+        self._client = client
+        super().__init__(
+            bulk_load=self._bulk_load,
+            batch_size=100,  # Reduced from 300 to lower burst pressure
+        )
+
+    async def _bulk_load(self, requests: Sequence[Request]) -> Sequence[int]:
+        """Transform requests to raw points and call bulk API."""
+        raw_points = [
+            (
+                req.point.id,
+                list(req.point.dense_vector),
+                list(req.point.sparse_indices),
+                list(req.point.sparse_values),
+                {
+                    'source_path': req.point.source_path,
+                    'chunk_index': req.point.chunk_index,
+                    'file_type': req.point.file_type,
+                    'text': req.point.text,
+                    'start_char': req.point.start_char,
+                    'end_char': req.point.end_char,
+                    'heading_context': req.point.heading_context,
+                    'page_number': req.point.page_number,
+                    'json_path': req.point.json_path,
+                },
+            )
+            for req in requests
+        ]
+
+        total_chars = sum(len(req.point.text) for req in requests)
+        logger.debug(f'[BATCH] Upserting {len(requests)} points ({total_chars:,} chars)')
+
+        await self._client.upsert(raw_points)
+        return [1] * len(requests)

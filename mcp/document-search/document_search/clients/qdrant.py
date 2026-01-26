@@ -2,16 +2,23 @@
 
 Thin wrapper around qdrant-client. Handles API calls only - no business logic.
 Type translation happens in the repository layer.
+
+Uses AsyncQdrantClient for non-blocking I/O in async contexts.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from typing import Any, TypedDict
 from uuid import UUID
 
-from qdrant_client import QdrantClient as _QdrantClient
+import httpx
+import tenacity
+from local_lib import ConcurrencyTracker
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import (
     Distance,
     FieldCondition,
@@ -30,7 +37,10 @@ from qdrant_client.http.models import (
     VectorParams,
 )
 
+from document_search.clients import _qdrant_retry
+
 logger = logging.getLogger(__name__)
+
 
 __all__ = [
     'CollectionInfoDict',
@@ -65,27 +75,50 @@ class SearchResultDict(TypedDict):
 
 
 class QdrantClient:
-    """Low-level Qdrant client for vector operations."""
+    """Low-level async Qdrant client for vector operations."""
 
     DEFAULT_URL = 'http://localhost:6333'
     DEFAULT_COLLECTION = 'document_chunks'
+
+    # Max concurrent upsert operations
+    DEFAULT_MAX_CONCURRENT_UPSERTS = 8
+
+    # Connection pool and timeout tuning
+    # - Pool size scales with CPU (2x) to handle concurrent workers
+    # - Timeout doubled from default 5s to handle large batch upserts under load
+    # - Must pass explicit limits to override qdrant-client's localhost defaults
+    #   which disable keep-alive (max_keepalive_connections=0)
+    DEFAULT_TIMEOUT = 10
+    DEFAULT_POOL_SIZE = (os.cpu_count() or 8) * 2
 
     def __init__(
         self,
         url: str = DEFAULT_URL,
         collection_name: str = DEFAULT_COLLECTION,
+        max_concurrent_upserts: int = DEFAULT_MAX_CONCURRENT_UPSERTS,
+        timeout: int = DEFAULT_TIMEOUT,
+        pool_size: int = DEFAULT_POOL_SIZE,
     ) -> None:
         """Initialize client.
 
         Args:
             url: Qdrant server URL.
             collection_name: Default collection for operations.
+            max_concurrent_upserts: Max concurrent upsert API calls.
+            timeout: HTTP timeout in seconds (default 10).
+            pool_size: HTTP connection pool size (default 2x CPU count).
         """
         self._url = url
         self._collection_name = collection_name
-        self._client = _QdrantClient(url=url)
 
-    def ensure_collection(self, vector_dimension: int) -> None:
+        # Override localhost defaults to enable connection pooling with keep-alive
+        limits = httpx.Limits(max_connections=pool_size, max_keepalive_connections=pool_size)
+        self._client = AsyncQdrantClient(url=url, timeout=timeout, limits=limits)
+
+        self._upsert_semaphore = asyncio.Semaphore(max_concurrent_upserts)
+        self._tracker = ConcurrencyTracker('QDRANT_UPSERT')
+
+    async def ensure_collection(self, vector_dimension: int) -> None:
         """Create collection with hybrid search support if it doesn't exist.
 
         Creates a collection with:
@@ -96,11 +129,11 @@ class QdrantClient:
         Args:
             vector_dimension: Size of dense embedding vectors (e.g., 768 for Gemini).
         """
-        collections = self._client.get_collections().collections
-        exists = any(c.name == self._collection_name for c in collections)
+        collections = await self._client.get_collections()
+        exists = any(c.name == self._collection_name for c in collections.collections)
 
         if not exists:
-            self._client.create_collection(
+            await self._client.create_collection(
                 collection_name=self._collection_name,
                 vectors_config={
                     'dense': VectorParams(
@@ -116,15 +149,23 @@ class QdrantClient:
             )
 
         # Ensure keyword index on file_type for faceting (idempotent)
-        self._ensure_file_type_index()
+        await self._ensure_file_type_index()
 
-    def upsert(
+    @tenacity.retry(
+        retry=tenacity.retry_if_exception(_qdrant_retry.is_retryable_qdrant_error),
+        stop=tenacity.stop_after_attempt(3),
+        wait=tenacity.wait_exponential(multiplier=0.5, max=5),
+        before_sleep=_qdrant_retry.log_qdrant_retry,
+    )
+    async def upsert(
         self,
         points: Sequence[  # strict_typing_linter.py: loose-typing # Qdrant payload
             tuple[UUID, Sequence[float], Sequence[int], Sequence[float], Mapping[str, Any]]
         ],
     ) -> int:
         """Insert or update points with hybrid vectors.
+
+        Retries on transient network errors (ReadError, WriteError).
 
         Args:
             points: Sequence of (id, dense_vector, sparse_indices, sparse_values, payload) tuples.
@@ -147,13 +188,14 @@ class QdrantClient:
             for point_id, dense_vector, sparse_indices, sparse_values, payload in points
         ]
 
-        self._client.upsert(
-            collection_name=self._collection_name,
-            points=point_structs,
-        )
+        async with self._upsert_semaphore, self._tracker.track():
+            await self._client.upsert(
+                collection_name=self._collection_name,
+                points=point_structs,
+            )
         return len(point_structs)
 
-    def search(
+    async def search(
         self,
         search_type: str = 'hybrid',
         dense_vector: Sequence[float] | None = None,
@@ -196,7 +238,7 @@ class QdrantClient:
             # BM25 sparse vectors only - keyword/full-text matching
             if sparse_indices is None or sparse_values is None:
                 raise ValueError('lexical search requires sparse_indices and sparse_values')
-            results = self._client.query_points(
+            results = await self._client.query_points(
                 collection_name=self._collection_name,
                 query=SparseVector(
                     indices=list(sparse_indices),
@@ -211,7 +253,7 @@ class QdrantClient:
             # Dense vectors only - neural similarity
             if dense_vector is None:
                 raise ValueError('embedding search requires dense_vector')
-            results = self._client.query_points(
+            results = await self._client.query_points(
                 collection_name=self._collection_name,
                 query=list(dense_vector),
                 using='dense',
@@ -223,7 +265,7 @@ class QdrantClient:
             # Hybrid: RRF fusion of dense + sparse (default)
             if dense_vector is None or sparse_indices is None or sparse_values is None:
                 raise ValueError('hybrid search requires dense_vector, sparse_indices, and sparse_values')
-            results = self._client.query_points(
+            results = await self._client.query_points(
                 collection_name=self._collection_name,
                 prefetch=[
                     Prefetch(
@@ -265,7 +307,7 @@ class QdrantClient:
             if hit.payload is not None
         ]
 
-    def get(  # strict_typing_linter.py: loose-typing # Qdrant payload
+    async def get(  # strict_typing_linter.py: loose-typing # Qdrant payload
         self, point_ids: Sequence[UUID]
     ) -> Sequence[Mapping[str, Any]]:
         """Retrieve points by ID.
@@ -276,7 +318,7 @@ class QdrantClient:
         Returns:
             List of points with id and payload.
         """
-        results = self._client.retrieve(
+        results = await self._client.retrieve(
             collection_name=self._collection_name,
             ids=[str(pid) for pid in point_ids],
             with_payload=True,
@@ -292,7 +334,7 @@ class QdrantClient:
             if point.payload is not None
         ]
 
-    def delete(self, point_ids: Sequence[UUID]) -> int:
+    async def delete(self, point_ids: Sequence[UUID]) -> int:
         """Delete points by ID.
 
         Args:
@@ -302,13 +344,13 @@ class QdrantClient:
             Number of points requested for deletion (not confirmed count).
             Qdrant's delete is idempotent - non-existent IDs are silently ignored.
         """
-        self._client.delete(
+        await self._client.delete(
             collection_name=self._collection_name,
             points_selector=[str(pid) for pid in point_ids],
         )
         return len(point_ids)
 
-    def delete_by_source_path(self, source_path: str) -> None:
+    async def delete_by_source_path(self, source_path: str) -> None:
         """Delete all points for a specific source file.
 
         Used when re-indexing a file to remove old chunks before inserting new ones.
@@ -316,7 +358,7 @@ class QdrantClient:
         Args:
             source_path: Exact source_path to match.
         """
-        self._client.delete(
+        await self._client.delete(
             collection_name=self._collection_name,
             points_selector=FilterSelector(
                 filter=Filter(
@@ -330,7 +372,7 @@ class QdrantClient:
             ),
         )
 
-    def delete_by_source_path_prefix(self, prefix: str) -> int:
+    async def delete_by_source_path_prefix(self, prefix: str) -> int:
         """Delete all points where source_path starts with prefix.
 
         Used for full_reindex to clean slate a directory before re-indexing.
@@ -348,7 +390,7 @@ class QdrantClient:
         offset = None
 
         while True:
-            results, offset = self._client.scroll(
+            results, offset = await self._client.scroll(
                 collection_name=self._collection_name,
                 limit=1000,
                 offset=offset,
@@ -369,7 +411,7 @@ class QdrantClient:
                     ids_to_delete.append(point.id)
 
             if ids_to_delete:
-                self._client.delete(
+                await self._client.delete(
                     collection_name=self._collection_name,
                     points_selector=ids_to_delete,
                 )
@@ -380,27 +422,27 @@ class QdrantClient:
 
         return deleted
 
-    def count(self) -> int:
+    async def count(self) -> int:
         """Get total point count in collection."""
-        info = self._client.get_collection(self._collection_name)
+        info = await self._client.get_collection(self._collection_name)
         return info.points_count or 0
 
-    def collection_exists(self) -> bool:
+    async def collection_exists(self) -> bool:
         """Check if collection exists."""
-        collections = self._client.get_collections().collections
-        return any(c.name == self._collection_name for c in collections)
+        collections = await self._client.get_collections()
+        return any(c.name == self._collection_name for c in collections.collections)
 
-    def get_collection_info(self) -> CollectionInfoDict | None:
+    async def get_collection_info(self) -> CollectionInfoDict | None:
         """Get collection metadata.
 
         Returns:
             Typed dict with name, vector_dimension, points_count, status.
             None if collection doesn't exist.
         """
-        if not self.collection_exists():
+        if not await self.collection_exists():
             return None
 
-        info = self._client.get_collection(self._collection_name)
+        info = await self._client.get_collection(self._collection_name)
 
         # Handle both named vectors (dict) and single vector config
         vectors_config = info.config.params.vectors
@@ -423,20 +465,20 @@ class QdrantClient:
 
     # Visibility methods for index introspection
 
-    def facet_by_file_type(self) -> Mapping[str, int]:
+    async def facet_by_file_type(self) -> Mapping[str, int]:
         """Get chunk counts by file type using Facet API.
 
         Returns:
             Mapping of file_type to chunk count.
         """
-        result = self._client.facet(
+        result = await self._client.facet(
             collection_name=self._collection_name,
             key='file_type',
             limit=100,  # More than enough for our ~7 file types
         )
         return {str(hit.value): hit.count for hit in result.hits}
 
-    def count_by_source_path(self, source_path: str) -> int:
+    async def count_by_source_path(self, source_path: str) -> int:
         """Count chunks for a specific source file.
 
         Args:
@@ -445,7 +487,7 @@ class QdrantClient:
         Returns:
             Number of chunks indexed for this file (0 if not indexed).
         """
-        result = self._client.count(
+        result = await self._client.count(
             collection_name=self._collection_name,
             count_filter=Filter(
                 must=[
@@ -458,7 +500,7 @@ class QdrantClient:
         )
         return result.count
 
-    def get_unique_source_paths(
+    async def get_unique_source_paths(
         self,
         path_prefix: str | None = None,
         file_type: str | None = None,
@@ -488,7 +530,7 @@ class QdrantClient:
         offset = None
 
         while True:
-            results, offset = self._client.scroll(
+            results, offset = await self._client.scroll(
                 collection_name=self._collection_name,
                 scroll_filter=scroll_filter,
                 limit=5000,
@@ -531,23 +573,23 @@ class QdrantClient:
 
         return sorted_paths
 
-    def _ensure_file_type_index(self) -> None:
+    async def _ensure_file_type_index(self) -> None:
         """Create keyword index on file_type for faceting if not exists.
 
         This is idempotent - checks if index exists before creating.
         Index creation happens asynchronously in the background.
         """
-        if not self.collection_exists():
+        if not await self.collection_exists():
             return
 
         # Check if file_type index already exists in payload schema
-        info = self._client.get_collection(self._collection_name)
+        info = await self._client.get_collection(self._collection_name)
         payload_schema = getattr(info, 'payload_schema', {}) or {}
         if 'file_type' in payload_schema:
             logger.debug('file_type index already exists')
             return
 
-        self._client.create_payload_index(
+        await self._client.create_payload_index(
             collection_name=self._collection_name,
             field_name='file_type',
             field_schema=PayloadSchemaType.KEYWORD,

@@ -13,7 +13,13 @@ import asyncio
 from collections.abc import Sequence
 from pathlib import Path
 
+import httpx
+import tenacity
 from google import genai
+from google.genai.types import HttpOptions
+from local_lib import ConcurrencyTracker
+
+from document_search.clients import _gemini_retry
 
 __all__ = [
     'GeminiClient',
@@ -28,23 +34,58 @@ class GeminiClient:
     """
 
     DEFAULT_MODEL = 'text-embedding-004'
-    DEFAULT_MAX_CONCURRENT = 200  # Aggressive - may hit rate limits
+
+    # Concurrency control - semaphore limits concurrent API calls
+    DEFAULT_MAX_CONCURRENT = 400  # Tuned for throughput - Gemini handles well
+
+    # HTTP client configuration (google-genai defaults, explicit for tuning)
+    DEFAULT_TIMEOUT_MS = 5000  # request timeout in milliseconds (google-genai default)
+    DEFAULT_MAX_CONNECTIONS = 100  # max simultaneous connections (google-genai default)
+    DEFAULT_MAX_KEEPALIVE = 20  # connections kept alive for reuse (google-genai default)
+    DEFAULT_KEEPALIVE_EXPIRY = 5.0  # seconds before idle close (google-genai default)
 
     def __init__(
         self,
         api_key: str | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        max_connections: int = DEFAULT_MAX_CONNECTIONS,
+        max_keepalive: int = DEFAULT_MAX_KEEPALIVE,
+        keepalive_expiry: float = DEFAULT_KEEPALIVE_EXPIRY,
     ) -> None:
         """Initialize client.
 
         Args:
             api_key: Gemini API key. If None, loads from standard location.
-            max_concurrent: Max concurrent API requests. Default 50 for Tier 1.
+            max_concurrent: Max concurrent API requests (semaphore limit).
+            timeout_ms: Request timeout in milliseconds.
+            max_connections: Max simultaneous HTTP connections.
+            max_keepalive: Max connections kept alive for reuse.
+            keepalive_expiry: Seconds before idle connections close.
         """
         self._api_key = api_key or _load_api_key()
-        self._client = genai.Client(api_key=self._api_key)
-        self._semaphore = asyncio.Semaphore(max_concurrent)
 
+        # Explicit HTTP client configuration for observability and tuning
+        limits = httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_keepalive,
+            keepalive_expiry=keepalive_expiry,
+        )
+        http_options = HttpOptions(
+            timeout=timeout_ms,
+            async_client_args={'limits': limits},
+        )
+        self._client = genai.Client(api_key=self._api_key, http_options=http_options)
+
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._tracker = ConcurrencyTracker('GEMINI')
+
+    @tenacity.retry(
+        retry=tenacity.retry_if_exception(_gemini_retry.is_retryable_gemini_error),
+        stop=tenacity.stop_after_attempt(3),
+        wait=tenacity.wait_exponential(multiplier=0.5, max=5),
+        before_sleep=_gemini_retry.log_gemini_retry,
+    )
     async def embed(
         self,
         texts: Sequence[str],
@@ -56,6 +97,7 @@ class GeminiClient:
 
         Uses native async API for true concurrent requests.
         Rate limiting handled internally via semaphore.
+        Retries on transient network errors (ReadError, WriteError, timeouts).
 
         Args:
             texts: Texts to embed (max 100 per API call).
@@ -68,7 +110,7 @@ class GeminiClient:
         Raises:
             google.genai.errors.ClientError: On API errors.
         """
-        async with self._semaphore:
+        async with self._semaphore, self._tracker.track():
             result = await self._client.aio.models.embed_content(
                 model=model,
                 contents=list(texts),
