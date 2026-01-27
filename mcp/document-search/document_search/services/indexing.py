@@ -40,7 +40,6 @@ from document_search.schemas.indexing import (
 from document_search.schemas.vectors import VectorPoint
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
-from document_search.services.embedding_batch_loader import EmbeddingBatchLoader
 from document_search.services.sparse_embedding import SparseEmbeddingService
 
 __all__ = [
@@ -79,45 +78,11 @@ class IndexingService:
     - Error collection and categorization
     """
 
-    @classmethod
-    async def create(
-        cls,
-        chunking_service: ChunkingService,
-        embedding_service: EmbeddingService,
-        sparse_embedding_service: SparseEmbeddingService,
-        repository: DocumentVectorRepository,
-        *,
-        state_path: Path = DEFAULT_STATE_PATH,
-        coalesce_delay: float = 0.01,
-    ) -> IndexingService:
-        """Create indexing service in async context.
-
-        Args:
-            chunking_service: Service for splitting files into chunks.
-            embedding_service: Service for creating dense embeddings.
-            sparse_embedding_service: Service for creating BM25 sparse embeddings.
-            repository: Repository for vector storage.
-            state_path: Path to persist indexing state.
-            coalesce_delay: Seconds to wait for embedding request coalescing (default 10ms).
-        """
-        # Create batch loader that coalesces embedding requests across workers
-        batch_loader = EmbeddingBatchLoader(embedding_service, coalesce_delay=coalesce_delay)
-
-        return cls(
-            chunking_service=chunking_service,
-            embedding_service=embedding_service,
-            sparse_embedding_service=sparse_embedding_service,
-            batch_loader=batch_loader,
-            repository=repository,
-            state_path=state_path,
-        )
-
     def __init__(
         self,
         chunking_service: ChunkingService,
         embedding_service: EmbeddingService,
         sparse_embedding_service: SparseEmbeddingService,
-        batch_loader: EmbeddingBatchLoader,
         repository: DocumentVectorRepository,
         *,
         state_path: Path = DEFAULT_STATE_PATH,
@@ -126,16 +91,14 @@ class IndexingService:
 
         Args:
             chunking_service: Service for splitting files into chunks.
-            embedding_service: Service for creating dense embeddings.
+            embedding_service: Service for creating dense embeddings (with internal batching).
             sparse_embedding_service: Service for creating BM25 sparse embeddings.
-            batch_loader: Batch loader for coalescing embedding requests.
             repository: Repository for vector storage.
             state_path: Path to persist indexing state.
         """
         self._chunking = chunking_service
         self._embedding = embedding_service
         self._sparse_embedding = sparse_embedding_service
-        self._batch_loader = batch_loader
         self._repo = repository
         self._state_path = state_path
         self._state: DirectoryIndexState | None = None
@@ -494,8 +457,8 @@ class IndexingService:
                 return
 
             # No try/finally - exceptions propagate, triggering fail-fast
-            # Dense embeddings via batch loader (Gemini API)
-            embed_tasks = [self._batch_loader.embed(c.text) for c in chunked.chunks]
+            # Dense embeddings via embedding service (Gemini API with internal batching)
+            embed_tasks = [self._embedding.embed_text(c.text) for c in chunked.chunks]
             responses = await asyncio.gather(*embed_tasks)
             dense = [tuple(r.values) for r in responses]
 
@@ -617,7 +580,7 @@ async def create_indexing_service(
     sparse_embedding_service = SparseEmbeddingService()
     repository = DocumentVectorRepository(qdrant_client)
 
-    return await IndexingService.create(
+    return IndexingService(
         chunking_service=chunking_service,
         embedding_service=embedding_service,
         sparse_embedding_service=sparse_embedding_service,
