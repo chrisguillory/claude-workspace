@@ -34,7 +34,9 @@ DEFAULT_CHUNK_OVERLAP = 300
 MIN_CHUNK_LENGTH = 50
 
 # JSONL constants
-JSONL_ENCODINGS = ('utf-8', 'utf-8-sig', 'utf-16', 'utf-16-le', 'utf-16-be', 'latin-1', 'cp1252')
+# UTF-16 variants removed from fallback - they're only detected via BOM (lines 253-258).
+# UTF-16 without BOM is non-standard and the codec falsely "succeeds" on arbitrary byte pairs.
+JSONL_ENCODINGS = ('utf-8', 'utf-8-sig', 'latin-1', 'cp1252')
 JSONL_SAMPLE_SIZE = 200
 JSONL_GROUPING_THRESHOLD = 800
 JSONL_MAX_GROUP_SIZE = 15
@@ -243,13 +245,20 @@ def _chunk_jsonl_impl(path: Path, chunk_size: int, chunk_overlap: int) -> Sequen
 
 
 def _detect_encoding(path: Path) -> str:
-    """Detect file encoding from BOM or content."""
+    """Detect file encoding from BOM or content.
+
+    Handles the case where UTF-8 detection fails due to sample truncation
+    mid-sequence (e.g., sample ends at byte 8191 in the middle of a 3-byte
+    UTF-8 character). This is expected when sampling and should still return
+    UTF-8.
+    """
     with open(path, 'rb') as f:
         sample = f.read(8192)
 
     if not sample:
         return 'utf-8'
 
+    # Check for BOMs first (definitive encoding markers)
     if sample.startswith(b'\xef\xbb\xbf'):
         return 'utf-8-sig'
     if sample.startswith(b'\xff\xfe'):
@@ -257,13 +266,23 @@ def _detect_encoding(path: Path) -> str:
     if sample.startswith(b'\xfe\xff'):
         return 'utf-16-be'
 
+    # Try each encoding in order. This is a detection algorithm, not exception
+    # swallowing - we intentionally try encodings until one works.
+    # Note: latin-1 always succeeds (1:1 byte mapping), so fallback is unreachable.
     for encoding in JSONL_ENCODINGS:
         try:
             sample.decode(encoding)
             return encoding
-        except (UnicodeDecodeError, UnicodeError):
+        except UnicodeDecodeError as e:
+            # UTF-8 truncation at sample boundary is expected - accept it.
+            # This happens when the 8192-byte sample cuts mid-UTF-8 sequence.
+            if encoding in ('utf-8', 'utf-8-sig') and e.reason == 'unexpected end of data':
+                if e.start >= len(sample) - 4:  # Within last 4 bytes (max UTF-8 char)
+                    return 'utf-8'
+            # Otherwise try next encoding
             continue
 
+    # Unreachable if latin-1 is in JSONL_ENCODINGS (it decodes any byte sequence)
     return 'utf-8'
 
 
