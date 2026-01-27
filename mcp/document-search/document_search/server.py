@@ -76,7 +76,7 @@ class ServerState:
 
         chunking_service = await ChunkingService.create()
         embedding_service = EmbeddingService(gemini_client)
-        sparse_embedding_service = SparseEmbeddingService()
+        sparse_embedding_service = await SparseEmbeddingService.create()
         reranker_service = RerankerService()
         repository = DocumentVectorRepository(qdrant_client)
 
@@ -243,11 +243,11 @@ def register_tools(state: ServerState) -> None:
             embed_request = EmbedRequest(text=query, task_type='RETRIEVAL_QUERY')
             embed_response = await state.embedding_service.embed(embed_request)
             dense_vector: Sequence[float] | None = embed_response.values
-            sparse_indices, sparse_values = state.sparse_embedding_service.embed(query)
+            sparse_indices, sparse_values = await state.sparse_embedding_service.embed(query)
         elif search_type == 'lexical':
             # Sparse only (BM25 keyword matching)
             dense_vector = None
-            sparse_indices, sparse_values = state.sparse_embedding_service.embed(query)
+            sparse_indices, sparse_values = await state.sparse_embedding_service.embed(query)
         elif search_type == 'embedding':
             # Dense only (semantic similarity)
             embed_request = EmbedRequest(text=query, task_type='RETRIEVAL_QUERY')
