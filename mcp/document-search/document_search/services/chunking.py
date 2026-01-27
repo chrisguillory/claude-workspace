@@ -39,6 +39,7 @@ from document_search.schemas.chunking import (
     FileType,
     get_file_type,
 )
+from document_search.schemas.embeddings import MAX_TEXT_CHARS
 from document_search.services.chunking_worker import chunk_jsonl
 from document_search.services.pdf_extraction import extract_pdf
 
@@ -363,24 +364,43 @@ class ChunkingService:
                 chunk_lines.append(row_str)
 
             chunk_text = '\n'.join(chunk_lines)
+            page_number = group_idx // group_size + 1
 
-            metadata = ChunkMetadata(
-                start_char=0,
-                end_char=len(chunk_text),
-                # Use group index as pseudo-page for reference
-                page_number=group_idx // group_size + 1,
-                heading_context=file_context,
-            )
-
-            chunks.append(
-                Chunk(
-                    text=chunk_text,
-                    source_path=str(path),
-                    chunk_index=len(chunks),
-                    file_type='csv',
-                    metadata=metadata,
+            # Sub-chunk if exceeds embedding API limit (e.g., geo_json fields)
+            if len(chunk_text) > MAX_TEXT_CHARS:
+                sub_texts = self._text_splitter.split_text(chunk_text)
+                for sub_text in sub_texts:
+                    metadata = ChunkMetadata(
+                        start_char=0,
+                        end_char=len(sub_text),
+                        page_number=page_number,
+                        heading_context=file_context,
+                    )
+                    chunks.append(
+                        Chunk(
+                            text=sub_text,
+                            source_path=str(path),
+                            chunk_index=len(chunks),
+                            file_type='csv',
+                            metadata=metadata,
+                        )
+                    )
+            else:
+                metadata = ChunkMetadata(
+                    start_char=0,
+                    end_char=len(chunk_text),
+                    page_number=page_number,
+                    heading_context=file_context,
                 )
-            )
+                chunks.append(
+                    Chunk(
+                        text=chunk_text,
+                        source_path=str(path),
+                        chunk_index=len(chunks),
+                        file_type='csv',
+                        metadata=metadata,
+                    )
+                )
 
         return chunks
 
