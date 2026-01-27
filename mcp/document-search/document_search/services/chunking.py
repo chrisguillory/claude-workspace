@@ -711,7 +711,20 @@ class ChunkingService:
 
                         # Process buffered samples
                         for buf_line, buf_obj, buf_size in sample_buffer:
-                            if should_group:
+                            # Large records always go to single-record handler
+                            if buf_size > self._chunk_size:
+                                if group_buffer:
+                                    self._jsonl_flush_group(group_buffer, path, schema_hint, chunks)
+                                    group_buffer = []
+                                    group_size_chars = 0
+                                self._jsonl_add_single_record(
+                                    buf_line,
+                                    buf_obj,
+                                    path,
+                                    schema_hint,
+                                    chunks,
+                                )
+                            elif should_group:
                                 group_buffer, group_size_chars = self._jsonl_update_group(
                                     buf_line,
                                     buf_obj,
@@ -734,7 +747,21 @@ class ChunkingService:
                     continue
 
                 # Phase 2: Process with decided strategy
-                if should_group:
+                # Large records always go to single-record handler for sub-chunking
+                if size > self._chunk_size:
+                    # Flush any pending group first
+                    if group_buffer:
+                        self._jsonl_flush_group(group_buffer, path, schema_hint, chunks)
+                        group_buffer = []
+                        group_size_chars = 0
+                    self._jsonl_add_single_record(
+                        line_num,
+                        obj,
+                        path,
+                        schema_hint,
+                        chunks,
+                    )
+                elif should_group:
                     group_buffer, group_size_chars = self._jsonl_update_group(
                         line_num,
                         obj,
@@ -762,7 +789,20 @@ class ChunkingService:
             schema_hint = self._detect_jsonl_schema_hint(sample_objects[:50])
 
             for buf_line, buf_obj, buf_size in sample_buffer:
-                if should_group:
+                # Large records always go to single-record handler for sub-chunking
+                if buf_size > self._chunk_size:
+                    if group_buffer:
+                        self._jsonl_flush_group(group_buffer, path, schema_hint, chunks)
+                        group_buffer = []
+                        group_size_chars = 0
+                    self._jsonl_add_single_record(
+                        buf_line,
+                        buf_obj,
+                        path,
+                        schema_hint,
+                        chunks,
+                    )
+                elif should_group:
                     group_buffer, group_size_chars = self._jsonl_update_group(
                         buf_line,
                         buf_obj,
