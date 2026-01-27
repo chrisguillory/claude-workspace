@@ -17,6 +17,9 @@ __all__ = [
     'SparseEmbeddingService',
 ]
 
+# Type alias for sparse vector result
+type SparseVector = tuple[Sequence[int], Sequence[float]]
+
 
 class SparseEmbeddingService:
     """BM25 sparse embedding service for keyword matching.
@@ -39,7 +42,7 @@ class SparseEmbeddingService:
         """Internal - use create() factory."""
         self._pool = _process_pool
 
-    async def embed(self, text: str) -> tuple[Sequence[int], Sequence[float]]:
+    async def embed(self, text: str) -> SparseVector:
         """Generate sparse vector for a single text.
 
         Args:
@@ -51,7 +54,7 @@ class SparseEmbeddingService:
         results = await self.embed_batch([text])
         return results[0]
 
-    async def embed_batch(self, texts: Sequence[str]) -> Sequence[tuple[Sequence[int], Sequence[float]]]:
+    async def embed_batch(self, texts: Sequence[str]) -> Sequence[SparseVector]:
         """Generate sparse vectors for multiple texts in subprocess.
 
         Args:
@@ -60,6 +63,8 @@ class SparseEmbeddingService:
         Returns:
             Sequence of (indices, values) tuples for sparse vectors.
         """
+        if not texts:
+            return []
         loop = asyncio.get_running_loop()
         results = await loop.run_in_executor(
             self._pool,
