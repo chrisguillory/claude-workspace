@@ -32,12 +32,13 @@ from local_lib.utils import Timer
 from document_search.clients.gemini import GeminiClient
 from document_search.clients.qdrant import QdrantClient
 from document_search.repositories.document_vector import DocumentVectorRepository
-from document_search.schemas.chunking import EXTENSION_MAP, Chunk
+from document_search.schemas.chunking import EXTENSION_MAP, Chunk, FileType, get_file_type
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
     DirectoryIndexState,
     FileIndexState,
     FileProcessingError,
+    FileTypeStats,
     IndexingResult,
     ProgressCallback,
 )
@@ -179,15 +180,21 @@ class IndexingService:
         timer = Timer()
 
         # Chunk
+        ft = get_file_type(file_path)
         chunks = list(await self._chunking.chunk_file(file_path))
         if not chunks:
+            by_file_type: dict[FileType, str] = {}
+            if ft is not None:
+                by_file_type[ft] = FileTypeStats(scanned=1, no_content=1).to_summary()
             return IndexingResult(
                 files_scanned=1,
-                files_processed=1,
-                files_skipped=0,
+                files_indexed=0,
+                files_cached=0,
+                files_no_content=1,
                 chunks_created=0,
                 chunks_deleted=0,
                 embeddings_created=0,
+                by_file_type=by_file_type,
                 elapsed_seconds=round(timer.elapsed(), 3),
                 errors=(),
             )
@@ -221,6 +228,7 @@ class IndexingService:
 
         # Update state
         file_hash = _file_hash(file_path)
+        chunks_deleted = len(old_state.chunk_ids) if old_state else 0
         async with self._state_lock:
             if self._state is not None:
                 new_files = dict(self._state.files)
@@ -238,19 +246,31 @@ class IndexingService:
                     files=new_files,
                     last_full_scan=self._state.last_full_scan,
                     total_files=self._state.total_files,
-                    total_chunks=self._state.total_chunks,
+                    total_chunks=self._state.total_chunks + len(chunks) - chunks_deleted,
                 )
 
         self._save_state()
 
-        chunks_deleted = len(old_state.chunk_ids) if old_state else 0
+        # Build by_file_type for single file
+        by_file_type_final: dict[FileType, str] = {}
+        if ft is not None:
+            by_file_type_final[ft] = FileTypeStats(scanned=1, indexed=1, chunks=len(chunks)).to_summary()
+
+        # Get index totals
+        index_files = len(self._state.files) if self._state else 0
+        index_chunks = self._state.total_chunks if self._state else 0
+
         return IndexingResult(
             files_scanned=1,
-            files_processed=1,
-            files_skipped=0,
+            files_indexed=1,
+            files_cached=0,
+            files_no_content=0,
             chunks_created=len(chunks),
             chunks_deleted=chunks_deleted,
             embeddings_created=len(chunks),
+            by_file_type=by_file_type_final,
+            index_files=index_files,
+            index_chunks=index_chunks,
             elapsed_seconds=round(timer.elapsed(), 3),
             errors=(),
         )
@@ -328,24 +348,41 @@ class IndexingService:
                     metadata_version=self._state.metadata_version,
                 )
 
-        # Determine which files need indexing
+        # Track files by type and determine which need indexing (single pass)
+        scanned_by_type: dict[FileType, int] = {}
+        cached_by_type: dict[FileType, int] = {}
         files_to_index: list[Path] = []
-        files_skipped = 0
+
         for file_path in all_files:
+            ft = get_file_type(file_path)
+            if ft is not None:
+                scanned_by_type[ft] = scanned_by_type.get(ft, 0) + 1
+
             if full_reindex or self._needs_indexing(file_path):
                 files_to_index.append(file_path)
-            else:
-                files_skipped += 1
+            elif ft is not None:
+                cached_by_type[ft] = cached_by_type.get(ft, 0) + 1
 
         if not files_to_index:
+            # Build by_file_type summary for cached-only result
+            by_file_type: dict[FileType, str] = {}
+            for ft in scanned_by_type:
+                stats = FileTypeStats(
+                    scanned=scanned_by_type.get(ft, 0),
+                    cached=cached_by_type.get(ft, 0),
+                )
+                by_file_type[ft] = stats.to_summary()
+
             return IndexingResult(
                 files_scanned=files_total,
                 files_ignored=files_ignored,
-                files_processed=0,
-                files_skipped=files_skipped,
+                files_indexed=0,
+                files_cached=sum(cached_by_type.values()),
+                files_no_content=0,
                 chunks_created=0,
                 chunks_deleted=chunks_deleted,
                 embeddings_created=0,
+                by_file_type=by_file_type,
                 elapsed_seconds=round(timer.elapsed(), 3),
                 errors=(),
             )
@@ -429,17 +466,50 @@ class IndexingService:
                 task.cancel()
             await asyncio.gather(waiter, *all_worker_tasks, return_exceptions=True)
 
-        # Collect results
+        # Collect results and aggregate by file type
         errors: list[FileProcessingError] = []
-        files_processed = 0
+        files_indexed = 0
+        files_no_content = 0
         chunks_created = 0
 
-        for result in results.values():
+        # Track processing outcomes by file type
+        indexed_by_type: dict[FileType, int] = {}
+        no_content_by_type: dict[FileType, int] = {}
+        errored_by_type: dict[FileType, int] = {}
+        chunks_by_type: dict[FileType, int] = {}
+
+        for file_key, result in results.items():
+            ft = get_file_type(Path(file_key))
             if isinstance(result, FileProcessingError):
                 errors.append(result)
+                if ft is not None:
+                    errored_by_type[ft] = errored_by_type.get(ft, 0) + 1
+            elif result == 0:
+                files_no_content += 1
+                if ft is not None:
+                    no_content_by_type[ft] = no_content_by_type.get(ft, 0) + 1
             else:
-                files_processed += 1
+                files_indexed += 1
                 chunks_created += result
+                if ft is not None:
+                    indexed_by_type[ft] = indexed_by_type.get(ft, 0) + 1
+                    chunks_by_type[ft] = chunks_by_type.get(ft, 0) + result
+
+        # Build by_file_type summary mapping
+        # scanned_by_type contains all file types (cached_by_type is a subset)
+        by_file_type_result: dict[FileType, str] = {}
+        for ft in scanned_by_type:
+            stats = FileTypeStats(
+                scanned=scanned_by_type.get(ft, 0),
+                indexed=indexed_by_type.get(ft, 0),
+                no_content=no_content_by_type.get(ft, 0),
+                cached=cached_by_type.get(ft, 0),
+                errored=errored_by_type.get(ft, 0),
+                chunks=chunks_by_type.get(ft, 0),
+            )
+            by_file_type_result[ft] = stats.to_summary()
+
+        files_cached = sum(cached_by_type.values())
 
         # Save state
         self._save_state()
@@ -449,19 +519,27 @@ class IndexingService:
             directory_path=str(directory),
             files=self._state.files if self._state else {},
             last_full_scan=datetime.now(UTC),
-            total_files=files_processed + files_skipped,
+            total_files=files_indexed + files_no_content + files_cached,
             total_chunks=previous_chunks + chunks_created - chunks_deleted,
         )
         self._save_state()
 
+        # Get index totals
+        index_files = len(self._state.files) if self._state else 0
+        index_chunks = self._state.total_chunks if self._state else 0
+
         return IndexingResult(
             files_scanned=files_total,
             files_ignored=files_ignored,
-            files_processed=files_processed,
-            files_skipped=files_skipped,
+            files_indexed=files_indexed,
+            files_cached=files_cached,
+            files_no_content=files_no_content,
             chunks_created=chunks_created,
             chunks_deleted=chunks_deleted,
             embeddings_created=chunks_created,
+            by_file_type=by_file_type_result,
+            index_files=index_files,
+            index_chunks=index_chunks,
             elapsed_seconds=round(timer.elapsed(), 3),
             errors=tuple(errors),
         )
@@ -640,6 +718,7 @@ class IndexingService:
                 async with results_lock:
                     results[file_key] = FileProcessingError(
                         file_path=file_key,
+                        file_type=get_file_type(file_path),
                         error_type=type(e).__name__,
                         message=str(e),
                         recoverable=True,
