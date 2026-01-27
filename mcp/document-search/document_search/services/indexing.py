@@ -197,7 +197,7 @@ class IndexingService:
         dense = [tuple(r.values) for r in responses]
 
         texts = [c.text for c in chunks]
-        sparse_results = self._sparse_embedding.embed_batch(texts)
+        sparse_results = await self._sparse_embedding.embed_batch(texts)
         sparse = [(tuple(i), tuple(v)) for i, v in sparse_results]
 
         # Build points using same factory as pipeline
@@ -471,10 +471,11 @@ class IndexingService:
     def shutdown(self) -> None:
         """Shutdown services and release resources.
 
-        Shuts down the ProcessPoolExecutor used for PDF chunking.
+        Shuts down ProcessPoolExecutors used for PDF chunking and sparse embeddings.
         Should be called when the service is no longer needed.
         """
         self._chunking.shutdown()
+        self._sparse_embedding.shutdown()
 
     def _load_state(self, directory: Path) -> DirectoryIndexState:
         """Load or create indexing state for directory.
@@ -562,6 +563,30 @@ class IndexingService:
                             chunk_ids=chunk_ids,
                         )
                     )
+                else:
+                    # File produced 0 chunks (content too short) - record in state to avoid re-processing
+                    async with self._state_lock:
+                        if self._state is not None:
+                            new_files = dict(self._state.files)
+                            new_files[file_key] = FileIndexState(
+                                file_path=file_key,
+                                file_hash=_file_hash(file_path),
+                                file_size=file_path.stat().st_size,
+                                chunk_count=0,
+                                chunk_ids=(),
+                                indexed_at=datetime.now(UTC),
+                                chunk_strategy_version=CHUNK_STRATEGY_VERSION,
+                            )
+                            self._state = DirectoryIndexState(
+                                directory_path=self._state.directory_path,
+                                files=new_files,
+                                last_full_scan=self._state.last_full_scan,
+                                total_files=self._state.total_files,
+                                total_chunks=self._state.total_chunks,
+                            )
+                    async with results_lock:
+                        results[file_key] = 0  # 0 chunks created
+                    logger.debug(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
 
             except (TimeoutError, OSError, UnicodeDecodeError) as e:
                 # Known file-level errors: record and continue
@@ -582,41 +607,125 @@ class IndexingService:
         embed_queue: asyncio.Queue[_ChunkedFile],
         upsert_queue: asyncio.Queue[_EmbeddedFile],
     ) -> None:
-        """Stage 2: Embed chunks (Gemini + sparse) and push to upsert queue.
+        """Stage 2: Generate dense + sparse embeddings and push to upsert queue.
+
+        Accumulates chunks from multiple small files before sending to
+        ProcessPoolExecutor for sparse embeddings, reducing IPC overhead.
+        Dense embeddings use BatchLoader which handles coalescing internally.
 
         Fail-fast: exceptions propagate immediately, task_done() only on success.
         """
-        while True:
-            try:
-                chunked = await embed_queue.get()
-            except asyncio.CancelledError:
+        # Accumulation settings (for sparse embedding ProcessPool efficiency)
+        BATCH_THRESHOLD = 500  # Min texts before sending to ProcessPool
+        BATCH_TIMEOUT = 0.05  # 50ms - don't wait forever for small files
+
+        # Accumulators
+        accumulated_files: list[_ChunkedFile] = []
+        accumulated_texts: list[str] = []
+        text_boundaries: list[int] = []  # Cumulative end index for each file
+
+        async def flush_batch() -> None:
+            """Generate embeddings and push files to upsert queue."""
+            nonlocal accumulated_files, accumulated_texts, text_boundaries
+
+            if not accumulated_texts:
                 return
 
-            # No try/finally - exceptions propagate, triggering fail-fast
-            # Dense embeddings via embedding service (Gemini API with internal batching)
-            embed_tasks = [self._embedding.embed_text(c.text) for c in chunked.chunks]
-            responses = await asyncio.gather(*embed_tasks)
-            dense = [tuple(r.values) for r in responses]
+            # Get sparse embeddings (one batch to ProcessPool)
+            sparse_results = await self._sparse_embedding.embed_batch(accumulated_texts)
 
-            # Sparse embeddings (local BM25, fast)
-            texts = [c.text for c in chunked.chunks]
-            sparse_results = self._sparse_embedding.embed_batch(texts)
-            sparse = [(tuple(i), tuple(v)) for i, v in sparse_results]
+            # Get dense embeddings (BatchLoader coalesces into batches of 100)
+            dense_tasks = [self._embedding.embed_text(text) for text in accumulated_texts]
+            dense_results = await asyncio.gather(*dense_tasks)
 
-            await upsert_queue.put(
-                _EmbeddedFile(
+            # Distribute results back to files and push to upsert queue
+            start_idx = 0
+            for i, chunked in enumerate(accumulated_files):
+                end_idx = text_boundaries[i]
+                file_sparse = list(sparse_results[start_idx:end_idx])
+                file_dense = list(dense_results[start_idx:end_idx])
+
+                # Create _EmbeddedFile with both embeddings
+                embedded = _EmbeddedFile(
                     file_path=chunked.file_path,
                     file_hash=chunked.file_hash,
                     file_size=chunked.file_size,
                     chunks=chunked.chunks,
                     chunk_ids=chunked.chunk_ids,
-                    dense_embeddings=dense,
-                    sparse_embeddings=sparse,
+                    dense_embeddings=[tuple(r.values) for r in file_dense],
+                    sparse_embeddings=[(tuple(indices), tuple(values)) for indices, values in file_sparse],
                 )
-            )
+                await upsert_queue.put(embedded)
+                embed_queue.task_done()
 
-            # Only mark done on success
+                start_idx = end_idx
+
+            # Reset accumulators
+            accumulated_files = []
+            accumulated_texts = []
+            text_boundaries = []
+
+        async def process_single_file(chunked: _ChunkedFile) -> None:
+            """Process a single file (used for large files to avoid accumulation)."""
+            texts = [c.text for c in chunked.chunks]
+
+            # Get both embeddings
+            sparse_results = await self._sparse_embedding.embed_batch(texts)
+            dense_tasks = [self._embedding.embed_text(text) for text in texts]
+            dense_results = await asyncio.gather(*dense_tasks)
+
+            # Create _EmbeddedFile
+            embedded = _EmbeddedFile(
+                file_path=chunked.file_path,
+                file_hash=chunked.file_hash,
+                file_size=chunked.file_size,
+                chunks=chunked.chunks,
+                chunk_ids=chunked.chunk_ids,
+                dense_embeddings=[tuple(r.values) for r in dense_results],
+                sparse_embeddings=[(tuple(i), tuple(v)) for i, v in sparse_results],
+            )
+            await upsert_queue.put(embedded)
             embed_queue.task_done()
+
+        while True:
+            try:
+                # Try to get item with timeout to allow periodic flushing
+                try:
+                    chunked = await asyncio.wait_for(
+                        embed_queue.get(),
+                        timeout=BATCH_TIMEOUT,
+                    )
+                except TimeoutError:
+                    # No items available, flush what we have
+                    await flush_batch()
+                    continue
+
+                texts = [c.text for c in chunked.chunks]
+
+                # Large files: process immediately without accumulation
+                if len(texts) >= BATCH_THRESHOLD:
+                    # Flush any accumulated small files first
+                    await flush_batch()
+                    # Process large file directly
+                    await process_single_file(chunked)
+                    continue
+
+                # Small files: accumulate
+                accumulated_files.append(chunked)
+                accumulated_texts.extend(texts)
+                text_boundaries.append(len(accumulated_texts))
+
+                # Flush if we've accumulated enough
+                if len(accumulated_texts) >= BATCH_THRESHOLD:
+                    await flush_batch()
+
+            except asyncio.CancelledError:
+                # Final flush before exit, but preserve cancellation signal
+                try:
+                    await flush_batch()
+                except Exception as e:
+                    logger.warning(f'Failed to flush batch during shutdown: {e}')
+                raise  # Re-raise CancelledError to signal proper cancellation
 
     async def _pipeline_upsert_worker(
         self,
@@ -713,7 +822,7 @@ async def create_indexing_service(
 
     chunking_service = await ChunkingService.create()
     embedding_service = EmbeddingService(gemini_client)
-    sparse_embedding_service = SparseEmbeddingService()
+    sparse_embedding_service = await SparseEmbeddingService.create()
     repository = DocumentVectorRepository(qdrant_client)
 
     return await IndexingService.create(
