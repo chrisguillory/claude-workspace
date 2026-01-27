@@ -164,7 +164,7 @@ def register_tools(state: ServerState) -> None:
             if progress.percent_complete % 10 < 1 or progress.percent_complete >= 99:
                 await logger.info(
                     f'[{progress.percent_complete:.0f}%] {progress.current_phase} | '
-                    f'{progress.files_processed}/{progress.files_total} files | '
+                    f'{progress.files_indexed}/{progress.files_total} files | '
                     f'{progress.chunks_created} chunks'
                 )
 
@@ -184,8 +184,9 @@ def register_tools(state: ServerState) -> None:
         )
 
         await logger.info(
-            f'Indexing complete: {result.files_processed} files, '
-            f'{result.chunks_created} chunks, {len(result.errors)} errors'
+            f'Indexing complete: {result.files_indexed} indexed, '
+            f'{result.files_cached} cached, {result.chunks_created} chunks, '
+            f'{len(result.errors)} errors'
         )
 
         return result
