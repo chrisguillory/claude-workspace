@@ -37,7 +37,7 @@ from qdrant_client.http.models import (
     VectorParams,
 )
 
-from document_search.clients import _qdrant_retry
+from document_search.clients import _retry
 
 logger = logging.getLogger(__name__)
 
@@ -152,10 +152,10 @@ class QdrantClient:
         await self._ensure_file_type_index()
 
     @tenacity.retry(
-        retry=tenacity.retry_if_exception(_qdrant_retry.is_retryable_qdrant_error),
+        retry=tenacity.retry_if_exception(_retry.is_retryable_qdrant_error),
         stop=tenacity.stop_after_attempt(3),
         wait=tenacity.wait_exponential(multiplier=0.5, max=5),
-        before_sleep=_qdrant_retry.log_qdrant_retry,
+        before_sleep=_retry.log_qdrant_retry,
     )
     async def upsert(
         self,

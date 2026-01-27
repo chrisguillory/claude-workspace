@@ -1,15 +1,16 @@
-"""Retry helpers for transient network errors in Gemini client.
+"""Gemini-specific retry helpers.
 
-Private module - not exported by the package.
+Private module - import from _retry package.
 """
 
 from __future__ import annotations
 
 import logging
 
-import httpx
+import google.genai.errors
 import tenacity
-from google.genai.errors import ServerError
+
+from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
 
 __all__ = [
     'is_retryable_gemini_error',
@@ -19,29 +20,27 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # Server error codes that are transient and worth retrying
-RETRYABLE_STATUS_CODES = {500, 502, 503, 504}
+RETRYABLE_STATUS_CODES = frozenset({500, 502, 503, 504})
 
 
 def is_retryable_gemini_error(exc: BaseException) -> bool:
     """Check if exception is a retryable transient error from Gemini.
 
-    We retry on:
-    - httpx transient errors (ReadError, WriteError, timeouts)
-    - Server errors with retryable status codes (502, 503, 504)
+    google-genai throws httpx exceptions directly.
+    Also retries ServerError with transient status codes (500/502/503/504).
     """
-    # Direct httpx transient errors
-    if isinstance(exc, (httpx.ReadError, httpx.WriteError, httpx.ReadTimeout, httpx.WriteTimeout)):
+    if is_retryable_httpx_error(exc):
         return True
 
     # API server errors with transient status codes
-    if isinstance(exc, ServerError) and exc.code in RETRYABLE_STATUS_CODES:
+    if isinstance(exc, google.genai.errors.ServerError) and exc.code in RETRYABLE_STATUS_CODES:
         return True
 
     return False
 
 
 def log_gemini_retry(retry_state: tenacity.RetryCallState) -> None:
-    """Log retry attempt with exception details."""
+    """Log Gemini retry attempt with exception details."""
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     if exc is None:
         return

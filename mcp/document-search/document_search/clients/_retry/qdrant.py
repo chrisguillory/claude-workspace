@@ -1,40 +1,39 @@
-"""Retry helpers for transient network errors.
+"""Qdrant-specific retry helpers.
 
-Private module - not exported by the package.
+Private module - import from _retry package.
 """
 
 from __future__ import annotations
 
 import logging
 
-import httpx
+import qdrant_client.http.exceptions
 import tenacity
-from qdrant_client.http.exceptions import ResponseHandlingException
 
-logger = logging.getLogger(__name__)
+from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
 
 __all__ = [
     'is_retryable_qdrant_error',
     'log_qdrant_retry',
 ]
 
+logger = logging.getLogger(__name__)
+
 
 def is_retryable_qdrant_error(exc: BaseException) -> bool:
     """Check if exception is a retryable transient error from Qdrant.
 
-    qdrant-client wraps all exceptions in ResponseHandlingException.
-    We only retry on transient network errors, not API errors.
+    qdrant-client wraps httpx exceptions in ResponseHandlingException.
+    Check exc.source for the underlying httpx error.
     """
-    if not isinstance(exc, ResponseHandlingException):
+    if not isinstance(exc, qdrant_client.http.exceptions.ResponseHandlingException):
         return False
 
-    source = exc.source
-    # Retryable transient errors
-    return isinstance(source, (httpx.ReadError, httpx.WriteError, httpx.ReadTimeout, httpx.WriteTimeout))
+    return is_retryable_httpx_error(exc.source)
 
 
 def log_qdrant_retry(retry_state: tenacity.RetryCallState) -> None:
-    """Log retry attempt with exception details, including source for ResponseHandlingException."""
+    """Log Qdrant retry attempt with exception details."""
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     if exc is None:
         return
@@ -44,7 +43,7 @@ def log_qdrant_retry(retry_state: tenacity.RetryCallState) -> None:
 
     # ResponseHandlingException wraps the underlying error in .source
     source_info = ''
-    if isinstance(exc, ResponseHandlingException) and exc.source:
+    if isinstance(exc, qdrant_client.http.exceptions.ResponseHandlingException) and exc.source:
         source_info = f' (source: {type(exc.source).__name__}: {exc.source})'
 
     logger.warning(

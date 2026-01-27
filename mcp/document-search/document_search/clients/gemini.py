@@ -19,7 +19,7 @@ from google import genai
 from google.genai.types import HttpOptions
 from local_lib import ConcurrencyTracker
 
-from document_search.clients import _gemini_retry
+from document_search.clients import _retry
 
 __all__ = [
     'GeminiClient',
@@ -81,10 +81,10 @@ class GeminiClient:
         self._tracker = ConcurrencyTracker('GEMINI')
 
     @tenacity.retry(
-        retry=tenacity.retry_if_exception(_gemini_retry.is_retryable_gemini_error),
+        retry=tenacity.retry_if_exception(_retry.is_retryable_gemini_error),
         stop=tenacity.stop_after_attempt(3),
         wait=tenacity.wait_exponential(multiplier=0.5, max=5),
-        before_sleep=_gemini_retry.log_gemini_retry,
+        before_sleep=_retry.log_gemini_retry,
     )
     async def embed(
         self,
