@@ -25,6 +25,7 @@ from document_search.schemas.vectors import (
     FileIndexStatus,
     IndexBreakdown,
     IndexedFile,
+    IndexInfo,
     SearchHit,
     SearchQuery,
     SearchResult,
@@ -298,6 +299,91 @@ class DocumentVectorRepository:
             IndexedFile(path=path, chunk_count=count, file_type=typing.cast(FileType, ftype))
             for path, ftype, count in raw_paths
         ]
+
+    async def get_index_info(self, path: str | None = None) -> IndexInfo:
+        """Get combined index information with infrastructure and content stats.
+
+        Args:
+            path: Scope content stats to this path. Use "**" for global stats.
+                  If None, returns global stats.
+
+        Returns:
+            IndexInfo with infrastructure (always global) and content (scoped) sections.
+
+        Raises:
+            ValueError: If collection is not initialized.
+        """
+        # Infrastructure stats (always global)
+        collection_info = await self.get_collection_info()
+        if collection_info is None:
+            raise ValueError('Collection not initialized - run index_documents first')
+
+        # Content breakdown (scoped if path provided and not "**")
+        if path is None or path == '**':
+            # Global stats - use efficient facet API
+            total_chunks = await self._client.count()
+            by_file_type = dict(await self._client.facet_by_file_type())
+            unique_paths = await self._client.get_unique_source_paths()
+            unique_files = len(unique_paths)
+        else:
+            # Scoped stats - aggregate from filtered paths
+            raw_paths = await self._client.get_unique_source_paths(path_prefix=path)
+            unique_files = len(raw_paths)
+            total_chunks = sum(count for _, _, count in raw_paths)
+            by_file_type_agg: dict[str, int] = {}
+            for _, ftype, count in raw_paths:
+                by_file_type_agg[ftype] = by_file_type_agg.get(ftype, 0) + count
+            by_file_type = by_file_type_agg
+
+        supported_types = sorted(set(EXTENSION_MAP.values()))
+
+        content = IndexBreakdown(
+            total_chunks=total_chunks,
+            by_file_type=by_file_type,
+            unique_files=unique_files,
+            supported_types=supported_types,
+        )
+
+        return IndexInfo(
+            infrastructure=collection_info,
+            content=content,
+            path=path,
+        )
+
+    async def clear_documents(self, path: str | None = None) -> tuple[int, int]:
+        """Clear documents from the index.
+
+        Args:
+            path: Path to clear. Use "**" for entire index.
+                  If None, this is a programming error (caller should resolve CWD).
+
+        Returns:
+            Tuple of (files_removed, chunks_removed).
+        """
+        if path == '**':
+            # Clear entire collection
+            raw_paths = await self._client.get_unique_source_paths()
+            files_count = len(raw_paths)
+            chunks_count = await self._client.count()
+            # Delete all by scrolling (no single "delete all" in Qdrant)
+            await self._client.delete_by_source_path_prefix('')
+            return (files_count, chunks_count)
+
+        if path is None:
+            raise ValueError('path must be provided (use "**" for entire index)')
+
+        # Check if path is a file or directory by looking at indexed content
+        chunk_count = await self._client.count_by_source_path(path)
+        if chunk_count > 0:
+            # Exact file match
+            await self._client.delete_by_source_path(path)
+            return (1, chunk_count)
+
+        # Directory prefix
+        raw_paths = await self._client.get_unique_source_paths(path_prefix=path)
+        files_count = len(raw_paths)
+        chunks_count = await self._client.delete_by_source_path_prefix(path)
+        return (files_count, chunks_count)
 
 
 class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):

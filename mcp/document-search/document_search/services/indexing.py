@@ -41,7 +41,7 @@ from document_search.schemas.indexing import (
     IndexingResult,
     ProgressCallback,
 )
-from document_search.schemas.vectors import VectorPoint
+from document_search.schemas.vectors import ClearResult, VectorPoint
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.sparse_embedding import SparseEmbeddingService
@@ -474,6 +474,55 @@ class IndexingService:
         """
         self._chunking.shutdown()
         self._sparse_embedding.shutdown()
+
+    async def clear_documents(self, path: str) -> ClearResult:
+        """Clear documents from the index and update state file.
+
+        Args:
+            path: Resolved path to clear. Use "**" for entire index.
+
+        Returns:
+            ClearResult with counts of files and chunks removed.
+        """
+        # Delete from Qdrant
+        files_removed, chunks_removed = await self._repo.clear_documents(path)
+
+        # Update state file
+        async with self._state_lock:
+            if self._state is not None and files_removed > 0:
+                if path == '**':
+                    # Clear entire state
+                    self._state = DirectoryIndexState(
+                        directory_path='',
+                        files={},
+                        last_full_scan=datetime.now(UTC),
+                        total_files=0,
+                        total_chunks=0,
+                    )
+                else:
+                    # Remove matching entries from state (single pass)
+                    new_files: dict[str, FileIndexState] = {}
+                    removed_chunks = 0
+                    for k, v in self._state.files.items():
+                        if k == path or k.startswith(path + '/'):
+                            removed_chunks += v.chunk_count
+                        else:
+                            new_files[k] = v
+                    self._state = DirectoryIndexState(
+                        directory_path=self._state.directory_path,
+                        files=new_files,
+                        last_full_scan=self._state.last_full_scan,
+                        total_files=len(new_files),
+                        total_chunks=max(0, self._state.total_chunks - removed_chunks),
+                    )
+
+        self._save_state()
+
+        return ClearResult(
+            files_removed=files_removed,
+            chunks_removed=chunks_removed,
+            path=None if path == '**' else path,
+        )
 
     def _load_state(self, directory: Path) -> DirectoryIndexState:
         """Load or create indexing state for directory.

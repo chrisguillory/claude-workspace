@@ -3,9 +3,11 @@
 Semantic search over local documents using Gemini embeddings and Qdrant.
 
 Tools:
-- index_directory: Index documents in a directory for semantic search
+- index_documents: Index file or directory for semantic search
+- clear_documents: Remove documents from the index
 - search_documents: Search indexed documents by natural language query
-- get_index_stats: Get statistics about the current index
+- list_documents: List indexed documents with filtering
+- get_info: Get index health and statistics
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import contextlib
 import logging
 import sys
 import typing
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,9 +32,9 @@ from document_search.schemas.chunking import FileType
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import IndexingProgress, IndexingResult
 from document_search.schemas.vectors import (
-    FileIndexStatus,
-    IndexBreakdown,
+    ClearResult,
     IndexedFile,
+    IndexInfo,
     SearchQuery,
     SearchResult,
     SearchType,
@@ -100,27 +102,33 @@ def register_tools(state: ServerState) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title='Index Directory',
+            title='Index Documents',
             destructiveHint=False,
             idempotentHint=True,
             readOnlyHint=False,
             openWorldHint=True,
         ),
     )
-    async def index_directory(
+    async def index_documents(
         path: str | None = None,
         full_reindex: bool = False,
+        respect_gitignore: bool | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
-        """Index all supported documents in a directory for semantic search.
+        """Index documents for semantic search (file or directory auto-detected).
 
         Processes files incrementally - only re-indexes files that have changed
         since the last indexing run. Supports markdown, text, JSON, and PDF files.
 
         Args:
-            path: Path to directory to index. Defaults to current working directory
-                if not specified. Supports absolute, relative, or ~ expansion.
+            path: Path to file or directory to index. Defaults to current working
+                directory if not specified. Supports absolute, relative, or ~ expansion.
             full_reindex: If True, reindex all files regardless of whether they've changed.
+                Only applies to directories (single files are always fully indexed).
+            respect_gitignore: Control .gitignore filtering behavior:
+                - None (default): Auto-detect git repos, respect gitignore if found.
+                - True: Strictly respect gitignore, fail if not a git repo.
+                - False: Ignore gitignore, index all supported files.
             ctx: MCP context for logging.
 
         Returns:
@@ -133,14 +141,21 @@ def register_tools(state: ServerState) -> None:
 
         # Default to current working directory
         if path is None:
-            directory = Path.cwd()
+            resolved_path = Path.cwd()
         else:
-            directory = Path(path).expanduser().resolve()
+            resolved_path = Path(path).expanduser().resolve()
 
-        if not directory.is_dir():
-            raise ValueError(f'Not a directory: {directory}')
+        # Auto-detect file vs directory
+        if resolved_path.is_file():
+            await logger.info(f'Indexing file: {resolved_path}')
+            result = await state.indexing_service.index_file(resolved_path)
+            await logger.info(f'Indexed: {result.chunks_created} chunks')
+            return result
 
-        await logger.info(f'Indexing directory: {directory}')
+        if not resolved_path.is_dir():
+            raise ValueError(f'Path not found: {resolved_path}')
+
+        await logger.info(f'Indexing directory: {resolved_path}')
         if full_reindex:
             await logger.info('Full reindex requested - ignoring cache')
 
@@ -162,8 +177,9 @@ def register_tools(state: ServerState) -> None:
                 pass  # No running loop, skip logging
 
         result = await state.indexing_service.index_directory(
-            directory,
+            resolved_path,
             full_reindex=full_reindex,
+            respect_gitignore=respect_gitignore,
             on_progress=sync_progress,
         )
 
@@ -185,28 +201,27 @@ def register_tools(state: ServerState) -> None:
     )
     async def search_documents(
         query: str,
+        path: str | None = None,
         limit: int = 10,
         search_type: SearchType = 'hybrid',
         file_types: Sequence[str] | None = None,
-        path_prefix: str | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
         """Search indexed documents with configurable search strategy.
 
         Args:
             query: Natural language search query.
+            path: Filter to files under this path. Defaults to CWD.
+                Use "**" to search entire index.
             limit: Maximum number of results to return (1-100).
             search_type: Search strategy:
                 - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
                   Combines semantic similarity with keyword matching.
-                  Recommended for most queries.
                 - 'lexical': BM25 keyword matching only. Best for exact term
                   matching, symbol lookup, and identifier search.
                 - 'embedding': Dense vector similarity only. Useful for
                   conceptual/semantic queries or debugging.
             file_types: Filter by file types (e.g., ['markdown', 'pdf']).
-            path_prefix: Filter to files under this path prefix. Defaults to current
-                working directory if not specified.
             ctx: MCP context for logging.
 
         Returns:
@@ -247,8 +262,13 @@ def register_tools(state: ServerState) -> None:
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 50)
 
-        # Resolve path_prefix to handle ~ and relative paths (defaults to CWD)
-        resolved_path_prefix = str(Path(path_prefix).expanduser().resolve() if path_prefix else Path.cwd())
+        # Resolve path (defaults to CWD, "**" means no filter)
+        if path == '**':
+            resolved_path: str | None = None
+        elif path is None:
+            resolved_path = str(Path.cwd())
+        else:
+            resolved_path = str(Path(path).expanduser().resolve())
 
         # Build search query
         search_query = SearchQuery(
@@ -258,7 +278,7 @@ def register_tools(state: ServerState) -> None:
             sparse_values=sparse_values,
             limit=rerank_candidates,
             file_types=tuple(typing.cast(FileType, ft) for ft in file_types) if file_types else None,
-            source_path_prefix=resolved_path_prefix,
+            source_path_prefix=resolved_path,
         )
 
         # Layer 1: Search with specified strategy
@@ -277,151 +297,74 @@ def register_tools(state: ServerState) -> None:
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title='Get Index Stats',
-            destructiveHint=False,
+            title='Clear Documents',
+            destructiveHint=True,
             idempotentHint=True,
-            readOnlyHint=True,
+            readOnlyHint=False,
             openWorldHint=False,
         ),
     )
-    async def get_index_stats(
+    async def clear_documents(
+        path: str | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
-    ) -> Mapping[str, int | str]:
-        """Get statistics about the current document index.
+    ) -> ClearResult:
+        """Remove documents from the index.
 
-        Returns information about the Qdrant collection including
-        vector count, dimension, and status.
+        Does not delete files from disk - only removes them from the search index.
 
         Args:
+            path: Path to clear. Defaults to CWD if not specified.
+                Use "**" to clear entire index.
             ctx: MCP context for logging.
 
         Returns:
-            Dictionary with index statistics.
+            ClearResult with counts of files and chunks removed.
         """
         if ctx is None:
             raise ValueError('MCP context required')
 
         logger = DualLogger(ctx)
-        await logger.info('Getting index stats')
 
-        stats = await state.indexing_service.get_index_stats()
-
-        if stats.get('status') == 'not_initialized':
-            await logger.warning('Index not initialized - run index_directory first')
+        # Resolve path (defaults to CWD)
+        if path == '**':
+            resolved_path = '**'
+            await logger.info('Clearing entire index')
+        elif path is None:
+            resolved_path = str(Path.cwd())
+            await logger.info(f'Clearing documents under: {resolved_path}')
         else:
-            await logger.info(f'Index has {stats.get("points_count", 0)} vectors')
+            resolved_path = str(Path(path).expanduser().resolve())
+            await logger.info(f'Clearing documents: {resolved_path}')
 
-        return stats
+        result = await state.indexing_service.clear_documents(resolved_path)
 
-    # Visibility tools for index introspection
+        await logger.info(f'Cleared: {result.files_removed} files, {result.chunks_removed} chunks')
+
+        return result
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
-            title='Get Index Breakdown',
+            title='List Documents',
             destructiveHint=False,
             idempotentHint=True,
             readOnlyHint=True,
             openWorldHint=False,
         ),
     )
-    async def get_index_breakdown(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
-    ) -> IndexBreakdown:
-        """Get overview of what's in the document index.
-
-        Returns breakdown by file type, unique file count, and supported types.
-        Useful for understanding index composition and verifying what's been indexed.
-
-        Args:
-            ctx: MCP context for logging.
-
-        Returns:
-            IndexBreakdown with total chunks, by_file_type counts, unique_files count,
-            and list of supported_types.
-        """
-        if ctx is None:
-            raise ValueError('MCP context required')
-
-        logger = DualLogger(ctx)
-        await logger.info('Getting index breakdown')
-
-        breakdown = await state.repository.get_index_breakdown()
-
-        await logger.info(
-            f'Index: {breakdown.total_chunks} chunks, '
-            f'{breakdown.unique_files} files, '
-            f'{len(breakdown.by_file_type)} types'
-        )
-
-        return breakdown
-
-    @server.tool(
-        annotations=mcp.types.ToolAnnotations(
-            title='Is File Indexed',
-            destructiveHint=False,
-            idempotentHint=True,
-            readOnlyHint=True,
-            openWorldHint=False,
-        ),
-    )
-    async def is_file_indexed(
-        path: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
-    ) -> FileIndexStatus:
-        """Check if a specific file is indexed.
-
-        Use this to understand why a file might not appear in search results.
-        Returns whether the file is indexed, and if not, the reason why
-        (unsupported file type or not found in index).
-
-        Args:
-            path: Absolute path to the file to check.
-            ctx: MCP context for logging.
-
-        Returns:
-            FileIndexStatus with indexed flag, reason, chunk_count, and file_type.
-        """
-        if ctx is None:
-            raise ValueError('MCP context required')
-
-        logger = DualLogger(ctx)
-
-        # Resolve path
-        resolved_path = str(Path(path).expanduser().resolve())
-
-        status = await state.repository.is_file_indexed(resolved_path)
-
-        if status.indexed:
-            await logger.info(f'File indexed: {resolved_path} ({status.chunk_count} chunks)')
-        else:
-            await logger.info(f'File not indexed: {resolved_path} (reason: {status.reason})')
-
-        return status
-
-    @server.tool(
-        annotations=mcp.types.ToolAnnotations(
-            title='List Indexed Files',
-            destructiveHint=False,
-            idempotentHint=True,
-            readOnlyHint=True,
-            openWorldHint=False,
-        ),
-    )
-    async def list_indexed_files(
-        path_prefix: str | None = None,
+    async def list_documents(
+        path: str | None = None,
         file_type: str | None = None,
         limit: int = 50,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> Sequence[IndexedFile]:
-        """List files in the index with optional filtering.
+        """List indexed documents with optional filtering.
 
-        Returns files sorted by chunk count (descending), so you can see which
-        files contribute most to the index. Useful for auditing indexed content.
+        Returns files sorted by chunk count (descending). Useful for auditing
+        indexed content or checking if specific files are indexed.
 
         Args:
-            path_prefix: Filter to files under this path prefix. Defaults to current
-                working directory if not specified.
-            file_type: Filter to this file type (e.g., 'markdown', 'pdf') (optional).
+            path: Filter to files under this path. Defaults to CWD.
+            file_type: Filter to this file type (e.g., 'markdown', 'pdf').
             limit: Maximum number of files to return (default 50).
             ctx: MCP context for logging.
 
@@ -433,18 +376,74 @@ def register_tools(state: ServerState) -> None:
 
         logger = DualLogger(ctx)
 
-        # Resolve path_prefix (defaults to CWD for consistency with index_directory)
-        resolved_prefix = str(Path(path_prefix).expanduser().resolve() if path_prefix else Path.cwd())
+        # Resolve path (defaults to CWD)
+        resolved_path = str(Path(path).expanduser().resolve() if path else Path.cwd())
 
         files = await state.repository.list_indexed_files(
-            path_prefix=resolved_prefix,
+            path_prefix=resolved_path,
             file_type=file_type,
             limit=limit,
         )
 
-        await logger.info(f'Listed {len(files)} indexed files')
+        await logger.info(f'Listed {len(files)} indexed documents')
 
         return files
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Get Info',
+            destructiveHint=False,
+            idempotentHint=True,
+            readOnlyHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def get_info(
+        path: str | None = None,
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
+    ) -> IndexInfo:
+        """Get index health and statistics.
+
+        Returns infrastructure stats (always global) and content breakdown
+        (optionally scoped by path).
+
+        Args:
+            path: Scope content stats to files under this path. Defaults to CWD.
+                Use "**" for global stats across entire index.
+            ctx: MCP context for logging.
+
+        Returns:
+            IndexInfo with infrastructure and content sections.
+        """
+        if ctx is None:
+            raise ValueError('MCP context required')
+
+        logger = DualLogger(ctx)
+
+        # Resolve path (defaults to CWD, "**" for global)
+        if path == '**':
+            resolved_path = '**'
+            await logger.info('Getting global index info')
+        elif path is None:
+            resolved_path = str(Path.cwd())
+            await logger.info(f'Getting index info for: {resolved_path}')
+        else:
+            resolved_path = str(Path(path).expanduser().resolve())
+            await logger.info(f'Getting index info for: {resolved_path}')
+
+        try:
+            info = await state.repository.get_index_info(resolved_path)
+        except ValueError as e:
+            await logger.warning(str(e))
+            raise
+
+        await logger.info(
+            f'Index: {info.content.total_chunks} chunks, '
+            f'{info.content.unique_files} files, '
+            f'status={info.infrastructure.status}'
+        )
+
+        return info
 
 
 @contextlib.asynccontextmanager
