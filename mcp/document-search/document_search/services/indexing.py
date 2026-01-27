@@ -13,17 +13,20 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
+import os
 import subprocess
-from collections.abc import Mapping, Sequence, Set
+from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
 import filelock
+import git
 from local_lib.utils import Timer
 
 from document_search.clients.gemini import GeminiClient
@@ -291,22 +294,17 @@ class IndexingService:
         timer = Timer()
         chunks_deleted = 0
 
-        # PHASE 1: Scan and identify files
-        all_files: list[Path] = []
-        for ext in EXTENSION_MAP:
-            all_files.extend(f for f in directory.glob(f'**/*{ext}') if f.is_file())
+        # PHASE 1: Scan files
+        extensions = set(EXTENSION_MAP.keys())
+        git_root = _find_git_root(str(directory))
 
-        files_found = len(all_files)
-
-        # Filter git-ignored files
-        files_ignored = 0
-        if respect_gitignore is not False:
-            ignored_files = _get_git_ignored_files(all_files, directory, strict=(respect_gitignore is True))
-            all_files = [f for f in all_files if f not in ignored_files]
-            files_ignored = len(ignored_files)
+        if respect_gitignore is not False and git_root:
+            all_files, files_ignored = _get_git_files(directory, extensions)
+        else:
+            all_files, files_ignored = list(_walk_files(directory, extensions)), 0
 
         files_total = len(all_files)
-        logger.info(f'[PIPELINE] Scanned {files_found} files, {files_ignored} git-ignored, {files_total} to consider')
+        logger.info(f'[PIPELINE] Found {files_total} files, {files_ignored} ignored')
 
         # FULL REINDEX: Clean slate
         if full_reindex:
@@ -953,49 +951,65 @@ class _QueueMonitor:
             )
 
 
-def _get_git_ignored_files(
-    file_paths: Sequence[Path],
-    directory: Path,
-    *,
-    strict: bool = False,
-) -> Set[Path]:
-    """Use git check-ignore to identify ignored files.
+def _walk_files(directory: Path, extensions: Set[str]) -> Iterator[Path]:
+    """Walk directory yielding files with matching extensions."""
+    for root, _, filenames in os.walk(directory):
+        root_path = Path(root).resolve()
+        for filename in filenames:
+            if any(filename.endswith(ext) for ext in extensions):
+                yield root_path / filename
 
-    Respects all gitignore rules: root, nested (e.g., .mypy_cache/.gitignore),
-    .git/info/exclude, and global gitignore.
 
-    Args:
-        file_paths: List of file paths to check.
-        directory: Working directory for git command.
-        strict: If True, raise on non-git repos. If False, return empty set.
+def _get_git_files(directory: Path, extensions: Set[str]) -> tuple[Sequence[Path], int]:
+    """Get non-ignored files and count of ignored files using git ls-files.
 
     Returns:
-        Set of paths that are git-ignored.
-
-    Raises:
-        FileNotFoundError: If git is not installed (always raised).
-        subprocess.TimeoutExpired: If git check-ignore takes too long (always raised).
-        RuntimeError: If directory is not a git repository (only if strict=True).
+        Tuple of (files to index, count of ignored files with matching extensions).
     """
-    if not file_paths:
-        return set()
-
-    result = subprocess.run(
-        ['git', 'check-ignore', '--stdin'],
-        input='\n'.join(str(p) for p in file_paths),
+    # Run both commands
+    included = subprocess.run(
+        ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
         capture_output=True,
         text=True,
         cwd=directory,
         timeout=30,
     )
+    if included.returncode != 0:
+        raise RuntimeError(f'git ls-files failed: {included.stderr}')
 
-    # Exit codes: 0 = some ignored, 1 = none ignored, 128 = not a git repo
-    if result.returncode == 128:
-        if strict:
-            raise RuntimeError(f'Not a git repository: {directory}')
-        return set()
+    ignored = subprocess.run(
+        ['git', 'ls-files', '--others', '--ignored', '--exclude-standard'],
+        capture_output=True,
+        text=True,
+        cwd=directory,
+        timeout=60,
+    )
+    if ignored.returncode != 0:
+        raise RuntimeError(f'git ls-files --ignored failed: {ignored.stderr}')
 
-    return {Path(line) for line in result.stdout.splitlines() if line}
+    files = []
+    directory_resolved = directory.resolve()
+    for line in included.stdout.splitlines():
+        if any(line.endswith(ext) for ext in extensions):
+            file_path = (directory / line).resolve()
+            # Only include files actually under the target directory
+            # (git ls-files can return ../paths for files outside cwd)
+            if file_path.is_relative_to(directory_resolved):
+                files.append(file_path)
+
+    ignored_count = sum(1 for line in ignored.stdout.splitlines() if any(line.endswith(ext) for ext in extensions))
+
+    return files, ignored_count
+
+
+@functools.lru_cache(maxsize=128)
+def _find_git_root(directory: str) -> str | None:
+    """Find the git root directory containing this path. Cached."""
+    try:
+        repo = git.Repo(directory, search_parent_directories=True)
+        return str(repo.working_dir)
+    except git.InvalidGitRepositoryError:
+        return None
 
 
 def _file_hash(path: Path) -> str:
