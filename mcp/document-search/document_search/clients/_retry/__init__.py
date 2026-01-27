@@ -45,14 +45,16 @@ Client-Specific Notes
 
 from __future__ import annotations
 
-from document_search.clients._retry.gemini import is_retryable_gemini_error, log_gemini_retry
+from document_search.clients._retry.gemini import gemini_breaker, is_retryable_gemini_error, log_gemini_retry
 from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
-from document_search.clients._retry.qdrant import is_retryable_qdrant_error, log_qdrant_retry
+from document_search.clients._retry.qdrant import is_retryable_qdrant_error, log_qdrant_retry, qdrant_breaker
 
 __all__ = [
-    'is_retryable_httpx_error',
+    'gemini_breaker',
     'is_retryable_gemini_error',
+    'is_retryable_httpx_error',
     'is_retryable_qdrant_error',
     'log_gemini_retry',
     'log_qdrant_retry',
+    'qdrant_breaker',
 ]

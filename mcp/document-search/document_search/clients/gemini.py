@@ -80,6 +80,7 @@ class GeminiClient:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._tracker = ConcurrencyTracker('GEMINI')
 
+    @_retry.gemini_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_gemini_error),
         stop=tenacity.stop_after_attempt(3),

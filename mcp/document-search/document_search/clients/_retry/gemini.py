@@ -1,4 +1,4 @@
-"""Gemini-specific retry helpers.
+"""Gemini-specific retry and circuit breaker helpers.
 
 Private module - import from _retry package.
 """
@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import logging
 
+import circuitbreaker
 import google.genai.errors
 import tenacity
 
 from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
 
 __all__ = [
+    'gemini_breaker',
     'is_retryable_gemini_error',
     'log_gemini_retry',
 ]
@@ -21,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 # Server error codes that are transient and worth retrying
 RETRYABLE_STATUS_CODES = frozenset({500, 502, 503, 504})
+
+# Circuit breaker - opens after consecutive failures, hard fails until recovery
+GEMINI_FAILURE_THRESHOLD = 10
+GEMINI_RECOVERY_TIMEOUT = 60
 
 
 def is_retryable_gemini_error(exc: BaseException) -> bool:
@@ -49,3 +55,16 @@ def log_gemini_retry(retry_state: tenacity.RetryCallState) -> None:
     exc_msg = str(exc)
 
     logger.warning(f'[RETRY] Gemini embed attempt {retry_state.attempt_number} failed: {exc_name}: {exc_msg}')
+
+
+def _gemini_circuit_filter(thrown_type: type, thrown_value: BaseException) -> bool:
+    """Only count retryable errors toward circuit breaker."""
+    return is_retryable_gemini_error(thrown_value)
+
+
+gemini_breaker = circuitbreaker.CircuitBreaker(
+    failure_threshold=GEMINI_FAILURE_THRESHOLD,
+    recovery_timeout=GEMINI_RECOVERY_TIMEOUT,
+    expected_exception=_gemini_circuit_filter,
+    name='gemini',
+)
