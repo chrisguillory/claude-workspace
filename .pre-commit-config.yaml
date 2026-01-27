@@ -1,57 +1,45 @@
+# Pre-commit hooks using project virtualenv via uv
+#
+# This configuration uses `language: system` to run hooks in the project's
+# virtualenv rather than creating isolated pip-based environments. This:
+#   - Eliminates dependency duplication (deps only in pyproject.toml)
+#   - Uses uv for fast, reproducible installs via uv.lock
+#   - Ensures hooks use exact same versions as development
+#
+# IMPORTANT: Run `uv sync --all-groups` before committing to ensure
+# all dev dependencies (ruff, mypy, etc.) are installed.
+
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix, .]
+        name: ruff
+        description: Run ruff linter with auto-fix
+        entry: uv run ruff check --fix .
+        language: system
         pass_filenames: false
         always_run: true
+
       - id: ruff-format
-        args: [.]
+        name: ruff-format
+        description: Run ruff formatter
+        entry: uv run ruff format .
+        language: system
         pass_filenames: false
         always_run: true
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
-    hooks:
       - id: mypy
-        # NOTE: pre-commit runs mypy in an isolated environment. Dependencies from
-        # pyproject.toml are NOT automatically available. Any library or type stub
-        # that mypy needs to resolve imports must be listed here explicitly.
-        #
-        # This includes dependencies from ALL workspace members:
-        # - local-lib
-        # - mcp/browser-automation
-        # - mcp/python-interpreter
-        # - mcp/selenium-browser-automation
-        additional_dependencies:
-          # Core dependencies (used by multiple packages)
-          - fastmcp>=2.12.5
-          - pydantic>=2.12.4
-          - httpx>=0.28.1
-          - pyyaml
-          - types-PyYAML
+        name: mypy
+        description: Run mypy type checker
+        entry: uv run mypy --config-file=pyproject.toml .
+        language: system
+        pass_filenames: false
+        always_run: true
 
-          # local-lib dependencies
-          - filelock>=3.20.0
-          - psutil>=7.1.3
-          - types-psutil>=7.2.1.20251231
-
-          # browser-automation dependencies
-          - playwright
-          - playwright-stealth
-
-          # python-interpreter dependencies
-          - attrs
-          - fastapi
-          - pandas
-          - uvicorn
-
-          # selenium-browser-automation dependencies
-          - selenium
-          - pycryptodome>=3.23.0
-          # dfindexeddb and ccl-chromium-reader have custom stubs in stubs/
-          # Don't include as dependencies - they require C libraries (snappy)
-        args: [--config-file=pyproject.toml, .]
+      - id: strict-typing-linter
+        name: strict-typing-linter
+        description: Check for mutable/loose types in document-search
+        entry: ./scripts/strict_typing_linter.py mcp/document-search/
+        language: system
         pass_filenames: false
         always_run: true

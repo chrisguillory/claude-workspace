@@ -1,0 +1,9 @@
+employee_id,name,department,salary,hire_date,performance_rating
+E001,John Smith,Engineering,125000,2022-03-15,4.5
+E002,Maria Garcia,Marketing,95000,2021-07-01,4.8
+E003,James Wilson,Engineering,140000,2020-01-10,4.2
+E004,Emily Brown,Sales,85000,2023-02-20,3.9
+E005,Michael Chen,Engineering,155000,2019-11-05,4.7
+E006,Sarah Johnson,HR,78000,2022-08-12,4.1
+E007,Robert Taylor,Finance,110000,2021-04-18,4.4
+E008,Lisa Anderson,Engineering,135000,2020-09-22,4.6

@@ -1,0 +1,53 @@
+MIME-Version: 1.0
+From: support@acmecorp.com
+To: customer@gmail.com
+Subject: Your Order #12345 Has Shipped!
+Date: Tue, 21 Jan 2025 14:22:00 -0500
+Content-Type: multipart/alternative; boundary="----=_Part_ABC123_987654321"
+
+------=_Part_ABC123_987654321
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Valued Customer,
+
+Great news! Your order #12345 has shipped and is on its way.
+
+Order Details:
+- Product: Wireless Bluetooth Headphones Model XZ-500
+- Quantity: 1
+- Price: $149.99
+- Shipping: Free 2-day delivery
+
+Tracking Number: 1Z999AA10123456784
+Expected Delivery: January 24, 2025
+
+You can track your package at: https://tracking.example.com/1Z999AA10123456784
+
+Thank you for shopping with Acme Corp!
+
+Best,
+Acme Corp Customer Service
+1-800-555-ACME
+
+------=_Part_ABC123_987654321
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html>
+<head><title>Order Shipped</title></head>
+<body>
+<h1>Your Order Has Shipped!</h1>
+<p>Dear Valued Customer,</p>
+<p>Great news! Your order <strong>#12345</strong> has shipped.</p>
+<table>
+<tr><td>Product:</td><td>Wireless Bluetooth Headphones Model XZ-500</td></tr>
+<tr><td>Quantity:</td><td>1</td></tr>
+<tr><td>Price:</td><td>$149.99</td></tr>
+</table>
+<p>Tracking: <a href="https://tracking.example.com/1Z999AA10123456784">1Z999AA10123456784</a></p>
+</body>
+</html>
+
+------=_Part_ABC123_987654321--

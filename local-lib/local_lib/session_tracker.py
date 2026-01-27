@@ -70,12 +70,12 @@ class SessionMetadata(BaseModel):
     """Derived session information."""
 
     claude_pid: int  # Found via process tree walking
-    started_at: JsonDatetime  # When SessionStart fired
-    ended_at: JsonDatetime | None = None  # When SessionEnd fired
+    process_created_at: JsonDatetime | None = None  # When OS created Claude process (from psutil)
+    session_ended_at: JsonDatetime | None = None  # When SessionEnd hook fired (clean exit)
+    session_end_reason: str | None = None  # Why session ended (prompt_input_exit, clear, logout, other)
     parent_id: str | None = None  # Extracted from transcript file
     crash_detected_at: JsonDatetime | None = None  # When crash detected
     startup_model: str | None = None  # Initial AI model (only set on startup, not resume)
-    end_reason: str | None = None  # Why session ended (prompt_input_exit, clear, logout, other)
     claude_version: str | None = None  # Claude Code CLI version (from executable symlink path)
 
 
@@ -129,6 +129,7 @@ class SessionManager:
         parent_id: str | None,
         startup_model: str | None = None,
         claude_version: str | None = None,
+        process_created_at: datetime | None = None,
     ) -> None:
         """Start a new session or restart an exited/completed/crashed session.
 
@@ -140,6 +141,7 @@ class SessionManager:
             parent_id: Parent conversation UUID if available
             startup_model: Initial AI model (only provided on startup, not resume)
             claude_version: Claude Code CLI version (from executable symlink path)
+            process_created_at: When OS created Claude process (from psutil)
         """
         if self._db is None:
             raise RuntimeError("SessionManager must be used within 'with' context")
@@ -156,9 +158,7 @@ class SessionManager:
                     state='active',
                     metadata=SessionMetadata(
                         claude_pid=claude_pid,
-                        started_at=datetime.now(UTC).astimezone(),
-                        ended_at=None,
-                        crash_detected_at=None,
+                        process_created_at=process_created_at,
                         parent_id=parent_id if parent_id is not None else existing_session.metadata.parent_id,
                         startup_model=existing_session.metadata.startup_model,  # Preserve from original
                         claude_version=claude_version
@@ -179,7 +179,7 @@ class SessionManager:
             state='active',
             metadata=SessionMetadata(
                 claude_pid=claude_pid,
-                started_at=datetime.now(UTC).astimezone(),
+                process_created_at=process_created_at,
                 parent_id=parent_id,
                 startup_model=startup_model,
                 claude_version=claude_version,
@@ -236,12 +236,12 @@ class SessionManager:
                     state='exited',
                     metadata=SessionMetadata(
                         claude_pid=existing_session.metadata.claude_pid,
-                        started_at=existing_session.metadata.started_at,
-                        ended_at=datetime.now(UTC).astimezone(),
+                        process_created_at=existing_session.metadata.process_created_at,
+                        session_ended_at=datetime.now(UTC).astimezone(),
+                        session_end_reason=reason,
                         parent_id=existing_session.metadata.parent_id,
                         crash_detected_at=existing_session.metadata.crash_detected_at,
                         startup_model=existing_session.metadata.startup_model,
-                        end_reason=reason,
                         claude_version=existing_session.metadata.claude_version,
                     ),
                 )
@@ -276,8 +276,9 @@ class SessionManager:
                     state='crashed',
                     metadata=SessionMetadata(
                         claude_pid=session.metadata.claude_pid,
-                        started_at=session.metadata.started_at,
-                        ended_at=session.metadata.ended_at,
+                        process_created_at=session.metadata.process_created_at,
+                        session_ended_at=session.metadata.session_ended_at,
+                        session_end_reason=session.metadata.session_end_reason,
                         parent_id=session.metadata.parent_id,
                         crash_detected_at=datetime.now(UTC).astimezone(),
                         startup_model=session.metadata.startup_model,
@@ -351,7 +352,6 @@ def add_session(
         state='active',
         metadata=SessionMetadata(
             claude_pid=claude_pid,
-            started_at=datetime.now(UTC).astimezone(),
             parent_id=parent_id,
         ),
     )
@@ -373,7 +373,7 @@ def end_session(cwd: str, session_id: str) -> None:
     for session in db.sessions:
         if session.session_id == session_id:
             session.state = 'exited'
-            session.metadata.ended_at = datetime.now(UTC).astimezone()
+            session.metadata.session_ended_at = datetime.now(UTC).astimezone()
             break
 
     save_sessions(cwd, db)
