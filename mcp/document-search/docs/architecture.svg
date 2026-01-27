@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 520">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#666"/>
+    </marker>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#7b1fa2"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="720" height="520" fill="#fff"/>
+
+  <!-- Title -->
+  <text x="360" y="28" text-anchor="middle" font-family="system-ui, sans-serif" font-size="17" font-weight="600" fill="#333">Claude Code Tool Architecture</text>
+
+  <!-- Human -->
+  <rect x="285" y="45" width="150" height="44" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="360" y="73" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#1565c0">Human</text>
+
+  <!-- Arrow: Human to Claude -->
+  <line x1="360" y1="89" x2="360" y2="115" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Claude Code -->
+  <rect x="235" y="120" width="250" height="60" rx="8" fill="#fff3e0" stroke="#f57c00" stroke-width="2"/>
+  <text x="360" y="148" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#e65100">Claude Code</text>
+  <text x="360" y="168" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#666">LLM Orchestrator — decides which tools to use</text>
+
+  <!-- Arrows: Claude to tools -->
+  <line x1="290" y1="180" x2="135" y2="215" stroke="#7b1fa2" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <line x1="360" y1="180" x2="360" y2="215" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="430" y1="180" x2="585" y2="215" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- DOCUMENT SEARCH (LEFT, PROMINENT) -->
+  <rect x="20" y="220" width="230" height="115" rx="8" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="3"/>
+  <text x="135" y="246" text-anchor="middle" font-family="system-ui, sans-serif" font-size="15" font-weight="700" fill="#6a1b9a">Document Search</text>
+  <text x="135" y="264" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#8e24aa">Docs &amp; Session Memory</text>
+  <line x1="40" y1="274" x2="230" y2="274" stroke="#ce93d8" stroke-width="1"/>
+  <text x="135" y="292" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Session transcripts (JSONL)</text>
+  <text x="135" y="308" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Markdown, PDFs, text</text>
+  <text x="135" y="324" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Hybrid: BM25 + embeddings</text>
+
+  <!-- Built-in (CENTER) -->
+  <rect x="265" y="220" width="190" height="115" rx="8" fill="#eceff1" stroke="#607d8b" stroke-width="2"/>
+  <text x="360" y="246" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#455a64">Built-in</text>
+  <text x="360" y="264" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#666">File Access</text>
+  <line x1="285" y1="274" x2="435" y2="274" stroke="#b0bec5" stroke-width="1"/>
+  <text x="360" y="292" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Read files</text>
+  <text x="360" y="308" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Grep patterns</text>
+  <text x="360" y="324" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Glob paths</text>
+
+  <!-- LSP (RIGHT) -->
+  <rect x="470" y="220" width="230" height="115" rx="8" fill="#e8f5e9" stroke="#43a047" stroke-width="2"/>
+  <text x="585" y="246" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#2e7d32">LSP</text>
+  <text x="585" y="264" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#666">Code Intelligence</text>
+  <line x1="490" y1="274" x2="680" y2="274" stroke="#a5d6a7" stroke-width="1"/>
+  <text x="585" y="292" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Go to definition</text>
+  <text x="585" y="308" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Find references</text>
+  <text x="585" y="324" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#555">• Symbol search</text>
+
+  <!-- Arrows to backends -->
+  <line x1="85" y1="335" x2="85" y2="365" stroke="#7b1fa2" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <line x1="185" y1="335" x2="185" y2="365" stroke="#7b1fa2" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <line x1="360" y1="335" x2="360" y2="365" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="585" y1="335" x2="585" y2="365" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Gemini API -->
+  <rect x="30" y="370" width="110" height="50" rx="6" fill="#e8eaf6" stroke="#5c6bc0" stroke-width="1.5"/>
+  <text x="85" y="390" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#3949ab">Gemini API</text>
+  <text x="85" y="404" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#666">text-embedding-004</text>
+
+  <!-- Qdrant -->
+  <rect x="155" y="370" width="100" height="50" rx="6" fill="#f3e5f5" stroke="#ab47bc" stroke-width="1.5"/>
+  <text x="205" y="393" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#7b1fa2">Qdrant</text>
+  <text x="205" y="408" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#666">vectors + BM25</text>
+
+  <!-- Arrow between Gemini and Qdrant -->
+  <line x1="140" y1="395" x2="153" y2="395" stroke="#7b1fa2" stroke-width="1.5" marker-end="url(#arrow-purple)"/>
+
+  <!-- Any Files -->
+  <rect x="285" y="370" width="150" height="50" rx="6" fill="#cfd8dc" stroke="#90a4ae" stroke-width="1.5"/>
+  <text x="360" y="393" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#546e7a">Any Files</text>
+  <text x="360" y="408" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#666">text patterns</text>
+
+  <!-- Code Files -->
+  <rect x="510" y="370" width="150" height="50" rx="6" fill="#c8e6c9" stroke="#81c784" stroke-width="1.5"/>
+  <text x="585" y="393" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#388e3c">Code Files</text>
+  <text x="585" y="408" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#666">.py .js .ts .go</text>
+
+  <!-- Indexed documents callout -->
+  <rect x="30" y="435" width="225" height="38" rx="6" fill="#fce4ec" stroke="#f48fb1" stroke-width="1"/>
+  <text x="142" y="455" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#c2185b">Indexed: .md .pdf .json .jsonl .txt .csv .eml</text>
+  <text x="142" y="468" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#888">(session transcripts = memory)</text>
+
+  <!-- Legend -->
+  <rect x="490" y="435" width="210" height="70" rx="6" fill="#fffde7" stroke="#fbc02d" stroke-width="1"/>
+  <text x="595" y="453" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="600" fill="#f57f17">Precision Types</text>
+  <text x="510" y="470" font-family="system-ui, sans-serif" font-size="9" fill="#7b1fa2">■ Doc Search: SEMANTIC</text>
+  <text x="510" y="485" font-family="system-ui, sans-serif" font-size="9" fill="#607d8b">■ Built-in: LEXICAL</text>
+  <text x="510" y="500" font-family="system-ui, sans-serif" font-size="9" fill="#43a047">■ LSP: EXACT</text>
+
+</svg>
