@@ -15,6 +15,12 @@ mkdir -p ~/.claude-workspace/secrets
 echo "your-key" > ~/.claude-workspace/secrets/document_search_api_key
 ```
 
+**MCP timeout** (default 2min is too short for large directories):
+```bash
+# Add to ~/.claude/settings.json under "env":
+"MCP_TOOL_TIMEOUT": "1800000"  # 30 minutes (in ms)
+```
+
 ## Installation
 
 For users installing from GitHub:
