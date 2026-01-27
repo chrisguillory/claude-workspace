@@ -1,0 +1,59 @@
+MIME-Version: 1.0
+From: legal@bigcorp.com
+To: contracts@vendor.com
+Subject: Contract Amendment - Service Agreement SA-2025-001
+Date: Wed, 22 Jan 2025 09:15:00 -0600
+Content-Type: multipart/mixed; boundary="----=_NextPart_000_0001_01D7A234.5678ABCD"
+
+This is a multi-part message in MIME format.
+
+------=_NextPart_000_0001_01D7A234.5678ABCD
+Content-Type: multipart/alternative; boundary="----=_NextPart_001_0002_01D7A234.5678ABCD"
+
+------=_NextPart_001_0002_01D7A234.5678ABCD
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Dear Contracts Team,
+
+Please find attached the amended Service Agreement SA-2025-001 for your review.
+
+Key changes in this amendment:
+1. Extended contract term from 2 years to 3 years
+2. Revised pricing structure with 15% volume discount
+3. Added SLA guarantees: 99.9% uptime commitment
+4. New data residency requirements for EU customers
+5. Updated liability cap to $5,000,000
+
+The amendment must be signed by both parties before February 15, 2025.
+
+Please review and let me know if you have any questions or concerns.
+
+Best regards,
+Patricia Williams
+Senior Legal Counsel
+BigCorp International
+patricia.williams@bigcorp.com
++1 (555) 234-5678
+
+------=_NextPart_001_0002_01D7A234.5678ABCD
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><h2>Contract Amendment</h2><p>Dear Contracts Team,</p><p>Please find attached...</p></body></html>
+
+------=_NextPart_001_0002_01D7A234.5678ABCD--
+
+------=_NextPart_000_0001_01D7A234.5678ABCD
+Content-Type: application/pdf; name="SA-2025-001-Amendment.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="SA-2025-001-Amendment.pdf"
+
+JVBERi0xLjcKCjEgMCBvYmogICUgZW50cnkgcG9pbnQKPDwKICAvVHlwZSAvQ2F0YWxvZwog
+IC9QYWdlcyAyIDAgUgo+PgplbmRvYmoKCjIgMCBvYmoKPDwKICAvVHlwZSAvUGFnZXMKICAv
+TWVkaWFCb3ggWyAwIDAgMjAwIDIwMCBdCiAgL0NvdW50IDEKICAvS2lkcyBbIDMgMCBSIF0K
+Pj4KZW5kb2JqCgozIDAgb2JqCjw8CiAgL1R5cGUgL1BhZ2UKICAvUGFyZW50IDIgMCBSCiAg
+L1Jlc291cmNlcyA8PAogICAgL0ZvbnQgPDwKICAgICAgL0YxIDQgMCBSIAogICAgPj4KICA+
+Pgo=
+
+------=_NextPart_000_0001_01D7A234.5678ABCD--

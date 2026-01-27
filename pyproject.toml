@@ -16,6 +16,7 @@ package = false
 members = [
     "local-lib",
     "mcp/browser-automation",
+    "mcp/document-search",
     "mcp/python-interpreter",
     "mcp/selenium-browser-automation",
     # "hooks" - decide later if hooks should be workspace member or stay inline
@@ -50,6 +51,7 @@ ignore = [
     "DTZ011",  # date.today() without timezone is fine for date-only ops
     "E501",    # line length handled by formatter
     "SIM102",  # allow nested if statements
+    "SIM103",  # allow explicit if-return-false for clarity
     "SIM108",  # allow if-else over ternary
 ]
 
@@ -84,8 +86,10 @@ init_typed = true
 [dependency-groups]
 dev = [
     "mypy>=1.19.1",
+    "pandas-stubs>=2.3.3.260113",
     "pre-commit>=4.5.1",
     "pydantic>=2.12.5", # Required for pydantic.mypy plugin
+    "pymupdf-stubs>=1.26.1.post1",
     "ruff>=0.14.10",
     "types-psutil>=7.2.1.20251231",
     "types-pyyaml>=6.0.12.20250915",

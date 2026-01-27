@@ -312,10 +312,16 @@ uv {add,remove} package-name
 Run pre-commit hooks before committing to catch linting/formatting issues:
 
 ```bash
-uv run --group dev pre-commit run --all-files
+uv run pre-commit run --all-files
 ```
 
 If hooks auto-fix files (ruff format), re-stage and run again until clean.
+
+If mypy fails with missing import errors for workspace member dependencies, sync all packages:
+
+```bash
+uv sync --all-groups --all-packages
+```
 
 ### Commit Workflow
 
@@ -323,7 +329,7 @@ If hooks auto-fix files (ruff format), re-stage and run again until clean.
 
 ```
 1. Stage changes: git add <files>
-2. Run pre-commit: uv run --group dev pre-commit run --all-files
+2. Run pre-commit: uv run pre-commit run --all-files
 3. If pre-commit fails → fix issues → re-stage → re-run pre-commit
 4. Only AFTER pre-commit passes → write commit message and commit
 ```
@@ -686,6 +692,6 @@ uv run --project mcp/python-interpreter mcp-py-server
 
 ## Next Steps
 
-- [x] Set up pre-commit hooks infrastructure (ruff, isort, mypy for type checking) - Done: `uv run --group dev pre-commit run --all-files`
+- [x] Set up pre-commit hooks infrastructure (ruff, isort, mypy for type checking) - Done: `uv run pre-commit run --all-files`
 - [ ] Consider bringing over docs/ structure from underwriting-api (testing-strategy.md, assertions.md, dependency-injection.md)
 - [ ] Migrate remaining untyped dicts to strict Pydantic models
