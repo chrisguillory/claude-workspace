@@ -45,14 +45,13 @@ markdown, text, pdf, json, jsonl, csv, email (.eml), images (placeholder for fut
 
 ## Tools
 
-| Tool                  | Description                                        |
-|-----------------------|----------------------------------------------------|
-| `index_directory`     | Index documents (incremental, respects .gitignore) |
-| `search_documents`    | Search with configurable strategy and filters      |
-| `get_index_stats`     | Collection statistics                              |
-| `get_index_breakdown` | Chunk counts by file type                          |
-| `is_file_indexed`     | Check if a specific file is indexed                |
-| `list_indexed_files`  | List all indexed files                             |
+| Tool               | Description                                        |
+|--------------------|----------------------------------------------------|
+| `index_documents`  | Index file or directory (incremental, respects .gitignore) |
+| `clear_documents`  | Remove documents from the index                    |
+| `search_documents` | Search with configurable strategy and filters      |
+| `list_documents`   | List indexed documents with optional filtering     |
+| `get_info`         | Index health and statistics                        |
 
 ## Search Types
 

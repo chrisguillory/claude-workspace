@@ -16,11 +16,13 @@ from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import Chunk, FileType
 
 __all__ = [
+    'ClearResult',
     'CollectionInfo',
     'FileIndexReason',
     'FileIndexStatus',
     'IndexBreakdown',
     'IndexedFile',
+    'IndexInfo',
     'SearchHit',
     'SearchQuery',
     'SearchResult',
@@ -174,3 +176,23 @@ class IndexedFile(StrictModel):
     path: str
     chunk_count: int
     file_type: FileType
+
+
+class IndexInfo(StrictModel):
+    """Combined index information with infrastructure and content stats.
+
+    Infrastructure stats are always global (collection-level).
+    Content stats can be scoped by path.
+    """
+
+    infrastructure: CollectionInfo
+    content: IndexBreakdown
+    path: str | None = None  # Scope used for content stats (None = CWD)
+
+
+class ClearResult(StrictModel):
+    """Result of clearing documents from index."""
+
+    files_removed: int
+    chunks_removed: int
+    path: str | None  # None means entire index was cleared
