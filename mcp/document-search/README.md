@@ -42,6 +42,32 @@ uv tool upgrade document-search-mcp
 
 For local development with editable install, see the [workspace README](../../README.md).
 
+## Architecture
+
+Document Search extends Claude Code with semantic retrieval, forming a distributed RAG system:
+
+![Architecture](docs/architecture.svg)
+
+**The RAG pattern emerges naturally:**
+- **R**etrieval: Document Search finds relevant chunks
+- **A**ugmented: Chunks flow back to Claude's context
+- **G**eneration: Claude synthesizes the answer
+
+**Two use cases, one pattern:**
+
+| Use Case       | What's Indexed               | What You Get                               |
+|----------------|------------------------------|--------------------------------------------|
+| Project search | Code, docs, configs          | Semantic understanding of your codebase    |
+| Session memory | `~/.claude/projects/*.jsonl` | Past decisions and context across sessions |
+
+**Search type tradeoffs:**
+
+| Type      | Path                | Best For                                |
+|-----------|---------------------|-----------------------------------------|
+| hybrid    | Gemini API + Qdrant | Most queries (semantic + keyword)       |
+| lexical   | Qdrant only         | Exact terms, identifiers, works offline |
+| embedding | Gemini API + Qdrant | Pure semantic similarity                |
+
 ## Supported File Types
 
 markdown, text, pdf, json, jsonl, csv, email (.eml), images (placeholder for future multimodal)
