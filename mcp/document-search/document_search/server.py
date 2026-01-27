@@ -78,7 +78,7 @@ class ServerState:
         reranker_service = RerankerService()
         repository = DocumentVectorRepository(qdrant_client)
 
-        indexing_service = IndexingService(
+        indexing_service = await IndexingService.create(
             chunking_service=chunking_service,
             embedding_service=embedding_service,
             sparse_embedding_service=sparse_embedding_service,

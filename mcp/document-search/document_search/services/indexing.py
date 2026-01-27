@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+import filelock
 from local_lib.utils import Timer
 
 from document_search.clients.gemini import GeminiClient
@@ -78,31 +79,67 @@ class IndexingService:
     - Error collection and categorization
     """
 
-    def __init__(
-        self,
+    @classmethod
+    async def create(
+        cls,
         chunking_service: ChunkingService,
         embedding_service: EmbeddingService,
         sparse_embedding_service: SparseEmbeddingService,
         repository: DocumentVectorRepository,
         *,
         state_path: Path = DEFAULT_STATE_PATH,
-    ) -> None:
-        """Initialize indexing service.
+    ) -> IndexingService:
+        """Async factory - preferred way to create IndexingService.
 
-        Args:
-            chunking_service: Service for splitting files into chunks.
-            embedding_service: Service for creating dense embeddings (with internal batching).
-            sparse_embedding_service: Service for creating BM25 sparse embeddings.
-            repository: Repository for vector storage.
-            state_path: Path to persist indexing state.
+        Handles async-context initialization (lock) and loads existing state.
         """
+        state_lock = asyncio.Lock()
+        file_lock = filelock.FileLock(str(state_path) + '.lock')
+
+        # Load existing state or create empty (under file lock for safety)
+        with file_lock:
+            if state_path.exists():
+                data = json.loads(state_path.read_text())
+                state = DirectoryIndexState.model_validate(data)
+            else:
+                state = DirectoryIndexState(
+                    directory_path='',
+                    files={},
+                    last_full_scan=datetime.now(UTC),
+                )
+
+        return cls(
+            chunking_service=chunking_service,
+            embedding_service=embedding_service,
+            sparse_embedding_service=sparse_embedding_service,
+            repository=repository,
+            state_lock=state_lock,
+            file_lock=file_lock,
+            state=state,
+            state_path=state_path,
+        )
+
+    def __init__(
+        self,
+        chunking_service: ChunkingService,
+        embedding_service: EmbeddingService,
+        sparse_embedding_service: SparseEmbeddingService,
+        repository: DocumentVectorRepository,
+        state_lock: asyncio.Lock,
+        file_lock: filelock.FileLock,
+        state: DirectoryIndexState,
+        *,
+        state_path: Path = DEFAULT_STATE_PATH,
+    ) -> None:
+        """Initialize indexing service. Use create() instead for proper async initialization."""
         self._chunking = chunking_service
         self._embedding = embedding_service
         self._sparse_embedding = sparse_embedding_service
         self._repo = repository
         self._state_path = state_path
-        self._state: DirectoryIndexState | None = None
-        self._state_lock: asyncio.Lock | None = None  # Initialized in async context
+        self._state = state
+        self._state_lock = state_lock
+        self._file_lock = file_lock  # Cross-process lock for state file
 
     async def get_index_stats(self) -> Mapping[str, int | str]:
         """Get current index statistics."""
@@ -116,6 +153,104 @@ class IndexingService:
             'vector_dimension': info.vector_dimension,
             'points_count': info.points_count,
         }
+
+    async def index_file(self, file_path: Path) -> IndexingResult:
+        """Index a single file directly (bypasses pipeline for simplicity).
+
+        Useful for testing, quick re-indexing of specific files, or targeted updates.
+        Follows same patterns as pipeline workers: fail-fast on infrastructure errors,
+        upsert-then-delete for atomicity.
+
+        Args:
+            file_path: Path to file to index.
+
+        Returns:
+            IndexingResult with counts.
+        """
+        if not file_path.is_file():
+            raise ValueError(f'Not a file: {file_path}')
+
+        await self._repo.ensure_collection(EMBEDDING_DIMENSION)
+
+        file_key = str(file_path)
+        timer = Timer()
+
+        # Chunk
+        chunks = list(await self._chunking.chunk_file(file_path))
+        if not chunks:
+            return IndexingResult(
+                files_scanned=1,
+                files_processed=1,
+                files_skipped=0,
+                chunks_created=0,
+                chunks_deleted=0,
+                embeddings_created=0,
+                elapsed_seconds=round(timer.elapsed(), 3),
+                errors=(),
+            )
+
+        chunk_ids = [_deterministic_chunk_id(file_key, c.chunk_index, c.text) for c in chunks]
+
+        # Embed (dense + sparse)
+        embed_tasks = [self._embedding.embed_text(c.text) for c in chunks]
+        responses = await asyncio.gather(*embed_tasks)
+        dense = [tuple(r.values) for r in responses]
+
+        texts = [c.text for c in chunks]
+        sparse_results = self._sparse_embedding.embed_batch(texts)
+        sparse = [(tuple(i), tuple(v)) for i, v in sparse_results]
+
+        # Build points using same factory as pipeline
+        points = [
+            VectorPoint.from_chunk(chunk, dense_emb, sparse_indices, sparse_values, chunk_id)
+            for chunk, dense_emb, (sparse_indices, sparse_values), chunk_id in zip(chunks, dense, sparse, chunk_ids)
+        ]
+
+        # Upsert new chunks
+        await self._repo.upsert(points)
+
+        # Delete old chunks (upsert-then-delete for atomicity)
+        async with self._state_lock:
+            old_state = self._state.files.get(file_key) if self._state else None
+
+        if old_state:
+            await self._repo.delete(list(old_state.chunk_ids))
+
+        # Update state
+        file_hash = _file_hash(file_path)
+        async with self._state_lock:
+            if self._state is not None:
+                new_files = dict(self._state.files)
+                new_files[file_key] = FileIndexState(
+                    file_path=file_key,
+                    file_hash=file_hash,
+                    file_size=file_path.stat().st_size,
+                    chunk_count=len(chunks),
+                    chunk_ids=tuple(chunk_ids),
+                    indexed_at=datetime.now(UTC),
+                    chunk_strategy_version=CHUNK_STRATEGY_VERSION,
+                )
+                self._state = DirectoryIndexState(
+                    directory_path=self._state.directory_path,
+                    files=new_files,
+                    last_full_scan=self._state.last_full_scan,
+                    total_files=self._state.total_files,
+                    total_chunks=self._state.total_chunks,
+                )
+
+        self._save_state()
+
+        chunks_deleted = len(old_state.chunk_ids) if old_state else 0
+        return IndexingResult(
+            files_scanned=1,
+            files_processed=1,
+            files_skipped=0,
+            chunks_created=len(chunks),
+            chunks_deleted=chunks_deleted,
+            embeddings_created=len(chunks),
+            elapsed_seconds=round(timer.elapsed(), 3),
+            errors=(),
+        )
 
     async def index_directory(
         self,
@@ -357,12 +492,13 @@ class IndexingService:
         )
 
     def _save_state(self) -> None:
-        """Persist indexing state to disk."""
+        """Persist indexing state to disk (cross-process safe)."""
         if self._state is None:
             return
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
-        # Use model_dump with mode='json' for datetime serialization
-        self._state_path.write_text(json.dumps(self._state.model_dump(mode='json'), indent=2))
+        # Use file lock for cross-process safety
+        with self._file_lock:
+            self._state_path.write_text(json.dumps(self._state.model_dump(mode='json'), indent=2))
 
     def _needs_indexing(self, path: Path) -> bool:
         """Check if file needs (re)indexing based on content hash."""
@@ -580,7 +716,7 @@ async def create_indexing_service(
     sparse_embedding_service = SparseEmbeddingService()
     repository = DocumentVectorRepository(qdrant_client)
 
-    return IndexingService(
+    return await IndexingService.create(
         chunking_service=chunking_service,
         embedding_service=embedding_service,
         sparse_embedding_service=sparse_embedding_service,

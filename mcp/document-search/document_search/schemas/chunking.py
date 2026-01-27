@@ -39,6 +39,7 @@ type FileType = Literal[
     # Extended types
     'email',  # .eml - original emails with headers
     'csv',  # .csv - tabular data
+    'jsonl',  # .jsonl, .ndjson - streaming JSON records (logs, events, transcripts)
 ]
 
 # TODO: Future file types to consider
@@ -69,6 +70,9 @@ EXTENSION_MAP: Mapping[str, FileType] = {
     '.eml': 'email',
     # CSV
     '.csv': 'csv',
+    # JSONL
+    '.jsonl': 'jsonl',
+    '.ndjson': 'jsonl',
 }
 
 
@@ -81,8 +85,13 @@ class ChunkMetadata(StrictModel):
     heading_context: str | None = None
     # PDF-specific: page number
     page_number: int | None = None
-    # JSON-specific: JSON path to this chunk's data
+    # JSON/JSONL-specific: JSON path to this chunk's data
     json_path: str | None = None
+    # JSONL-specific: line numbers and record context
+    jsonl_line_start: int | None = None  # First line in chunk (1-indexed)
+    jsonl_line_end: int | None = None  # Last line in chunk
+    jsonl_record_count: int | None = None  # Number of records in chunk
+    jsonl_schema_hint: str | None = None  # Common fields: "timestamp, level, message"
 
 
 class Chunk(StrictModel):

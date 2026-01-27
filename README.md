@@ -93,6 +93,21 @@ claude mcp add --scope user selenium-browser-automation -- uv run \
 
 **Note:** Requires Chrome/Chromium installed on the system.
 
+### [Document Search MCP](mcp/document-search)
+
+Semantic search over local documents using Gemini embeddings and Qdrant.
+
+```bash
+# Editable install (local development)
+uv tool install --editable ~/claude-workspace/mcp/document-search
+claude mcp add --scope user document-search -- mcp-document-search
+
+# Start Qdrant
+docker compose -f ~/claude-workspace/mcp/document-search/docker-compose.yaml up -d
+```
+
+**Note:** Requires a Gemini API key at `~/.claude-workspace/secrets/document_search_api_key`.
+
 ### Local Development
 
 For local development with live code changes, use workspace mode from the repo root:
