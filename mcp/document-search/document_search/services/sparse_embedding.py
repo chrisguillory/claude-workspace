@@ -1,13 +1,17 @@
 """BM25 sparse embedding service using fastembed.
 
 Generates sparse vectors for keyword matching in hybrid search.
+Uses ProcessPoolExecutor to bypass GIL for CPU-bound BM25 work.
 """
 
 from __future__ import annotations
 
+import asyncio
+import os
 from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
 
-from fastembed import SparseTextEmbedding
+from document_search.services import sparse_embedding_worker
 
 __all__ = [
     'SparseEmbeddingService',
@@ -17,20 +21,25 @@ __all__ = [
 class SparseEmbeddingService:
     """BM25 sparse embedding service for keyword matching.
 
-    Uses fastembed's Qdrant/bm25 model to generate sparse vectors
-    compatible with Qdrant's sparse vector index.
+    Uses ProcessPoolExecutor for parallel BM25 processing across CPU cores.
     """
 
-    MODEL_NAME = 'Qdrant/bm25'
+    @classmethod
+    async def create(cls, *, workers: int | None = None) -> SparseEmbeddingService:
+        """Create service with ProcessPoolExecutor.
 
-    def __init__(self) -> None:
-        """Initialize the BM25 sparse embedding model.
-
-        Note: First call triggers model download (~50MB).
+        Args:
+            workers: Max worker processes. Defaults to cpu_count.
         """
-        self._model = SparseTextEmbedding(self.MODEL_NAME)
+        if workers is None:
+            workers = os.cpu_count() or 4
+        return cls(_process_pool=ProcessPoolExecutor(max_workers=workers))
 
-    def embed(self, text: str) -> tuple[Sequence[int], Sequence[float]]:
+    def __init__(self, *, _process_pool: ProcessPoolExecutor) -> None:
+        """Internal - use create() factory."""
+        self._pool = _process_pool
+
+    async def embed(self, text: str) -> tuple[Sequence[int], Sequence[float]]:
         """Generate sparse vector for a single text.
 
         Args:
@@ -39,12 +48,11 @@ class SparseEmbeddingService:
         Returns:
             Tuple of (indices, values) for sparse vector.
         """
-        results = list(self._model.embed([text]))
-        result = results[0]
-        return result.indices.tolist(), result.values.tolist()
+        results = await self.embed_batch([text])
+        return results[0]
 
-    def embed_batch(self, texts: Sequence[str]) -> Sequence[tuple[Sequence[int], Sequence[float]]]:
-        """Generate sparse vectors for multiple texts.
+    async def embed_batch(self, texts: Sequence[str]) -> Sequence[tuple[Sequence[int], Sequence[float]]]:
+        """Generate sparse vectors for multiple texts in subprocess.
 
         Args:
             texts: Texts to embed.
@@ -52,5 +60,14 @@ class SparseEmbeddingService:
         Returns:
             Sequence of (indices, values) tuples for sparse vectors.
         """
-        results = list(self._model.embed(list(texts)))
-        return [(r.indices.tolist(), r.values.tolist()) for r in results]
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(
+            self._pool,
+            sparse_embedding_worker.embed_batch,
+            list(texts),
+        )
+        return results
+
+    def shutdown(self) -> None:
+        """Shutdown ProcessPoolExecutor and release resources."""
+        self._pool.shutdown(wait=True)
