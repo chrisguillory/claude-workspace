@@ -500,13 +500,14 @@ class IndexingService:
                         total_chunks=0,
                     )
                 else:
-                    # Remove matching entries from state
-                    new_files = {
-                        k: v for k, v in self._state.files.items() if not (k == path or k.startswith(path + '/'))
-                    }
-                    removed_chunks = sum(
-                        v.chunk_count for k, v in self._state.files.items() if k == path or k.startswith(path + '/')
-                    )
+                    # Remove matching entries from state (single pass)
+                    new_files: dict[str, FileIndexState] = {}
+                    removed_chunks = 0
+                    for k, v in self._state.files.items():
+                        if k == path or k.startswith(path + '/'):
+                            removed_chunks += v.chunk_count
+                        else:
+                            new_files[k] = v
                     self._state = DirectoryIndexState(
                         directory_path=self._state.directory_path,
                         files=new_files,
