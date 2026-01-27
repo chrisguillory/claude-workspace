@@ -21,6 +21,11 @@ echo "your-key" > ~/.claude-workspace/secrets/document_search_api_key
 "MCP_TOOL_TIMEOUT": "1800000"  # 30 minutes (in ms)
 ```
 
+**Tesseract** (optional, for OCR on scanned PDFs):
+```bash
+brew install tesseract
+```
+
 ## Installation
 
 For users installing from GitHub:
@@ -40,8 +45,6 @@ For local development with editable install, see the [workspace README](../../RE
 ## Supported File Types
 
 markdown, text, pdf, json, jsonl, csv, email (.eml), images (placeholder for future multimodal)
-
-**Note:** PDF OCR for scanned documents requires [Tesseract](https://github.com/tesseract-ocr/tesseract) (`brew install tesseract` on macOS).
 
 ## Tools
 
