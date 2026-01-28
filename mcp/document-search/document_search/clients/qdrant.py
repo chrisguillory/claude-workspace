@@ -151,6 +151,16 @@ class QdrantClient:
         # Ensure keyword index on file_type for faceting (idempotent)
         await self._ensure_file_type_index()
 
+    async def delete_collection(self) -> bool:
+        """Delete the entire collection. Returns True if deleted, False if didn't exist."""
+        collections = await self._client.get_collections()
+        exists = any(c.name == self._collection_name for c in collections.collections)
+
+        if exists:
+            await self._client.delete_collection(self._collection_name)
+            return True
+        return False
+
     @_retry.qdrant_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_qdrant_error),

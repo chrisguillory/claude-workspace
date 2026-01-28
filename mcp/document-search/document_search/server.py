@@ -29,6 +29,12 @@ from document_search.clients.gemini import GeminiClient
 from document_search.clients.qdrant import QdrantClient
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.schemas.chunking import FileType
+from document_search.schemas.config import (
+    EmbeddingConfig,
+    MigrationRequiredError,
+    load_config,
+    save_config,
+)
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import IndexingProgress, IndexingResult
 from document_search.schemas.vectors import (
@@ -46,32 +52,39 @@ from document_search.services.reranker import RerankerService
 from document_search.services.sparse_embedding import SparseEmbeddingService
 
 __all__ = [
-    'EMBEDDING_DIMENSION',
     'ServerState',
 ]
-
-# Embedding dimension for Gemini
-EMBEDDING_DIMENSION = 768
 
 
 @dataclass
 class ServerState:
     """Container for all server state - initialized once at startup."""
 
+    config: EmbeddingConfig
     indexing_service: IndexingService
     embedding_service: EmbeddingService
     sparse_embedding_service: SparseEmbeddingService
     reranker_service: RerankerService
     repository: DocumentVectorRepository
     qdrant_url: str
+    legacy_chunks: int = 0  # Non-zero if legacy data exists without config
 
     @classmethod
-    async def create(cls, qdrant_url: str = 'http://localhost:6333') -> typing.Self:
+    async def create(
+        cls,
+        config: EmbeddingConfig,
+        qdrant_url: str = 'http://localhost:6333',
+        legacy_chunks: int = 0,
+    ) -> typing.Self:
         """Async factory method to create server state with all services wired.
 
         Must be called from async context to ensure semaphores are bound correctly.
         """
-        gemini_client = GeminiClient()
+        gemini_client = GeminiClient(
+            model=config.embedding_model,
+            output_dimensionality=config.embedding_dimensions,
+            requests_per_minute=config.requests_per_minute,
+        )
         qdrant_client = QdrantClient(url=qdrant_url)
 
         chunking_service = await ChunkingService.create()
@@ -88,13 +101,43 @@ class ServerState:
         )
 
         return cls(
+            config=config,
             indexing_service=indexing_service,
             embedding_service=embedding_service,
             sparse_embedding_service=sparse_embedding_service,
             reranker_service=reranker_service,
             repository=repository,
             qdrant_url=qdrant_url,
+            legacy_chunks=legacy_chunks,
         )
+
+    def update_embedding_config(self, new_config: EmbeddingConfig) -> None:
+        """Update embedding config and recreate dependent services.
+
+        Called after clear_documents with new config params.
+        """
+        # Create new client and service with new config
+        gemini_client = GeminiClient(
+            model=new_config.embedding_model,
+            output_dimensionality=new_config.embedding_dimensions,
+            requests_per_minute=new_config.requests_per_minute,
+        )
+        new_embedding_service = EmbeddingService(gemini_client)
+
+        # Update references
+        self.config = new_config
+        self.embedding_service = new_embedding_service
+        # Update internal reference in indexing service
+        self.indexing_service._embedding = new_embedding_service  # noqa: SLF001
+
+    def require_migration(self) -> None:
+        """Raise if in legacy mode (data exists but no config)."""
+        if self.legacy_chunks:
+            raise MigrationRequiredError(
+                f'Index contains {self.legacy_chunks} chunks from deprecated text-embedding-004 model. '
+                f"Run clear_documents(path='**') to clear, then re-index. "
+                f'See: https://ai.google.dev/gemini-api/docs/deprecations'
+            )
 
 
 def register_tools(state: ServerState) -> None:
@@ -134,9 +177,10 @@ def register_tools(state: ServerState) -> None:
         Returns:
             IndexingResult with counts of files processed, chunks created, and any errors.
         """
-        if ctx is None:
+        if not ctx:
             raise ValueError('MCP context required')
 
+        state.require_migration()
         logger = DualLogger(ctx)
 
         # Default to current working directory
@@ -228,8 +272,12 @@ def register_tools(state: ServerState) -> None:
         Returns:
             SearchResult with ranked hits including text snippets and metadata.
         """
-        if ctx is None:
+        if not ctx:
             raise ValueError('MCP context required')
+
+        # Semantic search requires migration if legacy data exists
+        if search_type in ('hybrid', 'embedding'):
+            state.require_migration()
 
         logger = DualLogger(ctx)
         await logger.info(
@@ -307,37 +355,62 @@ def register_tools(state: ServerState) -> None:
     )
     async def clear_documents(
         path: str | None = None,
+        embedding_model: str | None = None,
+        embedding_dimensions: int | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
         """Remove documents from the index.
 
         Does not delete files from disk - only removes them from the search index.
 
+        When clearing the entire index (path='**'), you can optionally specify new
+        embedding configuration for migrating to a new embedding model.
+
         Args:
             path: Path to clear. Defaults to CWD if not specified.
                 Use "**" to clear entire index.
+            embedding_model: New embedding model (only with path='**').
+                Example: 'gemini-embedding-001'
+            embedding_dimensions: New embedding dimensions (only with path='**').
+                Example: 768
             ctx: MCP context for logging.
 
         Returns:
             ClearResult with counts of files and chunks removed.
         """
-        if ctx is None:
+        if not ctx:
             raise ValueError('MCP context required')
 
         logger = DualLogger(ctx)
+
+        # Config params only allowed with full clear
+        if (embedding_model or embedding_dimensions) and path != '**':
+            raise ValueError("embedding_model and embedding_dimensions require path='**'")
 
         # Resolve path (defaults to CWD)
         if path == '**':
             resolved_path = '**'
             await logger.info('Clearing entire index')
-        elif path is None:
-            resolved_path = str(Path.cwd())
-            await logger.info(f'Clearing documents under: {resolved_path}')
-        else:
+        elif path:
             resolved_path = str(Path(path).expanduser().resolve())
             await logger.info(f'Clearing documents: {resolved_path}')
+        else:
+            resolved_path = str(Path.cwd())
+            await logger.info(f'Clearing documents under: {resolved_path}')
 
         result = await state.indexing_service.clear_documents(resolved_path)
+
+        # Full clear: reset legacy mode, save/update config
+        if path == '**':
+            state.legacy_chunks = 0
+            new_config = EmbeddingConfig(
+                embedding_model=embedding_model or state.config.embedding_model,
+                embedding_dimensions=embedding_dimensions or state.config.embedding_dimensions,
+            )
+            save_config(new_config)
+            if embedding_model or embedding_dimensions:
+                state.update_embedding_config(new_config)
+                await logger.info(f'Updated config: {new_config.embedding_model} ({new_config.embedding_dimensions}d)')
 
         await logger.info(f'Cleared: {result.files_removed} files, {result.chunks_removed} chunks')
 
@@ -463,16 +536,42 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     logging.getLogger('httpcore').setLevel(logging.WARNING)
     logging.getLogger('google').setLevel(logging.WARNING)
 
+    # Load or detect embedding config
+    config = load_config()
+    legacy_chunks = 0
+
+    if config is None:
+        # No config file - check if collection has data (legacy state)
+        # TODO: Remove legacy detection after March 2026
+        qdrant_client = QdrantClient(url='http://localhost:6333')
+        collection_info = await qdrant_client.get_collection_info()
+
+        if collection_info and collection_info['points_count'] > 0:
+            # Legacy data exists - server starts but semantic ops blocked
+            legacy_chunks = collection_info['points_count']
+            config = EmbeddingConfig.default()
+            print(
+                f'⚠ Legacy index detected: {legacy_chunks} chunks from deprecated model. '
+                f"Run clear_documents(path='**') to migrate.",
+                file=sys.stderr,
+            )
+        else:
+            # Empty or no collection - use defaults
+            config = EmbeddingConfig.default()
+            save_config(config)
+            print(f'✓ Created embedding config: {config.embedding_model}', file=sys.stderr)
+
     # Initialize state with all services (async for semaphore binding)
-    state = await ServerState.create()
+    state = await ServerState.create(config, legacy_chunks=legacy_chunks)
 
     # Ensure Qdrant collection exists
-    await state.repository.ensure_collection(EMBEDDING_DIMENSION)
+    await state.repository.ensure_collection(config.embedding_dimensions)
 
     # Register tools with closure over state
     register_tools(state)
 
     print('✓ Document Search MCP server initialized', file=sys.stderr)
+    print(f'  Model: {config.embedding_model} ({config.embedding_dimensions}d)', file=sys.stderr)
     print(f'  Qdrant: {state.qdrant_url}', file=sys.stderr)
 
     # Server is ready - yield control back to FastMCP

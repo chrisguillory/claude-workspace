@@ -361,13 +361,10 @@ class DocumentVectorRepository:
             Tuple of (files_removed, chunks_removed).
         """
         if path == '**':
-            # Clear entire collection
-            raw_paths = await self._client.get_unique_source_paths()
-            files_count = len(raw_paths)
+            # Drop entire collection (instant vs scrolling through all points)
             chunks_count = await self._client.count()
-            # Delete all by scrolling (no single "delete all" in Qdrant)
-            await self._client.delete_by_source_path_prefix('')
-            return (files_count, chunks_count)
+            await self._client.delete_collection()
+            return (0, chunks_count)  # Can't count files after drop
 
         if path is None:
             raise ValueError('path must be provided (use "**" for entire index)')
