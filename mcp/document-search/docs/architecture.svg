@@ -60,12 +60,13 @@
 
   <!-- Arrows from Document Search to backends -->
   <!-- Hybrid path: Doc Search → Gemini (embed) -->
-  <line x1="75" y1="335" x2="75" y2="365" stroke="#7b1fa2" stroke-width="2" marker-end="url(#arrow-purple)"/>
-  <text x="60" y="355" font-family="system-ui, sans-serif" font-size="8" fill="#7b1fa2">embed</text>
+  <line x1="65" y1="335" x2="65" y2="365" stroke="#7b1fa2" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <text x="75" y="355" font-family="system-ui, sans-serif" font-size="9" fill="#7b1fa2">embed</text>
 
-  <!-- Lexical bypass: Doc Search → Qdrant directly (dashed) -->
-  <line x1="195" y1="335" x2="195" y2="365" stroke="#7b1fa2" stroke-width="2" stroke-dasharray="4,2" marker-end="url(#arrow-purple)"/>
-  <text x="200" y="355" font-family="system-ui, sans-serif" font-size="8" fill="#7b1fa2">BM25</text>
+  <!-- Lexical path: Doc Search → Qdrant directly (no embedding) -->
+  <line x1="218" y1="335" x2="218" y2="368" stroke="#7b1fa2" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <text x="228" y="348" font-family="system-ui, sans-serif" font-size="9" fill="#7b1fa2">BM25</text>
+  <text x="228" y="359" font-family="system-ui, sans-serif" font-size="8" fill="#999">(no embedding)</text>
 
   <!-- Grayed arrows for Built-in and LSP -->
   <line x1="360" y1="335" x2="360" y2="365" stroke="#bbb" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -77,13 +78,13 @@
   <text x="75" y="404" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="#666">text-embedding-004</text>
 
   <!-- Arrow: Gemini → Qdrant (vectors) -->
-  <line x1="130" y1="395" x2="155" y2="395" stroke="#7b1fa2" stroke-width="2" marker-end="url(#arrow-purple)"/>
-  <text x="143" y="388" font-family="system-ui, sans-serif" font-size="7" fill="#7b1fa2">vectors</text>
+  <line x1="130" y1="395" x2="163" y2="395" stroke="#7b1fa2" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <text x="147" y="382" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#7b1fa2">vectors</text>
 
   <!-- Qdrant -->
-  <rect x="160" y="370" width="100" height="50" rx="6" fill="#f3e5f5" stroke="#ab47bc" stroke-width="1.5"/>
-  <text x="210" y="390" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#7b1fa2">Qdrant</text>
-  <text x="210" y="404" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#666">vectors + BM25</text>
+  <rect x="168" y="370" width="100" height="50" rx="6" fill="#f3e5f5" stroke="#ab47bc" stroke-width="1.5"/>
+  <text x="218" y="390" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#7b1fa2">Qdrant</text>
+  <text x="218" y="404" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="#666">vectors + BM25</text>
 
   <!-- Any Files (grayed) -->
   <rect x="285" y="370" width="150" height="50" rx="6" fill="#f5f5f5" stroke="#ccc" stroke-width="1" opacity="0.8"/>
