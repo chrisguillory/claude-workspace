@@ -34,10 +34,11 @@ class GeminiClient:
     Rate limited via pyrate_limiter, concurrency controlled via semaphore.
     """
 
-    # Rate limiting - Tier 1 default (3K RPM)
-    # Note: Google counts each TEXT in a batch as a request, not the API call itself
-    # So 30 API calls × 100 texts = 3000 RPM
+    # Rate limiting - Tier 1 limits:
+    # - RPM: 3000 requests per minute
+    # - TPM: 1,000,000 tokens per minute (this is usually the bottleneck)
     DEFAULT_REQUESTS_PER_MINUTE = 3000
+    DEFAULT_TOKENS_PER_MINUTE = 1_000_000
 
     # Concurrency control - semaphore limits concurrent API calls
     DEFAULT_MAX_CONCURRENT = 200  # Tuned for throughput - Gemini handles well
@@ -78,16 +79,21 @@ class GeminiClient:
         self._output_dimensionality = output_dimensionality
         self._api_key = api_key or _load_api_key()
 
-        # Rate limiter with dual rates:
-        # - Per-second rate controls burst (must be >= max batch size of 100)
-        # - Both rates derived from RPM to maintain consistency
-        # Google counts each text as a "request", not the API call
-        requests_per_second = max(100, requests_per_minute // 60)  # At least 100 for batching
-        rates = [
-            pyrate_limiter.Rate(requests_per_second, pyrate_limiter.Duration.SECOND),
-            pyrate_limiter.Rate(requests_per_minute, pyrate_limiter.Duration.MINUTE),
-        ]
-        self._limiter = pyrate_limiter.Limiter(rates)
+        # RPM limiter: 100 texts per (time to do one batch at rpm)
+        # 3000/min = 30 batches/min = 1 batch per 2 seconds
+        batch_size = 100
+        batches_per_minute = requests_per_minute // batch_size  # 3000/100 = 30
+        seconds_per_batch = 60 // batches_per_minute  # 60/30 = 2 seconds
+        self._rpm_limiter = pyrate_limiter.Limiter(
+            pyrate_limiter.Rate(batch_size, seconds_per_batch * pyrate_limiter.Duration.SECOND),
+        )
+
+        # TPM limiter: 1M tokens per minute (use 50% - chars/4 underestimates)
+        # Tokens estimated as chars / 4
+        tokens_per_minute = int(self.DEFAULT_TOKENS_PER_MINUTE * 0.5)  # 500K
+        self._tpm_limiter = pyrate_limiter.Limiter(
+            pyrate_limiter.Rate(tokens_per_minute, pyrate_limiter.Duration.MINUTE),
+        )
 
         # HTTP client configuration
         limits = httpx.Limits(
@@ -133,7 +139,13 @@ class GeminiClient:
         Raises:
             google.genai.errors.ClientError: On API errors.
         """
-        await self._limiter.try_acquire_async('gemini', weight=(len(texts)))
+        # Estimate tokens (chars / 4 is a common approximation)
+        estimated_tokens = sum(len(t) for t in texts) // 4
+
+        # Acquire from both limiters (RPM by text count, TPM by token estimate)
+        await self._rpm_limiter.try_acquire_async('rpm', weight=len(texts))
+        await self._tpm_limiter.try_acquire_async('tpm', weight=estimated_tokens)
+
         async with self._semaphore, self._tracker.track():
             result = await self._client.aio.models.embed_content(
                 model=self._model,
