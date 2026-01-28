@@ -88,10 +88,13 @@ class GeminiClient:
             pyrate_limiter.Rate(batch_size, seconds_per_batch * pyrate_limiter.Duration.SECOND),
         )
 
-        # TPM limiter: 1M tokens per minute
-        # Tokens estimated as chars / 2 (empirically validated against Google's counting)
+        # TPM limiter: 1M tokens per minute, smoothed over 10-second windows to prevent burst.
+        # Max batch: 100 texts × 500 tokens (1500 char chunks) = 50K tokens.
+        # 10-second window: 166K tokens = 3 max batches before blocking.
+        # Tokens estimated as chars / 2 (empirically validated against Google's counting).
+        tokens_per_10sec = self.DEFAULT_TOKENS_PER_MINUTE // 6  # ~166,666
         self._tpm_limiter = pyrate_limiter.Limiter(
-            pyrate_limiter.Rate(self.DEFAULT_TOKENS_PER_MINUTE, pyrate_limiter.Duration.MINUTE),
+            pyrate_limiter.Rate(tokens_per_10sec, 10 * pyrate_limiter.Duration.SECOND),
         )
 
         # HTTP client configuration

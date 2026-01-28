@@ -21,8 +21,10 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Server error codes that are transient and worth retrying
-RETRYABLE_STATUS_CODES = frozenset({500, 502, 503, 504})
+# Status codes that are transient and worth retrying
+# 429: Rate limit exceeded (RESOURCE_EXHAUSTED)
+# 500/502/503/504: Server errors
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 # Circuit breaker - opens after consecutive failures, hard fails until recovery
 GEMINI_FAILURE_THRESHOLD = 10
@@ -33,13 +35,16 @@ def is_retryable_gemini_error(exc: BaseException) -> bool:
     """Check if exception is a retryable transient error from Gemini.
 
     google-genai throws httpx exceptions directly.
-    Also retries ServerError with transient status codes (500/502/503/504).
+    Retries on:
+    - httpx transport errors (timeout, network issues)
+    - HTTP 429 (rate limit / RESOURCE_EXHAUSTED)
+    - HTTP 500/502/503/504 (server errors)
     """
     if is_retryable_httpx_error(exc):
         return True
 
-    # API server errors with transient status codes
-    if isinstance(exc, google.genai.errors.ServerError) and exc.code in RETRYABLE_STATUS_CODES:
+    # API errors with retryable status codes (ClientError for 429, ServerError for 5xx)
+    if isinstance(exc, google.genai.errors.APIError) and exc.code in RETRYABLE_STATUS_CODES:
         return True
 
     return False
