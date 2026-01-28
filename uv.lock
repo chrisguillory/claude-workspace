@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -478,7 +478,7 @@ wheels = [
 
 [[package]]
 name = "document-search-mcp"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "mcp/document-search" }
 dependencies = [
     { name = "circuitbreaker" },

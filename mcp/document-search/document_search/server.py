@@ -166,6 +166,7 @@ def register_tools(state: ServerState) -> None:
         Args:
             path: Path to file or directory to index. Defaults to current working
                 directory if not specified. Supports absolute, relative, or ~ expansion.
+                Note: "**" is not supported (indexing requires a specific path).
             full_reindex: If True, reindex all files regardless of whether they've changed.
                 Only applies to directories (single files are always fully indexed).
             respect_gitignore: Control .gitignore filtering behavior:
@@ -179,6 +180,10 @@ def register_tools(state: ServerState) -> None:
         """
         if not ctx:
             raise ValueError('MCP context required')
+
+        # "**" not supported - indexing requires a specific path
+        if path == '**':
+            raise ValueError("index_documents does not support '**'. Specify a file or directory path.")
 
         state.require_migration()
         logger = DualLogger(ctx)
@@ -438,6 +443,7 @@ def register_tools(state: ServerState) -> None:
 
         Args:
             path: Filter to files under this path. Defaults to CWD.
+                Use "**" to search entire index.
             file_type: Filter to this file type (e.g., 'markdown', 'pdf').
             limit: Maximum number of files to return (default 50).
             ctx: MCP context for logging.
@@ -450,8 +456,13 @@ def register_tools(state: ServerState) -> None:
 
         logger = DualLogger(ctx)
 
-        # Resolve path (defaults to CWD)
-        resolved_path = str(Path(path).expanduser().resolve() if path else Path.cwd())
+        # Resolve path (defaults to CWD, "**" for global)
+        if path == '**':
+            resolved_path = None
+        elif path is None:
+            resolved_path = str(Path.cwd())
+        else:
+            resolved_path = str(Path(path).expanduser().resolve())
 
         files = await state.repository.list_indexed_files(
             path_prefix=resolved_path,
