@@ -11,6 +11,13 @@ from document_search.schemas.chunking import (
     FileType,
     get_file_type,
 )
+from document_search.schemas.config import (
+    CONFIG_PATH,
+    EmbeddingConfig,
+    MigrationRequiredError,
+    load_config,
+    save_config,
+)
 from document_search.schemas.embeddings import (
     EmbedBatchRequest,
     EmbedBatchResponse,
@@ -39,6 +46,12 @@ from document_search.schemas.vectors import (
 __all__ = [
     # Base
     'StrictModel',
+    # Config
+    'CONFIG_PATH',
+    'EmbeddingConfig',
+    'MigrationRequiredError',
+    'load_config',
+    'save_config',
     # Chunking
     'FileType',
     'EXTENSION_MAP',
