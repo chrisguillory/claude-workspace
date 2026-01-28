@@ -88,11 +88,10 @@ class GeminiClient:
             pyrate_limiter.Rate(batch_size, seconds_per_batch * pyrate_limiter.Duration.SECOND),
         )
 
-        # TPM limiter: 1M tokens per minute (use 50% - chars/4 underestimates)
-        # Tokens estimated as chars / 4
-        tokens_per_minute = int(self.DEFAULT_TOKENS_PER_MINUTE * 0.5)  # 500K
+        # TPM limiter: 1M tokens per minute
+        # Tokens estimated as chars / 2 (empirically validated against Google's counting)
         self._tpm_limiter = pyrate_limiter.Limiter(
-            pyrate_limiter.Rate(tokens_per_minute, pyrate_limiter.Duration.MINUTE),
+            pyrate_limiter.Rate(self.DEFAULT_TOKENS_PER_MINUTE, pyrate_limiter.Duration.MINUTE),
         )
 
         # HTTP client configuration
@@ -139,8 +138,8 @@ class GeminiClient:
         Raises:
             google.genai.errors.ClientError: On API errors.
         """
-        # Estimate tokens (chars / 4 is a common approximation)
-        estimated_tokens = sum(len(t) for t in texts) // 4
+        # Estimate tokens (chars / 2 - empirically validated against Google's counting)
+        estimated_tokens = sum(len(t) for t in texts) // 2
 
         # Acquire from both limiters (RPM by text count, TPM by token estimate)
         await self._rpm_limiter.try_acquire_async('rpm', weight=len(texts))
