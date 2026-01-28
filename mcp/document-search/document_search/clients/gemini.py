@@ -35,6 +35,8 @@ class GeminiClient:
     """
 
     # Rate limiting - Tier 1 default (3K RPM)
+    # Note: Google counts each TEXT in a batch as a request, not the API call itself
+    # So 30 API calls × 100 texts = 3000 RPM
     DEFAULT_REQUESTS_PER_MINUTE = 3000
 
     # Concurrency control - semaphore limits concurrent API calls
@@ -76,8 +78,16 @@ class GeminiClient:
         self._output_dimensionality = output_dimensionality
         self._api_key = api_key or _load_api_key()
 
-        # Rate limiter
-        self._limiter = pyrate_limiter.Limiter(pyrate_limiter.Rate(requests_per_minute, pyrate_limiter.Duration.MINUTE))
+        # Rate limiter with dual rates:
+        # - Per-second rate controls burst (must be >= max batch size of 100)
+        # - Both rates derived from RPM to maintain consistency
+        # Google counts each text as a "request", not the API call
+        requests_per_second = max(100, requests_per_minute // 60)  # At least 100 for batching
+        rates = [
+            pyrate_limiter.Rate(requests_per_second, pyrate_limiter.Duration.SECOND),
+            pyrate_limiter.Rate(requests_per_minute, pyrate_limiter.Duration.MINUTE),
+        ]
+        self._limiter = pyrate_limiter.Limiter(rates)
 
         # HTTP client configuration
         limits = httpx.Limits(
@@ -123,7 +133,7 @@ class GeminiClient:
         Raises:
             google.genai.errors.ClientError: On API errors.
         """
-        await self._limiter.try_acquire_async('gemini')
+        await self._limiter.try_acquire_async('gemini', weight=(len(texts)))
         async with self._semaphore, self._tracker.track():
             result = await self._client.aio.models.embed_content(
                 model=self._model,
