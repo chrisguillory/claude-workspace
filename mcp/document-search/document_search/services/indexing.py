@@ -929,6 +929,8 @@ class IndexingService:
 
 async def create_indexing_service(
     *,
+    embedding_model: str,
+    embedding_dimensions: int,
     qdrant_url: str = 'http://localhost:6333',
     state_path: Path = DEFAULT_STATE_PATH,
 ) -> IndexingService:
@@ -937,13 +939,18 @@ async def create_indexing_service(
     Must be called from async context - ensures semaphores are bound correctly.
 
     Args:
+        embedding_model: Gemini embedding model name.
+        embedding_dimensions: Output vector dimensions.
         qdrant_url: URL of Qdrant server.
         state_path: Path to persist indexing state.
 
     Returns:
         Configured IndexingService.
     """
-    gemini_client = GeminiClient()
+    gemini_client = GeminiClient(
+        model=embedding_model,
+        output_dimensionality=embedding_dimensions,
+    )
     qdrant_client = QdrantClient(url=qdrant_url)
 
     chunking_service = await ChunkingService.create()

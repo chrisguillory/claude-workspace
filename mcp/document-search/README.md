@@ -9,11 +9,15 @@ Semantic search over local documents using hybrid vector search (Gemini embeddin
 docker run -d --name qdrant -p 6333:6333 -v qdrant-data:/qdrant/storage qdrant/qdrant:v1.16.2
 ```
 
-**Gemini API key** ([free at Google AI Studio](https://aistudio.google.com/app/apikey)):
+**Gemini API key** ([Google AI Studio](https://aistudio.google.com/app/apikey)):
 ```bash
 mkdir -p ~/.claude-workspace/secrets
 echo "your-key" > ~/.claude-workspace/secrets/document_search_api_key
 ```
+
+> **Rate Limits**: Free tier is limited to **100 requests/day**. For production use,
+> [enable billing](https://ai.google.dev/gemini-api/docs/rate-limits) to unlock Tier 1
+> (1,000 RPD, 300 RPM). See [Rate Limits](#gemini-api-rate-limits) below.
 
 **MCP timeout** (default 2min is too short for large directories):
 ```bash
@@ -91,4 +95,19 @@ markdown, text, pdf, json, jsonl, csv, email (.eml), images (placeholder for fut
 ## State
 
 - Index state: `~/.claude-workspace/cache/document_search_index_state.json`
+- Embedding config: `~/.claude-workspace/config/document_search.json`
 - Qdrant collection: `document_chunks` on `localhost:6333`
+
+## Gemini API Rate Limits
+
+**Before January 2026**: `text-embedding-004` had no explicit daily request cap—only RPM limits (~10-20 RPM free tier). High-volume batch indexing worked without issues.
+
+**After January 2026**: Google shutdown `text-embedding-004` and enforced strict daily caps on `gemini-embedding-001` due to fraud/abuse.
+
+| Tier                          | Requests/Day | Requests/Min | Cost            |
+|-------------------------------|--------------|--------------|-----------------|
+| Free                          | **100**      | ~100         | $0              |
+| Tier 1 (billing enabled)      | 1,000        | 300          | $0.15/1M tokens |
+| Tier 2 ($250+ spend, 30 days) | 10,000+      | 1,000+       | $0.15/1M tokens |
+
+**For RAG/indexing workloads**: Free tier (100 RPD) is insufficient for indexing more than ~100 documents. Enable billing to unlock Tier 1.

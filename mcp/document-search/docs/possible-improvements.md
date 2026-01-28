@@ -2,7 +2,7 @@
 
 * SQLite for state persistence (instead of JSON file) - enables atomic single-row updates, crash recovery without
   full-file rewrites, and queryable index metadata; current JSON approach scales poorly beyond 10K files
-* Use `pyrate-limiter` for proactive throttling (instead of `tenacity` retry with exponential backoff on API errors)
+ 
 * Progress callbacks during file processing - currently `on_progress` is only called during scanning phase; for CLI
   usage, periodic updates during the worker processing phase would improve user experience
 * Collection verification on startup - detect when Qdrant collection is empty/missing but state file exists (e.g.,
