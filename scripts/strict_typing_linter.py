@@ -1071,11 +1071,21 @@ def check_file(filepath: Path, strict_ordering_packages: Set[Path]) -> Sequence[
     violations.extend(type_checker.violations)
 
     # Module ordering (if package or any parent opted in - recursive inheritance)
-    if _is_under_strict_package(filepath, strict_ordering_packages) and filepath.name != '__init__.py':
-        violations.extend(check_all_defined(filepath, tree, source_lines))
-        violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
-        violations.extend(check_module_ordering(filepath, tree, source_lines))
-        violations.extend(check_class_method_ordering(filepath, tree, source_lines))
+    if not _is_under_strict_package(filepath, strict_ordering_packages):
+        return violations
+
+    # Skip __main__.py (entry point, never exports)
+    if filepath.name == '__main__.py':
+        return violations
+
+    # Skip __init__.py only if it has no definitions (just boilerplate)
+    if filepath.name == '__init__.py' and not _extract_definitions(tree, _extract_all_names(tree)):
+        return violations
+
+    violations.extend(check_all_defined(filepath, tree, source_lines))
+    violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
+    violations.extend(check_module_ordering(filepath, tree, source_lines))
+    violations.extend(check_class_method_ordering(filepath, tree, source_lines))
 
     return violations
 
