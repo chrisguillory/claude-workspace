@@ -23,11 +23,8 @@ import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pandas as pd
-
+import pandas as pd
 from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
@@ -299,8 +296,6 @@ class ChunkingService:
 
     def _chunk_csv_sync(self, path: Path) -> Sequence[Chunk]:
         """Synchronous CSV chunking implementation."""
-        import pandas as pd
-
         chunks: list[Chunk] = []
 
         # Try multiple encodings

@@ -9,15 +9,21 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Annotated, Literal
 
 import pydantic
+from pydantic import Field, TypeAdapter
 
 from document_search.schemas.base import StrictModel
 
 __all__ = [
     'CONFIG_PATH',
     'EmbeddingConfig',
-    'MigrationRequiredError',
+    'EmbeddingProvider',
+    'GeminiConfig',
+    'OpenRouterConfig',
+    'create_config',
+    'default_config',
     'load_config',
     'save_config',
 ]
@@ -27,42 +33,90 @@ logger = logging.getLogger(__name__)
 # Config file location
 CONFIG_PATH = Path.home() / '.claude-workspace' / 'config' / 'document_search.json'
 
-# New defaults for fresh installations
-DEFAULT_MODEL = 'gemini-embedding-001'
-DEFAULT_DIMENSIONS = 768
-DEFAULT_REQUESTS_PER_MINUTE = 3000  # Tier 1 limit (free tier is 100 RPD)
+# Provider type
+type EmbeddingProvider = Literal['gemini', 'openrouter']
 
 
-class EmbeddingConfig(StrictModel):
-    """Embedding model configuration.
+class GeminiConfig(StrictModel):
+    """Gemini embedding configuration.
 
-    Persisted to ~/.claude-workspace/config/document_search.json.
-    Changes require clearing the index (embeddings are model-specific).
+    Requires requests_per_minute for API quota enforcement.
     """
 
+    provider: Literal['gemini'] = 'gemini'
     embedding_model: str
     embedding_dimensions: int
-    requests_per_minute: int = DEFAULT_REQUESTS_PER_MINUTE
+    batch_size: int
+    requests_per_minute: int
 
     @classmethod
-    def default(cls) -> EmbeddingConfig:
-        """Create config with current defaults."""
+    def default(cls) -> GeminiConfig:
+        """Create default Gemini config."""
         return cls(
-            embedding_model=DEFAULT_MODEL,
-            embedding_dimensions=DEFAULT_DIMENSIONS,
-            requests_per_minute=DEFAULT_REQUESTS_PER_MINUTE,
+            embedding_model='gemini-embedding-001',
+            embedding_dimensions=768,
+            batch_size=100,  # Max per Gemini API call
+            requests_per_minute=3000,
         )
 
 
-class MigrationRequiredError(Exception):
-    """Raised when index needs migration to a new embedding model.
+class OpenRouterConfig(StrictModel):
+    """OpenRouter embedding configuration.
 
-    Provides guidance for the user to clear and re-index.
+    Uses semaphore-based concurrency only (no rate limiting).
     """
 
-    def __init__(self, message: str, original_error: Exception | None = None) -> None:
-        super().__init__(message)
-        self.original_error = original_error
+    provider: Literal['openrouter'] = 'openrouter'
+    embedding_model: str
+    embedding_dimensions: int
+    batch_size: int
+
+    @classmethod
+    def default(cls) -> OpenRouterConfig:
+        """Create default OpenRouter config."""
+        return cls(
+            embedding_model='qwen/qwen3-embedding-8b',
+            embedding_dimensions=768,
+            batch_size=1000,
+        )
+
+
+# Discriminated union - type alias for annotations
+type EmbeddingConfig = GeminiConfig | OpenRouterConfig
+
+# TypeAdapter for deserializing with discriminator
+_config_adapter: TypeAdapter[GeminiConfig | OpenRouterConfig] = TypeAdapter(
+    Annotated[GeminiConfig | OpenRouterConfig, Field(discriminator='provider')]
+)
+
+
+def default_config(provider: EmbeddingProvider = 'gemini') -> EmbeddingConfig:
+    """Create config with defaults for the specified provider."""
+    if provider == 'openrouter':
+        return OpenRouterConfig.default()
+    return GeminiConfig.default()
+
+
+def create_config(
+    provider: EmbeddingProvider,
+    embedding_model: str | None = None,
+    embedding_dimensions: int | None = None,
+) -> EmbeddingConfig:
+    """Create config with optional overrides from provider defaults."""
+    if provider == 'openrouter':
+        openrouter = OpenRouterConfig.default()
+        return OpenRouterConfig(
+            embedding_model=embedding_model or openrouter.embedding_model,
+            embedding_dimensions=embedding_dimensions or openrouter.embedding_dimensions,
+            batch_size=openrouter.batch_size,
+        )
+    gemini = GeminiConfig.default()
+    return GeminiConfig(
+        embedding_model=embedding_model or gemini.embedding_model,
+        embedding_dimensions=embedding_dimensions or gemini.embedding_dimensions,
+        batch_size=gemini.batch_size,
+        requests_per_minute=gemini.requests_per_minute,
+    )
 
 
 def load_config() -> EmbeddingConfig | None:
@@ -79,7 +133,7 @@ def load_config() -> EmbeddingConfig | None:
 
     try:
         data = json.loads(CONFIG_PATH.read_text())
-        return EmbeddingConfig.model_validate(data)
+        return _config_adapter.validate_python(data)
     except (json.JSONDecodeError, pydantic.ValidationError) as e:
         raise ValueError(f'Invalid config file at {CONFIG_PATH}: {e}') from e
 

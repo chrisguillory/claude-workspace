@@ -14,7 +14,10 @@ from document_search.schemas.chunking import (
 from document_search.schemas.config import (
     CONFIG_PATH,
     EmbeddingConfig,
-    MigrationRequiredError,
+    GeminiConfig,
+    OpenRouterConfig,
+    create_config,
+    default_config,
     load_config,
     save_config,
 )
@@ -23,7 +26,7 @@ from document_search.schemas.embeddings import (
     EmbedBatchResponse,
     EmbedRequest,
     EmbedResponse,
-    TaskType,
+    TaskIntent,
 )
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
@@ -49,7 +52,10 @@ __all__ = [
     # Config
     'CONFIG_PATH',
     'EmbeddingConfig',
-    'MigrationRequiredError',
+    'GeminiConfig',
+    'OpenRouterConfig',
+    'create_config',
+    'default_config',
     'load_config',
     'save_config',
     # Chunking
@@ -60,7 +66,7 @@ __all__ = [
     'Chunk',
     'ChunkResult',
     # Embeddings
-    'TaskType',
+    'TaskIntent',
     'EmbedRequest',
     'EmbedBatchRequest',
     'EmbedResponse',

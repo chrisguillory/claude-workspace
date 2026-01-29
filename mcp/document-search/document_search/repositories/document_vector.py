@@ -61,7 +61,7 @@ class DocumentVectorRepository:
         """Ensure collection exists with correct configuration.
 
         Args:
-            vector_dimension: Size of embedding vectors (768 for Gemini).
+            vector_dimension: Size of embedding vectors (e.g., 768).
         """
         await self._client.ensure_collection(vector_dimension)
 
@@ -364,7 +364,7 @@ class DocumentVectorRepository:
             # Drop entire collection (instant vs scrolling through all points)
             chunks_count = await self._client.count()
             await self._client.delete_collection()
-            return (0, chunks_count)  # Can't count files after drop
+            return 0, chunks_count  # Can't count files after drop
 
         if path is None:
             raise ValueError('path must be provided (use "**" for entire index)')
@@ -374,13 +374,13 @@ class DocumentVectorRepository:
         if chunk_count > 0:
             # Exact file match
             await self._client.delete_by_source_path(path)
-            return (1, chunk_count)
+            return 1, chunk_count
 
         # Directory prefix
         raw_paths = await self._client.get_unique_source_paths(path_prefix=path)
         files_count = len(raw_paths)
         chunks_count = await self._client.delete_by_source_path_prefix(path)
-        return (files_count, chunks_count)
+        return files_count, chunks_count
 
 
 class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):

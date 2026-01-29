@@ -29,10 +29,10 @@ import filelock
 import git
 from local_lib.utils import Timer
 
-from document_search.clients.gemini import GeminiClient
-from document_search.clients.qdrant import QdrantClient
+from document_search.clients import QdrantClient, create_embedding_client
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.schemas.chunking import EXTENSION_MAP, Chunk, FileType, get_file_type
+from document_search.schemas.config import EmbeddingConfig
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
     DirectoryIndexState,
@@ -54,7 +54,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Gemini embedding dimension
+# Dense embedding dimension
 EMBEDDING_DIMENSION = 768
 
 # Default state file location
@@ -62,7 +62,7 @@ DEFAULT_STATE_PATH = Path.home() / '.claude-workspace' / 'cache' / 'document_sea
 
 # Pipeline worker configuration - each stage is independently tunable
 NUM_CHUNK_WORKERS = 16  # CPU-bound, limited by disk I/O
-NUM_EMBED_WORKERS = 64  # I/O-bound, feeds Gemini API
+NUM_EMBED_WORKERS = 64  # I/O-bound, feeds embedding API
 NUM_UPSERT_WORKERS = 16  # I/O-bound, feeds Qdrant API
 
 # Queue size limits for backpressure between stages
@@ -567,9 +567,9 @@ class IndexingService:
 
         # Update state file
         async with self._state_lock:
-            if self._state is not None and files_removed > 0:
+            if self._state is not None:
                 if path == '**':
-                    # Clear entire state
+                    # Clear entire state (files_removed is 0 after collection drop)
                     self._state = DirectoryIndexState(
                         directory_path='',
                         files={},
@@ -577,7 +577,7 @@ class IndexingService:
                         total_files=0,
                         total_chunks=0,
                     )
-                else:
+                elif files_removed > 0:
                     # Remove matching entries from state (single pass)
                     new_files: dict[str, FileIndexState] = {}
                     removed_chunks = 0
@@ -928,9 +928,8 @@ class IndexingService:
 
 
 async def create_indexing_service(
+    config: EmbeddingConfig,
     *,
-    embedding_model: str,
-    embedding_dimensions: int,
     qdrant_url: str = 'http://localhost:6333',
     state_path: Path = DEFAULT_STATE_PATH,
 ) -> IndexingService:
@@ -939,22 +938,18 @@ async def create_indexing_service(
     Must be called from async context - ensures semaphores are bound correctly.
 
     Args:
-        embedding_model: Gemini embedding model name.
-        embedding_dimensions: Output vector dimensions.
+        config: Embedding configuration with provider selection.
         qdrant_url: URL of Qdrant server.
         state_path: Path to persist indexing state.
 
     Returns:
         Configured IndexingService.
     """
-    gemini_client = GeminiClient(
-        model=embedding_model,
-        output_dimensionality=embedding_dimensions,
-    )
+    embedding_client = create_embedding_client(config)
     qdrant_client = QdrantClient(url=qdrant_url)
 
     chunking_service = await ChunkingService.create()
-    embedding_service = EmbeddingService(gemini_client)
+    embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
     sparse_embedding_service = await SparseEmbeddingService.create()
     repository = DocumentVectorRepository(qdrant_client)
 

@@ -40,7 +40,7 @@ __all__ = [
 #   matches on word tokens (lexemes). Best for exact term matching, symbol lookup,
 #   and identifier search where you want precise matches without conceptual noise.
 #
-# - 'embedding': Dense vectors only (Gemini embeddings). Pure neural similarity search.
+# - 'embedding': Dense vectors only. Pure neural similarity search.
 #   Primarily useful for debugging or comparing search strategies. In practice,
 #   hybrid mode provides better results for most use cases.
 type SearchType = Literal['hybrid', 'lexical', 'embedding']
@@ -54,7 +54,7 @@ class VectorPoint(StrictModel):
     """
 
     id: UUID
-    # Dense vector for semantic similarity (Gemini embeddings)
+    # Dense vector for semantic similarity
     dense_vector: Sequence[float]
     # Sparse vector for keyword matching (BM25)
     sparse_indices: Sequence[int]

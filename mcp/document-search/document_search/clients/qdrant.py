@@ -122,12 +122,12 @@ class QdrantClient:
         """Create collection with hybrid search support if it doesn't exist.
 
         Creates a collection with:
-        - Dense vectors: Semantic embeddings (Gemini, 768 dimensions)
+        - Dense vectors: Semantic embeddings (e.g., 768 dimensions)
         - Sparse vectors: BM25 keyword embeddings (fastembed)
         - Keyword index on file_type for faceting
 
         Args:
-            vector_dimension: Size of dense embedding vectors (e.g., 768 for Gemini).
+            vector_dimension: Size of dense embedding vectors (e.g., 768).
         """
         collections = await self._client.get_collections()
         exists = any(c.name == self._collection_name for c in collections.collections)
@@ -223,7 +223,7 @@ class QdrantClient:
                 - 'hybrid': Dense + sparse with RRF fusion. Recommended for most queries.
                 - 'lexical': BM25 sparse only. Best for exact term/symbol matching.
                 - 'embedding': Dense only. Primarily for debugging/comparison.
-            dense_vector: Gemini embedding (required for hybrid/embedding).
+            dense_vector: Dense embedding (required for hybrid/embedding).
             sparse_indices: BM25 sparse indices (required for hybrid/lexical).
             sparse_values: BM25 sparse values (required for hybrid/lexical).
             limit: Maximum results.

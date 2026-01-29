@@ -10,20 +10,33 @@ Rate limiting via pyrate_limiter to respect API quotas.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import httpx
 import pyrate_limiter
 import tenacity
 from google import genai
-from google.genai.types import HttpOptions
+from google.genai.types import EmbedContentConfig, HttpOptions
 from local_lib import ConcurrencyTracker
 
 from document_search.clients import _retry
+from document_search.schemas.embeddings import TaskIntent
 
 __all__ = [
     'GeminiClient',
+]
+
+# Gemini-specific task types
+type GeminiTaskType = Literal[
+    'RETRIEVAL_DOCUMENT',
+    'RETRIEVAL_QUERY',
+    'SEMANTIC_SIMILARITY',
+    'CLASSIFICATION',
+    'CLUSTERING',
+    'QUESTION_ANSWERING',
+    'FACT_VERIFICATION',
 ]
 
 
@@ -91,7 +104,6 @@ class GeminiClient:
         # TPM limiter: 1M tokens per minute, smoothed over 10-second windows to prevent burst.
         # Max batch: 100 texts × 500 tokens (1500 char chunks) = 50K tokens.
         # 10-second window: 166K tokens = 3 max batches before blocking.
-        # Tokens estimated as chars / 2 (empirically validated against Google's counting).
         tokens_per_10sec = self.DEFAULT_TOKENS_PER_MINUTE // 6  # ~166,666
         self._tpm_limiter = pyrate_limiter.Limiter(
             pyrate_limiter.Rate(tokens_per_10sec, 10 * pyrate_limiter.Duration.SECOND),
@@ -112,6 +124,12 @@ class GeminiClient:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._tracker = ConcurrencyTracker('GEMINI')
 
+    # Gemini task type mapping from generic intent
+    INTENT_TO_GEMINI_TASK: Mapping[TaskIntent, GeminiTaskType] = {
+        'document': 'RETRIEVAL_DOCUMENT',
+        'query': 'RETRIEVAL_QUERY',
+    }
+
     @_retry.gemini_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_gemini_error),
@@ -123,7 +141,7 @@ class GeminiClient:
         self,
         texts: Sequence[str],
         *,
-        task_type: str = 'RETRIEVAL_DOCUMENT',
+        intent: TaskIntent,
     ) -> Sequence[Sequence[float]]:
         """Embed texts using Gemini API.
 
@@ -133,7 +151,7 @@ class GeminiClient:
 
         Args:
             texts: Texts to embed (max 100 per API call).
-            task_type: Embedding task type.
+            intent: 'document' for indexing, 'query' for search.
 
         Returns:
             List of embedding vectors.
@@ -148,13 +166,21 @@ class GeminiClient:
         await self._rpm_limiter.try_acquire_async('rpm', weight=len(texts))
         await self._tpm_limiter.try_acquire_async('tpm', weight=estimated_tokens)
 
+        # Translate intent to Gemini's task_type
+        gemini_task_type = self.INTENT_TO_GEMINI_TASK[intent]
+
         async with self._semaphore, self._tracker.track():
             result = await self._client.aio.models.embed_content(
                 model=self._model,
                 contents=list(texts),
-                config={'task_type': task_type, 'output_dimensionality': self._output_dimensionality},
+                config=EmbedContentConfig(
+                    task_type=gemini_task_type, output_dimensionality=self._output_dimensionality
+                ),
             )
             return [list(e.values) for e in result.embeddings]
+
+    async def close(self) -> None:
+        """No-op: google-genai Client manages its own HTTP lifecycle."""
 
 
 def _load_api_key() -> str:
