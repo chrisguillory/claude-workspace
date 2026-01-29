@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import pydantic
 from pydantic import Field, TypeAdapter
@@ -122,6 +122,8 @@ def create_config(
 def load_config() -> EmbeddingConfig | None:
     """Load config from file if it exists.
 
+    Automatically migrates legacy config formats to current schema.
+
     Returns:
         EmbeddingConfig if file exists and is valid, None otherwise.
 
@@ -133,7 +135,19 @@ def load_config() -> EmbeddingConfig | None:
 
     try:
         data = json.loads(CONFIG_PATH.read_text())
-        return _config_adapter.validate_python(data)
+
+        # Auto-migrate legacy format
+        original_data = data.copy()
+        data = _migrate_legacy_config(data)
+
+        config = _config_adapter.validate_python(data)
+
+        # Re-save if migrated
+        if data != original_data:
+            save_config(config)
+            logger.info(f'Migrated config saved to {CONFIG_PATH}')
+
+        return config
     except (json.JSONDecodeError, pydantic.ValidationError) as e:
         raise ValueError(f'Invalid config file at {CONFIG_PATH}: {e}') from e
 
@@ -149,3 +163,29 @@ def save_config(config: EmbeddingConfig) -> None:
         + '\n'
     )
     logger.info(f'Saved embedding config: model={config.embedding_model}, dimensions={config.embedding_dimensions}')
+
+
+def _migrate_legacy_config(data: dict[str, Any]) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type
+    """Migrate legacy config format to current schema.
+
+    Legacy format (pre-v0.4.1):
+        {"embedding_model": "...", "embedding_dimensions": 768, "requests_per_minute": 3000}
+
+    Current format:
+        {"provider": "gemini", "embedding_model": "...", "embedding_dimensions": 768,
+         "batch_size": 100, "requests_per_minute": 3000}
+    """
+    if 'provider' in data:
+        return data  # Already migrated
+
+    logger.info('Migrating legacy config format')
+
+    # Infer provider from existing fields
+    if 'requests_per_minute' in data:
+        data['provider'] = 'gemini'
+        data.setdefault('batch_size', 100)
+    else:
+        data['provider'] = 'openrouter'
+        data.setdefault('batch_size', 1000)
+
+    return data
