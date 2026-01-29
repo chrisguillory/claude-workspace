@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import sys
 import typing
 from collections.abc import AsyncIterator, Sequence
@@ -27,6 +28,8 @@ from local_lib.utils import DualLogger
 
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
+from document_search.dashboard.launcher import ensure_dashboard
+from document_search.dashboard.state import DashboardStateManager
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.schemas.chunking import FileType
 from document_search.schemas.config import (
@@ -550,15 +553,22 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     # Register tools with closure over state
     register_tools(state)
 
+    # Start dashboard and register this MCP server
+    dashboard_state_manager = DashboardStateManager()
+    dashboard_port = ensure_dashboard()
+    dashboard_state_manager.register_mcp_server(os.getpid())
+
     print('✓ Document Search MCP server initialized', file=sys.stderr)
     print(f'  Provider: {config.provider}', file=sys.stderr)
     print(f'  Model: {config.embedding_model} ({config.embedding_dimensions}d)', file=sys.stderr)
     print(f'  Qdrant: {state.qdrant_url}', file=sys.stderr)
+    print(f'  Dashboard: http://127.0.0.1:{dashboard_port}', file=sys.stderr)
 
     # Server is ready - yield control back to FastMCP
     yield
 
     # Cleanup resources
+    dashboard_state_manager.unregister_mcp_server(os.getpid())
     state.indexing_service.shutdown()
     await state.embedding_client.close()
     print('✓ Document Search MCP server shutdown', file=sys.stderr)
