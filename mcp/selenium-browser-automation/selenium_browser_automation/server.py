@@ -3501,8 +3501,19 @@ Workflow:
 
                     # Report if body unavailable from both sources
                     if body_source is None:
+                        method = req.get('method', 'GET')
+                        status = resp.get('status', 0)
                         url_preview = req.get('url', '')[:100]
-                        errors.append(f'Response body unavailable: {url_preview}')
+
+                        if method == 'OPTIONS':
+                            # CORS preflight - no body expected
+                            errors.append(f'[{method} {status}] CORS preflight: {url_preview}')
+                        elif status == 204:
+                            # HTTP 204 No Content - no body by definition
+                            errors.append(f'[{method} {status}] No Content: {url_preview}')
+                        else:
+                            # Unexpected - we wanted a body but couldn't get it
+                            errors.append(f'[{method} {status}] body unavailable: {url_preview}')
 
             har_entries.append(har_entry)
 
