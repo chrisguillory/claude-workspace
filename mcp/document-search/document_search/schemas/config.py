@@ -9,12 +9,15 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import pydantic
 from pydantic import Field, TypeAdapter
 
 from document_search.schemas.base import StrictModel
+
+if TYPE_CHECKING:
+    from document_search.schemas.vectors import EmbeddingInfo
 
 __all__ = [
     'CONFIG_PATH',
@@ -59,6 +62,18 @@ class GeminiConfig(StrictModel):
             requests_per_minute=3000,
         )
 
+    def to_info(self) -> EmbeddingInfo:
+        """Convert to display schema."""
+        from document_search.schemas.vectors import EmbeddingInfo
+
+        return EmbeddingInfo(
+            provider=self.provider,
+            model=self.embedding_model,
+            dimensions=self.embedding_dimensions,
+            batch_size=self.batch_size,
+            requests_per_minute=self.requests_per_minute,
+        )
+
 
 class OpenRouterConfig(StrictModel):
     """OpenRouter embedding configuration.
@@ -78,6 +93,18 @@ class OpenRouterConfig(StrictModel):
             embedding_model='qwen/qwen3-embedding-8b',
             embedding_dimensions=768,
             batch_size=1000,
+        )
+
+    def to_info(self) -> EmbeddingInfo:
+        """Convert to display schema."""
+        from document_search.schemas.vectors import EmbeddingInfo
+
+        return EmbeddingInfo(
+            provider=self.provider,
+            model=self.embedding_model,
+            dimensions=self.embedding_dimensions,
+            batch_size=self.batch_size,
+            requests_per_minute=None,  # Not applicable
         )
 
 

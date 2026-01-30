@@ -11,22 +11,26 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import pydantic
+from local_lib.types import JsonDatetime
 
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import Chunk, FileType
+from document_search.schemas.config import EmbeddingProvider
 
 __all__ = [
     'ClearResult',
-    'CollectionInfo',
+    'CollectionMetadata',
+    'ContentStats',
+    'EmbeddingInfo',
     'FileIndexReason',
     'FileIndexStatus',
-    'IndexBreakdown',
     'IndexedFile',
     'IndexInfo',
     'SearchHit',
     'SearchQuery',
     'SearchResult',
     'SearchType',
+    'StorageStats',
     'VectorPoint',
 ]
 
@@ -137,10 +141,32 @@ class SearchResult(StrictModel):
     total: int
 
 
-class CollectionInfo(StrictModel):
-    """Qdrant collection metadata."""
+class CollectionMetadata(StrictModel):
+    """Collection metadata from registry."""
 
     name: str
+    description: str | None
+    created_at: JsonDatetime
+    provider: EmbeddingProvider
+
+
+class EmbeddingInfo(StrictModel):
+    """Embedding configuration for the collection's provider.
+
+    Flattens provider-specific config into a single schema for display.
+    Provider-specific fields are None when not applicable.
+    """
+
+    provider: EmbeddingProvider
+    model: str
+    dimensions: int
+    batch_size: int
+    requests_per_minute: int | None = None  # Gemini only
+
+
+class StorageStats(StrictModel):
+    """Qdrant storage statistics."""
+
     vector_dimension: int
     points_count: int
     status: str
@@ -149,8 +175,8 @@ class CollectionInfo(StrictModel):
 # Visibility schemas for index introspection
 
 
-class IndexBreakdown(StrictModel):
-    """Overview of what's in the document index."""
+class ContentStats(StrictModel):
+    """Content breakdown statistics."""
 
     total_chunks: int
     by_file_type: Mapping[str, int]
@@ -179,14 +205,16 @@ class IndexedFile(StrictModel):
 
 
 class IndexInfo(StrictModel):
-    """Combined index information with infrastructure and content stats.
+    """Comprehensive collection information.
 
-    Infrastructure stats are always global (collection-level).
+    Combines collection metadata, embedding config, storage stats, and content breakdown.
     Content stats can be scoped by path.
     """
 
-    infrastructure: CollectionInfo
-    content: IndexBreakdown
+    collection: CollectionMetadata
+    embedding: EmbeddingInfo
+    storage: StorageStats
+    content: ContentStats
     path: str | None = None  # Scope used for content stats (None = CWD)
 
 

@@ -30,20 +30,19 @@ from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
 from document_search.dashboard.launcher import ensure_dashboard
 from document_search.dashboard.state import DashboardStateManager
+from document_search.repositories.collection_registry import CollectionRegistryManager
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.schemas.chunking import FileType
+from document_search.schemas.collections import Collection
 from document_search.schemas.config import (
-    EmbeddingConfig,
     EmbeddingProvider,
-    create_config,
     default_config,
-    load_config,
-    save_config,
 )
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import IndexingProgress, IndexingResult
 from document_search.schemas.vectors import (
     ClearResult,
+    CollectionMetadata,
     IndexedFile,
     IndexInfo,
     SearchQuery,
@@ -63,73 +62,103 @@ __all__ = [
 
 @dataclass
 class ServerState:
-    """Container for all server state - initialized once at startup."""
+    """Container for all server state - initialized once at startup.
 
-    config: EmbeddingConfig
-    embedding_client: EmbeddingClient
-    indexing_service: IndexingService
-    embedding_service: EmbeddingService
+    Shared services are created once. Collection-specific services (embedding clients,
+    repositories, indexing services) are created on-demand and cached.
+    """
+
+    # Shared infrastructure
+    qdrant_client: QdrantClient
+    collection_registry: CollectionRegistryManager
+
+    # Shared services (collection-agnostic)
+    chunking_service: ChunkingService
     sparse_embedding_service: SparseEmbeddingService
     reranker_service: RerankerService
-    repository: DocumentVectorRepository
-    qdrant_url: str
+
+    # Cached per-provider embedding clients (shared to respect rate limits)
+    _embedding_clients: dict[EmbeddingProvider, EmbeddingClient]
+
+    # Cached per-collection repositories
+    _repositories: dict[str, DocumentVectorRepository]
 
     @classmethod
     async def create(
         cls,
-        config: EmbeddingConfig,
         qdrant_url: str = 'http://localhost:6333',
     ) -> typing.Self:
-        """Async factory method to create server state with all services wired.
+        """Async factory method to create server state with shared services.
 
         Must be called from async context to ensure semaphores are bound correctly.
         """
-        embedding_client = create_embedding_client(config)
         qdrant_client = QdrantClient(url=qdrant_url)
+        collection_registry = CollectionRegistryManager()
 
+        # Create shared services (expensive model loading happens here)
         chunking_service = await ChunkingService.create()
-        embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
         sparse_embedding_service = await SparseEmbeddingService.create()
         reranker_service = RerankerService()
-        repository = DocumentVectorRepository(qdrant_client)
-
-        indexing_service = await IndexingService.create(
-            chunking_service=chunking_service,
-            embedding_service=embedding_service,
-            sparse_embedding_service=sparse_embedding_service,
-            repository=repository,
-        )
 
         return cls(
-            config=config,
-            embedding_client=embedding_client,
-            indexing_service=indexing_service,
-            embedding_service=embedding_service,
+            qdrant_client=qdrant_client,
+            collection_registry=collection_registry,
+            chunking_service=chunking_service,
             sparse_embedding_service=sparse_embedding_service,
             reranker_service=reranker_service,
-            repository=repository,
-            qdrant_url=qdrant_url,
+            _embedding_clients={},
+            _repositories={},
         )
 
-    async def update_embedding_config(self, new_config: EmbeddingConfig) -> None:
-        """Update embedding config and recreate dependent services.
+    def get_embedding_client(self, provider: EmbeddingProvider) -> EmbeddingClient:
+        """Get or create embedding client for a provider.
 
-        Called after clear_documents with new config params.
-        Closes the old embedding client if it supports cleanup.
+        Clients are cached per provider to share rate limiting and semaphores.
         """
-        # Close old client (no-op for Gemini, releases httpx pool for OpenRouter)
-        await self.embedding_client.close()
+        if provider not in self._embedding_clients:
+            config = default_config(provider)
+            self._embedding_clients[provider] = create_embedding_client(config)
+        return self._embedding_clients[provider]
 
-        # Create new client and service with new config
-        embedding_client = create_embedding_client(new_config)
-        new_embedding_service = EmbeddingService(embedding_client, batch_size=new_config.batch_size)
+    def get_repository(self, collection_name: str) -> DocumentVectorRepository:
+        """Get or create repository for a collection.
 
-        # Update references
-        self.config = new_config
-        self.embedding_client = embedding_client
-        self.embedding_service = new_embedding_service
-        # Update internal reference in indexing service
-        self.indexing_service._embedding = new_embedding_service  # noqa: SLF001
+        Repositories are cached per collection to share batch loaders.
+        """
+        if collection_name not in self._repositories:
+            self._repositories[collection_name] = DocumentVectorRepository(self.qdrant_client, collection_name)
+        return self._repositories[collection_name]
+
+    def get_collection(self, collection_name: str) -> Collection:
+        """Get collection from registry. Raises if not found."""
+        collection = self.collection_registry.get(collection_name)
+        if collection is None:
+            raise ValueError(f"Collection '{collection_name}' not found. Use create_collection first.")
+        return collection
+
+    async def get_indexing_service(self, collection_name: str) -> IndexingService:
+        """Create indexing service for a collection.
+
+        Uses cached embedding client and repository, but creates fresh
+        IndexingService instance (lightweight).
+        """
+        collection = self.get_collection(collection_name)
+        embedding_client = self.get_embedding_client(collection.provider)
+        config = default_config(collection.provider)
+        embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
+        repository = self.get_repository(collection_name)
+
+        return await IndexingService.create(
+            chunking_service=self.chunking_service,
+            embedding_service=embedding_service,
+            sparse_embedding_service=self.sparse_embedding_service,
+            repository=repository,
+        )
+
+    async def close(self) -> None:
+        """Close all cached embedding clients."""
+        for client in self._embedding_clients.values():
+            await client.close()
 
 
 def register_tools(state: ServerState) -> None:
@@ -145,6 +174,7 @@ def register_tools(state: ServerState) -> None:
         ),
     )
     async def index_documents(
+        collection_name: str,
         path: str | None = None,
         full_reindex: bool = False,
         respect_gitignore: bool | None = None,
@@ -156,6 +186,7 @@ def register_tools(state: ServerState) -> None:
         since the last indexing run. Supports markdown, text, JSON, and PDF files.
 
         Args:
+            collection_name: Name of the collection to index into.
             path: Path to file or directory to index. Defaults to current working
                 directory if not specified. Supports absolute, relative, or ~ expansion.
                 Note: "**" is not supported (indexing requires a specific path).
@@ -165,7 +196,6 @@ def register_tools(state: ServerState) -> None:
                 - None (default): Auto-detect git repos, respect gitignore if found.
                 - True: Strictly respect gitignore, fail if not a git repo.
                 - False: Ignore gitignore, index all supported files.
-            ctx: MCP context for logging.
 
         Returns:
             IndexingResult with counts of files processed, chunks created, and any errors.
@@ -179,16 +209,27 @@ def register_tools(state: ServerState) -> None:
 
         logger = DualLogger(ctx)
 
+        # Get collection and indexing service
+        collection = state.get_collection(collection_name)
+        indexing_service = await state.get_indexing_service(collection_name)
+
+        await logger.info(f'Using collection: {collection_name} ({collection.provider})')
+
         # Default to current working directory
         if path is None:
             resolved_path = Path.cwd()
         else:
             resolved_path = Path(path).expanduser().resolve()
 
+        # Ensure Qdrant collection exists with correct dimensions
+        config = default_config(collection.provider)
+        repository = state.get_repository(collection_name)
+        await repository.ensure_collection(config.embedding_dimensions)
+
         # Auto-detect file vs directory
         if resolved_path.is_file():
             await logger.info(f'Indexing file: {resolved_path}')
-            result = await state.indexing_service.index_file(resolved_path)
+            result = await indexing_service.index_file(resolved_path)
             await logger.info(f'Indexed: {result.chunks_created} chunks')
             return result
 
@@ -216,7 +257,7 @@ def register_tools(state: ServerState) -> None:
             except RuntimeError:
                 pass  # No running loop, skip logging
 
-        result = await state.indexing_service.index_directory(
+        result = await indexing_service.index_directory(
             resolved_path,
             full_reindex=full_reindex,
             respect_gitignore=respect_gitignore,
@@ -242,6 +283,7 @@ def register_tools(state: ServerState) -> None:
     )
     async def search_documents(
         query: str,
+        collection_name: str,
         path: str | None = None,
         limit: int = 10,
         search_type: SearchType = 'hybrid',
@@ -252,8 +294,9 @@ def register_tools(state: ServerState) -> None:
 
         Args:
             query: Natural language search query.
+            collection_name: Name of the collection to search.
             path: Filter to files under this path. Defaults to CWD.
-                Use "**" to search entire index.
+                Use "**" to search entire collection.
             limit: Maximum number of results to return (1-100).
             search_type: Search strategy:
                 - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
@@ -263,7 +306,6 @@ def register_tools(state: ServerState) -> None:
                 - 'embedding': Dense vector similarity only. Useful for
                   conceptual/semantic queries or debugging.
             file_types: Filter by file types (e.g., ['markdown', 'pdf']).
-            ctx: MCP context for logging.
 
         Returns:
             SearchResult with ranked hits including text snippets and metadata.
@@ -272,17 +314,25 @@ def register_tools(state: ServerState) -> None:
             raise ValueError('MCP context required')
 
         logger = DualLogger(ctx)
+
+        # Get collection and services
+        collection = state.get_collection(collection_name)
+        embedding_client = state.get_embedding_client(collection.provider)
+        config = default_config(collection.provider)
+        embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
+        repository = state.get_repository(collection_name)
+
         await logger.info(
-            f'Searching ({search_type}): "{query[:50]}..."'
+            f'Searching {collection_name} ({search_type}): "{query[:50]}..."'
             if len(query) > 50
-            else f'Searching ({search_type}): "{query}"'
+            else f'Searching {collection_name} ({search_type}): "{query}"'
         )
 
         # Compute embeddings based on search type
         if search_type == 'hybrid':
             # Both dense and sparse embeddings
             embed_request = EmbedRequest(text=query, intent='query')
-            embed_response = await state.embedding_service.embed(embed_request)
+            embed_response = await embedding_service.embed(embed_request)
             dense_vector: Sequence[float] | None = embed_response.values
             sparse_indices, sparse_values = await state.sparse_embedding_service.embed(query)
         elif search_type == 'lexical':
@@ -292,7 +342,7 @@ def register_tools(state: ServerState) -> None:
         elif search_type == 'embedding':
             # Dense only (semantic similarity)
             embed_request = EmbedRequest(text=query, intent='query')
-            embed_response = await state.embedding_service.embed(embed_request)
+            embed_response = await embedding_service.embed(embed_request)
             dense_vector = embed_response.values
             sparse_indices = None
             sparse_values = None
@@ -323,7 +373,7 @@ def register_tools(state: ServerState) -> None:
         )
 
         # Layer 1: Search with specified strategy
-        result = await state.repository.search(search_query)
+        result = await repository.search(search_query)
 
         # Layer 2: Cross-encoder reranking
         result = await state.reranker_service.rerank(
@@ -346,30 +396,18 @@ def register_tools(state: ServerState) -> None:
         ),
     )
     async def clear_documents(
+        collection_name: str,
         path: str | None = None,
-        provider: EmbeddingProvider | None = None,
-        embedding_model: str | None = None,
-        embedding_dimensions: int | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
-        """Remove documents from the index.
+        """Remove documents from a collection's index.
 
         Does not delete files from disk - only removes them from the search index.
 
-        When clearing the entire index (path='**'), you can optionally switch
-        embedding providers or customize model/dimensions.
-
         Args:
+            collection_name: Name of the collection to clear documents from.
             path: Path to clear. Defaults to CWD if not specified.
-                Use "**" to clear entire index.
-            provider: Switch to this embedding provider ('gemini' or 'openrouter').
-                Uses provider defaults for batch_size and rate limiting.
-                Only allowed with path='**'.
-            embedding_model: Override the model name (uses provider default if None).
-                Only allowed with path='**'.
-            embedding_dimensions: Override dimensions (uses provider default if None).
-                Only allowed with path='**'.
-            ctx: MCP context for logging.
+                Use "**" to clear entire collection.
 
         Returns:
             ClearResult with counts of files and chunks removed.
@@ -379,14 +417,16 @@ def register_tools(state: ServerState) -> None:
 
         logger = DualLogger(ctx)
 
-        # Config params only allowed with full clear
-        if (provider or embedding_model or embedding_dimensions) and path != '**':
-            raise ValueError("provider, embedding_model, and embedding_dimensions require path='**'")
+        # Verify collection exists
+        collection = state.get_collection(collection_name)
+        indexing_service = await state.get_indexing_service(collection_name)
+
+        await logger.info(f'Clearing from collection: {collection_name} ({collection.provider})')
 
         # Resolve path (defaults to CWD)
         if path == '**':
             resolved_path = '**'
-            await logger.info('Clearing entire index')
+            await logger.info('Clearing entire collection')
         elif path:
             resolved_path = str(Path(path).expanduser().resolve())
             await logger.info(f'Clearing documents: {resolved_path}')
@@ -394,18 +434,7 @@ def register_tools(state: ServerState) -> None:
             resolved_path = str(Path.cwd())
             await logger.info(f'Clearing documents under: {resolved_path}')
 
-        result = await state.indexing_service.clear_documents(resolved_path)
-
-        # Full clear: update config if provider/model/dimensions changed
-        if path == '**' and (provider or embedding_model or embedding_dimensions):
-            target_provider = provider or state.config.provider
-            new_config = create_config(target_provider, embedding_model, embedding_dimensions)
-            save_config(new_config)
-            await state.update_embedding_config(new_config)
-            await logger.info(
-                f'Updated config: {new_config.provider} / {new_config.embedding_model} '
-                f'({new_config.embedding_dimensions}d)'
-            )
+        result = await indexing_service.clear_documents(resolved_path)
 
         await logger.info(f'Cleared: {result.files_removed} files, {result.chunks_removed} chunks')
 
@@ -421,6 +450,7 @@ def register_tools(state: ServerState) -> None:
         ),
     )
     async def list_documents(
+        collection_name: str,
         path: str | None = None,
         file_type: str | None = None,
         limit: int = 50,
@@ -432,11 +462,11 @@ def register_tools(state: ServerState) -> None:
         indexed content or checking if specific files are indexed.
 
         Args:
+            collection_name: Name of the collection to list documents from.
             path: Filter to files under this path. Defaults to CWD.
-                Use "**" to search entire index.
+                Use "**" to list entire collection.
             file_type: Filter to this file type (e.g., 'markdown', 'pdf').
             limit: Maximum number of files to return (default 50).
-            ctx: MCP context for logging.
 
         Returns:
             List of IndexedFile with path, chunk_count, and file_type.
@@ -446,6 +476,12 @@ def register_tools(state: ServerState) -> None:
 
         logger = DualLogger(ctx)
 
+        # Verify collection exists and get repository
+        state.get_collection(collection_name)
+        repository = state.get_repository(collection_name)
+
+        await logger.info(f'Listing documents in collection: {collection_name}')
+
         # Resolve path (defaults to CWD, "**" for global)
         if path == '**':
             resolved_path = None
@@ -454,7 +490,7 @@ def register_tools(state: ServerState) -> None:
         else:
             resolved_path = str(Path(path).expanduser().resolve())
 
-        files = await state.repository.list_indexed_files(
+        files = await repository.list_indexed_files(
             path_prefix=resolved_path,
             file_type=file_type,
             limit=limit,
@@ -474,51 +510,191 @@ def register_tools(state: ServerState) -> None:
         ),
     )
     async def get_info(
+        collection_name: str,
         path: str | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexInfo:
-        """Get index health and statistics.
+        """Get comprehensive collection information.
 
-        Returns infrastructure stats (always global) and content breakdown
-        (optionally scoped by path).
+        Returns collection metadata, storage stats, and content breakdown.
 
         Args:
+            collection_name: Name of the collection to get info for.
             path: Scope content stats to files under this path. Defaults to CWD.
-                Use "**" for global stats across entire index.
-            ctx: MCP context for logging.
+                Use "**" for global stats across entire collection.
 
         Returns:
-            IndexInfo with infrastructure and content sections.
+            IndexInfo with collection metadata, storage stats, and content breakdown.
         """
         if ctx is None:
             raise ValueError('MCP context required')
 
         logger = DualLogger(ctx)
 
+        # Get collection metadata from registry
+        collection = state.get_collection(collection_name)
+        repository = state.get_repository(collection_name)
+
+        await logger.info(f'Getting info for collection: {collection_name}')
+
         # Resolve path (defaults to CWD, "**" for global)
         if path == '**':
-            resolved_path = '**'
-            await logger.info('Getting global index info')
+            resolved_path: str | None = '**'
+            await logger.info('Getting global collection info')
         elif path is None:
             resolved_path = str(Path.cwd())
-            await logger.info(f'Getting index info for: {resolved_path}')
+            await logger.info(f'Getting info for: {resolved_path}')
         else:
             resolved_path = str(Path(path).expanduser().resolve())
-            await logger.info(f'Getting index info for: {resolved_path}')
+            await logger.info(f'Getting info for: {resolved_path}')
 
-        try:
-            info = await state.repository.get_index_info(resolved_path)
-        except ValueError as e:
-            await logger.warning(str(e))
-            raise
+        # Get provider config and embedding info
+        config = default_config(collection.provider)
+        embedding_info = config.to_info()
+
+        # Get storage stats from Qdrant
+        storage = await repository.get_storage_stats()
+        if storage is None:
+            raise ValueError('Collection not initialized in Qdrant - run index_documents first')
+
+        # Get content stats (scoped by path)
+        content = await repository.get_content_stats(resolved_path)
+
+        # Build comprehensive response
+        info = IndexInfo(
+            collection=CollectionMetadata(
+                name=collection.name,
+                description=collection.description,
+                created_at=collection.created_at,
+                provider=collection.provider,
+            ),
+            embedding=embedding_info,
+            storage=storage,
+            content=content,
+            path=resolved_path,
+        )
 
         await logger.info(
-            f'Index: {info.content.total_chunks} chunks, '
-            f'{info.content.unique_files} files, '
-            f'status={info.infrastructure.status}'
+            f'Collection: {content.total_chunks} chunks, {content.unique_files} files, status={storage.status}'
         )
 
         return info
+
+    # Collection management tools
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Create Collection',
+            destructiveHint=False,
+            idempotentHint=False,
+            readOnlyHint=False,
+            openWorldHint=False,
+        ),
+    )
+    async def create_collection(
+        name: str,
+        description: str | None,
+        provider: EmbeddingProvider,
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
+    ) -> Collection:
+        """Create a new document collection.
+
+        Each collection uses a specific embedding provider and stores documents
+        in a separate Qdrant collection.
+
+        Args:
+            name: Unique name for the collection (e.g., 'frontend-docs', 'api-specs').
+            description: Optional description of the collection's purpose.
+            provider: Embedding provider to use ('gemini' or 'openrouter').
+
+        Returns:
+            The created Collection with name, provider, and creation timestamp.
+        """
+        if ctx is None:
+            raise ValueError('MCP context required')
+
+        logger = DualLogger(ctx)
+
+        # Validate name
+        if name == '**':
+            raise ValueError("Collection name '**' is reserved")
+
+        collection = state.collection_registry.create_collection(
+            name=name,
+            provider=provider,
+            description=description,
+        )
+
+        await logger.info(f'Created collection: {name} (provider: {provider})')
+
+        return collection
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='List Collections',
+            destructiveHint=False,
+            idempotentHint=True,
+            readOnlyHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def list_collections(
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
+    ) -> Sequence[Collection]:
+        """List all document collections.
+
+        Returns:
+            List of all collections with their names, providers, and descriptions.
+        """
+        if ctx is None:
+            raise ValueError('MCP context required')
+
+        collections = state.collection_registry.list_collections()
+
+        return collections
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Delete Collection',
+            destructiveHint=True,
+            idempotentHint=True,
+            readOnlyHint=False,
+            openWorldHint=False,
+        ),
+    )
+    async def delete_collection(
+        name: str,
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
+    ) -> bool:
+        """Delete a document collection.
+
+        Removes both the collection metadata and all indexed documents in Qdrant.
+
+        Args:
+            name: Name of the collection to delete.
+
+        Returns:
+            True if deleted successfully.
+        """
+        if ctx is None:
+            raise ValueError('MCP context required')
+
+        logger = DualLogger(ctx)
+
+        # Verify collection exists and delete from Qdrant
+        state.get_collection(name)
+        await state.qdrant_client.delete_collection(name)
+
+        # Remove from registry
+        state.collection_registry.delete_collection(name)
+
+        # Clear from cache
+        if name in state._repositories:
+            del state._repositories[name]
+
+        await logger.info(f'Deleted collection: {name}')
+
+        return True
 
 
 @contextlib.asynccontextmanager
@@ -537,18 +713,11 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     logging.getLogger('httpcore').setLevel(logging.WARNING)
     logging.getLogger('google').setLevel(logging.WARNING)
 
-    # Load or create embedding config
-    config = load_config()
-    if config is None:
-        config = default_config()
-        save_config(config)
-        print(f'✓ Created embedding config: {config.embedding_model}', file=sys.stderr)
+    # Initialize state with shared services (async for semaphore binding)
+    state = await ServerState.create()
 
-    # Initialize state with all services (async for semaphore binding)
-    state = await ServerState.create(config)
-
-    # Ensure Qdrant collection exists
-    await state.repository.ensure_collection(config.embedding_dimensions)
+    # Migrate legacy collection if needed
+    await _migrate_legacy_collection(state)
 
     # Register tools with closure over state
     register_tools(state)
@@ -558,10 +727,12 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     dashboard_port = ensure_dashboard()
     dashboard_state_manager.register_mcp_server(os.getpid())
 
+    # List existing collections
+    collections = state.collection_registry.list_collections()
+    collection_names = [c.name for c in collections]
+
     print('✓ Document Search MCP server initialized', file=sys.stderr)
-    print(f'  Provider: {config.provider}', file=sys.stderr)
-    print(f'  Model: {config.embedding_model} ({config.embedding_dimensions}d)', file=sys.stderr)
-    print(f'  Qdrant: {state.qdrant_url}', file=sys.stderr)
+    print(f'  Collections: {collection_names if collection_names else "(none)"}', file=sys.stderr)
     print(f'  Dashboard: http://127.0.0.1:{dashboard_port}', file=sys.stderr)
 
     # Server is ready - yield control back to FastMCP
@@ -569,18 +740,38 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
 
     # Cleanup resources
     dashboard_state_manager.unregister_mcp_server(os.getpid())
-    state.indexing_service.shutdown()
-    await state.embedding_client.close()
+    await state.close()
     print('✓ Document Search MCP server shutdown', file=sys.stderr)
 
 
-# Create FastMCP server with lifespan
 server = mcp.server.fastmcp.FastMCP('document-search', lifespan=lifespan)
 
 
+# Create FastMCP server with lifespan
 def main() -> None:
     """Entry point for the MCP server."""
     server.run()
+
+
+async def _migrate_legacy_collection(state: ServerState) -> None:
+    """Migrate legacy 'document_chunks' collection to the registry if needed.
+
+    For backwards compatibility: if the registry is empty but Qdrant has the
+    old default collection, create a registry entry for it.
+    """
+    collections = state.collection_registry.list_collections()
+    if collections:
+        return  # Registry not empty, no migration needed
+
+    if not await state.qdrant_client.collection_exists('document_chunks'):
+        return  # No legacy collection to migrate
+
+    state.collection_registry.create_collection(
+        name='document_chunks',
+        provider='gemini',
+        description='Migrated from legacy single-collection setup',
+    )
+    print('  Migrated legacy collection: document_chunks (gemini)', file=sys.stderr)
 
 
 if __name__ == '__main__':

@@ -147,15 +147,14 @@ class IndexingService:
 
     async def get_index_stats(self) -> Mapping[str, int | str]:
         """Get current index statistics."""
-        info = await self._repo.get_collection_info()
-        if info is None:
+        stats = await self._repo.get_storage_stats()
+        if stats is None:
             return {'status': 'not_initialized'}
 
         return {
-            'status': info.status,
-            'collection': info.name,
-            'vector_dimension': info.vector_dimension,
-            'points_count': info.points_count,
+            'status': stats.status,
+            'vector_dimension': stats.vector_dimension,
+            'points_count': stats.points_count,
         }
 
     async def index_file(self, file_path: Path) -> IndexingResult:
@@ -929,6 +928,7 @@ class IndexingService:
 
 async def create_indexing_service(
     config: EmbeddingConfig,
+    collection_name: str,
     *,
     qdrant_url: str = 'http://localhost:6333',
     state_path: Path = DEFAULT_STATE_PATH,
@@ -939,6 +939,7 @@ async def create_indexing_service(
 
     Args:
         config: Embedding configuration with provider selection.
+        collection_name: Name of the collection to operate on.
         qdrant_url: URL of Qdrant server.
         state_path: Path to persist indexing state.
 
@@ -951,7 +952,7 @@ async def create_indexing_service(
     chunking_service = await ChunkingService.create()
     embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
     sparse_embedding_service = await SparseEmbeddingService.create()
-    repository = DocumentVectorRepository(qdrant_client)
+    repository = DocumentVectorRepository(qdrant_client, collection_name)
 
     return await IndexingService.create(
         chunking_service=chunking_service,

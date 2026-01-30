@@ -39,7 +39,6 @@ from document_search.schemas.indexing import (
     ProgressCallback,
 )
 from document_search.schemas.vectors import (
-    CollectionInfo,
     SearchHit,
     SearchQuery,
     SearchResult,
@@ -72,7 +71,6 @@ __all__ = [
     'EmbedResponse',
     'EmbedBatchResponse',
     # Vectors
-    'CollectionInfo',
     'SearchHit',
     'SearchQuery',
     'SearchResult',
