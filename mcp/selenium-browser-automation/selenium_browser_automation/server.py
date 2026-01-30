@@ -575,6 +575,34 @@ async def _setup_pending_profile_state(
     service.state.restored_origins.clear()
 
 
+async def _install_response_body_capture_if_needed(
+    driver: webdriver.Chrome,
+    service: BrowserService,
+    enable_har_capture: bool,
+    log_prefix: str,
+) -> None:
+    """Install JS interceptor for HAR response body capture if not already installed.
+
+    The interceptor patches fetch() and XMLHttpRequest to capture response bodies
+    in real-time, before Chrome garbage collects them. This enables export_har()
+    to retrieve bodies for API calls that JavaScript consumes immediately.
+
+    Args:
+        driver: WebDriver instance to install script on.
+        service: BrowserService to track installation state.
+        enable_har_capture: Whether HAR capture was requested.
+        log_prefix: Function name for log messages (e.g., 'navigate').
+    """
+    if enable_har_capture and not service.state.response_body_capture_enabled:
+        await asyncio.to_thread(
+            driver.execute_cdp_cmd,
+            'Page.addScriptToEvaluateOnNewDocument',
+            {'source': RESPONSE_BODY_CAPTURE_SCRIPT},
+        )
+        service.state.response_body_capture_enabled = True
+        print(f'[{log_prefix}] Response body capture interceptor installed', file=sys.stderr)
+
+
 class OriginTracker:
     """Tracks origins visited during browser session for multi-origin storage capture.
 
@@ -928,14 +956,7 @@ def register_tools(service: BrowserService) -> None:
 
         # Install response body capture interceptor for HAR export
         # Must run BEFORE first navigation to capture all fetch/XHR responses
-        if enable_har_capture and not service.state.response_body_capture_enabled:
-            await asyncio.to_thread(
-                driver.execute_cdp_cmd,
-                'Page.addScriptToEvaluateOnNewDocument',
-                {'source': RESPONSE_BODY_CAPTURE_SCRIPT},
-            )
-            service.state.response_body_capture_enabled = True
-            print('[navigate] Response body capture interceptor installed', file=sys.stderr)
+        await _install_response_body_capture_if_needed(driver, service, enable_har_capture, 'navigate')
 
         # PRE-ACTION: Capture localStorage before navigating away
         # (CDP can't query departed origins - frame is gone after navigation)
@@ -1197,17 +1218,9 @@ def register_tools(service: BrowserService) -> None:
 
         # Install response body capture interceptor for HAR export
         # Must run BEFORE first navigation to capture all fetch/XHR responses
-        if enable_har_capture and not service.state.response_body_capture_enabled:
-            await asyncio.to_thread(
-                driver.execute_cdp_cmd,
-                'Page.addScriptToEvaluateOnNewDocument',
-                {'source': RESPONSE_BODY_CAPTURE_SCRIPT},
-            )
-            service.state.response_body_capture_enabled = True
-            print(
-                '[navigate_with_profile_state] Response body capture interceptor installed',
-                file=sys.stderr,
-            )
+        await _install_response_body_capture_if_needed(
+            driver, service, enable_har_capture, 'navigate_with_profile_state'
+        )
 
         # Inject cookies via CDP BEFORE navigation
         cookies_injected = await _inject_cookies_via_cdp(driver, profile_state.cookies)
@@ -3484,7 +3497,7 @@ Workflow:
                                 har_entry['response']['content']['encoding'] = 'base64'
                             body_source = 'interceptor'
                             if intercepted.get('truncated'):
-                                errors.append(f'Response truncated at 50MB: {req.get("url", "")[:80]}')
+                                errors.append(f'Response truncated at 10MB: {req.get("url", "")[:80]}')
 
                     # Report if body unavailable from both sources
                     if body_source is None:
