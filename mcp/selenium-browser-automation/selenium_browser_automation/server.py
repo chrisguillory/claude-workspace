@@ -95,6 +95,7 @@ from .scripts import (
     NETWORK_MONITOR_CHECK_SCRIPT,
     NETWORK_MONITOR_SETUP_SCRIPT,
     RESOURCE_TIMING_SCRIPT,
+    RESPONSE_BODY_CAPTURE_SCRIPT,
     TEXT_EXTRACTION_SCRIPT,
     VISUAL_TREE_SCRIPT,
     WEB_VITALS_SCRIPT,
@@ -574,6 +575,34 @@ async def _setup_pending_profile_state(
     service.state.restored_origins.clear()
 
 
+async def _install_response_body_capture_if_needed(
+    driver: webdriver.Chrome,
+    service: BrowserService,
+    enable_har_capture: bool,
+    log_prefix: str,
+) -> None:
+    """Install JS interceptor for HAR response body capture if not already installed.
+
+    The interceptor patches fetch() and XMLHttpRequest to capture response bodies
+    in real-time, before Chrome garbage collects them. This enables export_har()
+    to retrieve bodies for API calls that JavaScript consumes immediately.
+
+    Args:
+        driver: WebDriver instance to install script on.
+        service: BrowserService to track installation state.
+        enable_har_capture: Whether HAR capture was requested.
+        log_prefix: Function name for log messages (e.g., 'navigate').
+    """
+    if enable_har_capture and not service.state.response_body_capture_enabled:
+        await asyncio.to_thread(
+            driver.execute_cdp_cmd,
+            'Page.addScriptToEvaluateOnNewDocument',
+            {'source': RESPONSE_BODY_CAPTURE_SCRIPT},
+        )
+        service.state.response_body_capture_enabled = True
+        print(f'[{log_prefix}] Response body capture interceptor installed', file=sys.stderr)
+
+
 class OriginTracker:
     """Tracks origins visited during browser session for multi-origin storage capture.
 
@@ -683,6 +712,8 @@ class BrowserState:
         # Lazy restore: pending profile state and tracking of already-restored origins
         self.pending_profile_state: ProfileState | None = None
         self.restored_origins: set[str] = set()
+        # Response body capture: True when JS interceptor is installed for HAR export
+        self.response_body_capture_enabled: bool = False
 
 
 class LoggerProtocol(typing.Protocol):
@@ -713,6 +744,8 @@ class BrowserService:
         # Clear lazy restore state - new browser = fresh session
         self.state.pending_profile_state = None
         self.state.restored_origins.clear()
+        # Reset response body capture state - new browser needs interceptor reinstalled
+        self.state.response_body_capture_enabled = False
 
     async def get_browser(
         self,
@@ -920,6 +953,10 @@ def register_tools(service: BrowserService) -> None:
                     'Page.addScriptToEvaluateOnNewDocument',
                     {'source': script},
                 )
+
+        # Install response body capture interceptor for HAR export
+        # Must run BEFORE first navigation to capture all fetch/XHR responses
+        await _install_response_body_capture_if_needed(driver, service, enable_har_capture, 'navigate')
 
         # PRE-ACTION: Capture localStorage before navigating away
         # (CDP can't query departed origins - frame is gone after navigation)
@@ -1178,6 +1215,12 @@ def register_tools(service: BrowserService) -> None:
                     'Page.addScriptToEvaluateOnNewDocument',
                     {'source': script},
                 )
+
+        # Install response body capture interceptor for HAR export
+        # Must run BEFORE first navigation to capture all fetch/XHR responses
+        await _install_response_body_capture_if_needed(
+            driver, service, enable_har_capture, 'navigate_with_profile_state'
+        )
 
         # Inject cookies via CDP BEFORE navigation
         cookies_injected = await _inject_cookies_via_cdp(driver, profile_state.cookies)
@@ -3146,6 +3189,75 @@ Note:
 
         return result
 
+    async def _lookup_intercepted_body(
+        driver: webdriver.Chrome,
+        url: str,
+        method: str,
+        cdp_timestamp: float | None,
+    ) -> dict[str, Any] | None:
+        """Look up response body from JavaScript interceptor capture.
+
+        Matches by URL + method + timestamp (within 5s window).
+        CDP timestamps are seconds since epoch, JS timestamps are milliseconds.
+
+        Args:
+            driver: WebDriver instance
+            url: Request URL to match
+            method: HTTP method to match
+            cdp_timestamp: CDP wallTime (seconds since epoch), or None
+
+        Returns:
+            Dict with 'body', 'base64Encoded', 'truncated' if found, else None
+        """
+        # Get captured responses from JavaScript
+        captured = await asyncio.to_thread(
+            driver.execute_script,
+            'return window.__responseBodies || [];',
+        )
+
+        if not captured:
+            return None
+
+        # Convert CDP timestamp (seconds) to JS timestamp (milliseconds)
+        cdp_timestamp_ms = (cdp_timestamp * 1000) if cdp_timestamp else None
+
+        # Find best match by URL + method + closest timestamp
+        best_match = None
+        best_time_diff = float('inf')
+
+        for entry in captured:
+            # URL and method must match exactly
+            if entry.get('url') != url:
+                continue
+            if entry.get('method', 'GET').upper() != method.upper():
+                continue
+
+            # Skip entries without response body (errors)
+            if entry.get('responseBody') is None and entry.get('error'):
+                continue
+
+            # Timestamp matching (5 second window)
+            entry_timestamp = entry.get('timestamp')  # milliseconds
+            if cdp_timestamp_ms and entry_timestamp:
+                time_diff = abs(entry_timestamp - cdp_timestamp_ms)
+                if time_diff > 5000:  # More than 5 seconds apart
+                    continue
+                if time_diff < best_time_diff:
+                    best_time_diff = time_diff
+                    best_match = entry
+            elif best_match is None:
+                # No timestamp to compare, take first URL/method match
+                best_match = entry
+
+        if best_match is None:
+            return None
+
+        return {
+            'body': best_match.get('responseBody'),
+            'base64Encoded': best_match.get('base64Encoded', False),
+            'truncated': best_match.get('truncated', False),
+        }
+
     @mcp.tool(
         description="""Export captured network traffic to HAR 1.2 file.
 
@@ -3351,15 +3463,46 @@ Workflow:
                     'json' in mime_type or 'text' in mime_type or 'xml' in mime_type or 'javascript' in mime_type
                 )
                 if should_fetch:
-                    body_result = await asyncio.to_thread(
-                        driver.execute_cdp_cmd,
-                        'Network.getResponseBody',
-                        {'requestId': request_id},
-                    )
-                    if body_result.get('body'):
-                        har_entry['response']['content']['text'] = body_result['body']
-                        if body_result.get('base64Encoded'):
-                            har_entry['response']['content']['encoding'] = 'base64'
+                    body_source: str | None = None
+
+                    # First, try CDP getResponseBody (works for static resources)
+                    try:
+                        body_result = await asyncio.to_thread(
+                            driver.execute_cdp_cmd,
+                            'Network.getResponseBody',
+                            {'requestId': request_id},
+                        )
+                        if body_result.get('body'):
+                            har_entry['response']['content']['text'] = body_result['body']
+                            if body_result.get('base64Encoded'):
+                                har_entry['response']['content']['encoding'] = 'base64'
+                            body_source = 'cdp'
+                    except WebDriverException:
+                        # CDP failed - Chrome likely GC'd the response body
+                        # Will try JavaScript interceptor fallback below
+                        pass
+
+                    # Fallback: Check JavaScript interceptor capture
+                    # No try/except here - let programming errors bubble up
+                    if body_source is None and service.state.response_body_capture_enabled:
+                        intercepted = await _lookup_intercepted_body(
+                            driver,
+                            url=req.get('url', ''),
+                            method=req.get('method', 'GET'),
+                            cdp_timestamp=txn.get('wall_time'),
+                        )
+                        if intercepted is not None and intercepted.get('body'):
+                            har_entry['response']['content']['text'] = intercepted['body']
+                            if intercepted.get('base64Encoded'):
+                                har_entry['response']['content']['encoding'] = 'base64'
+                            body_source = 'interceptor'
+                            if intercepted.get('truncated'):
+                                errors.append(f'Response truncated at 10MB: {req.get("url", "")[:80]}')
+
+                    # Report if body unavailable from both sources
+                    if body_source is None:
+                        url_preview = req.get('url', '')[:100]
+                        errors.append(f'Response body unavailable: {url_preview}')
 
             har_entries.append(har_entry)
 
