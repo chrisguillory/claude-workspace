@@ -11,6 +11,7 @@ from pathlib import Path
 __all__ = [
     'DASHBOARD_LOCK_PATH',
     'DASHBOARD_STATE_PATH',
+    'DEBUG_LOG_PATH',
     'DOCUMENT_SEARCH_DIR',
     'WORKSPACE_DIR',
 ]
@@ -22,3 +23,6 @@ DOCUMENT_SEARCH_DIR = WORKSPACE_DIR / 'document_search'
 # Dashboard coordination
 DASHBOARD_STATE_PATH = DOCUMENT_SEARCH_DIR / 'dashboard.json'
 DASHBOARD_LOCK_PATH = DOCUMENT_SEARCH_DIR / 'dashboard.lock'
+
+# Debug logging (enable detailed server logs for troubleshooting)
+DEBUG_LOG_PATH = DOCUMENT_SEARCH_DIR / 'server.log'

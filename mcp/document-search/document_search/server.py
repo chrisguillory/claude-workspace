@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import logging.handlers
 import os
 import sys
 import typing
@@ -30,6 +31,7 @@ from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
 from document_search.dashboard.launcher import ensure_dashboard
 from document_search.dashboard.state import DashboardStateManager
+from document_search.paths import DEBUG_LOG_PATH
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.schemas.chunking import FileType
 from document_search.schemas.config import (
@@ -526,12 +528,26 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
 
     # Configure logging with timestamps to stderr for performance observability
+    log_format = '%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s'
     logging.basicConfig(
         level=logging.DEBUG,
-        format='%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
+        format=log_format,
         datefmt='%H:%M:%S',
         stream=sys.stderr,
     )
+
+    # Add rotating file handler for debug analysis
+    DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.handlers.RotatingFileHandler(
+        DEBUG_LOG_PATH,
+        maxBytes=50 * 1024 * 1024,  # 50MB per file
+        backupCount=3,
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(log_format, datefmt='%H:%M:%S'))
+    logging.getLogger().addHandler(file_handler)
+    print(f'✓ Debug logging to: {DEBUG_LOG_PATH}', file=sys.stderr)
+
     # Silence noisy third-party loggers
     logging.getLogger('httpx').setLevel(logging.WARNING)
     logging.getLogger('httpcore').setLevel(logging.WARNING)
