@@ -9,7 +9,7 @@
  *
  * Configuration:
  *   - MAX_ENTRIES: 1000 (FIFO eviction)
- *   - MAX_BODY_SIZE: 50MB per response (matches export_har max)
+ *   - MAX_BODY_SIZE: 10MB per response (matches export_har default)
  *
  * Limitations:
  *   - Service Workers: Intercept before this code runs (documented limitation)
@@ -26,7 +26,7 @@
     window.__responseBodyCaptureInstalled = true;
 
     const MAX_ENTRIES = 1000;
-    const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50MB - matches export_har max
+    const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB - matches export_har default
 
     // Initialize storage
     window.__responseBodies = window.__responseBodies || [];
@@ -39,6 +39,19 @@
             window.__responseBodies.shift();
         }
         window.__responseBodies.push(entry);
+    }
+
+    /**
+     * Normalize URL to absolute form for consistent matching with CDP.
+     * Handles relative URLs and encoding differences.
+     */
+    function normalizeUrl(url) {
+        try {
+            return new URL(url, window.location.href).href;
+        } catch (e) {
+            // If URL parsing fails, return as-is
+            return String(url);
+        }
     }
 
     /**
@@ -208,10 +221,13 @@
             requestBody = init.body || null;
         }
 
+        // Normalize URL to absolute form for consistent CDP matching
+        const normalizedUrl = normalizeUrl(url);
+
         // Prepare entry
         const entry = {
             api: 'fetch',
-            url: url,
+            url: normalizedUrl,
             method: method.toUpperCase(),
             timestamp: startTime,
             requestBody: null,
@@ -269,9 +285,12 @@
     const origXHRSend = XMLHttpRequest.prototype.send;
 
     XMLHttpRequest.prototype.open = function(method, url) {
+        // Normalize URL to absolute form for consistent CDP matching
+        const normalizedUrl = normalizeUrl(url);
+
         this.__capture = {
             api: 'xhr',
-            url: String(url),
+            url: normalizedUrl,
             method: (method || 'GET').toUpperCase(),
             timestamp: null,
             requestBody: null,
@@ -332,7 +351,23 @@
                 }
             }
 
-            // Listen for completion
+            // error/abort/timeout handlers only set the error message.
+            // loadend is the ONLY place we call addEntry() to avoid duplicates,
+            // since loadend fires AFTER error/abort/timeout per WHATWG XHR spec.
+            xhr.addEventListener('error', function() {
+                xhr.__capture.error = 'XHR network error';
+            });
+
+            xhr.addEventListener('abort', function() {
+                xhr.__capture.error = 'XHR aborted';
+            });
+
+            xhr.addEventListener('timeout', function() {
+                xhr.__capture.error = 'XHR timeout';
+            });
+
+            // loadend fires after ALL terminal events (load, error, abort, timeout).
+            // This is the single place we capture and add the entry.
             xhr.addEventListener('loadend', function() {
                 try {
                     xhr.__capture.status = xhr.status;
@@ -340,44 +375,47 @@
 
                     const responseType = xhr.responseType || 'text';
 
-                    if (responseType === '' || responseType === 'text') {
-                        const text = xhr.responseText || '';
-                        if (text.length > MAX_BODY_SIZE) {
-                            xhr.__capture.responseBody = text.substring(0, MAX_BODY_SIZE);
-                            xhr.__capture.truncated = true;
-                            xhr.__capture.originalSize = text.length;
-                        } else {
-                            xhr.__capture.responseBody = text;
-                        }
-                    } else if (responseType === 'json') {
-                        try {
-                            const str = JSON.stringify(xhr.response);
-                            if (str.length > MAX_BODY_SIZE) {
-                                xhr.__capture.responseBody = str.substring(0, MAX_BODY_SIZE);
+                    // Only capture response body if no error was set by error/abort/timeout handlers
+                    if (!xhr.__capture.error) {
+                        if (responseType === '' || responseType === 'text') {
+                            const text = xhr.responseText || '';
+                            if (text.length > MAX_BODY_SIZE) {
+                                xhr.__capture.responseBody = text.substring(0, MAX_BODY_SIZE);
                                 xhr.__capture.truncated = true;
+                                xhr.__capture.originalSize = text.length;
                             } else {
-                                xhr.__capture.responseBody = str;
+                                xhr.__capture.responseBody = text;
                             }
-                        } catch (e) {
-                            xhr.__capture.error = 'JSON stringify failed: ' + e.message;
-                        }
-                    } else if (responseType === 'arraybuffer' && xhr.response) {
-                        const buffer = xhr.response;
-                        if (buffer.byteLength > MAX_BODY_SIZE) {
-                            xhr.__capture.responseBody = arrayBufferToBase64(buffer.slice(0, MAX_BODY_SIZE));
-                            xhr.__capture.truncated = true;
-                            xhr.__capture.originalSize = buffer.byteLength;
-                        } else {
-                            xhr.__capture.responseBody = arrayBufferToBase64(buffer);
-                        }
-                        xhr.__capture.base64Encoded = true;
-                    } else if (responseType === 'blob') {
-                        xhr.__capture.error = 'Blob responseType not captured (async read required)';
-                    } else if (responseType === 'document') {
-                        try {
-                            xhr.__capture.responseBody = xhr.response ? xhr.response.documentElement.outerHTML : null;
-                        } catch (e) {
-                            xhr.__capture.error = 'Document serialization failed: ' + e.message;
+                        } else if (responseType === 'json') {
+                            try {
+                                const str = JSON.stringify(xhr.response);
+                                if (str.length > MAX_BODY_SIZE) {
+                                    xhr.__capture.responseBody = str.substring(0, MAX_BODY_SIZE);
+                                    xhr.__capture.truncated = true;
+                                } else {
+                                    xhr.__capture.responseBody = str;
+                                }
+                            } catch (e) {
+                                xhr.__capture.error = 'JSON stringify failed: ' + e.message;
+                            }
+                        } else if (responseType === 'arraybuffer' && xhr.response) {
+                            const buffer = xhr.response;
+                            if (buffer.byteLength > MAX_BODY_SIZE) {
+                                xhr.__capture.responseBody = arrayBufferToBase64(buffer.slice(0, MAX_BODY_SIZE));
+                                xhr.__capture.truncated = true;
+                                xhr.__capture.originalSize = buffer.byteLength;
+                            } else {
+                                xhr.__capture.responseBody = arrayBufferToBase64(buffer);
+                            }
+                            xhr.__capture.base64Encoded = true;
+                        } else if (responseType === 'blob') {
+                            xhr.__capture.error = 'Blob responseType not captured (async read required)';
+                        } else if (responseType === 'document') {
+                            try {
+                                xhr.__capture.responseBody = xhr.response ? xhr.response.documentElement.outerHTML : null;
+                            } catch (e) {
+                                xhr.__capture.error = 'Document serialization failed: ' + e.message;
+                            }
                         }
                     }
 
@@ -386,21 +424,6 @@
                     xhr.__capture.error = 'Capture failed: ' + e.message;
                     addEntry(xhr.__capture);
                 }
-            });
-
-            xhr.addEventListener('error', function() {
-                xhr.__capture.error = 'XHR network error';
-                addEntry(xhr.__capture);
-            });
-
-            xhr.addEventListener('abort', function() {
-                xhr.__capture.error = 'XHR aborted';
-                addEntry(xhr.__capture);
-            });
-
-            xhr.addEventListener('timeout', function() {
-                xhr.__capture.error = 'XHR timeout';
-                addEntry(xhr.__capture);
             });
         }
 
