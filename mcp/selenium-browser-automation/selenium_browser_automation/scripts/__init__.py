@@ -22,6 +22,7 @@ __all__ = [
     'SAFE_SERIALIZE_SCRIPT',
     'INDEXEDDB_CAPTURE_SCRIPT',
     'INDEXEDDB_RESTORE_SCRIPT',
+    'RESPONSE_BODY_CAPTURE_SCRIPT',
     'build_execute_javascript_async_script',
 ]
 
@@ -45,6 +46,7 @@ RESOURCE_TIMING_SCRIPT: str = _load_script('resource_timing.js')
 SAFE_SERIALIZE_SCRIPT: str = _load_script('safe_serialize.js')
 INDEXEDDB_CAPTURE_SCRIPT: str = _load_script('indexeddb_capture.js')
 INDEXEDDB_RESTORE_SCRIPT: str = _load_script('indexeddb_restore.js')
+RESPONSE_BODY_CAPTURE_SCRIPT: str = _load_script('response_body_capture.js')
 
 
 def build_execute_javascript_async_script(escaped_code: str) -> str:
