@@ -164,7 +164,32 @@ class ServerState:
 def register_tools(state: ServerState) -> None:
     """Register MCP tools with closure over server state."""
 
+    # Generate collections summary once at registration
+    collections = state.collection_registry.list_collections()
+    collections_summary = _format_collections_summary(collections)
+
+    # Base docstrings for tools that need collection listings
+    INDEX_DOCS_BASE = """Index documents for semantic search (file or directory auto-detected).
+
+Processes files incrementally - only re-indexes files that have changed
+since the last indexing run. Supports markdown, text, JSON, and PDF files.
+
+Args:
+    collection_name: Name of the collection to index into.
+    path: Path to file or directory to index. Defaults to current working
+        directory if not specified. Note: "**" is not supported.
+    full_reindex: If True, reindex all files regardless of whether they've changed.
+        Only applies to directories (single files are always fully indexed).
+    respect_gitignore: Control .gitignore filtering behavior:
+        - None (default): Auto-detect git repos, respect gitignore if found.
+        - True: Strictly respect gitignore, fail if not a git repo.
+        - False: Ignore gitignore, index all supported files.
+
+Returns:
+    IndexingResult with counts of files processed, chunks created, and any errors."""
+
     @server.tool(
+        description=_inject_collections(INDEX_DOCS_BASE, collections_summary),
         annotations=mcp.types.ToolAnnotations(
             title='Index Documents',
             destructiveHint=False,
@@ -272,13 +297,34 @@ def register_tools(state: ServerState) -> None:
 
         return result
 
+    SEARCH_DOCS_BASE = """Search indexed documents with configurable search strategy.
+
+Args:
+    query: Natural language search query.
+    collection_name: Name of the collection to search.
+    path: Filter to files under this path. Defaults to current working directory.
+        Use "**" for entire collection (no path filter).
+    limit: Maximum number of results to return (1-100).
+    search_type: Search strategy:
+        - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
+          Combines semantic similarity with keyword matching.
+        - 'lexical': BM25 keyword matching only. Best for exact term
+          matching, symbol lookup, and identifier search.
+        - 'embedding': Dense vector similarity only. Useful for
+          conceptual/semantic queries or debugging.
+    file_types: Filter by file types (e.g., ['markdown', 'pdf']).
+
+Returns:
+    SearchResult with ranked hits including text snippets and metadata."""
+
     @server.tool(
+        description=_inject_collections(SEARCH_DOCS_BASE, collections_summary),
         annotations=mcp.types.ToolAnnotations(
             title='Search Documents',
             destructiveHint=False,
             idempotentHint=True,
             readOnlyHint=True,
-            openWorldHint=False,
+            openWorldHint=True,
         ),
     )
     async def search_documents(
@@ -290,26 +336,6 @@ def register_tools(state: ServerState) -> None:
         file_types: Sequence[str] | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
-        """Search indexed documents with configurable search strategy.
-
-        Args:
-            query: Natural language search query.
-            collection_name: Name of the collection to search.
-            path: Filter to files under this path. Defaults to CWD.
-                Use "**" to search entire collection.
-            limit: Maximum number of results to return (1-100).
-            search_type: Search strategy:
-                - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
-                  Combines semantic similarity with keyword matching.
-                - 'lexical': BM25 keyword matching only. Best for exact term
-                  matching, symbol lookup, and identifier search.
-                - 'embedding': Dense vector similarity only. Useful for
-                  conceptual/semantic queries or debugging.
-            file_types: Filter by file types (e.g., ['markdown', 'pdf']).
-
-        Returns:
-            SearchResult with ranked hits including text snippets and metadata.
-        """
         if not ctx:
             raise ValueError('MCP context required')
 
@@ -386,7 +412,20 @@ def register_tools(state: ServerState) -> None:
 
         return result
 
+    CLEAR_DOCS_BASE = """Remove documents from a collection's index.
+
+Does not delete files from disk - only removes them from the search index.
+
+Args:
+    collection_name: Name of the collection to clear documents from.
+    path: Path to clear. Defaults to current working directory.
+        Use "**" for entire collection (no path filter).
+
+Returns:
+    ClearResult with counts of files and chunks removed."""
+
     @server.tool(
+        description=_inject_collections(CLEAR_DOCS_BASE, collections_summary),
         annotations=mcp.types.ToolAnnotations(
             title='Clear Documents',
             destructiveHint=True,
@@ -400,18 +439,6 @@ def register_tools(state: ServerState) -> None:
         path: str | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
-        """Remove documents from a collection's index.
-
-        Does not delete files from disk - only removes them from the search index.
-
-        Args:
-            collection_name: Name of the collection to clear documents from.
-            path: Path to clear. Defaults to CWD if not specified.
-                Use "**" to clear entire collection.
-
-        Returns:
-            ClearResult with counts of files and chunks removed.
-        """
         if not ctx:
             raise ValueError('MCP context required')
 
@@ -440,7 +467,23 @@ def register_tools(state: ServerState) -> None:
 
         return result
 
+    LIST_DOCS_BASE = """List indexed documents with optional filtering.
+
+Returns files sorted by chunk count (descending). Useful for auditing
+indexed content or checking if specific files are indexed.
+
+Args:
+    collection_name: Name of the collection to list documents from.
+    path: Filter to files under this path. Defaults to current working directory.
+        Use "**" for entire collection (no path filter).
+    file_type: Filter to this file type (e.g., 'markdown', 'pdf').
+    limit: Maximum number of files to return (default 50).
+
+Returns:
+    List of IndexedFile with path, chunk_count, and file_type."""
+
     @server.tool(
+        description=_inject_collections(LIST_DOCS_BASE, collections_summary),
         annotations=mcp.types.ToolAnnotations(
             title='List Documents',
             destructiveHint=False,
@@ -456,21 +499,6 @@ def register_tools(state: ServerState) -> None:
         limit: int = 50,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> Sequence[IndexedFile]:
-        """List indexed documents with optional filtering.
-
-        Returns files sorted by chunk count (descending). Useful for auditing
-        indexed content or checking if specific files are indexed.
-
-        Args:
-            collection_name: Name of the collection to list documents from.
-            path: Filter to files under this path. Defaults to CWD.
-                Use "**" to list entire collection.
-            file_type: Filter to this file type (e.g., 'markdown', 'pdf').
-            limit: Maximum number of files to return (default 50).
-
-        Returns:
-            List of IndexedFile with path, chunk_count, and file_type.
-        """
         if ctx is None:
             raise ValueError('MCP context required')
 
@@ -500,7 +528,20 @@ def register_tools(state: ServerState) -> None:
 
         return files
 
+    GET_INFO_BASE = """Get comprehensive collection information.
+
+Returns collection metadata, embedding config, storage stats, and content breakdown.
+
+Args:
+    collection_name: Name of the collection to get info for.
+    path: Scope content stats to files under this path. Defaults to current working directory.
+        Use "**" for entire collection (no path filter).
+
+Returns:
+    IndexInfo with collection metadata, embedding config, storage stats, and content breakdown."""
+
     @server.tool(
+        description=_inject_collections(GET_INFO_BASE, collections_summary),
         annotations=mcp.types.ToolAnnotations(
             title='Get Info',
             destructiveHint=False,
@@ -514,18 +555,6 @@ def register_tools(state: ServerState) -> None:
         path: str | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexInfo:
-        """Get comprehensive collection information.
-
-        Returns collection metadata, storage stats, and content breakdown.
-
-        Args:
-            collection_name: Name of the collection to get info for.
-            path: Scope content stats to files under this path. Defaults to CWD.
-                Use "**" for global stats across entire collection.
-
-        Returns:
-            IndexInfo with collection metadata, storage stats, and content breakdown.
-        """
         if ctx is None:
             raise ValueError('MCP context required')
 
@@ -751,6 +780,48 @@ server = mcp.server.fastmcp.FastMCP('document-search', lifespan=lifespan)
 def main() -> None:
     """Entry point for the MCP server."""
     server.run()
+
+
+def _format_collections_summary(collections: Sequence[Collection], max_shown: int = 5) -> str:
+    """Format collection list for injection into tool descriptions.
+
+    Args:
+        collections: List of collections from registry.
+        max_shown: Maximum collections to show before truncating.
+
+    Returns:
+        Formatted string like "**Available collections:** frontend (gemini), ..."
+    """
+    if not collections:
+        return '**Available collections:** None. Use create_collection first.'
+
+    items = [f'{c.name} ({c.provider})' for c in collections[:max_shown]]
+    summary = ', '.join(items)
+
+    remaining = len(collections) - max_shown
+    if remaining > 0:
+        summary += f' ... and {remaining} more (use list_collections)'
+
+    return f'**Available collections:** {summary}'
+
+
+def _inject_collections(base_docstring: str, collections_summary: str) -> str:
+    """Inject collections summary into description before Args section.
+
+    Args:
+        base_docstring: Original tool docstring.
+        collections_summary: Formatted collections list.
+
+    Returns:
+        Updated docstring with collections summary inserted.
+    """
+    if 'Args:' in base_docstring:
+        args_pos = base_docstring.find('Args:')
+        before_args = base_docstring[:args_pos].rstrip()
+        after_args = base_docstring[args_pos:]
+        return f'{before_args}\n\n{collections_summary}\n\n{after_args}'
+
+    return f'{base_docstring.rstrip()}\n\n{collections_summary}'
 
 
 async def _migrate_legacy_collection(state: ServerState) -> None:
