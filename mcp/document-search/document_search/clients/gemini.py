@@ -164,9 +164,12 @@ class GeminiClient:
         Raises:
             google.genai.errors.ClientError: On API errors.
         """
-        # Estimate tokens: ~0.513 tokens/char matches Google's dashboard exactly.
-        # Calibrated by comparing our TPM to Google AI Studio's display.
-        estimated_tokens = int(sum(len(t) for t in texts) / 1.95)
+        # Token estimation calibrated to Google AI Studio dashboard (2026-01-30)
+        # IMPORTANT: API count_tokens() returns ~2.6x fewer than dashboard/rate limiter tracks.
+        # This discrepancy is documented: https://discuss.ai.google.dev/t/token-counts-mismatch-9x-discrepancy/72633
+        # Using chars/2.63 matches dashboard TPM; chars/6.79 matches API count_tokens().
+        # We use 2.63 because that's what Google's rate limiter actually enforces.
+        estimated_tokens = int(sum(len(t) for t in texts) / 2.63)
 
         # Acquire from both limiters (RPM by text count, TPM by token estimate)
         await self._rpm_limiter.try_acquire_async('rpm', weight=len(texts))
