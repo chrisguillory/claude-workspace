@@ -218,16 +218,13 @@ class IndexingService:
         # Upsert new chunks
         await self._repo.upsert(points)
 
-        # Delete old chunks (upsert-then-delete for atomicity)
+        # Delete only obsolete chunks (upsert-then-delete for atomicity)
         async with self._state_lock:
             old_state = self._state.files.get(file_key) if self._state else None
-
-        if old_state:
-            await self._repo.delete(list(old_state.chunk_ids))
+        chunks_deleted = await self._delete_obsolete_chunks(old_state, chunk_ids)
 
         # Update state
         file_hash = _file_hash(file_path)
-        chunks_deleted = len(old_state.chunk_ids) if old_state else 0
         async with self._state_lock:
             if self._state is not None:
                 new_files = dict(self._state.files)
@@ -387,13 +384,17 @@ class IndexingService:
             )
 
         # PHASE 2: Pipeline processing
-        # Create queues connecting stages
+        # Create queues connecting stages (exposed as instance attrs for monitoring)
         file_queue: asyncio.Queue[Path] = asyncio.Queue()
         embed_queue: asyncio.Queue[_ChunkedFile] = asyncio.Queue(maxsize=EMBED_QUEUE_SIZE)
         upsert_queue: asyncio.Queue[_EmbeddedFile] = asyncio.Queue(maxsize=UPSERT_QUEUE_SIZE)
+        self._file_queue = file_queue
+        self._embed_queue = embed_queue
+        self._upsert_queue = upsert_queue
 
-        # Shared results collection
+        # Shared results collection (exposed for progress monitoring)
         results: dict[str, int | FileProcessingError] = {}  # path -> chunk_count or error
+        self._results = results
         results_lock = asyncio.Lock()
 
         # Queue depth monitor for bottleneck analysis
@@ -885,15 +886,13 @@ class IndexingService:
             # Upsert new chunks
             await self._repo.upsert(points)
 
-            # Get and delete old chunks
+            # Delete only obsolete chunks
             if self._state_lock is None:
                 raise RuntimeError('State lock not initialized')
 
             async with self._state_lock:
                 old_state = self._state.files.get(file_key) if self._state else None
-
-            if old_state:
-                await self._repo.delete(list(old_state.chunk_ids))
+            await self._delete_obsolete_chunks(old_state, embedded.chunk_ids)
 
             # Update state
             async with self._state_lock:
@@ -924,6 +923,28 @@ class IndexingService:
 
             # Only mark done on success
             upsert_queue.task_done()
+
+    async def _delete_obsolete_chunks(
+        self,
+        old_state: FileIndexState | None,
+        new_chunk_ids: Sequence[UUID],
+    ) -> int:
+        """Delete chunks that no longer exist in the new set.
+
+        Only deletes IDs that were in the old state but not in the new set.
+        This prevents deleting chunks that were just upserted when IDs are
+        deterministic (same file content = same IDs).
+
+        Returns:
+            Count of chunks deleted.
+        """
+        if not old_state:
+            return 0
+        obsolete_ids = set(old_state.chunk_ids) - set(new_chunk_ids)
+        if not obsolete_ids:
+            return 0
+        await self._repo.delete(list(obsolete_ids))
+        return len(obsolete_ids)
 
 
 async def create_indexing_service(

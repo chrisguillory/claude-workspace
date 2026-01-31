@@ -23,13 +23,15 @@ class Collection(StrictModel):
     """A document collection with its embedding configuration.
 
     Each collection is stored as a separate Qdrant collection and uses
-    a specific embedding provider for all its vectors.
+    a specific embedding provider and model for all its vectors.
     """
 
     name: str
     description: str | None = None
     created_at: JsonDatetime
     provider: EmbeddingProvider
+    model: str
+    dimensions: int
 
 
 class CollectionRegistry(StrictModel, frozen=False):

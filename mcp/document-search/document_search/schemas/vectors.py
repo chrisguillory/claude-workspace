@@ -15,7 +15,8 @@ from local_lib.types import JsonDatetime
 
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import Chunk, FileType
-from document_search.schemas.config import EmbeddingProvider
+from document_search.schemas.collections import Collection
+from document_search.schemas.config import EmbeddingProvider, default_config
 
 __all__ = [
     'ClearResult',
@@ -161,7 +162,29 @@ class EmbeddingInfo(StrictModel):
     model: str
     dimensions: int
     batch_size: int
-    requests_per_minute: int | None = None  # Gemini only
+    requests_per_minute: int | None = None  # Set for Gemini; None for OpenRouter
+
+    @classmethod
+    def from_collection(cls, collection: Collection) -> EmbeddingInfo:
+        """Create EmbeddingInfo from collection and provider operational settings.
+
+        Combines collection-level settings (model, dimensions chosen at creation)
+        with provider-level operational settings (batch_size, requests_per_minute).
+
+        Args:
+            collection: Collection with provider and model configuration.
+
+        Returns:
+            EmbeddingInfo with merged collection and provider data.
+        """
+        config = default_config(collection.provider)
+        return cls(
+            provider=collection.provider,
+            model=collection.model,
+            dimensions=collection.dimensions,
+            batch_size=config.batch_size,
+            requests_per_minute=config.requests_per_minute,
+        )
 
 
 class StorageStats(StrictModel):

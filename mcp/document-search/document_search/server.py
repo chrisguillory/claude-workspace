@@ -30,12 +30,14 @@ from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
 from document_search.dashboard.launcher import ensure_dashboard
 from document_search.dashboard.state import DashboardStateManager
+from document_search.paths import index_state_path
 from document_search.repositories.collection_registry import CollectionRegistryManager
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.schemas.chunking import FileType
 from document_search.schemas.collections import Collection
 from document_search.schemas.config import (
     EmbeddingProvider,
+    create_config,
     default_config,
 )
 from document_search.schemas.embeddings import EmbedRequest
@@ -43,6 +45,7 @@ from document_search.schemas.indexing import IndexingProgress, IndexingResult
 from document_search.schemas.vectors import (
     ClearResult,
     CollectionMetadata,
+    EmbeddingInfo,
     IndexedFile,
     IndexInfo,
     SearchQuery,
@@ -77,8 +80,9 @@ class ServerState:
     sparse_embedding_service: SparseEmbeddingService
     reranker_service: RerankerService
 
-    # Cached per-provider embedding clients (shared to respect rate limits)
-    _embedding_clients: dict[EmbeddingProvider, EmbeddingClient]
+    # Cached embedding clients by (provider, model, dimensions)
+    # Collections with identical embedding configs share a client
+    _embedding_clients: dict[tuple[EmbeddingProvider, str, int], EmbeddingClient]
 
     # Cached per-collection repositories
     _repositories: dict[str, DocumentVectorRepository]
@@ -110,15 +114,21 @@ class ServerState:
             _repositories={},
         )
 
-    def get_embedding_client(self, provider: EmbeddingProvider) -> EmbeddingClient:
-        """Get or create embedding client for a provider.
+    def get_embedding_client(self, collection: Collection) -> EmbeddingClient:
+        """Get or create embedding client for a collection's embedding config.
 
-        Clients are cached per provider to share rate limiting and semaphores.
+        Clients are cached by (provider, model, dimensions). Collections with
+        identical embedding configurations share a client and its resources.
         """
-        if provider not in self._embedding_clients:
-            config = default_config(provider)
-            self._embedding_clients[provider] = create_embedding_client(config)
-        return self._embedding_clients[provider]
+        key = (collection.provider, collection.model, collection.dimensions)
+        if key not in self._embedding_clients:
+            config = create_config(
+                provider=collection.provider,
+                embedding_model=collection.model,
+                embedding_dimensions=collection.dimensions,
+            )
+            self._embedding_clients[key] = create_embedding_client(config)
+        return self._embedding_clients[key]
 
     def get_repository(self, collection_name: str) -> DocumentVectorRepository:
         """Get or create repository for a collection.
@@ -143,7 +153,7 @@ class ServerState:
         IndexingService instance (lightweight).
         """
         collection = self.get_collection(collection_name)
-        embedding_client = self.get_embedding_client(collection.provider)
+        embedding_client = self.get_embedding_client(collection)
         config = default_config(collection.provider)
         embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
         repository = self.get_repository(collection_name)
@@ -153,6 +163,7 @@ class ServerState:
             embedding_service=embedding_service,
             sparse_embedding_service=self.sparse_embedding_service,
             repository=repository,
+            state_path=index_state_path(collection_name),
         )
 
     async def close(self) -> None:
@@ -247,9 +258,8 @@ Returns:
             resolved_path = Path(path).expanduser().resolve()
 
         # Ensure Qdrant collection exists with correct dimensions
-        config = default_config(collection.provider)
         repository = state.get_repository(collection_name)
-        await repository.ensure_collection(config.embedding_dimensions)
+        await repository.ensure_collection(collection.dimensions)
 
         # Auto-detect file vs directory
         if resolved_path.is_file():
@@ -343,7 +353,7 @@ Returns:
 
         # Get collection and services
         collection = state.get_collection(collection_name)
-        embedding_client = state.get_embedding_client(collection.provider)
+        embedding_client = state.get_embedding_client(collection)
         config = default_config(collection.provider)
         embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
         repository = state.get_repository(collection_name)
@@ -577,9 +587,8 @@ Returns:
             resolved_path = str(Path(path).expanduser().resolve())
             await logger.info(f'Getting info for: {resolved_path}')
 
-        # Get provider config and embedding info
-        config = default_config(collection.provider)
-        embedding_info = config.to_info()
+        # Build embedding info from collection
+        embedding_info = EmbeddingInfo.from_collection(collection)
 
         # Get storage stats from Qdrant
         storage = await repository.get_storage_stats()
@@ -624,20 +633,24 @@ Returns:
         name: str,
         description: str | None,
         provider: EmbeddingProvider,
+        model: str | None = None,
+        dimensions: int | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> Collection:
         """Create a new document collection.
 
-        Each collection uses a specific embedding provider and stores documents
-        in a separate Qdrant collection.
+        Each collection uses a specific embedding provider and model. Model and dimensions
+        default to the provider's defaults if not specified.
 
         Args:
             name: Unique name for the collection (e.g., 'frontend-docs', 'api-specs').
             description: Optional description of the collection's purpose.
             provider: Embedding provider to use ('gemini' or 'openrouter').
+            model: Embedding model. Defaults to provider's default (e.g., 'gemini-embedding-001').
+            dimensions: Vector dimensions. Defaults to provider's default (e.g., 768).
 
         Returns:
-            The created Collection with name, provider, and creation timestamp.
+            The created Collection with name, provider, model, and dimensions.
         """
         if ctx is None:
             raise ValueError('MCP context required')
@@ -652,9 +665,11 @@ Returns:
             name=name,
             provider=provider,
             description=description,
+            model=model,
+            dimensions=dimensions,
         )
 
-        await logger.info(f'Created collection: {name} (provider: {provider})')
+        await logger.info(f'Created collection: {name} ({provider}, {collection.model}, {collection.dimensions}d)')
 
         return collection
 
@@ -828,21 +843,27 @@ async def _migrate_legacy_collection(state: ServerState) -> None:
     """Migrate legacy 'document_chunks' collection to the registry if needed.
 
     For backwards compatibility: if the registry is empty but Qdrant has the
-    old default collection, create a registry entry for it.
+    old default collection, create a registry entry for it. Queries Qdrant
+    for actual vector dimensions to preserve any custom configuration.
     """
     collections = state.collection_registry.list_collections()
     if collections:
         return  # Registry not empty, no migration needed
 
-    if not await state.qdrant_client.collection_exists('document_chunks'):
+    collection_info = await state.qdrant_client.get_collection_info('document_chunks')
+    if collection_info is None:
         return  # No legacy collection to migrate
+
+    # Use actual dimensions from Qdrant to preserve custom configuration
+    actual_dimensions = collection_info['vector_dimension']
 
     state.collection_registry.create_collection(
         name='document_chunks',
         provider='gemini',
         description='Migrated from legacy single-collection setup',
+        dimensions=actual_dimensions,
     )
-    print('  Migrated legacy collection: document_chunks (gemini)', file=sys.stderr)
+    print(f'  Migrated legacy collection: document_chunks (gemini, {actual_dimensions}d)', file=sys.stderr)
 
 
 if __name__ == '__main__':

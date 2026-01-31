@@ -6,6 +6,7 @@ Manages persistent collection metadata. Shared between MCP server and dashboard.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,7 +15,7 @@ import filelock
 
 from document_search.paths import COLLECTIONS_LOCK_PATH, COLLECTIONS_STATE_PATH
 from document_search.schemas.collections import Collection, CollectionRegistry
-from document_search.schemas.config import EmbeddingProvider
+from document_search.schemas.config import EmbeddingProvider, default_config
 
 __all__ = [
     'CollectionRegistryManager',
@@ -24,7 +25,12 @@ __all__ = [
 class CollectionRegistryManager:
     """Manages collection registry with file locking.
 
-    Thread-safe persistence of collection metadata.
+    Thread-safe persistence of collection metadata to a JSON file.
+
+    Future consideration: Qdrant 1.16+ supports collection-level metadata
+    (PUT/PATCH /collections/{name} with "metadata" field). Could consolidate
+    registry into Qdrant itself if committing to Qdrant as the only backend.
+    Current approach allows offline listing and dashboard access without Qdrant.
     """
 
     def __init__(
@@ -56,19 +62,45 @@ class CollectionRegistryManager:
         name: str,
         provider: EmbeddingProvider,
         description: str | None = None,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> Collection:
-        """Create a new collection. Raises ValueError if name exists."""
+        """Create a new collection. Raises ValueError if name exists.
+
+        Args:
+            name: Collection name.
+            provider: Embedding provider.
+            description: Optional description.
+            model: Embedding model. Defaults to provider's default model.
+            dimensions: Vector dimensions. Defaults to provider's default dimensions.
+
+        Returns:
+            Created collection.
+
+        Raises:
+            ValueError: If name is invalid or already exists.
+        """
+        if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+            raise ValueError('Collection name must contain only alphanumeric, underscore, or hyphen characters')
+
         with self._lock:
             registry = self.load()
 
             if name in registry.collections:
                 raise ValueError(f"Collection '{name}' already exists")
 
+            # Use provider defaults if model/dimensions not specified
+            config = default_config(provider)
+            final_model = model or config.embedding_model
+            final_dimensions = dimensions or config.embedding_dimensions
+
             collection = Collection(
                 name=name,
                 provider=provider,
                 created_at=datetime.now(UTC),
                 description=description,
+                model=final_model,
+                dimensions=final_dimensions,
             )
 
             new_collections = dict(registry.collections)

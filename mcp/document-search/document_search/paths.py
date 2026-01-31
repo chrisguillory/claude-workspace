@@ -14,7 +14,9 @@ __all__ = [
     'DASHBOARD_LOCK_PATH',
     'DASHBOARD_STATE_PATH',
     'DOCUMENT_SEARCH_DIR',
+    'INDEX_STATE_DIR',
     'WORKSPACE_DIR',
+    'index_state_path',
 ]
 
 # Base directories
@@ -28,3 +30,18 @@ COLLECTIONS_LOCK_PATH = DOCUMENT_SEARCH_DIR / 'collections.lock'
 # Dashboard coordination
 DASHBOARD_STATE_PATH = DOCUMENT_SEARCH_DIR / 'dashboard.json'
 DASHBOARD_LOCK_PATH = DOCUMENT_SEARCH_DIR / 'dashboard.lock'
+
+# Per-collection index state
+INDEX_STATE_DIR = DOCUMENT_SEARCH_DIR / 'index_state'
+
+
+def index_state_path(collection_name: str) -> Path:
+    """Get index state file path for a specific collection.
+
+    Raises:
+        ValueError: If collection_name contains path traversal sequences.
+    """
+    path = INDEX_STATE_DIR / f'{collection_name}.json'
+    if not path.resolve().is_relative_to(INDEX_STATE_DIR.resolve()):
+        raise ValueError(f'Invalid collection name: {collection_name}')
+    return path

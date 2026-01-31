@@ -12,14 +12,11 @@ from document_search.schemas.chunking import (
     get_file_type,
 )
 from document_search.schemas.config import (
-    CONFIG_PATH,
     EmbeddingConfig,
     GeminiConfig,
     OpenRouterConfig,
     create_config,
     default_config,
-    load_config,
-    save_config,
 )
 from document_search.schemas.embeddings import (
     EmbedBatchRequest,
@@ -49,14 +46,11 @@ __all__ = [
     # Base
     'StrictModel',
     # Config
-    'CONFIG_PATH',
     'EmbeddingConfig',
     'GeminiConfig',
     'OpenRouterConfig',
     'create_config',
     'default_config',
-    'load_config',
-    'save_config',
     # Chunking
     'FileType',
     'EXTENSION_MAP',
