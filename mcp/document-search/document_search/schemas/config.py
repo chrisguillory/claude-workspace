@@ -6,32 +6,18 @@ Supports migration between embedding models via clear + reconfigure workflow.
 
 from __future__ import annotations
 
-import json
-import logging
-from pathlib import Path
-from typing import Annotated, Any, Literal
-
-import pydantic
-from pydantic import Field, TypeAdapter
+from typing import Literal
 
 from document_search.schemas.base import StrictModel
 
 __all__ = [
-    'CONFIG_PATH',
     'EmbeddingConfig',
     'EmbeddingProvider',
     'GeminiConfig',
     'OpenRouterConfig',
     'create_config',
     'default_config',
-    'load_config',
-    'save_config',
 ]
-
-logger = logging.getLogger(__name__)
-
-# Config file location
-CONFIG_PATH = Path.home() / '.claude-workspace' / 'config' / 'document_search.json'
 
 # Provider type
 type EmbeddingProvider = Literal['gemini', 'openrouter']
@@ -70,6 +56,7 @@ class OpenRouterConfig(StrictModel):
     embedding_model: str
     embedding_dimensions: int
     batch_size: int
+    requests_per_minute: int | None = None
 
     @classmethod
     def default(cls) -> OpenRouterConfig:
@@ -83,11 +70,6 @@ class OpenRouterConfig(StrictModel):
 
 # Discriminated union - type alias for annotations
 type EmbeddingConfig = GeminiConfig | OpenRouterConfig
-
-# TypeAdapter for deserializing with discriminator
-_config_adapter: TypeAdapter[GeminiConfig | OpenRouterConfig] = TypeAdapter(
-    Annotated[GeminiConfig | OpenRouterConfig, Field(discriminator='provider')]
-)
 
 
 def default_config(provider: EmbeddingProvider = 'gemini') -> EmbeddingConfig:
@@ -117,75 +99,3 @@ def create_config(
         batch_size=gemini.batch_size,
         requests_per_minute=gemini.requests_per_minute,
     )
-
-
-def load_config() -> EmbeddingConfig | None:
-    """Load config from file if it exists.
-
-    Automatically migrates legacy config formats to current schema.
-
-    Returns:
-        EmbeddingConfig if file exists and is valid, None otherwise.
-
-    Raises:
-        ValueError: If config file exists but is invalid.
-    """
-    if not CONFIG_PATH.exists():
-        return None
-
-    try:
-        data = json.loads(CONFIG_PATH.read_text())
-
-        # Auto-migrate legacy format
-        original_data = data.copy()
-        data = _migrate_legacy_config(data)
-
-        config = _config_adapter.validate_python(data)
-
-        # Re-save if migrated
-        if data != original_data:
-            save_config(config)
-            logger.info(f'Migrated config saved to {CONFIG_PATH}')
-
-        return config
-    except (json.JSONDecodeError, pydantic.ValidationError) as e:
-        raise ValueError(f'Invalid config file at {CONFIG_PATH}: {e}') from e
-
-
-def save_config(config: EmbeddingConfig) -> None:
-    """Save config to file, creating parent directories if needed."""
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(
-        json.dumps(
-            config.model_dump(mode='json'),
-            indent=2,
-        )
-        + '\n'
-    )
-    logger.info(f'Saved embedding config: model={config.embedding_model}, dimensions={config.embedding_dimensions}')
-
-
-def _migrate_legacy_config(data: dict[str, Any]) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type
-    """Migrate legacy config format to current schema.
-
-    Legacy format (pre-v0.4.1):
-        {"embedding_model": "...", "embedding_dimensions": 768, "requests_per_minute": 3000}
-
-    Current format:
-        {"provider": "gemini", "embedding_model": "...", "embedding_dimensions": 768,
-         "batch_size": 100, "requests_per_minute": 3000}
-    """
-    if 'provider' in data:
-        return data  # Already migrated
-
-    logger.info('Migrating legacy config format')
-
-    # Infer provider from existing fields
-    if 'requests_per_minute' in data:
-        data['provider'] = 'gemini'
-        data.setdefault('batch_size', 100)
-    else:
-        data['provider'] = 'openrouter'
-        data.setdefault('batch_size', 1000)
-
-    return data
