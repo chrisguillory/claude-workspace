@@ -280,6 +280,23 @@ async def edge_cancelled_error_in_tuple() -> None:
         cleanup()
 
 
+async def edge_cancelled_error_with_return() -> None:
+    """VIOLATION: return instead of raise in CancelledError handler.
+
+    This looks like a clean exit but breaks the cancellation chain:
+    - task.cancelled() returns False (appears completed, not cancelled)
+    - Orchestrator code checking task.cancelled() will be confused
+    - The task appears to have completed normally, not been cancelled
+
+    Common in worker loops: `while True: try: await queue.get() except CancelledError: return`
+    Fix: Use `raise` after cleanup, or remove the try/except entirely if no cleanup needed.
+    """
+    try:
+        await async_op()
+    except CancelledError:
+        return  # EXC007: use `raise` or remove try/except entirely
+
+
 async def edge_sync_nested_in_async() -> None:
     """CORRECT: Sync function inside async doesn't trigger EXC007.
 

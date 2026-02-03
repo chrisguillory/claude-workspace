@@ -43,3 +43,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: exception-safety-linter
+        name: exception-safety-linter
+        description: Check for exception handling anti-patterns
+        entry: ./scripts/exception_safety_linter.py mcp/document-search/
+        language: system
+        pass_filenames: false
+        always_run: true
