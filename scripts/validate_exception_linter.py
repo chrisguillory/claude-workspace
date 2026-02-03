@@ -62,6 +62,7 @@ EXPECTED_VIOLATIONS: dict[str, set[str]] = {
     'exc006_violation_critical': {'EXC006'},
     # EXC007: CancelledError not raised
     'exc007_violation_basic': {'EXC007'},
+    'exc007_violation_return_in_worker': {'EXC007'},
 }
 
 # Functions with suppression directives (should NOT appear in linter output)
@@ -103,6 +104,7 @@ EXPECTED_EDGE_CASES: dict[str, set[str]] = {
     'edge_cancelled_error_short_name': {'EXC007'},  # Short name import
     'edge_cancelled_error_aliased': {'EXC007'},  # Aliased import
     'edge_cancelled_error_in_tuple': {'EXC007'},  # CancelledError in tuple
+    'edge_cancelled_error_with_return': {'EXC007'},  # return instead of raise
     'edge_sync_nested_in_async': set(),  # Sync nested function not subject to EXC007
     # TryStar (except*)
     'edge_trystar_no_raise': {'EXC002'},

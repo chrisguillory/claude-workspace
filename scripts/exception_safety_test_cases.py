@@ -425,6 +425,24 @@ async def exc007_violation_basic() -> None:
         cleanup()
 
 
+async def exc007_violation_return_in_worker() -> None:
+    """VIOLATION: CancelledError swallowed with return in worker loop.
+
+    This is the most common form of this bug in queue workers.
+    The developer thinks `return` cleanly exits the loop, but it actually:
+    - Makes task.cancelled() return False (appears completed, not cancelled)
+    - Breaks orchestrator logic that checks task.cancelled()
+    - Silently corrupts the cancellation chain
+    """
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    while True:
+        try:
+            item = await queue.get()
+        except asyncio.CancelledError:
+            return  # EXC007: Swallows cancellation! Use `raise` or remove try/except
+        await process_async(item)
+
+
 async def exc007_correct_explicit() -> None:
     """CORRECT: Always re-raise CancelledError after cleanup."""
     try:
@@ -467,6 +485,20 @@ async def exc007_correct_base_exception() -> None:
         # Error boundary - handles CancelledError, KeyboardInterrupt, etc.
         await rollback_async()
         raise  # Always re-raise
+
+
+async def exc007_correct_no_catch_needed() -> None:
+    """CORRECT: Don't catch CancelledError when no cleanup is needed.
+
+    The simplest and preferred pattern: let CancelledError propagate naturally.
+    Only catch it when you have cleanup to perform before propagation.
+
+    This is better than `except CancelledError: raise` which catches just to re-raise.
+    """
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    while True:
+        item = await queue.get()  # CancelledError propagates automatically
+        await process_async(item)
 
 
 # =============================================================================
@@ -619,8 +651,13 @@ def optional_feature() -> None:
     pass
 
 
-def process(item: str) -> None:
-    """Placeholder for item processing."""
+def process(item: object) -> None:
+    """Placeholder for sync item processing."""
+    pass
+
+
+async def process_async(item: object) -> None:
+    """Placeholder for async item processing."""
     pass
 
 

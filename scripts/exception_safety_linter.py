@@ -147,7 +147,7 @@ VIOLATION_MESSAGES: Mapping[ViolationKind, str] = {
     'raise-without-from': 'Raising new exception without "from" uses implicit chaining (unclear intent)',
     'unused-exception-var': 'Exception variable captured but never used',
     'logger-no-exc-info': 'Logger call without exc_info loses traceback',
-    'cancelled-not-raised': 'CancelledError not re-raised breaks async cancellation',
+    'cancelled-not-raised': 'CancelledError swallowed (task.cancelled() returns False, breaking orchestrator logic)',
 }
 
 # Fix suggestions for each violation
@@ -158,7 +158,7 @@ FIX_SUGGESTIONS: Mapping[ViolationKind, str] = {
     'raise-without-from': "Use 'raise NewError() from e' for explicit chaining, or 'from None' to suppress",
     'unused-exception-var': "Remove 'as e' or use e (log it, inspect it, etc.)",
     'logger-no-exc-info': 'Use logger.exception() or add exc_info=True',
-    'cancelled-not-raised': "Add 'raise' after any cleanup to propagate cancellation",
+    'cancelled-not-raised': "Add 'raise' after cleanup, or remove the try/except entirely if no cleanup needed",
 }
 
 
