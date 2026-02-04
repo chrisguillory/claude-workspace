@@ -10,13 +10,14 @@ lost debugging context, and broken async cancellation. Designed to catch
 issues commonly introduced by AI-generated code.
 
 Rules:
-    EXC001 bare-except          Bare except catches KeyboardInterrupt, SystemExit, CancelledError, GeneratorExit
-    EXC002 swallowed-exception  Broad catch (Exception/BaseException) without re-raise
-    EXC003 finally-control-flow Return/break/continue in finally suppresses exceptions
-    EXC004 raise-without-from   Raising new exception without 'from' uses implicit chaining
-    EXC005 unused-exception-var Catching 'as e' but never using e
-    EXC006 logger-no-exc-info   Logger error/warning calls in except without exc_info
-    EXC007 cancelled-not-raised CancelledError caught but not re-raised in async
+    EXC001 bare-except              Bare except catches KeyboardInterrupt, SystemExit, CancelledError, GeneratorExit
+    EXC002 swallowed-exception      Broad catch (Exception/BaseException) without re-raise
+    EXC003 finally-control-flow     Return/break/continue in finally suppresses exceptions
+    EXC004 raise-without-from       Raising new exception without 'from' uses implicit chaining
+    EXC005 unused-exception-var     Catching 'as e' but never using e
+    EXC006 logger-no-exc-info       Logger error/warning calls in except without exc_info
+    EXC007 cancelled-not-raised     CancelledError caught but not re-raised in async
+    EXC008 generator-exit-not-raised GeneratorExit caught but not re-raised in generator
 
 Escape hatches (inline suppression):
     # exception_safety_linter.py: bare-except
@@ -103,6 +104,27 @@ BUILTIN_CATCHES_CANCELLED: Set[str] = {
     'BaseException',
 }
 
+# GeneratorExit types (fully qualified)
+QUALIFIED_GENERATOR_EXIT: Set[str] = {
+    'builtins.GeneratorExit',
+}
+
+# Short name for GeneratorExit
+BUILTIN_GENERATOR_EXIT: Set[str] = {
+    'GeneratorExit',
+}
+
+# Exception types that catch GeneratorExit
+# Like CancelledError, GeneratorExit inherits from BaseException, NOT Exception.
+# So `except Exception:` does NOT catch GeneratorExit.
+QUALIFIED_CATCHES_GENERATOR_EXIT: Set[str] = {
+    'builtins.BaseException',
+}
+
+BUILTIN_CATCHES_GENERATOR_EXIT: Set[str] = {
+    'BaseException',
+}
+
 # Logger method names that should have exc_info in except blocks
 # Note: These are method names from logging module's Logger class
 LOGGER_ERROR_METHODS: Set[str] = {
@@ -126,6 +148,7 @@ type ViolationKind = Literal[
     'unused-exception-var',
     'logger-no-exc-info',
     'cancelled-not-raised',
+    'generator-exit-not-raised',
 ]
 
 # Maps kind to error code for display
@@ -137,6 +160,7 @@ ERROR_CODES: Mapping[ViolationKind, str] = {
     'unused-exception-var': 'EXC005',
     'logger-no-exc-info': 'EXC006',
     'cancelled-not-raised': 'EXC007',
+    'generator-exit-not-raised': 'EXC008',
 }
 
 # Short descriptions for each violation
@@ -148,6 +172,7 @@ VIOLATION_MESSAGES: Mapping[ViolationKind, str] = {
     'unused-exception-var': 'Exception variable captured but never used',
     'logger-no-exc-info': 'Logger call without exc_info loses traceback',
     'cancelled-not-raised': 'CancelledError swallowed (task.cancelled() returns False, breaking orchestrator logic)',
+    'generator-exit-not-raised': 'GeneratorExit swallowed (generator.close() cannot complete, resources leak)',
 }
 
 # Fix suggestions for each violation
@@ -159,6 +184,7 @@ FIX_SUGGESTIONS: Mapping[ViolationKind, str] = {
     'unused-exception-var': "Remove 'as e' or use e (log it, inspect it, etc.)",
     'logger-no-exc-info': 'Use logger.exception() or add exc_info=True',
     'cancelled-not-raised': "Add 'raise' after cleanup, or remove the try/except entirely if no cleanup needed",
+    'generator-exit-not-raised': "Add 'raise' after cleanup, or use 'finally' block instead (preferred)",
 }
 
 
@@ -203,6 +229,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
 
         # Context tracking
         self._in_async_function = False
+        self._in_generator_function = False
         self._in_except_handler = False
         self._in_finally_block = False
         self._handler_stack: list[ast.ExceptHandler] = []
@@ -212,18 +239,30 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
     # -------------------------------------------------------------------------
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        """Track async function context."""
-        prev = self._in_async_function
+        """Track async function context and generator status."""
+        prev_async = self._in_async_function
+        prev_gen = self._in_generator_function
+
         self._in_async_function = True
+        self._in_generator_function = self._is_generator_function(node)
+
         self.generic_visit(node)
-        self._in_async_function = prev
+
+        self._in_async_function = prev_async
+        self._in_generator_function = prev_gen
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Visit regular function (reset async context)."""
-        prev = self._in_async_function
+        """Visit regular function (reset async context, track generator status)."""
+        prev_async = self._in_async_function
+        prev_gen = self._in_generator_function
+
         self._in_async_function = False
+        self._in_generator_function = self._is_generator_function(node)
+
         self.generic_visit(node)
-        self._in_async_function = prev
+
+        self._in_async_function = prev_async
+        self._in_generator_function = prev_gen
 
     def visit_Try(self, node: ast.Try) -> None:
         """Visit try block - check handlers and finally."""
@@ -266,13 +305,15 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         self._in_except_handler = True
         self._handler_stack.append(node)
 
-        # Check for broad exception types and CancelledError
+        # Check for broad exception types, CancelledError, and GeneratorExit
         is_broad_catch = False
         is_cancelled_error_catch = False
+        is_generator_exit_catch = False
 
         if node.type is not None:
             is_broad_catch = self._is_broad_exception_type(node.type)
             is_cancelled_error_catch = self._is_cancelled_error_type(node.type)
+            is_generator_exit_catch = self._is_generator_exit_type(node.type)
 
         # Visit handler body (may recurse into nested try/except)
         self.generic_visit(node)
@@ -294,6 +335,12 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         if self._in_async_function and is_cancelled_error_catch and not self._handler_has_raise(node):
             if not self._outer_handler_reraises():
                 self._add_violation(node, 'cancelled-not-raised')
+
+        # EXC008: GeneratorExit not raised in generator function
+        # Same reasoning - skip if outer handler re-raises
+        if self._in_generator_function and is_generator_exit_catch and not self._handler_has_raise(node):
+            if not self._outer_handler_reraises():
+                self._add_violation(node, 'generator-exit-not-raised')
 
         # Restore context
         self._handler_stack.pop()
@@ -445,6 +492,39 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
 
         return False
 
+    def _is_generator_exit_type(self, node: ast.expr) -> bool:
+        """Check if exception type catches GeneratorExit."""
+        if isinstance(node, ast.Tuple):
+            return any(self._is_generator_exit_type(elt) for elt in node.elts)
+
+        # Resolve using import map
+        resolved = _resolve_name(node, self.import_map)
+
+        # Only BaseException catches GeneratorExit (not Exception!)
+        if resolved in QUALIFIED_CATCHES_GENERATOR_EXIT:
+            return True
+        if isinstance(node, ast.Name) and node.id in BUILTIN_CATCHES_GENERATOR_EXIT:
+            return True
+
+        # Check for explicit GeneratorExit
+        if resolved in QUALIFIED_GENERATOR_EXIT:
+            return True
+        if isinstance(node, ast.Name) and node.id in BUILTIN_GENERATOR_EXIT:
+            return True
+
+        return False
+
+    def _is_generator_function(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        """Check if function is a generator (contains yield expressions).
+
+        Does NOT recurse into nested functions, classes, lambdas, or generator
+        expressions. A function is only a generator if it directly contains yield.
+        """
+        finder = _YieldFinder()
+        for stmt in func.body:
+            finder.visit(stmt)
+        return finder.found
+
     def _handler_has_raise(self, handler: ast.ExceptHandler) -> bool:
         """Check if exception handler directly contains a raise statement.
 
@@ -543,6 +623,43 @@ class _RaiseFinder(ast.NodeVisitor):
         pass  # Don't recurse into lambdas
 
 
+class _YieldFinder(ast.NodeVisitor):
+    """Find yield expressions in function body, excluding nested scopes.
+
+    Follows the same pattern as _RaiseFinder - stops at scope boundaries
+    to avoid false positives from nested generators.
+
+    A function is a generator only if it directly contains yield expressions,
+    not if a nested function or generator expression contains yield.
+    """
+
+    def __init__(self) -> None:
+        self.found = False
+
+    def visit_Yield(self, node: ast.Yield) -> None:
+        self.found = True
+
+    def visit_YieldFrom(self, node: ast.YieldFrom) -> None:
+        self.found = True
+
+    # Stop at scope boundaries
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        pass  # Don't recurse into nested functions
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        pass  # Don't recurse into nested async functions
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        pass  # Don't recurse into nested classes
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        pass  # Don't recurse into lambdas
+
+    # Generator expressions create their own scope
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        pass  # Don't recurse - genexp doesn't make containing function a generator
+
+
 # =============================================================================
 # File Processing
 # =============================================================================
@@ -616,7 +733,7 @@ def _resolve_name(node: ast.expr, import_map: Mapping[str, str]) -> str:
         if name in import_map:
             return import_map[name]
         # Assume builtins for known exception names not explicitly imported
-        if name in BUILTIN_BROAD_EXCEPTIONS | BUILTIN_CANCELLED_ERROR:
+        if name in BUILTIN_BROAD_EXCEPTIONS | BUILTIN_CANCELLED_ERROR | BUILTIN_GENERATOR_EXIT:
             return f'builtins.{name}'
         return name  # Local definition or unknown
 

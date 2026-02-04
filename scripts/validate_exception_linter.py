@@ -63,6 +63,8 @@ EXPECTED_VIOLATIONS: dict[str, set[str]] = {
     # EXC007: CancelledError not raised
     'exc007_violation_basic': {'EXC007'},
     'exc007_violation_return_in_worker': {'EXC007'},
+    # EXC008: GeneratorExit not raised
+    'exc008_violation_basic': {'EXC008'},
 }
 
 # Functions with suppression directives (should NOT appear in linter output)
@@ -106,6 +108,17 @@ EXPECTED_EDGE_CASES: dict[str, set[str]] = {
     'edge_cancelled_error_in_tuple': {'EXC007'},  # CancelledError in tuple
     'edge_cancelled_error_with_return': {'EXC007'},  # return instead of raise
     'edge_sync_nested_in_async': set(),  # Sync nested function not subject to EXC007
+    # EXC008: GeneratorExit variants
+    'edge_generator_base_exception_no_raise': {'EXC002', 'EXC008'},
+    'edge_generator_base_exception_with_raise': set(),
+    'edge_generator_exit_in_tuple': {'EXC008'},
+    'edge_generator_exit_with_return': {'EXC008'},
+    'edge_async_generator_generator_exit': {'EXC008'},
+    'edge_async_generator_both_violations': {'EXC002', 'EXC007', 'EXC008'},
+    'edge_sync_nested_in_generator': set(),
+    'edge_regular_function_generator_exit': set(),
+    'edge_generator_expression_not_generator': set(),
+    'edge_yield_from_is_generator': {'EXC008'},
     # TryStar (except*)
     'edge_trystar_no_raise': {'EXC002'},
     'edge_trystar_with_raise': set(),  # With raise is OK

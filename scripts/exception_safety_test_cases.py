@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Generator
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -499,6 +500,59 @@ async def exc007_correct_no_catch_needed() -> None:
     while True:
         item = await queue.get()  # CancelledError propagates automatically
         await process_async(item)
+
+
+# =============================================================================
+# EXC008: GeneratorExit not raised (breaks generator cleanup protocol)
+# =============================================================================
+
+
+def exc008_violation_basic() -> Generator[int]:
+    """VIOLATION: Catching GeneratorExit without re-raising.
+
+    When generator.close() is called, GeneratorExit is raised. If caught
+    without re-raising, close() cannot complete properly, causing:
+    - Context managers inside generator don't exit cleanly
+    - Resources leak (file handles, connections, locks)
+    - Generator cleanup protocol broken
+    """
+    value = 42
+    try:
+        yield value
+    except GeneratorExit:  # EXC008: no raise - generator.close() incomplete!
+        cleanup()
+
+
+def exc008_correct_explicit() -> Generator[int]:
+    """CORRECT: Always re-raise GeneratorExit after cleanup.
+
+    Like CancelledError in async (EXC007), GeneratorExit must propagate
+    to maintain the cleanup protocol. Catch only when you have cleanup
+    to perform, then re-raise.
+    """
+    value = 42
+    try:
+        yield value
+    except GeneratorExit:
+        logger.info('Generator closing, cleaning up')
+        cleanup()
+        raise  # MUST re-raise to complete close()
+
+
+def exc008_correct_finally() -> Generator[int]:
+    """CORRECT: Use finally instead (preferred pattern).
+
+    Unlike try/except GeneratorExit, finally always runs regardless of
+    how the generator exits (normal completion, close(), throw(), etc.).
+    This is the cleanest pattern when you just need cleanup.
+
+    Mirrors exc007_correct_no_catch_needed for async functions.
+    """
+    value = 42
+    try:
+        yield value
+    finally:
+        cleanup()  # Runs automatically on close()
 
 
 # =============================================================================

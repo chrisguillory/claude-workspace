@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from asyncio import CancelledError
 from asyncio import CancelledError as CE
+from collections.abc import AsyncGenerator, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +316,146 @@ async def edge_sync_nested_in_async() -> None:
 
 
 # =============================================================================
+# EXC008: GeneratorExit in Generators
+# =============================================================================
+
+
+def edge_generator_base_exception_no_raise() -> Generator[int]:
+    """VIOLATION: BaseException in generator catches GeneratorExit.
+
+    Triggers BOTH rules (like EXC007 + EXC002):
+    - EXC008: Catches GeneratorExit without re-raise (generator-specific)
+    - EXC002: Broad exception (BaseException) without re-raise (general)
+
+    Like CancelledError, GeneratorExit inherits from BaseException.
+    Catching BaseException in generators without re-raise breaks cleanup.
+    """
+    value = 1
+    try:
+        yield value
+    except BaseException:  # EXC008 + EXC002: catches GeneratorExit, no raise
+        cleanup()
+
+
+def edge_generator_base_exception_with_raise() -> Generator[int]:
+    """CORRECT: BaseException with re-raise propagates GeneratorExit."""
+    value = 1
+    try:
+        yield value
+    except BaseException:
+        cleanup()
+        raise  # Proper propagation
+
+
+def edge_generator_exit_in_tuple() -> Generator[int]:
+    """VIOLATION: GeneratorExit in tuple without re-raise."""
+    value = 1
+    try:
+        yield value
+    except (ValueError, GeneratorExit):  # EXC008: GeneratorExit in tuple, no raise
+        cleanup()
+
+
+def edge_generator_exit_with_return() -> Generator[int]:
+    """VIOLATION: return instead of raise in GeneratorExit handler.
+
+    Like EXC007's return-in-CancelledError pattern, returning from
+    a GeneratorExit handler prevents proper cleanup propagation.
+    The generator.close() call cannot complete correctly.
+    """
+    value = 1
+    try:
+        yield value
+    except GeneratorExit:
+        return  # EXC008: use `raise` or use `finally` instead
+
+
+async def edge_async_generator_generator_exit() -> AsyncGenerator[int]:
+    """VIOLATION: Async generator catching GeneratorExit without raise.
+
+    Async generators can receive GeneratorExit when .aclose() is called.
+    Same rules apply as sync generators.
+    """
+    value = 1
+    try:
+        yield value
+    except GeneratorExit:  # EXC008: async generator, no raise
+        cleanup()
+
+
+async def edge_async_generator_both_violations() -> AsyncGenerator[int]:
+    """VIOLATION: Async generator catching BaseException.
+
+    Triggers THREE rules:
+    - EXC008: Catches GeneratorExit (from .aclose())
+    - EXC007: Catches CancelledError (from cancellation during await)
+    - EXC002: Broad exception without re-raise
+    """
+    value = 1
+    try:
+        await async_op()
+        yield value
+    except BaseException:  # EXC002 + EXC007 + EXC008: no raise
+        cleanup()
+
+
+def edge_sync_nested_in_generator() -> Generator[object]:
+    """CORRECT: Sync function inside generator doesn't trigger EXC008.
+
+    A nested function is not a generator just because it's inside one.
+    Catching GeneratorExit in the nested sync function is unusual
+    but doesn't break generator semantics.
+    """
+
+    def sync_handler() -> None:
+        try:
+            risky()
+        except GeneratorExit:  # NOT EXC008: not a generator
+            cleanup()
+
+    sync_handler()
+    yield 1
+
+
+def edge_regular_function_generator_exit() -> None:
+    """CORRECT: Non-generator catching GeneratorExit is unusual but OK.
+
+    GeneratorExit is only raised by Python in generators when close()
+    is called. Catching it in a regular function is unusual (maybe
+    the code handles generators internally?) but not a linter violation.
+    """
+    try:
+        some_function()
+    except GeneratorExit:  # NOT EXC008: not a generator function
+        pass
+
+
+def edge_generator_expression_not_generator() -> None:
+    """CORRECT: Generator expression doesn't make function a generator.
+
+    The function contains a generator expression, but that doesn't make
+    the function itself a generator. Only direct yield makes it a generator.
+    """
+    try:
+        items = (x for x in range(10))  # Generator expression
+        process_items(items)
+    except GeneratorExit:  # NOT EXC008: function is not a generator
+        pass
+
+
+def edge_yield_from_is_generator() -> Generator[int]:
+    """VIOLATION: yield from also makes function a generator.
+
+    Both `yield` and `yield from` make a function a generator.
+    The cleanup protocol applies equally to both forms.
+    """
+    try:
+        yield from some_generator()
+    except GeneratorExit:  # EXC008: yield from = generator
+        cleanup()
+
+
+# =============================================================================
 # TryStar (Python 3.11+ Exception Groups)
 # =============================================================================
 
@@ -380,6 +521,21 @@ def cleanup() -> None:
     pass
 
 
+def process_items(items: object) -> None:
+    """Placeholder for processing items."""
+    pass
+
+
 def risky() -> None:
     """Placeholder for operation that might raise."""
     pass
+
+
+def some_function() -> None:
+    """Placeholder for a function."""
+    pass
+
+
+def some_generator() -> Generator[int]:
+    """Placeholder generator."""
+    yield 1
