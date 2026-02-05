@@ -152,6 +152,7 @@ class ChromeLocalState(BaseModel):
     privacy_budget: dict[str, Any] | None = None
     profile_network_context_service: dict[str, Any] | None = None
     profiles: dict[str, Any] | None = None  # Note: different from 'profile' section
+    restart: dict[str, Any] | None = None  # Session restart state
     segmentation_platform: dict[str, Any] | None = None
     session_id_generator_last_value: str | None = None
     signin: dict[str, Any] | None = None
