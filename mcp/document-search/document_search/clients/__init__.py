@@ -37,6 +37,7 @@ def create_embedding_client(config: EmbeddingConfig) -> EmbeddingClient:
             return OpenRouterClient(
                 model=config.embedding_model,
                 dimensions=config.embedding_dimensions,
+                requests_per_minute=config.requests_per_minute,
             )
 
     raise TypeError(f'Unknown config type: {type(config).__name__}')
