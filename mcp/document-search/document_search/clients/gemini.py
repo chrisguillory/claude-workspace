@@ -20,6 +20,7 @@ import tenacity
 from google import genai
 from google.genai.types import EmbedContentConfig, HttpOptions
 from local_lib import ConcurrencyTracker
+from vertexai.preview import tokenization
 
 from document_search.clients import _retry
 from document_search.schemas.embeddings import TaskIntent
@@ -129,6 +130,11 @@ class GeminiClient:
         'query': 'RETRIEVAL_QUERY',
     }
 
+    # Embedding model → tokenizer model (verified to match API count_tokens)
+    EMBEDDING_TO_TOKENIZER: Mapping[str, str] = {
+        'gemini-embedding-001': 'gemini-1.5-flash-002',
+    }
+
     @_retry.gemini_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_gemini_error),
@@ -158,8 +164,12 @@ class GeminiClient:
         Raises:
             google.genai.errors.ClientError: On API errors.
         """
-        # Estimate tokens: ~0.476 tokens/char matches Google's dashboard measurements.
-        estimated_tokens = int(sum(len(t) for t in texts) / 2.1)
+        # Token estimation calibrated to Google AI Studio dashboard (2026-01-30)
+        # IMPORTANT: API count_tokens() returns ~2.6x fewer than dashboard/rate limiter tracks.
+        # This discrepancy is documented: https://discuss.ai.google.dev/t/token-counts-mismatch-9x-discrepancy/72633
+        # Using chars/2.63 matches dashboard TPM; chars/6.79 matches API count_tokens().
+        # We use 2.63 because that's what Google's rate limiter actually enforces.
+        estimated_tokens = int(sum(len(t) for t in texts) / 2.63)
 
         # Acquire from both limiters (RPM by text count, TPM by token estimate)
         await self._rpm_limiter.try_acquire_async('rpm', weight=len(texts))
@@ -177,6 +187,49 @@ class GeminiClient:
                 ),
             )
             return [list(e.values) for e in result.embeddings]
+
+    async def count_tokens(self, texts: Sequence[str]) -> int:
+        """Count tokens for texts using Gemini API.
+
+        Makes an API call to get exact token count. Useful for:
+        - Validating token estimation accuracy
+        - Debugging rate limiting issues
+
+        Args:
+            texts: Texts to count tokens for.
+
+        Returns:
+            Total token count across all texts.
+        """
+        result = await self._client.aio.models.count_tokens(
+            model=self._model,
+            contents=list(texts),
+        )
+        return int(result.total_tokens)
+
+    def count_tokens_local(self, texts: Sequence[str]) -> int:
+        """Count tokens locally using Vertex AI tokenizer.
+
+        No API call - uses local SentencePiece tokenizer.
+        First call downloads vocabulary (~1s), subsequent calls are instant.
+
+        Args:
+            texts: Texts to count tokens for.
+
+        Returns:
+            Total token count matching API's count_tokens().
+
+        Raises:
+            ValueError: If embedding model has no verified tokenizer mapping.
+        """
+        if self._model not in self.EMBEDDING_TO_TOKENIZER:
+            raise ValueError(
+                f"No verified tokenizer for '{self._model}'. Supported: {list(self.EMBEDDING_TO_TOKENIZER.keys())}"
+            )
+
+        tokenizer = tokenization.get_tokenizer_for_model(self.EMBEDDING_TO_TOKENIZER[self._model])
+        token_sum = sum(tokenizer.count_tokens(t).total_tokens for t in texts)
+        return token_sum + 1  # API adds BOS token
 
     async def close(self) -> None:
         """No-op: google-genai Client manages its own HTTP lifecycle."""

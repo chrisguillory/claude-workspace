@@ -61,6 +61,7 @@ class OpenRouterClient:
         model: str,
         *,
         dimensions: int | None = None,
+        requests_per_minute: int | None = None,
         api_key: str | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
@@ -75,6 +76,7 @@ class OpenRouterClient:
             model: Model identifier (e.g., 'qwen/qwen3-embedding-8b').
             dimensions: Output vector dimensions. If None, uses model's native dimensions.
                 Note: Not all models support dimension reduction.
+            requests_per_minute: Not supported at the moment.
             api_key: OpenRouter API key. If None, loads from standard location.
             max_concurrent: Max concurrent API requests (semaphore limit).
             timeout_ms: Request timeout in milliseconds.
@@ -83,6 +85,8 @@ class OpenRouterClient:
             keepalive_expiry: Seconds before idle connections close.
             encoding_format: Response format ('float' or 'base64').
         """
+        if requests_per_minute is not None:
+            raise ValueError('OpenRouterClient does not support rate limiting')
         self._model = model
         self._dimensions = dimensions
         self._api_key = api_key or _load_api_key()

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
 # dependencies = []
@@ -1129,19 +1129,36 @@ def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: boo
 def _discover_strict_ordering_packages(files: Sequence[Path]) -> Set[Path]:
     """Find packages that have opted into strict module ordering.
 
-    Scans all __init__.py files in the file list for __strict_module_ordering__ = True.
+    Two discovery methods:
+    1. Scan __init__.py files in the input list
+    2. Walk up from each input file to find parent __init__.py files
+
+    This ensures single-file invocations still respect package-level settings.
     Raises ValueError on unrecognized __strict_* variables (fail-fast on typos).
 
     Strictness is inherited: if a parent package has the flag, all child packages
     are also considered strict.
     """
     packages: set[Path] = set()
-    init_files = {f for f in files if f.name == '__init__.py'}
+    checked_init_files: set[Path] = set()
 
-    for init_path in init_files:
-        # _get_strict_module_ordering raises ValueError on unrecognized __strict_* vars
-        if _get_strict_module_ordering(init_path):
-            packages.add(init_path.parent)
+    # Method 1: Check __init__.py files in input list
+    for f in files:
+        if f.name == '__init__.py':
+            checked_init_files.add(f)
+            if _get_strict_module_ordering(f):
+                packages.add(f.parent)
+
+    # Method 2: Walk up from each file to find parent __init__.py files
+    for f in files:
+        for parent in f.parents:
+            init_path = parent / '__init__.py'
+            if init_path in checked_init_files:
+                continue
+            checked_init_files.add(init_path)
+            if init_path.exists():
+                if _get_strict_module_ordering(init_path):
+                    packages.add(parent)
 
     return packages
 

@@ -21,14 +21,13 @@ from local_lib.batch_loader import GenericBatchLoader
 from document_search.clients.qdrant import QdrantClient
 from document_search.schemas.chunking import EXTENSION_MAP, FileType
 from document_search.schemas.vectors import (
-    CollectionInfo,
+    ContentStats,
     FileIndexStatus,
-    IndexBreakdown,
     IndexedFile,
-    IndexInfo,
     SearchHit,
     SearchQuery,
     SearchResult,
+    StorageStats,
     VectorPoint,
 )
 
@@ -45,17 +44,20 @@ class DocumentVectorRepository:
     Provides typed interface for storing document chunks with their
     embeddings and searching by vector similarity.
 
+    Each repository instance is bound to a specific collection.
     Uses UpsertLoader for automatic batching of concurrent upsert requests.
     """
 
-    def __init__(self, client: QdrantClient) -> None:
-        """Initialize repository.
+    def __init__(self, client: QdrantClient, collection_name: str) -> None:
+        """Initialize repository for a specific collection.
 
         Args:
             client: Qdrant client instance.
+            collection_name: Name of the collection to operate on.
         """
         self._client = client
-        self._upsert_loader = UpsertLoader(client)
+        self._collection_name = collection_name
+        self._upsert_loader = UpsertLoader(client, collection_name)
 
     async def ensure_collection(self, vector_dimension: int) -> None:
         """Ensure collection exists with correct configuration.
@@ -63,7 +65,7 @@ class DocumentVectorRepository:
         Args:
             vector_dimension: Size of embedding vectors (e.g., 768).
         """
-        await self._client.ensure_collection(vector_dimension)
+        await self._client.ensure_collection(self._collection_name, vector_dimension)
 
     async def upsert(self, points: Sequence[VectorPoint]) -> int:
         """Store or update document vectors with hybrid embeddings (automatically batched).
@@ -99,6 +101,7 @@ class DocumentVectorRepository:
         fetch_limit = query.limit * 3 if query.source_path_prefix else query.limit
 
         raw_results = await self._client.search(
+            self._collection_name,
             search_type=query.search_type,
             dense_vector=list(query.dense_vector) if query.dense_vector else None,
             sparse_indices=list(query.sparse_indices) if query.sparse_indices else None,
@@ -142,7 +145,7 @@ class DocumentVectorRepository:
         Returns:
             Typed document data (without scores).
         """
-        raw_results = await self._client.get(point_ids)
+        raw_results = await self._client.get(self._collection_name, point_ids)
 
         return [
             SearchHit(
@@ -170,7 +173,7 @@ class DocumentVectorRepository:
         Returns:
             Number of points deleted.
         """
-        return await self._client.delete(point_ids)
+        return await self._client.delete(self._collection_name, point_ids)
 
     async def delete_by_source_path_prefix(self, prefix: str) -> int:
         """Delete all vectors for files under a directory prefix.
@@ -184,24 +187,23 @@ class DocumentVectorRepository:
         Returns:
             Number of points deleted.
         """
-        return await self._client.delete_by_source_path_prefix(prefix)
+        return await self._client.delete_by_source_path_prefix(self._collection_name, prefix)
 
     async def count(self) -> int:
         """Get total document count."""
-        return await self._client.count()
+        return await self._client.count(self._collection_name)
 
-    async def get_collection_info(self) -> CollectionInfo | None:
-        """Get collection metadata.
+    async def get_storage_stats(self) -> StorageStats | None:
+        """Get Qdrant storage statistics.
 
         Returns:
-            Collection info if exists, None otherwise.
+            Storage stats if collection exists, None otherwise.
         """
-        info = await self._client.get_collection_info()
+        info = await self._client.get_collection_info(self._collection_name)
         if info is None:
             return None
 
-        return CollectionInfo(
-            name=info['name'],
+        return StorageStats(
             vector_dimension=info['vector_dimension'],
             points_count=info['points_count'],
             status=info['status'],
@@ -209,24 +211,35 @@ class DocumentVectorRepository:
 
     # Visibility methods for index introspection
 
-    async def get_index_breakdown(self) -> IndexBreakdown:
-        """Get overview of what's in the document index.
+    async def get_content_stats(self, path: str | None = None) -> ContentStats:
+        """Get content breakdown statistics.
+
+        Args:
+            path: Scope stats to this path. Use "**" or None for global stats.
 
         Returns:
-            IndexBreakdown with total chunks, breakdown by file type,
+            ContentStats with total chunks, breakdown by file type,
             unique file count, and list of supported types.
         """
-        total_chunks = await self._client.count()
-        by_file_type = await self._client.facet_by_file_type()
+        if path is None or path == '**':
+            # Global stats - use efficient facet API
+            total_chunks = await self._client.count(self._collection_name)
+            by_file_type = dict(await self._client.facet_by_file_type(self._collection_name))
+            unique_paths = await self._client.get_unique_source_paths(self._collection_name)
+            unique_files = len(unique_paths)
+        else:
+            # Scoped stats - aggregate from filtered paths
+            raw_paths = await self._client.get_unique_source_paths(self._collection_name, path_prefix=path)
+            unique_files = len(raw_paths)
+            total_chunks = sum(count for _, _, count in raw_paths)
+            by_file_type_agg: dict[str, int] = {}
+            for _, ftype, count in raw_paths:
+                by_file_type_agg[ftype] = by_file_type_agg.get(ftype, 0) + count
+            by_file_type = by_file_type_agg
 
-        # Get unique file count via scroll (more efficient than full path list)
-        unique_paths = await self._client.get_unique_source_paths()
-        unique_files = len(unique_paths)
-
-        # Get supported types from EXTENSION_MAP (static)
         supported_types = sorted(set(EXTENSION_MAP.values()))
 
-        return IndexBreakdown(
+        return ContentStats(
             total_chunks=total_chunks,
             by_file_type=by_file_type,
             unique_files=unique_files,
@@ -256,7 +269,7 @@ class DocumentVectorRepository:
             )
 
         # Check if file has chunks in the index
-        chunk_count = await self._client.count_by_source_path(path)
+        chunk_count = await self._client.count_by_source_path(self._collection_name, path)
 
         if chunk_count == 0:
             return FileIndexStatus(
@@ -290,6 +303,7 @@ class DocumentVectorRepository:
             List of IndexedFile sorted by chunk count descending.
         """
         raw_paths = await self._client.get_unique_source_paths(
+            self._collection_name,
             path_prefix=path_prefix,
             file_type=file_type,
             limit=limit,
@@ -299,56 +313,6 @@ class DocumentVectorRepository:
             IndexedFile(path=path, chunk_count=count, file_type=typing.cast(FileType, ftype))
             for path, ftype, count in raw_paths
         ]
-
-    async def get_index_info(self, path: str | None = None) -> IndexInfo:
-        """Get combined index information with infrastructure and content stats.
-
-        Args:
-            path: Scope content stats to this path. Use "**" for global stats.
-                  If None, returns global stats.
-
-        Returns:
-            IndexInfo with infrastructure (always global) and content (scoped) sections.
-
-        Raises:
-            ValueError: If collection is not initialized.
-        """
-        # Infrastructure stats (always global)
-        collection_info = await self.get_collection_info()
-        if collection_info is None:
-            raise ValueError('Collection not initialized - run index_documents first')
-
-        # Content breakdown (scoped if path provided and not "**")
-        if path is None or path == '**':
-            # Global stats - use efficient facet API
-            total_chunks = await self._client.count()
-            by_file_type = dict(await self._client.facet_by_file_type())
-            unique_paths = await self._client.get_unique_source_paths()
-            unique_files = len(unique_paths)
-        else:
-            # Scoped stats - aggregate from filtered paths
-            raw_paths = await self._client.get_unique_source_paths(path_prefix=path)
-            unique_files = len(raw_paths)
-            total_chunks = sum(count for _, _, count in raw_paths)
-            by_file_type_agg: dict[str, int] = {}
-            for _, ftype, count in raw_paths:
-                by_file_type_agg[ftype] = by_file_type_agg.get(ftype, 0) + count
-            by_file_type = by_file_type_agg
-
-        supported_types = sorted(set(EXTENSION_MAP.values()))
-
-        content = IndexBreakdown(
-            total_chunks=total_chunks,
-            by_file_type=by_file_type,
-            unique_files=unique_files,
-            supported_types=supported_types,
-        )
-
-        return IndexInfo(
-            infrastructure=collection_info,
-            content=content,
-            path=path,
-        )
 
     async def clear_documents(self, path: str | None = None) -> tuple[int, int]:
         """Clear documents from the index.
@@ -362,24 +326,24 @@ class DocumentVectorRepository:
         """
         if path == '**':
             # Drop entire collection (instant vs scrolling through all points)
-            chunks_count = await self._client.count()
-            await self._client.delete_collection()
+            chunks_count = await self._client.count(self._collection_name)
+            await self._client.delete_collection(self._collection_name)
             return 0, chunks_count  # Can't count files after drop
 
         if path is None:
             raise ValueError('path must be provided (use "**" for entire index)')
 
         # Check if path is a file or directory by looking at indexed content
-        chunk_count = await self._client.count_by_source_path(path)
+        chunk_count = await self._client.count_by_source_path(self._collection_name, path)
         if chunk_count > 0:
             # Exact file match
-            await self._client.delete_by_source_path(path)
+            await self._client.delete_by_source_path(self._collection_name, path)
             return 1, chunk_count
 
         # Directory prefix
-        raw_paths = await self._client.get_unique_source_paths(path_prefix=path)
+        raw_paths = await self._client.get_unique_source_paths(self._collection_name, path_prefix=path)
         files_count = len(raw_paths)
-        chunks_count = await self._client.delete_by_source_path_prefix(path)
+        chunks_count = await self._client.delete_by_source_path_prefix(self._collection_name, path)
         return files_count, chunks_count
 
 
@@ -387,6 +351,7 @@ class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):
     """BatchLoader for Qdrant upserts with automatic batching.
 
     Concurrency control is handled by QdrantClient's semaphore.
+    Each loader is bound to a specific collection.
     """
 
     @attrs.define(frozen=True, kw_only=True)
@@ -395,8 +360,9 @@ class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):
 
         point: VectorPoint
 
-    def __init__(self, client: QdrantClient) -> None:
+    def __init__(self, client: QdrantClient, collection_name: str) -> None:
         self._client = client
+        self._collection_name = collection_name
         super().__init__(
             bulk_load=self._bulk_load,
             batch_size=100,  # Reduced from 300 to lower burst pressure
@@ -428,5 +394,5 @@ class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):
         total_chars = sum(len(req.point.text) for req in requests)
         logger.debug(f'[BATCH] Upserting {len(requests)} points ({total_chars:,} chars)')
 
-        await self._client.upsert(raw_points)
+        await self._client.upsert(self._collection_name, raw_points)
         return [1] * len(requests)
