@@ -8,10 +8,13 @@
 This script enforces immutable interface types and module organization:
 1. IMMUTABLE TYPES: Use Sequence/Mapping/Set instead of list/dict/set
 2. STRICT TYPING: No Any, Mapping[str, Any], Sequence[Any] etc.
-3. MODULE ORDERING (opt-in): Public before private, classes before functions
+3. TUPLE FIELDS: Flag tuple[X, ...] in class fields (use Sequence[T] instead)
+4. HASHABLE FIELDS (opt-in): Enforce hashable types via __strict_typing_linter__hashable_fields__
+5. MODULE ORDERING (opt-in): Public before private, classes before functions
 
 Checks ALL function/method parameters, return types, and class field annotations.
-Skips non-frozen dataclasses (mutable by design).
+Skips non-frozen dataclasses and attrs classes (mutable by design).
+Note: pydantic_settings.BaseSettings (intentionally non-frozen) is not supported at this time.
 Respects .gitignore when scanning directories.
 
 Module ordering is opt-in via __strict_module_ordering__ = True in package __init__.py.
@@ -26,6 +29,8 @@ Design Philosophy:
     - Escape hatches:
       - # strict_typing_linter.py: mutable-type - suppress mutable type violations
       - # strict_typing_linter.py: loose-typing - suppress loose typing violations
+      - # strict_typing_linter.py: tuple-field - suppress tuple-in-field violations
+      - # strict_typing_linter.py: hashable-field - suppress unhashable-field violations
       - # strict_typing_linter.py: ordering - suppress ordering violations
 
 Usage:
@@ -192,10 +197,10 @@ DIRECTIVE_PREFIX = '# strict_typing_linter.py:'
 
 # Type aliases for constrained string values
 type FieldContext = Literal['field', 'parameter', 'return']
-type DirectiveCode = Literal['mutable-type', 'loose-typing', 'ordering']
+type DirectiveCode = Literal['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering']
 
 # Violation kind literals - used in discriminated unions
-type TypeViolationKind = Literal['mutable', 'loose']
+type TypeViolationKind = Literal['mutable', 'loose', 'tuple-field', 'hashable-field']
 type OrderingViolationKind = Literal['ordering', 'missing-all', 'trailing-comma']
 type ViolationKind = TypeViolationKind | OrderingViolationKind
 
@@ -209,7 +214,7 @@ class TypeViolation:
     column: int
     context: FieldContext
     bad_type: str
-    kind: Literal['mutable', 'loose']
+    kind: TypeViolationKind
     source_line: str
     suggestion: str
 
@@ -270,13 +275,129 @@ def _is_frozen_dataclass(node: ast.ClassDef) -> bool | None:
     return None
 
 
+def _is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[str, str]) -> bool | None:
+    """Check if class has an attrs decorator and whether it's frozen.
+
+    Uses import tracking to resolve decorator names, avoiding false positives
+    from custom decorators with similar names.
+
+    Returns:
+        True if frozen attrs class (@frozen, @define(frozen=True), etc.)
+        False if non-frozen attrs class (@define, @mutable, etc.)
+        None if not an attrs class
+    """
+    # Fully qualified attrs decorator names
+    ALWAYS_FROZEN = {'attrs.frozen', 'attr.frozen'}
+    ALWAYS_MUTABLE = {'attrs.mutable', 'attr.mutable'}
+    CONFIGURABLE = {'attrs.define', 'attr.define', 'attrs.s', 'attr.s', 'attrs.attrs', 'attr.attrs'}
+
+    for decorator in node.decorator_list:
+        # Resolve decorator to qualified name
+        decorator_node = decorator.func if isinstance(decorator, ast.Call) else decorator
+        resolved = _resolve_qualified_name(decorator_node, import_map)
+
+        # Check against known attrs patterns
+        if resolved in ALWAYS_FROZEN:
+            return True
+        if resolved in ALWAYS_MUTABLE:
+            return False
+        if resolved in CONFIGURABLE:
+            # For Call decorators with frozen= keyword
+            if isinstance(decorator, ast.Call):
+                for kw in decorator.keywords:
+                    if kw.arg == 'frozen' and isinstance(kw.value, ast.Constant):
+                        return kw.value.value is True
+            # Default for configurable decorators without frozen=True
+            return False
+
+    return None
+
+
+def _is_variable_length_tuple(node: ast.expr, import_map: Mapping[str, str]) -> bool:
+    """Check if an AST node is a variable-length tuple annotation: tuple[X, ...].
+
+    Only matches the homogeneous form with Ellipsis. Does NOT match:
+    - tuple (bare, no subscript)
+    - tuple[int, str] (fixed-length)
+    - tuple[()] (empty tuple)
+    """
+    if not isinstance(node, ast.Subscript):
+        return False
+
+    # Check the container resolves to tuple
+    resolved = _resolve_qualified_name(node.value, import_map)
+    if isinstance(node.value, ast.Name):
+        if node.value.id != 'tuple' and resolved not in ('builtins.tuple', 'typing.Tuple'):
+            return False
+    elif isinstance(node.value, ast.Attribute):
+        if resolved not in ('builtins.tuple', 'typing.Tuple'):
+            return False
+    else:
+        return False
+
+    # Check slice is (Type, Ellipsis)
+    if not isinstance(node.slice, ast.Tuple):
+        return False
+    if len(node.slice.elts) != 2:
+        return False
+    return isinstance(node.slice.elts[1], ast.Constant) and node.slice.elts[1].value is Ellipsis
+
+
+def _is_strict_var(name: str) -> bool:
+    """Check if a name matches any recognized strict variable prefix."""
+    return any(name.startswith(prefix) for prefix in STRICT_VAR_PREFIXES) and name.endswith('__')
+
+
+def _validate_strict_var_in_class(name: str, class_name: str, lineno: int) -> None:
+    """Validate a __strict_*__ variable found in a class body.
+
+    Raises:
+        ValueError: If unrecognized or misplaced
+    """
+    if name not in RECOGNIZED_STRICT_VARS:
+        raise ValueError(
+            f'{class_name}:{lineno}: Unrecognized strict variable '
+            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?"
+        )
+    if name in MODULE_LEVEL_STRICT_VARS:
+        raise ValueError(
+            f"{class_name}:{lineno}: '{name}' is a module-level variable. Place it in __init__.py, not inside a class."
+        )
+
+
+def _get_strict_hashable_fields(node: ast.ClassDef) -> bool:
+    """Check if class body declares __strict_typing_linter__hashable_fields__ = True.
+
+    Also validates unrecognized __strict_*__ variables at the class level (fail-fast on typos).
+
+    Raises:
+        ValueError: If unrecognized or misplaced __strict_*__ variable found
+    """
+    for item in node.body:
+        if isinstance(item, ast.Assign):
+            for target in item.targets:
+                if isinstance(target, ast.Name) and _is_strict_var(target.id):
+                    _validate_strict_var_in_class(target.id, node.name, item.lineno)
+                    if target.id == '__strict_typing_linter__hashable_fields__':
+                        if isinstance(item.value, ast.Constant):
+                            return item.value.value is True
+        # Also handle annotated assignment: ClassVar[bool] = True
+        elif isinstance(item, ast.AnnAssign):
+            if isinstance(item.target, ast.Name) and _is_strict_var(item.target.id):
+                _validate_strict_var_in_class(item.target.id, node.name, item.lineno)
+                if item.target.id == '__strict_typing_linter__hashable_fields__' and item.value is not None:
+                    if isinstance(item.value, ast.Constant):
+                        return item.value.value is True
+    return False
+
+
 class AnnotationChecker(ast.NodeVisitor):
     """AST visitor that checks for mutable and loose types in annotations."""
 
     SUGGESTIONS: Mapping[str, str] = {
         # Mutable type suggestions
-        'list': 'Sequence[T] or tuple[T, ...]',
-        'List': 'Sequence[T] or tuple[T, ...]',
+        'list': 'Sequence[T]',
+        'List': 'Sequence[T]',
         'dict': 'Mapping[K, V]',
         'Dict': 'Mapping[K, V]',
         'set': 'Set[T] (from collections.abc)',
@@ -292,6 +413,7 @@ class AnnotationChecker(ast.NodeVisitor):
         self.violations: list[Violation] = []  # Internal - OK to be mutable
         self._function_depth = 0  # Track nesting depth in functions
         self._skip_class_fields = False  # Skip field checking for non-frozen dataclasses
+        self._hashable_fields = False  # In a __strict_typing_linter__hashable_fields__ class
 
     def _get_type_name(self, node: ast.expr) -> str:
         """Extract the name from a type expression."""
@@ -326,19 +448,34 @@ class AnnotationChecker(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Handle class definitions, skipping non-frozen dataclasses."""
         frozen = _is_frozen_dataclass(node)
+        if frozen is None:
+            frozen = _is_frozen_attrs(node, self.import_map)
+        hashable = _get_strict_hashable_fields(node)
 
         # Save previous state
         prev_skip = self._skip_class_fields
+        prev_hashable = self._hashable_fields
 
-        # Skip field checking for non-frozen dataclasses (mutable by design)
-        if frozen is False:
-            self._skip_class_fields = True
+        # Skip field checking for non-frozen dataclasses/attrs (mutable by design)
+        # Must unconditionally assign (not just set True) so nested classes reset properly
+        self._skip_class_fields = frozen is False
+
+        if frozen is False and hashable:
+            raise ValueError(
+                f"Class '{node.name}' at line {node.lineno}: "
+                f'__strict_typing_linter__hashable_fields__ = True is incompatible with non-frozen class. '
+                f'Non-frozen classes are mutable and cannot be hashable.'
+            )
+
+        # Set hashable fields mode - each class starts fresh (no inheritance from parent)
+        self._hashable_fields = hashable
 
         # Visit children
         self.generic_visit(node)
 
         # Restore state
         self._skip_class_fields = prev_skip
+        self._hashable_fields = prev_hashable
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         """Check annotated assignments (x: Type = value)."""
@@ -390,20 +527,71 @@ class AnnotationChecker(ast.NodeVisitor):
             self._check_annotation(node.args.kwarg.annotation, node.args.kwarg.lineno, 'parameter')
 
     def _check_annotation(self, node: ast.expr, lineno: int, context: FieldContext) -> None:
-        """Check if an annotation contains forbidden types."""
+        """Check if an annotation contains forbidden types.
+
+        Three-pass checking for field annotations:
+        1. tuple-field: Flag tuple[X, ...] in fields (outside hashable context)
+        2. hashable-field: Flag Sequence/Mapping in fields (inside hashable context)
+        3. mutable/loose: Existing checks (all contexts)
+        """
+        source_line = ''
+        if 0 < lineno <= len(self.source_lines):
+            source_line = self.source_lines[lineno - 1].strip()
+
+        # Pass 1: tuple-field check (fields only, outside hashable context)
+        # Check ClassVar too — prefer abstract interfaces (Sequence) everywhere for consistency
+        if context == 'field' and not self._hashable_fields:
+            if self._find_tuple_field(node):
+                if not self._has_directive(lineno, 'tuple-field'):
+                    self.violations.append(
+                        TypeViolation(
+                            filepath=self.filepath,
+                            line=lineno,
+                            column=getattr(node, 'col_offset', 0),
+                            context=context,
+                            bad_type='tuple',
+                            kind='tuple-field',
+                            source_line=source_line,
+                            suggestion='Sequence[T]',
+                        )
+                    )
+
+        # Pass 2: hashable-field check (fields only, inside hashable context)
+        # Skip ClassVar fields — not instance fields, don't affect __hash__
+        if context == 'field' and self._hashable_fields and not self._is_classvar(node):
+            unhashable = self._find_unhashable_field(node)
+            if unhashable:
+                if not self._has_directive(lineno, 'hashable-field'):
+                    self.violations.append(
+                        TypeViolation(
+                            filepath=self.filepath,
+                            line=lineno,
+                            column=getattr(node, 'col_offset', 0),
+                            context=context,
+                            bad_type=unhashable,
+                            kind='hashable-field',
+                            source_line=source_line,
+                            suggestion=self._hashable_suggestion(unhashable),
+                        )
+                    )
+
+        # Pass 3: existing mutable/loose check (all contexts)
         bad_type = self._find_forbidden_type(node)
         if bad_type:
-            # Determine violation kind
             kind: TypeViolationKind = 'loose' if bad_type in LOOSE_TYPES else 'mutable'
 
-            # Check for directive comment with appropriate code
             if self._has_directive(lineno, kind):
                 return
 
-            # Get the source line for context
-            source_line = ''
-            if 0 < lineno <= len(self.source_lines):
-                source_line = self.source_lines[lineno - 1].strip()
+            suggestion = self.SUGGESTIONS.get(bad_type, 'a more specific type')
+
+            # Context-dependent overrides in hashable classes:
+            # list→tuple (Sequence would also be flagged), dict→frozendict (Mapping would also be flagged)
+            if self._hashable_fields and context == 'field':
+                if bad_type in ('list', 'List'):
+                    suggestion = 'tuple[T, ...]'
+                elif bad_type in ('dict', 'Dict'):
+                    suggestion = 'frozendict[K, V] (third-party) or restructure'
 
             self.violations.append(
                 TypeViolation(
@@ -414,9 +602,112 @@ class AnnotationChecker(ast.NodeVisitor):
                     bad_type=bad_type,
                     kind=kind,
                     source_line=source_line,
-                    suggestion=self.SUGGESTIONS.get(bad_type, 'a more specific type'),
+                    suggestion=suggestion,
                 )
             )
+
+    def _is_classvar(self, node: ast.expr) -> bool:
+        """Check if annotation is a ClassVar (not an instance field)."""
+        if isinstance(node, ast.Subscript):
+            resolved = _resolve_qualified_name(node.value, self.import_map)
+            return resolved in ('typing.ClassVar', 'typing_extensions.ClassVar')
+        if isinstance(node, ast.Name):
+            resolved = _resolve_qualified_name(node, self.import_map)
+            return resolved in ('typing.ClassVar', 'typing_extensions.ClassVar')
+        return False
+
+    def _hashable_suggestion(self, unhashable: str) -> str:
+        """Get suggestion for replacing unhashable type in hashable class."""
+        if unhashable == 'Sequence':
+            return 'tuple[T, ...]'
+        elif unhashable == 'Mapping':
+            return 'frozendict[K, V] (third-party) or restructure'
+        else:
+            return 'a hashable type'
+
+    def _find_tuple_field(self, node: ast.expr) -> bool:
+        """Recursively check if annotation contains tuple[X, ...] (variable-length).
+
+        Walks the entire type tree to catch nested tuples like Mapping[str, tuple[X, ...]].
+        """
+        if _is_variable_length_tuple(node, self.import_map):
+            return True
+
+        if isinstance(node, ast.Subscript):
+            resolved = _resolve_qualified_name(node.value, self.import_map)
+            # Annotated: check first type arg only (rest is metadata)
+            if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
+                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
+                    return self._find_tuple_field(node.slice.elts[0])
+                return self._find_tuple_field(node.slice)
+            # Recurse into all type parameters
+            return self._find_tuple_field_in_slice(node.slice)
+
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return self._find_tuple_field(node.left) or self._find_tuple_field(node.right)
+
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # String annotation (forward reference or PEP 563)
+            expr_node = ast.parse(node.value, mode='eval').body
+            return self._find_tuple_field(expr_node)
+
+        return False
+
+    def _find_tuple_field_in_slice(self, node: ast.expr) -> bool:
+        """Check slice for tuple[X, ...] patterns."""
+        if isinstance(node, ast.Tuple):
+            return any(self._find_tuple_field(elt) for elt in node.elts)
+        return self._find_tuple_field(node)
+
+    def _find_unhashable_field(self, node: ast.expr) -> str | None:
+        """Recursively check if annotation contains unhashable abstract types.
+
+        Returns the type name ('Sequence' or 'Mapping') if found, None otherwise.
+        Walks the entire type tree to catch nested unhashables like tuple[Sequence[int], ...].
+        """
+        # Check if this node is Sequence or Mapping
+        classification = self._classify_by_qualified_name(node)
+        if classification == 'transparent':
+            # 'transparent' means Sequence or Mapping — these are unhashable
+            return self._get_type_name(node)
+
+        if isinstance(node, ast.Subscript):
+            # Check the container itself
+            container_class = self._classify_by_qualified_name(node.value)
+            if container_class == 'transparent':
+                return self._get_type_name(node.value)
+
+            resolved = _resolve_qualified_name(node.value, self.import_map)
+            # Annotated: check first type arg only
+            if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
+                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
+                    return self._find_unhashable_field(node.slice.elts[0])
+                return self._find_unhashable_field(node.slice)
+            # Recurse into type parameters
+            return self._find_unhashable_in_slice(node.slice)
+
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            left = self._find_unhashable_field(node.left)
+            if left:
+                return left
+            return self._find_unhashable_field(node.right)
+
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # String annotation (forward reference or PEP 563)
+            expr_node = ast.parse(node.value, mode='eval').body
+            return self._find_unhashable_field(expr_node)
+
+        return None
+
+    def _find_unhashable_in_slice(self, node: ast.expr) -> str | None:
+        """Check slice for unhashable type patterns."""
+        if isinstance(node, ast.Tuple):
+            for elt in node.elts:
+                result = self._find_unhashable_field(elt)
+                if result:
+                    return result
+            return None
+        return self._find_unhashable_field(node)
 
     def _find_forbidden_type(self, node: ast.expr) -> str | None:
         """Recursively find if annotation contains a forbidden type.
@@ -714,14 +1005,16 @@ class AnnotationChecker(ast.NodeVisitor):
     _DIRECTIVE_CODES: Mapping[str, str] = {
         'mutable': 'mutable-type',
         'loose': 'loose-typing',
+        'tuple-field': 'tuple-field',
+        'hashable-field': 'hashable-field',
     }
 
-    def _has_directive(self, lineno: int, violation_kind: Literal['mutable', 'loose']) -> bool:
+    def _has_directive(self, lineno: int, violation_kind: TypeViolationKind) -> bool:
         """Check if line has a directive comment for this check.
 
         Args:
             lineno: Line number to check
-            violation_kind: 'mutable' or 'loose' - determines which code to check
+            violation_kind: Type violation kind - determines which code to check
 
         Returns:
             True if a matching directive comment is found
@@ -759,9 +1052,26 @@ class AnnotationChecker(ast.NodeVisitor):
 
 
 # Recognized __strict_* variables (fail-fast on typos)
+# Two namespaces: __strict_*__ (legacy module-level) and __strict_typing_linter__*__ (scoped)
 RECOGNIZED_STRICT_VARS: Set[str] = {
     '__strict_module_ordering__',
+    '__strict_typing_linter__hashable_fields__',
 }
+
+# Scope-aware sets for targeted error messages
+MODULE_LEVEL_STRICT_VARS: Set[str] = {
+    '__strict_module_ordering__',
+}
+
+CLASS_LEVEL_STRICT_VARS: Set[str] = {
+    '__strict_typing_linter__hashable_fields__',
+}
+
+# Prefixes that trigger fail-fast validation on unrecognized names
+STRICT_VAR_PREFIXES: Sequence[str] = (
+    '__strict_typing_linter__',
+    '__strict_',
+)
 
 
 def _get_strict_module_ordering(init_path: Path) -> bool:
@@ -781,18 +1091,22 @@ def _get_strict_module_ordering(init_path: Path) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name):
+                if isinstance(target, ast.Name) and _is_strict_var(target.id):
                     name = target.id
-                    # Fail-fast on unrecognized __strict_* variables
-                    if name.startswith('__strict_') and name.endswith('__'):
-                        if name not in RECOGNIZED_STRICT_VARS:
-                            raise ValueError(
-                                f'{init_path}:{node.lineno}: Unrecognized strict variable '
-                                f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?"
-                            )
-                        if name == '__strict_module_ordering__':
-                            if isinstance(node.value, ast.Constant):
-                                return node.value.value is True
+                    # Fail-fast on unrecognized __strict_*__ variables
+                    if name not in RECOGNIZED_STRICT_VARS:
+                        raise ValueError(
+                            f'{init_path}:{node.lineno}: Unrecognized strict variable '
+                            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?"
+                        )
+                    if name in CLASS_LEVEL_STRICT_VARS:
+                        raise ValueError(
+                            f'{init_path}:{node.lineno}: '
+                            f"'{name}' is a class-level variable. Place it inside a class body, not in __init__.py."
+                        )
+                    if name == '__strict_module_ordering__':
+                        if isinstance(node.value, ast.Constant):
+                            return node.value.value is True
     return False
 
 
@@ -1176,8 +1490,14 @@ def _is_under_strict_package(filepath: Path, strict_packages: Set[Path]) -> bool
 def format_violation(v: Violation) -> str:
     """Format a violation for display."""
     if isinstance(v, TypeViolation):
-        type_desc = 'Loose type' if v.kind == 'loose' else 'Mutable type'
-        directive_code = 'loose-typing' if v.kind == 'loose' else 'mutable-type'
+        # Map violation kind to human-readable description and directive code
+        _KIND_INFO: Mapping[str, tuple[str, str]] = {
+            'mutable': ('Mutable type', 'mutable-type'),
+            'loose': ('Loose type', 'loose-typing'),
+            'tuple-field': ('Variable-length tuple', 'tuple-field'),
+            'hashable-field': ('Unhashable type', 'hashable-field'),
+        }
+        type_desc, directive_code = _KIND_INFO.get(v.kind, ('Type error', v.kind))
         return (
             f'{v.filepath}:{v.line}:{v.column}: error: '
             f"{type_desc} '{v.bad_type}' in {v.context} annotation\n"
@@ -1205,6 +1525,8 @@ def format_violation(v: Violation) -> str:
 _CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
     'mutable-type': {'mutable'},
     'loose-typing': {'loose'},
+    'tuple-field': {'tuple-field'},
+    'hashable-field': {'hashable-field'},
     'ordering': {'ordering', 'missing-all', 'trailing-comma'},
 }
 
@@ -1232,8 +1554,8 @@ def main() -> int:
         nargs='*',
         default=[],
         metavar='CODE',
-        choices=['mutable-type', 'loose-typing', 'ordering'],
-        help='Violation codes to ignore (mutable-type, loose-typing, ordering)',
+        choices=['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering'],
+        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, hashable-field, ordering)',
     )
     parser.add_argument(
         '--no-gitignore',
@@ -1285,12 +1607,18 @@ def main() -> int:
         file_count = len({v.filepath for v in all_violations})
         mutable_count = sum(1 for v in all_violations if v.kind == 'mutable')
         loose_count = sum(1 for v in all_violations if v.kind == 'loose')
+        tuple_count = sum(1 for v in all_violations if v.kind == 'tuple-field')
+        hashable_count = sum(1 for v in all_violations if v.kind == 'hashable-field')
         ordering_count = sum(1 for v in all_violations if v.kind in ('ordering', 'missing-all', 'trailing-comma'))
         summary_parts = []
         if mutable_count:
             summary_parts.append(f'{mutable_count} mutable')
         if loose_count:
             summary_parts.append(f'{loose_count} loose')
+        if tuple_count:
+            summary_parts.append(f'{tuple_count} tuple-field')
+        if hashable_count:
+            summary_parts.append(f'{hashable_count} hashable-field')
         if ordering_count:
             summary_parts.append(f'{ordering_count} ordering')
         print(f'Found {len(all_violations)} violation(s) ({", ".join(summary_parts)}) in {file_count} file(s).')
