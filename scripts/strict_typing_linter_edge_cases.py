@@ -13,8 +13,8 @@ Run: ./validate_strict_typing_linter.py (validates both test files)
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import attrs
@@ -108,7 +108,7 @@ class EdgeTupleInFunctionOnly:
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableNestedSequenceInTuple:
     """VIOLATION: Sequence nested in tuple is still unhashable."""
 
@@ -118,7 +118,7 @@ class EdgeHashableNestedSequenceInTuple:
     data: tuple[Sequence[int], ...]  # hashable-field: nested Sequence
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableNestedMappingInTuple:
     """VIOLATION: Mapping nested in tuple is still unhashable."""
 
@@ -127,7 +127,7 @@ class EdgeHashableNestedMappingInTuple:
     data: tuple[Mapping[str, int], ...]  # hashable-field: nested Mapping
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableSequenceInAnnotated:
     """VIOLATION: Annotated doesn't protect Sequence from hashable check."""
 
@@ -141,7 +141,7 @@ class EdgeHashableSequenceInAnnotated:
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableSequenceUnion:
     """VIOLATION: Sequence in union is unhashable."""
 
@@ -150,7 +150,7 @@ class EdgeHashableSequenceUnion:
     items: Sequence[int] | None  # hashable-field
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableMappingUnion:
     """VIOLATION: Mapping in union is unhashable."""
 
@@ -164,7 +164,7 @@ class EdgeHashableMappingUnion:
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableListSuggestion:
     """VIOLATION: list in hashable class suggests tuple[T, ...] not Sequence[T].
 
@@ -176,7 +176,7 @@ class EdgeHashableListSuggestion:
     items: list[int]  # mutable-type: suggests tuple[T, ...] in this context
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableDictSuggestion:
     """VIOLATION: dict in hashable class suggests frozendict (not Mapping, which would also be flagged)."""
 
@@ -190,7 +190,7 @@ class EdgeHashableDictSuggestion:
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableClassVarSequence:
     """CORRECT: ClassVar[Sequence] doesn't affect __hash__."""
 
@@ -199,7 +199,7 @@ class EdgeHashableClassVarSequence:
     CLASS_DATA: ClassVar[Sequence[int]] = []  # OK: ClassVar
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableClassVarMapping:
     """CORRECT: ClassVar[Mapping] doesn't affect __hash__."""
 
@@ -208,7 +208,7 @@ class EdgeHashableClassVarMapping:
     CLASS_MAP: ClassVar[Mapping[str, int]] = {}  # OK: ClassVar
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableClassVarTuple:
     """CORRECT: ClassVar with tuple also OK."""
 
@@ -222,7 +222,7 @@ class EdgeHashableClassVarTuple:
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeOuterHashable:
     """Outer class with hashable flag."""
 
@@ -237,13 +237,13 @@ class EdgeOuterHashable:
         inner_values: tuple[int, ...]  # tuple-field: no inheritance
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeOuterHashableWithInnerDataclass:
     """Outer hashable with nested dataclass."""
 
     __strict_typing_linter__hashable_fields__ = True
 
-    @dataclass(frozen=True)
+    @dataclasses.dataclass(frozen=True)
     class EdgeInnerDataclass:
         """Nested dataclass must declare its own hashable flag."""
 
@@ -264,7 +264,7 @@ class EdgeMultipleViolationsTupleAndMutable:
     nested: tuple[list[int], ...]  # tuple-field (and mutable inside)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeHashableMultipleViolations:
     """VIOLATION: Multiple hashable violations."""
 
@@ -296,7 +296,7 @@ class EdgeStringAnnotationNested:
 # =============================================================================
 
 
-@dataclass  # NOT frozen
+@dataclasses.dataclass  # NOT frozen
 class EdgeNonFrozenSkipped:
     """Non-frozen dataclass fields are skipped entirely."""
 
@@ -305,7 +305,7 @@ class EdgeNonFrozenSkipped:
     data: Mapping[str, int]  # OK: non-frozen dataclass not checked
 
 
-@dataclass(frozen=False)  # Explicitly not frozen
+@dataclasses.dataclass(frozen=False)  # Explicitly not frozen
 class EdgeExplicitlyNotFrozen:
     """Explicitly non-frozen dataclass also skipped."""
 
@@ -321,7 +321,7 @@ class EdgeExplicitlyNotFrozen:
 # =============================================================================
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeFrozenNoHashableFlag:
     """Frozen dataclass without hashable flag still checks tuple-field."""
 
@@ -362,7 +362,7 @@ class EdgeSuppressedTupleField:
     values: tuple[int, ...]  # strict_typing_linter.py: tuple-field
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class EdgeSuppressedHashableField:
     """Suppression directive for hashable-field."""
 
@@ -459,7 +459,7 @@ class EdgeAttrsFrozenHashableSequence:
 # =============================================================================
 
 
-@dataclass
+@dataclasses.dataclass
 class EdgeNonFrozenOuterWithInner:
     """Non-frozen outer — fields skipped. Inner class must NOT inherit skip."""
 
@@ -471,15 +471,317 @@ class EdgeNonFrozenOuterWithInner:
         values: tuple[int, ...]  # tuple-field: inner is not a non-frozen dataclass
 
 
-@dataclass
+@dataclasses.dataclass
 class EdgeDeeplyNested4Levels:
     """Four levels of nesting tests save/restore state at arbitrary depth."""
 
     class Level2:
-        @dataclass(frozen=True)
+        @dataclasses.dataclass(frozen=True)
         class Level3:
             class Level4:
                 values: tuple[int, ...]  # tuple-field: deepest level checked
+
+
+# =============================================================================
+# Cross-type hashability: Runtime inspector checks user-defined types
+# =============================================================================
+
+# --- attrs: unhashable field types ---
+
+
+@attrs.frozen
+class EdgeCrossTypeAttrsUnhashable:
+    """VIOLATION: Field type is an attrs class with unhashable fields."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _UnhashableAttrsClass
+
+
+@attrs.frozen
+class EdgeCrossTypeAttrsNonFrozen:
+    """VIOLATION: Field type is a non-frozen attrs class."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _NonFrozenAttrsClass
+
+
+@attrs.frozen
+class EdgeCrossTypeAttrsHashable:
+    """CORRECT: Field type is a frozen attrs class with hashable fields."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashableAttrsClass
+
+
+# --- dataclass: unhashable field types ---
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassUnhashable:
+    """VIOLATION: Field type is a frozen dataclass with unhashable fields."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _UnhashableFrozenDataclass
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassNonFrozen:
+    """VIOLATION: Field type is a non-frozen dataclass."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _NonFrozenDataclass
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassInUnion:
+    """VIOLATION: Unhashable dataclass in union still flagged."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _UnhashableFrozenDataclass | None
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassHashable:
+    """CORRECT: Frozen dataclass with only hashable fields."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashableFrozenDataclass
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassHashExcluded:
+    """CORRECT: Frozen dataclass with unhashable field excluded from hash."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashExcludedDataclass
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassHashableUnion:
+    """CORRECT: Hashable dataclass in union is fine."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashableFrozenDataclass | None
+
+
+# --- Pydantic: unhashable field types ---
+
+
+class EdgeCrossTypePydanticUnhashable(pydantic.BaseModel):
+    """VIOLATION: Pydantic model references unhashable Pydantic model."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _UnhashablePydanticModel
+
+
+class EdgeCrossTypePydanticNonFrozen(pydantic.BaseModel):
+    """VIOLATION: Pydantic model references non-frozen Pydantic model."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _NonFrozenPydanticModel
+
+
+class EdgeCrossTypeInUnion(pydantic.BaseModel):
+    """VIOLATION: Unhashable Pydantic type inside a union still flagged."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _UnhashablePydanticModel | None
+
+
+class EdgeCrossTypePydanticHashable(pydantic.BaseModel):
+    """CORRECT: Pydantic model references hashable Pydantic model."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashablePydanticModel
+
+
+class EdgeCrossTypeHashableUnion(pydantic.BaseModel):
+    """CORRECT: Hashable Pydantic type in union is fine."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashablePydanticModel | None
+
+
+# --- Mixed framework cross-references ---
+
+
+@attrs.frozen
+class EdgeCrossTypeAttrsRefsPydanticUnhashable:
+    """VIOLATION: attrs class references unhashable Pydantic model."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    point: _UnhashablePydanticModel
+
+
+@attrs.frozen
+class EdgeCrossTypeAttrsRefsPydanticHashable:
+    """CORRECT: attrs class references hashable Pydantic model."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    point: _HashablePydanticModel
+
+
+@attrs.frozen
+class EdgeCrossTypeAttrsRefsDataclassUnhashable:
+    """VIOLATION: attrs references unhashable frozen dataclass."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    point: _UnhashableFrozenDataclass
+
+
+@attrs.frozen
+class EdgeCrossTypeAttrsRefsDataclassHashable:
+    """CORRECT: attrs references hashable frozen dataclass."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    point: _HashableFrozenDataclass
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassRefsPydanticUnhashable:
+    """VIOLATION: Dataclass references unhashable Pydantic model."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    model: _UnhashablePydanticModel
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassRefsPydanticHashable:
+    """CORRECT: Dataclass references hashable Pydantic model."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    model: _HashablePydanticModel
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassRefsAttrsUnhashable:
+    """VIOLATION: Dataclass references unhashable attrs class."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _UnhashableAttrsClass
+
+
+@dataclasses.dataclass(frozen=True)
+class EdgeCrossTypeDataclassRefsAttrsHashable:
+    """CORRECT: Dataclass references hashable attrs class."""
+
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashableAttrsClass
+
+
+class EdgeCrossTypePydanticRefsAttrsUnhashable(pydantic.BaseModel):
+    """VIOLATION: Pydantic model references unhashable attrs class."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _UnhashableAttrsClass
+
+
+class EdgeCrossTypePydanticRefsAttrsHashable(pydantic.BaseModel):
+    """CORRECT: Pydantic model references hashable attrs class."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashableAttrsClass
+
+
+class EdgeCrossTypePydanticRefsDataclassUnhashable(pydantic.BaseModel):
+    """VIOLATION: Pydantic references unhashable frozen dataclass."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _UnhashableFrozenDataclass
+
+
+class EdgeCrossTypePydanticRefsDataclassHashable(pydantic.BaseModel):
+    """CORRECT: Pydantic references hashable frozen dataclass."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    __strict_typing_linter__hashable_fields__ = True
+    config: _HashableFrozenDataclass
+
+
+# --- Helper types referenced by cross-type tests above ---
+
+
+@attrs.frozen
+class _UnhashableAttrsClass:
+    """Frozen attrs class with list field — unhashable at runtime."""
+
+    items: list[int]  # strict_typing_linter.py: mutable-type
+
+
+@attrs.define
+class _NonFrozenAttrsClass:
+    """Non-frozen attrs class — unhashable (no __hash__)."""
+
+    name: str
+
+
+@attrs.frozen
+class _HashableAttrsClass:
+    """Frozen attrs class with only hashable fields."""
+
+    name: str
+    value: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _UnhashableFrozenDataclass:
+    """Frozen dataclass with Sequence field — unhashable at runtime."""
+
+    values: Sequence[float]
+
+
+@dataclasses.dataclass
+class _NonFrozenDataclass:
+    """Non-frozen dataclass — unhashable (no __hash__)."""
+
+    name: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _HashableFrozenDataclass:
+    """Frozen dataclass with only hashable fields."""
+
+    name: str
+    count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _HashExcludedDataclass:
+    """Frozen dataclass with unhashable field excluded from hash."""
+
+    name: str
+    data: list[int] = dataclasses.field(  # strict_typing_linter.py: mutable-type
+        hash=False, default_factory=list, compare=False
+    )
+
+
+class _UnhashablePydanticModel(pydantic.BaseModel):
+    """Pydantic model with Sequence field — unhashable at runtime."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    values: Sequence[float]
+
+
+class _NonFrozenPydanticModel(pydantic.BaseModel):
+    """Non-frozen Pydantic model — unhashable (no __hash__)."""
+
+    name: str
+
+
+class _HashablePydanticModel(pydantic.BaseModel):
+    """Pydantic model with only hashable fields."""
+
+    model_config = pydantic.ConfigDict(frozen=True)
+    name: str
+    count: int
 
 
 # =============================================================================

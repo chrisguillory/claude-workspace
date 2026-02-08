@@ -98,6 +98,8 @@ EXPECTED_EDGE_CASES: dict[str, set[str]] = {
     'EdgeHashableClassVarMapping': set(),
     'EdgeHashableClassVarTuple': set(),
     # Nested class independence
+    'EdgeOuterHashable': set(),  # outer wrapper, no violations
+    'EdgeOuterHashableWithInnerDataclass': set(),  # outer wrapper
     'EdgeInnerNoInherit': {'tuple-field'},
     'EdgeInnerDataclass': {'tuple-field'},
     # Multiple violations
@@ -128,7 +130,41 @@ EXPECTED_EDGE_CASES: dict[str, set[str]] = {
     'EdgeNonFrozenOuterWithInner': set(),  # non-frozen, fields skipped
     'EdgeInnerInsideNonFrozen': {'tuple-field'},
     # 4+ levels of nesting
+    'EdgeDeeplyNested4Levels': set(),  # non-frozen outer, fields skipped
+    'Level2': set(),  # regular class, no annotated fields
+    'Level3': set(),  # frozen dataclass wrapper, no violating fields
     'Level4': {'tuple-field'},
+    # Cross-type hashability: runtime inspector (attrs → dataclass → Pydantic)
+    # attrs
+    'EdgeCrossTypeAttrsUnhashable': {'hashable-field'},
+    'EdgeCrossTypeAttrsNonFrozen': {'hashable-field'},
+    'EdgeCrossTypeAttrsHashable': set(),
+    # dataclass
+    'EdgeCrossTypeDataclassUnhashable': {'hashable-field'},
+    'EdgeCrossTypeDataclassNonFrozen': {'hashable-field'},
+    'EdgeCrossTypeDataclassInUnion': {'hashable-field'},
+    'EdgeCrossTypeDataclassHashable': set(),
+    'EdgeCrossTypeDataclassHashExcluded': set(),
+    'EdgeCrossTypeDataclassHashableUnion': set(),
+    # Pydantic
+    'EdgeCrossTypePydanticUnhashable': {'hashable-field'},
+    'EdgeCrossTypePydanticNonFrozen': {'hashable-field'},
+    'EdgeCrossTypeInUnion': {'hashable-field'},
+    'EdgeCrossTypePydanticHashable': set(),
+    'EdgeCrossTypeHashableUnion': set(),
+    # Mixed framework cross-references
+    'EdgeCrossTypeAttrsRefsPydanticUnhashable': {'hashable-field'},
+    'EdgeCrossTypeAttrsRefsPydanticHashable': set(),
+    'EdgeCrossTypeAttrsRefsDataclassUnhashable': {'hashable-field'},
+    'EdgeCrossTypeAttrsRefsDataclassHashable': set(),
+    'EdgeCrossTypeDataclassRefsPydanticUnhashable': {'hashable-field'},
+    'EdgeCrossTypeDataclassRefsPydanticHashable': set(),
+    'EdgeCrossTypeDataclassRefsAttrsUnhashable': {'hashable-field'},
+    'EdgeCrossTypeDataclassRefsAttrsHashable': set(),
+    'EdgeCrossTypePydanticRefsAttrsUnhashable': {'hashable-field'},
+    'EdgeCrossTypePydanticRefsAttrsHashable': set(),
+    'EdgeCrossTypePydanticRefsDataclassUnhashable': {'hashable-field'},
+    'EdgeCrossTypePydanticRefsDataclassHashable': set(),
 }
 
 EDGE_CASE_SUPPRESSED: set[str] = {
