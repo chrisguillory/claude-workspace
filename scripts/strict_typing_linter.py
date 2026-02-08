@@ -59,7 +59,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from hashability_inspector import HashabilityInspector
+from hashability_inspector import HashabilityInspector, QualifiedName
 
 # =============================================================================
 # Configuration - What to check (not WHERE to check - that's the caller's job)
@@ -84,7 +84,7 @@ LOOSE_TYPES: Set[str] = {
 FORBIDDEN_TYPES: Set[str] = MUTABLE_TYPES | LOOSE_TYPES
 
 # Fully qualified mutable types (typing module aliases for builtins + explicit mutable interfaces)
-QUALIFIED_MUTABLE: Set[str] = {
+QUALIFIED_MUTABLE: Set[QualifiedName] = {
     'typing.List',
     'typing.Dict',
     'typing.Set',
@@ -97,7 +97,7 @@ QUALIFIED_MUTABLE: Set[str] = {
 }
 
 # Fully qualified allowed types (abstract interfaces)
-QUALIFIED_ALLOWED: Set[str] = {
+QUALIFIED_ALLOWED: Set[QualifiedName] = {
     'collections.abc.Set',
     'collections.abc.Mapping',
     'collections.abc.Sequence',
@@ -107,7 +107,7 @@ QUALIFIED_ALLOWED: Set[str] = {
 }
 
 # Fully qualified transparent types (check nested contents)
-QUALIFIED_TRANSPARENT: Set[str] = {
+QUALIFIED_TRANSPARENT: Set[QualifiedName] = {
     'collections.abc.Mapping',
     'collections.abc.Sequence',
     'typing.Mapping',
@@ -126,7 +126,7 @@ ALLOWED_CONTAINERS: Set[str] = {
 # Maps fully qualified type name to positions where Any is acceptable (0-indexed)
 # None = all positions allowed, tuple of ints = only those positions allowed
 # Names are resolved via import map, so only canonical names needed here
-ANY_ALLOWED_POSITIONS: Mapping[str, Sequence[int] | None] = {
+ANY_ALLOWED_POSITIONS: Mapping[QualifiedName, Sequence[int] | None] = {
     # FastMCP Context[ServerSessionT, LifespanContextT, RequestT] - all positions
     'mcp.server.fastmcp.Context': None,
     # Generator[YieldType, SendType, ReturnType] - SendType and ReturnType often unused
@@ -138,7 +138,7 @@ ANY_ALLOWED_POSITIONS: Mapping[str, Sequence[int] | None] = {
 }
 
 
-def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
+def _build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
     """Build a mapping from local names to fully qualified names from imports.
 
     Examples:
@@ -147,7 +147,7 @@ def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
         from typing import Generator -> {'Generator': 'typing.Generator'}
         from typing import Generator as Gen -> {'Gen': 'typing.Generator'}
     """
-    import_map: dict[str, str] = {}
+    import_map: dict[LocalName, QualifiedName] = {}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -204,7 +204,7 @@ def _find_source_root(path: Path) -> Path:
     return parent
 
 
-def _resolve_qualified_name(node: ast.expr, import_map: Mapping[str, str]) -> str:
+def _resolve_qualified_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> QualifiedName:
     """Resolve a type node to its fully qualified canonical name.
 
     Uses the import map to resolve local names to their fully qualified origins.
@@ -242,6 +242,10 @@ DIRECTIVE_PREFIX = '# strict_typing_linter.py:'
 
 
 # Type aliases for constrained string values
+# Name resolution
+type LocalName = str  # Local identifier as it appears in source (e.g., 'Generator', 't')
+type TypeClassification = Literal['mutable', 'transparent', 'allowed', 'unknown']
+
 type FieldContext = Literal['field', 'parameter', 'return']
 type DirectiveCode = Literal['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering']
 
@@ -271,7 +275,7 @@ class OrderingViolation:
 
     filepath: Path
     line: int
-    kind: Literal['ordering', 'missing-all', 'trailing-comma']
+    kind: OrderingViolationKind
     message: str
     source_line: str
     suggestion: str
@@ -321,7 +325,7 @@ def _is_frozen_dataclass(node: ast.ClassDef) -> bool | None:
     return None
 
 
-def _is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[str, str]) -> bool | None:
+def _is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[LocalName, QualifiedName]) -> bool | None:
     """Check if class has an attrs decorator and whether it's frozen.
 
     Uses import tracking to resolve decorator names, avoiding false positives
@@ -359,7 +363,7 @@ def _is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[str, str]) -> bool 
     return None
 
 
-def _is_variable_length_tuple(node: ast.expr, import_map: Mapping[str, str]) -> bool:
+def _is_variable_length_tuple(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> bool:
     """Check if an AST node is a variable-length tuple annotation: tuple[X, ...].
 
     Only matches the homogeneous form with Ellipsis. Does NOT match:
@@ -456,7 +460,7 @@ class AnnotationChecker(ast.NodeVisitor):
         self,
         filepath: Path,
         source_lines: Sequence[str],
-        import_map: Mapping[str, str],
+        import_map: Mapping[LocalName, QualifiedName],
         inspector: HashabilityInspector | None = None,
     ) -> None:
         self.filepath = filepath
@@ -478,7 +482,7 @@ class AnnotationChecker(ast.NodeVisitor):
             return self._get_type_name(node.value)
         return ''
 
-    def _classify_by_qualified_name(self, node: ast.expr) -> Literal['mutable', 'transparent', 'allowed', 'unknown']:
+    def _classify_by_qualified_name(self, node: ast.expr) -> TypeClassification:
         """Classify type using fully qualified name resolution.
 
         Used to disambiguate types like 'Set' which could be:
@@ -1092,7 +1096,7 @@ class AnnotationChecker(ast.NodeVisitor):
         return self._find_forbidden_type_no_any(expr_node)
 
     # Mapping from violation kind to directive code
-    _DIRECTIVE_CODES: Mapping[str, str] = {
+    _DIRECTIVE_CODES: Mapping[TypeViolationKind, DirectiveCode] = {
         'mutable': 'mutable-type',
         'loose': 'loose-typing',
         'tuple-field': 'tuple-field',
@@ -1585,7 +1589,7 @@ def format_violation(v: Violation) -> str:
     """Format a violation for display."""
     if isinstance(v, TypeViolation):
         # Map violation kind to human-readable description and directive code
-        _KIND_INFO: Mapping[str, tuple[str, str]] = {
+        _KIND_INFO: Mapping[TypeViolationKind, tuple[str, DirectiveCode]] = {
             'mutable': ('Mutable type', 'mutable-type'),
             'loose': ('Loose type', 'loose-typing'),
             'tuple-field': ('Variable-length tuple', 'tuple-field'),
