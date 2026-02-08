@@ -31,6 +31,7 @@ from __future__ import annotations
 __all__ = [
     'HashabilityInspector',
     'InspectionResult',
+    'QualifiedName',
     'UnhashableField',
 ]
 
@@ -47,6 +48,9 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Fully qualified dotted type name (e.g., 'document_search.schemas.vectors.VectorPoint')
+type QualifiedName = str
 
 
 # =============================================================================
@@ -89,7 +93,7 @@ UNHASHABLE_ORIGINS: frozenset[type] = frozenset(
 )
 
 # External types we can classify without importing
-KNOWN_HASHABLE: frozenset[str] = frozenset(
+KNOWN_HASHABLE: frozenset[QualifiedName] = frozenset(
     {
         'uuid.UUID',
         'datetime.datetime',
@@ -109,7 +113,7 @@ KNOWN_HASHABLE: frozenset[str] = frozenset(
     }
 )
 
-KNOWN_UNHASHABLE: frozenset[str] = frozenset(
+KNOWN_UNHASHABLE: frozenset[QualifiedName] = frozenset(
     {
         'numpy.ndarray',
         'numpy.matrix',
@@ -138,7 +142,7 @@ class InspectionResult:
 
     is_hashable: bool
     type_name: str
-    qualified_name: str
+    qualified_name: QualifiedName
     unhashable_fields: tuple[UnhashableField, ...]
 
 
@@ -160,8 +164,8 @@ class HashabilityInspector:
     """
 
     def __init__(self, source_roots: tuple[Path, ...] = ()) -> None:
-        self._cache: dict[str, InspectionResult | None] = {}
-        self._in_progress: set[str] = set()
+        self._cache: dict[QualifiedName, InspectionResult | None] = {}
+        self._in_progress: set[QualifiedName] = set()
 
         # Append source roots to sys.path so project types are importable.
         # Uses append (not insert) to preserve stdlib priority and avoid shadowing.
@@ -173,7 +177,7 @@ class HashabilityInspector:
                 sys.path.append(resolved)
                 existing.add(resolved)
 
-    def check(self, qualified_name: str) -> InspectionResult | None:
+    def check(self, qualified_name: QualifiedName) -> InspectionResult | None:
         """Check if a user-defined type is hashable via runtime inspection.
 
         Args:
@@ -222,7 +226,7 @@ class HashabilityInspector:
     # Import resolution
     # -----------------------------------------------------------------
 
-    def _import_class(self, qualified_name: str) -> type | None:
+    def _import_class(self, qualified_name: QualifiedName) -> type | None:
         """Import a class by qualified name, handling nested classes.
 
         Tries progressively shorter module paths to support nested classes
@@ -256,7 +260,7 @@ class HashabilityInspector:
     # Core verification dispatch
     # -----------------------------------------------------------------
 
-    def _verify(self, qualified_name: str) -> InspectionResult | None:
+    def _verify(self, qualified_name: QualifiedName) -> InspectionResult | None:
         """Import and verify a type's hashability."""
         cls = self._import_class(qualified_name)
         if cls is None:
@@ -288,7 +292,7 @@ class HashabilityInspector:
     # attrs checker
     # -----------------------------------------------------------------
 
-    def _check_attrs(self, cls: type, type_name: str, qualified_name: str) -> InspectionResult:
+    def _check_attrs(self, cls: type, type_name: str, qualified_name: QualifiedName) -> InspectionResult:
         """Verify attrs class hashability via field inspection."""
         import attrs
 
@@ -339,7 +343,7 @@ class HashabilityInspector:
     # Dataclass checker
     # -----------------------------------------------------------------
 
-    def _check_dataclass(self, cls: type, type_name: str, qualified_name: str) -> InspectionResult:
+    def _check_dataclass(self, cls: type, type_name: str, qualified_name: QualifiedName) -> InspectionResult:
         """Verify dataclass hashability via field inspection."""
         # Non-frozen dataclasses have __hash__ set to None
         if getattr(cls, '__hash__', None) is None:
@@ -389,7 +393,7 @@ class HashabilityInspector:
     # Pydantic checker
     # -----------------------------------------------------------------
 
-    def _check_pydantic(self, cls: type, type_name: str, qualified_name: str) -> InspectionResult:
+    def _check_pydantic(self, cls: type, type_name: str, qualified_name: QualifiedName) -> InspectionResult:
         """Verify Pydantic model hashability via model_fields inspection."""
         model_config = getattr(cls, 'model_config', {})
         is_frozen = model_config.get('frozen', False)

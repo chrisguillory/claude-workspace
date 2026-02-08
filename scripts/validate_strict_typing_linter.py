@@ -22,6 +22,23 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
+
+# ---------------------------------------------------------------------------
+# Data Types
+# ---------------------------------------------------------------------------
+
+
+class LineRange(NamedTuple):
+    """Line range for a class definition (inclusive)."""
+
+    start: int
+    end: int
+
+
+# Maps class name to set of violation kinds found/expected in that class
+type ViolationMap = dict[str, set[str]]
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -40,7 +57,7 @@ EDGE_CASE_FILE = SCRIPT_DIR / 'strict_typing_linter_edge_cases.py'
 
 # Maps class/function name to expected violation codes
 # Each test class should trigger exactly one violation type
-EXPECTED_VIOLATIONS: dict[str, set[str]] = {
+EXPECTED_VIOLATIONS: ViolationMap = {
     # tuple-field violations
     'TupleFieldViolationBasic': {'tuple-field'},
     'TupleFieldViolationNested': {'tuple-field'},
@@ -68,7 +85,7 @@ SUPPRESSED_NAMES: set[str] = {
 # Expected Violations: Edge Case File
 # ---------------------------------------------------------------------------
 
-EXPECTED_EDGE_CASES: dict[str, set[str]] = {
+EXPECTED_EDGE_CASES: ViolationMap = {
     # Nested tuple edge cases
     'EdgeNestedTupleInMapping': {'tuple-field'},
     'EdgeNestedTupleInSequence': {'tuple-field'},
@@ -178,7 +195,7 @@ EDGE_CASE_SUPPRESSED: set[str] = {
 # ---------------------------------------------------------------------------
 
 
-def get_class_line_ranges(filepath: Path) -> dict[str, tuple[int, int]]:
+def get_class_line_ranges(filepath: Path) -> dict[str, LineRange]:
     """Parse AST to get line ranges for each class.
 
     Returns dict mapping class name to (start_line, end_line).
@@ -190,11 +207,11 @@ def get_class_line_ranges(filepath: Path) -> dict[str, tuple[int, int]]:
     source = filepath.read_text(encoding='utf-8')
     tree = ast.parse(source)
 
-    ranges: dict[str, tuple[int, int]] = {}
+    ranges: dict[str, LineRange] = {}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.end_lineno is not None:
-            ranges[node.name] = (node.lineno, node.end_lineno)
+            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
 
     return ranges
 
@@ -243,8 +260,8 @@ def parse_linter_output(output: str) -> list[tuple[int, str]]:
 
 def map_violations_to_classes(
     violations: list[tuple[int, str]],
-    ranges: dict[str, tuple[int, int]],
-) -> dict[str, set[str]]:
+    ranges: dict[str, LineRange],
+) -> ViolationMap:
     """Map violations to the classes they occur in.
 
     For nested classes with overlapping ranges, attributes violations to the
@@ -252,7 +269,7 @@ def map_violations_to_classes(
 
     Returns dict mapping class name to set of violation kinds.
     """
-    result: dict[str, set[str]] = {}
+    result: ViolationMap = {}
 
     for line_num, kind in violations:
         # Find all classes that contain this line
@@ -285,8 +302,8 @@ class ValidationResult:
 
 
 def validate(
-    actual: dict[str, set[str]],
-    expected: dict[str, set[str]],
+    actual: ViolationMap,
+    expected: ViolationMap,
     suppressed: set[str],
     all_classes: set[str],
 ) -> list[str]:
@@ -326,7 +343,7 @@ def validate(
 
 def validate_file(
     test_file: Path,
-    expected: dict[str, set[str]],
+    expected: ViolationMap,
     suppressed: set[str],
 ) -> ValidationResult:
     """Validate a single test file against expected violations."""
