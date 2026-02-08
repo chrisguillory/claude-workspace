@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -49,6 +50,7 @@ from document_search.services.sparse_embedding import SparseEmbeddingService
 
 __all__ = [
     'IndexingService',
+    'PipelineSnapshot',
     'create_indexing_service',
 ]
 
@@ -144,6 +146,7 @@ class IndexingService:
         self._state = state
         self._state_lock = state_lock
         self._file_lock = file_lock  # Cross-process lock for state file
+        self._operation: _OperationState | None = None
 
     async def get_index_stats(self) -> Mapping[str, int | str]:
         """Get current index statistics."""
@@ -156,6 +159,34 @@ class IndexingService:
             'vector_dimension': stats.vector_dimension,
             'points_count': stats.points_count,
         }
+
+    def get_pipeline_snapshot(self) -> PipelineSnapshot | None:
+        """Get point-in-time snapshot of running pipeline.
+
+        Returns None if no operation is running.
+        Caller adds lifecycle status and cross-layer metrics.
+        """
+        if self._operation is None:
+            return None
+
+        op = self._operation
+        files_to_process = op.files_found - op.files_cached
+
+        return PipelineSnapshot(
+            scan_complete=op.scan_complete,
+            files_found=op.files_found,
+            files_to_process=files_to_process,
+            files_cached=op.files_cached,
+            chunks_ingested=op.counters.chunks_ingested,
+            chunks_embedded=op.counters.chunks_embedded,
+            chunks_stored=op.counters.chunks_stored,
+            files_awaiting_chunk=op.file_queue.qsize(),
+            files_awaiting_embed=op.embed_queue.qsize(),
+            files_awaiting_store=op.upsert_queue.qsize(),
+            files_done=len(op.results),
+            files_errored=sum(1 for v in op.results.values() if isinstance(v, FileProcessingError)),
+            elapsed_seconds=time.monotonic() - op.start_time,
+        )
 
     async def index_file(self, file_path: Path) -> IndexingResult:
         """Index a single file directly (bypasses pipeline for simplicity).
@@ -203,16 +234,16 @@ class IndexingService:
         # Embed (dense + sparse)
         embed_tasks = [self._embedding.embed_text(c.text) for c in chunks]
         responses = await asyncio.gather(*embed_tasks)
-        dense = [tuple(r.values) for r in responses]
+        dense = [r.values for r in responses]
 
         texts = [c.text for c in chunks]
         sparse_results = await self._sparse_embedding.embed_batch(texts)
-        sparse = [(tuple(i), tuple(v)) for i, v in sparse_results]
-
         # Build points using same factory as pipeline
         points = [
             VectorPoint.from_chunk(chunk, dense_emb, sparse_indices, sparse_values, chunk_id)
-            for chunk, dense_emb, (sparse_indices, sparse_values), chunk_id in zip(chunks, dense, sparse, chunk_ids)
+            for chunk, dense_emb, (sparse_indices, sparse_values), chunk_id in zip(
+                chunks, dense, sparse_results, chunk_ids
+            )
         ]
 
         # Upsert new chunks
@@ -233,7 +264,7 @@ class IndexingService:
                     file_hash=file_hash,
                     file_size=file_path.stat().st_size,
                     chunk_count=len(chunks),
-                    chunk_ids=tuple(chunk_ids),
+                    chunk_ids=chunk_ids,
                     indexed_at=datetime.now(UTC),
                     chunk_strategy_version=CHUNK_STRATEGY_VERSION,
                 )
@@ -344,12 +375,36 @@ class IndexingService:
                     metadata_version=self._state.metadata_version,
                 )
 
+        # PHASE 1b: Create operation state early for scan progress visibility
+        # Create queues connecting stages
+        file_queue: asyncio.Queue[Path] = asyncio.Queue()
+        embed_queue: asyncio.Queue[_ChunkedFile] = asyncio.Queue(maxsize=EMBED_QUEUE_SIZE)
+        upsert_queue: asyncio.Queue[_EmbeddedFile] = asyncio.Queue(maxsize=UPSERT_QUEUE_SIZE)
+
+        # Shared results collection
+        results: dict[str, int | FileProcessingError] = {}  # path -> chunk_count or error
+        results_lock = asyncio.Lock()
+
+        self._operation = _OperationState(
+            file_queue=file_queue,
+            embed_queue=embed_queue,
+            upsert_queue=upsert_queue,
+            counters=PipelineCounters(),
+            results=results,
+            results_lock=results_lock,
+            scan_complete=False,
+            files_found=files_total,
+            files_cached=0,
+            start_time=time.monotonic(),
+        )
+
         # Track files by type and determine which need indexing (single pass)
+        # Yields to event loop periodically so monitoring coroutine can capture scan progress.
         scanned_by_type: dict[FileType, int] = {}
         cached_by_type: dict[FileType, int] = {}
         files_to_index: list[Path] = []
 
-        for file_path in all_files:
+        for i, file_path in enumerate(all_files):
             ft = get_file_type(file_path)
             if ft is not None:
                 scanned_by_type[ft] = scanned_by_type.get(ft, 0) + 1
@@ -358,6 +413,13 @@ class IndexingService:
                 files_to_index.append(file_path)
             elif ft is not None:
                 cached_by_type[ft] = cached_by_type.get(ft, 0) + 1
+                self._operation.files_cached += 1
+
+            # Yield to event loop every 100 files for monitoring visibility
+            if i % 100 == 99:
+                await asyncio.sleep(0)
+
+        self._operation.scan_complete = True
 
         if not files_to_index:
             # Build by_file_type summary for cached-only result
@@ -369,6 +431,7 @@ class IndexingService:
                 )
                 by_file_type[ft] = stats.to_summary()
 
+            self._operation = None
             return IndexingResult(
                 files_scanned=files_total,
                 files_ignored=files_ignored,
@@ -383,22 +446,8 @@ class IndexingService:
                 errors=(),
             )
 
-        # PHASE 2: Pipeline processing
-        # Create queues connecting stages (exposed as instance attrs for monitoring)
-        file_queue: asyncio.Queue[Path] = asyncio.Queue()
-        embed_queue: asyncio.Queue[_ChunkedFile] = asyncio.Queue(maxsize=EMBED_QUEUE_SIZE)
-        upsert_queue: asyncio.Queue[_EmbeddedFile] = asyncio.Queue(maxsize=UPSERT_QUEUE_SIZE)
-        self._file_queue = file_queue
-        self._embed_queue = embed_queue
-        self._upsert_queue = upsert_queue
-
-        # Shared results collection (exposed for progress monitoring)
-        results: dict[str, int | FileProcessingError] = {}  # path -> chunk_count or error
-        self._results = results
-        results_lock = asyncio.Lock()
-
         # Queue depth monitor for bottleneck analysis
-        monitor = _QueueMonitor(file_queue, embed_queue, upsert_queue, results)
+        monitor = _QueueMonitor(file_queue, embed_queue, upsert_queue, results, self._operation.counters)
 
         # Populate file queue
         for path in files_to_index:
@@ -415,15 +464,19 @@ class IndexingService:
 
         # Start workers for each stage
         chunk_tasks = [
-            asyncio.create_task(self._pipeline_chunk_worker(file_queue, embed_queue, results, results_lock))
+            asyncio.create_task(
+                self._pipeline_chunk_worker(file_queue, embed_queue, results, results_lock, self._operation.counters)
+            )
             for _ in range(min(NUM_CHUNK_WORKERS, len(files_to_index)))
         ]
         embed_tasks = [
-            asyncio.create_task(self._pipeline_embed_worker(embed_queue, upsert_queue))
+            asyncio.create_task(self._pipeline_embed_worker(embed_queue, upsert_queue, self._operation.counters))
             for _ in range(NUM_EMBED_WORKERS)
         ]
         upsert_tasks = [
-            asyncio.create_task(self._pipeline_upsert_worker(upsert_queue, results, results_lock))
+            asyncio.create_task(
+                self._pipeline_upsert_worker(upsert_queue, results, results_lock, self._operation.counters)
+            )
             for _ in range(NUM_UPSERT_WORKERS)
         ]
 
@@ -528,6 +581,9 @@ class IndexingService:
         index_files = len(self._state.files) if self._state else 0
         index_chunks = self._state.total_chunks if self._state else 0
 
+        # Clear operation state
+        self._operation = None
+
         return IndexingResult(
             files_scanned=files_total,
             files_ignored=files_ignored,
@@ -541,7 +597,7 @@ class IndexingService:
             index_files=index_files,
             index_chunks=index_chunks,
             elapsed_seconds=round(timer.elapsed(), 3),
-            errors=tuple(errors),
+            errors=errors,
         )
 
     def shutdown(self) -> None:
@@ -657,6 +713,7 @@ class IndexingService:
         embed_queue: asyncio.Queue[_ChunkedFile],
         results: dict[str, int | FileProcessingError],  # strict_typing_linter.py: mutable-type
         results_lock: asyncio.Lock,
+        counters: PipelineCounters,
     ) -> None:
         """Stage 1: Chunk files and push to embed queue.
 
@@ -664,10 +721,7 @@ class IndexingService:
         Infrastructure errors propagate immediately (fail-fast).
         """
         while True:
-            try:
-                file_path = await file_queue.get()
-            except asyncio.CancelledError:
-                return
+            file_path = await file_queue.get()
 
             file_key = str(file_path)
             try:
@@ -688,6 +742,7 @@ class IndexingService:
                             chunk_ids=chunk_ids,
                         )
                     )
+                    counters.chunks_ingested += len(chunks)
                 else:
                     # File produced 0 chunks (content too short) - record in state to avoid re-processing
                     async with self._state_lock:
@@ -723,7 +778,7 @@ class IndexingService:
                         message=str(e),
                         recoverable=True,
                     )
-                logger.warning(f'[CHUNK] Skipping {file_path.name}: {type(e).__name__}: {e}')
+                logger.warning(f'[CHUNK] Skipping {file_path.name}: {type(e).__name__}: {e}', exc_info=True)
 
             # Mark done whether success or known error (unknown errors propagate)
             file_queue.task_done()
@@ -732,6 +787,7 @@ class IndexingService:
         self,
         embed_queue: asyncio.Queue[_ChunkedFile],
         upsert_queue: asyncio.Queue[_EmbeddedFile],
+        counters: PipelineCounters,
     ) -> None:
         """Stage 2: Generate dense + sparse embeddings and push to upsert queue.
 
@@ -778,11 +834,12 @@ class IndexingService:
                     file_size=chunked.file_size,
                     chunks=chunked.chunks,
                     chunk_ids=chunked.chunk_ids,
-                    dense_embeddings=[tuple(r.values) for r in file_dense],
-                    sparse_embeddings=[(tuple(indices), tuple(values)) for indices, values in file_sparse],
+                    dense_embeddings=[r.values for r in file_dense],
+                    sparse_embeddings=file_sparse,
                 )
                 await upsert_queue.put(embedded)
                 embed_queue.task_done()
+                counters.chunks_embedded += len(chunked.chunks)
 
                 start_idx = end_idx
 
@@ -807,11 +864,12 @@ class IndexingService:
                 file_size=chunked.file_size,
                 chunks=chunked.chunks,
                 chunk_ids=chunked.chunk_ids,
-                dense_embeddings=[tuple(r.values) for r in dense_results],
-                sparse_embeddings=[(tuple(i), tuple(v)) for i, v in sparse_results],
+                dense_embeddings=[r.values for r in dense_results],
+                sparse_embeddings=sparse_results,
             )
             await upsert_queue.put(embedded)
             embed_queue.task_done()
+            counters.chunks_embedded += len(chunked.chunks)
 
         while True:
             try:
@@ -850,7 +908,7 @@ class IndexingService:
                 try:
                     await flush_batch()
                 except Exception as e:
-                    logger.warning(f'Failed to flush batch during shutdown: {e}')
+                    logger.warning(f'Failed to flush batch during shutdown: {e}', exc_info=True)
                 raise  # Re-raise CancelledError to signal proper cancellation
 
     async def _pipeline_upsert_worker(
@@ -858,16 +916,14 @@ class IndexingService:
         upsert_queue: asyncio.Queue[_EmbeddedFile],
         results: dict[str, int | FileProcessingError],  # strict_typing_linter.py: mutable-type
         results_lock: asyncio.Lock,
+        counters: PipelineCounters,
     ) -> None:
         """Stage 3: Upsert to Qdrant, delete old chunks, update state.
 
         Fail-fast: exceptions propagate immediately, task_done() only on success.
         """
         while True:
-            try:
-                embedded = await upsert_queue.get()
-            except asyncio.CancelledError:
-                return
+            embedded = await upsert_queue.get()
 
             file_key = str(embedded.file_path)
 
@@ -885,6 +941,7 @@ class IndexingService:
 
             # Upsert new chunks
             await self._repo.upsert(points)
+            counters.chunks_stored += len(embedded.chunks)
 
             # Delete only obsolete chunks
             if self._state_lock is None:
@@ -903,7 +960,7 @@ class IndexingService:
                         file_hash=embedded.file_hash,
                         file_size=embedded.file_size,
                         chunk_count=len(embedded.chunks),
-                        chunk_ids=tuple(embedded.chunk_ids),
+                        chunk_ids=embedded.chunk_ids,
                         indexed_at=datetime.now(UTC),
                         chunk_strategy_version=CHUNK_STRATEGY_VERSION,
                     )
@@ -947,6 +1004,38 @@ class IndexingService:
         return len(obsolete_ids)
 
 
+@dataclass(frozen=True)
+class PipelineSnapshot:
+    """Point-in-time snapshot of pipeline state.
+
+    Contains everything IndexingService knows about current operation.
+    Excludes lifecycle status and cross-layer metrics (handled by caller).
+    """
+
+    # Scanning phase
+    scan_complete: bool
+    files_found: int
+    files_to_process: int
+    files_cached: int
+
+    # Pipeline stages (cumulative chunk counts)
+    chunks_ingested: int
+    chunks_embedded: int
+    chunks_stored: int
+
+    # Pipeline queues (file counts waiting)
+    files_awaiting_chunk: int
+    files_awaiting_embed: int
+    files_awaiting_store: int
+
+    # Results
+    files_done: int
+    files_errored: int
+
+    # Timing
+    elapsed_seconds: float
+
+
 async def create_indexing_service(
     config: EmbeddingConfig,
     collection_name: str,
@@ -985,14 +1074,56 @@ async def create_indexing_service(
 
 
 @dataclass
+class PipelineCounters:
+    """Cumulative chunk counts at pipeline stage boundaries.
+
+    Tracks chunks exiting each stage for progress monitoring.
+    Dashboard derives queue depths as differences between stages.
+
+    Thread-safe: Python's += on integers is atomic under GIL.
+    """
+
+    chunks_ingested: int = 0  # Chunk worker → embed queue
+    chunks_embedded: int = 0  # Embed worker → upsert queue
+    chunks_stored: int = 0  # Upsert worker → complete
+
+
+@dataclass
+class _OperationState:
+    """Per-operation mutable state.
+
+    Created in index_directory(), cleared on completion.
+    Exposes pipeline internals for progress monitoring.
+    """
+
+    # Scanning
+    scan_complete: bool
+
+    # Pipeline queues
+    file_queue: asyncio.Queue[Path]
+    embed_queue: asyncio.Queue[_ChunkedFile]
+    upsert_queue: asyncio.Queue[_EmbeddedFile]
+
+    # Tracking
+    counters: PipelineCounters
+    results: dict[str, int | FileProcessingError]
+    results_lock: asyncio.Lock
+
+    # Metadata
+    files_found: int
+    files_cached: int
+    start_time: float  # From time.monotonic()
+
+
+@dataclass
 class _ChunkedFile:
     """Output of chunk stage, input to embed stage."""
 
     file_path: Path
     file_hash: str
     file_size: int
-    chunks: list[Chunk]
-    chunk_ids: list[UUID]
+    chunks: Sequence[Chunk]
+    chunk_ids: Sequence[UUID]
 
 
 @dataclass
@@ -1002,10 +1133,10 @@ class _EmbeddedFile:
     file_path: Path
     file_hash: str
     file_size: int
-    chunks: list[Chunk]
-    chunk_ids: list[UUID]
-    dense_embeddings: list[tuple[float, ...]]
-    sparse_embeddings: list[tuple[tuple[int, ...], tuple[float, ...]]]
+    chunks: Sequence[Chunk]
+    chunk_ids: Sequence[UUID]
+    dense_embeddings: Sequence[Sequence[float]]
+    sparse_embeddings: Sequence[tuple[Sequence[int], Sequence[float]]]
 
 
 class _QueueMonitor:
@@ -1023,12 +1154,14 @@ class _QueueMonitor:
         embed_queue: asyncio.Queue[_ChunkedFile],
         upsert_queue: asyncio.Queue[_EmbeddedFile],
         results: dict[str, int | FileProcessingError],  # strict_typing_linter.py: mutable-type
+        counters: PipelineCounters,
         log_interval: float = 5.0,
     ) -> None:
         self._file_queue = file_queue
         self._embed_queue = embed_queue
         self._upsert_queue = upsert_queue
         self._results = results
+        self._counters = counters
         self._log_interval = log_interval
         self._task: asyncio.Task[None] | None = None
 
@@ -1048,10 +1181,16 @@ class _QueueMonitor:
         while True:
             await asyncio.sleep(self._log_interval)
             done = len(self._results)
+
+            # Derive chunk queue depths from cumulative counters
+            chunks_awaiting_embed = max(0, self._counters.chunks_ingested - self._counters.chunks_embedded)
+            chunks_awaiting_store = max(0, self._counters.chunks_embedded - self._counters.chunks_stored)
+
             logger.info(
                 f'[QUEUES] files={self._file_queue.qsize()} '
-                f'embed={self._embed_queue.qsize()}/{EMBED_QUEUE_SIZE} '
-                f'upsert={self._upsert_queue.qsize()}/{UPSERT_QUEUE_SIZE} done={done}'
+                f'embed={self._embed_queue.qsize()}({chunks_awaiting_embed} chunks)/{EMBED_QUEUE_SIZE} '
+                f'upsert={self._upsert_queue.qsize()}({chunks_awaiting_store} chunks)/{UPSERT_QUEUE_SIZE} '
+                f'done={done}'
             )
 
 

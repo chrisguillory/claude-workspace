@@ -358,6 +358,8 @@ class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):
     class Request:
         """Hashable request for batching."""
 
+        __strict_typing_linter__hashable_fields__ = True
+
         point: VectorPoint
 
     def __init__(self, client: QdrantClient, collection_name: str) -> None:

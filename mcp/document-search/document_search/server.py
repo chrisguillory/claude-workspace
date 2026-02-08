@@ -17,6 +17,7 @@ import contextlib
 import logging
 import os
 import sys
+import traceback
 import typing
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ from local_lib.utils import DualLogger
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
 from document_search.dashboard.launcher import ensure_dashboard
+from document_search.dashboard.progress import ProgressWriter
 from document_search.dashboard.state import DashboardStateManager
 from document_search.paths import index_state_path
 from document_search.repositories.collection_registry import CollectionRegistryManager
@@ -40,8 +42,9 @@ from document_search.schemas.config import (
     create_config,
     default_config,
 )
+from document_search.schemas.dashboard import OperationProgress
 from document_search.schemas.embeddings import EmbedRequest
-from document_search.schemas.indexing import IndexingProgress, IndexingResult
+from document_search.schemas.indexing import IndexingResult
 from document_search.schemas.vectors import (
     ClearResult,
     CollectionMetadata,
@@ -275,37 +278,57 @@ Returns:
         if full_reindex:
             await logger.info('Full reindex requested - ignoring cache')
 
-        # Progress callback that logs via MCP context
-        async def on_progress(progress: IndexingProgress) -> None:
-            if progress.percent_complete % 10 < 1 or progress.percent_complete >= 99:
-                await logger.info(
-                    f'[{progress.percent_complete:.0f}%] {progress.current_phase} | '
-                    f'{progress.files_indexed}/{progress.files_total} files | '
-                    f'{progress.chunks_created} chunks'
-                )
+        # Capture baseline 429 count for delta calculation
+        embedding_client = state.get_embedding_client(collection)
+        errors_429_start = embedding_client.errors_429
 
-        # The on_progress callback is sync in IndexingService, so wrap it
-        def sync_progress(progress: IndexingProgress) -> None:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(on_progress(progress))
-            except RuntimeError:
-                pass  # No running loop, skip logging
+        # Setup progress writer
+        progress_writer = ProgressWriter(mcp_server_pid=os.getpid())
+        operation_id = progress_writer.start_operation(collection_name, str(resolved_path))
+        await logger.info(f'Operation: {operation_id}')
 
-        result = await indexing_service.index_directory(
-            resolved_path,
-            full_reindex=full_reindex,
-            respect_gitignore=respect_gitignore,
-            on_progress=sync_progress,
+        # Start indexing as a task
+        indexing_task = asyncio.create_task(
+            indexing_service.index_directory(
+                resolved_path,
+                full_reindex=full_reindex,
+                respect_gitignore=respect_gitignore,
+            )
         )
 
-        await logger.info(
-            f'Indexing complete: {result.files_indexed} indexed, '
-            f'{result.files_cached} cached, {result.chunks_created} chunks, '
-            f'{len(result.errors)} errors'
-        )
+        # Monitoring coroutine
+        async def monitor_progress() -> None:
+            while not indexing_task.done():
+                snapshot = indexing_service.get_pipeline_snapshot()
+                if snapshot:
+                    errors_429_delta = embedding_client.errors_429 - errors_429_start
+                    progress = OperationProgress.from_snapshot(
+                        snapshot,
+                        status='running',
+                        errors_429=errors_429_delta,
+                    )
+                    progress_writer.update_progress(progress)
+                await asyncio.sleep(0.5)
 
-        return result
+        monitor_task = asyncio.create_task(monitor_progress())
+
+        try:
+            result = await indexing_task
+            progress_writer.complete_with_success(result)
+            await logger.info(
+                f'Indexing complete: {result.files_indexed} indexed, '
+                f'{result.files_cached} cached, {result.chunks_created} chunks, '
+                f'{len(result.errors)} errors'
+            )
+            return result
+        except Exception as e:
+            error_tb = ''.join(traceback.format_exception(e))
+            progress_writer.complete_with_error(error_tb)
+            raise
+        finally:
+            monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor_task
 
     SEARCH_DOCS_BASE = """Search indexed documents with configurable search strategy.
 
@@ -404,7 +427,7 @@ Returns:
             sparse_indices=sparse_indices,
             sparse_values=sparse_values,
             limit=rerank_candidates,
-            file_types=tuple(typing.cast(FileType, ft) for ft in file_types) if file_types else None,
+            file_types=[typing.cast(FileType, ft) for ft in file_types] if file_types else None,
             source_path_prefix=resolved_path,
         )
 

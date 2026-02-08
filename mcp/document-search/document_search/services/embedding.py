@@ -78,7 +78,7 @@ class EmbeddingService:
             intent=request.intent,
         )
         values = vectors[0]
-        return EmbedResponse(values=tuple(values), dimensions=len(values))
+        return EmbedResponse(values=values, dimensions=len(values))
 
     async def embed_batch(self, request: EmbedBatchRequest) -> EmbedBatchResponse:
         """Embed batch of texts.
@@ -93,7 +93,7 @@ class EmbeddingService:
             texts=request.texts,
             intent=request.intent,
         )
-        embeddings = [EmbedResponse(values=tuple(v), dimensions=len(v)) for v in vectors]
+        embeddings = [EmbedResponse(values=v, dimensions=len(v)) for v in vectors]
         return EmbedBatchResponse(embeddings=embeddings)
 
 

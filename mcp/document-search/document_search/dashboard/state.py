@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,7 +86,7 @@ class DashboardStateManager:
             if state is None:
                 return
 
-            new_servers = tuple(s for s in state.mcp_servers if s.pid != pid)
+            new_servers = [s for s in state.mcp_servers if s.pid != pid]
             if len(new_servers) != len(state.mcp_servers):
                 new_state = DashboardState(
                     port=state.port,
@@ -95,13 +95,13 @@ class DashboardStateManager:
                 )
                 self._save_unlocked(new_state)
 
-    def get_live_mcp_servers(self) -> tuple[McpServer, ...]:
+    def get_live_mcp_servers(self) -> Sequence[McpServer]:
         """Return MCP servers whose processes are still running."""
         with self._lock:
             state = self.load()
             if state is None:
-                return ()
-            return tuple(s for s in state.mcp_servers if _process_exists(s.pid))
+                return []
+            return [s for s in state.mcp_servers if _process_exists(s.pid)]
 
     def _save_unlocked(self, state: DashboardState) -> None:
         """Save without acquiring lock. Caller must hold lock."""

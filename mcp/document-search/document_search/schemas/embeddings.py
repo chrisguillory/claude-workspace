@@ -56,7 +56,7 @@ class EmbedBatchRequest(StrictModel):
 class EmbedResponse(StrictModel):
     """Single embedding result."""
 
-    values: tuple[float, ...]
+    values: Sequence[float]
     dimensions: int
 
 

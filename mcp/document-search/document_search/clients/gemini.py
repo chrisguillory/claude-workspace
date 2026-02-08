@@ -123,6 +123,7 @@ class GeminiClient:
 
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._tracker = ConcurrencyTracker('GEMINI')
+        self.errors_429 = 0
 
     # Gemini task type mapping from generic intent
     INTENT_TO_GEMINI_TASK: Mapping[TaskIntent, GeminiTaskType] = {
