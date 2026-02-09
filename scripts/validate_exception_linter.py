@@ -24,7 +24,7 @@ import ast
 import re
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -86,7 +86,7 @@ EXPECTED_VIOLATIONS: ViolationMap = {
 }
 
 # Functions with suppression directives (should NOT appear in linter output)
-SUPPRESSED_FUNCTIONS: set[str] = {
+SUPPRESSED_FUNCTIONS: Set[str] = {
     'exc002_suppressed_intentional',
     'exc003_suppressed_top_level',
     'exc006_correct_when_suppressing',  # Has EXC002 suppression
@@ -141,10 +141,12 @@ EXPECTED_EDGE_CASES: ViolationMap = {
     'edge_trystar_no_raise': {'EXC002'},
     'edge_trystar_with_raise': set(),  # With raise is OK
     'edge_trystar_specific': set(),  # Specific exception is OK
+    # Entry-point error boundary
+    'edge_sys_exit_in_main': {'EXC002'},  # sys.exit(1) is not re-raise
 }
 
 # Functions with suppression directives
-EDGE_CASE_SUPPRESSED: set[str] = {
+EDGE_CASE_SUPPRESSED: Set[str] = {
     'edge_multi_code_suppression',  # Tests comma-separated directive codes
     'edge_logger_suppressed',  # Tests EXC006 suppression directive
 }
@@ -181,7 +183,7 @@ def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
 def run_linter(test_file: Path, linter: Path) -> str:
     """Run the linter and return combined stdout+stderr."""
     result = subprocess.run(
-        [sys.executable, str(linter), str(test_file)],
+        [sys.executable, str(linter), '--no-skip-file', str(test_file)],
         capture_output=True,
         text=True,
         timeout=60,
@@ -189,7 +191,7 @@ def run_linter(test_file: Path, linter: Path) -> str:
     return result.stdout + result.stderr
 
 
-def parse_linter_output(output: str) -> list[tuple[int, str]]:
+def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
     """Parse linter output to extract (line_number, rule_code) tuples."""
     violations: list[tuple[int, str]] = []
 
@@ -207,7 +209,7 @@ def parse_linter_output(output: str) -> list[tuple[int, str]]:
 
 
 def map_violations_to_functions(
-    violations: list[tuple[int, str]],
+    violations: Sequence[tuple[int, str]],
     ranges: Mapping[str, LineRange],
 ) -> ViolationMap:
     """Map violations to the functions they occur in.
@@ -235,7 +237,7 @@ class ValidationResult:
     """Result of validating a single test file."""
 
     file_name: str
-    errors: list[str]
+    errors: Sequence[str]
     violation_count: int
     expected_count: int
     rule_counts: dict[str, int]
@@ -244,9 +246,9 @@ class ValidationResult:
 def validate(
     actual: ViolationMap,
     expected: ViolationMap,
-    suppressed: set[str],
-    all_functions: set[str],
-) -> list[str]:
+    suppressed: Set[str],
+    all_functions: Set[str],
+) -> Sequence[str]:
     """Validate actual violations against expected.
 
     Returns list of error messages (empty if all passed).
@@ -282,7 +284,7 @@ def validate(
 def validate_file(
     test_file: Path,
     expected: ViolationMap,
-    suppressed: set[str],
+    suppressed: Set[str],
 ) -> ValidationResult:
     """Validate a single test file against expected violations."""
     # Parse test file AST

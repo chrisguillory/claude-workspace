@@ -16,9 +16,13 @@ __all__ = [
     'DOCUMENT_SEARCH_DIR',
     'INDEX_STATE_DIR',
     'OPERATIONS_DIR',
+    'PROJECT_ROOT',
     'WORKSPACE_DIR',
     'index_state_path',
 ]
+
+# Project root (directory containing pyproject.toml)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Base directories
 WORKSPACE_DIR = Path.home() / '.claude-workspace'

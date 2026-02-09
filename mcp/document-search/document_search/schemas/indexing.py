@@ -7,7 +7,7 @@ Supports incremental indexing via content hash comparison.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Annotated
+from typing import Annotated, Literal
 
 import pydantic
 from local_lib.types import JsonDatetime, JsonUuid
@@ -25,6 +25,7 @@ __all__ = [
     'IndexingProgress',
     'IndexingResult',
     'ProgressCallback',
+    'StopAfterStage',
 ]
 
 # Current chunking strategy version - bump when ChunkingService changes
@@ -111,6 +112,10 @@ class FileTypeStats(StrictModel):
         return ' '.join(parts) if parts else 'empty'
 
 
+# Pipeline stage boundaries for stop_after parameter
+type StopAfterStage = Literal['scan', 'chunk', 'embed']
+
+
 class IndexingResult(StrictModel):
     """Result of directory indexing operation."""
 
@@ -127,6 +132,8 @@ class IndexingResult(StrictModel):
     chunks_created: int
     chunks_deleted: int  # Old chunks soft-deleted
     embeddings_created: int
+    embed_cache_hits: int  # Embeddings served from Redis
+    embed_cache_misses: int  # Embeddings computed via API
 
     # Per-file-type breakdown (values are summary strings)
     by_file_type: Mapping[FileType, str] = {}
@@ -138,6 +145,9 @@ class IndexingResult(StrictModel):
     # Timing and errors
     elapsed_seconds: float
     errors: Sequence[FileProcessingError]
+
+    # Pipeline control
+    stopped_after: StopAfterStage | None = None
 
     @property
     def success_rate(self) -> float:

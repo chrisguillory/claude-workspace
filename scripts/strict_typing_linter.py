@@ -27,6 +27,7 @@ Design Philosophy:
     - Error-only, no auto-fix: Forces conscious decision at each occurrence
     - Pure analysis: Checks exactly the files it's given (no internal filtering)
     - Escape hatches:
+      - # strict_typing_linter.py: skip-file - skip entire file
       - # strict_typing_linter.py: mutable-type - suppress mutable type violations
       - # strict_typing_linter.py: loose-typing - suppress loose typing violations
       - # strict_typing_linter.py: tuple-field - suppress tuple-in-field violations
@@ -1467,9 +1468,19 @@ def check_file(
     filepath: Path,
     strict_ordering_packages: Set[Path],
     inspector: HashabilityInspector | None = None,
+    *,
+    respect_skip_file: bool = True,
 ) -> Sequence[Violation]:
     """Check a single file for all violations."""
     source = filepath.read_text(encoding='utf-8')
+
+    # File-level skip directive (check first 10 lines)
+    if respect_skip_file:
+        prefix_lower = DIRECTIVE_PREFIX.lower()
+        for line in source.splitlines()[:10]:
+            if prefix_lower in line.lower() and 'skip-file' in line.lower():
+                return []
+
     tree = ast.parse(source, filename=str(filepath))
     source_lines = source.splitlines()
     violations: list[Violation] = []
@@ -1660,6 +1671,11 @@ def main() -> int:
         action='store_true',
         help='Do not respect .gitignore when scanning directories',
     )
+    parser.add_argument(
+        '--no-skip-file',
+        action='store_true',
+        help='Ignore skip-file directives (used by validation harnesses)',
+    )
 
     args = parser.parse_args()
     exclude_dirs = set(args.exclude)
@@ -1696,7 +1712,9 @@ def main() -> int:
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
-        violations = check_file(filepath, strict_ordering_packages, inspector=inspector)
+        violations = check_file(
+            filepath, strict_ordering_packages, inspector=inspector, respect_skip_file=not args.no_skip_file
+        )
         all_violations.extend(violations)
 
     # Filter out ignored violation kinds

@@ -1,3 +1,4 @@
+# strict_typing_linter.py: skip-file
 # ruff: noqa: F841
 # mypy: disable-error-code="type-arg"
 """Strict typing linter edge cases - regression testing and comprehensive coverage.

@@ -20,6 +20,7 @@ Rules:
     EXC008 generator-exit-not-raised GeneratorExit caught but not re-raised in generator
 
 Escape hatches (inline suppression):
+    # exception_safety_linter.py: skip-file
     # exception_safety_linter.py: bare-except
     # exception_safety_linter.py: swallowed-exception, raise-without-from
 
@@ -672,9 +673,17 @@ class _YieldFinder(ast.NodeVisitor):
 # =============================================================================
 
 
-def check_file(filepath: Path) -> Sequence[Violation]:
+def check_file(filepath: Path, *, respect_skip_file: bool = True) -> Sequence[Violation]:
     """Check a single file for exception safety violations."""
     source = filepath.read_text(encoding='utf-8')
+
+    # File-level skip directive (check first 10 lines)
+    if respect_skip_file:
+        prefix_lower = DIRECTIVE_PREFIX.lower()
+        for line in source.splitlines()[:10]:
+            if prefix_lower in line.lower() and 'skip-file' in line.lower():
+                return []
+
     tree = ast.parse(source, filename=str(filepath))
     source_lines = source.splitlines()
     import_map = _build_import_map(tree)
@@ -874,6 +883,11 @@ def main() -> int:
         action='store_true',
         help='Do not respect .gitignore when scanning directories',
     )
+    parser.add_argument(
+        '--no-skip-file',
+        action='store_true',
+        help='Ignore skip-file directives (used by validation harnesses)',
+    )
 
     args = parser.parse_args()
     exclude_dirs = set(args.exclude) | {'.venv', 'venv', '__pycache__', '.git'}
@@ -896,7 +910,7 @@ def main() -> int:
     all_violations: list[Violation] = []
     for filepath in files:
         try:
-            violations = check_file(filepath)
+            violations = check_file(filepath, respect_skip_file=not args.no_skip_file)
             all_violations.extend(violations)
         except (SyntaxError, UnicodeDecodeError) as e:
             print(f'{filepath}: {e}', file=sys.stderr)

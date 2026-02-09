@@ -43,6 +43,7 @@ import logging
 import sys
 import types
 import typing
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,10 @@ logger = logging.getLogger(__name__)
 
 # Fully qualified dotted type name (e.g., 'document_search.schemas.vectors.VectorPoint')
 type QualifiedName = str
+
+# Runtime type annotation object (from typing.get_type_hints, get_origin, get_args).
+# No standard type exists yet — see Python discuss.python.org/t/typeform-spelling/51435.
+type TypeAnnotation = Any
 
 
 # =============================================================================
@@ -143,7 +148,7 @@ class InspectionResult:
     is_hashable: bool
     type_name: str
     qualified_name: QualifiedName
-    unhashable_fields: tuple[UnhashableField, ...]
+    unhashable_fields: Sequence[UnhashableField]
 
 
 # =============================================================================
@@ -433,7 +438,7 @@ class HashabilityInspector:
     # Recursive annotation checker
     # -----------------------------------------------------------------
 
-    def _is_annotation_hashable(self, annotation: Any) -> bool:
+    def _is_annotation_hashable(self, annotation: TypeAnnotation) -> bool:
         """Recursively check if a type annotation represents a hashable type."""
         # None / NoneType
         if annotation is None or annotation is type(None):
@@ -476,7 +481,7 @@ class HashabilityInspector:
         # No framework metadata — fall back to __hash__ existence
         return getattr(cls, '__hash__', None) is not None
 
-    def _check_generic_origin(self, origin: Any, args: tuple[Any, ...]) -> bool:
+    def _check_generic_origin(self, origin: TypeAnnotation, args: tuple[TypeAnnotation, ...]) -> bool:
         """Check a generic type's hashability based on its origin and args."""
         # Mutable containers and abstract types that could be mutable
         if origin in UNHASHABLE_ORIGINS:
@@ -531,7 +536,7 @@ def _is_pydantic_model(cls: type) -> bool:
 # =============================================================================
 
 
-def _annotation_repr(annotation: Any) -> str:
+def _annotation_repr(annotation: TypeAnnotation) -> str:
     """Human-readable representation of a type annotation."""
     # typing types have good __repr__ already
     if hasattr(annotation, '__origin__'):

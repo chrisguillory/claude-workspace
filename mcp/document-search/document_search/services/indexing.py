@@ -28,9 +28,11 @@ from uuid import UUID
 
 import filelock
 import git
+from local_lib.background_tasks import BackgroundTaskGroup
 from local_lib.utils import Timer
 
 from document_search.clients import QdrantClient, create_embedding_client
+from document_search.clients.redis import RedisClient
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.schemas.chunking import EXTENSION_MAP, Chunk, FileType, get_file_type
 from document_search.schemas.config import EmbeddingConfig
@@ -42,6 +44,7 @@ from document_search.schemas.indexing import (
     FileTypeStats,
     IndexingResult,
     ProgressCallback,
+    StopAfterStage,
 )
 from document_search.schemas.vectors import ClearResult, VectorPoint
 from document_search.services.chunking import ChunkingService
@@ -179,6 +182,8 @@ class IndexingService:
             files_cached=op.files_cached,
             chunks_ingested=op.counters.chunks_ingested,
             chunks_embedded=op.counters.chunks_embedded,
+            embed_cache_hits=self._embedding.cache_hits,
+            embed_cache_misses=self._embedding.cache_misses,
             chunks_stored=op.counters.chunks_stored,
             files_awaiting_chunk=op.file_queue.qsize(),
             files_awaiting_embed=op.embed_queue.qsize(),
@@ -224,6 +229,8 @@ class IndexingService:
                 chunks_created=0,
                 chunks_deleted=0,
                 embeddings_created=0,
+                embed_cache_hits=self._embedding.cache_hits,
+                embed_cache_misses=self._embedding.cache_misses,
                 by_file_type=by_file_type,
                 elapsed_seconds=round(timer.elapsed(), 3),
                 errors=(),
@@ -295,6 +302,8 @@ class IndexingService:
             chunks_created=len(chunks),
             chunks_deleted=chunks_deleted,
             embeddings_created=len(chunks),
+            embed_cache_hits=self._embedding.cache_hits,
+            embed_cache_misses=self._embedding.cache_misses,
             by_file_type=by_file_type_final,
             index_files=index_files,
             index_chunks=index_chunks,
@@ -309,6 +318,7 @@ class IndexingService:
         full_reindex: bool = False,
         respect_gitignore: bool | None = None,
         on_progress: ProgressCallback | None = None,
+        stop_after: StopAfterStage | None = None,
     ) -> IndexingResult:
         """Index files using pipeline architecture with separate worker pools.
 
@@ -345,13 +355,49 @@ class IndexingService:
         extensions = set(EXTENSION_MAP.keys())
         git_root = _find_git_root(str(directory))
 
+        # Create operation state before discovery so the monitor can report progress
+        file_queue: asyncio.Queue[Path] = asyncio.Queue()
+        embed_queue: asyncio.Queue[_ChunkedFile] = asyncio.Queue(maxsize=EMBED_QUEUE_SIZE)
+        upsert_queue: asyncio.Queue[_EmbeddedFile] = asyncio.Queue(maxsize=UPSERT_QUEUE_SIZE)
+        results: dict[str, int | FileProcessingError] = {}
+        results_lock = asyncio.Lock()
+
+        self._operation = _OperationState(
+            file_queue=file_queue,
+            embed_queue=embed_queue,
+            upsert_queue=upsert_queue,
+            counters=PipelineCounters(),
+            results=results,
+            results_lock=results_lock,
+            scan_complete=False,
+            files_found=0,
+            files_cached=0,
+            start_time=time.monotonic(),
+        )
+
+        # Run file discovery in a thread so the event loop (and monitor) stays responsive.
+        # Both paths update operation.files_found incrementally for dashboard visibility.
+        logger.info('[SCAN] Starting file discovery...')
         if respect_gitignore is not False and git_root:
-            all_files, files_ignored = _get_git_files(directory, extensions)
+            all_files, files_ignored = await asyncio.to_thread(
+                _get_git_files,
+                directory,
+                extensions,
+                self._operation,
+            )
         else:
-            all_files, files_ignored = list(_walk_files(directory, extensions)), 0
+            all_files = await asyncio.to_thread(
+                _walk_files_counted,
+                directory,
+                extensions,
+                self._operation,
+            )
+            files_ignored = 0
 
         files_total = len(all_files)
-        logger.info(f'[PIPELINE] Found {files_total} files, {files_ignored} ignored')
+        self._operation.files_found = files_total
+        ignored_text = f' ({files_ignored:,} ignored)' if files_ignored else ''
+        logger.info(f'[SCAN] Discovered {files_total:,} files{ignored_text}')
 
         # FULL REINDEX: Clean slate
         if full_reindex:
@@ -375,31 +421,9 @@ class IndexingService:
                     metadata_version=self._state.metadata_version,
                 )
 
-        # PHASE 1b: Create operation state early for scan progress visibility
-        # Create queues connecting stages
-        file_queue: asyncio.Queue[Path] = asyncio.Queue()
-        embed_queue: asyncio.Queue[_ChunkedFile] = asyncio.Queue(maxsize=EMBED_QUEUE_SIZE)
-        upsert_queue: asyncio.Queue[_EmbeddedFile] = asyncio.Queue(maxsize=UPSERT_QUEUE_SIZE)
-
-        # Shared results collection
-        results: dict[str, int | FileProcessingError] = {}  # path -> chunk_count or error
-        results_lock = asyncio.Lock()
-
-        self._operation = _OperationState(
-            file_queue=file_queue,
-            embed_queue=embed_queue,
-            upsert_queue=upsert_queue,
-            counters=PipelineCounters(),
-            results=results,
-            results_lock=results_lock,
-            scan_complete=False,
-            files_found=files_total,
-            files_cached=0,
-            start_time=time.monotonic(),
-        )
-
-        # Track files by type and determine which need indexing (single pass)
-        # Yields to event loop periodically so monitoring coroutine can capture scan progress.
+        # Classify files: determine which need indexing vs cached (single pass).
+        # Yields to event loop periodically so the monitor can capture scan progress.
+        logger.info(f'[SCAN] Classifying {files_total:,} files...')
         scanned_by_type: dict[FileType, int] = {}
         cached_by_type: dict[FileType, int] = {}
         files_to_index: list[Path] = []
@@ -420,6 +444,38 @@ class IndexingService:
                 await asyncio.sleep(0)
 
         self._operation.scan_complete = True
+        files_cached_count = sum(cached_by_type.values())
+        logger.info(
+            f'[PIPELINE] Scan complete in {timer.elapsed():.1f}s: '
+            f'{len(files_to_index)} to index, {files_cached_count} cached'
+        )
+
+        if stop_after == 'scan':
+            scan_by_type: dict[FileType, str] = {}
+            for ft in scanned_by_type:
+                stats = FileTypeStats(
+                    scanned=scanned_by_type.get(ft, 0),
+                    cached=cached_by_type.get(ft, 0),
+                )
+                scan_by_type[ft] = stats.to_summary()
+
+            self._operation = None
+            return IndexingResult(
+                files_scanned=files_total,
+                files_ignored=files_ignored,
+                files_indexed=0,
+                files_cached=sum(cached_by_type.values()),
+                files_no_content=0,
+                chunks_created=0,
+                chunks_deleted=chunks_deleted,
+                embeddings_created=0,
+                embed_cache_hits=0,
+                embed_cache_misses=0,
+                by_file_type=scan_by_type,
+                elapsed_seconds=round(timer.elapsed(), 3),
+                errors=(),
+                stopped_after='scan',
+            )
 
         if not files_to_index:
             # Build by_file_type summary for cached-only result
@@ -441,9 +497,12 @@ class IndexingService:
                 chunks_created=0,
                 chunks_deleted=chunks_deleted,
                 embeddings_created=0,
+                embed_cache_hits=self._embedding.cache_hits,
+                embed_cache_misses=self._embedding.cache_misses,
                 by_file_type=by_file_type,
                 elapsed_seconds=round(timer.elapsed(), 3),
                 errors=(),
+                stopped_after=stop_after,
             )
 
         # Queue depth monitor for bottleneck analysis
@@ -462,23 +521,36 @@ class IndexingService:
         # Start queue monitor
         monitor.start()
 
-        # Start workers for each stage
+        # Start workers for each stage (drain workers replace downstream stages when stop_after is set)
+        counters = self._operation.counters
         chunk_tasks = [
-            asyncio.create_task(
-                self._pipeline_chunk_worker(file_queue, embed_queue, results, results_lock, self._operation.counters)
-            )
+            asyncio.create_task(self._pipeline_chunk_worker(file_queue, embed_queue, results, results_lock, counters))
             for _ in range(min(NUM_CHUNK_WORKERS, len(files_to_index)))
         ]
-        embed_tasks = [
-            asyncio.create_task(self._pipeline_embed_worker(embed_queue, upsert_queue, self._operation.counters))
-            for _ in range(NUM_EMBED_WORKERS)
-        ]
-        upsert_tasks = [
-            asyncio.create_task(
-                self._pipeline_upsert_worker(upsert_queue, results, results_lock, self._operation.counters)
-            )
-            for _ in range(NUM_UPSERT_WORKERS)
-        ]
+
+        if stop_after == 'chunk':
+            embed_tasks = [
+                asyncio.create_task(self._drain_worker(embed_queue, counters, 'chunks_embedded', results, results_lock))
+                for _ in range(NUM_EMBED_WORKERS)
+            ]
+            upsert_tasks = []
+        else:
+            embed_tasks = [
+                asyncio.create_task(self._pipeline_embed_worker(embed_queue, upsert_queue, counters))
+                for _ in range(NUM_EMBED_WORKERS)
+            ]
+            if stop_after == 'embed':
+                upsert_tasks = [
+                    asyncio.create_task(
+                        self._drain_worker(upsert_queue, counters, 'chunks_stored', results, results_lock)
+                    )
+                    for _ in range(NUM_UPSERT_WORKERS)
+                ]
+            else:
+                upsert_tasks = [
+                    asyncio.create_task(self._pipeline_upsert_worker(upsert_queue, results, results_lock, counters))
+                    for _ in range(NUM_UPSERT_WORKERS)
+                ]
 
         all_worker_tasks = chunk_tasks + embed_tasks + upsert_tasks
 
@@ -593,11 +665,14 @@ class IndexingService:
             chunks_created=chunks_created,
             chunks_deleted=chunks_deleted,
             embeddings_created=chunks_created,
+            embed_cache_hits=self._embedding.cache_hits,
+            embed_cache_misses=self._embedding.cache_misses,
             by_file_type=by_file_type_result,
             index_files=index_files,
             index_chunks=index_chunks,
             elapsed_seconds=round(timer.elapsed(), 3),
             errors=errors,
+            stopped_after=stop_after,
         )
 
     def shutdown(self) -> None:
@@ -981,6 +1056,27 @@ class IndexingService:
             # Only mark done on success
             upsert_queue.task_done()
 
+    async def _drain_worker(
+        self,
+        queue: asyncio.Queue[_ChunkedFile] | asyncio.Queue[_EmbeddedFile],
+        counters: PipelineCounters,
+        counter_attr: str,
+        results: dict[str, int | FileProcessingError],  # strict_typing_linter.py: mutable-type
+        results_lock: asyncio.Lock,
+    ) -> None:
+        """Drain a queue, counting chunks without processing.
+
+        Replaces real workers when stop_after truncates the pipeline.
+        Records chunk counts in results so final aggregation works.
+        """
+        while True:
+            item = await queue.get()
+            chunk_count = len(item.chunks)
+            setattr(counters, counter_attr, getattr(counters, counter_attr) + chunk_count)
+            async with results_lock:
+                results[str(item.file_path)] = chunk_count
+            queue.task_done()
+
     async def _delete_obsolete_chunks(
         self,
         old_state: FileIndexState | None,
@@ -1021,6 +1117,8 @@ class PipelineSnapshot:
     # Pipeline stages (cumulative chunk counts)
     chunks_ingested: int
     chunks_embedded: int
+    embed_cache_hits: int
+    embed_cache_misses: int
     chunks_stored: int
 
     # Pipeline queues (file counts waiting)
@@ -1040,6 +1138,8 @@ async def create_indexing_service(
     config: EmbeddingConfig,
     collection_name: str,
     *,
+    redis: RedisClient,
+    cache_tasks: BackgroundTaskGroup,
     qdrant_url: str = 'http://localhost:6333',
     state_path: Path = DEFAULT_STATE_PATH,
 ) -> IndexingService:
@@ -1050,6 +1150,8 @@ async def create_indexing_service(
     Args:
         config: Embedding configuration with provider selection.
         collection_name: Name of the collection to operate on.
+        redis: Redis client for embedding cache.
+        cache_tasks: Background task group for cache write tracking.
         qdrant_url: URL of Qdrant server.
         state_path: Path to persist indexing state.
 
@@ -1060,7 +1162,14 @@ async def create_indexing_service(
     qdrant_client = QdrantClient(url=qdrant_url)
 
     chunking_service = await ChunkingService.create()
-    embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
+    embedding_service = EmbeddingService(
+        embedding_client,
+        batch_size=config.batch_size,
+        redis=redis,
+        cache_tasks=cache_tasks,
+        model=config.embedding_model,
+        dimensions=config.embedding_dimensions,
+    )
     sparse_embedding_service = await SparseEmbeddingService.create()
     repository = DocumentVectorRepository(qdrant_client, collection_name)
 
@@ -1203,8 +1312,37 @@ def _walk_files(directory: Path, extensions: Set[str]) -> Iterator[Path]:
                 yield root_path / filename
 
 
-def _get_git_files(directory: Path, extensions: Set[str]) -> tuple[Sequence[Path], int]:
+def _walk_files_counted(
+    directory: Path,
+    extensions: Set[str],
+    operation: _OperationState,
+) -> Sequence[Path]:
+    """Walk directory, updating operation.files_found as files are discovered.
+
+    Called from a thread via asyncio.to_thread. The monitor on the main thread
+    reads operation.files_found every 500ms — CPython's GIL makes int attribute
+    writes safe for cross-thread reads.
+    """
+    files: list[Path] = []
+    for file_path in _walk_files(directory, extensions):
+        files.append(file_path)
+        if len(files) % 100 == 0:
+            operation.files_found = len(files)
+    operation.files_found = len(files)
+    return files
+
+
+def _get_git_files(
+    directory: Path,
+    extensions: Set[str],
+    operation: _OperationState | None = None,
+) -> tuple[Sequence[Path], int]:
     """Get non-ignored files and count of ignored files using git ls-files.
+
+    Args:
+        directory: Directory to scan.
+        extensions: File extensions to include.
+        operation: If provided, files_found is updated incrementally.
 
     Returns:
         Tuple of (files to index, count of ignored files with matching extensions).
@@ -1239,6 +1377,8 @@ def _get_git_files(directory: Path, extensions: Set[str]) -> tuple[Sequence[Path
             # (git ls-files can return ../paths for files outside cwd)
             if file_path.is_relative_to(directory_resolved):
                 files.append(file_path)
+                if operation is not None and len(files) % 100 == 0:
+                    operation.files_found = len(files)
 
     ignored_count = sum(1 for line in ignored.stdout.splitlines() if any(line.endswith(ext) for ext in extensions))
 
