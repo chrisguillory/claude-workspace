@@ -121,6 +121,11 @@ BOLD = '\033[1m'
 RESET = '\033[0m'
 
 
+def _osc8_link(url: str, text: str) -> str:
+    """Wrap text in an OSC 8 clickable hyperlink (Cmd+click)."""
+    return f'\033]8;;{url}\a{text}\033]8;;\a'
+
+
 # =============================================================================
 # Static Data Cache
 #
@@ -234,6 +239,29 @@ def _git_branch() -> str:
     return ''
 
 
+def _git_remote_url() -> str:
+    """Get GitHub HTTPS URL for origin remote, or empty string."""
+    try:
+        result = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            # Convert git@github.com:user/repo.git → https://github.com/user/repo
+            if url.startswith('git@github.com:'):
+                url = 'https://github.com/' + url[15:]
+            if url.endswith('.git'):
+                url = url[:-4]
+            if 'github.com' in url:
+                return url
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return ''
+
+
 # =============================================================================
 # Formatting
 # =============================================================================
@@ -324,6 +352,7 @@ def main() -> None:
 
     static = _read_static_data()
     branch = _git_branch()
+    remote_url = _git_remote_url()
 
     # ── Line 1: Identity + Model ─────────────────────────────────────────
     parts: list[str] = []
@@ -331,8 +360,9 @@ def main() -> None:
     # Model
     parts.append(f'{CYAN}[{data.model.display_name}]{RESET}')
 
-    # Session ID (first 8 chars)
-    parts.append(f'{DIM}sid:{data.session_id}{RESET}')
+    # Session ID — space-separated so UUID is double-clickable, links to transcript
+    transcript_url = f'file://{data.transcript_path}'
+    parts.append(f'{DIM}session_id:{RESET} {_osc8_link(transcript_url, data.session_id)}')
 
     # Account
     email = static.get('email', '')
@@ -346,9 +376,13 @@ def main() -> None:
         else:
             parts.append(f'{DIM}{sub}{RESET}')
 
-    # Git branch
+    # Git branch — links to GitHub branch page
     if branch:
-        parts.append(f'{DIM}⎇ {branch}{RESET}')
+        if remote_url:
+            branch_link = _osc8_link(f'{remote_url}/tree/{branch}', branch)
+            parts.append(f'{DIM}⎇{RESET} {branch_link}')
+        else:
+            parts.append(f'{DIM}⎇ {branch}{RESET}')
 
     # Vim mode
     if data.vim and 'mode' in data.vim:
@@ -389,6 +423,65 @@ def main() -> None:
         metrics.append(f'{GREEN}+{added}{RESET}{RED}-{removed}{RESET}')
 
     print(' │ '.join(metrics))
+
+    # ── Line 3: Workspace + Version ─────────────────────────────────────
+    line3: list[str] = []
+
+    line3.append(f'{DIM}v{data.version}{RESET}')
+
+    # Show cwd; if project_dir differs, show both
+    if data.workspace.project_dir != data.workspace.current_dir:
+        line3.append(f'{DIM}cwd:{RESET} {data.cwd}')
+        line3.append(f'{DIM}project:{RESET} {data.workspace.project_dir}')
+    else:
+        line3.append(f'{DIM}cwd:{RESET} {data.cwd}')
+
+    # Rate limit tier
+    tier = static.get('tier', '')
+    if tier:
+        line3.append(f'{DIM}tier:{RESET} {tier}')
+
+    # Transcript path
+    line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, data.transcript_path)}')
+
+    print(' │ '.join(line3))
+
+    # ── Line 4: Context Window Detail ───────────────────────────────────
+    line4: list[str] = []
+
+    # Cumulative totals
+    ctx_in = _format_tokens(ctx.total_input_tokens)
+    ctx_out = _format_tokens(ctx.total_output_tokens)
+    line4.append(f'{DIM}total_in:{RESET} {ctx_in}')
+    line4.append(f'{DIM}total_out:{RESET} {ctx_out}')
+
+    # Context window size
+    ctx_size = _format_tokens(ctx.context_window_size)
+    line4.append(f'{DIM}window:{RESET} {ctx_size}')
+
+    # Remaining percentage
+    remaining = ctx.remaining_percentage
+    if remaining is not None:
+        rem_color = GREEN if remaining > 30 else YELLOW if remaining > 10 else RED
+        line4.append(f'{rem_color}{remaining:.0f}% remaining{RESET}')
+
+    # Exceeds 200k warning
+    if data.exceeds_200k_tokens:
+        line4.append(f'{RED}⚠ >200k tokens{RESET}')
+
+    # Cache tokens (from current usage)
+    if ctx.current_usage is not None:
+        cache_create = ctx.current_usage.cache_creation_input_tokens
+        cache_read = ctx.current_usage.cache_read_input_tokens
+        if cache_create or cache_read:
+            line4.append(f'{DIM}cache: +{_format_tokens(cache_create)} ↺{_format_tokens(cache_read)}{RESET}')
+
+    # API duration (distinct from wall clock duration)
+    api_dur = data.cost.total_api_duration_ms
+    if api_dur is not None and api_dur > 0:
+        line4.append(f'{DIM}api:{_format_duration(api_dur)}{RESET}')
+
+    print(' │ '.join(line4))
 
 
 def _excepthook(exc_type: type[BaseException], exc_value: BaseException, exc_tb: types.TracebackType | None) -> None:
