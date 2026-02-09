@@ -24,8 +24,26 @@ import ast
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
+
+# ---------------------------------------------------------------------------
+# Data Types
+# ---------------------------------------------------------------------------
+
+
+class LineRange(NamedTuple):
+    """Line range for a function definition (inclusive)."""
+
+    start: int
+    end: int
+
+
+# Maps function name to set of violation codes found/expected in that function
+type ViolationMap = dict[str, set[str]]
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -43,7 +61,7 @@ EDGE_CASE_FILE = SCRIPT_DIR / 'exception_safety_edge_cases.py'
 # ---------------------------------------------------------------------------
 
 # Each violation function triggers exactly one rule (no pollution)
-EXPECTED_VIOLATIONS: dict[str, set[str]] = {
+EXPECTED_VIOLATIONS: ViolationMap = {
     # EXC001: Bare except
     'exc001_violation_basic': {'EXC001'},
     # EXC002: Swallowed exception (broad catch without re-raise)
@@ -80,7 +98,7 @@ SUPPRESSED_FUNCTIONS: set[str] = {
 
 # Edge cases for comprehensive testing. May have multiple rules or test
 # false positive prevention (set() means expect NO violations).
-EXPECTED_EDGE_CASES: dict[str, set[str]] = {
+EXPECTED_EDGE_CASES: ViolationMap = {
     # EXC002: Tuple exception handling
     'edge_tuple_with_broad_exception': {'EXC002'},
     # EXC002: Non-canonical patterns (without pass)
@@ -137,7 +155,7 @@ EDGE_CASE_SUPPRESSED: set[str] = {
 # ---------------------------------------------------------------------------
 
 
-def get_function_line_ranges(filepath: Path) -> dict[str, tuple[int, int]]:
+def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
     """Parse AST to get line ranges for each function.
 
     Returns dict mapping function name to (start_line, end_line).
@@ -145,12 +163,12 @@ def get_function_line_ranges(filepath: Path) -> dict[str, tuple[int, int]]:
     source = filepath.read_text(encoding='utf-8')
     tree = ast.parse(source)
 
-    ranges: dict[str, tuple[int, int]] = {}
+    ranges: dict[str, LineRange] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             # end_lineno is always set for nodes parsed from source (not constructed)
             assert node.end_lineno is not None
-            ranges[node.name] = (node.lineno, node.end_lineno)
+            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
 
     return ranges
 
@@ -190,13 +208,13 @@ def parse_linter_output(output: str) -> list[tuple[int, str]]:
 
 def map_violations_to_functions(
     violations: list[tuple[int, str]],
-    ranges: dict[str, tuple[int, int]],
-) -> dict[str, set[str]]:
+    ranges: Mapping[str, LineRange],
+) -> ViolationMap:
     """Map violations to the functions they occur in.
 
     Returns dict mapping function name to set of rule codes.
     """
-    result: dict[str, set[str]] = {}
+    result: ViolationMap = {}
 
     for line_num, rule_code in violations:
         for func_name, (start, end) in ranges.items():
@@ -224,8 +242,8 @@ class ValidationResult:
 
 
 def validate(
-    actual: dict[str, set[str]],
-    expected: dict[str, set[str]],
+    actual: ViolationMap,
+    expected: ViolationMap,
     suppressed: set[str],
     all_functions: set[str],
 ) -> list[str]:
@@ -263,7 +281,7 @@ def validate(
 
 def validate_file(
     test_file: Path,
-    expected: dict[str, set[str]],
+    expected: ViolationMap,
     suppressed: set[str],
 ) -> ValidationResult:
     """Validate a single test file against expected violations."""

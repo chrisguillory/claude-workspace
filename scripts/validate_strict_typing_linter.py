@@ -20,6 +20,7 @@ import ast
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -195,7 +196,7 @@ EDGE_CASE_SUPPRESSED: set[str] = {
 # ---------------------------------------------------------------------------
 
 
-def get_class_line_ranges(filepath: Path) -> dict[str, LineRange]:
+def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
     """Parse AST to get line ranges for each class.
 
     Returns dict mapping class name to (start_line, end_line).
@@ -260,7 +261,7 @@ def parse_linter_output(output: str) -> list[tuple[int, str]]:
 
 def map_violations_to_classes(
     violations: list[tuple[int, str]],
-    ranges: dict[str, LineRange],
+    ranges: Mapping[str, LineRange],
 ) -> ViolationMap:
     """Map violations to the classes they occur in.
 
