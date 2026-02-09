@@ -1,5 +1,6 @@
 volumes:
   qdrant-data:
+  redis-data:
 
 services:
   qdrant:
@@ -20,3 +21,20 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/arm64
+    container_name: document-search-redis
+    restart: unless-stopped
+    ports:
+      - "6379"  # Ephemeral host port (Docker assigns dynamically)
+    volumes:
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

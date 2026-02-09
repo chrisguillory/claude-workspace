@@ -20,7 +20,7 @@ import ast
 import re
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -77,7 +77,7 @@ EXPECTED_VIOLATIONS: ViolationMap = {
 }
 
 # Classes/functions with suppression directives (should NOT appear in output)
-SUPPRESSED_NAMES: set[str] = {
+SUPPRESSED_NAMES: Set[str] = {
     'TupleFieldSuppressed',
     'HashableFieldSuppressed',
 }
@@ -185,7 +185,7 @@ EXPECTED_EDGE_CASES: ViolationMap = {
     'EdgeCrossTypePydanticRefsDataclassHashable': set(),
 }
 
-EDGE_CASE_SUPPRESSED: set[str] = {
+EDGE_CASE_SUPPRESSED: Set[str] = {
     'EdgeSuppressedTupleField',
     'EdgeSuppressedHashableField',
     'EdgeMultipleSuppressionCodes',
@@ -225,7 +225,7 @@ def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
 def run_linter(test_file: Path, linter: Path) -> tuple[str, int]:
     """Run the linter and return (output, return_code)."""
     result = subprocess.run(
-        [sys.executable, str(linter), str(test_file)],
+        [sys.executable, str(linter), '--no-skip-file', str(test_file)],
         capture_output=True,
         text=True,
         timeout=60,
@@ -233,7 +233,7 @@ def run_linter(test_file: Path, linter: Path) -> tuple[str, int]:
     return result.stdout + result.stderr, result.returncode
 
 
-def parse_linter_output(output: str) -> list[tuple[int, str]]:
+def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
     """Parse linter output to extract (line_number, violation_kind) tuples.
 
     Pattern: "filepath:line:col: error: {Type} '{bad_type}' in {context} annotation"
@@ -260,7 +260,7 @@ def parse_linter_output(output: str) -> list[tuple[int, str]]:
 
 
 def map_violations_to_classes(
-    violations: list[tuple[int, str]],
+    violations: Sequence[tuple[int, str]],
     ranges: Mapping[str, LineRange],
 ) -> ViolationMap:
     """Map violations to the classes they occur in.
@@ -296,7 +296,7 @@ class ValidationResult:
     """Result of validating a single test file."""
 
     file_name: str
-    errors: list[str]
+    errors: Sequence[str]
     violation_count: int
     expected_count: int
     kind_counts: dict[str, int]
@@ -305,9 +305,9 @@ class ValidationResult:
 def validate(
     actual: ViolationMap,
     expected: ViolationMap,
-    suppressed: set[str],
-    all_classes: set[str],
-) -> list[str]:
+    suppressed: Set[str],
+    all_classes: Set[str],
+) -> Sequence[str]:
     """Validate actual violations against expected.
 
     Returns list of error messages (empty if all passed).
@@ -345,7 +345,7 @@ def validate(
 def validate_file(
     test_file: Path,
     expected: ViolationMap,
-    suppressed: set[str],
+    suppressed: Set[str],
 ) -> ValidationResult:
     """Validate a single test file against expected violations."""
     # Parse test file AST

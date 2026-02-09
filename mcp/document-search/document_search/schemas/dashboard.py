@@ -78,6 +78,8 @@ class OperationProgress(StrictModel):
     # Pipeline stages (cumulative chunk counts through each stage)
     chunks_ingested: int  # Output of chunk stage
     chunks_embedded: int  # Output of embed stage
+    embed_cache_hits: int  # Embeddings served from Redis
+    embed_cache_misses: int  # Embeddings computed via API
     chunks_stored: int  # Output of store stage
 
     # Completion
@@ -115,6 +117,8 @@ class OperationProgress(StrictModel):
             files_awaiting_store=snapshot.files_awaiting_store,
             chunks_ingested=snapshot.chunks_ingested,
             chunks_embedded=snapshot.chunks_embedded,
+            embed_cache_hits=snapshot.embed_cache_hits,
+            embed_cache_misses=snapshot.embed_cache_misses,
             chunks_stored=snapshot.chunks_stored,
             files_done=snapshot.files_done,
             errors_429=errors_429,

@@ -1,3 +1,4 @@
+# exception_safety_linter.py: skip-file
 # ruff: noqa: SIM105
 # SIM105: try-except-pass patterns required for testing; except* incompatible with contextlib.suppress
 """Exception safety edge cases - regression testing and false positive prevention.
@@ -17,6 +18,7 @@ Run: ./validate_exception_linter.py (validates both test files)
 from __future__ import annotations
 
 import logging
+import sys
 from asyncio import CancelledError
 from asyncio import CancelledError as CE
 from collections.abc import AsyncGenerator, Generator
@@ -490,6 +492,34 @@ def edge_trystar_specific() -> None:
 
 
 # =============================================================================
+# EXC002: Entry-Point Error Boundary Edge Cases
+# =============================================================================
+
+
+def edge_sys_exit_in_main() -> None:
+    """VIOLATION: sys.exit(1) after broad catch still triggers EXC002.
+
+    This is a common pattern in __main__ blocks, but the linter flags it because
+    the original exception is replaced by SystemExit — the traceback context and
+    exception type are lost to the caller (the OS only sees exit code 1).
+
+    While sys.exit(1) signals failure to the OS, the linter prefers sys.excepthook
+    which preserves full exception propagation AND allows custom formatting.
+
+    The preferred alternative (see exc002_correct_excepthook in test_cases):
+        sys.excepthook = my_hook
+        main()  # No try/except needed
+
+    If you must use this pattern (e.g., legacy code), suppress with directive.
+    """
+    try:
+        main_entrypoint()
+    except Exception as e:  # EXC002: broad catch, sys.exit is not re-raise
+        print(f'Fatal: {e}', file=sys.stderr)
+        sys.exit(1)
+
+
+# =============================================================================
 # Suppression Directive Edge Cases
 # =============================================================================
 
@@ -518,6 +548,11 @@ async def async_op() -> None:
 
 def cleanup() -> None:
     """Placeholder for cleanup logic."""
+    pass
+
+
+def main_entrypoint() -> None:
+    """Placeholder for main entry point."""
     pass
 
 
