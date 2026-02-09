@@ -60,6 +60,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+# Name resolution (import map usage)
+type QualifiedName = str  # Fully qualified dotted name (e.g., 'builtins.Exception', 'asyncio.CancelledError')
+type LocalName = str  # Local identifier as it appears in source (e.g., 'Exception', 'CancelledError')
+
+# Error code identifier
+type ErrorCode = str  # Violation code like 'EXC001', 'EXC002', etc.
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -72,56 +79,56 @@ TEST_CASES_FILE = 'exception_safety_test_cases.py'
 
 # Broad exception types (fully qualified only - like strict_typing_linter.py pattern)
 # These are the canonical names after import resolution
-QUALIFIED_BROAD_EXCEPTIONS: Set[str] = {
+QUALIFIED_BROAD_EXCEPTIONS: Set[QualifiedName] = {
     'builtins.Exception',
     'builtins.BaseException',
 }
 
 # Short names for builtins when not explicitly imported
-BUILTIN_BROAD_EXCEPTIONS: Set[str] = {
+BUILTIN_BROAD_EXCEPTIONS: Set[LocalName] = {
     'Exception',
     'BaseException',
 }
 
 # CancelledError types (fully qualified)
-QUALIFIED_CANCELLED_ERROR: Set[str] = {
+QUALIFIED_CANCELLED_ERROR: Set[QualifiedName] = {
     'asyncio.CancelledError',
 }
 
 # Short name for CancelledError
-BUILTIN_CANCELLED_ERROR: Set[str] = {
+BUILTIN_CANCELLED_ERROR: Set[LocalName] = {
     'CancelledError',
 }
 
 # Exception types that catch CancelledError (Python 3.8+)
 # Note: CancelledError inherits from BaseException, NOT Exception.
 # So `except Exception:` does NOT catch CancelledError.
-QUALIFIED_CATCHES_CANCELLED: Set[str] = {
+QUALIFIED_CATCHES_CANCELLED: Set[QualifiedName] = {
     'builtins.BaseException',
 }
 
-BUILTIN_CATCHES_CANCELLED: Set[str] = {
+BUILTIN_CATCHES_CANCELLED: Set[LocalName] = {
     'BaseException',
 }
 
 # GeneratorExit types (fully qualified)
-QUALIFIED_GENERATOR_EXIT: Set[str] = {
+QUALIFIED_GENERATOR_EXIT: Set[QualifiedName] = {
     'builtins.GeneratorExit',
 }
 
 # Short name for GeneratorExit
-BUILTIN_GENERATOR_EXIT: Set[str] = {
+BUILTIN_GENERATOR_EXIT: Set[LocalName] = {
     'GeneratorExit',
 }
 
 # Exception types that catch GeneratorExit
 # Like CancelledError, GeneratorExit inherits from BaseException, NOT Exception.
 # So `except Exception:` does NOT catch GeneratorExit.
-QUALIFIED_CATCHES_GENERATOR_EXIT: Set[str] = {
+QUALIFIED_CATCHES_GENERATOR_EXIT: Set[QualifiedName] = {
     'builtins.BaseException',
 }
 
-BUILTIN_CATCHES_GENERATOR_EXIT: Set[str] = {
+BUILTIN_CATCHES_GENERATOR_EXIT: Set[LocalName] = {
     'BaseException',
 }
 
@@ -152,7 +159,7 @@ type ViolationKind = Literal[
 ]
 
 # Maps kind to error code for display
-ERROR_CODES: Mapping[ViolationKind, str] = {
+ERROR_CODES: Mapping[ViolationKind, ErrorCode] = {
     'bare-except': 'EXC001',
     'swallowed-exception': 'EXC002',
     'finally-control-flow': 'EXC003',
@@ -220,7 +227,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         self,
         filepath: Path,
         source_lines: Sequence[str],
-        import_map: Mapping[str, str],
+        import_map: Mapping[LocalName, QualifiedName],
     ) -> None:
         self.filepath = filepath
         self.source_lines = source_lines
@@ -698,7 +705,7 @@ def find_python_files(
 # =============================================================================
 
 
-def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
+def _build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
     """Build mapping from local names to fully qualified names.
 
     Examples:
@@ -708,7 +715,7 @@ def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
     Note: Builtins like Exception, BaseException are NOT in the import map
     (available without explicit import). This is why we need BUILTIN_* sets.
     """
-    import_map: dict[str, str] = {}
+    import_map: dict[LocalName, QualifiedName] = {}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -725,7 +732,7 @@ def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
     return import_map
 
 
-def _resolve_name(node: ast.expr, import_map: Mapping[str, str]) -> str:
+def _resolve_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> QualifiedName:
     """Resolve exception type to fully qualified name."""
     if isinstance(node, ast.Name):
         name = node.id
@@ -767,7 +774,7 @@ def _find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestRe
         return {}
 
     references: dict[ViolationKind, TestReference] = {}
-    code_to_kind = {code: kind for kind, code in ERROR_CODES.items()}
+    code_to_kind: dict[ErrorCode, ViolationKind] = {code: kind for kind, code in ERROR_CODES.items()}
 
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
