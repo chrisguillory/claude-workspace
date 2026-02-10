@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -315,6 +315,44 @@ class SessionManager:
 
         self._db.sessions = kept_sessions
         return removed_ids
+
+    def get_active_sessions_for_pid(self, pid: int) -> Sequence[Session]:
+        """Get all active sessions owned by a specific PID.
+
+        Args:
+            pid: Process ID to filter by
+
+        Returns:
+            Sequence of active Session objects with matching PID
+        """
+        if self._db is None:
+            raise RuntimeError("SessionManager must be used within 'with' context")
+
+        return [s for s in self._db.sessions if s.state == 'active' and s.metadata.claude_pid == pid]
+
+    def remove_sessions(self, session_ids: Set[str]) -> Set[str]:
+        """Remove sessions by ID.
+
+        Args:
+            session_ids: Set of session IDs to remove
+
+        Returns:
+            Sequence of removed session IDs (intersection of requested and existing)
+        """
+        if self._db is None:
+            raise RuntimeError("SessionManager must be used within 'with' context")
+
+        removed: set[str] = set()
+        kept: list[Session] = []
+
+        for session in self._db.sessions:
+            if session.session_id in session_ids:
+                removed.add(session.session_id)
+            else:
+                kept.append(session)
+
+        self._db.sessions = kept
+        return removed
 
 
 # Deprecated: Old functional API - use SessionManager instead
