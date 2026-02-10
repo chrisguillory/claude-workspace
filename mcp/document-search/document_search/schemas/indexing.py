@@ -44,7 +44,7 @@ class FileIndexState(StrictModel):
     file_hash: str  # SHA256 of file contents
     file_size: int  # Bytes, for quick change detection
     chunk_count: int
-    chunk_ids: Annotated[tuple[JsonUuid, ...], pydantic.Field(strict=False)]  # IDs of chunks in Qdrant
+    chunk_ids: Sequence[JsonUuid]  # IDs of chunks in Qdrant
     indexed_at: JsonDatetime
     chunk_strategy_version: int = CHUNK_STRATEGY_VERSION
 
@@ -80,7 +80,7 @@ class ErrorCategory(StrictModel):
     error_type: str  # "encoding", "permission", "api_error", etc.
     count: int
     action: str  # Human-readable fix suggestion
-    files: tuple[str, ...]  # Affected file paths
+    files: Sequence[str]  # Affected file paths
 
 
 class FileTypeStats(StrictModel):
@@ -137,7 +137,7 @@ class IndexingResult(StrictModel):
 
     # Timing and errors
     elapsed_seconds: float
-    errors: tuple[FileProcessingError, ...]
+    errors: Sequence[FileProcessingError]
 
     @property
     def success_rate(self) -> float:
@@ -184,7 +184,7 @@ class IndexingResult(StrictModel):
                 error_type=category,
                 count=len(files),
                 action=category_map.get(category, (category, default_action))[1],
-                files=tuple(files),
+                files=files,
             )
             for category, files in grouped.items()
         ]
