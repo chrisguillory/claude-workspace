@@ -38,8 +38,16 @@ repos:
 
       - id: strict-typing-linter
         name: strict-typing-linter
-        description: Check for mutable/loose types in document-search
-        entry: ./scripts/strict_typing_linter.py mcp/document-search/
+        description: Check for mutable/loose types in annotations
+        entry: ./scripts/strict_typing_linter.py mcp/document-search/ scripts/
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: exception-safety-linter
+        name: exception-safety-linter
+        description: Check for exception handling anti-patterns
+        entry: ./scripts/exception_safety_linter.py mcp/document-search/ scripts/
         language: system
         pass_filenames: false
         always_run: true

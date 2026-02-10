@@ -664,10 +664,7 @@ class IndexingService:
         Infrastructure errors propagate immediately (fail-fast).
         """
         while True:
-            try:
-                file_path = await file_queue.get()
-            except asyncio.CancelledError:
-                return
+            file_path = await file_queue.get()
 
             file_key = str(file_path)
             try:
@@ -723,7 +720,7 @@ class IndexingService:
                         message=str(e),
                         recoverable=True,
                     )
-                logger.warning(f'[CHUNK] Skipping {file_path.name}: {type(e).__name__}: {e}')
+                logger.warning(f'[CHUNK] Skipping {file_path.name}: {type(e).__name__}: {e}', exc_info=True)
 
             # Mark done whether success or known error (unknown errors propagate)
             file_queue.task_done()
@@ -850,7 +847,7 @@ class IndexingService:
                 try:
                     await flush_batch()
                 except Exception as e:
-                    logger.warning(f'Failed to flush batch during shutdown: {e}')
+                    logger.warning(f'Failed to flush batch during shutdown: {e}', exc_info=True)
                 raise  # Re-raise CancelledError to signal proper cancellation
 
     async def _pipeline_upsert_worker(
@@ -864,10 +861,7 @@ class IndexingService:
         Fail-fast: exceptions propagate immediately, task_done() only on success.
         """
         while True:
-            try:
-                embedded = await upsert_queue.get()
-            except asyncio.CancelledError:
-                return
+            embedded = await upsert_queue.get()
 
             file_key = str(embedded.file_path)
 

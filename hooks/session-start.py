@@ -25,6 +25,7 @@ from pathlib import Path
 
 import packaging.version
 import psutil
+from local_lib.phantom import PhantomHandler
 from local_lib.schemas.hooks import SessionStartHookInput
 from local_lib.session_tracker import SessionManager
 from local_lib.utils import Timer
@@ -143,17 +144,26 @@ process_created_at = get_process_created_at(claude_pid)
 # Track session using SessionManager (atomic with file locking)
 with SessionManager(project_dir) as manager:
     crashed_ids = manager.detect_crashed_sessions()
-    pruned_ids = manager.prune_orphaned_sessions()
-    manager.start_session(
-        session_id=hook_data.session_id,
-        transcript_path=hook_data.transcript_path,
-        source=hook_data.source,
-        claude_pid=claude_pid,
-        parent_id=parent_id,
-        startup_model=hook_data.model,
-        claude_version=claude_version,
-        process_created_at=process_created_at,
-    )
+
+    phantom = PhantomHandler(manager, claude_pid, claude_version)
+
+    if phantom.is_phantom(hook_data.session_id, hook_data.source, transcript_file):
+        pruned_ids = manager.prune_orphaned_sessions()
+    else:
+        phantom.cleanup(hook_data.session_id)
+        pruned_ids = manager.prune_orphaned_sessions()
+        manager.start_session(
+            session_id=hook_data.session_id,
+            transcript_path=hook_data.transcript_path,
+            source=hook_data.source,
+            claude_pid=claude_pid,
+            parent_id=parent_id,
+            startup_model=hook_data.model,
+            claude_version=claude_version,
+            process_created_at=process_created_at,
+        )
+
+phantom.log()
 
 # Print session information
 print(f'Completed in {timer.elapsed_ms()} ms')
@@ -163,6 +173,7 @@ print(f'claude_version: {claude_version}')
 print(f'process_created_at: {process_created_at}')
 print(f'parent_id: {parent_id}')
 print(f'encoding_verified: {encoding_matches}')
+phantom.print_diagnostics()
 if crashed_ids:
     print(f'crashed_sessions: {crashed_ids}')
 if pruned_ids:
