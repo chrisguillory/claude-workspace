@@ -70,7 +70,7 @@ python_version = "3.13"
 plugins = ["pydantic.mypy"]
 strict = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR:$MYPY_CONFIG_FILE_DIR/stubs"
+mypy_path = "$MYPY_CONFIG_FILE_DIR:$MYPY_CONFIG_FILE_DIR/stubs:$MYPY_CONFIG_FILE_DIR/scripts"
 exclude = [
     ".venv",
     "scratch",

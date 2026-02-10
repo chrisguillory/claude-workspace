@@ -27,6 +27,7 @@ Design Philosophy:
     - Error-only, no auto-fix: Forces conscious decision at each occurrence
     - Pure analysis: Checks exactly the files it's given (no internal filtering)
     - Escape hatches:
+      - # strict_typing_linter.py: skip-file - skip entire file
       - # strict_typing_linter.py: mutable-type - suppress mutable type violations
       - # strict_typing_linter.py: loose-typing - suppress loose typing violations
       - # strict_typing_linter.py: tuple-field - suppress tuple-in-field violations
@@ -49,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins
 import io
 import subprocess
 import sys
@@ -58,9 +60,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from hashability_inspector import HashabilityInspector, QualifiedName
+
 # =============================================================================
 # Configuration - What to check (not WHERE to check - that's the caller's job)
 # =============================================================================
+
+# Builtin names — skip these in the inspector (int, str, bool, etc. are not user-defined types)
+BUILTIN_NAMES: Set[str] = set(dir(builtins))
 
 # Builtin mutable types (lowercase) - always flagged
 MUTABLE_TYPES: Set[str] = {
@@ -78,7 +85,7 @@ LOOSE_TYPES: Set[str] = {
 FORBIDDEN_TYPES: Set[str] = MUTABLE_TYPES | LOOSE_TYPES
 
 # Fully qualified mutable types (typing module aliases for builtins + explicit mutable interfaces)
-QUALIFIED_MUTABLE: Set[str] = {
+QUALIFIED_MUTABLE: Set[QualifiedName] = {
     'typing.List',
     'typing.Dict',
     'typing.Set',
@@ -91,7 +98,7 @@ QUALIFIED_MUTABLE: Set[str] = {
 }
 
 # Fully qualified allowed types (abstract interfaces)
-QUALIFIED_ALLOWED: Set[str] = {
+QUALIFIED_ALLOWED: Set[QualifiedName] = {
     'collections.abc.Set',
     'collections.abc.Mapping',
     'collections.abc.Sequence',
@@ -101,7 +108,7 @@ QUALIFIED_ALLOWED: Set[str] = {
 }
 
 # Fully qualified transparent types (check nested contents)
-QUALIFIED_TRANSPARENT: Set[str] = {
+QUALIFIED_TRANSPARENT: Set[QualifiedName] = {
     'collections.abc.Mapping',
     'collections.abc.Sequence',
     'typing.Mapping',
@@ -120,7 +127,7 @@ ALLOWED_CONTAINERS: Set[str] = {
 # Maps fully qualified type name to positions where Any is acceptable (0-indexed)
 # None = all positions allowed, tuple of ints = only those positions allowed
 # Names are resolved via import map, so only canonical names needed here
-ANY_ALLOWED_POSITIONS: Mapping[str, Sequence[int] | None] = {
+ANY_ALLOWED_POSITIONS: Mapping[QualifiedName, Sequence[int] | None] = {
     # FastMCP Context[ServerSessionT, LifespanContextT, RequestT] - all positions
     'mcp.server.fastmcp.Context': None,
     # Generator[YieldType, SendType, ReturnType] - SendType and ReturnType often unused
@@ -132,7 +139,7 @@ ANY_ALLOWED_POSITIONS: Mapping[str, Sequence[int] | None] = {
 }
 
 
-def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
+def _build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
     """Build a mapping from local names to fully qualified names from imports.
 
     Examples:
@@ -141,7 +148,7 @@ def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
         from typing import Generator -> {'Generator': 'typing.Generator'}
         from typing import Generator as Gen -> {'Gen': 'typing.Generator'}
     """
-    import_map: dict[str, str] = {}
+    import_map: dict[LocalName, QualifiedName] = {}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -158,7 +165,47 @@ def _build_import_map(tree: ast.Module) -> Mapping[str, str]:
     return import_map
 
 
-def _resolve_qualified_name(node: ast.expr, import_map: Mapping[str, str]) -> str:
+def _compute_module_path(filepath: Path) -> str:
+    """Compute importable module path by walking the package hierarchy.
+
+    Resolves to absolute path first to prevent infinite loops when
+    Path('.').parent returns Path('.') on relative paths.
+
+    Walks up from filepath through __init__.py chain to find the top-level package.
+    Example: mcp/document-search/document_search/schemas/vectors.py
+             -> 'document_search.schemas.vectors'
+    """
+    filepath = filepath.resolve()
+    # __init__.py represents the package itself, not a submodule named '__init__'
+    if filepath.name == '__init__.py':
+        parts: list[str] = []
+        parent = filepath.parent
+    else:
+        parts = [filepath.stem]
+        parent = filepath.parent
+    while (parent / '__init__.py').exists():
+        parts.append(parent.name)
+        parent = parent.parent
+    return '.'.join(reversed(parts))
+
+
+def _find_source_root(path: Path) -> Path:
+    """Find the source root for a path (directory above the top-level package).
+
+    For directories, returns the directory itself (resolved to absolute).
+    For files, walks up past __init__.py chain to find the package root.
+    Resolves to absolute first to prevent infinite loops on relative paths.
+    """
+    if path.is_dir():
+        return path.resolve()
+    path = path.resolve()
+    parent = path.parent
+    while (parent / '__init__.py').exists():
+        parent = parent.parent
+    return parent
+
+
+def _resolve_qualified_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> QualifiedName:
     """Resolve a type node to its fully qualified canonical name.
 
     Uses the import map to resolve local names to their fully qualified origins.
@@ -196,6 +243,10 @@ DIRECTIVE_PREFIX = '# strict_typing_linter.py:'
 
 
 # Type aliases for constrained string values
+# Name resolution
+type LocalName = str  # Local identifier as it appears in source (e.g., 'Generator', 't')
+type TypeClassification = Literal['mutable', 'transparent', 'allowed', 'unknown']
+
 type FieldContext = Literal['field', 'parameter', 'return']
 type DirectiveCode = Literal['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering']
 
@@ -225,7 +276,7 @@ class OrderingViolation:
 
     filepath: Path
     line: int
-    kind: Literal['ordering', 'missing-all', 'trailing-comma']
+    kind: OrderingViolationKind
     message: str
     source_line: str
     suggestion: str
@@ -275,7 +326,7 @@ def _is_frozen_dataclass(node: ast.ClassDef) -> bool | None:
     return None
 
 
-def _is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[str, str]) -> bool | None:
+def _is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[LocalName, QualifiedName]) -> bool | None:
     """Check if class has an attrs decorator and whether it's frozen.
 
     Uses import tracking to resolve decorator names, avoiding false positives
@@ -313,7 +364,7 @@ def _is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[str, str]) -> bool 
     return None
 
 
-def _is_variable_length_tuple(node: ast.expr, import_map: Mapping[str, str]) -> bool:
+def _is_variable_length_tuple(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> bool:
     """Check if an AST node is a variable-length tuple annotation: tuple[X, ...].
 
     Only matches the homogeneous form with Ellipsis. Does NOT match:
@@ -406,7 +457,13 @@ class AnnotationChecker(ast.NodeVisitor):
         'Any': 'a specific type (TypedDict, StrictModel, or concrete type)',
     }
 
-    def __init__(self, filepath: Path, source_lines: Sequence[str], import_map: Mapping[str, str]) -> None:
+    def __init__(
+        self,
+        filepath: Path,
+        source_lines: Sequence[str],
+        import_map: Mapping[LocalName, QualifiedName],
+        inspector: HashabilityInspector | None = None,
+    ) -> None:
         self.filepath = filepath
         self.source_lines = source_lines
         self.import_map = import_map
@@ -414,6 +471,7 @@ class AnnotationChecker(ast.NodeVisitor):
         self._function_depth = 0  # Track nesting depth in functions
         self._skip_class_fields = False  # Skip field checking for non-frozen dataclasses
         self._hashable_fields = False  # In a __strict_typing_linter__hashable_fields__ class
+        self._inspector = inspector
 
     def _get_type_name(self, node: ast.expr) -> str:
         """Extract the name from a type expression."""
@@ -425,7 +483,7 @@ class AnnotationChecker(ast.NodeVisitor):
             return self._get_type_name(node.value)
         return ''
 
-    def _classify_by_qualified_name(self, node: ast.expr) -> Literal['mutable', 'transparent', 'allowed', 'unknown']:
+    def _classify_by_qualified_name(self, node: ast.expr) -> TypeClassification:
         """Classify type using fully qualified name resolution.
 
         Used to disambiguate types like 'Set' which could be:
@@ -623,7 +681,7 @@ class AnnotationChecker(ast.NodeVisitor):
         elif unhashable == 'Mapping':
             return 'frozendict[K, V] (third-party) or restructure'
         else:
-            return 'a hashable type'
+            return f'ensure {unhashable} fields use hashable types (tuple instead of Sequence/list)'
 
     def _find_tuple_field(self, node: ast.expr) -> bool:
         """Recursively check if annotation contains tuple[X, ...] (variable-length).
@@ -660,16 +718,26 @@ class AnnotationChecker(ast.NodeVisitor):
         return self._find_tuple_field(node)
 
     def _find_unhashable_field(self, node: ast.expr) -> str | None:
-        """Recursively check if annotation contains unhashable abstract types.
+        """Recursively check if annotation contains unhashable types.
 
-        Returns the type name ('Sequence' or 'Mapping') if found, None otherwise.
+        Returns the type name if unhashable, None otherwise.
         Walks the entire type tree to catch nested unhashables like tuple[Sequence[int], ...].
+
+        Checks two layers:
+        1. AST-level: Sequence/Mapping detected by name via QUALIFIED_TRANSPARENT
+        2. Runtime-level: User-defined types checked via HashabilityInspector import
         """
         # Check if this node is Sequence or Mapping
         classification = self._classify_by_qualified_name(node)
         if classification == 'transparent':
             # 'transparent' means Sequence or Mapping — these are unhashable
             return self._get_type_name(node)
+
+        # Runtime check for user-defined types (VectorPoint, Config, etc.)
+        if classification == 'unknown':
+            result = self._check_type_via_inspector(node)
+            if result is not None:
+                return result
 
         if isinstance(node, ast.Subscript):
             # Check the container itself
@@ -696,6 +764,33 @@ class AnnotationChecker(ast.NodeVisitor):
             # String annotation (forward reference or PEP 563)
             expr_node = ast.parse(node.value, mode='eval').body
             return self._find_unhashable_field(expr_node)
+
+        return None
+
+    def _check_type_via_inspector(self, node: ast.expr) -> str | None:
+        """Check user-defined type hashability via runtime inspector.
+
+        Returns type name if unhashable, None if hashable or unverifiable.
+        """
+        if self._inspector is None:
+            return None
+
+        qualified = _resolve_qualified_name(node, self.import_map)
+        if not qualified:
+            return None
+
+        # Same-file types have no module prefix — compute importable module path
+        if '.' not in qualified:
+            if qualified in BUILTIN_NAMES:
+                return None
+            module_path = _compute_module_path(self.filepath)
+            if not module_path:
+                return None  # Standalone __init__.py with no package — can't resolve
+            qualified = f'{module_path}.{qualified}'
+
+        result = self._inspector.check(qualified)
+        if result is not None and not result.is_hashable:
+            return self._get_type_name(node)
 
         return None
 
@@ -1002,7 +1097,7 @@ class AnnotationChecker(ast.NodeVisitor):
         return self._find_forbidden_type_no_any(expr_node)
 
     # Mapping from violation kind to directive code
-    _DIRECTIVE_CODES: Mapping[str, str] = {
+    _DIRECTIVE_CODES: Mapping[TypeViolationKind, DirectiveCode] = {
         'mutable': 'mutable-type',
         'loose': 'loose-typing',
         'tuple-field': 'tuple-field',
@@ -1369,9 +1464,23 @@ def check_class_method_ordering(
 # =============================================================================
 
 
-def check_file(filepath: Path, strict_ordering_packages: Set[Path]) -> Sequence[Violation]:
+def check_file(
+    filepath: Path,
+    strict_ordering_packages: Set[Path],
+    inspector: HashabilityInspector | None = None,
+    *,
+    respect_skip_file: bool = True,
+) -> Sequence[Violation]:
     """Check a single file for all violations."""
     source = filepath.read_text(encoding='utf-8')
+
+    # File-level skip directive (check first 10 lines)
+    if respect_skip_file:
+        prefix_lower = DIRECTIVE_PREFIX.lower()
+        for line in source.splitlines()[:10]:
+            if prefix_lower in line.lower() and 'skip-file' in line.lower():
+                return []
+
     tree = ast.parse(source, filename=str(filepath))
     source_lines = source.splitlines()
     violations: list[Violation] = []
@@ -1380,7 +1489,7 @@ def check_file(filepath: Path, strict_ordering_packages: Set[Path]) -> Sequence[
     import_map = _build_import_map(tree)
 
     # Type checking
-    type_checker = AnnotationChecker(filepath, source_lines, import_map)
+    type_checker = AnnotationChecker(filepath, source_lines, import_map, inspector=inspector)
     type_checker.visit(tree)
     violations.extend(type_checker.violations)
 
@@ -1491,7 +1600,7 @@ def format_violation(v: Violation) -> str:
     """Format a violation for display."""
     if isinstance(v, TypeViolation):
         # Map violation kind to human-readable description and directive code
-        _KIND_INFO: Mapping[str, tuple[str, str]] = {
+        _KIND_INFO: Mapping[TypeViolationKind, tuple[str, DirectiveCode]] = {
             'mutable': ('Mutable type', 'mutable-type'),
             'loose': ('Loose type', 'loose-typing'),
             'tuple-field': ('Variable-length tuple', 'tuple-field'),
@@ -1562,6 +1671,11 @@ def main() -> int:
         action='store_true',
         help='Do not respect .gitignore when scanning directories',
     )
+    parser.add_argument(
+        '--no-skip-file',
+        action='store_true',
+        help='Ignore skip-file directives (used by validation harnesses)',
+    )
 
     args = parser.parse_args()
     exclude_dirs = set(args.exclude)
@@ -1588,10 +1702,19 @@ def main() -> int:
     # Raises ValueError on unrecognized __strict_* variables (fail-fast on typos)
     strict_ordering_packages = _discover_strict_ordering_packages(files)
 
+    # Compute source roots from expanded files so the inspector can import project types.
+    # Uses files (not args.paths) to handle nested projects when scanning from repo root.
+    source_roots = tuple(sorted({_find_source_root(f) for f in files}))
+
+    # Shared inspector for runtime hashability checking across all files
+    inspector = HashabilityInspector(source_roots=source_roots)
+
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
-        violations = check_file(filepath, strict_ordering_packages)
+        violations = check_file(
+            filepath, strict_ordering_packages, inspector=inspector, respect_skip_file=not args.no_skip_file
+        )
         all_violations.extend(violations)
 
     # Filter out ignored violation kinds

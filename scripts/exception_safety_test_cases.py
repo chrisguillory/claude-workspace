@@ -1,3 +1,4 @@
+# exception_safety_linter.py: skip-file
 # ruff: noqa: E722, F841, SIM105
 # E722: bare except required for EXC001 test
 # F841: unused exception variable required for EXC005 test
@@ -30,8 +31,12 @@ suppression for cleanup errors.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from collections.abc import Generator
+import sys
+import traceback
+import types
+from collections.abc import Generator, Iterator
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -160,6 +165,50 @@ def exc002_correct_with_note() -> None:
         raise  # Original exception propagates with added notes
 
 
+def exc002_correct_excepthook() -> None:
+    """CORRECT: Entry-point error boundary using sys.excepthook.
+
+    At program entry points there is no caller to propagate to. The traditional
+    pattern of try/except Exception at __main__ triggers EXC002 because there's
+    no re-raise. sys.excepthook is Python's canonical mechanism for this — the
+    exception propagates naturally to the top level, Python calls your hook for
+    formatting, and the process exits with code 1 (non-zero).
+
+    This is NOT exception swallowing — the exception is:
+    - Fully reported (traceback printed to stderr)
+    - Process exits non-zero (OS sees the failure)
+    - No try/except needed (no broad catch to flag)
+
+    For thread entry points, use threading.excepthook (Python 3.8+).
+    For unraisable exceptions (__del__, weak refs), use sys.unraisablehook.
+    For rich formatting, libraries like rich.traceback.install() use this same
+    mechanism: they replace sys.excepthook with a prettier formatter.
+
+    Equivalent pattern in other languages:
+    - Rust: std::panic::set_hook()
+    - React: Error Boundary components
+    """
+
+    def _excepthook(
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
+        """Custom exception formatter for entry-point errors."""
+        # Let system exceptions (KeyboardInterrupt, SystemExit, GeneratorExit)
+        # use default handling — issubclass(_, Exception) is the positive check
+        # that covers all application errors without brittle enumeration
+        if not issubclass(exc_type, Exception):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        # Format application errors
+        print(f'Fatal: {exc_type.__name__}: {exc_value}', file=sys.stderr)
+        traceback.print_exception(exc_type, exc_value, exc_tb, file=sys.stderr)
+
+    sys.excepthook = _excepthook
+    main()  # Exception propagates naturally — no try/except needed
+
+
 def exc002_suppressed_intentional() -> None:
     """SUPPRESSED: Rare case where swallowing is intentional."""
     try:
@@ -241,6 +290,30 @@ def exc003_correct_continue() -> None:
             cleanup()
         if should_continue:
             continue
+
+
+def exc003_correct_contextmanager() -> str | None:
+    """CORRECT: Use contextlib.contextmanager to avoid try/finally temptation.
+
+    Context managers separate resource lifecycle from business logic. The
+    decorator handles try/finally internally, so there's no opportunity for
+    return/break/continue in a finally block.
+
+    This is the structural fix — rather than moving control flow outside
+    finally (which the other correct patterns show), eliminate the manual
+    try/finally entirely.
+    """
+
+    @contextlib.contextmanager
+    def managed_resource() -> Iterator[str]:
+        resource = acquire_resource()
+        try:
+            yield resource
+        finally:
+            release_resource(resource)
+
+    with managed_resource() as r:
+        return compute_with(r)  # Clean — finally cleanup happens automatically
 
 
 def exc003_suppressed_top_level() -> int:
@@ -502,6 +575,26 @@ async def exc007_correct_no_catch_needed() -> None:
         await process_async(item)
 
 
+async def exc007_correct_taskgroup() -> None:
+    """CORRECT: asyncio.TaskGroup handles cancellation automatically (Python 3.11+).
+
+    TaskGroup is the structural alternative to manual three-way classification.
+    When any task fails:
+    - Sibling tasks are automatically cancelled
+    - CancelledError propagates correctly without manual re-raise
+    - Multiple failures are collected into an ExceptionGroup
+
+    No try/except CancelledError needed — the TaskGroup protocol handles it.
+    This is to EXC007 what contextlib.contextmanager is to EXC003: a structural
+    fix that eliminates the anti-pattern rather than just correcting it.
+    """
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(task_a())
+        tg.create_task(task_b())
+        # If either task raises, the other is cancelled automatically.
+        # CancelledError propagation is handled by TaskGroup.
+
+
 # =============================================================================
 # EXC008: GeneratorExit not raised (breaks generator cleanup protocol)
 # =============================================================================
@@ -553,6 +646,30 @@ def exc008_correct_finally() -> Generator[int]:
         yield value
     finally:
         cleanup()  # Runs automatically on close()
+
+
+def exc008_correct_contextmanager() -> None:
+    """CORRECT: contextlib.contextmanager handles GeneratorExit implicitly.
+
+    The @contextmanager decorator wraps a generator in a context manager that
+    handles the cleanup protocol (including GeneratorExit) internally. You
+    write try/yield/finally and the decorator does the rest.
+
+    This is to EXC008 what TaskGroup is to EXC007: a structural fix that
+    eliminates the manual protocol handling entirely. The generator is never
+    directly exposed — callers use 'with' instead of next()/close().
+    """
+
+    @contextlib.contextmanager
+    def managed_connection() -> Iterator[object]:
+        conn = acquire_resource()
+        try:
+            yield conn
+        finally:
+            release_resource(conn)  # GeneratorExit handled by decorator
+
+    with managed_connection() as conn:
+        process(conn)
 
 
 # =============================================================================
@@ -660,6 +777,11 @@ class SuccessResult:
 # -----------------------------------------------------------------------------
 
 
+def acquire_resource() -> str:
+    """Placeholder for resource acquisition."""
+    return ''
+
+
 async def async_operation() -> None:
     """Placeholder for async operation."""
     pass
@@ -672,6 +794,11 @@ def cleanup() -> None:
 
 def compute() -> str:
     """Placeholder for computation."""
+    return ''
+
+
+def compute_with(resource: object) -> str:
+    """Placeholder for computation with resource."""
     return ''
 
 
@@ -715,6 +842,11 @@ async def process_async(item: object) -> None:
     pass
 
 
+def release_resource(resource: object) -> None:
+    """Placeholder for resource release."""
+    pass
+
+
 def risky_operation() -> None:
     """Placeholder for operation that might raise."""
     pass
@@ -727,6 +859,16 @@ def rollback() -> None:
 
 async def rollback_async(backup_path: Path | None = None) -> None:
     """Placeholder for async rollback logic."""
+    pass
+
+
+async def task_a() -> None:
+    """Placeholder for async task."""
+    pass
+
+
+async def task_b() -> None:
+    """Placeholder for async task."""
     pass
 
 

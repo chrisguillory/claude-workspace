@@ -20,8 +20,26 @@ import ast
 import re
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
+
+# ---------------------------------------------------------------------------
+# Data Types
+# ---------------------------------------------------------------------------
+
+
+class LineRange(NamedTuple):
+    """Line range for a class definition (inclusive)."""
+
+    start: int
+    end: int
+
+
+# Maps class name to set of violation kinds found/expected in that class
+type ViolationMap = dict[str, set[str]]
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -40,7 +58,7 @@ EDGE_CASE_FILE = SCRIPT_DIR / 'strict_typing_linter_edge_cases.py'
 
 # Maps class/function name to expected violation codes
 # Each test class should trigger exactly one violation type
-EXPECTED_VIOLATIONS: dict[str, set[str]] = {
+EXPECTED_VIOLATIONS: ViolationMap = {
     # tuple-field violations
     'TupleFieldViolationBasic': {'tuple-field'},
     'TupleFieldViolationNested': {'tuple-field'},
@@ -59,7 +77,7 @@ EXPECTED_VIOLATIONS: dict[str, set[str]] = {
 }
 
 # Classes/functions with suppression directives (should NOT appear in output)
-SUPPRESSED_NAMES: set[str] = {
+SUPPRESSED_NAMES: Set[str] = {
     'TupleFieldSuppressed',
     'HashableFieldSuppressed',
 }
@@ -68,7 +86,7 @@ SUPPRESSED_NAMES: set[str] = {
 # Expected Violations: Edge Case File
 # ---------------------------------------------------------------------------
 
-EXPECTED_EDGE_CASES: dict[str, set[str]] = {
+EXPECTED_EDGE_CASES: ViolationMap = {
     # Nested tuple edge cases
     'EdgeNestedTupleInMapping': {'tuple-field'},
     'EdgeNestedTupleInSequence': {'tuple-field'},
@@ -98,6 +116,8 @@ EXPECTED_EDGE_CASES: dict[str, set[str]] = {
     'EdgeHashableClassVarMapping': set(),
     'EdgeHashableClassVarTuple': set(),
     # Nested class independence
+    'EdgeOuterHashable': set(),  # outer wrapper, no violations
+    'EdgeOuterHashableWithInnerDataclass': set(),  # outer wrapper
     'EdgeInnerNoInherit': {'tuple-field'},
     'EdgeInnerDataclass': {'tuple-field'},
     # Multiple violations
@@ -128,10 +148,44 @@ EXPECTED_EDGE_CASES: dict[str, set[str]] = {
     'EdgeNonFrozenOuterWithInner': set(),  # non-frozen, fields skipped
     'EdgeInnerInsideNonFrozen': {'tuple-field'},
     # 4+ levels of nesting
+    'EdgeDeeplyNested4Levels': set(),  # non-frozen outer, fields skipped
+    'Level2': set(),  # regular class, no annotated fields
+    'Level3': set(),  # frozen dataclass wrapper, no violating fields
     'Level4': {'tuple-field'},
+    # Cross-type hashability: runtime inspector (attrs → dataclass → Pydantic)
+    # attrs
+    'EdgeCrossTypeAttrsUnhashable': {'hashable-field'},
+    'EdgeCrossTypeAttrsNonFrozen': {'hashable-field'},
+    'EdgeCrossTypeAttrsHashable': set(),
+    # dataclass
+    'EdgeCrossTypeDataclassUnhashable': {'hashable-field'},
+    'EdgeCrossTypeDataclassNonFrozen': {'hashable-field'},
+    'EdgeCrossTypeDataclassInUnion': {'hashable-field'},
+    'EdgeCrossTypeDataclassHashable': set(),
+    'EdgeCrossTypeDataclassHashExcluded': set(),
+    'EdgeCrossTypeDataclassHashableUnion': set(),
+    # Pydantic
+    'EdgeCrossTypePydanticUnhashable': {'hashable-field'},
+    'EdgeCrossTypePydanticNonFrozen': {'hashable-field'},
+    'EdgeCrossTypeInUnion': {'hashable-field'},
+    'EdgeCrossTypePydanticHashable': set(),
+    'EdgeCrossTypeHashableUnion': set(),
+    # Mixed framework cross-references
+    'EdgeCrossTypeAttrsRefsPydanticUnhashable': {'hashable-field'},
+    'EdgeCrossTypeAttrsRefsPydanticHashable': set(),
+    'EdgeCrossTypeAttrsRefsDataclassUnhashable': {'hashable-field'},
+    'EdgeCrossTypeAttrsRefsDataclassHashable': set(),
+    'EdgeCrossTypeDataclassRefsPydanticUnhashable': {'hashable-field'},
+    'EdgeCrossTypeDataclassRefsPydanticHashable': set(),
+    'EdgeCrossTypeDataclassRefsAttrsUnhashable': {'hashable-field'},
+    'EdgeCrossTypeDataclassRefsAttrsHashable': set(),
+    'EdgeCrossTypePydanticRefsAttrsUnhashable': {'hashable-field'},
+    'EdgeCrossTypePydanticRefsAttrsHashable': set(),
+    'EdgeCrossTypePydanticRefsDataclassUnhashable': {'hashable-field'},
+    'EdgeCrossTypePydanticRefsDataclassHashable': set(),
 }
 
-EDGE_CASE_SUPPRESSED: set[str] = {
+EDGE_CASE_SUPPRESSED: Set[str] = {
     'EdgeSuppressedTupleField',
     'EdgeSuppressedHashableField',
     'EdgeMultipleSuppressionCodes',
@@ -142,7 +196,7 @@ EDGE_CASE_SUPPRESSED: set[str] = {
 # ---------------------------------------------------------------------------
 
 
-def get_class_line_ranges(filepath: Path) -> dict[str, tuple[int, int]]:
+def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
     """Parse AST to get line ranges for each class.
 
     Returns dict mapping class name to (start_line, end_line).
@@ -154,11 +208,11 @@ def get_class_line_ranges(filepath: Path) -> dict[str, tuple[int, int]]:
     source = filepath.read_text(encoding='utf-8')
     tree = ast.parse(source)
 
-    ranges: dict[str, tuple[int, int]] = {}
+    ranges: dict[str, LineRange] = {}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.end_lineno is not None:
-            ranges[node.name] = (node.lineno, node.end_lineno)
+            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
 
     return ranges
 
@@ -171,7 +225,7 @@ def get_class_line_ranges(filepath: Path) -> dict[str, tuple[int, int]]:
 def run_linter(test_file: Path, linter: Path) -> tuple[str, int]:
     """Run the linter and return (output, return_code)."""
     result = subprocess.run(
-        [sys.executable, str(linter), str(test_file)],
+        [sys.executable, str(linter), '--no-skip-file', str(test_file)],
         capture_output=True,
         text=True,
         timeout=60,
@@ -179,7 +233,7 @@ def run_linter(test_file: Path, linter: Path) -> tuple[str, int]:
     return result.stdout + result.stderr, result.returncode
 
 
-def parse_linter_output(output: str) -> list[tuple[int, str]]:
+def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
     """Parse linter output to extract (line_number, violation_kind) tuples.
 
     Pattern: "filepath:line:col: error: {Type} '{bad_type}' in {context} annotation"
@@ -206,9 +260,9 @@ def parse_linter_output(output: str) -> list[tuple[int, str]]:
 
 
 def map_violations_to_classes(
-    violations: list[tuple[int, str]],
-    ranges: dict[str, tuple[int, int]],
-) -> dict[str, set[str]]:
+    violations: Sequence[tuple[int, str]],
+    ranges: Mapping[str, LineRange],
+) -> ViolationMap:
     """Map violations to the classes they occur in.
 
     For nested classes with overlapping ranges, attributes violations to the
@@ -216,7 +270,7 @@ def map_violations_to_classes(
 
     Returns dict mapping class name to set of violation kinds.
     """
-    result: dict[str, set[str]] = {}
+    result: ViolationMap = {}
 
     for line_num, kind in violations:
         # Find all classes that contain this line
@@ -242,18 +296,18 @@ class ValidationResult:
     """Result of validating a single test file."""
 
     file_name: str
-    errors: list[str]
+    errors: Sequence[str]
     violation_count: int
     expected_count: int
     kind_counts: dict[str, int]
 
 
 def validate(
-    actual: dict[str, set[str]],
-    expected: dict[str, set[str]],
-    suppressed: set[str],
-    all_classes: set[str],
-) -> list[str]:
+    actual: ViolationMap,
+    expected: ViolationMap,
+    suppressed: Set[str],
+    all_classes: Set[str],
+) -> Sequence[str]:
     """Validate actual violations against expected.
 
     Returns list of error messages (empty if all passed).
@@ -290,8 +344,8 @@ def validate(
 
 def validate_file(
     test_file: Path,
-    expected: dict[str, set[str]],
-    suppressed: set[str],
+    expected: ViolationMap,
+    suppressed: Set[str],
 ) -> ValidationResult:
     """Validate a single test file against expected violations."""
     # Parse test file AST
