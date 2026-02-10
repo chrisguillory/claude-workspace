@@ -252,6 +252,9 @@ import uvicorn
 from local_lib.session_tracker import SESSIONS_PATH, SessionDatabase
 from local_lib.utils import DualLogger, encode_project_path, humanize_seconds
 
+# Internal imports
+from python_interpreter.manager import ExternalInterpreterManager, InterpreterConfig
+
 
 # Custom exceptions for auto-installation
 class PackageInstallationError(Exception):
@@ -266,13 +269,17 @@ class MaxInstallAttemptsError(Exception):
     pass
 
 
-class BaseModel(pydantic.BaseModel):
+class StrictModel(pydantic.BaseModel):
     """Base model with strict validation - no extra fields, all fields required unless Optional."""
 
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
+    model_config = pydantic.ConfigDict(
+        extra='forbid',
+        strict=True,
+        frozen=True,
+    )
 
 
-class ExecuteCodeInput(BaseModel):
+class ExecuteCodeInput(StrictModel):
     """Input model for execute tool."""
 
     code: str = pydantic.Field(
@@ -282,19 +289,19 @@ class ExecuteCodeInput(BaseModel):
     )
 
 
-class ResetScopeInput(BaseModel):
+class ResetScopeInput(StrictModel):
     """Input model for reset tool."""
 
     pass
 
 
-class ListVarsInput(BaseModel):
+class ListVarsInput(StrictModel):
     """Input model for list_vars tool."""
 
     pass
 
 
-class TruncationInfo(pydantic.BaseModel):
+class TruncationInfo(StrictModel):
     """Information about truncated output."""
 
     file_path: str
@@ -302,7 +309,7 @@ class TruncationInfo(pydantic.BaseModel):
     truncated_at: int
 
 
-class InstanceMetadata(pydantic.BaseModel):
+class InstanceMetadata(StrictModel):
     """Metadata about a running MCP server instance."""
 
     pid: int
@@ -311,13 +318,26 @@ class InstanceMetadata(pydantic.BaseModel):
     timestamp: str
 
 
-@attrs.define
+@attrs.define(frozen=True)
 class ClaudeContext:
     """Context information about the Claude Code session."""
 
     claude_pid: int
     project_dir: pathlib.Path
     socket_path: pathlib.Path
+
+
+class InterpreterInfo(StrictModel):
+    """API response model for interpreter information."""
+
+    name: str
+    type: typing.Literal['builtin', 'external']
+    python_path: str | None = None
+    cwd: str | None = None
+    pid: int | None = None
+    started_at: datetime.datetime | None = None
+    uptime: str | None = None
+    has_startup_script: bool = False
 
 
 def _discover_session_id(claude_pid: int) -> str:
@@ -498,6 +518,9 @@ class ServerState:
 
         print(f'Unix socket path: {claude_context.socket_path}')
 
+        # Initialize external interpreter manager
+        interpreter_manager = ExternalInterpreterManager(claude_context.project_dir)
+
         return cls(
             session_id=session_id,
             started_at=started_at,
@@ -507,6 +530,7 @@ class ServerState:
             output_dir=output_dir,
             temp_dir=temp_dir,
             claude_pid=claude_context.claude_pid,
+            interpreter_manager=interpreter_manager,
         )
 
     def __init__(
@@ -519,6 +543,7 @@ class ServerState:
         output_dir: pathlib.Path,
         temp_dir: tempfile.TemporaryDirectory[str],
         claude_pid: int,
+        interpreter_manager: ExternalInterpreterManager,
     ) -> None:
         # Identity
         self.session_id = session_id
@@ -533,8 +558,9 @@ class ServerState:
         # Resources
         self.temp_dir = temp_dir
         self.claude_pid = claude_pid
+        self.interpreter_manager = interpreter_manager
 
-        # Python execution scope - persists across executions
+        # Python execution scope - persists across executions (builtin interpreter only)
         self.scope_globals: dict[str, typing.Any] = {}
 
 
@@ -564,14 +590,14 @@ class LoggerProtocol(typing.Protocol):
     async def error(self, message: str) -> None: ...
 
 
-class ExecuteResult(pydantic.BaseModel):
+class ExecuteResult(StrictModel):
     """Result from executing Python code."""
 
     truncation_info: TruncationInfo | None = None
     result: str
 
 
-class SessionInfo(pydantic.BaseModel):
+class SessionInfo(StrictModel):
     """Session and server metadata."""
 
     session_id: str
@@ -590,25 +616,52 @@ class PythonInterpreterService:
     def __init__(self, state: ServerState) -> None:
         self.state = state  # Non-Optional - guaranteed by constructor
 
-    async def execute(self, code: str, logger: LoggerProtocol) -> ExecuteResult:
-        """Execute Python code in persistent scope."""
-        await logger.info(f'Executing Python code ({len(code)} chars)')
+    async def execute(self, code: str, logger: LoggerProtocol, interpreter: str | None = None) -> str:
+        """Execute Python code in persistent scope.
 
-        try:
+        Args:
+            code: Python code to execute
+            logger: Logger instance
+            interpreter: Interpreter name (None = builtin with auto-install)
+
+        Returns:
+            Plain string output (stdout + stderr + result + truncation notice)
+        """
+        if interpreter is None:
+            # Builtin interpreter with auto-install
+            await logger.info(f'Executing in builtin interpreter ({len(code)} chars)')
+
             result, truncation_info = self._execute_with_file_handling(code)
 
             if truncation_info:
-                await logger.warning(
-                    f'Output truncated: {truncation_info.original_size} chars exceeds limit of {truncation_info.truncated_at}'
-                )
-                await logger.info(f'Full output saved to: {truncation_info.file_path}')
+                await logger.warning(f'Output truncated: {truncation_info.original_size} chars')
+                separator = '=' * 50
+                return f'{result}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {truncation_info.original_size:,} chars\n# Full output: {truncation_info.file_path}\n{separator}'
 
-            await logger.info(f'Execution complete - output length: {len(result)} chars')
-            return ExecuteResult(truncation_info=truncation_info, result=result)
+            return result
+        else:
+            # External interpreter
+            await logger.info(f"Executing in '{interpreter}' ({len(code)} chars)")
 
-        except Exception as e:
-            await logger.warning(f'Execution failed: {type(e).__name__}: {e}')
-            raise
+            response = self.state.interpreter_manager.execute(interpreter, code)
+
+            if response.get('error'):
+                error: str = response['error']
+                return error
+
+            # Combine output
+            parts = [response.get('stdout', ''), response.get('stderr', ''), response.get('result', '')]
+            output = '\n'.join(p for p in parts if p)
+
+            # Handle truncation
+            if len(output) > CHARACTER_LIMIT:
+                timestamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%d_%H%M%S')
+                file_path = self.state.output_dir / f'output_{timestamp}.txt'
+                file_path.write_text(output, encoding='utf-8')
+                separator = '=' * 50
+                return f'{output[:CHARACTER_LIMIT]}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {len(output):,} chars\n# Full output: {file_path}\n{separator}'
+
+            return output
 
     async def reset(self, logger: LoggerProtocol) -> str:
         """Clear all variables from persistent scope and reload user modules from disk.
@@ -644,23 +697,29 @@ class PythonInterpreterService:
         await logger.info(f'Reset complete - cleared {var_count} vars, reloaded {reload_count} modules')
         return f'Scope reset - cleared {var_count} vars, reloaded {reload_count} modules'
 
-    async def list_vars(self, logger: LoggerProtocol) -> str:
-        """List all user-defined variables in persistent scope."""
-        await logger.info('Listing Python interpreter variables')
+    async def list_vars(self, logger: LoggerProtocol, interpreter: str | None = None) -> str:
+        """List all user-defined variables in persistent scope.
 
-        if not self.state.scope_globals:
-            await logger.info('No variables in scope')
-            return 'No variables defined'
+        Args:
+            logger: Logger instance
+            interpreter: Interpreter name (None = builtin)
+        """
+        if interpreter is None:
+            # Builtin interpreter
+            await logger.info('Listing builtin interpreter variables')
 
-        # Filter out builtins like __name__, __doc__, etc
-        user_vars = [name for name in self.state.scope_globals if not name.startswith('__')]
+            if not self.state.scope_globals:
+                return 'No variables defined'
 
-        if not user_vars:
-            await logger.info('No user variables in scope (only builtins)')
-            return 'No variables defined'
+            user_vars = [name for name in self.state.scope_globals if not name.startswith('__')]
+            if not user_vars:
+                return 'No variables defined'
 
-        await logger.info(f'Found {len(user_vars)} variables in scope')
-        return ', '.join(sorted(user_vars))
+            return ', '.join(sorted(user_vars))
+        else:
+            # External interpreter
+            await logger.info(f"Listing variables in '{interpreter}'")
+            return self.state.interpreter_manager.list_vars(interpreter)
 
     async def get_session_info(self, logger: LoggerProtocol) -> SessionInfo:
         """Get comprehensive session and server metadata."""
@@ -680,6 +739,78 @@ class PythonInterpreterService:
             started_at=self.state.started_at,
             uptime=uptime,
         )
+
+    async def add_interpreter(self, config: InterpreterConfig, logger: LoggerProtocol) -> InterpreterInfo:
+        """Add and start an external interpreter.
+
+        Args:
+            config: Interpreter configuration
+            logger: Logger instance
+
+        Returns:
+            InterpreterInfo with runtime details
+        """
+        await logger.info(f"Adding interpreter '{config.name}' ({config.python_path})")
+
+        pid, started_at = self.state.interpreter_manager.add_interpreter(config)
+
+        return InterpreterInfo(
+            name=config.name,
+            type='external',
+            python_path=str(config.python_path),
+            cwd=str(config.cwd or self.state.project_dir),
+            pid=pid,
+            started_at=started_at,
+            uptime='0s',
+            has_startup_script=config.startup_script is not None,
+        )
+
+    async def stop_interpreter(self, name: str, logger: LoggerProtocol) -> str:
+        """Stop an external interpreter.
+
+        Args:
+            name: Interpreter name
+            logger: Logger instance
+        """
+        await logger.info(f"Stopping interpreter '{name}'")
+        self.state.interpreter_manager.stop_interpreter(name)
+        return f"Interpreter '{name}' stopped"
+
+    async def list_interpreters(self, logger: LoggerProtocol) -> list[InterpreterInfo]:
+        """List all interpreters (builtin and external).
+
+        Args:
+            logger: Logger instance
+
+        Returns:
+            List of InterpreterInfo
+        """
+        await logger.info('Listing interpreters')
+
+        # Builtin interpreter
+        builtin = InterpreterInfo(
+            name='builtin',
+            type='builtin',
+        )
+
+        # External interpreters
+        external_infos = []
+        for name, config, pid, started_at in self.state.interpreter_manager.get_interpreters():
+            uptime_seconds = (datetime.datetime.now(datetime.UTC) - started_at).total_seconds()
+            external_infos.append(
+                InterpreterInfo(
+                    name=name,
+                    type='external',
+                    python_path=str(config.python_path),
+                    cwd=str(config.cwd or self.state.project_dir),
+                    pid=pid,
+                    started_at=started_at,
+                    uptime=humanize_seconds(uptime_seconds),
+                    has_startup_script=config.startup_script is not None,
+                )
+            )
+
+        return [builtin] + external_infos
 
     def _execute_with_file_handling(self, code: str) -> tuple[str, TruncationInfo | None]:
         """Execute code and handle large output by saving to temp file."""
@@ -734,23 +865,21 @@ def register_tools(service: PythonInterpreterService) -> None:
             readOnlyHint=False,
             openWorldHint=False,
         ),
+        structured_output=False,
     )
-    async def execute(code: str, ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> ExecuteResult:
-        """Execute Python code in persistent scope with auto-installation of missing packages. Variables persist across calls.
+    async def execute(
+        code: str,
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
+        interpreter: str | None = None,
+    ) -> str:
+        """Execute Python code in persistent scope.
 
-        IMPORTANT: For better user experience, you should typically use the Bash client instead:
-            mcp-py-client <<'PY'
-            import tiktoken
-            tokens = tiktoken.get_encoding("cl100k_base").encode("Strawberry")
-            print(f"Token count: {len(tokens)}")
-            PY
-
-        If mcp-py-client is not found, install via:
-            uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
-
-        Only use this MCP tool directly if the user explicitly requests it or you need structured ExecuteResult output."""
+        Args:
+            code: Python code to execute
+            interpreter: Interpreter name (None = builtin with auto-install, string = external interpreter without auto-install)
+        """
         logger = DualLogger(ctx)
-        return await service.execute(code, logger)
+        return await service.execute(code, logger, interpreter)
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
@@ -777,10 +906,17 @@ def register_tools(service: PythonInterpreterService) -> None:
         ),
         structured_output=False,
     )
-    async def list_vars(ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> str:
-        """List all user-defined variables in persistent scope."""
+    async def list_vars(
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
+        interpreter: str | None = None,
+    ) -> str:
+        """List all user-defined variables in persistent scope.
+
+        Args:
+            interpreter: Interpreter name (None = builtin)
+        """
         logger = DualLogger(ctx)
-        return await service.list_vars(logger)
+        return await service.list_vars(logger, interpreter)
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
@@ -795,6 +931,79 @@ def register_tools(service: PythonInterpreterService) -> None:
         """Get comprehensive session and server metadata including session ID, paths, PID, start time, and uptime."""
         logger = DualLogger(ctx)
         return await service.get_session_info(logger)
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Add External Interpreter',
+            destructiveHint=False,
+            idempotentHint=False,
+            readOnlyHint=False,
+            openWorldHint=False,
+        ),
+    )
+    async def add_interpreter(
+        name: str,
+        python_path: str,
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        startup_script: str | None = None,
+    ) -> InterpreterInfo:
+        """Add and start an external Python interpreter.
+
+        Creates a subprocess using a different Python executable (e.g., project venv).
+        No auto-install - uses whatever packages are in that Python environment.
+
+        Args:
+            name: Unique name for this interpreter
+            python_path: Path to Python executable
+            cwd: Working directory (defaults to project dir)
+            env: Additional environment variables
+            startup_script: Python code to run after starting (e.g., imports)
+        """
+        logger = DualLogger(ctx)
+        config = InterpreterConfig(
+            name=name,
+            python_path=pathlib.Path(python_path),
+            cwd=pathlib.Path(cwd) if cwd else None,
+            env=env,
+            startup_script=startup_script,
+        )
+        return await service.add_interpreter(config, logger)
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='Stop Interpreter',
+            destructiveHint=True,
+            idempotentHint=False,
+            readOnlyHint=False,
+            openWorldHint=False,
+        ),
+        structured_output=False,
+    )
+    async def stop_interpreter(
+        name: str,
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
+    ) -> str:
+        """Stop an external interpreter subprocess."""
+        logger = DualLogger(ctx)
+        return await service.stop_interpreter(name, logger)
+
+    @server.tool(
+        annotations=mcp.types.ToolAnnotations(
+            title='List Interpreters',
+            destructiveHint=False,
+            idempotentHint=True,
+            readOnlyHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def list_interpreters(
+        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
+    ) -> list[InterpreterInfo]:
+        """List all interpreters (builtin and external)."""
+        logger = DualLogger(ctx)
+        return await service.list_interpreters(logger)
 
 
 @contextlib.asynccontextmanager
@@ -822,6 +1031,8 @@ async def lifespan(
     yield
 
     # SHUTDOWN: Cleanup after all requests complete
+    print('Shutting down external interpreters...')
+    state.interpreter_manager.shutdown_all()
     state.temp_dir.cleanup()
     if state.socket_path.exists():
         state.socket_path.unlink()
@@ -849,10 +1060,11 @@ async def global_exception_handler(request: fastapi.Request, exc: Exception) -> 
     )
 
 
-class ExecuteRequest(pydantic.BaseModel):
+class ExecuteRequest(StrictModel):
     """Request body for HTTP execute endpoint."""
 
     code: str
+    interpreter: str | None = None
 
 
 # Dependency functions (standard FastAPI pattern)
@@ -889,17 +1101,10 @@ async def http_execute(
         logger: Injected logger instance
 
     Returns:
-        JSON response with result field (may contain truncation info)
+        JSON response with result field
     """
-    result = await service.execute(request.code, logger)
-
-    # Format response with truncation info if needed
-    if result.truncation_info:
-        separator = '=' * 50
-        formatted_result = f'{result.result}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {result.truncation_info.original_size:,} chars\n# Full output: {result.truncation_info.file_path}\n{separator}'
-        return {'result': formatted_result}
-
-    return {'result': result.result}
+    result = await service.execute(request.code, logger, request.interpreter)
+    return {'result': result}
 
 
 # Helper functions for code execution

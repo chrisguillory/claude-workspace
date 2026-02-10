@@ -8,6 +8,7 @@ dependencies = [
     "dfindexeddb>=20251109",
     "fastmcp>=2.12.5",
     "httpx",
+    "local-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=local-lib",
     "pycryptodome>=3.23.0",
     "pydantic>=2.0.0",
     "pyyaml",
@@ -15,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-selenium-server = "selenium_browser_automation.server:main"
+mcp-selenium-browser = "selenium_browser_automation.server:main"
 
 [tool.hatch.build]
 # Package directory to include in distribution
@@ -26,6 +27,7 @@ allow-direct-references = true
 
 [tool.uv.sources]
 ccl-chromium-reader = { git = "https://github.com/cclgroupltd/ccl_chromium_reader.git" }
+local-lib = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

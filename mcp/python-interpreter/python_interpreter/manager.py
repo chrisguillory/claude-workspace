@@ -153,7 +153,8 @@ class ExternalInterpreterManager:
 
     def _send_request(self, proc: subprocess.Popen[str], request: dict[str, Any], timeout: float) -> dict[str, Any]:
         """Send request and read response."""
-        assert proc.stdin and proc.stdout
+        if not proc.stdin or not proc.stdout:
+            raise ExternalInterpreterError('Subprocess stdin/stdout not available')
 
         json_data = json.dumps(request)
         proc.stdin.write(f'{len(json_data)}\n{json_data}')
@@ -163,7 +164,8 @@ class ExternalInterpreterManager:
 
     def _read_response(self, proc: subprocess.Popen[str], timeout: float) -> dict[str, Any]:
         """Read length-prefixed JSON response with timeout."""
-        assert proc.stdout
+        if not proc.stdout:
+            raise ExternalInterpreterError('Subprocess stdout not available')
 
         ready, _, _ = select.select([proc.stdout], [], [], timeout)
         if not ready:
