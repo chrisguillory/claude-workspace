@@ -6,6 +6,7 @@ and interpreter lifecycle. Used by both MCP tools and the HTTP bridge.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import pathlib
 import subprocess
@@ -25,7 +26,6 @@ __all__ = [
     'LoggerProtocol',
     'SimpleLogger',
     'PackageInstallationError',
-    'MaxInstallAttemptsError',
     'CHARACTER_LIMIT',
 ]
 
@@ -50,10 +50,6 @@ IMPORT_TO_PACKAGE_MAP = {
 
 class PackageInstallationError(Exception):
     """Raised when auto-installation of a package fails."""
-
-
-class MaxInstallAttemptsError(Exception):
-    """Raised when maximum installation attempts are exceeded."""
 
 
 class LoggerProtocol(typing.Protocol):
@@ -183,13 +179,13 @@ class PythonInterpreterService:
         # Auto-install retry loop (only for builtin)
         max_attempts = 3 if interpreter == 'builtin' else 1
         for attempt in range(max_attempts):
-            response = self.state.interpreter_manager.execute(interpreter, code)
+            response = await asyncio.to_thread(self.state.interpreter_manager.execute, interpreter, code)
 
             # Handle auto-install for builtin
             if response.error_type == 'ModuleNotFoundError' and response.module_name and interpreter == 'builtin':
                 if attempt < max_attempts - 1:
                     await logger.info(f"Auto-installing '{response.module_name}'")
-                    install_msg = _install_package(response.module_name)
+                    install_msg = await asyncio.to_thread(_install_package, response.module_name)
                     await logger.info(install_msg)
                     continue
 
@@ -212,13 +208,13 @@ class PythonInterpreterService:
 
             return output
 
-        raise MaxInstallAttemptsError(f'Failed after {max_attempts} auto-install attempts')
+        return response.error or 'Auto-install failed'
 
     async def reset(self, logger: LoggerProtocol) -> str:
         """Clear all variables from builtin interpreter scope."""
         await logger.info('Resetting builtin interpreter scope')
 
-        response = self.state.interpreter_manager.reset('builtin')
+        response = await asyncio.to_thread(self.state.interpreter_manager.reset, 'builtin')
 
         if response.error:
             raise RuntimeError(f'Reset failed: {response.error}')
@@ -234,7 +230,7 @@ class PythonInterpreterService:
         """
         await logger.info(f"Listing variables in '{interpreter}'")
 
-        response = self.state.interpreter_manager.list_vars(interpreter)
+        response = await asyncio.to_thread(self.state.interpreter_manager.list_vars, interpreter)
 
         if response.error:
             raise RuntimeError(f'List vars failed: {response.error}')
@@ -271,7 +267,7 @@ class PythonInterpreterService:
         """
         await logger.info(f"Adding interpreter '{config.name}' ({config.python_path})")
 
-        pid, started_at = self.state.interpreter_manager.add_interpreter(config)
+        pid, started_at = await asyncio.to_thread(self.state.interpreter_manager.add_interpreter, config)
 
         return InterpreterInfo(
             name=config.name,
@@ -292,7 +288,7 @@ class PythonInterpreterService:
             logger: Logger instance
         """
         await logger.info(f"Stopping interpreter '{name}'")
-        self.state.interpreter_manager.stop_interpreter(name)
+        await asyncio.to_thread(self.state.interpreter_manager.stop_interpreter, name)
         return f"Interpreter '{name}' stopped"
 
     async def list_interpreters(self, logger: LoggerProtocol) -> list[InterpreterInfo]:

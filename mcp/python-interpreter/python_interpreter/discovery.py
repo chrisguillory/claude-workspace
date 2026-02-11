@@ -114,34 +114,34 @@ def find_claude_context() -> ClaudeContext:
         comm = parts[1] if len(parts) > 1 else ''
 
         if 'claude' in comm.lower():
-            # Get Claude's CWD using lsof
+            # Get Claude's CWD using lsof -F n (machine-parseable, handles paths with spaces)
             result = subprocess.run(
-                ['lsof', '-p', str(current), '-a', '-d', 'cwd'],
+                ['lsof', '-p', str(current), '-a', '-d', 'cwd', '-F', 'n'],
                 capture_output=True,
                 text=True,
             )
 
             cwd = None
-            for line in result.stdout.split('\n'):
-                if 'cwd' in line:
-                    parts = line.split()
-                    if len(parts) >= 9:
-                        cwd = pathlib.Path(' '.join(parts[8:]))
-                        break
+            for line in result.stdout.splitlines():
+                if line.startswith('n'):
+                    cwd = pathlib.Path(line[1:])  # Strip 'n' prefix
+                    break
 
             if not cwd:
                 raise RuntimeError(f'Found Claude process (PID {current}) but could not determine CWD')
 
             # Verify by checking if Claude has .claude/ files open
-            result = subprocess.run(['lsof', '-p', str(current)], capture_output=True, text=True)
+            result = subprocess.run(
+                ['lsof', '-p', str(current), '-F', 'n'],
+                capture_output=True,
+                text=True,
+            )
 
-            claude_files = []
-            for line in result.stdout.split('\n'):
-                if '.claude' in line:
-                    parts = line.split()
-                    if len(parts) >= 9:
-                        file_path = pathlib.Path(' '.join(parts[8:]))
-                        claude_files.append(file_path)
+            claude_files = [
+                pathlib.Path(line[1:])
+                for line in result.stdout.splitlines()
+                if line.startswith('n') and '.claude' in line
+            ]
 
             if not claude_files:
                 raise RuntimeError(

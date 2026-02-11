@@ -11,6 +11,7 @@ __all__ = [
 import contextlib
 import dataclasses
 import datetime
+import importlib.resources
 import json
 import os
 import pathlib
@@ -49,7 +50,7 @@ class ExternalInterpreterManager:
     def __init__(self, project_dir: pathlib.Path) -> None:
         self.project_dir = project_dir
         self._interpreters: dict[str, tuple[InterpreterConfig, subprocess.Popen[str], datetime.datetime]] = {}
-        self._driver_script = (pathlib.Path(__file__).parent / 'driver.py').read_text()
+        self._driver_script = importlib.resources.files('python_interpreter').joinpath('driver.py').read_text()
 
     def add_interpreter(self, config: InterpreterConfig) -> tuple[int, datetime.datetime]:
         """Start an external interpreter subprocess.
@@ -175,10 +176,10 @@ class ExternalInterpreterManager:
         return DriverResetResponse.model_validate(response_dict)
 
     def shutdown_all(self) -> None:
-        """Stop all interpreters. Best effort."""
-        for name in list(self._interpreters.keys()):
-            with contextlib.suppress(Exception):
-                self.stop_interpreter(name)
+        """Kill all interpreter subprocesses. Best effort."""
+        for name, (_, proc, _) in list(self._interpreters.items()):
+            self._kill_subprocess(proc)
+        self._interpreters.clear()
 
     def _send_request(self, proc: subprocess.Popen[str], request: dict[str, Any], timeout: float) -> dict[str, Any]:
         """Send request and read response."""
@@ -192,19 +193,30 @@ class ExternalInterpreterManager:
         return self._read_response(proc, timeout)
 
     def _read_response(self, proc: subprocess.Popen[str], timeout: float) -> dict[str, Any]:
-        """Read length-prefixed JSON response with timeout."""
+        """Read length-prefixed JSON response with timeout.
+
+        Guards both the length prefix read and the payload read with select.select
+        to prevent blocking indefinitely on either.
+        """
         if not proc.stdout:
             raise ExternalInterpreterError('Subprocess stdout not available')
 
+        # Guard length prefix read
         ready, _, _ = select.select([proc.stdout], [], [], timeout)
         if not ready:
-            raise ExternalInterpreterError(f'Timeout ({timeout}s)')
+            raise ExternalInterpreterError(f'Timeout ({timeout}s) waiting for response')
 
         length_line = proc.stdout.readline()
         if not length_line:
             raise ExternalInterpreterError('Subprocess closed stdout')
 
         length = int(length_line.strip())
+
+        # Guard payload read
+        ready, _, _ = select.select([proc.stdout], [], [], timeout)
+        if not ready:
+            raise ExternalInterpreterError(f'Timeout ({timeout}s) reading payload ({length} bytes)')
+
         json_data = proc.stdout.read(length)
 
         if len(json_data) < length:

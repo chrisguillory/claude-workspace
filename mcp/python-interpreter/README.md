@@ -112,12 +112,22 @@ List currently defined variables in the persistent scope.
 Get comprehensive session and server metadata including session ID, project directory, socket path, transcript path,
 output directory, Claude PID, start time, and uptime.
 
+### `add_interpreter`
+Add and start an external Python interpreter subprocess using a different Python executable (e.g., project venv).
+
+### `stop_interpreter`
+Stop an external interpreter subprocess. Cannot stop the builtin interpreter.
+
+### `list_interpreters`
+List all running interpreters (builtin and external) with metadata.
+
 ## Features
 
 - **Persistent Python scope** - Variables, imports, and functions persist across executions
 - **Auto-installs missing packages** - Detects ImportError and installs packages via uv
-- **Large output handling** - Outputs >50KB saved to temp files with paths returned
+- **Large output handling** - Outputs >25K chars saved to temp files with paths returned
 - **Readable approval prompts** - See [Why the HTTP Bridge Exists](#why-the-http-bridge-exists) for details
+- **Multi-interpreter support** - Run code in the builtin interpreter or external Python environments (e.g., project venvs)
 - **Session-scoped resources** - Socket path and temp directory tied to Claude session
 
 ## Client Usage
@@ -188,9 +198,9 @@ Bash heredoc ──[stdin]──> mcp-py-client ───┘
 ### Session Discovery
 
 The server discovers its Claude Code session by:
-1. Emitting a unique marker to stderr on startup
-2. Searching Claude's debug logs for that marker
-3. Extracting the session ID from the log filename
+1. Walking the process tree upward to find the Claude Code parent process
+2. Using `lsof` to determine Claude's working directory and verify `.claude/` files
+3. Looking up the active session matching Claude's PID in `sessions.json` (maintained by claude-workspace hooks)
 
 ### Unix Socket
 

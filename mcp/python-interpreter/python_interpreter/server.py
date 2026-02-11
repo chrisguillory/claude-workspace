@@ -215,7 +215,7 @@ async def lifespan(
     # Start FastAPI in background on Unix socket
     config = uvicorn.Config(fastapi_app, uds=state.socket_path.as_posix(), log_level='warning')
     uvicorn_server = uvicorn.Server(config)
-    asyncio.create_task(uvicorn_server.serve())
+    uvicorn_task = asyncio.create_task(uvicorn_server.serve())
 
     print('Server initialized', file=sys.stderr)
     print(f'  Output directory: {state.output_dir}', file=sys.stderr)
@@ -224,7 +224,12 @@ async def lifespan(
     yield
 
     # Shutdown
-    print('Shutting down external interpreters...', file=sys.stderr)
+    uvicorn_server.should_exit = True
+    uvicorn_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await uvicorn_task
+
+    print('Shutting down interpreters...', file=sys.stderr)
     state.interpreter_manager.shutdown_all()
     state.temp_dir.cleanup()
     if state.socket_path.exists():

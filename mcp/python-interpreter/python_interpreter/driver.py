@@ -74,23 +74,31 @@ def send_response(response: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
-def detect_last_expression(code: str) -> tuple[bool, str | None]:
-    """Detect if the last statement is an expression.
+def _split_last_expression(code: str) -> tuple[str, str] | None:
+    """Split code into preceding statements and final expression.
+
+    Uses AST node line numbers for precise splitting, handling multi-line
+    expressions correctly.
 
     Returns:
-        (is_expression, unparsed_last_line) or (False, None)
+        (preceding_code, expression_code) or None if last statement isn't an expression.
     """
     try:
         tree = ast.parse(code)
         if not tree.body:
-            return False, None
+            return None
 
         last_node = tree.body[-1]
-        if isinstance(last_node, ast.Expr):
-            return True, ast.unparse(last_node.value)
-        return False, None
+        if not isinstance(last_node, ast.Expr):
+            return None
+
+        # Use AST line numbers for precise splitting (1-indexed)
+        code_lines = code.splitlines(keepends=True)
+        preceding = ''.join(code_lines[: last_node.lineno - 1])
+        expr_code = ast.unparse(last_node.value)
+        return preceding, expr_code
     except SyntaxError:
-        return False, None
+        return None
 
 
 def execute_code(code: str) -> dict[str, Any]:
@@ -103,36 +111,22 @@ def execute_code(code: str) -> dict[str, Any]:
 
     try:
         with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
-            is_expr, last_line = detect_last_expression(code)
+            split = _split_last_expression(code)
 
-            if is_expr and last_line:
-                # Execute all but last line, then eval last line for its value
-                lines = code.splitlines()
-                code_without_last = '\n'.join(lines[:-1])
+            if split is not None:
+                preceding, expr_code = split
 
-                if code_without_last.strip():
-                    exec(code_without_last, _scope_globals)
+                if preceding.strip():
+                    exec(preceding, _scope_globals)
 
-                result = eval(last_line, _scope_globals)
+                result = eval(expr_code, _scope_globals)
 
-                stdout_val = stdout_capture.getvalue()
-                stderr_val = stderr_capture.getvalue()
-
-                # If there was print output, return that; otherwise return repr of result
-                if stdout_val or stderr_val:
-                    return {
-                        'stdout': stdout_val,
-                        'stderr': stderr_val,
-                        'result': '',
-                        'error': None,
-                    }
-                else:
-                    return {
-                        'stdout': '',
-                        'stderr': '',
-                        'result': repr(result) if result is not None else '',
-                        'error': None,
-                    }
+                return {
+                    'stdout': stdout_capture.getvalue(),
+                    'stderr': stderr_capture.getvalue(),
+                    'result': repr(result) if result is not None else '',
+                    'error': None,
+                }
             else:
                 # Pure statements - just exec
                 exec(code, _scope_globals)
