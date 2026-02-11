@@ -100,13 +100,28 @@ uv run --project mcp/python-interpreter mcp-py-server
 ## Tools
 
 ### `execute`
-Execute Python code in persistent scope. Returns expression values, stdout/stderr, or paths to large outputs.
+Execute Python code in persistent scope. Variables, imports, functions, and classes persist across calls.
+
+- Last expression is auto-evaluated (no need to print)
+- Returns stdout/stderr, repr() of last expression, or full tracebacks on error
+- Outputs >25,000 chars are truncated with full output saved to temp file
+- Builtin interpreter auto-installs missing packages via `uv pip install`
+
+```
+execute("x = 5")             → ""
+execute("x * 2")             → "10"
+execute("print(f'x = {x}')") → "x = 5"
+execute("import math; math.pi") → "3.141592653589793"
+execute("1/0")                → "Traceback ... ZeroDivisionError: division by zero"
+```
 
 ### `reset`
-Clear all variables and reset to fresh state.
+Clear all variables, imports, and functions from the builtin interpreter scope. Destructive and cannot be undone.
+Returns count of items removed.
 
 ### `list_vars`
-List currently defined variables in the persistent scope.
+List currently defined variables in the persistent scope. Returns alphabetically sorted names, filtering out
+Python builtins.
 
 ### `get_session_info`
 Get comprehensive session and server metadata including session ID, project directory, socket path, transcript path,
@@ -114,12 +129,32 @@ output directory, Claude PID, start time, and uptime.
 
 ### `add_interpreter`
 Add and start an external Python interpreter subprocess using a different Python executable (e.g., project venv).
+No auto-install — uses whatever packages are in that Python environment.
 
 ### `stop_interpreter`
 Stop an external interpreter subprocess. Cannot stop the builtin interpreter.
 
 ### `list_interpreters`
 List all running interpreters (builtin and external) with metadata.
+
+## Security
+
+**WARNING:** This server executes arbitrary Python code. Only use with trusted input.
+
+Code running in interpreters has access to:
+- All Python built-ins (open, exec, eval, import, etc.)
+- File system, network, and system calls
+
+Code does **not** have access to MCP server internals — each interpreter runs in an isolated subprocess.
+
+## Example Session
+
+```
+1. execute("import math; pi_squared = math.pi ** 2")  → ""
+2. execute("pi_squared")                               → "9.869604401089358"
+3. list_vars()                                         → "math, pi_squared"
+4. reset()                                             → "Scope cleared (2 items removed)"
+```
 
 ## Features
 

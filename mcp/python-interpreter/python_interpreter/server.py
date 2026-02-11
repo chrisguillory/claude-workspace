@@ -68,6 +68,19 @@ def register_tools(service: PythonInterpreterService) -> None:
     ) -> str:
         """Execute Python code in persistent scope.
 
+        Variables, imports, functions, and classes persist across calls. The last expression
+        is auto-evaluated (no need to print). Returns stdout/stderr output, repr() of the
+        last expression, or full tracebacks on error. Outputs >25,000 chars are truncated
+        with full output saved to a temp file.
+
+        The builtin interpreter auto-installs missing packages via uv on ModuleNotFoundError.
+        External interpreters use whatever packages exist in their Python environment.
+
+        IMPORTANT: For better readability in approval prompts, prefer the Bash client:
+            mcp-py-client <<'PY'
+            print("Hello")
+            PY
+
         Args:
             code: Python code to execute
             interpreter: Interpreter name (defaults to 'builtin' with auto-install)
@@ -86,7 +99,11 @@ def register_tools(service: PythonInterpreterService) -> None:
         structured_output=False,
     )
     async def reset(ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> str:
-        """Clear all variables, imports, and functions from persistent scope."""
+        """Clear all variables, imports, and functions from the builtin interpreter scope.
+
+        Destructive and cannot be undone. Returns count of items removed. Does not
+        affect external interpreters - use stop_interpreter + add_interpreter to reset those.
+        """
         logger = DualLogger(ctx)
         return await service.reset(logger)
 
@@ -105,6 +122,9 @@ def register_tools(service: PythonInterpreterService) -> None:
         interpreter: str = 'builtin',
     ) -> str:
         """List all user-defined variables in persistent scope.
+
+        Returns alphabetically sorted names of variables, functions, classes, and imports.
+        Filters out Python builtins (names starting with '__').
 
         Args:
             interpreter: Interpreter name (defaults to 'builtin')
@@ -179,7 +199,14 @@ def register_tools(service: PythonInterpreterService) -> None:
         name: str,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
     ) -> str:
-        """Stop an external interpreter subprocess."""
+        """Stop an external interpreter subprocess.
+
+        Kills the subprocess and removes it from the interpreter list. All state in that
+        interpreter is lost. Cannot stop the builtin interpreter - it is always running.
+
+        Args:
+            name: Name of the interpreter to stop (cannot be 'builtin')
+        """
         logger = DualLogger(ctx)
         return await service.stop_interpreter(name, logger)
 
@@ -195,7 +222,11 @@ def register_tools(service: PythonInterpreterService) -> None:
     async def list_interpreters(
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
     ) -> list[InterpreterInfo]:
-        """List all interpreters (builtin and external)."""
+        """List all interpreters (builtin and external).
+
+        Returns name, type, python_path, cwd, pid, started_at, uptime, and whether
+        a startup script was configured. Dead interpreters are automatically removed.
+        """
         logger = DualLogger(ctx)
         return await service.list_interpreters(logger)
 
