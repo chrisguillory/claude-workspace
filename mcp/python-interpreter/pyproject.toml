@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi",
     "fastmcp>=2.12.5",
+    "filelock",
     "httpx>=0.28.1",
     "local-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=local-lib",
     "pandas",

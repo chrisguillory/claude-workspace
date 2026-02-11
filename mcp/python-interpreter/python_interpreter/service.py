@@ -18,7 +18,8 @@ from local_lib.utils import encode_project_path, humanize_seconds
 
 from python_interpreter.discovery import discover_session_id, find_claude_context
 from python_interpreter.manager import ExternalInterpreterManager, InterpreterConfig
-from python_interpreter.models import InterpreterInfo, SessionInfo
+from python_interpreter.models import InterpreterInfo, InterpreterSource, SavedInterpreterConfig, SessionInfo
+from python_interpreter.registry import InterpreterRegistryManager
 
 __all__ = [
     'ServerState',
@@ -117,6 +118,12 @@ class ServerState:
         interpreter_manager.add_interpreter(builtin_config)
         print('Builtin interpreter started', file=sys.stderr)
 
+        # Initialize interpreter registry for saved configurations
+        interpreter_registry = InterpreterRegistryManager(claude_context.project_dir)
+        saved_count = len(interpreter_registry.list_saved())
+        if saved_count:
+            print(f'Loaded {saved_count} saved interpreter config(s)', file=sys.stderr)
+
         return cls(
             session_id=session_id,
             started_at=started_at,
@@ -127,6 +134,7 @@ class ServerState:
             temp_dir=temp_dir,
             claude_pid=claude_context.claude_pid,
             interpreter_manager=interpreter_manager,
+            interpreter_registry=interpreter_registry,
         )
 
     def __init__(
@@ -140,6 +148,7 @@ class ServerState:
         temp_dir: tempfile.TemporaryDirectory[str],
         claude_pid: int,
         interpreter_manager: ExternalInterpreterManager,
+        interpreter_registry: InterpreterRegistryManager,
     ) -> None:
         # Identity
         self.session_id = session_id
@@ -155,6 +164,7 @@ class ServerState:
         self.temp_dir = temp_dir
         self.claude_pid = claude_pid
         self.interpreter_manager = interpreter_manager
+        self.interpreter_registry = interpreter_registry
 
 
 class PythonInterpreterService:
@@ -255,66 +265,118 @@ class PythonInterpreterService:
             uptime=uptime,
         )
 
-    async def add_interpreter(self, config: InterpreterConfig, logger: LoggerProtocol) -> InterpreterInfo:
-        """Add and start an external interpreter.
-
-        Args:
-            config: Interpreter configuration
-            logger: Logger instance
-
-        Returns:
-            InterpreterInfo with runtime details
-        """
+    async def add_interpreter(
+        self,
+        config: InterpreterConfig,
+        logger: LoggerProtocol,
+        save: bool,
+        description: str | None,
+    ) -> InterpreterInfo:
+        """Add and start an external interpreter, optionally saving the config."""
         await logger.info(f"Adding interpreter '{config.name}' ({config.python_path})")
 
         pid, started_at = await asyncio.to_thread(self.state.interpreter_manager.add_interpreter, config)
 
+        if save:
+            saved_config = SavedInterpreterConfig(
+                python_path=str(config.python_path),
+                cwd=str(config.cwd) if config.cwd else None,
+                env=config.env,
+                startup_script=config.startup_script,
+                description=description,
+            )
+            self.state.interpreter_registry.save_interpreter(config.name, saved_config)
+            await logger.info(f"Saved interpreter '{config.name}' to registry")
+
+        is_saved = save or self.state.interpreter_registry.get(config.name) is not None
+        source: InterpreterSource = 'saved' if is_saved else 'transient'
+        saved = self.state.interpreter_registry.get(config.name)
+
         return InterpreterInfo(
             name=config.name,
-            type='external',
+            source=source,
+            state='running',
             python_path=str(config.python_path),
             cwd=str(config.cwd or self.state.project_dir),
+            has_startup_script=config.startup_script is not None,
+            description=saved.description if saved else description,
             pid=pid,
             started_at=started_at,
             uptime='0s',
-            has_startup_script=config.startup_script is not None,
         )
 
-    async def stop_interpreter(self, name: str, logger: LoggerProtocol) -> str:
+    async def stop_interpreter(self, name: str, logger: LoggerProtocol, remove: bool) -> str:
         """Stop an external interpreter.
 
-        Args:
-            name: Interpreter name
-            logger: Logger instance
+        Saved interpreters transition to 'stopped' (config preserved).
+        If remove=True, also deletes the saved config permanently.
+        Transient interpreters are always removed.
         """
         await logger.info(f"Stopping interpreter '{name}'")
         await asyncio.to_thread(self.state.interpreter_manager.stop_interpreter, name)
-        return f"Interpreter '{name}' stopped"
+
+        is_saved = self.state.interpreter_registry.get(name) is not None
+        if is_saved and remove:
+            self.state.interpreter_registry.remove_interpreter(name)
+            return f"Interpreter '{name}' stopped and removed from saved configs"
+        if is_saved:
+            return f"Interpreter '{name}' stopped (saved config preserved)"
+        return f"Interpreter '{name}' stopped and removed"
 
     async def list_interpreters(self, logger: LoggerProtocol) -> list[InterpreterInfo]:
-        """List all interpreters (builtin and external).
-
-        Args:
-            logger: Logger instance
-
-        Returns:
-            List of InterpreterInfo
-        """
+        """List all interpreters (running + saved-but-stopped)."""
         await logger.info('Listing interpreters')
 
-        result = []
-        for name, config, pid, started_at in self.state.interpreter_manager.get_interpreters():
+        running = self.state.interpreter_manager.get_interpreters()
+        running_names = {name for name, _, _, _ in running}
+        saved_configs = self.state.interpreter_registry.list_saved()
+
+        result: list[InterpreterInfo] = []
+
+        # Running interpreters
+        for name, config, pid, started_at in running:
             uptime_seconds = (datetime.datetime.now(datetime.UTC) - started_at).total_seconds()
+            saved = saved_configs.get(name)
+
+            source: InterpreterSource
+            if name == 'builtin':
+                source = 'builtin'
+            elif saved is not None:
+                source = 'saved'
+            else:
+                source = 'transient'
+
             result.append(
                 InterpreterInfo(
                     name=name,
-                    type='builtin' if name == 'builtin' else 'external',
+                    source=source,
+                    state='running',
                     python_path=str(config.python_path),
                     cwd=str(config.cwd or self.state.project_dir),
+                    has_startup_script=config.startup_script is not None,
+                    description=saved.description if saved else None,
                     pid=pid,
                     started_at=started_at,
                     uptime=humanize_seconds(uptime_seconds),
-                    has_startup_script=config.startup_script is not None,
+                )
+            )
+
+        # Saved-but-stopped interpreters
+        for name, saved_config in saved_configs.items():
+            if name in running_names:
+                continue
+            result.append(
+                InterpreterInfo(
+                    name=name,
+                    source='saved',
+                    state='stopped',
+                    python_path=saved_config.python_path,
+                    cwd=saved_config.cwd,
+                    has_startup_script=saved_config.startup_script is not None,
+                    description=saved_config.description,
+                    pid=None,
+                    started_at=None,
+                    uptime=None,
                 )
             )
 

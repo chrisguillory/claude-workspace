@@ -77,8 +77,8 @@ def send_response(response: dict[str, Any]) -> None:
 def _split_last_expression(code: str) -> tuple[str, str] | None:
     """Split code into preceding statements and final expression.
 
-    Uses AST node line numbers for precise splitting, handling multi-line
-    expressions correctly.
+    Uses ast.unparse on AST nodes for splitting, which correctly handles
+    semicolons (multiple statements on one line) and multi-line expressions.
 
     Returns:
         (preceding_code, expression_code) or None if last statement isn't an expression.
@@ -92,9 +92,12 @@ def _split_last_expression(code: str) -> tuple[str, str] | None:
         if not isinstance(last_node, ast.Expr):
             return None
 
-        # Use AST line numbers for precise splitting (1-indexed)
-        code_lines = code.splitlines(keepends=True)
-        preceding = ''.join(code_lines[: last_node.lineno - 1])
+        # Build preceding code from all nodes except the last
+        if len(tree.body) > 1:
+            preceding = ast.unparse(ast.Module(body=tree.body[:-1], type_ignores=[]))
+        else:
+            preceding = ''
+
         expr_code = ast.unparse(last_node.value)
         return preceding, expr_code
     except SyntaxError:
@@ -126,6 +129,8 @@ def execute_code(code: str) -> dict[str, Any]:
                     'stderr': stderr_capture.getvalue(),
                     'result': repr(result) if result is not None else '',
                     'error': None,
+                    'error_type': None,
+                    'module_name': None,
                 }
             else:
                 # Pure statements - just exec
@@ -136,6 +141,8 @@ def execute_code(code: str) -> dict[str, Any]:
                     'stderr': stderr_capture.getvalue(),
                     'result': '',
                     'error': None,
+                    'error_type': None,
+                    'module_name': None,
                 }
 
     except ModuleNotFoundError as e:
@@ -153,6 +160,8 @@ def execute_code(code: str) -> dict[str, Any]:
             'stderr': stderr_capture.getvalue(),
             'result': '',
             'error': traceback.format_exc(),
+            'error_type': None,
+            'module_name': None,
         }
 
 

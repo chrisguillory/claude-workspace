@@ -2467,6 +2467,7 @@ source = { editable = "mcp/python-interpreter" }
 dependencies = [
     { name = "fastapi" },
     { name = "fastmcp" },
+    { name = "filelock" },
     { name = "httpx" },
     { name = "local-lib" },
     { name = "pandas" },
@@ -2478,6 +2479,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi" },
     { name = "fastmcp", specifier = ">=2.12.5" },
+    { name = "filelock" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "local-lib", editable = "local-lib" },
     { name = "pandas" },

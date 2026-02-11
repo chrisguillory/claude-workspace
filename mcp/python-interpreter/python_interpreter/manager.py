@@ -195,13 +195,16 @@ class ExternalInterpreterManager:
     def _read_response(self, proc: subprocess.Popen[str], timeout: float) -> dict[str, Any]:
         """Read length-prefixed JSON response with timeout.
 
-        Guards both the length prefix read and the payload read with select.select
-        to prevent blocking indefinitely on either.
+        Uses select.select to guard the initial readline() which blocks until
+        the length prefix arrives. The subsequent read(length) does NOT use select
+        because readline() with buffered TextIOWrapper may have already consumed
+        the payload into userspace buffer — select only sees kernel-level fd
+        readability and would falsely timeout on already-buffered data.
         """
         if not proc.stdout:
             raise ExternalInterpreterError('Subprocess stdout not available')
 
-        # Guard length prefix read
+        # Guard length prefix read with select (blocks until data arrives)
         ready, _, _ = select.select([proc.stdout], [], [], timeout)
         if not ready:
             raise ExternalInterpreterError(f'Timeout ({timeout}s) waiting for response')
@@ -212,11 +215,7 @@ class ExternalInterpreterManager:
 
         length = int(length_line.strip())
 
-        # Guard payload read
-        ready, _, _ = select.select([proc.stdout], [], [], timeout)
-        if not ready:
-            raise ExternalInterpreterError(f'Timeout ({timeout}s) reading payload ({length} bytes)')
-
+        # Read payload — no select guard here; see docstring
         json_data = proc.stdout.read(length)
 
         if len(json_data) < length:

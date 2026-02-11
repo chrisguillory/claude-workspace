@@ -79,7 +79,7 @@ def get_socket_path() -> pathlib.Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Execute Python code via MCP interpreter')
-    parser.add_argument('--interpreter', '-i', help='Interpreter name (default: builtin)')
+    parser.add_argument('--interpreter', '-i', default='builtin', help='Interpreter name (default: builtin)')
     args = parser.parse_args()
 
     # Read code from stdin
@@ -92,9 +92,7 @@ def main() -> None:
     socket_path = get_socket_path()
 
     # Build request payload
-    payload = {'code': code}
-    if args.interpreter:
-        payload['interpreter'] = args.interpreter
+    payload = {'code': code, 'interpreter': args.interpreter}
 
     # Connect via Unix socket
     transport = httpx.HTTPTransport(uds=socket_path.as_posix())

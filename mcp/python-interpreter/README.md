@@ -129,13 +129,19 @@ output directory, Claude PID, start time, and uptime.
 
 ### `add_interpreter`
 Add and start an external Python interpreter subprocess using a different Python executable (e.g., project venv).
-No auto-install — uses whatever packages are in that Python environment.
+No auto-install — uses whatever packages are in that Python environment. `python_path` can be relative to the
+project directory (e.g., `.venv/bin/python`).
+
+Set `save=True` to persist the configuration. Saved interpreters appear as "stopped" in `list_interpreters` after
+server restart and can be re-started by calling `add_interpreter` again with the same name and path.
 
 ### `stop_interpreter`
-Stop an external interpreter subprocess. Cannot stop the builtin interpreter.
+Stop an external interpreter subprocess. Cannot stop the builtin interpreter. Saved interpreters transition to
+"stopped" (config preserved). Set `remove=True` to permanently delete the saved config.
 
 ### `list_interpreters`
-List all running interpreters (builtin and external) with metadata.
+List all interpreters — running (builtin, saved, transient) and saved-but-stopped. Returns source, state,
+python_path, and runtime metadata.
 
 ## Security
 
