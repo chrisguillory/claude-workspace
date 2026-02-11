@@ -25,6 +25,8 @@ the MCP server since it runs in a different Python environment.
 
 from __future__ import annotations
 
+__all__ = ['main']
+
 import ast
 import contextlib
 import io

@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+__all__ = [
+    'ExternalInterpreterManager',
+    'InterpreterConfig',
+    'ExternalInterpreterError',
+]
+
 import contextlib
+import dataclasses
 import datetime
 import json
 import os
@@ -11,13 +18,11 @@ import select
 import subprocess
 import typing
 
-import attrs
-
 if typing.TYPE_CHECKING:
     from typing import Any
 
 
-@attrs.define(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class InterpreterConfig:
     """Configuration for an external Python interpreter."""
 
@@ -186,8 +191,6 @@ class ExternalInterpreterManager:
 
     def _kill_subprocess(self, proc: subprocess.Popen[str]) -> None:
         """Kill subprocess."""
-        try:
+        with contextlib.suppress(Exception):
             proc.kill()
             proc.wait(timeout=5.0)
-        except Exception:
-            pass

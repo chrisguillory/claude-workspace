@@ -2462,10 +2462,9 @@ wheels = [
 
 [[package]]
 name = "python-interpreter-mcp"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "mcp/python-interpreter" }
 dependencies = [
-    { name = "attrs" },
     { name = "fastapi" },
     { name = "fastmcp" },
     { name = "httpx" },
@@ -2477,7 +2476,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "attrs" },
     { name = "fastapi" },
     { name = "fastmcp", specifier = ">=2.12.5" },
     { name = "httpx", specifier = ">=0.28.1" },

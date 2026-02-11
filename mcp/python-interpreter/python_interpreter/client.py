@@ -35,6 +35,8 @@ Usage Examples:
 
 from __future__ import annotations
 
+__all__ = ['main']
+
 import argparse
 import os
 import pathlib
