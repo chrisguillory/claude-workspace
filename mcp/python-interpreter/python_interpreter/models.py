@@ -9,10 +9,13 @@ import pydantic
 
 __all__ = [
     'StrictModel',
-    'TruncationInfo',
     'InterpreterInfo',
     'SessionInfo',
     'ExecuteRequest',
+    'DriverExecuteResponse',
+    'DriverListVarsResponse',
+    'DriverResetResponse',
+    'DriverReadyResponse',
 ]
 
 type InterpreterType = typing.Literal['builtin', 'external']
@@ -26,14 +29,6 @@ class StrictModel(pydantic.BaseModel):
         strict=True,
         frozen=True,
     )
-
-
-class TruncationInfo(StrictModel):
-    """Information about truncated output."""
-
-    file_path: str
-    original_size: int
-    truncated_at: int
 
 
 class InterpreterInfo(StrictModel):
@@ -66,4 +61,37 @@ class ExecuteRequest(StrictModel):
     """Request body for HTTP execute endpoint."""
 
     code: str
-    interpreter: str | None = None
+    interpreter: str = 'builtin'
+
+
+class DriverExecuteResponse(StrictModel):
+    """Response from driver execute action."""
+
+    stdout: str
+    stderr: str
+    result: str
+    error: str | None
+    error_type: str | None = None
+    module_name: str | None = None
+
+
+class DriverListVarsResponse(StrictModel):
+    """Response from driver list_vars action."""
+
+    result: str
+    error: str | None
+
+
+class DriverResetResponse(StrictModel):
+    """Response from driver reset action."""
+
+    result: str
+    error: str | None
+
+
+class DriverReadyResponse(StrictModel):
+    """Response from driver on startup (ready signal)."""
+
+    status: typing.Literal['ready']
+    python_version: str
+    python_executable: str

@@ -64,13 +64,13 @@ def register_tools(service: PythonInterpreterService) -> None:
     async def execute(
         code: str,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
-        interpreter: str | None = None,
+        interpreter: str = 'builtin',
     ) -> str:
         """Execute Python code in persistent scope.
 
         Args:
             code: Python code to execute
-            interpreter: Interpreter name (None = builtin with auto-install, string = external interpreter without auto-install)
+            interpreter: Interpreter name (defaults to 'builtin' with auto-install)
         """
         logger = DualLogger(ctx)
         return await service.execute(code, logger, interpreter)
@@ -102,12 +102,12 @@ def register_tools(service: PythonInterpreterService) -> None:
     )
     async def list_vars(
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
-        interpreter: str | None = None,
+        interpreter: str = 'builtin',
     ) -> str:
         """List all user-defined variables in persistent scope.
 
         Args:
-            interpreter: Interpreter name (None = builtin)
+            interpreter: Interpreter name (defaults to 'builtin')
         """
         logger = DualLogger(ctx)
         return await service.list_vars(logger, interpreter)

@@ -13,6 +13,7 @@ Protocol:
 Request format:
     {"action": "execute", "code": "..."}
     {"action": "list_vars"}
+    {"action": "reset"}
     {"action": "shutdown"}
 
 Response format:
@@ -143,6 +144,15 @@ def execute_code(code: str) -> dict[str, Any]:
                     'error': None,
                 }
 
+    except ModuleNotFoundError as e:
+        return {
+            'stdout': stdout_capture.getvalue(),
+            'stderr': stderr_capture.getvalue(),
+            'result': '',
+            'error': traceback.format_exc(),
+            'error_type': 'ModuleNotFoundError',
+            'module_name': e.name,
+        }
     except Exception:
         return {
             'stdout': stdout_capture.getvalue(),
@@ -194,6 +204,11 @@ def main() -> None:
         elif action == 'list_vars':
             response = list_vars()
             send_response(response)
+
+        elif action == 'reset':
+            var_count = len([k for k in _scope_globals if not k.startswith('__')])
+            _scope_globals.clear()
+            send_response({'result': f'Scope cleared ({var_count} items removed)', 'error': None})
 
         elif action == 'shutdown':
             send_response({'status': 'shutdown'})

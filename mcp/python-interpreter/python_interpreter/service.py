@@ -6,23 +6,18 @@ and interpreter lifecycle. Used by both MCP tools and the HTTP bridge.
 
 from __future__ import annotations
 
-import ast
-import contextlib
 import datetime
-import importlib
-import io
 import pathlib
 import subprocess
 import sys
 import tempfile
 import typing
-from collections.abc import Set
 
 from local_lib.utils import encode_project_path, humanize_seconds
 
 from python_interpreter.discovery import discover_session_id, find_claude_context
 from python_interpreter.manager import ExternalInterpreterManager, InterpreterConfig
-from python_interpreter.models import InterpreterInfo, SessionInfo, TruncationInfo
+from python_interpreter.models import InterpreterInfo, SessionInfo
 
 __all__ = [
     'ServerState',
@@ -118,6 +113,14 @@ class ServerState:
         # Initialize external interpreter manager
         interpreter_manager = ExternalInterpreterManager(claude_context.project_dir)
 
+        # Auto-start builtin interpreter using current Python executable
+        builtin_config = InterpreterConfig(
+            name='builtin',
+            python_path=pathlib.Path(sys.executable),
+        )
+        interpreter_manager.add_interpreter(builtin_config)
+        print('Builtin interpreter started', file=sys.stderr)
+
         return cls(
             session_id=session_id,
             started_at=started_at,
@@ -157,12 +160,6 @@ class ServerState:
         self.claude_pid = claude_pid
         self.interpreter_manager = interpreter_manager
 
-        # Python execution scope - persists across executions (builtin interpreter only)
-        self.scope_globals: dict[str, typing.Any] = {}
-
-        # Snapshot of sys.modules at startup - used by reset() to only reload user-imported modules
-        self._initial_modules: Set[str] = set(sys.modules.keys())
-
 
 class PythonInterpreterService:
     """Python interpreter service - protocol-agnostic, pure domain logic."""
@@ -170,41 +167,38 @@ class PythonInterpreterService:
     def __init__(self, state: ServerState) -> None:
         self.state = state
 
-    async def execute(self, code: str, logger: LoggerProtocol, interpreter: str | None = None) -> str:
+    async def execute(self, code: str, logger: LoggerProtocol, interpreter: str = 'builtin') -> str:
         """Execute Python code in persistent scope.
 
         Args:
             code: Python code to execute
             logger: Logger instance
-            interpreter: Interpreter name (None = builtin with auto-install)
+            interpreter: Interpreter name (defaults to 'builtin' with auto-install)
 
         Returns:
             Plain string output (stdout + stderr + result + truncation notice)
         """
-        if interpreter is None:
-            # Builtin interpreter with auto-install
-            await logger.info(f'Executing in builtin interpreter ({len(code)} chars)')
+        await logger.info(f"Executing in '{interpreter}' ({len(code)} chars)")
 
-            result, truncation_info = self._execute_with_file_handling(code)
-
-            if truncation_info:
-                await logger.warning(f'Output truncated: {truncation_info.original_size} chars')
-                separator = '=' * 50
-                return f'{result}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {truncation_info.original_size:,} chars\n# Full output: {truncation_info.file_path}\n{separator}'
-
-            return result
-        else:
-            # External interpreter
-            await logger.info(f"Executing in '{interpreter}' ({len(code)} chars)")
-
+        # Auto-install retry loop (only for builtin)
+        max_attempts = 3 if interpreter == 'builtin' else 1
+        for attempt in range(max_attempts):
             response = self.state.interpreter_manager.execute(interpreter, code)
 
-            if response.get('error'):
-                error: str = response['error']
-                return error
+            # Handle auto-install for builtin
+            if response.error_type == 'ModuleNotFoundError' and response.module_name and interpreter == 'builtin':
+                if attempt < max_attempts - 1:
+                    await logger.info(f"Auto-installing '{response.module_name}'")
+                    install_msg = _install_package(response.module_name)
+                    await logger.info(install_msg)
+                    continue
+
+            # Return error if present
+            if response.error:
+                return response.error
 
             # Combine output
-            parts = [response.get('stdout', ''), response.get('stderr', ''), response.get('result', '')]
+            parts = [response.stdout, response.stderr, response.result]
             output = '\n'.join(p for p in parts if p)
 
             # Handle truncation
@@ -213,65 +207,39 @@ class PythonInterpreterService:
                 file_path = self.state.output_dir / f'output_{timestamp}.txt'
                 file_path.write_text(output, encoding='utf-8')
                 separator = '=' * 50
+                await logger.warning(f'Output truncated: {len(output)} chars')
                 return f'{output[:CHARACTER_LIMIT]}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {len(output):,} chars\n# Full output: {file_path}\n{separator}'
 
             return output
 
+        raise MaxInstallAttemptsError(f'Failed after {max_attempts} auto-install attempts')
+
     async def reset(self, logger: LoggerProtocol) -> str:
-        """Clear all variables and reload user-imported modules from disk.
+        """Clear all variables from builtin interpreter scope."""
+        await logger.info('Resetting builtin interpreter scope')
 
-        Only reloads modules imported after server startup (not the server's own dependencies).
-        """
-        await logger.info('Resetting Python interpreter scope')
+        response = self.state.interpreter_manager.reset('builtin')
 
-        # Clear execution scope
-        var_count = len([k for k in self.state.scope_globals if not k.startswith('__')])
-        self.state.scope_globals.clear()
+        if response.error:
+            raise RuntimeError(f'Reset failed: {response.error}')
 
-        # Reload only modules imported by user code (not present at server startup)
-        modules_to_reload = []
-        for name, module in list(sys.modules.items()):
-            if name in self.state._initial_modules:
-                continue
-            if module is None:
-                continue
-            if not hasattr(module, '__file__') or module.__file__ is None:
-                continue
-            modules_to_reload.append(module)
+        return response.result
 
-        reload_count = 0
-        for module in reversed(modules_to_reload):
-            try:
-                importlib.reload(module)
-                reload_count += 1
-                await logger.info(f'Reloaded: {module.__name__}')
-            except Exception as e:
-                await logger.warning(f'Failed to reload {module.__name__}: {e}')
-
-        await logger.info(f'Reset complete - cleared {var_count} vars, reloaded {reload_count} modules')
-        return f'Scope reset - cleared {var_count} vars, reloaded {reload_count} modules'
-
-    async def list_vars(self, logger: LoggerProtocol, interpreter: str | None = None) -> str:
+    async def list_vars(self, logger: LoggerProtocol, interpreter: str = 'builtin') -> str:
         """List all user-defined variables in persistent scope.
 
         Args:
             logger: Logger instance
-            interpreter: Interpreter name (None = builtin)
+            interpreter: Interpreter name (defaults to 'builtin')
         """
-        if interpreter is None:
-            await logger.info('Listing builtin interpreter variables')
+        await logger.info(f"Listing variables in '{interpreter}'")
 
-            if not self.state.scope_globals:
-                return 'No variables defined'
+        response = self.state.interpreter_manager.list_vars(interpreter)
 
-            user_vars = [name for name in self.state.scope_globals if not name.startswith('__')]
-            if not user_vars:
-                return 'No variables defined'
+        if response.error:
+            raise RuntimeError(f'List vars failed: {response.error}')
 
-            return ', '.join(sorted(user_vars))
-        else:
-            await logger.info(f"Listing variables in '{interpreter}'")
-            return self.state.interpreter_manager.list_vars(interpreter)
+        return response.result
 
     async def get_session_info(self, logger: LoggerProtocol) -> SessionInfo:
         """Get comprehensive session and server metadata."""
@@ -338,18 +306,13 @@ class PythonInterpreterService:
         """
         await logger.info('Listing interpreters')
 
-        builtin = InterpreterInfo(
-            name='builtin',
-            type='builtin',
-        )
-
-        external_infos = []
+        result = []
         for name, config, pid, started_at in self.state.interpreter_manager.get_interpreters():
             uptime_seconds = (datetime.datetime.now(datetime.UTC) - started_at).total_seconds()
-            external_infos.append(
+            result.append(
                 InterpreterInfo(
                     name=name,
-                    type='external',
+                    type='builtin' if name == 'builtin' else 'external',
                     python_path=str(config.python_path),
                     cwd=str(config.cwd or self.state.project_dir),
                     pid=pid,
@@ -359,47 +322,7 @@ class PythonInterpreterService:
                 )
             )
 
-        return [builtin] + external_infos
-
-    def _execute_with_file_handling(self, code: str) -> tuple[str, TruncationInfo | None]:
-        """Execute code and handle large output by saving to temp file."""
-        result = _execute_code(code, self.state.scope_globals)
-
-        if len(result) > CHARACTER_LIMIT:
-            timestamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%d_%H%M%S')
-            filename = f'output_{timestamp}.txt'
-            file_path = self.state.output_dir / filename
-
-            file_path.write_text(result, encoding='utf-8')
-
-            truncation_info = TruncationInfo(
-                file_path=str(file_path),
-                original_size=len(result),
-                truncated_at=CHARACTER_LIMIT,
-            )
-
-            return result[:CHARACTER_LIMIT], truncation_info
-
-        return result, None
-
-
-# Private helper functions for builtin code execution
-
-
-def _detect_expression(code: str) -> tuple[bool, str | None]:
-    """Detect if last line is an expression. Returns (is_expr, last_line)."""
-    try:
-        tree = ast.parse(code)
-        if not tree.body:
-            return False, None
-
-        last_node = tree.body[-1]
-        if isinstance(last_node, ast.Expr):
-            last_line = ast.unparse(last_node.value)
-            return True, last_line
-        return False, None
-    except SyntaxError:
-        return False, None
+        return result
 
 
 def _install_package(import_name: str) -> str:
@@ -435,82 +358,3 @@ def _install_package(import_name: str) -> str:
     else:
         stderr = result.stderr.strip() if result.stderr else 'No error details'
         raise PackageInstallationError(f'Failed to install {package_name}\n{stderr}')
-
-
-def _execute_code(code: str, scope_globals: dict[str, typing.Any]) -> str:
-    """Execute code in provided scope. Auto-installs missing packages.
-
-    Args:
-        code: Python code to execute
-        scope_globals: Global scope dictionary for execution
-
-    Returns:
-        Output string from successful execution
-    """
-    max_install_attempts = 3
-    successfully_installed: set[str] = set()
-    failed_installs: set[str] = set()
-
-    while True:
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
-
-        with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
-            try:
-                is_expr, last_line = _detect_expression(code)
-
-                if is_expr and last_line:
-                    lines = code.splitlines()
-                    code_without_last = '\n'.join(lines[:-1])
-
-                    if code_without_last.strip():
-                        exec(code_without_last, scope_globals)
-
-                    result = eval(last_line, scope_globals)
-
-                    stdout_value = stdout_capture.getvalue()
-                    stderr_value = stderr_capture.getvalue()
-
-                    if stdout_value or stderr_value:
-                        return (stdout_value + stderr_value).rstrip()
-                    else:
-                        return repr(result) if result is not None else ''
-                else:
-                    exec(code, scope_globals)
-
-                    stdout_value = stdout_capture.getvalue()
-                    stderr_value = stderr_capture.getvalue()
-                    return (stdout_value + stderr_value).rstrip()
-
-            except ModuleNotFoundError as e:
-                module_name = e.name
-
-                total_attempts = len(successfully_installed) + len(failed_installs)
-                should_attempt = (
-                    module_name
-                    and module_name not in successfully_installed
-                    and module_name not in failed_installs
-                    and total_attempts < max_install_attempts
-                )
-
-                if should_attempt and module_name is not None:
-                    try:
-                        message = _install_package(module_name)
-                        successfully_installed.add(module_name)
-                        print(message, file=sys.stderr)
-                        continue
-
-                    except PackageInstallationError as install_error:
-                        failed_installs.add(module_name)
-                        raise PackageInstallationError(f'{install_error}\n\nOriginal import error: {e}') from e
-                else:
-                    if total_attempts >= max_install_attempts:
-                        raise MaxInstallAttemptsError(
-                            f'Maximum installation attempts ({max_install_attempts}) exceeded.\n'
-                            f'Successfully installed: {successfully_installed}\n'
-                            f'Failed: {failed_installs}'
-                        ) from e
-                    elif module_name in failed_installs:
-                        raise PackageInstallationError(f"Package '{module_name}' already failed to install") from e
-                    else:
-                        raise

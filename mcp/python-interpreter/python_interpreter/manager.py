@@ -16,10 +16,14 @@ import os
 import pathlib
 import select
 import subprocess
-import typing
+from typing import Any
 
-if typing.TYPE_CHECKING:
-    from typing import Any
+from python_interpreter.models import (
+    DriverExecuteResponse,
+    DriverListVarsResponse,
+    DriverReadyResponse,
+    DriverResetResponse,
+)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -76,10 +80,16 @@ class ExternalInterpreterManager:
         started_at = datetime.datetime.now(datetime.UTC)
 
         # Wait for ready signal
-        response = self._read_response(proc, timeout=10.0)
-        if response.get('status') != 'ready':
+        response_dict = self._read_response(proc, timeout=10.0)
+        try:
+            ready_response = DriverReadyResponse.model_validate(response_dict)
+        except Exception as e:
             self._kill_subprocess(proc)
-            raise ExternalInterpreterError(f'Failed to start: {response}')
+            raise ExternalInterpreterError(f'Invalid ready response: {e}') from e
+
+        if ready_response.status != 'ready':
+            self._kill_subprocess(proc)
+            raise ExternalInterpreterError(f'Failed to start: {response_dict}')
 
         # Execute startup script if provided
         if config.startup_script:
@@ -93,6 +103,9 @@ class ExternalInterpreterManager:
 
     def stop_interpreter(self, name: str) -> None:
         """Stop and remove an external interpreter."""
+        if name == 'builtin':
+            raise ExternalInterpreterError("Cannot stop 'builtin' interpreter")
+
         if name not in self._interpreters:
             raise ExternalInterpreterError(f"Interpreter '{name}' not found")
 
@@ -119,7 +132,7 @@ class ExternalInterpreterManager:
 
         return result
 
-    def execute(self, name: str, code: str, timeout: float = 60.0) -> dict[str, Any]:
+    def execute(self, name: str, code: str, timeout: float = 60.0) -> DriverExecuteResponse:
         """Execute code in named interpreter."""
         if name not in self._interpreters:
             raise ExternalInterpreterError(f"Interpreter '{name}' not found")
@@ -130,9 +143,10 @@ class ExternalInterpreterManager:
             del self._interpreters[name]
             raise ExternalInterpreterError(f"Interpreter '{name}' crashed (exit code: {proc.returncode})")
 
-        return self._send_request(proc, {'action': 'execute', 'code': code}, timeout=timeout)
+        response_dict = self._send_request(proc, {'action': 'execute', 'code': code}, timeout=timeout)
+        return DriverExecuteResponse.model_validate(response_dict)
 
-    def list_vars(self, name: str, timeout: float = 10.0) -> str:
+    def list_vars(self, name: str, timeout: float = 10.0) -> DriverListVarsResponse:
         """List variables in named interpreter."""
         if name not in self._interpreters:
             raise ExternalInterpreterError(f"Interpreter '{name}' not found")
@@ -143,12 +157,22 @@ class ExternalInterpreterManager:
             del self._interpreters[name]
             raise ExternalInterpreterError(f"Interpreter '{name}' crashed")
 
-        response = self._send_request(proc, {'action': 'list_vars'}, timeout=timeout)
-        if response.get('error'):
-            raise ExternalInterpreterError(response['error'])
+        response_dict = self._send_request(proc, {'action': 'list_vars'}, timeout=timeout)
+        return DriverListVarsResponse.model_validate(response_dict)
 
-        result: str = response.get('result', 'No variables defined')
-        return result
+    def reset(self, name: str, timeout: float = 10.0) -> DriverResetResponse:
+        """Reset interpreter scope (clear all variables)."""
+        if name not in self._interpreters:
+            raise ExternalInterpreterError(f"Interpreter '{name}' not found")
+
+        _, proc, _ = self._interpreters[name]
+
+        if proc.poll() is not None:
+            del self._interpreters[name]
+            raise ExternalInterpreterError(f"Interpreter '{name}' crashed")
+
+        response_dict = self._send_request(proc, {'action': 'reset'}, timeout=timeout)
+        return DriverResetResponse.model_validate(response_dict)
 
     def shutdown_all(self) -> None:
         """Stop all interpreters. Best effort."""
