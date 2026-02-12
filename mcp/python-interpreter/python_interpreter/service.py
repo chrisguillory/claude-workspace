@@ -294,9 +294,9 @@ class PythonInterpreterService:
         await logger.info(f"Executing in '{interpreter}' ({len(code)} chars)")
 
         # Auto-start if not running (with per-interpreter lock to prevent races)
-        if not self.state.interpreter_manager.is_running(interpreter):
+        if not await asyncio.to_thread(self.state.interpreter_manager.is_running, interpreter):
             async with self._get_start_lock(interpreter):
-                if not self.state.interpreter_manager.is_running(interpreter):
+                if not await asyncio.to_thread(self.state.interpreter_manager.is_running, interpreter):
                     await self._auto_start_interpreter(interpreter, logger)
 
         # Auto-install retry loop (only for builtin)
@@ -363,24 +363,23 @@ class PythonInterpreterService:
         self.state.interpreter_registry.save_interpreter(name, saved_config)
         await logger.info(f"Saved interpreter '{name}' to registry")
 
-        is_running = self.state.interpreter_manager.is_running(name)
-        if is_running:
-            running = self.state.interpreter_manager.get_interpreters()
-            for r_name, r_config, r_pid, r_started_at in running:
-                if r_name == name:
-                    uptime_seconds = (datetime.datetime.now(datetime.UTC) - r_started_at).total_seconds()
-                    return InterpreterInfo(
-                        name=name,
-                        source='saved',
-                        state='running',
-                        python_path=str(r_config.python_path),
-                        cwd=str(r_config.cwd or self.state.project_dir),
-                        has_startup_script=r_config.startup_script is not None,
-                        description=description,
-                        pid=r_pid,
-                        started_at=r_started_at,
-                        uptime=humanize_seconds(uptime_seconds),
-                    )
+        # Single atomic call — avoids TOCTOU race between is_running and get_interpreters
+        running = await asyncio.to_thread(self.state.interpreter_manager.get_interpreters)
+        for r_name, r_config, r_pid, r_started_at in running:
+            if r_name == name:
+                uptime_seconds = (datetime.datetime.now(datetime.UTC) - r_started_at).total_seconds()
+                return InterpreterInfo(
+                    name=name,
+                    source='saved',
+                    state='running',
+                    python_path=str(r_config.python_path),
+                    cwd=str(r_config.cwd or self.state.project_dir),
+                    has_startup_script=r_config.startup_script is not None,
+                    description=description,
+                    pid=r_pid,
+                    started_at=r_started_at,
+                    uptime=humanize_seconds(uptime_seconds),
+                )
 
         return InterpreterInfo(
             name=name,
@@ -537,7 +536,7 @@ def _build_jetbrains_startup_script(config: JetBrainsRunConfig) -> str | None:
     parts.append(f'sys.argv = [{", ".join(argv_items)}]')
 
     # Read and exec the script
-    parts.append(f'exec(open({str(script_path)!r}).read())')
+    parts.append(f'exec(__import__("pathlib").Path({str(script_path)!r}).read_text())')
 
     return '\n'.join(parts)
 

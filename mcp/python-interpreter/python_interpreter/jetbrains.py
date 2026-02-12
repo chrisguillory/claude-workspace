@@ -16,6 +16,7 @@ __all__ = [
     'discover_run_configs',
 ]
 
+import os
 import pathlib
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Sequence
@@ -168,12 +169,17 @@ def _parse_jdk_table(jdk_table_path: pathlib.Path) -> Sequence[JetBrainsSDKEntry
 # ---------------------------------------------------------------------------
 
 
+_SKIP_DIRS = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', 'dist', 'build', '.tox', '.mypy_cache'}
+
+
 def _scan_run_xml_files(project_dir: pathlib.Path) -> Iterator[pathlib.Path]:
     """Find all candidate run configuration XML files in the project tree."""
-    # *.run.xml anywhere in project tree (excluding .idea/)
-    for path in project_dir.rglob('*.run.xml'):
-        if '.idea' not in path.parts:
-            yield path
+    # *.run.xml anywhere in project tree (excluding .idea/ and heavy dirs)
+    for root, dirs, files in os.walk(project_dir):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and d != '.idea']
+        for f in files:
+            if f.endswith('.run.xml'):
+                yield pathlib.Path(root) / f
 
     # .idea/runConfigurations/*.xml (legacy location)
     run_configs_dir = project_dir / '.idea' / 'runConfigurations'
