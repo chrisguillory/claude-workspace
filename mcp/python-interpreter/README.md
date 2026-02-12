@@ -100,24 +100,75 @@ uv run --project mcp/python-interpreter mcp-py-server
 ## Tools
 
 ### `execute`
-Execute Python code in persistent scope. Returns expression values, stdout/stderr, or paths to large outputs.
+Execute Python code in persistent scope. Variables, imports, functions, and classes persist across calls.
+
+- Last expression is auto-evaluated (no need to print)
+- Returns stdout/stderr, repr() of last expression, or full tracebacks on error
+- Outputs >25,000 chars are truncated with full output saved to temp file
+- Builtin interpreter auto-installs missing packages via `uv pip install`
+
+```
+execute("x = 5")             → ""
+execute("x * 2")             → "10"
+execute("print(f'x = {x}')") → "x = 5"
+execute("import math; math.pi") → "3.141592653589793"
+execute("1/0")                → "Traceback ... ZeroDivisionError: division by zero"
+```
 
 ### `reset`
-Clear all variables and reset to fresh state.
+Clear all variables, imports, and functions from the builtin interpreter scope. Destructive and cannot be undone.
+Returns count of items removed.
 
 ### `list_vars`
-List currently defined variables in the persistent scope.
+List currently defined variables in the persistent scope. Returns alphabetically sorted names, filtering out
+Python builtins.
 
 ### `get_session_info`
 Get comprehensive session and server metadata including session ID, project directory, socket path, transcript path,
 output directory, Claude PID, start time, and uptime.
 
+### `add_interpreter`
+Add and start an external Python interpreter subprocess using a different Python executable (e.g., project venv).
+No auto-install — uses whatever packages are in that Python environment. `python_path` can be relative to the
+project directory (e.g., `.venv/bin/python`).
+
+Set `save=True` to persist the configuration. Saved interpreters appear as "stopped" in `list_interpreters` after
+server restart and can be re-started by calling `add_interpreter` again with the same name and path.
+
+### `stop_interpreter`
+Stop an external interpreter subprocess. Cannot stop the builtin interpreter. Saved interpreters transition to
+"stopped" (config preserved). Set `remove=True` to permanently delete the saved config.
+
+### `list_interpreters`
+List all interpreters — running (builtin, saved, transient) and saved-but-stopped. Returns source, state,
+python_path, and runtime metadata.
+
+## Security
+
+**WARNING:** This server executes arbitrary Python code. Only use with trusted input.
+
+Code running in interpreters has access to:
+- All Python built-ins (open, exec, eval, import, etc.)
+- File system, network, and system calls
+
+Code does **not** have access to MCP server internals — each interpreter runs in an isolated subprocess.
+
+## Example Session
+
+```
+1. execute("import math; pi_squared = math.pi ** 2")  → ""
+2. execute("pi_squared")                               → "9.869604401089358"
+3. list_vars()                                         → "math, pi_squared"
+4. reset()                                             → "Scope cleared (2 items removed)"
+```
+
 ## Features
 
 - **Persistent Python scope** - Variables, imports, and functions persist across executions
 - **Auto-installs missing packages** - Detects ImportError and installs packages via uv
-- **Large output handling** - Outputs >50KB saved to temp files with paths returned
+- **Large output handling** - Outputs >25K chars saved to temp files with paths returned
 - **Readable approval prompts** - See [Why the HTTP Bridge Exists](#why-the-http-bridge-exists) for details
+- **Multi-interpreter support** - Run code in the builtin interpreter or external Python environments (e.g., project venvs)
 - **Session-scoped resources** - Socket path and temp directory tied to Claude session
 
 ## Client Usage
@@ -188,9 +239,9 @@ Bash heredoc ──[stdin]──> mcp-py-client ───┘
 ### Session Discovery
 
 The server discovers its Claude Code session by:
-1. Emitting a unique marker to stderr on startup
-2. Searching Claude's debug logs for that marker
-3. Extracting the session ID from the log filename
+1. Walking the process tree upward to find the Claude Code parent process
+2. Using `lsof` to determine Claude's working directory and verify `.claude/` files
+3. Looking up the active session matching Claude's PID in `sessions.json` (maintained by claude-workspace hooks)
 
 ### Unix Socket
 
