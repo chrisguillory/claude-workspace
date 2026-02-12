@@ -35,6 +35,9 @@ Usage Examples:
 
 from __future__ import annotations
 
+__all__ = ['main']
+
+import argparse
 import os
 import pathlib
 import sys
@@ -75,6 +78,10 @@ def get_socket_path() -> pathlib.Path:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description='Execute Python code via MCP interpreter')
+    parser.add_argument('--interpreter', '-i', default='builtin', help='Interpreter name (default: builtin)')
+    args = parser.parse_args()
+
     # Read code from stdin
     code = sys.stdin.read()
     if not code.strip():
@@ -84,10 +91,13 @@ def main() -> None:
     # Get socket path
     socket_path = get_socket_path()
 
+    # Build request payload
+    payload = {'code': code, 'interpreter': args.interpreter}
+
     # Connect via Unix socket
     transport = httpx.HTTPTransport(uds=socket_path.as_posix())
-    with httpx.Client(transport=transport, timeout=30.0) as client:
-        response = client.post('http://localhost/execute', json={'code': code})
+    with httpx.Client(transport=transport, timeout=60.0) as client:
+        response = client.post('http://localhost/execute', json=payload)
 
         # Handle errors by printing response details before raising
         if response.is_error:
