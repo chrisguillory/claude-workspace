@@ -1,7 +1,7 @@
 """Python interpreter domain logic.
 
-Protocol-agnostic service layer for code execution, variable management,
-and interpreter lifecycle. Used by both MCP tools and the HTTP bridge.
+Protocol-agnostic service layer for code execution and interpreter lifecycle.
+Used by both MCP tools and the HTTP bridge.
 """
 
 from __future__ import annotations
@@ -13,12 +13,19 @@ import subprocess
 import sys
 import tempfile
 import typing
+from collections.abc import Sequence
 
 from local_lib.utils import encode_project_path, humanize_seconds
 
 from python_interpreter.discovery import discover_session_id, find_claude_context
 from python_interpreter.manager import ExternalInterpreterManager, InterpreterConfig
-from python_interpreter.models import InterpreterInfo, InterpreterSource, SavedInterpreterConfig, SessionInfo
+from python_interpreter.models import (
+    InterpreterInfo,
+    InterpreterSource,
+    JetBrainsRunConfig,
+    JetBrainsSDKEntry,
+    SavedInterpreterConfig,
+)
 from python_interpreter.registry import InterpreterRegistryManager
 
 __all__ = [
@@ -119,10 +126,25 @@ class ServerState:
         print('Builtin interpreter started', file=sys.stderr)
 
         # Initialize interpreter registry for saved configurations
-        interpreter_registry = InterpreterRegistryManager(claude_context.project_dir)
+        interpreter_registry = InterpreterRegistryManager()
         saved_count = len(interpreter_registry.list_saved())
         if saved_count:
             print(f'Loaded {saved_count} saved interpreter config(s)', file=sys.stderr)
+
+        # Discover JetBrains IDE interpreter configs
+        jetbrains_sdks: Sequence[JetBrainsSDKEntry] = ()
+        jetbrains_runs: Sequence[JetBrainsRunConfig] = ()
+        registry = interpreter_registry.load()
+        if registry.discover_jetbrains:
+            from python_interpreter.jetbrains import discover_run_configs, discover_sdk_entries
+
+            jetbrains_sdks = tuple(discover_sdk_entries(claude_context.project_dir))
+            jetbrains_runs = tuple(discover_run_configs(claude_context.project_dir, sdk_entries=jetbrains_sdks))
+            if jetbrains_sdks or jetbrains_runs:
+                print(
+                    f'  JetBrains: {len(jetbrains_sdks)} SDK(s), {len(jetbrains_runs)} console config(s)',
+                    file=sys.stderr,
+                )
 
         return cls(
             session_id=session_id,
@@ -135,6 +157,8 @@ class ServerState:
             claude_pid=claude_context.claude_pid,
             interpreter_manager=interpreter_manager,
             interpreter_registry=interpreter_registry,
+            jetbrains_sdks=jetbrains_sdks,
+            jetbrains_runs=jetbrains_runs,
         )
 
     def __init__(
@@ -149,6 +173,8 @@ class ServerState:
         claude_pid: int,
         interpreter_manager: ExternalInterpreterManager,
         interpreter_registry: InterpreterRegistryManager,
+        jetbrains_sdks: Sequence[JetBrainsSDKEntry],
+        jetbrains_runs: Sequence[JetBrainsRunConfig],
     ) -> None:
         # Identity
         self.session_id = session_id
@@ -166,15 +192,96 @@ class ServerState:
         self.interpreter_manager = interpreter_manager
         self.interpreter_registry = interpreter_registry
 
+        # JetBrains discovered configs
+        self.jetbrains_sdks = jetbrains_sdks
+        self.jetbrains_runs = jetbrains_runs
+
 
 class PythonInterpreterService:
     """Python interpreter service - protocol-agnostic, pure domain logic."""
 
     def __init__(self, state: ServerState) -> None:
         self.state = state
+        self._interpreter_sources: dict[str, InterpreterSource] = {'builtin': 'builtin'}
+        self._start_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_start_lock(self, name: str) -> asyncio.Lock:
+        """Get or create a per-interpreter startup lock."""
+        if name not in self._start_locks:
+            self._start_locks[name] = asyncio.Lock()
+        return self._start_locks[name]
+
+    async def _auto_start_interpreter(self, name: str, logger: LoggerProtocol) -> None:
+        """Auto-start a stopped interpreter from known config.
+
+        Resolution order: builtin -> saved registry -> jetbrains-run -> jetbrains-sdk.
+        """
+        config: InterpreterConfig
+        source: InterpreterSource
+
+        if name == 'builtin':
+            config = InterpreterConfig(
+                name='builtin',
+                python_path=pathlib.Path(sys.executable),
+            )
+            source = 'builtin'
+        else:
+            # Check saved registry
+            saved = self.state.interpreter_registry.get(name)
+            if saved is not None:
+                resolved_path = pathlib.Path(saved.python_path)
+                if not resolved_path.is_absolute():
+                    resolved_path = self.state.project_dir / resolved_path
+                config = InterpreterConfig(
+                    name=name,
+                    python_path=resolved_path,
+                    cwd=pathlib.Path(saved.cwd) if saved.cwd else None,
+                    env=dict(saved.env) if saved.env else None,
+                    startup_script=saved.startup_script,
+                )
+                source = 'saved'
+            else:
+                # Check JetBrains run configs
+                run_match = next((c for c in self.state.jetbrains_runs if c.name == name), None)
+                if run_match is not None:
+                    if run_match.python_path is None:
+                        raise ValueError(
+                            f"JetBrains config '{name}' has unresolved SDK. "
+                            f'Register it with an explicit python_path via register_interpreter.'
+                        )
+                    startup_script = _build_jetbrains_startup_script(run_match)
+                    config = InterpreterConfig(
+                        name=name,
+                        python_path=pathlib.Path(run_match.python_path),
+                        cwd=pathlib.Path(run_match.cwd) if run_match.cwd else None,
+                        env=dict(run_match.env) if run_match.env else None,
+                        startup_script=startup_script,
+                    )
+                    source = 'jetbrains-run'
+                else:
+                    # Check JetBrains SDK entries
+                    sdk_match = next((e for e in self.state.jetbrains_sdks if e.name == name), None)
+                    if sdk_match is not None:
+                        config = InterpreterConfig(
+                            name=name,
+                            python_path=pathlib.Path(sdk_match.python_path),
+                        )
+                        source = 'jetbrains-sdk'
+                    else:
+                        raise ValueError(
+                            f"Interpreter '{name}' not found. "
+                            f'Use register_interpreter to create one, '
+                            f'or list_interpreters to see available options.'
+                        )
+
+        await logger.info(f"Auto-starting '{name}' ({source}, {config.python_path})")
+        await asyncio.to_thread(self.state.interpreter_manager.add_interpreter, config)
+        self._interpreter_sources[name] = source
 
     async def execute(self, code: str, logger: LoggerProtocol, interpreter: str = 'builtin') -> str:
         """Execute Python code in persistent scope.
+
+        Auto-starts stopped interpreters from known configs (saved, JetBrains, builtin).
 
         Args:
             code: Python code to execute
@@ -185,6 +292,12 @@ class PythonInterpreterService:
             Plain string output (stdout + stderr + result + truncation notice)
         """
         await logger.info(f"Executing in '{interpreter}' ({len(code)} chars)")
+
+        # Auto-start if not running (with per-interpreter lock to prevent races)
+        if not self.state.interpreter_manager.is_running(interpreter):
+            async with self._get_start_lock(interpreter):
+                if not self.state.interpreter_manager.is_running(interpreter):
+                    await self._auto_start_interpreter(interpreter, logger)
 
         # Auto-install retry loop (only for builtin)
         max_attempts = 3 if interpreter == 'builtin' else 1
@@ -220,111 +333,89 @@ class PythonInterpreterService:
 
         return response.error or 'Auto-install failed'
 
-    async def reset(self, logger: LoggerProtocol) -> str:
-        """Clear all variables from builtin interpreter scope."""
-        await logger.info('Resetting builtin interpreter scope')
-
-        response = await asyncio.to_thread(self.state.interpreter_manager.reset, 'builtin')
-
-        if response.error:
-            raise RuntimeError(f'Reset failed: {response.error}')
-
-        return response.result
-
-    async def list_vars(self, logger: LoggerProtocol, interpreter: str = 'builtin') -> str:
-        """List all user-defined variables in persistent scope.
-
-        Args:
-            logger: Logger instance
-            interpreter: Interpreter name (defaults to 'builtin')
-        """
-        await logger.info(f"Listing variables in '{interpreter}'")
-
-        response = await asyncio.to_thread(self.state.interpreter_manager.list_vars, interpreter)
-
-        if response.error:
-            raise RuntimeError(f'List vars failed: {response.error}')
-
-        return response.result
-
-    async def get_session_info(self, logger: LoggerProtocol) -> SessionInfo:
-        """Get comprehensive session and server metadata."""
-        await logger.info('Getting session info')
-
-        uptime_seconds = (datetime.datetime.now(datetime.UTC) - self.state.started_at).total_seconds()
-        uptime = humanize_seconds(uptime_seconds)
-
-        return SessionInfo(
-            session_id=self.state.session_id,
-            project_dir=str(self.state.project_dir),
-            socket_path=str(self.state.socket_path),
-            transcript_path=str(self.state.transcript_path),
-            output_dir=str(self.state.output_dir),
-            claude_pid=self.state.claude_pid,
-            started_at=self.state.started_at,
-            uptime=uptime,
-        )
-
-    async def add_interpreter(
+    async def register_interpreter(
         self,
-        config: InterpreterConfig,
+        name: str,
+        python_path: pathlib.Path,
         logger: LoggerProtocol,
-        save: bool,
-        description: str | None,
+        cwd: pathlib.Path | None = None,
+        env: dict[str, str] | None = None,
+        startup_script: str | None = None,
+        description: str | None = None,
     ) -> InterpreterInfo:
-        """Add and start an external interpreter, optionally saving the config."""
-        await logger.info(f"Adding interpreter '{config.name}' ({config.python_path})")
+        """Save a new interpreter configuration to disk. Does NOT start it.
 
-        pid, started_at = await asyncio.to_thread(self.state.interpreter_manager.add_interpreter, config)
+        The interpreter auto-starts on next execute() call targeting it.
+        If already running, the config is updated on disk but takes effect after restart.
+        """
+        if name == 'builtin':
+            raise ValueError("Cannot register 'builtin' — it uses the server's Python automatically")
 
-        if save:
-            saved_config = SavedInterpreterConfig(
-                python_path=str(config.python_path),
-                cwd=str(config.cwd) if config.cwd else None,
-                env=config.env,
-                startup_script=config.startup_script,
-                description=description,
-            )
-            self.state.interpreter_registry.save_interpreter(config.name, saved_config)
-            await logger.info(f"Saved interpreter '{config.name}' to registry")
+        await logger.info(f"Registering interpreter '{name}' ({python_path})")
 
-        is_saved = save or self.state.interpreter_registry.get(config.name) is not None
-        source: InterpreterSource = 'saved' if is_saved else 'transient'
-        saved = self.state.interpreter_registry.get(config.name)
+        saved_config = SavedInterpreterConfig(
+            python_path=str(python_path),
+            cwd=str(cwd) if cwd else None,
+            env=env,
+            startup_script=startup_script,
+            description=description,
+        )
+        self.state.interpreter_registry.save_interpreter(name, saved_config)
+        await logger.info(f"Saved interpreter '{name}' to registry")
+
+        is_running = self.state.interpreter_manager.is_running(name)
+        if is_running:
+            running = self.state.interpreter_manager.get_interpreters()
+            for r_name, r_config, r_pid, r_started_at in running:
+                if r_name == name:
+                    uptime_seconds = (datetime.datetime.now(datetime.UTC) - r_started_at).total_seconds()
+                    return InterpreterInfo(
+                        name=name,
+                        source='saved',
+                        state='running',
+                        python_path=str(r_config.python_path),
+                        cwd=str(r_config.cwd or self.state.project_dir),
+                        has_startup_script=r_config.startup_script is not None,
+                        description=description,
+                        pid=r_pid,
+                        started_at=r_started_at,
+                        uptime=humanize_seconds(uptime_seconds),
+                    )
 
         return InterpreterInfo(
-            name=config.name,
-            source=source,
-            state='running',
-            python_path=str(config.python_path),
-            cwd=str(config.cwd or self.state.project_dir),
-            has_startup_script=config.startup_script is not None,
-            description=saved.description if saved else description,
-            pid=pid,
-            started_at=started_at,
-            uptime='0s',
+            name=name,
+            source='saved',
+            state='stopped',
+            python_path=str(python_path),
+            cwd=str(cwd) if cwd else None,
+            has_startup_script=startup_script is not None,
+            description=description,
+            pid=None,
+            started_at=None,
+            uptime=None,
         )
 
     async def stop_interpreter(self, name: str, logger: LoggerProtocol, remove: bool) -> str:
-        """Stop an external interpreter.
+        """Stop an interpreter subprocess.
 
-        Saved interpreters transition to 'stopped' (config preserved).
+        All interpreters (including builtin) can be stopped.
+        Stopped interpreters auto-restart on next execute() call.
         If remove=True, also deletes the saved config permanently.
-        Transient interpreters are always removed.
         """
         await logger.info(f"Stopping interpreter '{name}'")
         await asyncio.to_thread(self.state.interpreter_manager.stop_interpreter, name)
+        self._interpreter_sources.pop(name, None)
 
-        is_saved = self.state.interpreter_registry.get(name) is not None
-        if is_saved and remove:
-            self.state.interpreter_registry.remove_interpreter(name)
-            return f"Interpreter '{name}' stopped and removed from saved configs"
-        if is_saved:
-            return f"Interpreter '{name}' stopped (saved config preserved)"
-        return f"Interpreter '{name}' stopped and removed"
+        if remove:
+            removed = self.state.interpreter_registry.remove_interpreter(name)
+            if removed:
+                return f"Interpreter '{name}' stopped and config removed"
+            return f"Interpreter '{name}' stopped (no saved config to remove)"
+
+        return f"Interpreter '{name}' stopped (will auto-restart on next execute)"
 
     async def list_interpreters(self, logger: LoggerProtocol) -> list[InterpreterInfo]:
-        """List all interpreters (running + saved-but-stopped)."""
+        """List all interpreters (running, saved, and discovered)."""
         await logger.info('Listing interpreters')
 
         running = self.state.interpreter_manager.get_interpreters()
@@ -339,12 +430,14 @@ class PythonInterpreterService:
             saved = saved_configs.get(name)
 
             source: InterpreterSource
-            if name == 'builtin':
+            if name in self._interpreter_sources:
+                source = self._interpreter_sources[name]
+            elif name == 'builtin':
                 source = 'builtin'
             elif saved is not None:
                 source = 'saved'
             else:
-                source = 'transient'
+                source = 'saved'
 
             result.append(
                 InterpreterInfo(
@@ -380,7 +473,73 @@ class PythonInterpreterService:
                 )
             )
 
+        # JetBrains discovered SDK entries
+        listed_names = running_names | set(saved_configs.keys())
+        for entry in self.state.jetbrains_sdks:
+            if entry.name in listed_names:
+                continue
+            listed_names.add(entry.name)
+            result.append(
+                InterpreterInfo(
+                    name=entry.name,
+                    source='jetbrains-sdk',
+                    state='stopped',
+                    python_path=entry.python_path,
+                    cwd=None,
+                    has_startup_script=False,
+                    description=entry.version,
+                    pid=None,
+                    started_at=None,
+                    uptime=None,
+                )
+            )
+
+        # JetBrains discovered run configs (console only)
+        for run_config in self.state.jetbrains_runs:
+            if run_config.name in listed_names:
+                continue
+            listed_names.add(run_config.name)
+            result.append(
+                InterpreterInfo(
+                    name=run_config.name,
+                    source='jetbrains-run',
+                    state='stopped',
+                    python_path=run_config.python_path,
+                    cwd=run_config.cwd,
+                    has_startup_script=run_config.script_name is not None,
+                    description=f'from {pathlib.Path(run_config.xml_path).name}',
+                    pid=None,
+                    started_at=None,
+                    uptime=None,
+                )
+            )
+
         return result
+
+
+def _build_jetbrains_startup_script(config: JetBrainsRunConfig) -> str | None:
+    """Build startup script from JetBrains SCRIPT_NAME + PARAMETERS."""
+    if not config.script_name:
+        return None
+
+    script_path = pathlib.Path(config.script_name)
+    if not script_path.exists():
+        return None
+
+    parts = ['import sys']
+
+    # Set sys.argv to match what JetBrains would provide
+    argv_items = [repr(str(script_path))]
+    if config.parameters:
+        import shlex
+
+        argv_items.extend(repr(param) for param in shlex.split(config.parameters))
+    parts.append(f'sys.argv = [{", ".join(argv_items)}]')
+
+    # Read and exec the script
+    parts.append(f'exec(open({str(script_path)!r}).read())')
+
+    return '\n'.join(parts)
 
 
 def _install_package(import_name: str) -> str:

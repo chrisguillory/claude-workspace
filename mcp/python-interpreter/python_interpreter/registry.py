@@ -1,6 +1,6 @@
 """Interpreter configuration registry with atomic file persistence.
 
-Manages saved interpreter configurations in {project_dir}/.claude/interpreters.json.
+Manages saved interpreter configurations in ~/.claude-workspace/python_interpreter/interpreters.json.
 Uses file locking for cross-process safety (multiple MCP servers may share a project).
 """
 
@@ -22,15 +22,20 @@ from python_interpreter.models import InterpreterRegistry, SavedInterpreterConfi
 class InterpreterRegistryManager:
     """Manages saved interpreter configurations with atomic file persistence."""
 
-    def __init__(self, project_dir: pathlib.Path) -> None:
-        self._state_path = project_dir / '.claude' / 'interpreters.json'
+    STATE_DIR = pathlib.Path.home() / '.claude-workspace' / 'python_interpreter'
+
+    def __init__(self) -> None:
+        self._state_path = self.STATE_DIR / 'interpreters.json'
         self._lock = filelock.FileLock(self._state_path.with_suffix('.lock'))
 
     def load(self) -> InterpreterRegistry:
         """Load registry from file. Returns empty registry if not exists."""
         if not self._state_path.exists():
-            return InterpreterRegistry(discover_pycharm=True, interpreters={})
+            return InterpreterRegistry(discover_jetbrains=True, interpreters={})
         data = json.loads(self._state_path.read_text())
+        # Handle backwards compat: old files may have discover_pycharm
+        if 'discover_pycharm' in data and 'discover_jetbrains' not in data:
+            data['discover_jetbrains'] = data.pop('discover_pycharm')
         return InterpreterRegistry.model_validate(data)
 
     def save(self, registry: InterpreterRegistry) -> None:
@@ -46,7 +51,7 @@ class InterpreterRegistryManager:
             new_interpreters[name] = config
             self._save_unlocked(
                 InterpreterRegistry(
-                    discover_pycharm=registry.discover_pycharm,
+                    discover_jetbrains=registry.discover_jetbrains,
                     interpreters=new_interpreters,
                 )
             )
@@ -60,7 +65,7 @@ class InterpreterRegistryManager:
             new_interpreters = {k: v for k, v in registry.interpreters.items() if k != name}
             self._save_unlocked(
                 InterpreterRegistry(
-                    discover_pycharm=registry.discover_pycharm,
+                    discover_jetbrains=registry.discover_jetbrains,
                     interpreters=new_interpreters,
                 )
             )

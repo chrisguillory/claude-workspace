@@ -8,8 +8,7 @@ Architecture:
     mcp-py-client ─[HTTP]─> FastAPI on /tmp/python-interpreter-{pid}.sock
     External interpreters ─[subprocess]─> driver.py (length-prefixed JSON)
 
-Tools: execute, reset, list_vars, get_session_info,
-       add_interpreter, stop_interpreter, list_interpreters
+Tools: execute, register_interpreter, stop_interpreter, list_interpreters
 
 Setup:
     uv tool install --editable mcp/python-interpreter
@@ -24,7 +23,6 @@ import pathlib
 import sys
 import traceback
 import typing
-from collections.abc import Mapping
 
 import fastapi
 import mcp.server.fastmcp
@@ -32,8 +30,7 @@ import mcp.types
 import uvicorn
 from local_lib.utils import DualLogger
 
-from python_interpreter.manager import InterpreterConfig
-from python_interpreter.models import ExecuteRequest, InterpreterInfo, SavedInterpreterConfig, SessionInfo
+from python_interpreter.models import ExecuteRequest, InterpreterInfo
 from python_interpreter.service import PythonInterpreterService, ServerState, SimpleLogger
 
 __all__ = [
@@ -49,49 +46,63 @@ server: mcp.server.fastmcp.FastMCP
 fastapi_app = fastapi.FastAPI(title='Python Interpreter HTTP Bridge')
 
 
-def _format_saved_summary(
-    saved: Mapping[str, SavedInterpreterConfig],
-    running_names: set[str],
-    max_shown: int = 5,
-) -> str:
-    """Format saved interpreter list for injection into tool descriptions."""
-    if not saved:
-        return ''
+def _format_interpreter_summary(service: PythonInterpreterService, max_shown: int = 5) -> str:
+    """Format saved + discovered interpreter list for injection into tool descriptions."""
+    saved = service.state.interpreter_registry.list_saved()
+    running = service.state.interpreter_manager.get_interpreters()
+    running_names = {name for name, _, _, _ in running}
 
-    items = []
-    for name, config in list(saved.items())[:max_shown]:
+    items: list[str] = []
+
+    # Saved interpreters
+    for name, config in saved.items():
         state = 'running' if name in running_names else 'stopped'
         desc = f' — {config.description}' if config.description else ''
-        items.append(f'{name} ({state}{desc})')
+        items.append(f'{name} ({state}, saved{desc})')
 
-    summary = ', '.join(items)
-    remaining = len(saved) - max_shown
+    # JetBrains SDK entries
+    items.extend(
+        f'{entry.name} (jetbrains-sdk)'
+        for entry in service.state.jetbrains_sdks
+        if entry.name not in running_names and entry.name not in saved
+    )
+
+    # JetBrains run configs
+    items.extend(
+        f'{rc.name} (jetbrains-run)'
+        for rc in service.state.jetbrains_runs
+        if rc.name not in running_names and rc.name not in saved
+    )
+
+    if not items:
+        return ''
+
+    shown = items[:max_shown]
+    summary = ', '.join(shown)
+    remaining = len(items) - max_shown
     if remaining > 0:
         summary += f' ... and {remaining} more'
 
-    return f'**Saved interpreters:** {summary}'
+    return f'**Available interpreters:** {summary}'
 
 
-def _inject_saved_interpreters(base_docstring: str, saved_summary: str) -> str:
-    """Inject saved interpreter summary into tool description before Args."""
-    if not saved_summary:
+def _inject_interpreter_summary(base_docstring: str, summary: str) -> str:
+    """Inject interpreter summary into tool description before Args."""
+    if not summary:
         return base_docstring
 
     if 'Args:' in base_docstring:
         args_pos = base_docstring.find('Args:')
         before_args = base_docstring[:args_pos].rstrip()
         after_args = base_docstring[args_pos:]
-        return f'{before_args}\n\n{saved_summary}\n\n{after_args}'
-    return f'{base_docstring.rstrip()}\n\n{saved_summary}'
+        return f'{before_args}\n\n{summary}\n\n{after_args}'
+    return f'{base_docstring.rstrip()}\n\n{summary}'
 
 
 def register_tools(service: PythonInterpreterService) -> None:
     """Register service methods as MCP tools via closures."""
-    # Load saved interpreters for docstring injection
-    saved_configs = service.state.interpreter_registry.list_saved()
-    running = service.state.interpreter_manager.get_interpreters()
-    running_names = {name for name, _, _, _ in running}
-    saved_summary = _format_saved_summary(saved_configs, running_names)
+    # Build interpreter summary for docstring injection
+    interpreter_summary = _format_interpreter_summary(service)
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
@@ -115,8 +126,13 @@ def register_tools(service: PythonInterpreterService) -> None:
         last expression, or full tracebacks on error. Outputs >25,000 chars are truncated
         with full output saved to a temp file.
 
+        Stopped interpreters auto-start on execute. To reset state, use stop_interpreter
+        then execute again (the interpreter restarts fresh).
+
         The builtin interpreter auto-installs missing packages via uv on ModuleNotFoundError.
         External interpreters use whatever packages exist in their Python environment.
+
+        Tip: To list defined variables: execute("print([x for x in dir() if not x.startswith('_')])")
 
         IMPORTANT: For better readability in approval prompts, prefer the Bash client:
             mcp-py-client <<'PY'
@@ -130,116 +146,57 @@ def register_tools(service: PythonInterpreterService) -> None:
         logger = DualLogger(ctx)
         return await service.execute(code, logger, interpreter)
 
-    @server.tool(
-        annotations=mcp.types.ToolAnnotations(
-            title='Reset Python Scope',
-            destructiveHint=True,
-            idempotentHint=True,
-            readOnlyHint=False,
-            openWorldHint=False,
-        ),
-        structured_output=False,
-    )
-    async def reset(ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> str:
-        """Clear all variables, imports, and functions from the builtin interpreter scope.
+    REGISTER_INTERPRETER_BASE = """Save an external Python interpreter configuration.
 
-        Destructive and cannot be undone. Returns count of items removed. Does not
-        affect external interpreters - use stop_interpreter + add_interpreter to reset those.
-        """
-        logger = DualLogger(ctx)
-        return await service.reset(logger)
+        Persists config to disk. Does NOT start the interpreter — it auto-starts
+        on the next execute() call targeting it. If the interpreter is already
+        running, the config is updated on disk but takes effect after restart
+        (stop_interpreter + execute).
 
-    @server.tool(
-        annotations=mcp.types.ToolAnnotations(
-            title='List Python Variables',
-            destructiveHint=False,
-            idempotentHint=True,
-            readOnlyHint=True,
-            openWorldHint=False,
-        ),
-        structured_output=False,
-    )
-    async def list_vars(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
-        interpreter: str = 'builtin',
-    ) -> str:
-        """List all user-defined variables in persistent scope.
-
-        Returns alphabetically sorted names of variables, functions, classes, and imports.
-        Filters out Python builtins (names starting with '__').
-
-        Args:
-            interpreter: Interpreter name (defaults to 'builtin')
-        """
-        logger = DualLogger(ctx)
-        return await service.list_vars(logger, interpreter)
-
-    @server.tool(
-        annotations=mcp.types.ToolAnnotations(
-            title='Get Session Info',
-            destructiveHint=False,
-            idempotentHint=True,
-            readOnlyHint=True,
-            openWorldHint=False,
-        ),
-    )
-    async def get_session_info(ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any]) -> SessionInfo:
-        """Get comprehensive session and server metadata including session ID, paths, PID, start time, and uptime."""
-        logger = DualLogger(ctx)
-        return await service.get_session_info(logger)
-
-    ADD_INTERPRETER_BASE = """Add and start an external Python interpreter.
-
-        Creates a subprocess using a different Python executable (e.g., project venv).
-        No auto-install — uses whatever packages are in that Python environment.
         python_path can be relative to the project directory (e.g., '.venv/bin/python').
-
-        Set save=True to persist the configuration. Saved interpreters appear as
-        'stopped' in list_interpreters after server restart and can be re-started
-        by calling add_interpreter again with the same name and python_path.
 
         Args:
             name: Unique name for this interpreter
-            python_path: Path to Python executable (absolute or relative to project dir)
+            python_path: Path to Python executable
             cwd: Working directory (defaults to project dir)
             env: Additional environment variables
             startup_script: Python code to run after starting (e.g., imports)
-            save: Persist config to disk for reuse across server restarts
-            description: Human-readable description (stored if save=True)"""
+            description: Human-readable description"""
 
     @server.tool(
-        description=_inject_saved_interpreters(ADD_INTERPRETER_BASE, saved_summary),
+        description=_inject_interpreter_summary(REGISTER_INTERPRETER_BASE, interpreter_summary),
         annotations=mcp.types.ToolAnnotations(
-            title='Add External Interpreter',
+            title='Register Interpreter',
             destructiveHint=False,
             idempotentHint=False,
             readOnlyHint=False,
             openWorldHint=False,
         ),
     )
-    async def add_interpreter(
+    async def register_interpreter(
         name: str,
         python_path: str,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         startup_script: str | None = None,
-        save: bool = False,
         description: str | None = None,
     ) -> InterpreterInfo:
         logger = DualLogger(ctx)
-        # Resolve relative python_path against project dir
+
         resolved_path = pathlib.Path(python_path)
         if not resolved_path.is_absolute():
             resolved_path = service.state.project_dir / resolved_path
-        config = InterpreterConfig(
+
+        return await service.register_interpreter(
             name=name,
             python_path=resolved_path,
+            logger=logger,
             cwd=pathlib.Path(cwd) if cwd else None,
             env=env,
             startup_script=startup_script,
+            description=description,
         )
-        return await service.add_interpreter(config, logger, save=save, description=description)
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
@@ -256,27 +213,30 @@ def register_tools(service: PythonInterpreterService) -> None:
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         remove: bool = False,
     ) -> str:
-        """Stop an external interpreter subprocess.
+        """Stop an interpreter subprocess.
 
-        Saved interpreters transition to 'stopped' (config preserved, shown in
-        list_interpreters). Set remove=True to permanently delete the saved config.
-        Transient interpreters are always removed. Cannot stop the builtin interpreter.
+        All interpreters (including builtin) can be stopped. Stopped interpreters
+        auto-restart on the next execute() call — this is the way to reset state
+        (stop + execute = fresh scope).
+
+        Set remove=True to permanently delete a saved config.
 
         Args:
-            name: Name of the interpreter to stop (cannot be 'builtin')
+            name: Name of the interpreter to stop
             remove: Permanently delete saved config (default: False)
         """
         logger = DualLogger(ctx)
         return await service.stop_interpreter(name, logger, remove=remove)
 
-    LIST_INTERPRETERS_BASE = """List all interpreters (running and saved-but-stopped).
+    LIST_INTERPRETERS_BASE = """List all interpreters (running, saved, and discovered).
 
-        Returns name, source (builtin/saved/transient), state (running/stopped),
-        python_path, cwd, pid, uptime, and configuration details. Saved interpreters
-        appear as 'stopped' when not running. Dead interpreters are automatically removed."""
+        Returns name, source (builtin/saved/jetbrains-sdk/jetbrains-run),
+        state (running/stopped), python_path, cwd, pid, uptime, and configuration details.
+        Saved and JetBrains-discovered interpreters appear as 'stopped' when not running.
+        Dead interpreters are automatically removed."""
 
     @server.tool(
-        description=_inject_saved_interpreters(LIST_INTERPRETERS_BASE, saved_summary),
+        description=_inject_interpreter_summary(LIST_INTERPRETERS_BASE, interpreter_summary),
         annotations=mcp.types.ToolAnnotations(
             title='List Interpreters',
             destructiveHint=False,

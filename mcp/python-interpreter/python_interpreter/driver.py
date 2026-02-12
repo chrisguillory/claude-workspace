@@ -12,8 +12,6 @@ Protocol:
 
 Request format:
     {"action": "execute", "code": "..."}
-    {"action": "list_vars"}
-    {"action": "reset"}
     {"action": "shutdown"}
 
 Response format:
@@ -165,16 +163,6 @@ def execute_code(code: str) -> dict[str, Any]:
         }
 
 
-def list_vars() -> dict[str, Any]:
-    """List user-defined variables in scope."""
-    user_vars = sorted(name for name in _scope_globals if not name.startswith('__'))
-
-    if not user_vars:
-        return {'result': 'No variables defined', 'error': None}
-
-    return {'result': ', '.join(user_vars), 'error': None}
-
-
 def main() -> None:
     """Main driver loop - read requests, execute, send responses."""
     # Signal ready with Python version info
@@ -203,15 +191,6 @@ def main() -> None:
             code = request.get('code', '')
             response = execute_code(code)
             send_response(response)
-
-        elif action == 'list_vars':
-            response = list_vars()
-            send_response(response)
-
-        elif action == 'reset':
-            var_count = len([k for k in _scope_globals if not k.startswith('__')])
-            _scope_globals.clear()
-            send_response({'result': f'Scope cleared ({var_count} items removed)', 'error': None})
 
         elif action == 'shutdown':
             send_response({'status': 'shutdown'})

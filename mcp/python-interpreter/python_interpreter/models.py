@@ -15,16 +15,15 @@ __all__ = [
     'InterpreterSource',
     'SavedInterpreterConfig',
     'InterpreterRegistry',
-    'SessionInfo',
+    'JetBrainsSDKEntry',
+    'JetBrainsRunConfig',
     'ExecuteRequest',
     'DriverExecuteResponse',
-    'DriverListVarsResponse',
-    'DriverResetResponse',
     'DriverReadyResponse',
 ]
 
 type InterpreterState = typing.Literal['running', 'stopped']
-type InterpreterSource = typing.Literal['builtin', 'saved', 'transient']
+type InterpreterSource = typing.Literal['builtin', 'saved', 'jetbrains-sdk', 'jetbrains-run']
 
 
 class StrictModel(pydantic.BaseModel):
@@ -60,7 +59,7 @@ class InterpreterInfo(StrictModel):
 class SavedInterpreterConfig(StrictModel, frozen=False):
     """Persisted interpreter configuration (no runtime state).
 
-    Stored in {project_dir}/.claude/interpreters.json.
+    Stored in ~/.claude-workspace/python_interpreter/interpreters.json.
     python_path can be relative to project dir (e.g., '.venv/bin/python').
     """
 
@@ -74,25 +73,34 @@ class SavedInterpreterConfig(StrictModel, frozen=False):
 class InterpreterRegistry(StrictModel, frozen=False):
     """Registry of saved interpreter configurations.
 
-    Persisted to {project_dir}/.claude/interpreters.json.
+    Persisted to ~/.claude-workspace/python_interpreter/interpreters.json.
     frozen=False allows mutation for add/remove operations.
     """
 
-    discover_pycharm: bool
+    discover_jetbrains: bool
     interpreters: Mapping[str, SavedInterpreterConfig]
 
 
-class SessionInfo(StrictModel):
-    """Session and server metadata."""
+class JetBrainsSDKEntry(StrictModel):
+    """Python interpreter from JetBrains jdk.table.xml."""
 
-    session_id: str
-    project_dir: str
-    socket_path: str
-    transcript_path: str
-    output_dir: str
-    claude_pid: int
-    started_at: datetime.datetime
-    uptime: str
+    name: str
+    python_path: str
+    version: str | None
+    flavor: str | None
+    associated_project: str | None
+
+
+class JetBrainsRunConfig(StrictModel):
+    """JetBrains 'Run with Python Console' configuration from .run.xml."""
+
+    name: str
+    xml_path: str
+    python_path: str | None
+    cwd: str | None
+    env: Mapping[str, str] | None
+    script_name: str | None
+    parameters: str | None
 
 
 class ExecuteRequest(StrictModel):
@@ -111,20 +119,6 @@ class DriverExecuteResponse(StrictModel):
     error: str | None
     error_type: str | None
     module_name: str | None
-
-
-class DriverListVarsResponse(StrictModel):
-    """Response from driver list_vars action."""
-
-    result: str
-    error: str | None
-
-
-class DriverResetResponse(StrictModel):
-    """Response from driver reset action."""
-
-    result: str
-    error: str | None
 
 
 class DriverReadyResponse(StrictModel):
