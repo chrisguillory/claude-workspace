@@ -39,6 +39,12 @@ Workflow:
 
 Login IDs are auto-derived: email--{Console,Team,Personal}
 
+Run directly from GitHub (no clone needed):
+    uv run https://raw.githubusercontent.com/chrisguillory/claude-workspace/main/scripts/claude-login.py list-logins
+
+Pin to a specific commit for deterministic behavior:
+    uv run https://raw.githubusercontent.com/chrisguillory/claude-workspace/<sha>/scripts/claude-login.py list-logins
+
 Possible improvements:
 - Keychain `-T` flag: pass `-T /path/to/claude` to explicitly grant access.
   Not currently needed (no ACL restrictions observed). See:
