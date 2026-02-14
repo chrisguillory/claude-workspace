@@ -47,13 +47,13 @@ Pin to a specific commit for deterministic behavior:
 
 Tab completion (requires symlink, not remote uv run):
     ln -s ~/claude-workspace/scripts/claude-login.py ~/.local/bin/claude-login
-    claude-login --show-completion zsh > "$ZDOTDIR/completions/_claude-login"
+    claude-login completion zsh --install
+    # Or print to stdout: claude-login completion zsh > "$ZDOTDIR/completions/_claude-login"
     # Restart shell, then:
     claude-login switch-login <TAB>
 
     Note: typer derives the command name from sys.argv[0], so a symlink with a clean
-    name is required. --install-completion hardcodes ~/.zfunc and ~/.zshrc, which breaks
-    with non-default ZDOTDIR. Use --show-completion and place the file manually.
+    name is required.
 
 Possible improvements:
 - Keychain `-T` flag: pass `-T /path/to/claude` to explicitly grant access.
@@ -68,7 +68,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -918,7 +918,13 @@ def _complete_saved_mcp_server(incomplete: str) -> Sequence[tuple[str, str]]:
 # CLI
 # =============================================================================
 
-app = typer.Typer(help='Claude Code login and MCP auth manager.')
+# Typer's built-in --install-completion/--show-completion are disabled:
+# - --show-completion uses shellingham process-tree detection (fails outside interactive
+#   shells, including Claude Code's Bash tool, CI runners, and editor terminals)
+# - --install-completion hardcodes ~/.zfunc/~/.zshrc (ignores ZDOTDIR)
+# The `completion` command replaces both with explicit shell argument and ZDOTDIR support.
+app = typer.Typer(help='Claude Code login and MCP auth manager.', add_completion=False)
+typer.completion.completion_init()  # Patch click for runtime tab completion (skipped by add_completion=False)
 
 
 # -- Saved login management --------------------------------------------------
@@ -1011,6 +1017,60 @@ def cli_current_claude_login() -> None:
 def cli_nuke_claude_auth() -> None:
     """Wipe Claude Code's active auth state. Saved logins are untouched."""
     cmd_nuke_claude_auth()
+
+
+# -- Shell completion ---------------------------------------------------------
+
+# Custom install-path overrides. Shells listed here bypass typer's built-in
+# install(), which handles path resolution but may hardcode paths or mutate
+# rc files. Add entries here to fix broken defaults for specific shells.
+# Unlisted shells delegate to typer.completion.install() as-is.
+COMPLETION_INSTALL_OVERRIDES: Mapping[str, Callable[[str], Path]] = {
+    # typer hardcodes ~/.zfunc and appends to ~/.zshrc — override to respect ZDOTDIR.
+    'zsh': lambda prog: Path(os.environ.get('ZDOTDIR') or Path.home() / '.zsh') / 'completions' / f'_{prog}',
+    # typer appends a source line to ~/.bashrc — use XDG path that bash-completion auto-loads.
+    'bash': lambda prog: Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share')
+    / 'bash-completion'
+    / 'completions'
+    / prog,
+}
+
+
+@app.command('completion')
+def cli_completion(
+    shell: typer.completion.Shells = typer.Argument(..., help='Shell type'),
+    install: bool = typer.Option(False, '--install', help='Write to shell-standard location'),
+) -> None:
+    """Print or install shell tab completions.
+
+    Prints the completion script to stdout. With --install, writes to the
+    standard completions directory for the specified shell.
+
+    Zsh: $ZDOTDIR/completions/ (falls back to ~/.zsh/completions/)
+    """
+    ctx = click.get_current_context()
+    prog_name = ctx.find_root().info_name or 'claude-login'
+    complete_var = f'_{prog_name.replace("-", "_").upper()}_COMPLETE'
+    script = typer.completion.get_completion_script(
+        prog_name=prog_name,
+        complete_var=complete_var,
+        shell=shell.value,
+    )
+    if not install:
+        click.echo(script)
+        return
+    resolver = COMPLETION_INSTALL_OVERRIDES.get(shell.value)
+    if resolver is not None:
+        dest = resolver(prog_name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(script)
+    else:
+        _, dest = typer.completion.install(
+            shell=shell.value,
+            prog_name=prog_name,
+            complete_var=complete_var,
+        )
+    rich.console.Console(stderr=True).print(f'Installed to [bold]{dest}[/bold]\nRestart shell to activate.')
 
 
 if __name__ == '__main__':
