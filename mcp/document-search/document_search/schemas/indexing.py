@@ -14,6 +14,7 @@ from local_lib.types import JsonDatetime, JsonUuid
 
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import FileType
+from document_search.schemas.tracing import PipelineTimingReport
 
 __all__ = [
     'CHUNK_STRATEGY_VERSION',
@@ -148,6 +149,9 @@ class IndexingResult(StrictModel):
 
     # Pipeline control
     stopped_after: StopAfterStage | None = None
+
+    # Pipeline tracing (populated when full pipeline runs)
+    timing: PipelineTimingReport | None = None
 
     @property
     def success_rate(self) -> float:

@@ -7,7 +7,7 @@ Shared data models for:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
 from local_lib.types import JsonDatetime
@@ -16,7 +16,9 @@ if TYPE_CHECKING:
     from document_search.services.indexing import PipelineSnapshot
 
 from document_search.schemas.base import StrictModel
+from document_search.schemas.chunking import FileType
 from document_search.schemas.indexing import IndexingResult
+from document_search.schemas.tracing import QueueDepthSample
 
 __all__ = [
     'DashboardState',
@@ -75,6 +77,11 @@ class OperationProgress(StrictModel):
     files_awaiting_embed: int
     files_awaiting_store: int
 
+    # In-flight (files being processed inside workers)
+    files_in_chunk: int = 0
+    files_in_embed: int = 0
+    files_in_store: int = 0
+
     # Pipeline stages (cumulative chunk counts through each stage)
     chunks_ingested: int  # Output of chunk stage
     chunks_embedded: int  # Output of embed stage
@@ -85,6 +92,12 @@ class OperationProgress(StrictModel):
     # Completion
     files_done: int
     errors_429: int
+
+    # File type breakdown (live during scan, mirrors IndexingResult.by_file_type)
+    by_file_type: Mapping[FileType, str] = {}
+
+    # Queue depth time series (1Hz samples from tracer)
+    queue_depth_series: Sequence[QueueDepthSample] = ()
 
     @classmethod
     def from_snapshot(
@@ -115,6 +128,9 @@ class OperationProgress(StrictModel):
             files_awaiting_chunk=snapshot.files_awaiting_chunk,
             files_awaiting_embed=snapshot.files_awaiting_embed,
             files_awaiting_store=snapshot.files_awaiting_store,
+            files_in_chunk=snapshot.files_in_chunk,
+            files_in_embed=snapshot.files_in_embed,
+            files_in_store=snapshot.files_in_store,
             chunks_ingested=snapshot.chunks_ingested,
             chunks_embedded=snapshot.chunks_embedded,
             embed_cache_hits=snapshot.embed_cache_hits,
@@ -122,6 +138,8 @@ class OperationProgress(StrictModel):
             chunks_stored=snapshot.chunks_stored,
             files_done=snapshot.files_done,
             errors_429=errors_429,
+            by_file_type=snapshot.by_file_type,
+            queue_depth_series=snapshot.queue_depth_series,
         )
 
 
