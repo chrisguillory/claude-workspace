@@ -2,7 +2,7 @@
 name = "browser-automation-mcp"
 version = "0.1.0"
 description = "Browser Automation MCP Server - Playwright-based browser control with stealth mode"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "fastmcp>=2.12.5",
     "local-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=local-lib",
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-browser-server = "browser_automation.server:main"
+mcp-browser-server = "browser_automation.server:main"
 
 [tool.uv.sources]
 # Local development override: workspace reference takes precedence over git URL
