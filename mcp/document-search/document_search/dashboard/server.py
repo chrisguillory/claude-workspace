@@ -137,6 +137,25 @@ INDEX_HTML = """<!DOCTYPE html>
             font-weight: 600;
             color: #1a1a1a;
         }
+        .timing-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        .timing-table th, .timing-table td {
+            padding: 6px 10px;
+            text-align: right;
+            border-bottom: 1px solid #eee;
+        }
+        .timing-table th { text-align: left; color: #666; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+        .timing-table td:first-child { text-align: left; font-weight: 600; }
+        .timing-table .sub-stage td:first-child { padding-left: 20px; color: #888; }
+        .queue-chart { margin-top: 12px; }
+        .queue-chart svg { width: 100%; height: 80px; }
+        .chart-legend { display: flex; gap: 16px; font-size: 11px; color: #666; margin-top: 4px; }
+        .chart-legend span { display: flex; align-items: center; gap: 4px; }
+        .chart-legend .dot { width: 8px; height: 8px; border-radius: 50%; }
         .empty { text-align: center; padding: 40px; color: #999; }
         .server { padding: 8px 0; }
         .error-msg {
@@ -267,7 +286,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="progress-text">Chunks Stored: ${p.chunks_stored.toLocaleString()} / ${p.chunks_ingested.toLocaleString()}</div>
                 </div>
                 <div class="pipeline">
-                    Pipeline: ${p.files_awaiting_chunk} → chunk → ${p.files_awaiting_embed} → embed → ${p.files_awaiting_store} → store
+                    Pipeline: ${p.files_awaiting_chunk} queued → chunk${p.files_in_chunk ? ` (${p.files_in_chunk} active)` : ''} → ${p.files_awaiting_embed} queued → embed${p.files_in_embed ? ` (${p.files_in_embed} active)` : ''} → ${p.files_awaiting_store} queued → store${p.files_in_store ? ` (${p.files_in_store} active)` : ''}
                 </div>
                 <div class="stats">
                     <div class="stat"><div class="stat-label">Found</div><div class="stat-value">${p.files_found.toLocaleString()}</div></div>
@@ -277,6 +296,8 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="stat"><div class="stat-label">Errored</div><div class="stat-value">${p.files_errored}</div></div>
                     <div class="stat"><div class="stat-label">429 Errors</div><div class="stat-value">${p.errors_429}</div></div>
                 </div>
+                ${p.by_file_type && Object.keys(p.by_file_type).length > 0 ? formatFileTypeChart(p.by_file_type) : ''}
+                ${formatQueueDepthChart(p.queue_depth_series)}
             `;
         }
 
@@ -297,6 +318,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     ${op.error ? `<div class="error-msg">${op.error}</div>` : ''}
                     ${op.result ? `<div class="op-meta" style="margin-top: 8px;">Result: ${op.result.files_indexed} files, ${op.result.chunks_created} chunks${op.result.stopped_after ? ` (stopped after ${op.result.stopped_after})` : ''}</div>` : ''}
                     ${op.result?.by_file_type && Object.keys(op.result.by_file_type).length > 0 ? formatFileTypeChart(op.result.by_file_type) : ''}
+                    ${op.result?.timing ? formatTimingReport(op.result.timing) : ''}
                     <div class="log-header" onclick="toggleLogs('${op.operation_id}')">
                         <span id="log-toggle-${op.operation_id}">▶ Logs</span>
                         <span id="log-count-${op.operation_id}"></span>
@@ -384,6 +406,92 @@ INDEX_HTML = """<!DOCTYPE html>
                     }).join('')}
                 </div>
             `;
+        }
+
+        function formatQueueDepthChart(series) {
+            if (!series || series.length < 2) return '';
+            const maxT = series[series.length - 1].elapsed_seconds;
+            const maxQ = Math.max(1, ...series.map(s => Math.max(s.file_queue, s.embed_queue, s.upsert_queue)));
+            const ML = 40, MR = 8, MT = 4, MB = 18;  // margins for axes
+            const W = 600, H = 90;
+            const pw = W - ML - MR, ph = H - MT - MB;  // plot area
+            const x = (t) => ML + (t / maxT) * pw;
+            const y = (v) => MT + ph - (v / maxQ) * ph;
+            const line = (data, key) => data.map((s, i) => `${i===0?'M':'L'}${x(s.elapsed_seconds).toFixed(1)},${y(s[key]).toFixed(1)}`).join(' ');
+
+            // X-axis time ticks (up to 5)
+            const tickCount = Math.min(5, Math.floor(maxT / 10));
+            const tickInterval = tickCount > 0 ? maxT / tickCount : maxT;
+            let xTicks = '';
+            for (let i = 0; i <= tickCount; i++) {
+                const t = i * tickInterval;
+                const tx = x(t);
+                const label = t < 60 ? `${Math.round(t)}s` : `${(t/60).toFixed(1)}m`;
+                xTicks += `<line x1="${tx}" y1="${MT+ph}" x2="${tx}" y2="${MT+ph+3}" stroke="#ccc" stroke-width="0.5"/>`;
+                xTicks += `<text x="${tx}" y="${H-2}" text-anchor="middle" font-size="8" fill="#999">${label}</text>`;
+            }
+
+            return `
+                <div class="queue-chart">
+                    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+                        <text x="${ML-4}" y="${MT+4}" text-anchor="end" font-size="8" fill="#999">${maxQ.toLocaleString()}</text>
+                        <text x="${ML-4}" y="${MT+ph}" text-anchor="end" font-size="8" fill="#999">0</text>
+                        <line x1="${ML}" y1="${MT+ph}" x2="${ML+pw}" y2="${MT+ph}" stroke="#e8e8e8" stroke-width="0.5"/>
+                        <line x1="${ML}" y1="${MT}" x2="${ML+pw}" y2="${MT}" stroke="#e8e8e8" stroke-width="0.5" stroke-dasharray="2"/>
+                        ${xTicks}
+                        <path d="${line(series, 'file_queue')}" fill="none" stroke="#e65100" stroke-width="1.5" opacity="0.8"/>
+                        <path d="${line(series, 'embed_queue')}" fill="none" stroke="#1976d2" stroke-width="1.5" opacity="0.8"/>
+                        <path d="${line(series, 'upsert_queue')}" fill="none" stroke="#388e3c" stroke-width="1.5" opacity="0.8"/>
+                    </svg>
+                    <div class="chart-legend">
+                        <span><span class="dot" style="background:#e65100"></span>file (peak ${Math.max(...series.map(s=>s.file_queue)).toLocaleString()})</span>
+                        <span><span class="dot" style="background:#1976d2"></span>embed (peak ${Math.max(...series.map(s=>s.embed_queue)).toLocaleString()})</span>
+                        <span><span class="dot" style="background:#388e3c"></span>upsert (peak ${Math.max(...series.map(s=>s.upsert_queue)).toLocaleString()})</span>
+                    </div>
+                </div>`;
+        }
+
+        function formatTimingReport(timing) {
+            if (!timing || !timing.stages || timing.stages.length === 0) return '';
+            const SUB_STAGES = new Set(['embed_dense', 'embed_sparse']);
+            const fmtMs = (v) => v < 1 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v).toLocaleString();
+            const fmtPct = (stats) => stats ? `${fmtMs(stats.p50_ms)} / ${fmtMs(stats.p95_ms)} / ${fmtMs(stats.p99_ms)} / ${fmtMs(stats.max_ms)}` : '—';
+
+            let rows = timing.stages.map(s => {
+                const isSub = SUB_STAGES.has(s.stage);
+                const label = s.stage.replace('embed_', '↳ ');
+                return `<tr class="${isSub ? 'sub-stage' : ''}">
+                    <td>${label}</td>
+                    <td>${fmtPct(s.processing)}</td>
+                    <td>${s.queue_wait ? fmtPct(s.queue_wait) : '—'}</td>
+                    <td>${s.batch_wait ? fmtPct(s.batch_wait) : '—'}</td>
+                    <td>${s.cpu ? fmtPct(s.cpu) : '—'}</td>
+                    <td>${s.throughput_per_sec.toFixed(1)}/s</td>
+                    <td>${s.processing.count.toLocaleString()}</td>
+                </tr>`;
+            }).join('');
+
+            let chartHtml = formatQueueDepthChart(timing.queue_depth_series);
+
+            return `
+                <div style="margin-top: 12px;">
+                    <table class="timing-table">
+                        <tr>
+                            <th>Stage</th>
+                            <th>Processing p50/p95/p99/max (ms)</th>
+                            <th>Queue Wait</th>
+                            <th>Batch Wait</th>
+                            <th>CPU Time</th>
+                            <th>Throughput</th>
+                            <th>Items</th>
+                        </tr>
+                        ${rows}
+                    </table>
+                    <div style="font-size:11px;color:#888;margin-top:4px">
+                        Scan: ${timing.scan_seconds.toFixed(1)}s | ${timing.total_items.toLocaleString()} items | ${timing.total_elapsed_seconds.toFixed(1)}s total
+                    </div>
+                    ${chartHtml}
+                </div>`;
         }
 
         function formatDuration(seconds) {

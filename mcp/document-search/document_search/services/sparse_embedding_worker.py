@@ -6,6 +6,7 @@ All functions must be module-level (not methods) and use only primitives.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 
 from fastembed import SparseTextEmbedding
@@ -19,18 +20,21 @@ MODEL_NAME = 'Qdrant/bm25'
 
 def embed_batch(
     texts: Sequence[str],
-) -> Sequence[tuple[Sequence[int], Sequence[float]]]:
+) -> tuple[Sequence[tuple[Sequence[int], Sequence[float]]], float]:
     """Embed texts in subprocess - returns picklable types only.
 
     Args:
         texts: List of texts to embed.
 
     Returns:
-        List of (indices, values) tuples for sparse vectors.
+        Tuple of (sparse_vectors, cpu_seconds). CPU time measured via
+        time.process_time() in the subprocess for accurate profiling.
     """
+    cpu_start = time.process_time()
     model = _get_model()
     results = list(model.embed(texts))
-    return [(r.indices.tolist(), r.values.tolist()) for r in results]
+    cpu_seconds = time.process_time() - cpu_start
+    return [(r.indices.tolist(), r.values.tolist()) for r in results], cpu_seconds
 
 
 # Private module state and helpers below __all__ and public functions

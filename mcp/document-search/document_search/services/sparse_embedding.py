@@ -51,27 +51,31 @@ class SparseEmbeddingService:
         Returns:
             Tuple of (indices, values) for sparse vector.
         """
-        results = await self.embed_batch([text])
+        results, _cpu = await self.embed_batch(texts=[text])
         return results[0]
 
-    async def embed_batch(self, texts: Sequence[str]) -> Sequence[SparseVector]:
+    async def embed_batch(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[Sequence[SparseVector], float]:
         """Generate sparse vectors for multiple texts in subprocess.
 
         Args:
             texts: Texts to embed.
 
         Returns:
-            Sequence of (indices, values) tuples for sparse vectors.
+            Tuple of (sparse_vectors, cpu_seconds) where cpu_seconds
+            is CPU time measured in the subprocess worker.
         """
         if not texts:
-            return []
+            return [], 0.0
         loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(
+        results, cpu_seconds = await loop.run_in_executor(
             self._pool,
             sparse_embedding_worker.embed_batch,
             list(texts),
         )
-        return results
+        return results, cpu_seconds
 
     def shutdown(self) -> None:
         """Shutdown ProcessPoolExecutor and release resources."""
