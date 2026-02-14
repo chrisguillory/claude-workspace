@@ -45,11 +45,20 @@ Run directly from GitHub (no clone needed):
 Pin to a specific commit for deterministic behavior:
     uv run https://raw.githubusercontent.com/chrisguillory/claude-workspace/<sha>/scripts/claude-login.py list-logins
 
+Tab completion (requires symlink, not remote uv run):
+    ln -s ~/claude-workspace/scripts/claude-login.py ~/.local/bin/claude-login
+    claude-login --show-completion zsh > "$ZDOTDIR/completions/_claude-login"
+    # Restart shell, then:
+    claude-login switch-login <TAB>
+
+    Note: typer derives the command name from sys.argv[0], so a symlink with a clean
+    name is required. --install-completion hardcodes ~/.zfunc and ~/.zshrc, which breaks
+    with non-default ZDOTDIR. Use --show-completion and place the file manually.
+
 Possible improvements:
 - Keychain `-T` flag: pass `-T /path/to/claude` to explicitly grant access.
   Not currently needed (no ACL restrictions observed). See:
   https://macromates.com/blog/2006/keychain-access-from-shell/
-- Tab completion for switch-login LOGIN_ID via typer autocompletion callback.
 - Cross-platform: Linux uses ~/.claude/.credentials.json instead of Keychain.
 """
 
@@ -862,6 +871,50 @@ def cmd_nuke_claude_auth() -> None:
 
 
 # =============================================================================
+# Tab Completion
+# =============================================================================
+
+
+def _complete_login_id(incomplete: str) -> Sequence[tuple[str, str]]:
+    """Complete login IDs from saved logins. Returns (name, plan) tuples."""
+    completions: list[tuple[str, str]] = []
+    for login in list_all_logins():
+        if not login.name.lower().startswith(incomplete.lower()):
+            continue
+        if login.claude_ai_oauth:
+            help_text = _format_plan(login.claude_ai_oauth.subscription_type, login.claude_ai_oauth.rate_limit_tier)
+        else:
+            help_text = 'Console'
+        completions.append((login.name, help_text))
+    return completions
+
+
+def _complete_keychain_mcp_server(incomplete: str) -> Sequence[tuple[str, str]]:
+    """Complete MCP server names from current keychain (for save-mcp-login)."""
+    kc = read_keychain_raw()
+    if not kc:
+        return []
+    mcp_oauth = kc.get('mcpOAuth')
+    if not mcp_oauth or not isinstance(mcp_oauth, dict):
+        return []
+    completions: list[tuple[str, str]] = []
+    for entry in mcp_oauth.values():
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get('serverName', '')
+        if name and name.lower().startswith(incomplete.lower()):
+            url = entry.get('serverUrl', '')
+            completions.append((name, url))
+    return completions
+
+
+def _complete_saved_mcp_server(incomplete: str) -> Sequence[tuple[str, str]]:
+    """Complete MCP server names from saved MCP auths (for delete-mcp-login)."""
+    auths = load_mcp_auths()
+    return [(name, entry.server_url) for name, entry in auths.items() if name.lower().startswith(incomplete.lower())]
+
+
+# =============================================================================
 # CLI
 # =============================================================================
 
@@ -881,7 +934,9 @@ def cli_save_login(
 
 
 @app.command('switch-login')
-def cli_switch_login(login_id: str | None = typer.Argument(None, help='Login ID')) -> None:
+def cli_switch_login(
+    login_id: str | None = typer.Argument(None, help='Login ID', autocompletion=_complete_login_id),
+) -> None:
     """Switch to saved login + inject MCP tokens."""
     if login_id is None:
         logins = list_all_logins()
@@ -913,7 +968,7 @@ def cli_list_logins() -> None:
 
 
 @app.command('delete-login')
-def cli_delete_login(login_id: str = typer.Argument(..., help='Login ID')) -> None:
+def cli_delete_login(login_id: str = typer.Argument(..., help='Login ID', autocompletion=_complete_login_id)) -> None:
     """Delete a saved login."""
     cmd_delete_login(login_id)
 
@@ -922,7 +977,9 @@ def cli_delete_login(login_id: str = typer.Argument(..., help='Login ID')) -> No
 
 
 @app.command('save-mcp-login')
-def cli_save_mcp_login(server: str = typer.Argument(..., help='MCP server name')) -> None:
+def cli_save_mcp_login(
+    server: str = typer.Argument(..., help='MCP server name', autocompletion=_complete_keychain_mcp_server),
+) -> None:
     """Save MCP server token from keychain."""
     cmd_save_mcp_login(server)
 
@@ -934,7 +991,9 @@ def cli_list_mcp_logins() -> None:
 
 
 @app.command('delete-mcp-login')
-def cli_delete_mcp_login(server: str = typer.Argument(..., help='MCP server name')) -> None:
+def cli_delete_mcp_login(
+    server: str = typer.Argument(..., help='MCP server name', autocompletion=_complete_saved_mcp_server),
+) -> None:
     """Remove saved MCP login."""
     cmd_delete_mcp_login(server)
 
