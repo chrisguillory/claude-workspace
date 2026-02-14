@@ -134,12 +134,25 @@ def _osc8_link(url: str, text: str) -> str:
 # stale data across account switches.
 # =============================================================================
 
+CONFIG_PATH = Path.home() / '.claude.json'
+SCRIPT_PATH = Path(__file__).resolve()
 CACHE_PATH = Path('/tmp/claude-statusline-cache.json')
 CACHE_TTL_SECONDS = 300  # 5 minutes
+SNAPSHOT_DIR = Path.home() / '.claude-workspace' / 'statusline-snapshots'
+SWITCH_PENDING_PATH = Path.home() / '.claude-workspace' / '.switch-pending'
+
+
+def _max_mtime() -> float:
+    """Return the most recent mtime of config or script, or 0 if unavailable."""
+    mtime = 0.0
+    for path in (CONFIG_PATH, SCRIPT_PATH):
+        with contextlib.suppress(OSError):
+            mtime = max(mtime, path.stat().st_mtime)
+    return mtime
 
 
 def _read_cached_static() -> Mapping[str, str] | None:
-    """Read cached static data if fresh enough."""
+    """Read cached static data if fresh and neither config nor script changed."""
     if not CACHE_PATH.exists():
         return None
     try:
@@ -147,8 +160,12 @@ def _read_cached_static() -> Mapping[str, str] | None:
         if not isinstance(raw, dict):
             return None
         ts = float(raw.get('_timestamp', 0))
-        if (datetime.now(UTC).timestamp() - ts) < CACHE_TTL_SECONDS:
-            return {k: str(v) for k, v in raw.items()}
+        if (datetime.now(UTC).timestamp() - ts) > CACHE_TTL_SECONDS:
+            return None
+        # Invalidate if config or script was modified after cache was written
+        if _max_mtime() > ts:
+            return None
+        return {k: str(v) for k, v in raw.items()}
     except (json.JSONDecodeError, OSError):
         pass
     return None
@@ -161,6 +178,109 @@ def _write_cache(data: Mapping[str, str]) -> None:
         CACHE_PATH.write_text(json.dumps(cache))
 
 
+def _find_claude_pid() -> int:
+    """Find Claude Code PID by walking up the process tree."""
+    current = os.getppid()
+    for _ in range(20):
+        result = subprocess.run(
+            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            capture_output=True,
+            text=True,
+        )
+        if not result.stdout.strip():
+            break
+        parts = result.stdout.strip().split(None, 1)
+        ppid = int(parts[0])
+        comm = parts[1] if len(parts) > 1 else ''
+        if 'claude' in comm.lower():
+            return current
+        if ppid == 0:
+            break
+        current = ppid
+    raise RuntimeError('Could not find Claude Code process in parent tree')
+
+
+def _snapshot_path(session_id: str) -> Path:
+    return SNAPSHOT_DIR / f'{session_id}.json'
+
+
+def _is_switch_pending(disk_data: Mapping[str, str]) -> bool:
+    """Check if switch-login's marker matches current disk state."""
+    if not SWITCH_PENDING_PATH.exists():
+        return False
+    marker = json.loads(SWITCH_PENDING_PATH.read_text())
+    return all(
+        marker.get(k) == disk_data.get(k)
+        for k in ('emailAddress', 'billingType', 'subscription', 'tier')
+        if k in marker
+    )
+
+
+def _get_active_credentials(session_id: str, claude_pid: int) -> tuple[Mapping[str, str], bool]:
+    """Return (credentials_to_display, switch_pending).
+
+    On first call for a session, snapshots the current disk state.
+    On subsequent calls, compares snapshot vs disk to detect mid-session switches.
+    """
+    snap_file = _snapshot_path(session_id)
+    disk_data = _read_static_data()
+
+    if snap_file.exists():
+        snap = json.loads(snap_file.read_text())
+        # PID changed = session was resumed with new process → re-snapshot
+        if snap.get('claude_pid') != claude_pid:
+            snap_file.unlink(missing_ok=True)
+            SWITCH_PENDING_PATH.unlink(missing_ok=True)
+        else:
+            snap_creds = snap.get('credentials', {})
+            cred_keys = ('emailAddress', 'billingType', 'subscription', 'tier')
+            changed = any(snap_creds.get(k) != disk_data.get(k) for k in cred_keys)
+            if changed:
+                # Check if switch-login caused this (marker matches disk)
+                if _is_switch_pending(disk_data):
+                    return snap_creds, True
+                # /login or other cause — update snapshot to match new reality
+                snap['credentials'] = dict(disk_data)
+                snap['created_at'] = datetime.now(UTC).isoformat()
+                snap_file.write_text(json.dumps(snap, indent=2))
+                return disk_data, False
+            return disk_data, False
+
+    # First invocation (or PID changed) — create snapshot
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    snap = {
+        'session_id': session_id,
+        'claude_pid': claude_pid,
+        'created_at': datetime.now(UTC).isoformat(),
+        'credentials': dict(disk_data),
+    }
+    snap_file.write_text(json.dumps(snap, indent=2))
+
+    # Clean up orphans on first invocation
+    _cleanup_orphan_snapshots(session_id)
+
+    return disk_data, False
+
+
+def _cleanup_orphan_snapshots(current_session_id: str) -> None:
+    """Remove snapshot files whose Claude PID is no longer running."""
+    if not SNAPSHOT_DIR.exists():
+        return
+    for path in SNAPSHOT_DIR.glob('*.json'):
+        if path.stem == current_session_id:
+            continue
+        snap = json.loads(path.read_text())
+        pid = snap.get('claude_pid')
+        if pid is None:
+            path.unlink()
+            continue
+        # Check if process is still alive
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            path.unlink()
+
+
 def _read_static_data() -> Mapping[str, str]:
     """Read email and subscription from ~/.claude.json and keychain."""
     cached = _read_cached_static()
@@ -170,17 +290,14 @@ def _read_static_data() -> Mapping[str, str]:
     data: dict[str, str] = {}
 
     # Email from ~/.claude.json
-    config_path = Path.home() / '.claude.json'
-    if config_path.is_file():
+    if CONFIG_PATH.is_file():
         try:
-            config = json.loads(config_path.read_text())
+            config = json.loads(CONFIG_PATH.read_text())
             oa = config.get('oauthAccount', {})
-            email = oa.get('emailAddress', '')
-            if email:
-                data['email'] = email
-            org = oa.get('organizationName', '')
-            if org:
-                data['org'] = org
+            for key in ('emailAddress', 'organizationName', 'billingType'):
+                val = oa.get(key, '')
+                if val:
+                    data[key] = str(val)
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -190,8 +307,6 @@ def _read_static_data() -> Mapping[str, str]:
             [
                 'security',
                 'find-generic-password',
-                '-a',
-                os.environ.get('USER', ''),
                 '-w',
                 '-s',
                 'Claude Code-credentials',
@@ -267,8 +382,35 @@ def _git_remote_url() -> str:
 # =============================================================================
 
 
-def _context_bar(pct: float) -> str:
-    """Render a 10-char progress bar with color."""
+def _format_plan(sub: str, tier: str) -> str:
+    """Format subscription type and rate limit tier as friendly plan name.
+
+    Tier format: default_claude_{tier_plan}_{multiplier}, e.g. default_claude_max_5x.
+    The tier_plan and multiplier are extracted and title-cased.
+    """
+    tier_suffix = ''
+    if tier.startswith('default_claude_'):
+        # e.g. "max_5x" → "Max 5x"
+        raw = tier.removeprefix('default_claude_')
+        parts = raw.split('_', 1)
+        if len(parts) == 2:
+            tier_suffix = f'{parts[0].title()} {parts[1]}'
+        else:
+            tier_suffix = raw.title()
+    sub_lower = sub.lower()
+    if sub_lower == 'pro':
+        return 'Pro'
+    if sub_lower == 'max':
+        return tier_suffix or 'Max'
+    if sub_lower == 'team':
+        return tier_suffix or 'Team'
+    if sub:
+        return tier_suffix or sub
+    return tier_suffix
+
+
+def _context_bar(pct: float, window_size: int) -> str:
+    """Render a 10-char progress bar with color and estimated token usage."""
     if pct >= 90:
         color = RED
     elif pct >= 70:
@@ -278,7 +420,9 @@ def _context_bar(pct: float) -> str:
 
     filled = int(pct / 10)
     bar = '█' * filled + '░' * (10 - filled)
-    return f'{color}{bar}{RESET} {pct:.0f}%'
+    used = _format_tokens(int(pct / 100 * window_size))
+    total = _format_tokens(window_size)
+    return f'{color}{bar}{RESET} {pct:.0f}% {DIM}({used}/{total}){RESET}'
 
 
 def _format_duration(ms: float) -> str:
@@ -350,7 +494,8 @@ def main() -> None:
         print(f'{RED}StatusLine: validation failed — see {log_path}{RESET}', file=sys.stderr)
         return
 
-    static = _read_static_data()
+    claude_pid = _find_claude_pid()
+    static, switch_pending = _get_active_credentials(data.session_id, claude_pid)
     branch = _git_branch()
     remote_url = _git_remote_url()
 
@@ -358,23 +503,32 @@ def main() -> None:
     parts: list[str] = []
 
     # Model
-    parts.append(f'{CYAN}[{data.model.display_name}]{RESET}')
+    parts.append(f'{CYAN}[{data.model.id}]{RESET}')
 
-    # Session ID — space-separated so UUID is double-clickable, links to transcript
+    # PID + Session ID — space-separated so UUID is double-clickable, links to transcript
     transcript_url = f'file://{data.transcript_path}'
-    parts.append(f'{DIM}session_id:{RESET} {_osc8_link(transcript_url, data.session_id)}')
+    pid_str = f'{DIM}pid:{RESET} {claude_pid}'
+    parts.append(f'{pid_str} {DIM}session_id:{RESET} {_osc8_link(transcript_url, data.session_id)}')
 
     # Account
-    email = static.get('email', '')
+    email = static.get('emailAddress', '')
     sub = static.get('subscription', '')
-    if email:
-        parts.append(f'{DIM}{email}{RESET}')
-    if sub:
-        org = static.get('org', '')
-        if org:
-            parts.append(f'{DIM}{sub}·{org}{RESET}')
-        else:
-            parts.append(f'{DIM}{sub}{RESET}')
+    org = static.get('organizationName', '')
+    billing = static.get('billingType', '')
+    raw_tier = static.get('tier', '')
+    is_console = billing == 'prepaid'
+    plan = _format_plan(sub, raw_tier)
+    if is_console:
+        account_label = f'{YELLOW}Anthropic Console{RESET}'
+        account_parts = [f'{DIM}{email}{RESET}', account_label] if email else [account_label]
+        parts.append('·'.join(account_parts))
+    elif sub == 'Team':
+        parts.append(f'{DIM}{"·".join(p for p in [email, org or "Team", plan] if p)}{RESET}')
+    else:
+        parts.append(f'{DIM}{"·".join(p for p in [email, plan or "Personal"] if p)}{RESET}')
+
+    if switch_pending:
+        parts.append(f'{YELLOW}(switch pending — restart to activate){RESET}')
 
     # Git branch — links to GitHub branch page
     if branch:
@@ -396,11 +550,15 @@ def main() -> None:
     metrics: list[str] = []
 
     # Context bar
-    pct = data.context_window.used_percentage or 0
-    metrics.append(_context_bar(pct))
-
-    # Token counts
     ctx = data.context_window
+    pct = ctx.used_percentage or 0
+    metrics.append(_context_bar(pct, ctx.context_window_size))
+
+    # Remaining percentage
+    remaining = ctx.remaining_percentage
+    if remaining is not None:
+        rem_color = GREEN if remaining > 30 else YELLOW if remaining > 10 else RED
+        metrics.append(f'{rem_color}{remaining:.0f}% remaining{RESET}')
     if ctx.current_usage is not None:
         in_tokens = _format_tokens(ctx.current_usage.input_tokens)
         out_tokens = _format_tokens(ctx.current_usage.output_tokens)
@@ -436,11 +594,6 @@ def main() -> None:
     else:
         line3.append(f'{DIM}cwd:{RESET} {data.cwd}')
 
-    # Rate limit tier
-    tier = static.get('tier', '')
-    if tier:
-        line3.append(f'{DIM}tier:{RESET} {tier}')
-
     # Transcript path
     line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, data.transcript_path)}')
 
@@ -454,16 +607,6 @@ def main() -> None:
     ctx_out = _format_tokens(ctx.total_output_tokens)
     line4.append(f'{DIM}total_in:{RESET} {ctx_in}')
     line4.append(f'{DIM}total_out:{RESET} {ctx_out}')
-
-    # Context window size
-    ctx_size = _format_tokens(ctx.context_window_size)
-    line4.append(f'{DIM}window:{RESET} {ctx_size}')
-
-    # Remaining percentage
-    remaining = ctx.remaining_percentage
-    if remaining is not None:
-        rem_color = GREEN if remaining > 30 else YELLOW if remaining > 10 else RED
-        line4.append(f'{rem_color}{remaining:.0f}% remaining{RESET}')
 
     # Exceeds 200k warning
     if data.exceeds_200k_tokens:
@@ -482,6 +625,19 @@ def main() -> None:
         line4.append(f'{DIM}api:{_format_duration(api_dur)}{RESET}')
 
     print(' │ '.join(line4))
+
+    # ── Line 5: Debug ───────────────────────────────────────────────────
+    mtime = _max_mtime()
+    mtime_str = datetime.fromtimestamp(mtime, tz=UTC).astimezone().strftime('%H:%M:%S') if mtime else 'n/a'
+    cache_ts = 0.0
+    if CACHE_PATH.exists():
+        with contextlib.suppress(json.JSONDecodeError, OSError):
+            cache_ts = float(json.loads(CACHE_PATH.read_text()).get('_timestamp', 0))
+    cache_str = datetime.fromtimestamp(cache_ts, tz=UTC).astimezone().strftime('%H:%M:%S') if cache_ts else 'n/a'
+    invalidated = 'yes' if mtime > cache_ts else 'no'
+    print(
+        f'{DIM}max_mtime:{RESET} {mtime_str} {DIM}│ cache written:{RESET} {cache_str} {DIM}│ invalidated:{RESET} {invalidated}'
+    )
 
 
 def _excepthook(exc_type: type[BaseException], exc_value: BaseException, exc_tb: types.TracebackType | None) -> None:

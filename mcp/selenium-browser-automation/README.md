@@ -23,7 +23,7 @@ Linux/Windows typically get pre-built wheels and don't need this step.
 # From within the claude-workspace repo:
 claude mcp add --scope user selenium-browser-automation -- \
   uv run --project "$(git rev-parse --show-toplevel)/mcp/selenium-browser-automation" \
-  --script "$(git rev-parse --show-toplevel)/mcp/selenium-browser-automation/selenium_browser_automation/server.py"
+  mcp-selenium-browser
 ```
 
 ## Comparison with Claude in Chrome
