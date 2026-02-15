@@ -89,6 +89,11 @@ class OperationProgress(StrictModel):
     embed_cache_misses: int  # Embeddings computed via API
     chunks_stored: int  # Output of store stage
 
+    # Per-stage file completion (files that finished each stage)
+    files_chunked: int = 0
+    files_embedded: int = 0
+    files_stored: int = 0
+
     # Completion
     files_done: int
     errors_429: int
@@ -136,6 +141,9 @@ class OperationProgress(StrictModel):
             embed_cache_hits=snapshot.embed_cache_hits,
             embed_cache_misses=snapshot.embed_cache_misses,
             chunks_stored=snapshot.chunks_stored,
+            files_chunked=snapshot.files_chunked,
+            files_embedded=snapshot.files_embedded,
+            files_stored=snapshot.files_stored,
             files_done=snapshot.files_done,
             errors_429=errors_429,
             by_file_type=snapshot.by_file_type,

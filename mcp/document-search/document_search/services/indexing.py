@@ -197,6 +197,9 @@ class IndexingService:
             embed_cache_hits=self._embedding.cache_hits,
             embed_cache_misses=self._embedding.cache_misses,
             chunks_stored=op.counters.chunks_stored,
+            files_chunked=op.counters.files_chunked,
+            files_embedded=op.counters.files_embedded,
+            files_stored=op.counters.files_stored,
             files_awaiting_chunk=op.file_queue.qsize(),
             files_awaiting_embed=op.embed_queue.qsize(),
             files_awaiting_store=op.upsert_queue.qsize(),
@@ -853,6 +856,7 @@ class IndexingService:
                         )
                     )
                     counters.chunks_ingested += len(chunks)
+                    counters.files_chunked += 1
                 else:
                     # File produced 0 chunks (content too short) - record in state to avoid re-processing
                     tracer.record(file_key, 'chunk', 'completed')
@@ -976,6 +980,7 @@ class IndexingService:
                 await upsert_queue.put(embedded)
                 embed_queue.task_done()
                 counters.chunks_embedded += len(chunked.chunks)
+                counters.files_embedded += 1
 
                 start_idx = end_idx
 
@@ -1019,6 +1024,7 @@ class IndexingService:
             await upsert_queue.put(embedded)
             embed_queue.task_done()
             counters.chunks_embedded += len(chunked.chunks)
+            counters.files_embedded += 1
 
         while True:
             try:
@@ -1096,6 +1102,7 @@ class IndexingService:
             # Upsert new chunks
             await self._repo.upsert(points)
             counters.chunks_stored += len(embedded.chunks)
+            counters.files_stored += 1
 
             # Delete only obsolete chunks
             if self._state_lock is None:
@@ -1201,6 +1208,11 @@ class PipelineSnapshot:
     embed_cache_misses: int
     chunks_stored: int
 
+    # Per-stage file completion (files that finished each stage)
+    files_chunked: int
+    files_embedded: int
+    files_stored: int
+
     # Pipeline queues (file counts waiting)
     files_awaiting_chunk: int
     files_awaiting_embed: int
@@ -1275,10 +1287,10 @@ async def create_indexing_service(
 
 @dataclass
 class PipelineCounters:
-    """Cumulative chunk counts at pipeline stage boundaries.
+    """Cumulative counts at pipeline stage boundaries.
 
-    Tracks chunks exiting each stage for progress monitoring.
-    Dashboard derives queue depths as differences between stages.
+    Tracks chunks and files exiting each stage for progress monitoring.
+    Dashboard uses these to show per-stage completion and queue depths.
 
     Thread-safe: Python's += on integers is atomic under GIL.
     """
@@ -1286,6 +1298,11 @@ class PipelineCounters:
     chunks_ingested: int = 0  # Chunk worker → embed queue
     chunks_embedded: int = 0  # Embed worker → upsert queue
     chunks_stored: int = 0  # Upsert worker → complete
+
+    # File-level completion tracking (one file → many chunks)
+    files_chunked: int = 0  # Files that completed chunk stage
+    files_embedded: int = 0  # Files that completed embed stage
+    files_stored: int = 0  # Files that completed store stage
 
 
 @dataclass

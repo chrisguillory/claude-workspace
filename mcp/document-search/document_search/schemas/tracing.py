@@ -17,6 +17,7 @@ __all__ = [
     'PipelineStage',
     'PipelineTimingReport',
     'QueueDepthSample',
+    'StageCompletionData',
     'StageTimingReport',
     'TimingEvent',
     'TraceableStage',
@@ -66,19 +67,48 @@ class StageTimingReport(StrictModel):
 
 
 class QueueDepthSample(StrictModel):
-    """Point-in-time queue depth measurement (1Hz sampling)."""
+    """Point-in-time queue depth measurement (1Hz sampling).
+
+    Tracks items waiting in queues and items actively being processed.
+    """
 
     elapsed_seconds: float
     file_queue: int
     embed_queue: int
     upsert_queue: int
 
+    # Items currently being processed (started but not completed)
+    chunk_in_flight: int
+    embed_in_flight: int
+    store_in_flight: int
+
+    # Cumulative file completions per stage (enables completion curves)
+    files_chunk_done: int = 0
+    files_embed_done: int = 0
+    files_store_done: int = 0
+
+
+class StageCompletionData(StrictModel):
+    """Per-item completion data for client-side windowed analysis.
+
+    Parallel arrays sorted by completion time. completions[i] and
+    durations[i] describe the same item. Client computes windows dynamically.
+
+    Size impact: ~90 bytes per item per stage. For 358 files × 5 stages,
+    adds ~22KB to operation JSON (27% overhead vs aggregate-only report).
+    """
+
+    stage: TraceableStage
+    completions: Sequence[float]  # Seconds from pipeline start, sorted
+    durations: Sequence[float]  # Processing time in milliseconds
+
 
 class PipelineTimingReport(StrictModel):
     """Complete timing report for a pipeline run.
 
     Produced by PipelineTracer.build_report() after pipeline completion.
-    Includes per-stage timing percentiles and queue depth time series.
+    Includes per-stage timing percentiles, queue depth time series,
+    and raw completion data for interactive windowed analysis.
     """
 
     scan_seconds: float
@@ -86,3 +116,6 @@ class PipelineTimingReport(StrictModel):
     queue_depth_series: Sequence[QueueDepthSample]
     total_items: int
     total_elapsed_seconds: float
+
+    # Raw completion data for client-side interactive charts (zoom, hover, toggle)
+    completion_series: Sequence[StageCompletionData]

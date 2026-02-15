@@ -450,6 +450,14 @@ def _format_cost(usd: float) -> str:
     return f'{color}${usd:.2f}{RESET}'
 
 
+def _shorten_path(path: str) -> str:
+    """Replace home directory prefix with ~ for display."""
+    home = str(Path.home())
+    if path.startswith(home):
+        return '~' + path[len(home) :]
+    return path
+
+
 def _format_tokens(n: int) -> str:
     """Format token count as compact string."""
     if n >= 1_000_000:
@@ -502,8 +510,8 @@ def main() -> None:
     # ── Line 1: Identity + Model ─────────────────────────────────────────
     parts: list[str] = []
 
-    # Model
-    parts.append(f'{CYAN}[{data.model.id}]{RESET}')
+    # Model + Version
+    parts.append(f'{CYAN}{data.model.id}{RESET} {DIM}v{data.version}{RESET}')
 
     # PID + Session ID — space-separated so UUID is double-clickable, links to transcript
     transcript_url = f'file://{data.transcript_path}'
@@ -582,20 +590,18 @@ def main() -> None:
 
     print(' │ '.join(metrics))
 
-    # ── Line 3: Workspace + Version ─────────────────────────────────────
+    # ── Line 3: Workspace ──────────────────────────────────────────────
     line3: list[str] = []
-
-    line3.append(f'{DIM}v{data.version}{RESET}')
 
     # Show cwd; if project_dir differs, show both
     if data.workspace.project_dir != data.workspace.current_dir:
-        line3.append(f'{DIM}cwd:{RESET} {data.cwd}')
-        line3.append(f'{DIM}project:{RESET} {data.workspace.project_dir}')
+        line3.append(f'{DIM}cwd:{RESET} {_shorten_path(data.cwd)}')
+        line3.append(f'{DIM}project:{RESET} {_shorten_path(data.workspace.project_dir)}')
     else:
-        line3.append(f'{DIM}cwd:{RESET} {data.cwd}')
+        line3.append(f'{DIM}cwd:{RESET} {_shorten_path(data.cwd)}')
 
     # Transcript path
-    line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, data.transcript_path)}')
+    line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, _shorten_path(data.transcript_path))}')
 
     print(' │ '.join(line3))
 
