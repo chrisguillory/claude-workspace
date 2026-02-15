@@ -23,6 +23,7 @@ from document_search.schemas.tracing import (
     PercentileStats,
     PipelineTimingReport,
     QueueDepthSample,
+    StageCompletionData,
     StageTimingReport,
     TimingEvent,
     TraceableStage,
@@ -149,6 +150,16 @@ class PipelineTracer:
                 store_in += 1
         return chunk_in, embed_in, store_in
 
+    def get_completion_counts(self) -> tuple[int, int, int]:
+        """Count files that have completed each stage.
+
+        Returns (chunk, embed, store) counts of files with completion events.
+        """
+        chunk_done = sum(1 for events in self._events.values() if 'chunk:completed' in events)
+        embed_done = sum(1 for events in self._events.values() if 'embed:completed' in events)
+        store_done = sum(1 for events in self._events.values() if 'store:completed' in events)
+        return chunk_done, embed_done, store_done
+
     # ── Report generation ───────────────────────────────────────
 
     def build_report(self) -> PipelineTimingReport:
@@ -194,28 +205,69 @@ class PipelineTracer:
                 )
             )
 
+        completion_series = self._build_completion_series()
+
         return PipelineTimingReport(
             scan_seconds=round(self._scan_seconds, 3),
             stages=tuple(stage_reports),
             queue_depth_series=tuple(self._queue_depths),
             total_items=len(self._events),
             total_elapsed_seconds=round(total_elapsed, 3),
+            completion_series=completion_series,
         )
 
     # ── Private: queue monitoring ────────────────────────────────
 
     async def _monitor_loop(self, interval: float) -> None:
-        """Sample queue depths periodically."""
+        """Sample queue depths, in-flight counts, and completion counts periodically."""
         while True:
             await asyncio.sleep(interval)
+            chunk_in, embed_in, store_in = self.get_in_flight_counts()
+            chunk_done, embed_done, store_done = self.get_completion_counts()
             self._queue_depths.append(
                 QueueDepthSample(
                     elapsed_seconds=round(time.perf_counter() - self._start, 3),
                     file_queue=self._file_queue.qsize(),
                     embed_queue=self._embed_queue.qsize(),
                     upsert_queue=self._upsert_queue.qsize(),
+                    chunk_in_flight=chunk_in,
+                    embed_in_flight=embed_in,
+                    store_in_flight=store_in,
+                    files_chunk_done=chunk_done,
+                    files_embed_done=embed_done,
+                    files_store_done=store_done,
                 )
             )
+
+    # ── Private: completion series ─────────────────────────────
+
+    def _build_completion_series(self) -> Sequence[StageCompletionData]:
+        """Build per-item completion data for all stages.
+
+        Includes ALL items (no warm-up exclusion) so the client can see
+        the full timeline including ramp-up behavior. Sorted by completion
+        time for efficient client-side binary search windowing.
+        """
+        series: list[StageCompletionData] = []
+        for stage in _ALL_STAGES:
+            start_key, end_key = _stage_event_keys(stage)
+            pairs: list[tuple[float, float]] = []
+            for events in self._events.values():
+                start = events.get(start_key)
+                end = events.get(end_key)
+                if start is not None and end is not None:
+                    pairs.append((end - self._start, (end - start) * 1000))
+            if not pairs:
+                continue
+            pairs.sort()
+            series.append(
+                StageCompletionData(
+                    stage=stage,
+                    completions=tuple(round(p[0], 3) for p in pairs),
+                    durations=tuple(round(p[1], 3) for p in pairs),
+                )
+            )
+        return tuple(series)
 
     # ── Private: metric collection ──────────────────────────────
 
@@ -225,21 +277,15 @@ class PipelineTracer:
         warmup_ids: frozenset[str],
     ) -> Sequence[float]:
         """Collect processing times (completed - started) for a stage in ms."""
+        start_key, end_key = _stage_event_keys(stage)
         times: list[float] = []
-        # Sub-stages and top-level embed use batch_started as the start event
-        if stage in ('embed', 'embed_dense', 'embed_sparse'):
-            start_event = f'{stage}:batch_started' if stage == 'embed' else f'{stage}:started'
-        else:
-            start_event = f'{stage}:started'
-        end_event = f'{stage}:completed'
-
         for item_id, events in self._events.items():
             if item_id in warmup_ids:
                 continue
-            start = events.get(start_event)
-            end = events.get(end_event)
+            start = events.get(start_key)
+            end = events.get(end_key)
             if start is not None and end is not None:
-                times.append((end - start) * 1000)  # Convert to ms
+                times.append((end - start) * 1000)
         return times
 
     def _collect_queue_wait(
@@ -302,6 +348,19 @@ class PipelineTracer:
 
 
 # ── Module-level helpers ────────────────────────────────────────
+
+
+def _stage_event_keys(stage: TraceableStage) -> tuple[str, str]:
+    """Return (start_event_key, end_event_key) for stage processing time.
+
+    Embed uses batch_started → completed to measure processing time from
+    when the batch starts processing (after accumulation wait), excluding
+    queue wait (dequeued → batch_started). All other stages measure from
+    their started event.
+    """
+    if stage == 'embed':
+        return f'{stage}:batch_started', f'{stage}:completed'
+    return f'{stage}:started', f'{stage}:completed'
 
 
 def _percentiles(values: Sequence[float]) -> PercentileStats:

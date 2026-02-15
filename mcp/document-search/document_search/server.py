@@ -192,7 +192,9 @@ class ServerState:
         )
 
     async def close(self) -> None:
-        """Close all cached embedding clients."""
+        """Close all cached embedding clients and shut down process pools."""
+        self.chunking_service.shutdown()
+        self.sparse_embedding_service.shutdown()
         for client in self._embedding_clients.values():
             await client.close()
 
