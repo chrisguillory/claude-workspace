@@ -1201,15 +1201,25 @@ INDEX_HTML = """<!DOCTYPE html>
             const fmtMs = (v) => v < 1 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v).toLocaleString();
             const fmtPct = (stats) => stats ? `${fmtMs(stats.p50_ms)} / ${fmtMs(stats.p95_ms)} / ${fmtMs(stats.p99_ms)} / ${fmtMs(stats.max_ms)}` : '—';
 
+            const threads = timing.sparse_threads;
             let rows = timing.stages.map(s => {
                 const isSub = SUB_STAGES.has(s.stage);
                 const label = s.stage.replace('embed_', '↳ ');
+                // Efficiency: mean cpu / mean wall / threads (only for embed_sparse)
+                let effHtml = '—';
+                if (s.cpu && s.wall && threads && s.wall.p50_ms > 0) {
+                    const parallel = s.cpu.p50_ms / s.wall.p50_ms;
+                    const eff = parallel / threads;
+                    effHtml = `${parallel.toFixed(1)}x / ${threads}t = ${(eff * 100).toFixed(0)}%`;
+                }
                 return `<tr class="${isSub ? 'sub-stage' : ''}">
                     <td>${label}</td>
                     <td>${fmtPct(s.processing)}</td>
                     <td>${s.queue_wait ? fmtPct(s.queue_wait) : '—'}</td>
                     <td>${s.batch_wait ? fmtPct(s.batch_wait) : '—'}</td>
                     <td>${s.cpu ? fmtPct(s.cpu) : '—'}</td>
+                    <td>${s.wall ? fmtPct(s.wall) : '—'}</td>
+                    <td>${effHtml}</td>
                     <td>${s.throughput_per_sec.toFixed(1)}/s</td>
                     <td>${s.processing.count.toLocaleString()}</td>
                 </tr>`;
@@ -1237,14 +1247,16 @@ INDEX_HTML = """<!DOCTYPE html>
                             <th>Processing p50/p95/p99/max (ms)</th>
                             <th>Queue Wait</th>
                             <th>Batch Wait</th>
-                            <th>CPU Time</th>
+                            <th>CPU p50/p95/p99/max (ms)</th>
+                            <th>Wall p50/p95/p99/max (ms)</th>
+                            <th>Efficiency</th>
                             <th>Throughput</th>
                             <th>Items</th>
                         </tr>
                         ${rows}
                     </table>
                     <div style="font-size:11px;color:#888;margin-top:4px">
-                        Scan: ${timing.scan_seconds.toFixed(1)}s | ${timing.total_items.toLocaleString()} items | ${timing.total_elapsed_seconds.toFixed(1)}s total
+                        Scan: ${timing.scan_seconds.toFixed(1)}s | ${timing.total_items.toLocaleString()} items | ${timing.total_elapsed_seconds.toFixed(1)}s total${timing.sparse_threads ? ` | ${timing.sparse_threads} rayon threads` : ''}
                     </div>
                     ${chartHtml}
                 </div>`;
