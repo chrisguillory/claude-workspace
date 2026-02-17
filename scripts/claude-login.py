@@ -42,8 +42,8 @@ Workflow:
     4. Restart Claude Code to activate
 
 Setup token workflow (subscription accounts only):
-    1. Run `claude setup-token` to generate a 1-year token
-    2. save-setup-token --login <id> <token>
+    1. Run `claude setup-token` (opens browser — choose any account)
+    2. save-setup-token --login <id> (pastes token to specific login)
     3. switch-login <id> writes setup-token to keychain as accessToken
     4. switch-login <id> --keychain to use original OAuth credentials instead
 
@@ -69,13 +69,14 @@ Claude Code CLI auth commands (for reference):
     claude auth login [--email <email>] [--sso]   Non-interactive OAuth login
     claude auth status [--json|--text]             Check auth state (exit 0=ok, 1=no)
     claude auth logout                             Clear all auth state
-    claude setup-token                             Generate 1-year token (stdout only)
+    claude setup-token                             Browser OAuth → 1-year token (stdout)
     /login                                         Interactive OAuth (inside REPL)
     /logout                                        Clear auth (inside REPL)
 
     Setup tokens (sk-ant-oat01-*) have user:inference scope only — /status and
-    `claude usage` won't show profile info. Generate via browser OAuth flow;
-    no way to skip browser or paste token directly.
+    `claude usage` won't show profile info. `claude setup-token` opens the
+    same browser OAuth flow as /login — you choose the account there,
+    independent of which account is currently active. No way to skip browser.
 
     The settings.json `env` block has a security allowlist that excludes all
     credential env vars (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, etc.).
