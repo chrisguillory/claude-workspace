@@ -105,6 +105,20 @@ class EmbeddingService:
         """
         return await self._cache_loader.load(text)
 
+    async def embed_texts(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
+        """Embed multiple texts as a single batch-aware call.
+
+        Same cache/embed pipeline as embed_text(), but submits all items
+        in one lock acquisition — no per-text Task creation on the event loop.
+
+        Args:
+            texts: Texts to embed.
+
+        Returns:
+            Typed embed responses in same order as texts.
+        """
+        return await self._cache_loader.load_many(texts)
+
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
         """Embed single text.
 
@@ -209,7 +223,7 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
 
         if miss_indices:
             # Forward misses to the embed loader (coalesces into API batches)
-            miss_responses = await asyncio.gather(*[self._embed_loader.load(texts[i]) for i in miss_indices])
+            miss_responses = await self._embed_loader.load_many([texts[i] for i in miss_indices])
 
             for idx, response in zip(miss_indices, miss_responses):
                 results[idx] = response

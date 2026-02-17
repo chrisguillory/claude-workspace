@@ -33,7 +33,13 @@ class SparseEmbeddingService:
 
     def __init__(self) -> None:
         self._model = bm25_rs.BM25Model()
-        logger.info(f'[SPARSE] rayon thread pool: {bm25_rs.BM25Model.thread_count()} threads')
+        self._thread_count = bm25_rs.BM25Model.thread_count()
+        logger.info(f'[SPARSE] rayon thread pool: {self._thread_count} threads')
+
+    @property
+    def thread_count(self) -> int:
+        """Number of rayon worker threads available for parallel BM25 computation."""
+        return self._thread_count
 
     @classmethod
     async def create(cls, **kwargs: object) -> SparseEmbeddingService:

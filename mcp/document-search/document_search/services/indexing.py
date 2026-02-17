@@ -260,11 +260,10 @@ class IndexingService:
         chunk_ids = [_deterministic_chunk_id(file_key, c.chunk_index, c.text) for c in chunks]
 
         # Embed (dense + sparse)
-        embed_tasks = [self._embedding.embed_text(c.text) for c in chunks]
-        responses = await asyncio.gather(*embed_tasks)
+        texts = [c.text for c in chunks]
+        responses = await self._embedding.embed_texts(texts)
         dense = [r.values for r in responses]
 
-        texts = [c.text for c in chunks]
         sparse_results, _wall, _cpu = await self._sparse_embedding.embed_batch(texts)
         # Build points using same factory as pipeline
         points = [
@@ -923,9 +922,14 @@ class IndexingService:
 
         Fail-fast: exceptions propagate immediately, task_done() only on success.
         """
-        # Accumulation settings (for sparse embedding ProcessPool efficiency)
-        BATCH_THRESHOLD = 500  # Min texts before sending to ProcessPool
+        # Accumulation settings for sparse embedding batch efficiency.
+        # Rayon needs enough work items to saturate cores — benchmarks show
+        # ~100 texts per thread for 95%+ efficiency on medium/long texts.
+        # The timeout ensures we don't stall when work arrives slowly.
+        sparse_threads = self._sparse_embedding.thread_count
+        BATCH_THRESHOLD = max(500, sparse_threads * 300)
         BATCH_TIMEOUT = 0.05  # 50ms - don't wait forever for small files
+        logger.info(f'[EMBED] batch_threshold={BATCH_THRESHOLD} (sparse_threads={sparse_threads})')
 
         # Accumulators
         accumulated_files: list[_ChunkedFile] = []
@@ -971,8 +975,7 @@ class IndexingService:
 
             async def dense_with_tracing() -> Sequence[EmbedResponse]:
                 t0 = time.perf_counter()
-                dense_tasks = [self._embedding.embed_text(text) for text in accumulated_texts]
-                results: list[EmbedResponse] = list(await asyncio.gather(*dense_tasks))
+                results = await self._embedding.embed_texts(accumulated_texts)
                 elapsed = time.perf_counter() - t0
 
                 for chunked in accumulated_files:
@@ -1039,9 +1042,7 @@ class IndexingService:
                 return results, cpu_secs
 
             async def dense_single() -> Sequence[EmbedResponse]:
-                results: list[EmbedResponse] = list(
-                    await asyncio.gather(*[self._embedding.embed_text(text) for text in texts])
-                )
+                results = await self._embedding.embed_texts(texts)
                 tracer.record(fk, 'embed_dense', 'completed')
                 return results
 
