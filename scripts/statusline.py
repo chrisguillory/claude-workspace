@@ -1,7 +1,10 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["pydantic>=2.0"]
+# dependencies = [
+#     "psutil>=5.9",
+#     "pydantic>=2.0",
+# ]
 # ///
 
 """Claude Code status line script.
@@ -25,12 +28,14 @@ import json
 import os
 import subprocess
 import sys
+import time
 import traceback
 import types
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+import psutil
 import pydantic
 
 # =============================================================================
@@ -39,11 +44,57 @@ import pydantic
 
 
 class StrictModel(pydantic.BaseModel):
+    """Shared base: no extra fields, strict type coercion, immutable."""
+
     model_config = pydantic.ConfigDict(
         extra='forbid',
         strict=True,
         frozen=True,
     )
+
+
+# =============================================================================
+# Health Monitoring Models
+#
+# Tracks process health across statusline invocations via a per-session sidecar
+# file. Each invocation is a fresh Python process, so all cross-invocation state
+# (CPU deltas, memory trend, peak tracking) must be persisted to disk.
+#
+# HealthSample: single point-in-time measurement from psutil
+# HealthSidecar: ring buffer of recent samples + session-level aggregates
+# =============================================================================
+
+
+class HealthSample(StrictModel):
+    """Point-in-time process health measurement from psutil."""
+
+    ts: float  # time.time() — comparable across processes (unlike monotonic)
+    rss_bytes: int  # memory_info().rss
+    cpu_user: float  # cpu_times().user (cumulative seconds)
+    cpu_system: float  # cpu_times().system (cumulative seconds)
+    num_fds: int  # num_fds()
+    num_children: int  # len(children(recursive=True))
+    num_zombies: int  # children with STATUS_ZOMBIE or STATUS_DEAD
+    tree_rss_bytes: int  # sum of RSS across all child processes
+
+
+class HealthSidecar(StrictModel):
+    """Per-session health tracking, persisted between statusline invocations.
+
+    Ring buffer of recent samples enables delta CPU% calculation and memory
+    trend detection. Reset when claude_pid changes (session resumed with new
+    process) to avoid stale deltas.
+    """
+
+    session_id: str
+    claude_pid: int  # Reset sidecar when PID changes
+    peak_rss_bytes: int  # High water mark across session lifetime
+    samples: Sequence[HealthSample]  # Capped at MAX_HEALTH_SAMPLES
+
+
+# =============================================================================
+# Status Line Input Models — strict, fail-fast on schema drift
+# =============================================================================
 
 
 class ModelInfo(StrictModel):
@@ -121,6 +172,63 @@ BOLD = '\033[1m'
 RESET = '\033[0m'
 
 
+# =============================================================================
+# Health Monitoring Thresholds
+#
+# Calibrated against observed Claude Code behavior on macOS (Apple Silicon).
+# Claude Code is Node.js — single-threaded event loop, so CPU% is percentage
+# of ONE core (0-100%). The documented problems and their thresholds:
+#
+# CPU:  Ink/React TUI busy-wait pegs one core at ~100% when idle.
+#       Normal idle is 0-5%. (anthropics/claude-code#22275, #22131)
+# Mem:  Node.js heap leak grows from ~300MB to multi-GB over hours.
+#       Healthy session is 300-600MB RSS. (anthropics/claude-code#5771)
+# FDs:  File descriptor handles to .claude config files never closed.
+#       Healthy session has ~45 FDs. (anthropics/claude-code#21701, #23645)
+# Kids: MCP servers and subagents accumulate if not cleaned up.
+#       Healthy session has 3-8 children. (anthropics/claude-code#25180)
+# =============================================================================
+
+# Memory RSS thresholds (bytes)
+MEMORY_WARN_BYTES = 1_000_000_000  # 1GB — above typical healthy range
+MEMORY_CRIT_BYTES = 3_000_000_000  # 3GB — likely memory leak in progress
+
+# CPU percentage of one core (0-100%)
+CPU_WARN_PERCENT = 30.0  # Sustained background work, worth watching
+CPU_CRIT_PERCENT = 80.0  # Stuck busy-wait loop or runaway process
+
+# File descriptors — anomaly display trigger
+FD_WARN_COUNT = 100  # Well above normal (~45 observed healthy)
+
+# Child processes (recursive) — anomaly display triggers
+CHILDREN_WARN_COUNT = 30  # Above observed baseline of ~20 (MCP servers + subprocesses)
+CHILDREN_CRIT_COUNT = 50  # Process accumulation bug
+
+# Process tree memory — aggregate RSS across all children. Catches MCP server
+# memory leaks where the main Claude process looks fine but children balloon.
+TREE_RSS_WARN_BYTES = 2_000_000_000  # 2GB — tree consuming significant system memory
+
+# Growth rate alerts — catch leaks BEFORE they hit absolute thresholds.
+# Rates are per hour, computed from oldest vs newest persisted sample.
+# Only shown after MIN_TREND_SAMPLES spanning MIN_TREND_SPAN_SECONDS.
+FD_GROWTH_RATE_WARN = 20  # FDs/hour — steady leak pattern
+CHILDREN_GROWTH_RATE_WARN = 10  # children/hour — process accumulation pattern
+
+# Sampling — the statusline fires multiple times per assistant turn (streaming
+# start, tool call boundaries, completion), often 0.3s apart. Only persist to
+# the ring buffer at meaningful intervals so CPU% deltas are always computable
+# and the buffer spans real time, not sub-second bursts. Live psutil data is
+# always collected for display regardless of this interval.
+MIN_SAMPLE_INTERVAL = 2.0  # Minimum seconds between persisted samples
+
+# Trend detection — minimum data before showing memory trend
+MAX_HEALTH_SAMPLES = 60  # Ring buffer size (~2 hours at 1 sample per 2s minimum)
+MIN_TREND_SAMPLES = 5  # Minimum samples before showing trend arrow
+MIN_TREND_SPAN_SECONDS = 120.0  # Minimum time span for meaningful trend
+MEM_TREND_GROWTH_PCT = 20.0  # % growth between oldest/newest to show ↑
+MEM_TREND_SHRINK_PCT = 20.0  # % shrink between oldest/newest to show ↓
+
+
 def _osc8_link(url: str, text: str) -> str:
     """Wrap text in an OSC 8 clickable hyperlink (Cmd+click)."""
     return f'\033]8;;{url}\a{text}\033]8;;\a'
@@ -179,24 +287,25 @@ def _write_cache(data: Mapping[str, str]) -> None:
 
 
 def _find_claude_pid() -> int:
-    """Find Claude Code PID by walking up the process tree."""
+    """Find Claude Code PID by walking up the process tree via psutil.
+
+    Uses psutil instead of spawning `ps` subprocesses — ~0.4ms vs ~6ms per
+    ancestor hop. Checks exe() path because psutil.name() returns the version
+    number (e.g., '2.1.44'), not 'claude', on macOS.
+    """
     current = os.getppid()
     for _ in range(20):
-        result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            capture_output=True,
-            text=True,
-        )
-        if not result.stdout.strip():
+        try:
+            proc = psutil.Process(current)
+            exe = proc.exe()
+            if 'claude' in exe.lower():
+                return current
+            ppid = proc.ppid()
+            if ppid == 0:
+                break
+            current = ppid
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             break
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-        if 'claude' in comm.lower():
-            return current
-        if ppid == 0:
-            break
-        current = ppid
     raise RuntimeError('Could not find Claude Code process in parent tree')
 
 
@@ -263,11 +372,12 @@ def _get_active_credentials(session_id: str, claude_pid: int) -> tuple[Mapping[s
 
 
 def _cleanup_orphan_snapshots(current_session_id: str) -> None:
-    """Remove snapshot files whose Claude PID is no longer running."""
+    """Remove snapshot and health sidecar files whose Claude PID is no longer running."""
     if not SNAPSHOT_DIR.exists():
         return
     for path in SNAPSHOT_DIR.glob('*.json'):
-        if path.stem == current_session_id:
+        # Skip current session's files (both credential snapshot and health sidecar)
+        if path.stem.startswith(current_session_id):
             continue
         snap = json.loads(path.read_text())
         pid = snap.get('claude_pid')
@@ -468,6 +578,318 @@ def _format_tokens(n: int) -> str:
 
 
 # =============================================================================
+# Process Health Monitoring
+#
+# Collects CPU, memory, file descriptor, and child process metrics via psutil.
+# Cross-invocation state (for CPU% deltas and memory trend) persisted in a
+# per-session sidecar file alongside existing credential snapshots.
+#
+# Design rationale:
+# - Each statusline invocation is a FRESH Python process — no in-memory state.
+# - CPU% requires delta between two readings: we store cumulative cpu_times()
+#   and wall timestamp, then compute (delta_cpu / delta_wall) * 100 next time.
+# - Memory trend compares oldest vs newest sample in the ring buffer, but only
+#   after MIN_TREND_SAMPLES spanning MIN_TREND_SPAN_SECONDS to avoid noise.
+# - Child process scan uses recursive=True to catch the full tree (MCP servers,
+#   subagents, and their children). This is ~15ms — acceptable for a statusline.
+# - All psutil calls wrapped in try/except for NoSuchProcess and AccessDenied.
+#   Per-child errors are handled individually — one dead child won't abort the
+#   survey. If the Claude process itself dies, we return None gracefully.
+# =============================================================================
+
+
+def _health_sidecar_path(session_id: str) -> Path:
+    """Sidecar file for process health, stored alongside credential snapshots."""
+    return SNAPSHOT_DIR / f'{session_id}-health.json'
+
+
+def _load_health_sidecar(session_id: str) -> HealthSidecar | None:
+    """Load previous health sidecar, or None if missing/corrupt.
+
+    Returns None on any failure (missing file, corrupt JSON, schema mismatch).
+    Callers treat None as "first invocation" and bootstrap from scratch.
+    """
+    path = _health_sidecar_path(session_id)
+    if not path.exists():
+        return None
+    try:
+        return HealthSidecar.model_validate_json(path.read_text())
+    except (pydantic.ValidationError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_health_sidecar(sidecar: HealthSidecar) -> None:
+    """Atomically save health sidecar (write → fsync → rename).
+
+    Uses temp+rename for crash safety on APFS. The fsync ensures data reaches
+    disk before the rename makes the file visible — without it, a crash could
+    leave a valid filename pointing to an empty/partial file.
+    """
+    path = _health_sidecar_path(sidecar.session_id)
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp')
+    try:
+        with tmp.open('w') as f:
+            f.write(sidecar.model_dump_json())
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
+def _collect_health_sample(claude_pid: int) -> HealthSample | None:
+    """Collect current health metrics from the Claude process via psutil.
+
+    Returns None if the process no longer exists or is inaccessible.
+    Uses oneshot() context manager for efficient batched syscalls (~0.2ms).
+    """
+    try:
+        proc = psutil.Process(claude_pid)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+
+    try:
+        with proc.oneshot():
+            cpu_t = proc.cpu_times()
+            mem = proc.memory_info()
+            fd_count = proc.num_fds()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+
+    # Child process survey (~15ms for typical tree of ~20 children).
+    # Uses recursive=True to catch the full tree — users report 200+ processes
+    # accumulating as MCP servers and subagents spawn their own children.
+    # Collects per-child RSS (~0.05ms each) and zombie status in a single pass.
+    child_count = 0
+    zombie_count = 0
+    tree_rss = 0
+    try:
+        children = proc.children(recursive=True)
+        child_count = len(children)
+        for child in children:
+            try:
+                # macOS may report zombies as STATUS_DEAD depending on psutil version
+                if child.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+                    zombie_count += 1
+                else:
+                    tree_rss += child.memory_info().rss
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass  # Child died between enumeration and status/memory check
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass  # Parent died during child enumeration
+
+    return HealthSample(
+        ts=time.time(),
+        rss_bytes=mem.rss,
+        cpu_user=cpu_t.user,
+        cpu_system=cpu_t.system,
+        num_fds=fd_count,
+        num_children=child_count,
+        num_zombies=zombie_count,
+        tree_rss_bytes=tree_rss,
+    )
+
+
+def _update_health_sidecar(
+    session_id: str,
+    claude_pid: int,
+    sample: HealthSample,
+) -> HealthSidecar:
+    """Conditionally persist sample to sidecar, decoupling display from history.
+
+    The statusline fires multiple times per assistant turn (streaming start,
+    tool call boundaries, completion) — often 0.3s apart. If we persisted every
+    invocation, the ring buffer would fill with sub-second noise: 60 samples
+    spanning 30 seconds instead of ~2 hours of meaningful history.
+
+    Solution: two separate concerns with different cadences.
+      - Display: always uses the live sample (fresh mem/FDs/children).
+      - History: only persisted at MIN_SAMPLE_INTERVAL gaps, so CPU% deltas
+        between consecutive persisted samples are always meaningful, and the
+        ring buffer spans real wall-clock time for trend analysis.
+
+    First invocation and PID changes always persist immediately.
+    """
+    existing = _load_health_sidecar(session_id)
+
+    # PID mismatch means session was resumed with a new process — start fresh
+    if existing is not None and existing.claude_pid != claude_pid:
+        existing = None
+
+    if existing is None:
+        # First invocation — always persist
+        sidecar = HealthSidecar(
+            session_id=session_id,
+            claude_pid=claude_pid,
+            peak_rss_bytes=sample.rss_bytes,
+            samples=[sample],
+        )
+        _save_health_sidecar(sidecar)
+        return sidecar
+
+    # Check if enough time has passed to persist this sample
+    last_ts = existing.samples[-1].ts if existing.samples else 0.0
+    if sample.ts - last_ts < MIN_SAMPLE_INTERVAL:
+        # Too soon — return existing sidecar with updated peak (in memory only,
+        # not persisted) so display still reflects current peak awareness.
+        return HealthSidecar(
+            session_id=existing.session_id,
+            claude_pid=existing.claude_pid,
+            peak_rss_bytes=max(existing.peak_rss_bytes, sample.rss_bytes),
+            samples=existing.samples,
+        )
+
+    # Enough time passed — persist this sample
+    samples = [*existing.samples, sample]
+    if len(samples) > MAX_HEALTH_SAMPLES:
+        samples = samples[-MAX_HEALTH_SAMPLES:]
+    sidecar = HealthSidecar(
+        session_id=session_id,
+        claude_pid=claude_pid,
+        peak_rss_bytes=max(existing.peak_rss_bytes, sample.rss_bytes),
+        samples=samples,
+    )
+    _save_health_sidecar(sidecar)
+    return sidecar
+
+
+def _compute_cpu_percent(current: HealthSample, previous: HealthSample) -> float | None:
+    """Average CPU% of one core between two samples via delta cpu_times.
+
+    Node.js is single-threaded — the meaningful signal is whether one core is
+    pegged (>80%), not total system load. Returns None if samples are too close
+    together (<0.5s) to produce a meaningful delta.
+    """
+    dt = current.ts - previous.ts
+    if dt < 0.5:
+        return None
+    cpu_delta = (current.cpu_user - previous.cpu_user) + (current.cpu_system - previous.cpu_system)
+    return max(0.0, min(cpu_delta / dt * 100.0, 100.0))
+
+
+def _format_bytes(n: int) -> str:
+    """Format byte count as human-readable memory (e.g., 451M, 1.2G)."""
+    if n >= 1_000_000_000:
+        return f'{n / 1_000_000_000:.1f}G'
+    return f'{n // (1024 * 1024)}M'
+
+
+def _color_for_value(value: float, warn: float, crit: float) -> str:
+    """Return ANSI color based on threshold: green < warn, yellow < crit, red."""
+    if value >= crit:
+        return RED
+    if value >= warn:
+        return YELLOW
+    return GREEN
+
+
+def _format_health(sample: HealthSample, sidecar: HealthSidecar) -> str:
+    """Format process health metrics for line 1 display.
+
+    Uses two data sources with different roles:
+      - sample: live psutil snapshot — always fresh for mem/FDs/children display.
+      - sidecar.samples: persisted ring buffer at ≥2s intervals — used for CPU%
+        deltas and memory trend, where meaningful time gaps are required.
+
+    Tier 1 (always shown): mem and cpu, color-coded by severity.
+    Tier 2 (anomaly-only): zombies, excess children, FD count — shown only
+      when thresholds are exceeded, keeping the line clean during normal operation.
+    Tier 3 (trend): peak memory and trend arrow — shown after enough samples
+      to produce meaningful data (MIN_TREND_SAMPLES over MIN_TREND_SPAN_SECONDS).
+    """
+    parts: list[str] = []
+
+    # ── Tier 1: Memory (always shown) ──
+    mem_color = _color_for_value(sample.rss_bytes, MEMORY_WARN_BYTES, MEMORY_CRIT_BYTES)
+    mem_str = f'{mem_color}mem: {_format_bytes(sample.rss_bytes)}{RESET}'
+
+    # ── Tier 3: Memory trend arrow ──
+    # Compare oldest vs newest sample to detect sustained growth or shrinkage.
+    # Requires enough samples spanning enough time to avoid noise from transient
+    # spikes (e.g., a large context window load that gets GC'd).
+    samples = sidecar.samples
+    if len(samples) >= MIN_TREND_SAMPLES:
+        span = samples[-1].ts - samples[0].ts
+        if span >= MIN_TREND_SPAN_SECONDS:
+            oldest_rss = samples[0].rss_bytes
+            if oldest_rss > 0:
+                change_pct = ((sample.rss_bytes - oldest_rss) / oldest_rss) * 100
+                if change_pct > MEM_TREND_GROWTH_PCT:
+                    mem_str += f'{RED}\u2191{RESET}'  # ↑ growing
+                elif change_pct < -MEM_TREND_SHRINK_PCT:
+                    mem_str += f'{GREEN}\u2193{RESET}'  # ↓ shrinking
+
+    # ── Tier 3: Peak memory ──
+    # Show peak when it exceeds current by >20% and we have enough samples,
+    # indicating a prior spike that has since resolved (useful for leak diagnosis).
+    if len(samples) >= MIN_TREND_SAMPLES and sidecar.peak_rss_bytes > sample.rss_bytes * 1.2:
+        mem_str += f' {DIM}(peak: {_format_bytes(sidecar.peak_rss_bytes)}){RESET}'
+
+    # ── Tier 1: Tree RSS (shown when children consume significant memory) ──
+    # Catches MCP server memory leaks where the main process looks healthy but
+    # children are the problem. Shown as parenthetical after main process mem.
+    if sample.tree_rss_bytes >= TREE_RSS_WARN_BYTES:
+        tree_color = YELLOW if sample.tree_rss_bytes < MEMORY_CRIT_BYTES else RED
+        mem_str += f' {tree_color}(tree: {_format_bytes(sample.tree_rss_bytes)}){RESET}'
+
+    parts.append(mem_str)
+
+    # ── Tier 1: CPU (shown after first delta is available) ──
+    # Uses persisted samples (not the live sample) because consecutive persisted
+    # samples are guaranteed to be ≥MIN_SAMPLE_INTERVAL apart, giving a reliable
+    # delta. The live sample may be <0.3s from the last persisted one.
+    if len(samples) >= 2:
+        cpu = _compute_cpu_percent(samples[-1], samples[-2])
+        if cpu is not None:
+            cpu_color = _color_for_value(cpu, CPU_WARN_PERCENT, CPU_CRIT_PERCENT)
+            parts.append(f'{cpu_color}cpu: {cpu:.0f}%{RESET}')
+
+    # ── Tier 2: Anomaly indicators (conditional) ──
+    anomalies: list[str] = []
+
+    if sample.num_zombies > 0:
+        label = 'zombie' if sample.num_zombies == 1 else 'zombies'
+        anomalies.append(f'{RED}{sample.num_zombies} {label}{RESET}')
+
+    if sample.num_children >= CHILDREN_CRIT_COUNT:
+        anomalies.append(f'{RED}children: {sample.num_children}{RESET}')
+    elif sample.num_children >= CHILDREN_WARN_COUNT:
+        anomalies.append(f'{YELLOW}children: {sample.num_children}{RESET}')
+
+    if sample.num_fds >= FD_WARN_COUNT:
+        anomalies.append(f'{YELLOW}fds: {sample.num_fds}{RESET}')
+
+    # ── Tier 2: Growth rate alerts ──
+    # Catch leaks BEFORE they hit absolute thresholds by detecting sustained
+    # growth. A steady +20 FDs/hour signals a leak even at 60 current FDs.
+    if len(samples) >= MIN_TREND_SAMPLES:
+        span = samples[-1].ts - samples[0].ts
+        if span >= MIN_TREND_SPAN_SECONDS:
+            span_hours = span / 3600
+
+            fd_growth = (sample.num_fds - samples[0].num_fds) / span_hours
+            if fd_growth >= FD_GROWTH_RATE_WARN:
+                # Only show rate if absolute count isn't already triggering
+                if sample.num_fds < FD_WARN_COUNT:
+                    anomalies.append(f'{YELLOW}fds: {sample.num_fds} (+{fd_growth:.0f}/hr){RESET}')
+                else:
+                    # Absolute threshold already showing — just annotate with rate
+                    anomalies[-1] = f'{YELLOW}fds: {sample.num_fds} (+{fd_growth:.0f}/hr){RESET}'
+
+            child_growth = (sample.num_children - samples[0].num_children) / span_hours
+            if child_growth >= CHILDREN_GROWTH_RATE_WARN:
+                if sample.num_children < CHILDREN_WARN_COUNT:
+                    anomalies.append(f'{YELLOW}children: {sample.num_children} (+{child_growth:.0f}/hr){RESET}')
+
+    result = ' '.join(parts)
+    if anomalies:
+        result += f' {DIM}|{RESET} ' + ' '.join(anomalies)
+    return result
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -503,6 +925,14 @@ def main() -> None:
         return
 
     claude_pid = _find_claude_pid()
+
+    # Collect process health early — before slow operations (keychain, git) —
+    # so the CPU delta captures Claude's behavior, not our own overhead.
+    health_sample = _collect_health_sample(claude_pid)
+    health_sidecar: HealthSidecar | None = None
+    if health_sample is not None:
+        health_sidecar = _update_health_sidecar(data.session_id, claude_pid, health_sample)
+
     static, switch_pending = _get_active_credentials(data.session_id, claude_pid)
     branch = _git_branch()
     remote_url = _git_remote_url()
@@ -517,6 +947,10 @@ def main() -> None:
     transcript_url = f'file://{data.transcript_path}'
     pid_str = f'{DIM}pid:{RESET} {claude_pid}'
     parts.append(f'{pid_str} {DIM}session_id:{RESET} {_osc8_link(transcript_url, data.session_id)}')
+
+    # Process health (Tier 1: always, Tier 2: anomalies, Tier 3: trend)
+    if health_sample is not None and health_sidecar is not None:
+        parts.append(_format_health(health_sample, health_sidecar))
 
     # Account
     email = static.get('emailAddress', '')
