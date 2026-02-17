@@ -8,7 +8,6 @@ Uses BatchLoader pattern for upserts to coalesce concurrent requests.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import typing
 from collections.abc import Sequence
@@ -90,8 +89,8 @@ class DocumentVectorRepository:
         Returns:
             Number of points upserted.
         """
-        tasks = [self._upsert_loader.load(UpsertLoader.Request(point=point)) for point in points]
-        results = await asyncio.gather(*tasks)
+        requests = [UpsertLoader.Request(point=point) for point in points]
+        results = await self._upsert_loader.load_many(requests)
         return sum(results)
 
     async def search(self, query: SearchQuery) -> SearchResult:
