@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Sequence, Set
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 _ALL_STAGES: Sequence[TraceableStage] = ('chunk', 'embed', 'embed_dense', 'embed_sparse', 'store')
 
 # Stages with queue wait (have an input queue)
-_QUEUED_STAGES: frozenset[TraceableStage] = frozenset({'chunk', 'embed', 'store'})
+_QUEUED_STAGES: Set[TraceableStage] = {'chunk', 'embed', 'store'}
 
 # Items processed before this count are flagged as warm-up
 _WARMUP_ITEMS = 100
@@ -78,6 +78,12 @@ class PipelineTracer:
         # Per-item CPU time: item_id → {stage → cpu_seconds}
         self._cpu_times: dict[str, dict[str, float]] = {}
 
+        # Per-item Rust-internal wall time: item_id → {stage → wall_seconds}
+        self._wall_times: dict[str, dict[str, float]] = {}
+
+        # Rayon thread count (set via set_sparse_threads)
+        self._sparse_threads: int | None = None
+
         # Per-item batch size: item_id → batch_size
         self._batch_sizes: dict[str, int] = {}
 
@@ -108,9 +114,18 @@ class PipelineTracer:
             self._item_order.append(item_id)
 
     def record_cpu(self, item_id: str, stage: TraceableStage, cpu_seconds: float) -> None:
-        """Record CPU time for a stage (measured in subprocess)."""
+        """Record CPU time for a stage (sum of per-task durations from Rust)."""
         cpus = self._cpu_times.setdefault(item_id, {})
         cpus[stage] = cpu_seconds
+
+    def record_wall(self, item_id: str, stage: TraceableStage, wall_seconds: float) -> None:
+        """Record Rust-internal wall time for a stage (parallel section latency)."""
+        walls = self._wall_times.setdefault(item_id, {})
+        walls[stage] = wall_seconds
+
+    def set_sparse_threads(self, thread_count: int) -> None:
+        """Store rayon thread count for efficiency ratio computation."""
+        self._sparse_threads = thread_count
 
     def record_batch_size(self, item_id: str, batch_size: int) -> None:
         """Record the batch size this item was processed in."""
@@ -172,7 +187,7 @@ class PipelineTracer:
         total_elapsed = time.perf_counter() - self._start
 
         # Identify warm-up items (first N)
-        warmup_ids = frozenset(self._item_order[:_WARMUP_ITEMS])
+        warmup_ids = set(self._item_order[:_WARMUP_ITEMS])
 
         stage_reports: list[StageTimingReport] = []
 
@@ -184,6 +199,7 @@ class PipelineTracer:
             queue_wait = self._collect_queue_wait(stage, warmup_ids)
             batch_wait = self._collect_batch_wait(stage, warmup_ids)
             cpu_times = self._collect_cpu_times(stage, warmup_ids)
+            wall_times = self._collect_wall_times(stage, warmup_ids)
 
             throughput = len(processing_times) / total_elapsed if total_elapsed > 0 else 0.0
 
@@ -205,6 +221,7 @@ class PipelineTracer:
                     queue_wait=_percentiles(queue_wait) if queue_wait else None,
                     batch_wait=_percentiles(batch_wait) if batch_wait else None,
                     cpu=_percentiles(cpu_times) if cpu_times else None,
+                    wall=_percentiles(wall_times) if wall_times else None,
                     throughput_per_sec=round(throughput, 2),
                     avg_batch_size=round(avg_batch, 1) if avg_batch is not None else None,
                 )
@@ -218,6 +235,7 @@ class PipelineTracer:
             queue_depth_series=tuple(self._queue_depths),
             total_items=len(self._events),
             total_elapsed_seconds=round(total_elapsed, 3),
+            sparse_threads=self._sparse_threads,
             completion_series=completion_series,
         )
 
@@ -279,7 +297,7 @@ class PipelineTracer:
     def _collect_processing_times(
         self,
         stage: TraceableStage,
-        warmup_ids: frozenset[str],
+        warmup_ids: Set[str],
     ) -> Sequence[float]:
         """Collect processing times (completed - started) for a stage in ms."""
         start_key, end_key = _stage_event_keys(stage)
@@ -296,7 +314,7 @@ class PipelineTracer:
     def _collect_queue_wait(
         self,
         stage: TraceableStage,
-        warmup_ids: frozenset[str],
+        warmup_ids: Set[str],
     ) -> Sequence[float]:
         """Collect queue wait times (started/dequeued - queued) for a stage in ms."""
         if stage not in _QUEUED_STAGES:
@@ -320,7 +338,7 @@ class PipelineTracer:
     def _collect_batch_wait(
         self,
         stage: TraceableStage,
-        warmup_ids: frozenset[str],
+        warmup_ids: Set[str],
     ) -> Sequence[float]:
         """Collect batch accumulation wait (batch_started - dequeued) in ms."""
         if stage != 'embed':
@@ -339,7 +357,7 @@ class PipelineTracer:
     def _collect_cpu_times(
         self,
         stage: TraceableStage,
-        warmup_ids: frozenset[str],
+        warmup_ids: Set[str],
     ) -> Sequence[float]:
         """Collect CPU times for a stage in ms."""
         times: list[float] = []
@@ -349,6 +367,21 @@ class PipelineTracer:
             cpu = cpus.get(stage)
             if cpu is not None:
                 times.append(cpu * 1000)
+        return times
+
+    def _collect_wall_times(
+        self,
+        stage: TraceableStage,
+        warmup_ids: Set[str],
+    ) -> Sequence[float]:
+        """Collect Rust-internal wall times for a stage in ms."""
+        times: list[float] = []
+        for item_id, walls in self._wall_times.items():
+            if item_id in warmup_ids:
+                continue
+            wall = walls.get(stage)
+            if wall is not None:
+                times.append(wall * 1000)
         return times
 
 

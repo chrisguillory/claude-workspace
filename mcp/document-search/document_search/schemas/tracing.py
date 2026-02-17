@@ -62,6 +62,7 @@ class StageTimingReport(StrictModel):
     queue_wait: PercentileStats | None = None
     batch_wait: PercentileStats | None = None
     cpu: PercentileStats | None = None
+    wall: PercentileStats | None = None
     throughput_per_sec: float
     avg_batch_size: float | None = None
 
@@ -116,6 +117,7 @@ class PipelineTimingReport(StrictModel):
     queue_depth_series: Sequence[QueueDepthSample]
     total_items: int
     total_elapsed_seconds: float
+    sparse_threads: int | None = None
 
     # Raw completion data for client-side interactive charts (zoom, hover, toggle)
     completion_series: Sequence[StageCompletionData]

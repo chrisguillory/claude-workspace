@@ -383,6 +383,7 @@ class IndexingService:
         results_lock = asyncio.Lock()
 
         tracer = PipelineTracer(file_queue, embed_queue, upsert_queue)
+        tracer.set_sparse_threads(self._sparse_embedding.thread_count)
 
         self._operation = _OperationState(
             file_queue=file_queue,
@@ -961,10 +962,14 @@ class IndexingService:
             async def sparse_with_tracing() -> tuple[Sequence[tuple[Sequence[int], Sequence[float]]], float]:
                 results, wall_secs, cpu_secs = await self._sparse_embedding.embed_batch(accumulated_texts)
 
+                # Amortize batch totals across files
+                per_file_cpu = cpu_secs / batch_size
+                per_file_wall = wall_secs / batch_size
                 for chunked in accumulated_files:
                     fk = str(chunked.file_path)
                     tracer.record(fk, 'embed_sparse', 'completed')
-                    tracer.record_cpu(fk, 'embed_sparse', cpu_secs)
+                    tracer.record_cpu(fk, 'embed_sparse', per_file_cpu)
+                    tracer.record_wall(fk, 'embed_sparse', per_file_wall)
 
                 parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
                 logger.info(
@@ -1036,9 +1041,10 @@ class IndexingService:
 
             # Run sparse and dense embeddings in parallel with independent completion tracking
             async def sparse_single() -> tuple[Sequence[tuple[Sequence[int], Sequence[float]]], float]:
-                results, _wall, cpu_secs = await self._sparse_embedding.embed_batch(texts)
+                results, wall_secs, cpu_secs = await self._sparse_embedding.embed_batch(texts)
                 tracer.record(fk, 'embed_sparse', 'completed')
                 tracer.record_cpu(fk, 'embed_sparse', cpu_secs)
+                tracer.record_wall(fk, 'embed_sparse', wall_secs)
                 return results, cpu_secs
 
             async def dense_single() -> Sequence[EmbedResponse]:
