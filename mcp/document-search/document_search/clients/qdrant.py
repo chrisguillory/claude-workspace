@@ -29,6 +29,7 @@ from qdrant_client.http.models import (
     MatchAny,
     MatchValue,
     Modifier,
+    OptimizersConfigDiff,
     PayloadSchemaType,
     PointStruct,
     Prefetch,
@@ -112,7 +113,12 @@ class QdrantClient:
 
         # Override localhost defaults to enable connection pooling with keep-alive
         limits = httpx.Limits(max_connections=pool_size, max_keepalive_connections=pool_size)
-        self._client = AsyncQdrantClient(url=url, timeout=timeout, limits=limits)
+        self._client = AsyncQdrantClient(
+            url=url,
+            prefer_grpc=True,
+            timeout=timeout,
+            limits=limits,
+        )
 
         self._upsert_semaphore = asyncio.Semaphore(max_concurrent_upserts)
         self._tracker = ConcurrencyTracker('QDRANT_UPSERT')
@@ -122,7 +128,7 @@ class QdrantClient:
 
         Creates a collection with:
         - Dense vectors: Semantic embeddings (e.g., 768 dimensions)
-        - Sparse vectors: BM25 keyword embeddings (fastembed)
+        - Sparse vectors: BM25 keyword embeddings (bm25-rs)
         - Keyword index on file_type for faceting
 
         Args:
@@ -150,6 +156,31 @@ class QdrantClient:
 
         # Ensure keyword index on file_type for faceting (idempotent)
         await self._ensure_file_type_index(collection_name)
+
+    async def get_indexing_threshold(self, collection_name: str) -> int:
+        """Get current indexing threshold.
+
+        Returns:
+            Segment size threshold in KB that triggers indexing.
+        """
+        info = await self._client.get_collection(collection_name)
+        return info.config.optimizer_config.indexing_threshold or 20_000
+
+    async def set_indexing_threshold(self, collection_name: str, threshold_kb: int) -> None:
+        """Set indexing threshold for bulk operations.
+
+        Use threshold_kb=0 to disable HNSW index building during bulk upserts,
+        then restore the original value after to trigger a single efficient rebuild.
+
+        Args:
+            collection_name: Collection name.
+            threshold_kb: Segment size threshold in KB that triggers indexing.
+                0 disables indexing.
+        """
+        await self._client.update_collection(
+            collection_name=collection_name,
+            optimizers_config=OptimizersConfigDiff(indexing_threshold=threshold_kb),
+        )
 
     async def delete_collection(self, collection_name: str) -> None:
         """Delete the entire collection. Raises if collection doesn't exist."""

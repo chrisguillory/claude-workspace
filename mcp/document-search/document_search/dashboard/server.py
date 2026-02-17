@@ -1280,7 +1280,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
         async function fetchLogs(opId) {
             try {
-                const resp = await fetch(`/api/operations/${opId}/logs?tail=100`);
+                const resp = await fetch(`/api/operations/${opId}/logs?tail=1000`);
                 const data = await resp.json();
                 const el = document.getElementById('logs-' + opId);
                 const countEl = document.getElementById('log-count-' + opId);
@@ -1290,7 +1290,9 @@ INDEX_HTML = """<!DOCTYPE html>
                 if (lastLogLines[opId] === data.total_lines) return;
                 lastLogLines[opId] = data.total_lines;
 
-                countEl.textContent = `${data.total_lines} lines`;
+                countEl.textContent = data.lines.length < data.total_lines
+                    ? `showing ${data.lines.length} of ${data.total_lines} lines`
+                    : `${data.total_lines} lines`;
                 if (data.lines.length === 0) {
                     el.innerHTML = '<div class="log-viewer">No logs yet</div>';
                     return;

@@ -67,6 +67,18 @@ class DocumentVectorRepository:
         """
         await self._client.ensure_collection(self._collection_name, vector_dimension)
 
+    async def get_indexing_threshold(self) -> int:
+        """Get current HNSW indexing threshold in KB."""
+        return await self._client.get_indexing_threshold(self._collection_name)
+
+    async def set_indexing_threshold(self, threshold_kb: int) -> None:
+        """Set HNSW indexing threshold for bulk operations.
+
+        Use 0 to disable index building during bulk upserts,
+        then restore original value after to trigger rebuild.
+        """
+        await self._client.set_indexing_threshold(self._collection_name, threshold_kb)
+
     async def upsert(self, points: Sequence[VectorPoint]) -> int:
         """Store or update document vectors with hybrid embeddings (automatically batched).
 

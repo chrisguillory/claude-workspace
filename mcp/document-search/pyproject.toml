@@ -4,9 +4,9 @@ version = "0.4.2"
 description = "Document Search MCP Server - Semantic search over local documents"
 requires-python = ">=3.13"
 dependencies = [
+    "bm25-rs",
     "circuitbreaker>=2.1.3",
     "fastapi>=0.124.2",
-    "fastembed>=0.7.4",
     "fastmcp>=2.12.5",
     "filelock>=3.20.0",
     "gitpython>=3.1.46",
@@ -36,6 +36,7 @@ document-search-dashboard = "document_search.dashboard:main"
 # Local development override: workspace reference takes precedence over git URL in dependencies.
 # Remote uvx installations use the git URL; local development uses workspace (faster, sees live changes).
 local-lib = { workspace = true }
+bm25-rs = { path = "./bm25-rs/", editable = true }
 
 [tool.hatch.build]
 include = ["document_search/"]

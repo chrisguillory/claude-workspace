@@ -90,6 +90,11 @@ class PipelineTracer:
         # Track item order for warm-up flagging
         self._item_order: list[str] = []
 
+    @property
+    def start_time(self) -> float:
+        """Pipeline start time (perf_counter)."""
+        return self._start
+
     # ── Per-item timing ─────────────────────────────────────────
 
     def record(self, item_id: str, stage: TraceableStage, event: TimingEvent) -> None:

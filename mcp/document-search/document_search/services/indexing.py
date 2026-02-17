@@ -36,6 +36,7 @@ from document_search.clients.redis import RedisClient
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.schemas.chunking import EXTENSION_MAP, Chunk, FileType, get_file_type
 from document_search.schemas.config import EmbeddingConfig
+from document_search.schemas.embeddings import EmbedResponse
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
     DirectoryIndexState,
@@ -264,7 +265,7 @@ class IndexingService:
         dense = [r.values for r in responses]
 
         texts = [c.text for c in chunks]
-        sparse_results, _cpu = await self._sparse_embedding.embed_batch(texts)
+        sparse_results, _wall, _cpu = await self._sparse_embedding.embed_batch(texts)
         # Build points using same factory as pipeline
         points = [
             VectorPoint.from_chunk(chunk, dense_emb, sparse_indices, sparse_values, chunk_id)
@@ -544,6 +545,11 @@ class IndexingService:
             f'for {len(files_to_index)} files'
         )
 
+        # Disable HNSW indexing during bulk upsert to free CPU for embedding workers.
+        # Save original value so we restore exactly what was configured.
+        original_indexing_threshold = await self._repo.get_indexing_threshold()
+        await self._repo.set_indexing_threshold(0)
+
         # Start queue depth monitoring (1Hz sampling for time series)
         tracer.start_monitoring()
 
@@ -620,6 +626,9 @@ class IndexingService:
             for task in all_worker_tasks:
                 task.cancel()
             await asyncio.gather(waiter, *all_worker_tasks, return_exceptions=True)
+            # Restore HNSW indexing — Qdrant rebuilds the index in a single pass.
+            # Must be in finally to prevent threshold=0 persisting after worker errors.
+            await self._repo.set_indexing_threshold(original_indexing_threshold)
 
         # Collect results and aggregate by file type
         errors: list[FileProcessingError] = []
@@ -881,7 +890,7 @@ class IndexingService:
                             )
                     async with results_lock:
                         results[file_key] = 0  # 0 chunks created
-                    logger.debug(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
+                    logger.info(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
 
             except (TimeoutError, OSError, UnicodeDecodeError) as e:
                 # Known file-level errors: record and continue
@@ -931,31 +940,54 @@ class IndexingService:
                 return
 
             batch_size = len(accumulated_files)
+            flush_t0 = time.perf_counter()
+            logger.info(
+                f'[EMBED-FLUSH] {batch_size} files, {len(accumulated_texts)} texts, t={flush_t0 - tracer.start_time:.3f}s'
+            )
 
             # Record batch start for all files in batch
             for chunked in accumulated_files:
                 fk = str(chunked.file_path)
                 tracer.record(fk, 'embed', 'batch_started')
                 tracer.record(fk, 'embed_sparse', 'started')
+                tracer.record(fk, 'embed_dense', 'started')
                 tracer.record_batch_size(fk, batch_size)
 
-            # Get sparse embeddings (one batch to ProcessPool)
-            sparse_results, sparse_cpu = await self._sparse_embedding.embed_batch(accumulated_texts)
+            # Run sparse and dense embeddings in parallel with independent timing
+            async def sparse_with_tracing() -> tuple[Sequence[tuple[Sequence[int], Sequence[float]]], float]:
+                results, wall_secs, cpu_secs = await self._sparse_embedding.embed_batch(accumulated_texts)
 
-            for chunked in accumulated_files:
-                fk = str(chunked.file_path)
-                tracer.record(fk, 'embed_sparse', 'completed')
-                tracer.record_cpu(fk, 'embed_sparse', sparse_cpu)
+                for chunked in accumulated_files:
+                    fk = str(chunked.file_path)
+                    tracer.record(fk, 'embed_sparse', 'completed')
+                    tracer.record_cpu(fk, 'embed_sparse', cpu_secs)
 
-            # Get dense embeddings (BatchLoader coalesces into batches of 100)
-            for chunked in accumulated_files:
-                tracer.record(str(chunked.file_path), 'embed_dense', 'started')
+                parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
+                logger.info(
+                    f'[EMBED-SPARSE] {len(accumulated_texts)} texts in {wall_secs:.3f}s wall, '
+                    f'{cpu_secs:.3f}s cpu ({parallel:.1f}x), t={time.perf_counter() - tracer.start_time:.3f}s'
+                )
+                return results, cpu_secs
 
-            dense_tasks = [self._embedding.embed_text(text) for text in accumulated_texts]
-            dense_results = await asyncio.gather(*dense_tasks)
+            async def dense_with_tracing() -> Sequence[EmbedResponse]:
+                t0 = time.perf_counter()
+                dense_tasks = [self._embedding.embed_text(text) for text in accumulated_texts]
+                results: list[EmbedResponse] = list(await asyncio.gather(*dense_tasks))
+                elapsed = time.perf_counter() - t0
 
-            for chunked in accumulated_files:
-                tracer.record(str(chunked.file_path), 'embed_dense', 'completed')
+                for chunked in accumulated_files:
+                    tracer.record(str(chunked.file_path), 'embed_dense', 'completed')
+
+                logger.info(
+                    f'[EMBED-DENSE] {len(accumulated_texts)} texts done in {elapsed:.3f}s, '
+                    f't={time.perf_counter() - tracer.start_time:.3f}s'
+                )
+                return results
+
+            (sparse_results, _sparse_cpu), dense_results = await asyncio.gather(
+                sparse_with_tracing(),
+                dense_with_tracing(),
+            )
 
             # Distribute results back to files and push to upsert queue
             start_idx = 0
@@ -996,18 +1028,27 @@ class IndexingService:
 
             tracer.record(fk, 'embed', 'batch_started')
             tracer.record_batch_size(fk, 1)
-
-            # Get sparse embeddings
             tracer.record(fk, 'embed_sparse', 'started')
-            sparse_results, sparse_cpu = await self._sparse_embedding.embed_batch(texts)
-            tracer.record(fk, 'embed_sparse', 'completed')
-            tracer.record_cpu(fk, 'embed_sparse', sparse_cpu)
-
-            # Get dense embeddings
             tracer.record(fk, 'embed_dense', 'started')
-            dense_tasks = [self._embedding.embed_text(text) for text in texts]
-            dense_results = await asyncio.gather(*dense_tasks)
-            tracer.record(fk, 'embed_dense', 'completed')
+
+            # Run sparse and dense embeddings in parallel with independent completion tracking
+            async def sparse_single() -> tuple[Sequence[tuple[Sequence[int], Sequence[float]]], float]:
+                results, _wall, cpu_secs = await self._sparse_embedding.embed_batch(texts)
+                tracer.record(fk, 'embed_sparse', 'completed')
+                tracer.record_cpu(fk, 'embed_sparse', cpu_secs)
+                return results, cpu_secs
+
+            async def dense_single() -> Sequence[EmbedResponse]:
+                results: list[EmbedResponse] = list(
+                    await asyncio.gather(*[self._embedding.embed_text(text) for text in texts])
+                )
+                tracer.record(fk, 'embed_dense', 'completed')
+                return results
+
+            (sparse_results, _sparse_cpu), dense_results = await asyncio.gather(
+                sparse_single(),
+                dense_single(),
+            )
 
             # Create _EmbeddedFile
             embedded = _EmbeddedFile(
@@ -1026,16 +1067,29 @@ class IndexingService:
             counters.chunks_embedded += len(chunked.chunks)
             counters.files_embedded += 1
 
+        _worker_id = id(asyncio.current_task()) % 10000  # short ID for logs
+
         while True:
             try:
                 # Try to get item with timeout to allow periodic flushing
                 try:
+                    get_t0 = time.perf_counter()
                     chunked = await asyncio.wait_for(
                         embed_queue.get(),
                         timeout=BATCH_TIMEOUT,
                     )
+                    get_elapsed = time.perf_counter() - get_t0
+                    if get_elapsed > 0.1:  # log slow gets (>100ms)
+                        logger.info(
+                            f'[EMBED-W{_worker_id}] get() took {get_elapsed:.3f}s, accum={len(accumulated_texts)} texts'
+                        )
                 except TimeoutError:
                     # No items available, flush what we have
+                    if accumulated_texts:
+                        logger.info(
+                            f'[EMBED-W{_worker_id}] timeout flush: {len(accumulated_texts)} texts, '
+                            f'{len(accumulated_files)} files, t={time.perf_counter() - tracer.start_time:.3f}s'
+                        )
                     await flush_batch()
                     continue
 
@@ -1138,7 +1192,7 @@ class IndexingService:
             async with results_lock:
                 results[file_key] = len(embedded.chunks)
 
-            logger.debug(f'[UPSERT] {embedded.file_path.name}: {len(embedded.chunks)} chunks')
+            logger.info(f'[UPSERT] {embedded.file_path.name}: {len(embedded.chunks)} chunks')
 
             # Only mark done on success
             upsert_queue.task_done()
