@@ -244,10 +244,11 @@ def _osc8_link(url: str, text: str) -> str:
 
 CONFIG_PATH = Path.home() / '.claude.json'
 SCRIPT_PATH = Path(__file__).resolve()
-CACHE_PATH = Path('/tmp/claude-statusline-cache.json')
+CACHE_PATH = Path.home() / '.claude-workspace' / 'statusline-cache.json'
 CACHE_TTL_SECONDS = 300  # 5 minutes
 SNAPSHOT_DIR = Path.home() / '.claude-workspace' / 'statusline-snapshots'
 SWITCH_PENDING_PATH = Path.home() / '.claude-workspace' / '.switch-pending'
+LOGINS_DIR = Path.home() / '.claude-workspace' / 'logins'
 
 
 def _max_mtime() -> float:
@@ -273,7 +274,7 @@ def _read_cached_static() -> Mapping[str, str] | None:
         # Invalidate if config or script was modified after cache was written
         if _max_mtime() > ts:
             return None
-        return {k: str(v) for k, v in raw.items()}
+        return {k: str(v) for k, v in raw.items() if not k.startswith('_')}
     except (json.JSONDecodeError, OSError):
         pass
     return None
@@ -284,6 +285,7 @@ def _write_cache(data: Mapping[str, str]) -> None:
     cache = {**data, '_timestamp': datetime.now(UTC).timestamp()}
     with contextlib.suppress(OSError):
         CACHE_PATH.write_text(json.dumps(cache))
+        CACHE_PATH.chmod(0o600)
 
 
 def _find_claude_pid() -> int:
@@ -313,15 +315,35 @@ def _snapshot_path(session_id: str) -> Path:
     return SNAPSHOT_DIR / f'{session_id}.json'
 
 
+def _atomic_write_json(path: Path, data: str) -> None:
+    """Atomically write JSON string to file (temp → fsync → rename, 0o600)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp')
+    try:
+        with tmp.open('w') as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(path)
+        path.chmod(0o600)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
 def _is_switch_pending(disk_data: Mapping[str, str]) -> bool:
-    """Check if switch-login's marker matches current disk state."""
-    if not SWITCH_PENDING_PATH.exists():
+    """Check if switch-login's marker matches current disk state.
+
+    Compares identity fields only — must match the same keys used for
+    account_changed detection in _get_active_credentials.
+    """
+    try:
+        marker = json.loads(SWITCH_PENDING_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
         return False
-    marker = json.loads(SWITCH_PENDING_PATH.read_text())
-    return all(
-        marker.get(k) == disk_data.get(k)
-        for k in ('emailAddress', 'billingType', 'subscription', 'tier')
-        if k in marker
+    return bool(
+        marker.get('emailAddress') == disk_data.get('emailAddress')
+        and marker.get('billingType', '') == disk_data.get('billingType', '')
     )
 
 
@@ -334,36 +356,48 @@ def _get_active_credentials(session_id: str, claude_pid: int) -> tuple[Mapping[s
     snap_file = _snapshot_path(session_id)
     disk_data = _read_static_data()
 
+    snap = None
     if snap_file.exists():
-        snap = json.loads(snap_file.read_text())
+        try:
+            snap = json.loads(snap_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            snap_file.unlink(missing_ok=True)
+
+    if snap is not None:
         # PID changed = session was resumed with new process → re-snapshot
         if snap.get('claude_pid') != claude_pid:
             snap_file.unlink(missing_ok=True)
             SWITCH_PENDING_PATH.unlink(missing_ok=True)
         else:
             snap_creds = snap.get('credentials', {})
-            cred_keys = ('emailAddress', 'billingType', 'subscription', 'tier')
-            changed = any(snap_creds.get(k) != disk_data.get(k) for k in cred_keys)
-            if changed:
+            # Only compare identity fields — plan info can change without
+            # account change (e.g., reverse mapping enriches setup-token data).
+            identity_keys = ('emailAddress', 'billingType')
+            account_changed = any(snap_creds.get(k) != disk_data.get(k) for k in identity_keys)
+            if account_changed:
                 # Check if switch-login caused this (marker matches disk)
                 if _is_switch_pending(disk_data):
                     return snap_creds, True
                 # /login or other cause — update snapshot to match new reality
                 snap['credentials'] = dict(disk_data)
                 snap['created_at'] = datetime.now(UTC).isoformat()
-                snap_file.write_text(json.dumps(snap, indent=2))
+                _atomic_write_json(snap_file, json.dumps(snap, indent=2))
                 return disk_data, False
+            # Same account — update snapshot with latest display data
+            # (reverse mapping may have enriched subscription/tier)
+            if snap_creds != dict(disk_data):
+                snap['credentials'] = dict(disk_data)
+                _atomic_write_json(snap_file, json.dumps(snap, indent=2))
             return disk_data, False
 
     # First invocation (or PID changed) — create snapshot
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     snap = {
         'session_id': session_id,
         'claude_pid': claude_pid,
         'created_at': datetime.now(UTC).isoformat(),
         'credentials': dict(disk_data),
     }
-    snap_file.write_text(json.dumps(snap, indent=2))
+    _atomic_write_json(snap_file, json.dumps(snap, indent=2))
 
     # Clean up orphans on first invocation
     _cleanup_orphan_snapshots(session_id)
@@ -379,16 +413,50 @@ def _cleanup_orphan_snapshots(current_session_id: str) -> None:
         # Skip current session's files (both credential snapshot and health sidecar)
         if path.stem.startswith(current_session_id):
             continue
-        snap = json.loads(path.read_text())
-        pid = snap.get('claude_pid')
-        if pid is None:
-            path.unlink()
-            continue
-        # Check if process is still alive
         try:
+            snap = json.loads(path.read_text())
+            pid = snap.get('claude_pid')
+            if pid is None:
+                path.unlink()
+                continue
             os.kill(pid, 0)
-        except ProcessLookupError:
-            path.unlink()
+        except (ProcessLookupError, json.JSONDecodeError, OSError):
+            path.unlink(missing_ok=True)
+        except PermissionError:
+            pass  # Process exists but owned by another user
+
+
+def _reverse_map_setup_token(access_token: str) -> Mapping[str, str] | None:
+    """Match a keychain accessToken against saved logins' setup_token fields.
+
+    Returns plan info from the matching login, or None if no match.
+    """
+    if not access_token or not LOGINS_DIR.is_dir():
+        return None
+    sub_display = {
+        'free': 'Free',
+        'pro': 'Pro',
+        'team': 'Team',
+        'max': 'Max',
+        'enterprise': 'Enterprise',
+    }
+    for path in LOGINS_DIR.glob('*.json'):
+        try:
+            login = json.loads(path.read_text())
+            if login.get('setup_token') == access_token:
+                result: dict[str, str] = {'loginName': login.get('name', '')}
+                oauth = login.get('claude_ai_oauth')
+                if oauth:
+                    sub = oauth.get('subscription_type', '')
+                    if sub:
+                        result['subscription'] = sub_display.get(sub, sub)
+                    tier = oauth.get('rate_limit_tier', '')
+                    if tier:
+                        result['tier'] = tier
+                return result
+        except (json.JSONDecodeError, OSError):
+            continue
+    return None
 
 
 def _read_static_data() -> Mapping[str, str]:
@@ -441,7 +509,19 @@ def _read_static_data() -> Mapping[str, str]:
             tier = oauth.get('rateLimitTier', '')
             if tier:
                 data['tier'] = tier
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+
+            # Setup-token reverse mapping: when subscriptionType is null
+            # (setup-token in keychain), look up plan info from saved logins.
+            if not sub:
+                access_token = oauth.get('accessToken', '')
+                login_data = _reverse_map_setup_token(access_token)
+                if login_data:
+                    for key in ('subscription', 'tier', 'loginName'):
+                        if login_data.get(key):
+                            data[key] = login_data[key]
+                    if 'authMethod' not in data:
+                        data['authMethod'] = 'setup-token'
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError, AttributeError, TypeError):
         pass
 
     _write_cache(data)
@@ -619,24 +699,9 @@ def _load_health_sidecar(session_id: str) -> HealthSidecar | None:
 
 
 def _save_health_sidecar(sidecar: HealthSidecar) -> None:
-    """Atomically save health sidecar (write → fsync → rename).
-
-    Uses temp+rename for crash safety on APFS. The fsync ensures data reaches
-    disk before the rename makes the file visible — without it, a crash could
-    leave a valid filename pointing to an empty/partial file.
-    """
+    """Atomically save health sidecar via shared atomic write helper."""
     path = _health_sidecar_path(sidecar.session_id)
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix('.tmp')
-    try:
-        with tmp.open('w') as f:
-            f.write(sidecar.model_dump_json())
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
-    except OSError:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
+    _atomic_write_json(path, sidecar.model_dump_json())
 
 
 def _collect_health_sample(claude_pid: int) -> HealthSample | None:
@@ -773,7 +838,7 @@ def _format_bytes(n: int) -> str:
     """Format byte count as human-readable memory (e.g., 451M, 1.2G)."""
     if n >= 1_000_000_000:
         return f'{n / 1_000_000_000:.1f}G'
-    return f'{n // (1024 * 1024)}M'
+    return f'{n // 1_000_000}M'
 
 
 def _color_for_value(value: float, warn: float, crit: float) -> str:
@@ -858,7 +923,9 @@ def _format_health(sample: HealthSample, sidecar: HealthSidecar) -> str:
     elif sample.num_children >= CHILDREN_WARN_COUNT:
         anomalies.append(f'{YELLOW}children: {sample.num_children}{RESET}')
 
+    fd_anomaly_idx: int | None = None
     if sample.num_fds >= FD_WARN_COUNT:
+        fd_anomaly_idx = len(anomalies)
         anomalies.append(f'{YELLOW}fds: {sample.num_fds}{RESET}')
 
     # ── Tier 2: Growth rate alerts ──
@@ -871,12 +938,11 @@ def _format_health(sample: HealthSample, sidecar: HealthSidecar) -> str:
 
             fd_growth = (sample.num_fds - samples[0].num_fds) / span_hours
             if fd_growth >= FD_GROWTH_RATE_WARN:
-                # Only show rate if absolute count isn't already triggering
-                if sample.num_fds < FD_WARN_COUNT:
-                    anomalies.append(f'{YELLOW}fds: {sample.num_fds} (+{fd_growth:.0f}/hr){RESET}')
+                if fd_anomaly_idx is not None:
+                    # Absolute threshold already showing — annotate with rate
+                    anomalies[fd_anomaly_idx] = f'{YELLOW}fds: {sample.num_fds} (+{fd_growth:.0f}/hr){RESET}'
                 else:
-                    # Absolute threshold already showing — just annotate with rate
-                    anomalies[-1] = f'{YELLOW}fds: {sample.num_fds} (+{fd_growth:.0f}/hr){RESET}'
+                    anomalies.append(f'{YELLOW}fds: {sample.num_fds} (+{fd_growth:.0f}/hr){RESET}')
 
             child_growth = (sample.num_children - samples[0].num_children) / span_hours
             if child_growth >= CHILDREN_GROWTH_RATE_WARN:
@@ -895,14 +961,16 @@ def _format_health(sample: HealthSample, sidecar: HealthSidecar) -> str:
 
 
 def main() -> None:
-    log_path = Path('/tmp/claude-statusline-error.log')
+    log_path = Path.home() / '.claude-workspace' / 'statusline-error.log'
 
     try:
         raw = json.load(sys.stdin)
     except json.JSONDecodeError as e:
         msg = f'{datetime.now(UTC).isoformat()}\nJSON decode failed: {e}\n\n'
         with contextlib.suppress(OSError):
+            log_path.parent.mkdir(parents=True, exist_ok=True)
             log_path.write_text(msg)
+            log_path.chmod(0o600)
         print(f'{RED}StatusLine: invalid JSON{RESET}', file=sys.stderr)
         return
 
@@ -919,7 +987,9 @@ def main() -> None:
         error_msg += '\n\n'
 
         with contextlib.suppress(OSError):
+            log_path.parent.mkdir(parents=True, exist_ok=True)
             log_path.write_text(error_msg)
+            log_path.chmod(0o600)
 
         print(f'{RED}StatusLine: validation failed — see {log_path}{RESET}', file=sys.stderr)
         return
@@ -958,8 +1028,12 @@ def main() -> None:
     org = static.get('organizationName', '')
     billing = static.get('billingType', '')
     raw_tier = static.get('tier', '')
+    auth_method = static.get('authMethod', '')
     is_console = billing == 'prepaid'
     plan = _format_plan(sub, raw_tier)
+    # Append auth method indicator for setup-tokens (distinguishes from full OAuth)
+    if auth_method == 'setup-token' and plan:
+        plan += ' ⚷'
     if is_console:
         account_label = f'{YELLOW}Anthropic Console{RESET}'
         account_parts = [f'{DIM}{email}{RESET}', account_label] if email else [account_label]

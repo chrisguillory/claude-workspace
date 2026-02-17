@@ -22,6 +22,10 @@ Saved login management:
     list-logins                List all saved logins
     delete-login <id>          Delete a saved login
 
+Setup token management:
+    save-setup-token --login <id>  Save long-lived token (prompted securely)
+    clear-setup-token <id>         Remove setup token from login
+
 Saved MCP login management:
     save-mcp-login <server>    Save MCP server token from keychain
     list-mcp-logins            List saved MCP logins
@@ -36,6 +40,12 @@ Workflow:
     2. For MCP servers: /mcp to auth, then save-mcp-login for each
     3. switch-login <id> to switch accounts (injects MCP tokens automatically)
     4. Restart Claude Code to activate
+
+Setup token workflow (subscription accounts only):
+    1. Run `claude setup-token` to generate a 1-year token
+    2. save-setup-token --login <id> <token>
+    3. switch-login <id> writes setup-token to keychain as accessToken
+    4. switch-login <id> --keychain to use original OAuth credentials instead
 
 Login IDs are auto-derived: email--{Console,Team,Personal}
 
@@ -54,6 +64,31 @@ Tab completion (requires symlink, not remote uv run):
 
     Note: typer derives the command name from sys.argv[0], so a symlink with a clean
     name is required.
+
+Claude Code CLI auth commands (for reference):
+    claude auth login [--email <email>] [--sso]   Non-interactive OAuth login
+    claude auth status [--json|--text]             Check auth state (exit 0=ok, 1=no)
+    claude auth logout                             Clear all auth state
+    claude setup-token                             Generate 1-year token (stdout only)
+    /login                                         Interactive OAuth (inside REPL)
+    /logout                                        Clear auth (inside REPL)
+
+    Setup tokens (sk-ant-oat01-*) have user:inference scope only — /status and
+    `claude usage` won't show profile info. Generate via browser OAuth flow;
+    no way to skip browser or paste token directly.
+
+    The settings.json `env` block has a security allowlist that excludes all
+    credential env vars (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, etc.).
+    Credentials must come from shell environment or OS keychain.
+
+Token format reference:
+    sk-ant-oat01-*   OAuth Access Token v1 (both /login and setup-token)
+    sk-ant-api03-*   Console API key
+
+    OAuth and setup tokens are visually identical (same prefix, 108 chars).
+    The only distinction is server-side: setup tokens have 1-year expiry and
+    user:inference scope only. Locally, setup tokens are stored with
+    refreshToken: null in the keychain — that's how we differentiate them.
 
 Possible improvements:
 - Keychain `-T` flag: pass `-T /path/to/claude` to explicitly grant access.
@@ -99,16 +134,16 @@ class PermissiveModel(pydantic.BaseModel):
 class OAuthAccount(PermissiveModel):
     """Claude Code oauthAccount from ~/.claude.json."""
 
-    # Always present
+    # Always present after login
     account_uuid: str
     email_address: str
     organization_uuid: str
-    billing_type: str
-    has_extra_usage_enabled: bool
-    display_name: str
-    subscription_created_at: str
 
-    # Sometimes present
+    # Populated by profile refresh (may be missing on fresh login)
+    billing_type: str | None = None
+    has_extra_usage_enabled: bool | None = None
+    display_name: str | None = None
+    subscription_created_at: str | None = None
     organization_name: str | None = None
     organization_role: str | None = None
     workspace_role: str | None = None
@@ -116,14 +151,18 @@ class OAuthAccount(PermissiveModel):
 
 
 class ClaudeAiOAuth(PermissiveModel):
-    """Claude account OAuth tokens from keychain."""
+    """Claude account OAuth tokens from keychain.
+
+    Fields are nullable because setup-tokens write accessToken with all other
+    fields as null. save-login must handle reading this state from keychain.
+    """
 
     access_token: str
-    refresh_token: str
-    expires_at: int
-    scopes: Sequence[str]
-    subscription_type: str
-    rate_limit_tier: str
+    refresh_token: str | None = None
+    expires_at: int | None = None
+    scopes: Sequence[str] = ()
+    subscription_type: str | None = None
+    rate_limit_tier: str | None = None
 
 
 class McpOAuthEntry(PermissiveModel):
@@ -140,13 +179,19 @@ class McpOAuthEntry(PermissiveModel):
 
 
 class LoginFile(StrictModel):
-    """Saved login credentials."""
+    """Saved login credentials.
+
+    Optional fields have defaults so pre-migration files and tab completion
+    (which bypasses @app.callback) can deserialize without crashing.
+    """
 
     name: str
     created_at: datetime
     oauth_account: OAuthAccount
     claude_ai_oauth: ClaudeAiOAuth | None = None
     api_key: str | None = None
+    setup_token: str | None = None
+    setup_token_created_at: datetime | None = None
 
 
 # =============================================================================
@@ -160,6 +205,8 @@ MCP_AUTHS_PATH = WORKSPACE_DIR / 'mcp-auths.json'
 SWITCH_PENDING_PATH = WORKSPACE_DIR / '.switch-pending'
 KEYCHAIN_SERVICE_CREDENTIALS = 'Claude Code-credentials'
 KEYCHAIN_SERVICE_API_KEY = 'Claude Code'
+SETUP_TOKEN_PREFIX = 'sk-ant-oat01-'
+SETUP_TOKEN_LIFETIME_DAYS = 365
 
 
 # =============================================================================
@@ -206,12 +253,15 @@ def write_keychain_raw(data: Mapping[str, Any]) -> None:  # strict_typing_linter
 
 
 def delete_keychain() -> None:
-    """Delete keychain entry entirely."""
-    subprocess.run(
-        ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS],
-        capture_output=True,
-        timeout=5,
-    )
+    """Delete all keychain entries for credentials service."""
+    for _ in range(5):
+        result = subprocess.run(
+            ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            break
 
 
 def read_api_key_keychain() -> str | None:
@@ -266,6 +316,21 @@ def delete_api_key_keychain() -> None:
 # =============================================================================
 
 
+_OAUTH_CAMEL_TO_SNAKE: Mapping[str, str] = {
+    'accountUuid': 'account_uuid',
+    'emailAddress': 'email_address',
+    'organizationUuid': 'organization_uuid',
+    'billingType': 'billing_type',
+    'hasExtraUsageEnabled': 'has_extra_usage_enabled',
+    'displayName': 'display_name',
+    'subscriptionCreatedAt': 'subscription_created_at',
+    'organizationName': 'organization_name',
+    'organizationRole': 'organization_role',
+    'workspaceRole': 'workspace_role',
+    'accountCreatedAt': 'account_created_at',
+}
+
+
 def read_oauth_account() -> OAuthAccount | None:
     """Read oauthAccount from ~/.claude.json."""
     if not CONFIG_PATH.is_file():
@@ -274,58 +339,45 @@ def read_oauth_account() -> OAuthAccount | None:
     raw = config.get('oauthAccount')
     if not raw:
         return None
-    # Convert camelCase keys to snake_case for Pydantic
-    converted = {
-        'account_uuid': raw.get('accountUuid'),
-        'email_address': raw.get('emailAddress'),
-        'organization_uuid': raw.get('organizationUuid'),
-        'billing_type': raw.get('billingType'),
-        'has_extra_usage_enabled': raw.get('hasExtraUsageEnabled'),
-        'display_name': raw.get('displayName'),
-        'subscription_created_at': raw.get('subscriptionCreatedAt'),
-        'organization_name': raw.get('organizationName'),
-        'organization_role': raw.get('organizationRole'),
-        'workspace_role': raw.get('workspaceRole'),
-        'account_created_at': raw.get('accountCreatedAt'),
-    }
-    # Remove None values for optional fields
-    converted = {k: v for k, v in converted.items() if v is not None}
+    # Convert known camelCase keys to snake_case; pass unknown keys through
+    # so extra='allow' on PermissiveModel preserves forward-compat fields.
+    converted: dict[str, Any] = {}
+    for camel_key, value in raw.items():
+        snake_key = _OAUTH_CAMEL_TO_SNAKE.get(camel_key)
+        converted[snake_key if snake_key else camel_key] = value
     return OAuthAccount.model_validate(converted)
+
+
+_OAUTH_SNAKE_TO_CAMEL: Mapping[str, str] = {v: k for k, v in _OAUTH_CAMEL_TO_SNAKE.items()}
 
 
 def write_oauth_account(account: OAuthAccount) -> None:
     """Write oauthAccount to ~/.claude.json, preserving all other fields."""
-    config = json.loads(CONFIG_PATH.read_text())
-    # Convert snake_case back to camelCase for Claude Code
+    config = json.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.is_file() else {}
     dumped = account.model_dump()
-    camel = {
-        'accountUuid': dumped['account_uuid'],
-        'emailAddress': dumped['email_address'],
-        'organizationUuid': dumped['organization_uuid'],
-        'billingType': dumped['billing_type'],
-        'hasExtraUsageEnabled': dumped['has_extra_usage_enabled'],
-        'displayName': dumped['display_name'],
-        'subscriptionCreatedAt': dumped['subscription_created_at'],
-    }
-    # Add optional fields if present
-    for snake, camel_key in [
-        ('organization_name', 'organizationName'),
-        ('organization_role', 'organizationRole'),
-        ('workspace_role', 'workspaceRole'),
-        ('account_created_at', 'accountCreatedAt'),
-    ]:
-        if dumped.get(snake) is not None:
-            camel[camel_key] = dumped[snake]
+    camel: dict[str, Any] = {}
+    # Convert known snake_case fields back to camelCase
+    for snake_key, value in dumped.items():
+        camel_key = _OAUTH_SNAKE_TO_CAMEL.get(snake_key)
+        if camel_key:
+            # Skip None optional fields to avoid breaking Claude Code
+            if value is not None or snake_key in ('account_uuid', 'email_address', 'organization_uuid'):
+                camel[camel_key] = value
+        else:
+            # Unknown extras (forward-compat) — pass through as-is
+            camel[snake_key] = value
 
     config['oauthAccount'] = camel
-    CONFIG_PATH.write_text(json.dumps(config, indent=2))
+    _write_file_atomically(CONFIG_PATH, json.dumps(config, indent=2))
 
 
 def remove_oauth_account() -> None:
     """Remove oauthAccount from ~/.claude.json."""
+    if not CONFIG_PATH.is_file():
+        return
     config = json.loads(CONFIG_PATH.read_text())
     config.pop('oauthAccount', None)
-    CONFIG_PATH.write_text(json.dumps(config, indent=2))
+    _write_file_atomically(CONFIG_PATH, json.dumps(config, indent=2))
 
 
 def remove_primary_api_key() -> None:
@@ -334,10 +386,63 @@ def remove_primary_api_key() -> None:
     Claude Code stores this as a fallback when keychain write fails.
     Must be cleaned up when switching to subscription accounts.
     """
+    if not CONFIG_PATH.is_file():
+        return
     config = json.loads(CONFIG_PATH.read_text())
     if 'primaryApiKey' in config:
         del config['primaryApiKey']
-        CONFIG_PATH.write_text(json.dumps(config, indent=2))
+        _write_file_atomically(CONFIG_PATH, json.dumps(config, indent=2))
+
+
+# =============================================================================
+# File Operations
+# =============================================================================
+
+
+def _write_file_atomically(path: Path, content: str) -> None:
+    """Write content to a temp file, fsync, then atomic rename."""
+    tmp = path.with_suffix('.tmp')
+    try:
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, content.encode())
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+# =============================================================================
+# Login File Migration
+# =============================================================================
+
+# Fields added after initial LoginFile schema. Each entry is (field_name, default_value).
+_LOGIN_MIGRATION_FIELDS: Sequence[tuple[str, Any]] = [  # strict_typing_linter.py: loose-typing
+    ('api_key', None),
+    ('setup_token', None),
+    ('setup_token_created_at', None),
+]
+
+
+def migrate_login_files() -> int:
+    """Add missing fields to login files. Returns count migrated."""
+    if not LOGINS_DIR.exists():
+        return 0
+    migrated = 0
+    for path in sorted(LOGINS_DIR.glob('*.json')):
+        raw: dict[str, Any] = json.loads(path.read_text())
+        changed = False
+        for field, default in _LOGIN_MIGRATION_FIELDS:
+            if field not in raw:
+                raw[field] = default
+                changed = True
+        if changed:
+            _write_file_atomically(path, json.dumps(raw, indent=2))
+            migrated += 1
+    return migrated
 
 
 # =============================================================================
@@ -372,8 +477,7 @@ def save_login(login: LoginFile) -> Path:
     """Save login to disk."""
     LOGINS_DIR.mkdir(parents=True, exist_ok=True)
     path = login_path(login.name)
-    path.write_text(login.model_dump_json(indent=2))
-    path.chmod(0o600)
+    _write_file_atomically(path, login.model_dump_json(indent=2))
     return path
 
 
@@ -408,13 +512,11 @@ def delete_login_file(name: str) -> None:
 def save_mcp_auths(auths: Mapping[str, McpOAuthEntry]) -> None:
     """Save MCP auths to disk."""
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    # Serialize with model_dump
     serialized = {k: v.model_dump() for k, v in auths.items()}
-    MCP_AUTHS_PATH.write_text(json.dumps(serialized, indent=2))
-    MCP_AUTHS_PATH.chmod(0o600)
+    _write_file_atomically(MCP_AUTHS_PATH, json.dumps(serialized, indent=2))
 
 
-def load_mcp_auths() -> dict[str, McpOAuthEntry]:  # strict_typing_linter.py: mutable-type
+def load_mcp_auths() -> Mapping[str, McpOAuthEntry]:
     """Load MCP auths from disk."""
     if not MCP_AUTHS_PATH.exists():
         return {}
@@ -477,12 +579,14 @@ def _redact(val: str) -> str:
     return '***'
 
 
-def _format_expiry(expires_ms: int) -> str:
+def _format_expiry(expires_ms: int | None) -> str:
     """Format expiry as human-readable time remaining."""
-    if expires_ms == 0:
+    if not expires_ms:
         return 'no expiry'
     expires_dt = datetime.fromtimestamp(expires_ms / 1000, UTC)
     remaining = expires_dt - datetime.now(UTC)
+    if remaining.total_seconds() <= 0:
+        return 'expired'
     days = remaining.days
     hours = remaining.seconds // 3600
     if days > 0:
@@ -493,8 +597,12 @@ def _format_expiry(expires_ms: int) -> str:
     return f'{remaining.seconds // 60}m'
 
 
-def _format_plan(sub: str, tier: str) -> str:
+def _format_plan(sub: str | None, tier: str | None) -> str:
     """Format subscription type and rate limit tier as friendly plan name."""
+    if not sub:
+        return 'Unknown'
+    if not tier:
+        return sub.title()
     multiplier = ''
     if tier.startswith('default_claude_max_'):
         multiplier = ' ' + tier.removeprefix('default_claude_max_')
@@ -507,18 +615,44 @@ def _format_plan(sub: str, tier: str) -> str:
     return f'{sub}{multiplier}'
 
 
+def _format_setup_token_remaining(created_at: datetime | None) -> str:
+    """Format setup-token remaining life from creation timestamp."""
+    if not created_at:
+        return 'unknown expiry'
+    elapsed = datetime.now(UTC) - created_at
+    remaining = SETUP_TOKEN_LIFETIME_DAYS - elapsed.days
+    if remaining <= 0:
+        return 'expired'
+    return f'~{remaining}d remaining'
+
+
 def _print_login(login: LoginFile, is_current: bool) -> None:
     """Print login summary."""
     marker = '*' if is_current else ' '
+    parts: list[str] = [f'{marker} {login.name}']
 
+    # Plan
     if login.claude_ai_oauth:
-        plan = _format_plan(login.claude_ai_oauth.subscription_type, login.claude_ai_oauth.rate_limit_tier)
+        parts.append(_format_plan(login.claude_ai_oauth.subscription_type, login.claude_ai_oauth.rate_limit_tier))
+    elif login.api_key:
+        parts.append('Console')
+
+    # Auth methods (first listed = default for switch-login)
+    if login.setup_token:
+        remaining = _format_setup_token_remaining(login.setup_token_created_at)
+        auth = f'setup-token ({remaining})'
+        if login.claude_ai_oauth:
+            auth += ' + keychain'
+        parts.append(auth)
+    elif login.claude_ai_oauth:
         expiry = _format_expiry(login.claude_ai_oauth.expires_at)
         has_refresh = bool(login.claude_ai_oauth.refresh_token)
-        refresh_note = ' (has refresh token)' if has_refresh else ' (no refresh token!)'
-        print(f'{marker} {login.name} | {plan} | access expires: {expiry}{refresh_note}')
-    else:
-        print(f'{marker} {login.name}')
+        refresh_note = ', refresh ✓' if has_refresh else ', no refresh!'
+        parts.append(f'keychain ({expiry}{refresh_note})')
+    elif login.api_key:
+        parts.append(f'api-key ({_redact(login.api_key)})')
+
+    print(' | '.join(parts))
 
 
 def _print_mcp_auth(name: str, entry: McpOAuthEntry) -> None:
@@ -546,15 +680,17 @@ def cmd_save_login(force: bool, inject_mcp: bool) -> None:
     oauth_raw = kc.get('claudeAiOauth') if kc else None
 
     oauth = None
-    if oauth_raw:
+    if oauth_raw and oauth_raw.get('refreshToken'):
+        # Only parse as ClaudeAiOAuth when refreshToken is present (real OAuth).
+        # Setup-tokens in keychain have refreshToken: null — skip those.
         oauth = ClaudeAiOAuth.model_validate(
             {
                 'access_token': oauth_raw['accessToken'],
                 'refresh_token': oauth_raw['refreshToken'],
                 'expires_at': oauth_raw['expiresAt'],
-                'scopes': oauth_raw['scopes'],
-                'subscription_type': oauth_raw['subscriptionType'],
-                'rate_limit_tier': oauth_raw['rateLimitTier'],
+                'scopes': oauth_raw.get('scopes', []),
+                'subscription_type': oauth_raw.get('subscriptionType'),
+                'rate_limit_tier': oauth_raw.get('rateLimitTier'),
             }
         )
 
@@ -574,12 +710,18 @@ def cmd_save_login(force: bool, inject_mcp: bool) -> None:
                 print(f'ERROR: Login "{name}" exists with different tokens. Use --force to overwrite.', file=sys.stderr)
                 sys.exit(1)
 
+    # Preserve setup_token from existing login
+    setup_token = existing_login.setup_token if existing_login else None
+    setup_token_created_at = existing_login.setup_token_created_at if existing_login else None
+
     login = LoginFile(
         name=name,
         created_at=datetime.now(UTC),
         oauth_account=account,
         claude_ai_oauth=oauth,
         api_key=api_key,
+        setup_token=setup_token,
+        setup_token_created_at=setup_token_created_at,
     )
     save_login(login)
 
@@ -598,10 +740,21 @@ def cmd_save_login(force: bool, inject_mcp: bool) -> None:
             print('No saved MCP logins to inject.')
 
 
-def cmd_switch_login(name: str) -> None:
+def cmd_switch_login(name: str, use_keychain: bool) -> None:
     """Switch to saved login. Enforces mutual exclusivity between auth types."""
     login = load_login(name)
     is_console = login.oauth_account.billing_type == 'prepaid'
+
+    # Validate before any mutations — early exit must not leave partial state
+    if is_console and use_keychain:
+        print('ERROR: Console logins use API keys, not keychain OAuth.', file=sys.stderr)
+        sys.exit(1)
+    if not is_console and not login.setup_token and not login.claude_ai_oauth:
+        print('ERROR: Login has no auth credentials.', file=sys.stderr)
+        sys.exit(1)
+    if not is_console and use_keychain and not login.claude_ai_oauth:
+        print('ERROR: No keychain OAuth saved. Run /login and save-login first.', file=sys.stderr)
+        sys.exit(1)
 
     # Capture previous login before overwriting
     previous_login = get_current_login_name()
@@ -615,8 +768,9 @@ def cmd_switch_login(name: str) -> None:
     # Load MCP auths for injection into credentials keychain
     mcp_auths = load_mcp_auths()
 
+    auth_method = ''
+
     if is_console:
-        # Console: write API key, strip OAuth from credentials
         if login.api_key:
             write_api_key_keychain(login.api_key)
         else:
@@ -632,35 +786,65 @@ def cmd_switch_login(name: str) -> None:
             write_keychain_raw({'mcpOAuth': current_mcp})
         else:
             delete_keychain()
+
+        auth_method = 'api-key'
+
+    elif login.setup_token and not use_keychain:
+        # Subscription with setup-token: write to keychain as claudeAiOauth.
+        # The credential reader (dB) handles refreshToken:null gracefully —
+        # the refresh mechanism silently skips when there's no refresh token.
+        # This avoids the OAuth refresh race condition entirely.
+        delete_api_key_keychain()
+
+        kc_data: dict[str, Any] = {}
+        kc_data['claudeAiOauth'] = {
+            'accessToken': login.setup_token,
+            'refreshToken': None,
+            'expiresAt': None,
+            'scopes': ['user:inference'],
+            'subscriptionType': None,
+            'rateLimitTier': None,
+        }
+        if mcp_auths:
+            kc_data['mcpOAuth'] = dict(mcp_auths_to_keychain(mcp_auths))
+        write_keychain_raw(kc_data)
+
+        auth_method = 'setup-token'
+
     else:
-        # Subscription: write OAuth, delete API key
+        # Subscription with keychain OAuth (or --keychain forced)
+        # Validated above — claude_ai_oauth is guaranteed non-None here
+        oauth = login.claude_ai_oauth
+        if not oauth:
+            raise RuntimeError('unreachable: claude_ai_oauth validated at function entry')
         delete_api_key_keychain()
 
         kc_data = {}
-        if login.claude_ai_oauth:
-            kc_data['claudeAiOauth'] = {
-                'accessToken': login.claude_ai_oauth.access_token,
-                'refreshToken': login.claude_ai_oauth.refresh_token,
-                'expiresAt': login.claude_ai_oauth.expires_at,
-                'scopes': list(login.claude_ai_oauth.scopes),
-                'subscriptionType': login.claude_ai_oauth.subscription_type,
-                'rateLimitTier': login.claude_ai_oauth.rate_limit_tier,
-            }
+        kc_data['claudeAiOauth'] = {
+            'accessToken': oauth.access_token,
+            'refreshToken': oauth.refresh_token,
+            'expiresAt': oauth.expires_at,
+            'scopes': list(oauth.scopes),
+            'subscriptionType': oauth.subscription_type,
+            'rateLimitTier': oauth.rate_limit_tier,
+        }
         if mcp_auths:
             kc_data['mcpOAuth'] = dict(mcp_auths_to_keychain(mcp_auths))
-        if kc_data:
-            write_keychain_raw(kc_data)
-        else:
-            delete_keychain()
+        write_keychain_raw(kc_data)
+
+        auth_method = 'keychain'
 
     # Write switch-pending marker for statusline to detect
-    marker: dict[str, str] = {
+    marker: dict[str, Any] = {
         'emailAddress': login.oauth_account.email_address,
-        'billingType': login.oauth_account.billing_type,
+        'authMethod': auth_method,
+        'loginName': login.name,
     }
+    if login.oauth_account.billing_type:
+        marker['billingType'] = login.oauth_account.billing_type
     if login.claude_ai_oauth:
         # Title-case to match statusline's _read_static_data display format
-        sub = login.claude_ai_oauth.subscription_type
+        sub = login.claude_ai_oauth.subscription_type or ''
         marker['subscription'] = {
             'free': 'Free',
             'pro': 'Pro',
@@ -668,13 +852,17 @@ def cmd_switch_login(name: str) -> None:
             'max': 'Max',
             'enterprise': 'Enterprise',
         }.get(sub, sub)
-        marker['tier'] = login.claude_ai_oauth.rate_limit_tier
+        tier = login.claude_ai_oauth.rate_limit_tier
+        if tier:
+            marker['tier'] = tier
     if previous_login:
         marker['previousLogin'] = previous_login
-    SWITCH_PENDING_PATH.write_text(json.dumps(marker))
+    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    _write_file_atomically(SWITCH_PENDING_PATH, json.dumps(marker))
 
     print(f'Switched to: {login.name}')
     print(f'  {login.oauth_account.email_address}')
+    print(f'  Auth: {auth_method}')
     if is_console:
         key_status = 'injected' if login.api_key else 'MISSING'
         print(f'  Console (prepaid) | API key: {key_status}')
@@ -732,16 +920,23 @@ def cmd_current_login() -> None:
     print(f'  {account.billing_type}')
 
     if oauth_raw:
+        access = oauth_raw.get('accessToken', '')
+        has_refresh = bool(oauth_raw.get('refreshToken'))
         sub = oauth_raw.get('subscriptionType', '?')
         tier = oauth_raw.get('rateLimitTier', '?')
-        print(f'  OAuth: {sub} ({tier})')
+        if not has_refresh:
+            # Setup-tokens are written with refreshToken: null
+            print(f'  Setup token: {_redact(access)} (in keychain)')
+        else:
+            print(f'  OAuth: {sub} ({tier})')
 
     if api_key:
         print(f'  API key: {_redact(api_key)}')
 
+    # Detect auth conflicts (API key + OAuth in credentials keychain)
     if oauth_raw and api_key:
         print()
-        print('  WARNING: Auth conflict! Both OAuth and API key are present.')
+        print('  WARNING: Auth conflict! Both OAuth and API key active.')
         print('  Use switch-login to cleanly switch accounts.')
 
     # Check if it matches a saved login
@@ -808,7 +1003,7 @@ def cmd_save_mcp_login(server_query: str) -> None:
     )
 
     # Load, update, save
-    auths = load_mcp_auths()
+    auths = dict(load_mcp_auths())
     auths[entry.server_name] = entry
     save_mcp_auths(auths)
 
@@ -831,7 +1026,7 @@ def cmd_list_mcp_logins() -> None:
 
 def cmd_delete_mcp_login(server_query: str) -> None:
     """Delete saved MCP login."""
-    auths = load_mcp_auths()
+    auths = dict(load_mcp_auths())
     if not auths:
         print('No saved MCP logins.', file=sys.stderr)
         sys.exit(1)
@@ -852,6 +1047,48 @@ def cmd_delete_mcp_login(server_query: str) -> None:
     save_mcp_auths(auths)
 
     print(f'Deleted MCP login: {name}')
+
+
+def cmd_save_setup_token(token: str, login_id: str) -> None:
+    """Save a long-lived setup token to an existing login."""
+    if not token.startswith(SETUP_TOKEN_PREFIX):
+        print(f'ERROR: Invalid token format. Must start with {SETUP_TOKEN_PREFIX}', file=sys.stderr)
+        sys.exit(1)
+
+    login = load_login(login_id)
+
+    if login.oauth_account.billing_type == 'prepaid':
+        print('ERROR: Setup tokens are only for subscription accounts (Pro/Max/Team).', file=sys.stderr)
+        sys.exit(1)
+
+    updated = login.model_copy(
+        update={
+            'setup_token': token,
+            'setup_token_created_at': datetime.now(UTC),
+        },
+    )
+    save_login(updated)
+
+    print(f'Saved setup-token to: {login_id}')
+    print(f'  {_format_setup_token_remaining(updated.setup_token_created_at)}')
+
+
+def cmd_clear_setup_token(login_id: str) -> None:
+    """Remove setup token from a login."""
+    login = load_login(login_id)
+
+    if not login.setup_token:
+        print(f'ERROR: No setup token on this login: {login_id}', file=sys.stderr)
+        sys.exit(1)
+
+    updated = login.model_copy(update={'setup_token': None, 'setup_token_created_at': None})
+    save_login(updated)
+
+    print(f'Removed setup-token from: {login_id}')
+    if updated.claude_ai_oauth:
+        print('  switch-login will now use keychain OAuth.')
+    elif not updated.api_key:
+        print('  WARNING: Login has no auth credentials.', file=sys.stderr)
 
 
 def cmd_nuke_claude_auth() -> None:
@@ -914,6 +1151,35 @@ def _complete_saved_mcp_server(incomplete: str) -> Sequence[tuple[str, str]]:
     return [(name, entry.server_url) for name, entry in auths.items() if name.lower().startswith(incomplete.lower())]
 
 
+def _complete_subscription_login_id(incomplete: str) -> Sequence[tuple[str, str]]:
+    """Subscription logins only (for save-setup-token --login)."""
+    completions: list[tuple[str, str]] = []
+    for login in list_all_logins():
+        if login.oauth_account.billing_type == 'prepaid':
+            continue
+        if not login.name.lower().startswith(incomplete.lower()):
+            continue
+        if login.claude_ai_oauth:
+            help_text = _format_plan(login.claude_ai_oauth.subscription_type, login.claude_ai_oauth.rate_limit_tier)
+        else:
+            help_text = 'Subscription'
+        completions.append((login.name, help_text))
+    return completions
+
+
+def _complete_setup_token_login_id(incomplete: str) -> Sequence[tuple[str, str]]:
+    """Logins that have setup tokens (for clear-setup-token)."""
+    completions: list[tuple[str, str]] = []
+    for login in list_all_logins():
+        if not login.setup_token:
+            continue
+        if not login.name.lower().startswith(incomplete.lower()):
+            continue
+        remaining = _format_setup_token_remaining(login.setup_token_created_at)
+        completions.append((login.name, remaining))
+    return completions
+
+
 # =============================================================================
 # CLI
 # =============================================================================
@@ -925,6 +1191,15 @@ def _complete_saved_mcp_server(incomplete: str) -> Sequence[tuple[str, str]]:
 # The `completion` command replaces both with explicit shell argument and ZDOTDIR support.
 app = typer.Typer(help='Claude Code login and MCP auth manager.', add_completion=False)
 typer.completion.completion_init()  # Patch click for runtime tab completion (skipped by add_completion=False)
+
+
+@app.callback(invoke_without_command=True)
+def _app_main(ctx: typer.Context) -> None:
+    """Run migrations before any command."""
+    migrate_login_files()
+    if ctx.invoked_subcommand is None:
+        print(ctx.get_help())
+        raise SystemExit(0)
 
 
 # -- Saved login management --------------------------------------------------
@@ -942,6 +1217,7 @@ def cli_save_login(
 @app.command('switch-login')
 def cli_switch_login(
     login_id: str | None = typer.Argument(None, help='Login ID', autocompletion=_complete_login_id),
+    use_keychain: bool = typer.Option(False, '--keychain', help='Force keychain OAuth (bypass setup-token)'),
 ) -> None:
     """Switch to saved login + inject MCP tokens."""
     if login_id is None:
@@ -964,7 +1240,7 @@ def cli_switch_login(
                 rich.panel.Panel(f'{msg} No saved logins.', border_style='red', title='Error', title_align='left')
             )
         raise SystemExit(1)
-    cmd_switch_login(login_id)
+    cmd_switch_login(login_id, use_keychain)
 
 
 @app.command('list-logins')
@@ -977,6 +1253,37 @@ def cli_list_logins() -> None:
 def cli_delete_login(login_id: str = typer.Argument(..., help='Login ID', autocompletion=_complete_login_id)) -> None:
     """Delete a saved login."""
     cmd_delete_login(login_id)
+
+
+@app.command('save-setup-token')
+def cli_save_setup_token(
+    login_id: str = typer.Option(..., '--login', help='Login ID', autocompletion=_complete_subscription_login_id),
+    token: str = typer.Option('', '--token', help='Token (prompted securely if omitted)'),
+) -> None:
+    """Save long-lived token to a login (subscription accounts only).
+
+    Token is prompted interactively to avoid shell history exposure.
+    Or pass via --token or stdin: echo TOKEN | claude-login save-setup-token --login ID --token -
+    """
+    if not token:
+        if not sys.stdin.isatty():
+            token = sys.stdin.read().strip()
+        else:
+            token = typer.prompt('Paste setup token', hide_input=True)
+    elif token == '-':
+        token = sys.stdin.read().strip()
+    if not token:
+        print('ERROR: No token provided.', file=sys.stderr)
+        sys.exit(1)
+    cmd_save_setup_token(token, login_id)
+
+
+@app.command('clear-setup-token')
+def cli_clear_setup_token(
+    login_id: str = typer.Argument(..., help='Login ID', autocompletion=_complete_setup_token_login_id),
+) -> None:
+    """Remove setup-token from a login."""
+    cmd_clear_setup_token(login_id)
 
 
 # -- Saved MCP login management ----------------------------------------------
