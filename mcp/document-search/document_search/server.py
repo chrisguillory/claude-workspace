@@ -17,6 +17,7 @@ import contextlib
 import logging
 import os
 import sys
+import time
 import traceback
 import typing
 from collections.abc import AsyncIterator, Sequence
@@ -826,6 +827,13 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     logging.getLogger('httpcore').setLevel(logging.WARNING)
     logging.getLogger('google').setLevel(logging.WARNING)
 
+    # Enable asyncio debug mode: logs slow callbacks (>slow_callback_duration),
+    # unawaited coroutines, and other event loop issues.
+    loop = asyncio.get_running_loop()
+    loop.set_debug(True)
+    loop.slow_callback_duration = 0.5  # warn on callbacks >500ms
+    logger.info('[ASYNCIO] debug mode enabled, slow_callback_duration=0.5s')
+
     # Connect to Redis (embedding cache)
     redis_port = discover_redis_port(PROJECT_ROOT)
     redis_client = RedisClient(host='127.0.0.1', port=redis_port)
@@ -834,6 +842,12 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
 
     # Initialize state with shared services (async for semaphore binding)
     state = await ServerState.create(redis_client=redis_client)
+
+    # Warm up bm25-rs (initializes rayon thread pool + thread-local stemmers)
+    warmup_t0 = time.perf_counter()
+    await state.sparse_embedding_service.embed_batch(['warmup text'])
+    warmup_elapsed = time.perf_counter() - warmup_t0
+    logger.info(f'[SPARSE-WARMUP] bm25-rs ready in {warmup_elapsed:.3f}s')
 
     # Migrate legacy collection if needed
     await _migrate_legacy_collection(state)

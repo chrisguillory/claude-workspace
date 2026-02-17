@@ -1,7 +1,10 @@
+.DS_Store
 .claude/settings.local.json
+.venv/
 __pycache__/
 scratch/
-.DS_Store
+target/
+*.so
 
 # IDE
 .idea/

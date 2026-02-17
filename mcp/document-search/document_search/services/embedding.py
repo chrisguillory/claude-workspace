@@ -1,18 +1,21 @@
 """Embedding service - typed interface over embedding clients.
 
 Two-stage BatchLoader pipeline:
-1. CacheLoader coalesces lookups into Redis MGET batches (5000 batch, 1ms delay)
+1. CacheLoader coalesces lookups into Redis MGET batches (100 batch, 1ms delay)
 2. Cache misses forward to EmbedLoader for API batches (100-1000 batch, 10ms delay)
+
+Cache values use numpy float32 binary (~3KB per 768-dim embedding vs ~17KB JSON).
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
+import time
 from collections.abc import Sequence
 
+import numpy as np
 from local_lib.background_tasks import BackgroundTaskGroup
 from local_lib.batch_loader import GenericBatchLoader
 
@@ -33,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # Cache configuration
 CACHE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
-CACHE_BATCH_SIZE = 500
+CACHE_BATCH_SIZE = 100
 CACHE_COALESCE_DELAY = 0.001  # 1ms - Redis is fast
 
 
@@ -41,7 +44,7 @@ class EmbeddingService:
     """Typed embedding service with Redis-backed caching and automatic batching.
 
     Two-stage BatchLoader pipeline:
-    1. CacheLoader coalesces lookups into Redis MGET batches (5000 batch, 1ms delay)
+    1. CacheLoader coalesces lookups into Redis MGET batches (100 batch, 1ms delay)
     2. Cache misses forward to EmbedLoader for API batches (100-1000 batch, 10ms delay)
     """
 
@@ -180,8 +183,12 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         # Propagate any previous cache write errors
         self._cache_tasks.check_health()
 
+        t0 = time.perf_counter()
         keys = [self._cache_key(t) for t in texts]
+        t_keys = time.perf_counter()
+
         cached = await self._redis.mget(keys)
+        t_mget = time.perf_counter()
 
         # Separate hits and misses
         results: list[EmbedResponse | None] = []
@@ -189,12 +196,14 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
 
         for i, raw in enumerate(cached):
             if raw is not None:
-                data = json.loads(raw)
-                results.append(EmbedResponse(values=data['values'], dimensions=data['dimensions']))
+                values = np.frombuffer(raw, dtype=np.float32).tolist()
+                # Skip Pydantic validation on cache hits — data was validated on write
+                results.append(EmbedResponse.model_construct(values=values, dimensions=len(values)))
                 self.hits += 1
             else:
                 results.append(None)
                 miss_indices.append(i)
+        t_deser = time.perf_counter()
 
         self.misses += len(miss_indices)
 
@@ -207,15 +216,24 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
                 # Fire-and-forget cache write
                 self._cache_tasks.submit(self._cache_write(texts[idx], response))
 
-        if len(texts) >= 100:
-            logger.info(f'[CACHE] batch={len(texts)} hits={len(texts) - len(miss_indices)} misses={len(miss_indices)}')
+        t_end = time.perf_counter()
+        hits = len(texts) - len(miss_indices)
+        task_count = len(asyncio.all_tasks())
+        logger.info(
+            f'[CACHE-DETAIL] n={len(texts)} hits={hits} '
+            f'keys={(t_keys - t0) * 1000:.1f}ms '
+            f'mget={(t_mget - t_keys) * 1000:.1f}ms '
+            f'deser={(t_deser - t_mget) * 1000:.1f}ms '
+            f'total={(t_end - t0) * 1000:.1f}ms '
+            f'tasks={task_count}'
+        )
 
         return results  # type: ignore[return-value]
 
     async def _cache_write(self, text: str, response: EmbedResponse) -> None:
         """Write embedding to cache with TTL."""
         key = self._cache_key(text)
-        value = json.dumps({'values': list(response.values), 'dimensions': response.dimensions})
+        value = np.array(response.values, dtype=np.float32).tobytes()
         await self._redis.set(key, value, ex=CACHE_TTL_SECONDS)
 
 

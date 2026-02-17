@@ -149,3 +149,25 @@ class Prefetch:
         filter: Filter | None = None,
         **kwargs: Any,
     ) -> None: ...
+
+class OptimizersConfigDiff:
+    deleted_threshold: float | None
+    vacuum_min_vector_number: int | None
+    default_segment_number: int | None
+    max_segment_size: int | None
+    memmap_threshold: int | None
+    indexing_threshold: int | None
+    flush_interval_sec: int | None
+    max_optimization_threads: int | None
+    def __init__(
+        self,
+        deleted_threshold: float | None = None,
+        vacuum_min_vector_number: int | None = None,
+        default_segment_number: int | None = None,
+        max_segment_size: int | None = None,
+        memmap_threshold: int | None = None,
+        indexing_threshold: int | None = None,
+        flush_interval_sec: int | None = None,
+        max_optimization_threads: int | None = None,
+        **kwargs: Any,
+    ) -> None: ...

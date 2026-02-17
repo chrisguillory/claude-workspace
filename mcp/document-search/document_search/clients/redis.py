@@ -1,6 +1,7 @@
 """Async Redis client for embedding cache.
 
 Thin wrapper around redis.asyncio with connection pooling and concurrency control.
+Binary mode (decode_responses=False) for efficient numpy embedding storage.
 Port discovery handles Docker Compose ephemeral port mapping.
 """
 
@@ -25,8 +26,9 @@ logger = logging.getLogger(__name__)
 class RedisClient:
     """Async Redis client with connection pooling and concurrency control.
 
-    All operations are gated by a semaphore to prevent Redis saturation
-    from fire-and-forget cache writes.
+    Uses binary mode (decode_responses=False) for efficient numpy embedding
+    storage. All operations are gated by a semaphore to prevent Redis
+    saturation from fire-and-forget cache writes.
     """
 
     def __init__(
@@ -45,7 +47,7 @@ class RedisClient:
             max_connections=max_connections,
             socket_timeout=socket_timeout,
             socket_connect_timeout=socket_connect_timeout,
-            decode_responses=True,
+            decode_responses=False,
         )
         self._client = aioredis.Redis(connection_pool=pool)
         self._semaphore = asyncio.Semaphore(max_concurrent)
@@ -54,12 +56,12 @@ class RedisClient:
         """Verify Redis connectivity."""
         return await self._client.ping()
 
-    async def mget(self, keys: Sequence[str]) -> Sequence[str | None]:
+    async def mget(self, keys: Sequence[str]) -> Sequence[bytes | None]:
         """Batch get, gated by concurrency semaphore."""
         async with self._semaphore:
             return await self._client.mget(keys)
 
-    async def set(self, name: str, value: str, *, ex: int | None = None) -> bool | None:
+    async def set(self, name: str, value: bytes, *, ex: int | None = None) -> bool | None:
         """Set with optional TTL, gated by concurrency semaphore."""
         async with self._semaphore:
             return await self._client.set(name, value, ex=ex)
