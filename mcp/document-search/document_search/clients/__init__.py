@@ -6,6 +6,7 @@ from document_search.clients.gemini import GeminiClient
 from document_search.clients.openrouter import OpenRouterClient
 from document_search.clients.protocols import EmbeddingClient
 from document_search.clients.qdrant import QdrantClient
+from document_search.clients.redis import RedisClient
 from document_search.schemas.config import EmbeddingConfig, GeminiConfig, OpenRouterConfig
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     'GeminiClient',
     'OpenRouterClient',
     'QdrantClient',
+    'RedisClient',
     'create_embedding_client',
 ]
 

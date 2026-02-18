@@ -55,6 +55,9 @@ from qdrant_client.http.models import (
     NestedCondition as NestedCondition,
 )
 from qdrant_client.http.models import (
+    OptimizersConfigDiff as OptimizersConfigDiff,
+)
+from qdrant_client.http.models import (
     PointStruct as PointStruct,
 )
 from qdrant_client.http.models import (

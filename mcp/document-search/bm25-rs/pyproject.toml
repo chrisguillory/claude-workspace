@@ -1,0 +1,22 @@
+[build-system]
+requires = ["maturin>=1.0"]
+build-backend = "maturin"
+
+[project]
+name = "bm25-rs"
+version = "0.1.0"
+description = "BM25 sparse embedding compatible with fastembed Qdrant/bm25, using rayon for parallel computation"
+requires-python = ">=3.13"
+
+[project.optional-dependencies]
+test = [
+    "fastembed>=0.7.4",
+    "mmh3",
+    "numpy",
+    "py-rust-stemmers",
+    "pytest",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"

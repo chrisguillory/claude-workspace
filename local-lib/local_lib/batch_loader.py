@@ -50,7 +50,9 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
         self.sort_requests = sort_requests
 
         self._lock = asyncio.Lock()
-        self._pending: dict[TRequest, list[asyncio.Future[TResponse]]] = collections.defaultdict(list)
+        # Split pools: load() → Futures, load_many() → BatchRecords
+        self._individual: dict[TRequest, list[asyncio.Future[TResponse]]] = collections.defaultdict(list)
+        self._batches: list[_BatchRecord[TRequest, TResponse]] = []
         self._load_task: asyncio.Task[None] | None = None
 
     def __repr__(self) -> str:
@@ -71,7 +73,7 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
         future: asyncio.Future[TResponse] = asyncio.Future()
 
         async with self._lock:
-            self._pending[request].append(future)
+            self._individual[request].append(future)
             if not self._load_task:
                 self._load_task = asyncio.create_task(self._process_pending())
 
@@ -85,24 +87,65 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
 
         return future.result()
 
+    async def load_many(self, requests: Sequence[TRequest]) -> Sequence[TResponse]:
+        """Load multiple requests as a single batch-aware call.
+
+        Creates one _BatchRecord per call instead of N Futures. All delivery
+        happens via position_map writes into a shared results array. Single
+        Future fires when all unique requests resolve — 1 event loop callback
+        instead of N.
+
+        Args:
+            requests: Sequence of requests to process.
+
+        Returns:
+            Responses in same order as requests.
+        """
+        if not requests:
+            return []
+
+        batch = _BatchRecord[TRequest, TResponse].from_requests(requests)
+
+        async with self._lock:
+            self._batches.append(batch)
+            if not self._load_task:
+                self._load_task = asyncio.create_task(self._process_pending())
+
+        await batch.future
+        return batch.results  # type: ignore[return-value]
+
     async def _process_pending(self) -> None:
-        """Process all pending requests in batches."""
+        """Process all pending requests in batches.
+
+        Unified processing for both load() and load_many() pools.
+        Collects unique requests across both, chunks, calls bulk_load,
+        and delivers to Futures (load) and BatchRecords (load_many).
+        """
         # Wait for more requests to coalesce
         await asyncio.sleep(self.coalesce_delay)
 
-        # Grab all pending requests
+        # Swap out both pools atomically
         async with self._lock:
-            requests_to_load = self._pending
-            self._pending = collections.defaultdict(list)
+            individual = self._individual
+            self._individual = collections.defaultdict(list)
+            batches = self._batches
+            self._batches = []
+
+        # Collect unique requests across both pools
+        all_unique: dict[TRequest, None] = dict.fromkeys(individual.keys())
+        for batch in batches:
+            all_unique.update(dict.fromkeys(batch.pending_requests))
 
         if self.sort_requests:
-            requests_to_load = dict(sorted(requests_to_load.items(), key=lambda x: str(x[0])))
+            all_unique = dict(sorted(all_unique.items(), key=lambda x: str(x[0])))
 
-        if not requests_to_load:
+        if not all_unique:
+            async with self._lock:
+                self._load_task = None
             return
 
-        # Split into batches and process
-        chunks = list(more_itertools.chunked(requests_to_load.keys(), n=self.batch_size))
+        # Split into batch_size chunks and process
+        chunks = list(more_itertools.chunked(all_unique.keys(), n=self.batch_size))
         tasks: list[asyncio.Task[Sequence[TResponse]]] = [
             asyncio.create_task(self.bulk_load(list(chunk))) for chunk in chunks
         ]
@@ -110,21 +153,33 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
         try:
             for chunk, task in zip(chunks, tasks, strict=True):
                 chunk_responses = await task
+
+                # Deliver to both pools
                 for request, response in zip(chunk, chunk_responses, strict=True):
-                    for future in requests_to_load[request]:
+                    # Individual callers (Futures)
+                    for future in individual.get(request, ()):
                         if not future.done():
                             future.set_result(response)
 
+                    # Batch callers (BatchRecords)
+                    # NOTE: O(B) per request where B = concurrent batches
+                    # For large B, consider reverse index optimization (see docs)
+                    for batch in batches:
+                        batch.deliver(request, response)
+
         except Exception as e:
             # Propagate exception to all waiting callers
-            for futures in requests_to_load.values():
+            for futures in individual.values():
                 for future in futures:
                     if not future.done():
                         future.set_exception(e)
 
+            for batch in batches:
+                batch.deliver_error(e)
+
             # Schedule next batch if more requests arrived
             async with self._lock:
-                if self._pending:
+                if self._individual or self._batches:
                     self._load_task = asyncio.create_task(self._process_pending())
                 else:
                     self._load_task = None
@@ -137,7 +192,65 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
 
         # Schedule next batch if more requests arrived during processing
         async with self._lock:
-            if self._pending:
+            if self._individual or self._batches:
                 self._load_task = asyncio.create_task(self._process_pending())
             else:
                 self._load_task = None
+
+
+class _BatchRecord[TRequest: Hashable, TResponse]:
+    """Batch-level tracking for load_many() calls.
+
+    Owns delivery logic: position_map tracks where each request's result goes,
+    remaining counter triggers the batch Future when all unique requests resolve.
+    One object per load_many() call instead of N per-item objects.
+    """
+
+    __slots__ = ('results', 'future', '_position_map', '_remaining')
+
+    def __init__(
+        self,
+        results: list[TResponse | None],
+        future: asyncio.Future[None],
+        position_map: dict[TRequest, tuple[int, ...]],
+        remaining: int,
+    ) -> None:
+        self.results = results
+        self.future = future
+        self._position_map = position_map
+        self._remaining = remaining
+
+    @classmethod
+    def from_requests(cls, requests: Sequence[TRequest]) -> _BatchRecord[TRequest, TResponse]:
+        """Build batch record from input requests with deduplication tracking."""
+        position_map: dict[TRequest, list[int]] = collections.defaultdict(list)
+        for i, req in enumerate(requests):
+            position_map[req].append(i)
+
+        return cls(
+            results=[None] * len(requests),
+            future=asyncio.Future(),
+            position_map={k: tuple(v) for k, v in position_map.items()},
+            remaining=len(position_map),  # count of UNIQUE requests
+        )
+
+    def deliver(self, request: TRequest, response: TResponse) -> None:
+        """Write result to all positions for this request, trigger Future when done."""
+        positions = self._position_map.pop(request, None)
+        if positions is None:
+            return  # Request not in this batch
+        for pos in positions:
+            self.results[pos] = response
+        self._remaining -= 1
+        if self._remaining == 0 and not self.future.done():
+            self.future.set_result(None)
+
+    def deliver_error(self, exc: BaseException) -> None:
+        """Fail the entire batch with one exception."""
+        if not self.future.done():
+            self.future.set_exception(exc)
+
+    @property
+    def pending_requests(self) -> set[TRequest]:
+        """Requests still waiting for delivery."""
+        return set(self._position_map.keys())

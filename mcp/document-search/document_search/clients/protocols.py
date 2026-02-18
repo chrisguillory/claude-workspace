@@ -39,3 +39,11 @@ class EmbeddingClient(Protocol):
     async def close(self) -> None:
         """Release resources. No-op for clients without external connections."""
         ...
+
+    @property
+    def errors_429(self) -> int:
+        """Cumulative count of 429 rate limit errors encountered.
+
+        Used for dashboard monitoring. Resets only on client recreation.
+        """
+        ...

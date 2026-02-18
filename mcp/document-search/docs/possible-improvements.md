@@ -1,12 +1,9 @@
 # Possible Improvements
 
-* SQLite for state persistence (instead of JSON file) - enables atomic single-row updates, crash recovery without
-  full-file rewrites, and queryable index metadata; current JSON approach scales poorly beyond 10K files
- 
-* Progress callbacks during file processing - currently `on_progress` is only called during scanning phase; for CLI
-  usage, periodic updates during the worker processing phase would improve user experience
-* Collection verification on startup - detect when Qdrant collection is empty/missing but state file exists (e.g.,
-  after Docker container deletion); currently this mismatch causes files to be skipped despite missing vectors
+* Collection verification on startup - detect when Qdrant collection is empty/missing but index state exists
+  in Redis (e.g., after Docker container deletion); currently this mismatch causes files to be skipped despite
+  missing vectors. `ensure_collection` creates collections but doesn't verify vector counts match index state.
+
 * Query transformation techniques for improved retrieval:
   - **HyDE** (Hypothetical Document Embeddings) - generate a hypothetical answer, embed that instead of the query;
     bridges the query-document style gap in embedding space
@@ -15,3 +12,9 @@
     ambiguous queries
   - **Step-back prompting** - abstract the query to a higher-level concept before retrieval; helps with specific
     questions that need general background
+
+* `embed_batch_bytes` in bm25-rs has no timing instrumentation - returns raw results without wall_secs/cpu_secs.
+  No production callers currently, but should be added if the bytes API is used.
+
+* Dashboard `server.py` is 1,700 lines of mixed Python + inline HTML/JS/CSS. Extracting the frontend to a
+  separate file would improve maintainability (JS linting, syntax highlighting in editors, etc.)

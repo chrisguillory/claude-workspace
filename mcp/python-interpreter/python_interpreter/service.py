@@ -101,7 +101,7 @@ class ServerState:
         encoded_project_path = encode_project_path(claude_context.project_dir)
         transcript_path = (
             pathlib.Path.home() / '.claude' / 'projects' / encoded_project_path / f'{session_id}.jsonl'
-        ).resolve(strict=True)
+        ).resolve(strict=False)
 
         # Initialize temp directory for large outputs
         temp_dir = tempfile.TemporaryDirectory()
