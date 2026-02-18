@@ -109,7 +109,8 @@ class QdrantClient:
         """
         self._url = url
 
-        # Override localhost defaults to enable connection pooling with keep-alive
+        # REST connection pool for management operations (create/get/update collection).
+        # Hot-path operations (upsert, query, delete) route through gRPC via prefer_grpc.
         limits = httpx.Limits(max_connections=pool_size, max_keepalive_connections=pool_size)
         self._client = AsyncQdrantClient(
             url=url,
@@ -162,7 +163,8 @@ class QdrantClient:
             Segment size threshold in KB that triggers indexing.
         """
         info = await self._client.get_collection(collection_name)
-        return info.config.optimizer_config.indexing_threshold or 20_000
+        threshold = info.config.optimizer_config.indexing_threshold
+        return threshold if threshold is not None else 20_000
 
     async def set_indexing_threshold(self, collection_name: str, threshold_kb: int) -> None:
         """Set indexing threshold for bulk operations.

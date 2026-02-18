@@ -73,6 +73,9 @@ class SparseEmbeddingService:
         """
         if not texts:
             return [], 0.0, 0.0
+        # asyncio.to_thread prevents event loop blocking during PyO3 argument
+        # conversion (list → Vec<String>). The Rust computation itself releases
+        # the GIL via py.allow_threads, so only the conversion phase blocks.
         results, wall_secs, cpu_secs = await asyncio.to_thread(self._model.embed_batch, list(texts))
         parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
         logger.info(

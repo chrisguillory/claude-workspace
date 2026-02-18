@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import mmap
 import os
 import subprocess
 import sys
@@ -324,6 +325,7 @@ CYAN = '\033[36m'
 GREEN = '\033[32m'
 YELLOW = '\033[33m'
 RED = '\033[31m'
+MAGENTA_BOLD = '\033[1;35m'
 DIM = '\033[2m'
 BOLD = '\033[1m'
 RESET = '\033[0m'
@@ -497,7 +499,7 @@ def _is_switch_pending(disk_data: ResolvedCredentials) -> bool:
     """
     try:
         marker = SwitchPendingMarker.model_validate_json(SWITCH_PENDING_PATH.read_text())
-    except OSError:
+    except OSError:  # ValidationError/JSONDecodeError: fail-fast on schema drift (our data)
         return False
     return marker.email_address == disk_data.email_address and marker.billing_type == disk_data.billing_type
 
@@ -515,7 +517,7 @@ def _get_active_credentials(session_id: str, claude_pid: int) -> tuple[ResolvedC
     if snap_file.exists():
         try:
             snap = CredentialSnapshot.model_validate_json(snap_file.read_text())
-        except OSError:
+        except OSError:  # ValidationError/JSONDecodeError: fail-fast on schema drift (our data)
             snap_file.unlink(missing_ok=True)
 
     if snap is not None:
@@ -583,7 +585,7 @@ def _cleanup_orphan_snapshots(current_session_id: str) -> None:
             else:
                 pid = CredentialSnapshot.model_validate_json(path.read_text()).claude_pid
             os.kill(pid, 0)
-        except (ProcessLookupError, OSError):
+        except (ProcessLookupError, OSError):  # ValidationError/JSONDecodeError: fail-fast (our data)
             path.unlink(missing_ok=True)
         except PermissionError:
             pass  # Process exists but owned by another user
@@ -597,7 +599,7 @@ def _iter_logins() -> Sequence[LoginFile]:
     for path in LOGINS_DIR.glob('*.json'):
         try:
             results.append(LoginFile.model_validate_json(path.read_text()))
-        except OSError:
+        except OSError:  # ValidationError/JSONDecodeError: fail-fast on schema drift (our data)
             continue
     return results
 
@@ -1126,6 +1128,31 @@ def _format_health(sample: HealthSample, sidecar: HealthSidecar) -> str:
 
 
 # =============================================================================
+# Session Title
+# =============================================================================
+
+
+def _get_session_title(transcript_path: str) -> str | None:
+    """Look up user-set session title (via /rename) from the transcript.
+
+    Searches the JSONL transcript for a custom-title record using mmap rfind.
+    No JSON parsing unless a title exists. Returns None if no custom title.
+    """
+    try:
+        with open(transcript_path, 'rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            pos = mm.rfind(b'"custom-title"')
+            if pos == -1:
+                return None
+            line_start = mm.rfind(b'\n', 0, pos) + 1
+            line_end = mm.find(b'\n', pos)
+            if line_end == -1:
+                line_end = len(mm)
+            return json.loads(mm[line_start:line_end]).get('customTitle')  # type: ignore[no-any-return]
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -1179,6 +1206,11 @@ def main() -> None:
 
     # ── Line 1: Identity + Model ─────────────────────────────────────────
     parts: list[str] = []
+
+    # Session title (user-set via /rename)
+    session_title = _get_session_title(data.transcript_path)
+    if session_title:
+        parts.append(f'{MAGENTA_BOLD}{session_title}{RESET}')
 
     # Model + Version
     parts.append(f'{CYAN}{data.model.id}{RESET} {DIM}v{data.version}{RESET}')

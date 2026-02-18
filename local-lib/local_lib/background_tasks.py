@@ -24,6 +24,11 @@ class BackgroundTaskGroup:
     Tasks are submitted fire-and-forget via submit(). Errors are captured
     instantly via task done callbacks and raised on next check_health()
     or drain() call.
+
+    Lifecycle: Create one per operation, not as a long-lived singleton.
+    Once an error is captured, check_health() raises it on every subsequent
+    call (fail-fast). The operation should fail and a fresh group should be
+    created for the next operation.
     """
 
     def __init__(self, name: str) -> None:
@@ -51,8 +56,16 @@ class BackgroundTaskGroup:
             logger.error(f'[{self._name}] Background task failed: {exc}')
 
     def check_health(self) -> None:
-        """Raise first captured error, if any. O(1) field read."""
+        """Raise first captured error, if any. O(1) field read.
+
+        Clears __traceback__ before re-raising to prevent unbounded frame
+        accumulation (CPython issue #116862). Each `raise` prepends frames,
+        and this method is called per-batch — without clearing, tracebacks
+        grow by 2 frames per invocation. The original traceback was already
+        logged at capture time in _on_done().
+        """
         if self._first_error is not None:
+            self._first_error.__traceback__ = None
             raise self._first_error
 
     async def drain(self) -> None:

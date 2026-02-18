@@ -164,9 +164,9 @@ class PipelineTracer:
         for events in self._events.values():
             if 'chunk:started' in events and 'chunk:completed' not in events and 'chunk:errored' not in events:
                 chunk_in += 1
-            if 'embed:dequeued' in events and 'embed:completed' not in events:
+            if 'embed:dequeued' in events and 'embed:completed' not in events and 'embed:errored' not in events:
                 embed_in += 1
-            if 'store:started' in events and 'store:completed' not in events:
+            if 'store:started' in events and 'store:completed' not in events and 'store:errored' not in events:
                 store_in += 1
         return chunk_in, embed_in, store_in
 

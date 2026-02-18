@@ -18,9 +18,12 @@ class BM25Model:
         """Create BM25 model with parameters matching fastembed Qdrant/bm25.
 
         Args:
-            k: Term frequency saturation parameter.
+            k: Term frequency saturation parameter (must be >= 0).
             b: Document length normalization.
-            avg_doc_len: Assumed average document length in tokens.
+            avg_doc_len: Assumed average document length in tokens (must be > 0).
+
+        Raises:
+            ValueError: If k < 0 or avg_doc_len <= 0.
         """
         ...
     def embed_batch(
