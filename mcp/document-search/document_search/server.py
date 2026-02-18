@@ -35,9 +35,10 @@ from document_search.clients.redis import RedisClient, discover_redis_port
 from document_search.dashboard.launcher import ensure_dashboard
 from document_search.dashboard.progress import ProgressWriter
 from document_search.dashboard.state import DashboardStateManager
-from document_search.paths import PROJECT_ROOT, index_state_path
+from document_search.paths import PROJECT_ROOT
 from document_search.repositories.collection_registry import CollectionRegistryManager
 from document_search.repositories.document_vector import DocumentVectorRepository
+from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import FileType
 from document_search.schemas.collections import Collection
 from document_search.schemas.config import (
@@ -147,7 +148,10 @@ class ServerState:
         Repositories are cached per collection to share batch loaders.
         """
         if collection_name not in self._repositories:
-            self._repositories[collection_name] = DocumentVectorRepository(self.qdrant_client, collection_name)
+            state_store = IndexStateStore(self.redis_client, collection_name)
+            self._repositories[collection_name] = DocumentVectorRepository(
+                self.qdrant_client, collection_name, state_store
+            )
         return self._repositories[collection_name]
 
     def get_collection(self, collection_name: str) -> Collection:
@@ -183,13 +187,14 @@ class ServerState:
             dimensions=collection.dimensions,
         )
         repository = self.get_repository(collection_name)
+        state_store = IndexStateStore(self.redis_client, collection_name)
 
-        return await IndexingService.create(
+        return IndexingService(
             chunking_service=self.chunking_service,
             embedding_service=embedding_service,
             sparse_embedding_service=self.sparse_embedding_service,
             repository=repository,
-            state_path=index_state_path(collection_name),
+            state_store=state_store,
         )
 
     async def close(self) -> None:
@@ -217,8 +222,6 @@ Args:
     collection_name: Name of the collection to index into.
     path: Path to file or directory to index. Defaults to current working
         directory if not specified. Note: "**" is not supported.
-    full_reindex: If True, reindex all files regardless of whether they've changed.
-        Only applies to directories (single files are always fully indexed).
     respect_gitignore: Control .gitignore filtering behavior:
         - None (default): Auto-detect git repos, respect gitignore if found.
         - True: Strictly respect gitignore, fail if not a git repo.
@@ -246,7 +249,6 @@ Returns:
     async def index_documents(
         collection_name: str,
         path: str | None = None,
-        full_reindex: bool = False,
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
@@ -261,8 +263,6 @@ Returns:
             path: Path to file or directory to index. Defaults to current working
                 directory if not specified. Supports absolute, relative, or ~ expansion.
                 Note: "**" is not supported (indexing requires a specific path).
-            full_reindex: If True, reindex all files regardless of whether they've changed.
-                Only applies to directories (single files are always fully indexed).
             respect_gitignore: Control .gitignore filtering behavior:
                 - None (default): Auto-detect git repos, respect gitignore if found.
                 - True: Strictly respect gitignore, fail if not a git repo.
@@ -309,8 +309,6 @@ Returns:
             raise ValueError(f'Path not found: {resolved_path}')
 
         await logger.info(f'Indexing directory: {resolved_path}')
-        if full_reindex:
-            await logger.info('Full reindex requested - ignoring cache')
 
         # Capture baseline 429 count for delta calculation
         embedding_client = state.get_embedding_client(collection)
@@ -325,7 +323,6 @@ Returns:
         indexing_task = asyncio.create_task(
             indexing_service.index_directory(
                 resolved_path,
-                full_reindex=full_reindex,
                 respect_gitignore=respect_gitignore,
                 stop_after=stop_after,
             )

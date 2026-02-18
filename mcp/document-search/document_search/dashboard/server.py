@@ -272,6 +272,12 @@ INDEX_HTML = """<!DOCTYPE html>
                 ? (p.chunks_embedded / p.chunks_ingested * 100).toFixed(1) : 0;
             const chunksStorePct = p.chunks_ingested > 0
                 ? (p.chunks_stored / p.chunks_ingested * 100).toFixed(1) : 0;
+            const totalChunked = p.chunks_ingested + (p.chunks_skipped || 0);
+            const chunkSkipPct = totalChunked > 0
+                ? ((p.chunks_skipped || 0) / totalChunked * 100).toFixed(1) : 0;
+            const chunkCacheText = (p.chunks_skipped || 0) > 0
+                ? `<div class="pipeline" style="color:#2e7d32;background:#e8f5e9">Chunk cache: ${(p.chunks_skipped).toLocaleString()} of ${totalChunked.toLocaleString()} chunks unchanged (${chunkSkipPct}% reused)</div>`
+                : '';
             return `
                 <div class="progress-bar">
                     <div class="progress-fill" style="width: ${filesPct}%"></div>
@@ -285,12 +291,14 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="progress-fill" style="width: ${chunksStorePct}%"></div>
                     <div class="progress-text">Chunks Stored: ${p.chunks_stored.toLocaleString()} / ${p.chunks_ingested.toLocaleString()}</div>
                 </div>
+                ${chunkCacheText}
                 <div class="pipeline">
                     Pipeline: ${p.files_awaiting_chunk} queued → chunk${p.files_in_chunk ? ` (${p.files_in_chunk} active)` : ''} → ${p.files_awaiting_embed} queued → embed${p.files_in_embed ? ` (${p.files_in_embed} active)` : ''} → ${p.files_awaiting_store} queued → store${p.files_in_store ? ` (${p.files_in_store} active)` : ''}
                 </div>
                 <div class="stats">
                     <div class="stat"><div class="stat-label">Found</div><div class="stat-value">${p.files_found.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Cached</div><div class="stat-value">${p.files_cached.toLocaleString()}</div></div>
+                    <div class="stat"><div class="stat-label">Chunks Skipped</div><div class="stat-value">${(p.chunks_skipped || 0).toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Cache Hits</div><div class="stat-value">${p.embed_cache_hits.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Cache Misses</div><div class="stat-value">${p.embed_cache_misses.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Errored</div><div class="stat-value">${p.files_errored}</div></div>
@@ -305,12 +313,20 @@ INDEX_HTML = """<!DOCTYPE html>
             const r = op.result;
             if (!r) return '';
             const rate = r.elapsed_seconds > 0 ? (r.files_indexed / r.elapsed_seconds).toFixed(1) : '0';
+            const totalChunks = r.chunks_created + (r.chunks_skipped || 0);
+            const chunksText = (r.chunks_skipped || 0) > 0
+                ? `${totalChunks.toLocaleString()} chunks (${(r.chunks_skipped).toLocaleString()} reused)`
+                : `${r.chunks_created.toLocaleString()} chunks`;
             const parts = [
                 `${formatDuration(r.elapsed_seconds)}`,
-                `${r.files_scanned.toLocaleString()} files \\u2192 ${r.chunks_created.toLocaleString()} chunks`,
+                `${r.files_scanned.toLocaleString()} files \\u2192 ${chunksText}`,
                 `${rate}/s`,
             ];
             let line2Parts = [`Cache: ${r.embed_cache_hits.toLocaleString()} hits, ${r.embed_cache_misses.toLocaleString()} misses`];
+            if ((r.chunks_skipped || 0) > 0) {
+                const skipPct = (r.chunks_skipped / totalChunks * 100).toFixed(0);
+                line2Parts.push(`Chunk cache: ${skipPct}%`);
+            }
             const errCount = r.errors ? r.errors.length : 0;
             if (errCount > 0) line2Parts.push(`<span style="color:#c62828">Errors: ${errCount}</span>`);
             if (r.stopped_after) line2Parts.push(`Stopped after ${r.stopped_after}`);

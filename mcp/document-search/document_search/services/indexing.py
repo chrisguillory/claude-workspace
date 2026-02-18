@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import hashlib
-import json
 import logging
 import os
 import subprocess
@@ -26,7 +25,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-import filelock
 import git
 from local_lib.background_tasks import BackgroundTaskGroup
 from local_lib.utils import Timer
@@ -34,12 +32,12 @@ from local_lib.utils import Timer
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.redis import RedisClient
 from document_search.repositories.document_vector import DocumentVectorRepository
+from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import EXTENSION_MAP, Chunk, FileType, get_file_type
 from document_search.schemas.config import EmbeddingConfig
 from document_search.schemas.embeddings import EmbedResponse
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
-    DirectoryIndexState,
     FileIndexState,
     FileProcessingError,
     FileTypeStats,
@@ -65,9 +63,6 @@ logger = logging.getLogger(__name__)
 # Dense embedding dimension
 EMBEDDING_DIMENSION = 768
 
-# Default state file location
-DEFAULT_STATE_PATH = Path.home() / '.claude-workspace' / 'cache' / 'document_search_index_state.json'
-
 # Pipeline worker configuration - each stage is independently tunable
 NUM_CHUNK_WORKERS = 16  # CPU-bound, limited by disk I/O
 NUM_EMBED_WORKERS = 64  # I/O-bound, feeds embedding API
@@ -91,67 +86,21 @@ class IndexingService:
     - Error collection and categorization
     """
 
-    @classmethod
-    async def create(
-        cls,
-        chunking_service: ChunkingService,
-        embedding_service: EmbeddingService,
-        sparse_embedding_service: SparseEmbeddingService,
-        repository: DocumentVectorRepository,
-        *,
-        state_path: Path = DEFAULT_STATE_PATH,
-    ) -> IndexingService:
-        """Async factory - preferred way to create IndexingService.
-
-        Handles async-context initialization (lock) and loads existing state.
-        """
-        state_lock = asyncio.Lock()
-        file_lock = filelock.FileLock(str(state_path) + '.lock')
-
-        # Load existing state or create empty (under file lock for safety)
-        with file_lock:
-            if state_path.exists():
-                data = json.loads(state_path.read_text())
-                state = DirectoryIndexState.model_validate(data)
-            else:
-                state = DirectoryIndexState(
-                    directory_path='',
-                    files={},
-                    last_full_scan=datetime.now(UTC),
-                )
-
-        return cls(
-            chunking_service=chunking_service,
-            embedding_service=embedding_service,
-            sparse_embedding_service=sparse_embedding_service,
-            repository=repository,
-            state_lock=state_lock,
-            file_lock=file_lock,
-            state=state,
-            state_path=state_path,
-        )
-
     def __init__(
         self,
         chunking_service: ChunkingService,
         embedding_service: EmbeddingService,
         sparse_embedding_service: SparseEmbeddingService,
         repository: DocumentVectorRepository,
-        state_lock: asyncio.Lock,
-        file_lock: filelock.FileLock,
-        state: DirectoryIndexState,
-        *,
-        state_path: Path = DEFAULT_STATE_PATH,
+        state_store: IndexStateStore,
     ) -> None:
-        """Initialize indexing service. Use create() instead for proper async initialization."""
         self._chunking = chunking_service
         self._embedding = embedding_service
         self._sparse_embedding = sparse_embedding_service
         self._repo = repository
-        self._state_path = state_path
-        self._state = state
-        self._state_lock = state_lock
-        self._file_lock = file_lock  # Cross-process lock for state file
+        self._state_store = state_store
+        self._pre_loaded: Mapping[str, FileIndexState] = {}
+        self._cached_hashes: dict[str, str] = {}
         self._operation: _OperationState | None = None
 
     async def get_index_stats(self) -> Mapping[str, int | str]:
@@ -198,6 +147,7 @@ class IndexingService:
             embed_cache_hits=self._embedding.cache_hits,
             embed_cache_misses=self._embedding.cache_misses,
             chunks_stored=op.counters.chunks_stored,
+            chunks_skipped=op.counters.chunks_skipped,
             files_chunked=op.counters.files_chunked,
             files_embedded=op.counters.files_embedded,
             files_stored=op.counters.files_stored,
@@ -249,6 +199,7 @@ class IndexingService:
                 files_no_content=1,
                 chunks_created=0,
                 chunks_deleted=0,
+                chunks_skipped=0,
                 embeddings_created=0,
                 embed_cache_hits=self._embedding.cache_hits,
                 embed_cache_misses=self._embedding.cache_misses,
@@ -277,42 +228,31 @@ class IndexingService:
         await self._repo.upsert(points)
 
         # Delete only obsolete chunks (upsert-then-delete for atomicity)
-        async with self._state_lock:
-            old_state = self._state.files.get(file_key) if self._state else None
-        chunks_deleted = await self._delete_obsolete_chunks(old_state, chunk_ids)
+        old_state = await self._state_store.get_file_state(file_key)
+        obsolete_ids = set(old_state.chunk_ids) - set(chunk_ids) if old_state else set()
+        if obsolete_ids:
+            await self._repo.delete(list(obsolete_ids))
+        chunks_deleted = len(obsolete_ids)
 
-        # Update state
+        # Write new state to Redis (immediately durable)
         file_hash = _file_hash(file_path)
-        async with self._state_lock:
-            if self._state is not None:
-                new_files = dict(self._state.files)
-                new_files[file_key] = FileIndexState(
-                    file_path=file_key,
-                    file_hash=file_hash,
-                    file_size=file_path.stat().st_size,
-                    chunk_count=len(chunks),
-                    chunk_ids=chunk_ids,
-                    indexed_at=datetime.now(UTC),
-                    chunk_strategy_version=CHUNK_STRATEGY_VERSION,
-                )
-                self._state = DirectoryIndexState(
-                    directory_path=self._state.directory_path,
-                    files=new_files,
-                    last_full_scan=self._state.last_full_scan,
-                    total_files=self._state.total_files,
-                    total_chunks=self._state.total_chunks + len(chunks) - chunks_deleted,
-                )
-
-        self._save_state()
+        await self._state_store.put_file_state(
+            file_key,
+            FileIndexState(
+                file_path=file_key,
+                file_hash=file_hash,
+                file_size=file_path.stat().st_size,
+                chunk_count=len(chunks),
+                chunk_ids=chunk_ids,
+                indexed_at=datetime.now(UTC),
+                chunk_strategy_version=CHUNK_STRATEGY_VERSION,
+            ),
+        )
 
         # Build by_file_type for single file
         by_file_type_final: dict[FileType, str] = {}
         if ft is not None:
             by_file_type_final[ft] = FileTypeStats(scanned=1, indexed=1, chunks=len(chunks)).to_summary()
-
-        # Get index totals
-        index_files = len(self._state.files) if self._state else 0
-        index_chunks = self._state.total_chunks if self._state else 0
 
         return IndexingResult(
             files_scanned=1,
@@ -321,12 +261,11 @@ class IndexingService:
             files_no_content=0,
             chunks_created=len(chunks),
             chunks_deleted=chunks_deleted,
+            chunks_skipped=0,
             embeddings_created=len(chunks),
             embed_cache_hits=self._embedding.cache_hits,
             embed_cache_misses=self._embedding.cache_misses,
             by_file_type=by_file_type_final,
-            index_files=index_files,
-            index_chunks=index_chunks,
             elapsed_seconds=round(timer.elapsed(), 3),
             errors=(),
         )
@@ -335,7 +274,6 @@ class IndexingService:
         self,
         directory: Path,
         *,
-        full_reindex: bool = False,
         respect_gitignore: bool | None = None,
         on_progress: ProgressCallback | None = None,
         stop_after: StopAfterStage | None = None,
@@ -352,9 +290,12 @@ class IndexingService:
         - Upsert workers to always be writing to Qdrant (not blocked on Gemini)
         - Independent tuning of worker counts per stage
 
+        Every run is self-verifying via chunk-level comparison: changed files
+        are re-chunked and only chunks with new IDs are embedded and upserted.
+        Recovery from corruption: clear_documents() + re-index.
+
         Args:
             directory: Directory to index.
-            full_reindex: If True, reindex all files regardless of hash.
             respect_gitignore: Git ignore filtering behavior.
             on_progress: Optional callback for progress updates (not yet implemented).
 
@@ -365,8 +306,6 @@ class IndexingService:
             raise ValueError(f'Not a directory: {directory}')
 
         await self._repo.ensure_collection(EMBEDDING_DIMENSION)
-        self._state = self._load_state(directory)
-        self._state_lock = asyncio.Lock()
 
         timer = Timer()
         chunks_deleted = 0
@@ -425,27 +364,8 @@ class IndexingService:
         ignored_text = f' ({files_ignored:,} ignored)' if files_ignored else ''
         logger.info(f'[SCAN] Discovered {files_total:,} files{ignored_text}')
 
-        # FULL REINDEX: Clean slate
-        if full_reindex:
-            chunks_deleted = await self._repo.delete_by_source_path_prefix(str(directory))
-            if chunks_deleted > 0:
-                logger.info(f'[PIPELINE] Deleted {chunks_deleted} existing chunks for clean slate')
-
-            if self._state:
-                dir_prefix = str(directory)
-                new_files = {
-                    k: v
-                    for k, v in self._state.files.items()
-                    if not (k == dir_prefix or k.startswith(dir_prefix + '/'))
-                }
-                self._state = DirectoryIndexState(
-                    directory_path=self._state.directory_path,
-                    files=new_files,
-                    last_full_scan=self._state.last_full_scan,
-                    total_chunks=self._state.total_chunks - chunks_deleted,
-                    total_files=len(new_files),
-                    metadata_version=self._state.metadata_version,
-                )
+        # Pre-load all file states from Redis in one pipeline round-trip
+        self._pre_loaded = await self._state_store.get_all_states([str(p) for p in all_files])
 
         # Classify files: determine which need indexing vs cached (single pass).
         # Yields to event loop periodically so the monitor can capture scan progress.
@@ -459,8 +379,10 @@ class IndexingService:
             if ft is not None:
                 scanned_by_type[ft] = scanned_by_type.get(ft, 0) + 1
 
-            if full_reindex or self._needs_indexing(file_path):
+            file_hash = self._needs_indexing(file_path)
+            if file_hash is not None:
                 files_to_index.append(file_path)
+                self._cached_hashes[str(file_path)] = file_hash
             elif ft is not None:
                 cached_by_type[ft] = cached_by_type.get(ft, 0) + 1
                 self._operation.files_cached += 1
@@ -494,6 +416,7 @@ class IndexingService:
                 files_no_content=0,
                 chunks_created=0,
                 chunks_deleted=chunks_deleted,
+                chunks_skipped=0,
                 embeddings_created=0,
                 embed_cache_hits=0,
                 embed_cache_misses=0,
@@ -522,6 +445,7 @@ class IndexingService:
                 files_no_content=0,
                 chunks_created=0,
                 chunks_deleted=chunks_deleted,
+                chunks_skipped=0,
                 embeddings_created=0,
                 embed_cache_hits=self._embedding.cache_hits,
                 embed_cache_misses=self._embedding.cache_misses,
@@ -673,30 +597,30 @@ class IndexingService:
             )
             by_file_type_result[ft] = stats.to_summary()
 
-        files_cached = sum(cached_by_type.values())
+        files_cached = sum(cached_by_type.values()) + counters.files_chunk_cached
 
-        # Save state
-        self._save_state()
-
-        previous_chunks = self._state.total_chunks if self._state else 0
-        self._state = DirectoryIndexState(
-            directory_path=str(directory),
-            files=self._state.files if self._state else {},
-            last_full_scan=datetime.now(UTC),
-            total_files=files_indexed + files_no_content + files_cached,
-            total_chunks=previous_chunks + chunks_created - chunks_deleted,
-        )
-        self._save_state()
+        # Orphan sweep: find files in Redis that were deleted from disk
+        scanned_paths: set[str] = {str(p) for p in all_files}
+        redis_files = await self._state_store.get_files_under_path(str(directory))
+        orphan_chunk_ids: list[UUID] = []
+        orphan_paths: list[str] = []
+        for file_path_str, file_state in redis_files:
+            if file_path_str not in scanned_paths:
+                orphan_chunk_ids.extend(file_state.chunk_ids)
+                orphan_paths.append(file_path_str)
+        if orphan_chunk_ids:
+            await self._repo.delete(orphan_chunk_ids)
+            chunks_deleted += len(orphan_chunk_ids)
+            logger.info(f'[SWEEP] Deleted {len(orphan_chunk_ids)} orphan chunks from {len(orphan_paths)} removed files')
+        for p in orphan_paths:
+            await self._state_store.delete_file_state(p)
 
         # Build timing report from tracer
         timing_report = tracer.build_report()
 
-        # Get index totals
-        index_files = len(self._state.files) if self._state else 0
-        index_chunks = self._state.total_chunks if self._state else 0
-
-        # Clear operation state
+        # Clear operation and transient state
         self._operation = None
+        self._cached_hashes.clear()
 
         return IndexingResult(
             files_scanned=files_total,
@@ -706,12 +630,11 @@ class IndexingService:
             files_no_content=files_no_content,
             chunks_created=chunks_created,
             chunks_deleted=chunks_deleted,
+            chunks_skipped=counters.chunks_skipped,
             embeddings_created=chunks_created,
             embed_cache_hits=self._embedding.cache_hits,
             embed_cache_misses=self._embedding.cache_misses,
             by_file_type=by_file_type_result,
-            index_files=index_files,
-            index_chunks=index_chunks,
             elapsed_seconds=round(timer.elapsed(), 3),
             errors=errors,
             stopped_after=stop_after,
@@ -728,7 +651,7 @@ class IndexingService:
         self._sparse_embedding.shutdown()
 
     async def clear_documents(self, path: str) -> ClearResult:
-        """Clear documents from the index and update state file.
+        """Clear documents from the index.
 
         Args:
             path: Resolved path to clear. Use "**" for entire index.
@@ -736,94 +659,58 @@ class IndexingService:
         Returns:
             ClearResult with counts of files and chunks removed.
         """
-        # Delete from Qdrant
-        files_removed, chunks_removed = await self._repo.clear_documents(path)
+        if path == '**':
+            # Drop entire Qdrant collection + clear all Redis state
+            chunks_count = await self._repo.count()
+            await self._repo.delete_collection()
+            await self._state_store.clear_collection()
+            return ClearResult(files_removed=0, chunks_removed=chunks_count, path=None)
 
-        # Update state file
-        async with self._state_lock:
-            if self._state is not None:
-                if path == '**':
-                    # Clear entire state (files_removed is 0 after collection drop)
-                    self._state = DirectoryIndexState(
-                        directory_path='',
-                        files={},
-                        last_full_scan=datetime.now(UTC),
-                        total_files=0,
-                        total_chunks=0,
-                    )
-                elif files_removed > 0:
-                    # Remove matching entries from state (single pass)
-                    new_files: dict[str, FileIndexState] = {}
-                    removed_chunks = 0
-                    for k, v in self._state.files.items():
-                        if k == path or k.startswith(path + '/'):
-                            removed_chunks += v.chunk_count
-                        else:
-                            new_files[k] = v
-                    self._state = DirectoryIndexState(
-                        directory_path=self._state.directory_path,
-                        files=new_files,
-                        last_full_scan=self._state.last_full_scan,
-                        total_files=len(new_files),
-                        total_chunks=max(0, self._state.total_chunks - removed_chunks),
-                    )
+        # Get chunk IDs from Redis for the target path
+        # Single file or directory — Redis SCAN handles prefix matching
+        file_state = await self._state_store.get_file_state(path)
+        if file_state is not None:
+            # Exact file match
+            chunk_ids = list(file_state.chunk_ids)
+            if chunk_ids:
+                await self._repo.delete(chunk_ids)
+            await self._state_store.delete_file_state(path)
+            return ClearResult(files_removed=1, chunks_removed=len(chunk_ids), path=path)
 
-        self._save_state()
+        # Directory prefix — get all chunk IDs under path from Redis
+        all_chunk_ids_str = await self._state_store.get_chunk_ids_under_path(path)
+        if all_chunk_ids_str:
+            await self._repo.delete([UUID(cid) for cid in all_chunk_ids_str])
+        files_under = await self._state_store.get_files_under_path(path)
+        files_removed = len(files_under)
+        await self._state_store.delete_files_under_path(path)
 
-        return ClearResult(
-            files_removed=files_removed,
-            chunks_removed=chunks_removed,
-            path=None if path == '**' else path,
-        )
+        return ClearResult(files_removed=files_removed, chunks_removed=len(all_chunk_ids_str), path=path)
 
-    def _load_state(self, directory: Path) -> DirectoryIndexState:
-        """Load or create indexing state for directory.
+    def _needs_indexing(self, path: Path) -> str | None:
+        """Check if file needs (re)indexing based on pre-loaded state from Redis.
 
-        State is shared across all directories - files are keyed by absolute path.
+        Returns:
+            File hash if indexing needed, None if cached.
         """
-        if self._state_path.exists():
-            data = json.loads(self._state_path.read_text())
-            return DirectoryIndexState.model_validate(data)
-
-        return DirectoryIndexState(
-            directory_path=str(directory),
-            files={},
-            last_full_scan=datetime.now(UTC),
-        )
-
-    def _save_state(self) -> None:
-        """Persist indexing state to disk (cross-process safe)."""
-        if self._state is None:
-            return
-        self._state_path.parent.mkdir(parents=True, exist_ok=True)
-        # Use file lock for cross-process safety
-        with self._file_lock:
-            self._state_path.write_text(json.dumps(self._state.model_dump(mode='json'), indent=2))
-
-    def _needs_indexing(self, path: Path) -> bool:
-        """Check if file needs (re)indexing based on content hash."""
-        if self._state is None:
-            return True
-
-        file_state = self._state.files.get(str(path))
+        file_state = self._pre_loaded.get(str(path))
         if file_state is None:
-            return True  # Never indexed
+            return _file_hash(path)
 
-        # Check if chunking strategy changed
         if file_state.chunk_strategy_version != CHUNK_STRATEGY_VERSION:
-            return True
+            return _file_hash(path)
 
-        # Check file size first (quick check)
         try:
             current_size = path.stat().st_size
             if current_size != file_state.file_size:
-                return True
+                return _file_hash(path)
         except OSError:
-            return True
+            return _file_hash(path)
 
-        # Check content hash
         current_hash = _file_hash(path)
-        return current_hash != file_state.file_hash
+        if current_hash != file_state.file_hash:
+            return current_hash
+        return None
 
     async def _pipeline_chunk_worker(
         self,
@@ -851,46 +738,108 @@ class IndexingService:
                         timeout=FILE_CHUNK_TIMEOUT_SECONDS,
                     )
                 )
-                if chunks:
-                    chunk_ids = [_deterministic_chunk_id(file_key, c.chunk_index, c.text) for c in chunks]
+
+                file_hash = self._cached_hashes.pop(file_key, None) or _file_hash(file_path)
+                file_size = file_path.stat().st_size
+
+                # Compute all chunk IDs and diff against old state (Gate 2)
+                all_chunk_ids = [_deterministic_chunk_id(file_key, c.chunk_index, c.text) for c in chunks]
+
+                old_state = self._pre_loaded.get(file_key)
+                old_ids = set(old_state.chunk_ids) if old_state else set()
+                new_ids = set(all_chunk_ids)
+
+                unchanged_ids = old_ids & new_ids
+                deleted_ids = list(old_ids - new_ids)
+                chunks_skipped = len(unchanged_ids)
+
+                if not chunks:
+                    # Path A: 0-chunk file. Delete old chunks if any, update state.
+                    tracer.record(file_key, 'chunk', 'completed')
+                    if deleted_ids:
+                        # Old chunks exist — send through pipeline for deletion
+                        tracer.record(file_key, 'embed', 'queued')
+                        await embed_queue.put(
+                            _ChunkedFile(
+                                file_path=file_path,
+                                file_hash=file_hash,
+                                file_size=file_size,
+                                chunks=[],
+                                chunk_ids=[],
+                                all_chunk_ids=[],
+                                deleted_chunk_ids=deleted_ids,
+                                chunks_skipped=0,
+                            )
+                        )
+                        counters.files_chunked += 1
+                    else:
+                        # No old chunks either — just write empty state
+                        await self._state_store.put_file_state(
+                            file_key,
+                            FileIndexState(
+                                file_path=file_key,
+                                file_hash=file_hash,
+                                file_size=file_size,
+                                chunk_count=0,
+                                chunk_ids=[],
+                                indexed_at=datetime.now(UTC),
+                                chunk_strategy_version=CHUNK_STRATEGY_VERSION,
+                            ),
+                        )
+                        async with results_lock:
+                            results[file_key] = 0
+                    logger.info(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
+
+                elif not deleted_ids and chunks_skipped == len(all_chunk_ids):
+                    # Path B: All chunk IDs unchanged, no deletions.
+                    # Update Redis state with new file hash, skip embed/upsert.
+                    tracer.record(file_key, 'chunk', 'completed')
+                    await self._state_store.put_file_state(
+                        file_key,
+                        FileIndexState(
+                            file_path=file_key,
+                            file_hash=file_hash,
+                            file_size=file_size,
+                            chunk_count=len(all_chunk_ids),
+                            chunk_ids=all_chunk_ids,
+                            indexed_at=datetime.now(UTC),
+                            chunk_strategy_version=CHUNK_STRATEGY_VERSION,
+                        ),
+                    )
+                    counters.files_chunk_cached += 1
+                    counters.chunks_skipped += chunks_skipped
+                    logger.info(f'[CHUNK] {file_path.name}: all {chunks_skipped} chunks unchanged')
+
+                else:
+                    # Path C: Has changed or deleted chunks — filter to changed only.
+                    changed_chunks = []
+                    changed_ids = []
+                    for chunk, cid in zip(chunks, all_chunk_ids):
+                        if cid not in unchanged_ids:
+                            changed_chunks.append(chunk)
+                            changed_ids.append(cid)
+
                     tracer.record(file_key, 'chunk', 'completed')
                     tracer.record(file_key, 'embed', 'queued')
                     await embed_queue.put(
                         _ChunkedFile(
                             file_path=file_path,
-                            file_hash=_file_hash(file_path),
-                            file_size=file_path.stat().st_size,
-                            chunks=chunks,
-                            chunk_ids=chunk_ids,
+                            file_hash=file_hash,
+                            file_size=file_size,
+                            chunks=changed_chunks,
+                            chunk_ids=changed_ids,
+                            all_chunk_ids=all_chunk_ids,
+                            deleted_chunk_ids=deleted_ids,
+                            chunks_skipped=chunks_skipped,
                         )
                     )
-                    counters.chunks_ingested += len(chunks)
+                    counters.chunks_ingested += len(changed_chunks)
+                    counters.chunks_skipped += chunks_skipped
                     counters.files_chunked += 1
-                else:
-                    # File produced 0 chunks (content too short) - record in state to avoid re-processing
-                    tracer.record(file_key, 'chunk', 'completed')
-                    async with self._state_lock:
-                        if self._state is not None:
-                            new_files = dict(self._state.files)
-                            new_files[file_key] = FileIndexState(
-                                file_path=file_key,
-                                file_hash=_file_hash(file_path),
-                                file_size=file_path.stat().st_size,
-                                chunk_count=0,
-                                chunk_ids=(),
-                                indexed_at=datetime.now(UTC),
-                                chunk_strategy_version=CHUNK_STRATEGY_VERSION,
-                            )
-                            self._state = DirectoryIndexState(
-                                directory_path=self._state.directory_path,
-                                files=new_files,
-                                last_full_scan=self._state.last_full_scan,
-                                total_files=self._state.total_files,
-                                total_chunks=self._state.total_chunks,
-                            )
-                    async with results_lock:
-                        results[file_key] = 0  # 0 chunks created
-                    logger.info(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
+                    logger.info(
+                        f'[CHUNK] {file_path.name}: {len(changed_chunks)} changed, '
+                        f'{chunks_skipped} skipped, {len(deleted_ids)} deleted'
+                    )
 
             except (TimeoutError, OSError, UnicodeDecodeError) as e:
                 # Known file-level errors: record and continue
@@ -1011,6 +960,9 @@ class IndexingService:
                     file_size=chunked.file_size,
                     chunks=chunked.chunks,
                     chunk_ids=chunked.chunk_ids,
+                    all_chunk_ids=chunked.all_chunk_ids,
+                    deleted_chunk_ids=chunked.deleted_chunk_ids,
+                    chunks_skipped=chunked.chunks_skipped,
                     dense_embeddings=[r.values for r in file_dense],
                     sparse_embeddings=file_sparse,
                 )
@@ -1064,6 +1016,9 @@ class IndexingService:
                 file_size=chunked.file_size,
                 chunks=chunked.chunks,
                 chunk_ids=chunked.chunk_ids,
+                all_chunk_ids=chunked.all_chunk_ids,
+                deleted_chunk_ids=chunked.deleted_chunk_ids,
+                chunks_skipped=chunked.chunks_skipped,
                 dense_embeddings=[r.values for r in dense_results],
                 sparse_embeddings=sparse_results,
             )
@@ -1101,7 +1056,29 @@ class IndexingService:
                     continue
 
                 # Record dequeue event (entering accumulator)
-                tracer.record(str(chunked.file_path), 'embed', 'dequeued')
+                fk = str(chunked.file_path)
+                tracer.record(fk, 'embed', 'dequeued')
+
+                # Zero-chunk passthrough: deletion-only files skip embedding entirely
+                if not chunked.chunks:
+                    embedded = _EmbeddedFile(
+                        file_path=chunked.file_path,
+                        file_hash=chunked.file_hash,
+                        file_size=chunked.file_size,
+                        chunks=[],
+                        chunk_ids=[],
+                        all_chunk_ids=chunked.all_chunk_ids,
+                        deleted_chunk_ids=chunked.deleted_chunk_ids,
+                        chunks_skipped=chunked.chunks_skipped,
+                        dense_embeddings=[],
+                        sparse_embeddings=[],
+                    )
+                    tracer.record(fk, 'embed', 'completed')
+                    tracer.record(fk, 'store', 'queued')
+                    await upsert_queue.put(embedded)
+                    embed_queue.task_done()
+                    counters.files_embedded += 1
+                    continue
 
                 texts = [c.text for c in chunked.chunks]
 
@@ -1149,50 +1126,39 @@ class IndexingService:
             tracer.record(file_key, 'store', 'started')
 
             # No try/finally - exceptions propagate, triggering fail-fast
-            # Build points
-            points = [
-                VectorPoint.from_chunk(chunk, dense, sparse_indices, sparse_values, chunk_id)
-                for chunk, dense, (sparse_indices, sparse_values), chunk_id in zip(
-                    embedded.chunks,
-                    embedded.dense_embeddings,
-                    embedded.sparse_embeddings,
-                    embedded.chunk_ids,
-                )
-            ]
+            # Upsert changed chunks (may be empty for deletion-only files)
+            if embedded.chunks:
+                points = [
+                    VectorPoint.from_chunk(chunk, dense, sparse_indices, sparse_values, chunk_id)
+                    for chunk, dense, (sparse_indices, sparse_values), chunk_id in zip(
+                        embedded.chunks,
+                        embedded.dense_embeddings,
+                        embedded.sparse_embeddings,
+                        embedded.chunk_ids,
+                    )
+                ]
+                await self._repo.upsert(points)
 
-            # Upsert new chunks
-            await self._repo.upsert(points)
             counters.chunks_stored += len(embedded.chunks)
             counters.files_stored += 1
 
-            # Delete only obsolete chunks
-            if self._state_lock is None:
-                raise RuntimeError('State lock not initialized')
+            # Delete obsolete chunks (pre-computed by chunk worker)
+            if embedded.deleted_chunk_ids:
+                await self._repo.delete(list(embedded.deleted_chunk_ids))
 
-            async with self._state_lock:
-                old_state = self._state.files.get(file_key) if self._state else None
-            await self._delete_obsolete_chunks(old_state, embedded.chunk_ids)
-
-            # Update state
-            async with self._state_lock:
-                if self._state is not None:
-                    new_files = dict(self._state.files)
-                    new_files[file_key] = FileIndexState(
-                        file_path=file_key,
-                        file_hash=embedded.file_hash,
-                        file_size=embedded.file_size,
-                        chunk_count=len(embedded.chunks),
-                        chunk_ids=embedded.chunk_ids,
-                        indexed_at=datetime.now(UTC),
-                        chunk_strategy_version=CHUNK_STRATEGY_VERSION,
-                    )
-                    self._state = DirectoryIndexState(
-                        directory_path=self._state.directory_path,
-                        files=new_files,
-                        last_full_scan=self._state.last_full_scan,
-                        total_files=self._state.total_files,
-                        total_chunks=self._state.total_chunks,
-                    )
+            # Write state using full chunk ID set (not just changed chunks)
+            await self._state_store.put_file_state(
+                file_key,
+                FileIndexState(
+                    file_path=file_key,
+                    file_hash=embedded.file_hash,
+                    file_size=embedded.file_size,
+                    chunk_count=len(embedded.all_chunk_ids),
+                    chunk_ids=embedded.all_chunk_ids,
+                    indexed_at=datetime.now(UTC),
+                    chunk_strategy_version=CHUNK_STRATEGY_VERSION,
+                ),
+            )
 
             # Record success
             tracer.record(file_key, 'store', 'completed')
@@ -1225,28 +1191,6 @@ class IndexingService:
                 results[str(item.file_path)] = chunk_count
             queue.task_done()
 
-    async def _delete_obsolete_chunks(
-        self,
-        old_state: FileIndexState | None,
-        new_chunk_ids: Sequence[UUID],
-    ) -> int:
-        """Delete chunks that no longer exist in the new set.
-
-        Only deletes IDs that were in the old state but not in the new set.
-        This prevents deleting chunks that were just upserted when IDs are
-        deterministic (same file content = same IDs).
-
-        Returns:
-            Count of chunks deleted.
-        """
-        if not old_state:
-            return 0
-        obsolete_ids = set(old_state.chunk_ids) - set(new_chunk_ids)
-        if not obsolete_ids:
-            return 0
-        await self._repo.delete(list(obsolete_ids))
-        return len(obsolete_ids)
-
 
 @dataclass(frozen=True)
 class PipelineSnapshot:
@@ -1268,6 +1212,7 @@ class PipelineSnapshot:
     embed_cache_hits: int
     embed_cache_misses: int
     chunks_stored: int
+    chunks_skipped: int
 
     # Per-stage file completion (files that finished each stage)
     files_chunked: int
@@ -1305,7 +1250,6 @@ async def create_indexing_service(
     redis: RedisClient,
     cache_tasks: BackgroundTaskGroup,
     qdrant_url: str = 'http://localhost:6333',
-    state_path: Path = DEFAULT_STATE_PATH,
 ) -> IndexingService:
     """Factory function to create IndexingService with default dependencies.
 
@@ -1314,10 +1258,9 @@ async def create_indexing_service(
     Args:
         config: Embedding configuration with provider selection.
         collection_name: Name of the collection to operate on.
-        redis: Redis client for embedding cache.
+        redis: Redis client for embedding cache and index state.
         cache_tasks: Background task group for cache write tracking.
         qdrant_url: URL of Qdrant server.
-        state_path: Path to persist indexing state.
 
     Returns:
         Configured IndexingService.
@@ -1335,14 +1278,15 @@ async def create_indexing_service(
         dimensions=config.embedding_dimensions,
     )
     sparse_embedding_service = await SparseEmbeddingService.create()
-    repository = DocumentVectorRepository(qdrant_client, collection_name)
+    state_store = IndexStateStore(redis, collection_name)
+    repository = DocumentVectorRepository(qdrant_client, collection_name, state_store)
 
-    return await IndexingService.create(
+    return IndexingService(
         chunking_service=chunking_service,
         embedding_service=embedding_service,
         sparse_embedding_service=sparse_embedding_service,
         repository=repository,
-        state_path=state_path,
+        state_store=state_store,
     )
 
 
@@ -1359,11 +1303,13 @@ class PipelineCounters:
     chunks_ingested: int = 0  # Chunk worker → embed queue
     chunks_embedded: int = 0  # Embed worker → upsert queue
     chunks_stored: int = 0  # Upsert worker → complete
+    chunks_skipped: int = 0  # Unchanged chunks (matched old IDs)
 
     # File-level completion tracking (one file → many chunks)
     files_chunked: int = 0  # Files that completed chunk stage
     files_embedded: int = 0  # Files that completed embed stage
     files_stored: int = 0  # Files that completed store stage
+    files_chunk_cached: int = 0  # Files where all chunk IDs matched
 
 
 @dataclass
@@ -1402,13 +1348,20 @@ class _OperationState:
 
 @dataclass
 class _ChunkedFile:
-    """Output of chunk stage, input to embed stage."""
+    """Output of chunk stage, input to embed stage.
+
+    Only changed chunks flow through embedding. Unchanged chunks
+    (matching IDs already in Qdrant) are skipped entirely.
+    """
 
     file_path: Path
     file_hash: str
     file_size: int
-    chunks: Sequence[Chunk]
-    chunk_ids: Sequence[UUID]
+    chunks: Sequence[Chunk]  # Only changed chunks (need embedding)
+    chunk_ids: Sequence[UUID]  # IDs for chunks above (parallel arrays)
+    all_chunk_ids: Sequence[UUID]  # ALL chunk IDs (for Redis state)
+    deleted_chunk_ids: Sequence[UUID]  # Old chunks to delete from Qdrant
+    chunks_skipped: int  # Count of unchanged chunks
 
 
 @dataclass
@@ -1418,8 +1371,11 @@ class _EmbeddedFile:
     file_path: Path
     file_hash: str
     file_size: int
-    chunks: Sequence[Chunk]
-    chunk_ids: Sequence[UUID]
+    chunks: Sequence[Chunk]  # Only changed chunks
+    chunk_ids: Sequence[UUID]  # IDs for chunks above
+    all_chunk_ids: Sequence[UUID]  # ALL chunk IDs (for Redis state)
+    deleted_chunk_ids: Sequence[UUID]  # Old chunks to delete from Qdrant
+    chunks_skipped: int
     dense_embeddings: Sequence[Sequence[float]]
     sparse_embeddings: Sequence[tuple[Sequence[int], Sequence[float]]]
 

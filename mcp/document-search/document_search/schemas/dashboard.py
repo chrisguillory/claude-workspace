@@ -78,9 +78,9 @@ class OperationProgress(StrictModel):
     files_awaiting_store: int
 
     # In-flight (files being processed inside workers)
-    files_in_chunk: int = 0
-    files_in_embed: int = 0
-    files_in_store: int = 0
+    files_in_chunk: int
+    files_in_embed: int
+    files_in_store: int
 
     # Pipeline stages (cumulative chunk counts through each stage)
     chunks_ingested: int  # Output of chunk stage
@@ -88,21 +88,22 @@ class OperationProgress(StrictModel):
     embed_cache_hits: int  # Embeddings served from Redis
     embed_cache_misses: int  # Embeddings computed via API
     chunks_stored: int  # Output of store stage
+    chunks_skipped: int  # Unchanged chunks (chunk-level cache)
 
     # Per-stage file completion (files that finished each stage)
-    files_chunked: int = 0
-    files_embedded: int = 0
-    files_stored: int = 0
+    files_chunked: int
+    files_embedded: int
+    files_stored: int
 
     # Completion
     files_done: int
     errors_429: int
 
     # File type breakdown (live during scan, mirrors IndexingResult.by_file_type)
-    by_file_type: Mapping[FileType, str] = {}
+    by_file_type: Mapping[FileType, str]
 
     # Queue depth time series (1Hz samples from tracer)
-    queue_depth_series: Sequence[QueueDepthSample] = ()
+    queue_depth_series: Sequence[QueueDepthSample]
 
     @classmethod
     def from_snapshot(
@@ -141,6 +142,7 @@ class OperationProgress(StrictModel):
             embed_cache_hits=snapshot.embed_cache_hits,
             embed_cache_misses=snapshot.embed_cache_misses,
             chunks_stored=snapshot.chunks_stored,
+            chunks_skipped=snapshot.chunks_skipped,
             files_chunked=snapshot.files_chunked,
             files_embedded=snapshot.files_embedded,
             files_stored=snapshot.files_stored,
@@ -148,6 +150,54 @@ class OperationProgress(StrictModel):
             errors_429=errors_429,
             by_file_type=snapshot.by_file_type,
             queue_depth_series=snapshot.queue_depth_series,
+        )
+
+    @classmethod
+    def from_result(
+        cls,
+        result: IndexingResult,
+        *,
+        errors_429: int,
+    ) -> OperationProgress:
+        """Build final progress from IndexingResult with all queues drained.
+
+        Single source of truth for result → progress conversion.
+        Eliminates manual field-by-field construction in progress writer.
+
+        Args:
+            result: Completed IndexingResult from IndexingService.
+            errors_429: Count of rate limit errors from prior progress snapshots.
+
+        Returns:
+            Complete OperationProgress with status='complete'.
+        """
+        return cls(
+            status='complete',
+            elapsed_seconds=result.elapsed_seconds,
+            scan_complete=True,
+            files_found=result.files_scanned,
+            files_to_process=result.files_indexed + result.files_no_content,
+            files_cached=result.files_cached,
+            files_errored=len(result.errors),
+            files_awaiting_chunk=0,
+            files_awaiting_embed=0,
+            files_awaiting_store=0,
+            files_in_chunk=0,
+            files_in_embed=0,
+            files_in_store=0,
+            chunks_ingested=result.chunks_created,
+            chunks_embedded=result.chunks_created,
+            embed_cache_hits=result.embed_cache_hits,
+            embed_cache_misses=result.embed_cache_misses,
+            chunks_stored=result.chunks_created,
+            chunks_skipped=result.chunks_skipped,
+            files_chunked=result.files_indexed + result.files_no_content,
+            files_embedded=result.files_indexed + result.files_no_content,
+            files_stored=result.files_indexed + result.files_no_content,
+            files_done=result.files_indexed + result.files_no_content,
+            errors_429=errors_429,
+            by_file_type=result.by_file_type,
+            queue_depth_series=(),
         )
 
 

@@ -23,11 +23,9 @@ from qdrant_client.http.models import (
     Distance,
     FieldCondition,
     Filter,
-    FilterSelector,
     Fusion,
     FusionQuery,
     MatchAny,
-    MatchValue,
     Modifier,
     OptimizersConfigDiff,
     PayloadSchemaType,
@@ -392,80 +390,6 @@ class QdrantClient:
         )
         return len(point_ids)
 
-    async def delete_by_source_path(self, collection_name: str, source_path: str) -> None:
-        """Delete all points for a specific source file.
-
-        Used when re-indexing a file to remove old chunks before inserting new ones.
-
-        Args:
-            collection_name: Collection name.
-            source_path: Exact source_path to match.
-        """
-        await self._client.delete(
-            collection_name=collection_name,
-            points_selector=FilterSelector(
-                filter=Filter(
-                    must=[
-                        FieldCondition(
-                            key='source_path',
-                            match=MatchValue(value=source_path),
-                        )
-                    ]
-                )
-            ),
-        )
-
-    async def delete_by_source_path_prefix(self, collection_name: str, prefix: str) -> int:
-        """Delete all points where source_path starts with prefix.
-
-        Used for full_reindex to clean slate a directory before re-indexing.
-        Scrolls entire collection since Qdrant doesn't support prefix filtering.
-
-        Args:
-            collection_name: Collection name.
-            prefix: Directory path prefix. Matches files within this directory.
-                    /a/b matches /a/b/c.md but NOT /a/b-other/x.md
-
-        Returns:
-            Number of points deleted.
-        """
-        prefix = prefix.rstrip('/')
-        deleted = 0
-        offset = None
-
-        while True:
-            results, offset = await self._client.scroll(
-                collection_name=collection_name,
-                limit=1000,
-                offset=offset,
-                with_payload=['source_path'],
-                with_vectors=False,
-            )
-
-            if not results:
-                break
-
-            ids_to_delete = []
-            for point in results:
-                if point.payload is None:
-                    continue
-                path = point.payload.get('source_path', '')
-                # Match exact prefix OR path within prefix directory
-                if path == prefix or path.startswith(prefix + '/'):
-                    ids_to_delete.append(point.id)
-
-            if ids_to_delete:
-                await self._client.delete(
-                    collection_name=collection_name,
-                    points_selector=ids_to_delete,
-                )
-                deleted += len(ids_to_delete)
-
-            if offset is None:
-                break
-
-        return deleted
-
     async def count(self, collection_name: str) -> int:
         """Get total point count in collection."""
         info = await self._client.get_collection(collection_name)
@@ -527,104 +451,6 @@ class QdrantClient:
             limit=100,  # More than enough for our ~7 file types
         )
         return {str(hit.value): hit.count for hit in result.hits}
-
-    async def count_by_source_path(self, collection_name: str, source_path: str) -> int:
-        """Count chunks for a specific source file.
-
-        Args:
-            collection_name: Collection name.
-            source_path: Exact path to check.
-
-        Returns:
-            Number of chunks indexed for this file (0 if not indexed).
-        """
-        result = await self._client.count(
-            collection_name=collection_name,
-            count_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key='source_path',
-                        match=MatchValue(value=source_path),
-                    )
-                ]
-            ),
-        )
-        return result.count
-
-    async def get_unique_source_paths(
-        self,
-        collection_name: str,
-        path_prefix: str | None = None,
-        file_type: str | None = None,
-        limit: int | None = None,
-    ) -> Sequence[tuple[str, str, int]]:
-        """Get unique source_paths with file types and chunk counts.
-
-        Uses scroll API to iterate all points and aggregate by source_path.
-        Results are sorted by chunk count descending.
-
-        Args:
-            collection_name: Collection name.
-            path_prefix: Filter to paths starting with this prefix.
-            file_type: Filter to this file type.
-            limit: Maximum number of files to return.
-
-        Returns:
-            List of (source_path, file_type, chunk_count) tuples.
-        """
-        # Build filter if needed
-        conditions = []
-        if file_type:
-            conditions.append(FieldCondition(key='file_type', match=MatchValue(value=file_type)))
-        scroll_filter = Filter(must=conditions) if conditions else None
-
-        # Aggregate by source_path
-        path_data: dict[str, tuple[str, int]] = {}  # path -> (file_type, count)
-        offset = None
-
-        while True:
-            results, offset = await self._client.scroll(
-                collection_name=collection_name,
-                scroll_filter=scroll_filter,
-                limit=5000,
-                offset=offset,
-                with_payload=['source_path', 'file_type'],
-                with_vectors=False,
-            )
-
-            if not results:
-                break
-
-            for point in results:
-                if point.payload is None:
-                    continue
-                path = point.payload.get('source_path', '')
-                ftype = point.payload.get('file_type', '')
-
-                # Apply path_prefix filter client-side (Qdrant doesn't support prefix)
-                if path_prefix and not (path == path_prefix or path.startswith(path_prefix + '/')):
-                    continue
-
-                if path in path_data:
-                    _, count = path_data[path]
-                    path_data[path] = (ftype, count + 1)
-                else:
-                    path_data[path] = (ftype, 1)
-
-            if offset is None:
-                break
-
-        # Sort by count descending and apply limit
-        sorted_paths = sorted(
-            [(path, ftype, count) for path, (ftype, count) in path_data.items()],
-            key=lambda x: x[2],
-            reverse=True,
-        )
-
-        if limit:
-            sorted_paths = sorted_paths[:limit]
-
-        return sorted_paths
 
     async def _ensure_file_type_index(self, collection_name: str) -> None:
         """Create keyword index on file_type for faceting if not exists.

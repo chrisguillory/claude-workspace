@@ -132,6 +132,7 @@ class IndexingResult(StrictModel):
     # Chunk operations
     chunks_created: int
     chunks_deleted: int  # Old chunks soft-deleted
+    chunks_skipped: int  # Unchanged chunks (matched old IDs)
     embeddings_created: int
     embed_cache_hits: int  # Embeddings served from Redis
     embed_cache_misses: int  # Embeddings computed via API

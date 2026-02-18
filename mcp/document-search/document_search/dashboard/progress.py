@@ -124,23 +124,8 @@ class ProgressWriter:
 
         # Build final progress from result (always, even if monitor never ran)
         prior_429 = self._state.progress.errors_429 if self._state.progress else 0
-        final_progress = OperationProgress(
-            status='complete',
-            elapsed_seconds=result.elapsed_seconds,
-            scan_complete=True,
-            files_found=result.files_scanned,
-            files_to_process=result.files_indexed + result.files_no_content,
-            files_cached=result.files_cached,
-            files_errored=len(result.errors),
-            files_awaiting_chunk=0,
-            files_awaiting_embed=0,
-            files_awaiting_store=0,
-            chunks_ingested=result.chunks_created,
-            chunks_embedded=result.chunks_created,
-            embed_cache_hits=result.embed_cache_hits,
-            embed_cache_misses=result.embed_cache_misses,
-            chunks_stored=result.chunks_created,
-            files_done=result.files_indexed + result.files_no_content,
+        final_progress = OperationProgress.from_result(
+            result,
             errors_429=prior_429,
         )
 
