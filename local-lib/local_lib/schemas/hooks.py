@@ -32,6 +32,8 @@ class SessionStartHookInput(StrictModel):
     hook_event_name: Literal['SessionStart']
     source: Literal['startup', 'resume', 'compact', 'clear']
     model: str | None = None
+    permission_mode: str | None = None
+    agent_type: str | None = None  # Present when started with --agent
 
 
 class SessionEndHookInput(StrictModel):
@@ -44,7 +46,8 @@ class SessionEndHookInput(StrictModel):
     cwd: str
     transcript_path: str
     hook_event_name: Literal['SessionEnd']
-    reason: Literal['prompt_input_exit', 'clear', 'logout', 'other']
+    reason: Literal['prompt_input_exit', 'clear', 'logout', 'bypass_permissions_disabled', 'other']
+    permission_mode: str | None = None
 
 
 # --- PreToolUse hook types ---
