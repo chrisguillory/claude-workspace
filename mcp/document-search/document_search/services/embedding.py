@@ -193,8 +193,11 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         return f'embed:{self._model}:{self._dimensions}:document:{text_hash}'
 
     async def _bulk_lookup(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
-        """Look up cached embeddings, forward misses to embed loader."""
-        # Propagate any previous cache write errors
+        """Look up cached embeddings, forward misses to embed loader.
+
+        Redis errors propagate intentionally — Redis is required infrastructure
+        (index state + embedding cache), not an optional optimization layer.
+        """
         self._cache_tasks.check_health()
 
         t0 = time.perf_counter()

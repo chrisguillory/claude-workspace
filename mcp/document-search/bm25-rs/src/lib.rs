@@ -313,16 +313,27 @@ impl BM25Model {
     ///     avg_doc_len: Assumed average document length in tokens (default: 256.0)
     #[new]
     #[pyo3(signature = (k=DEFAULT_K, b=DEFAULT_B, avg_doc_len=DEFAULT_AVG_LEN))]
-    fn new(k: f64, b: f64, avg_doc_len: f64) -> Self {
+    fn new(k: f64, b: f64, avg_doc_len: f64) -> PyResult<Self> {
+        if avg_doc_len <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "avg_doc_len must be positive",
+            ));
+        }
+        if k < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "k must be non-negative",
+            ));
+        }
+
         let stopwords: HashSet<String> = ENGLISH_STOPWORDS
             .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect();
 
-        Self {
+        Ok(Self {
             inner: BM25::new(stopwords, k, b, avg_doc_len),
-        }
+        })
     }
 
     fn __repr__(&self) -> String {
@@ -410,7 +421,7 @@ impl BM25Model {
         &self,
         py: Python<'py>,
         texts: Vec<String>,
-    ) -> (Bound<'py, pyo3::types::PyBytes>, Bound<'py, pyo3::types::PyBytes>, Bound<'py, pyo3::types::PyBytes>) {
+    ) -> PyResult<(Bound<'py, pyo3::types::PyBytes>, Bound<'py, pyo3::types::PyBytes>, Bound<'py, pyo3::types::PyBytes>)> {
         // Phase 1: Parallel compute.
         let results: Vec<(Vec<u32>, Vec<f64>)> = py.allow_threads(|| {
             texts
@@ -432,9 +443,12 @@ impl BM25Model {
         let mut offset: u32 = 0;
         for (indices, _) in &results {
             offsets.push(offset);
-            offset = offset
-                .checked_add(u32::try_from(indices.len()).expect("token count exceeds u32::MAX"))
-                .expect("total token count exceeds u32::MAX");
+            let len = u32::try_from(indices.len()).map_err(|_| {
+                pyo3::exceptions::PyValueError::new_err("token count exceeds u32::MAX")
+            })?;
+            offset = offset.checked_add(len).ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err("total token count exceeds u32::MAX")
+            })?;
         }
         offsets.push(offset);
 
@@ -452,11 +466,11 @@ impl BM25Model {
         let indices_bytes = as_bytes(&all_indices);
         let values_bytes = as_bytes(&all_values);
 
-        (
+        Ok((
             pyo3::types::PyBytes::new(py, offsets_bytes),
             pyo3::types::PyBytes::new(py, indices_bytes),
             pyo3::types::PyBytes::new(py, values_bytes),
-        )
+        ))
     }
 
     /// Embed texts for query (values are all 1.0, deduplicated tokens).
@@ -468,9 +482,10 @@ impl BM25Model {
             TL_STATE.with(|s| {
                 let mut state = s.borrow_mut();
                 let (indices, _) = self.inner.embed_one_reuse(&text, &mut state);
-                // Deduplicate indices, all values 1.0
+                // Deduplicate and sort for deterministic output
                 let unique: HashSet<u32> = indices.into_iter().collect();
-                let deduped: Vec<u32> = unique.into_iter().collect();
+                let mut deduped: Vec<u32> = unique.into_iter().collect();
+                deduped.sort_unstable();
                 let values = vec![1.0; deduped.len()];
                 (deduped, values)
             })

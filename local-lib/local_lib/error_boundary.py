@@ -139,11 +139,18 @@ class ErrorBoundary:
 
         Returns True to suppress (scope boundary) or calls sys.exit()
         for process boundaries. Returns False for non-application exceptions.
+
+        Handler failures cannot breach the boundary — if the custom handler
+        raises, we fall back to stderr reporting of the original exception,
+        then proceed with the configured suppress/exit behavior.
         """
         if not isinstance(exc_value, Exception):
             return False  # No exception, or system exception — pass through
 
-        self._handler(exc_value)
+        try:
+            self._handler(exc_value)
+        except Exception:
+            _default_handler(exc_value)
 
         if self._exit_code is not None:
             sys.exit(self._exit_code)

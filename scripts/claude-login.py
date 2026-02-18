@@ -94,6 +94,13 @@ Token format reference:
     user:inference scope only. Locally, setup tokens are stored with
     refreshToken: null in the keychain — that's how we differentiate them.
 
+Security limitations:
+- Credentials passed to `security add-generic-password -w` are visible in
+  `ps aux` for the subprocess lifetime. The macOS `security` CLI has no stdin
+  alternative. On single-user machines (common case), this is low-risk since
+  `ps` output is only visible to the same user and root. On shared machines,
+  consider using Keychain Services C API via pyobjc instead of the CLI.
+
 Possible improvements:
 - Keychain `-T` flag: pass `-T /path/to/claude` to explicitly grant access.
   Not currently needed (no ACL restrictions observed). See:
@@ -271,10 +278,15 @@ def read_keychain_raw() -> Mapping[str, Any] | None:  # strict_typing_linter.py:
 
 
 def write_keychain_raw(data: Mapping[str, Any]) -> None:  # strict_typing_linter.py: loose-typing
-    """Write full keychain JSON. Deletes then re-creates the entry."""
+    """Write full keychain JSON atomically using -U (update-or-insert).
+
+    Cleans up duplicate entries first (may exist from manual keychain edits),
+    then uses -U for atomic update. This eliminates the credential gap from
+    the previous delete-then-add pattern.
+    """
     user = os.environ.get('USER', '')
-    # Delete ALL existing entries with this service (may be multiple with different -a values)
-    for _ in range(5):
+    # Delete duplicates with different -a values (keep first occurrence)
+    for i in range(1, 5):
         del_result = subprocess.run(
             ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS],
             capture_output=True,
@@ -282,9 +294,19 @@ def write_keychain_raw(data: Mapping[str, Any]) -> None:  # strict_typing_linter
         )
         if del_result.returncode != 0:
             break
-    # Write new entry
+    # Atomic update or insert (-U)
     result = subprocess.run(
-        ['security', 'add-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS, '-a', user, '-w', json.dumps(data)],
+        [
+            'security',
+            'add-generic-password',
+            '-U',
+            '-s',
+            KEYCHAIN_SERVICE_CREDENTIALS,
+            '-a',
+            user,
+            '-w',
+            json.dumps(data),
+        ],
         capture_output=True,
         text=True,
         timeout=5,
@@ -470,7 +492,7 @@ _LOGIN_MIGRATION_FIELDS: Sequence[tuple[str, Any]] = [  # strict_typing_linter.p
 
 
 def migrate_login_files() -> int:
-    """Add missing fields to login files. Returns count migrated."""
+    """Add missing fields to login files and fix permissions. Returns count migrated."""
     if not LOGINS_DIR.exists():
         return 0
     migrated = 0
@@ -481,7 +503,9 @@ def migrate_login_files() -> int:
             if field not in raw:
                 raw[field] = default
                 changed = True
-        if changed:
+        # Fix world/group-readable permissions from pre-0o600 era
+        needs_chmod = (path.stat().st_mode & 0o077) != 0
+        if changed or needs_chmod:
             _write_file_atomically(path, json.dumps(raw, indent=2))
             migrated += 1
     return migrated
@@ -511,13 +535,17 @@ def derive_login_name(account: OAuthAccount, oauth: ClaudeAiOAuth | None) -> str
 
 
 def login_path(name: str) -> Path:
-    """Return path for a login file."""
-    return LOGINS_DIR / f'{name}.json'
+    """Return path for a login file with traversal protection."""
+    path = (LOGINS_DIR / f'{name}.json').resolve()
+    if not path.is_relative_to(LOGINS_DIR.resolve()):
+        print(f'ERROR: Invalid login name: {name}', file=sys.stderr)
+        sys.exit(1)
+    return path
 
 
 def save_login(login: LoginFile) -> Path:
     """Save login to disk."""
-    LOGINS_DIR.mkdir(parents=True, exist_ok=True)
+    LOGINS_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = login_path(login.name)
     _write_file_atomically(path, login.model_dump_json(indent=2))
     return path

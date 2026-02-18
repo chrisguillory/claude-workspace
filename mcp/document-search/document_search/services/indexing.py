@@ -808,6 +808,8 @@ class IndexingService:
                     )
                     counters.files_chunk_cached += 1
                     counters.chunks_skipped += chunks_skipped
+                    async with results_lock:
+                        results[file_key] = 0  # Chunk-cached, 0 new chunks
                     logger.info(f'[CHUNK] {file_path.name}: all {chunks_skipped} chunks unchanged')
 
                 else:
@@ -1297,7 +1299,8 @@ class PipelineCounters:
     Tracks chunks and files exiting each stage for progress monitoring.
     Dashboard uses these to show per-stage completion and queue depths.
 
-    Thread-safe: Python's += on integers is atomic under GIL.
+    Safe without locks: all workers are asyncio tasks in a single thread.
+    Increments complete between await points (cooperative scheduling).
     """
 
     chunks_ingested: int = 0  # Chunk worker → embed queue

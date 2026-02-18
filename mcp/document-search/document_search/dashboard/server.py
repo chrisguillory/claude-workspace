@@ -6,11 +6,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 import socket
 import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -248,6 +250,12 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
 
     <script>
+        function escapeHtml(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                             .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+
         function formatOperationMeta(op) {
             const p = op.progress;
             const status = op.ended_at ? (op.error ? 'failed' : 'complete') : 'running';
@@ -345,14 +353,14 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="op-header">
                         <div class="op-title">
                             <span class="status-badge status-${status}">${status}</span>
-                            <span>${op.collection_name}</span>
+                            <span>${escapeHtml(op.collection_name)}</span>
                             ${status !== 'running' ? `<button class="btn-delete" onclick="deleteOp('${op.operation_id}')" title="Delete">×</button>` : ''}
                         </div>
                         ${!isComplete ? `<div class="op-meta" id="meta-${op.operation_id}">${formatOperationMeta(op)}</div>` : ''}
                     </div>
-                    <div class="op-meta">${op.directory}</div>
+                    <div class="op-meta">${escapeHtml(op.directory)}</div>
                     ${isComplete ? formatCompletedSummary(op) : `<div id="progress-${op.operation_id}">${formatOperationProgressHtml(op)}</div>`}
-                    ${op.error ? `<div class="error-msg">${op.error}</div>` : ''}
+                    ${op.error ? `<div class="error-msg">${escapeHtml(op.error)}</div>` : ''}
                     ${op.result?.by_file_type && Object.keys(op.result.by_file_type).length > 0 ? formatFileTypeChart(op.result.by_file_type) : ''}
                     ${op.result?.timing ? formatTimingReport(op.result.timing, op.operation_id) : ''}
                     <div class="log-header" onclick="toggleLogs('${op.operation_id}')">
@@ -1561,7 +1569,7 @@ class DashboardServer:
         @app.get('/api/operations/{operation_id}')
         def get_operation(operation_id: str) -> OperationState:
             """Get specific operation by ID."""
-            file_path = OPERATIONS_DIR / f'{operation_id}.json'
+            file_path = _operation_path(operation_id, '.json')
             if not file_path.exists():
                 raise HTTPException(status_code=404, detail='Operation not found')
             data = json.loads(file_path.read_text())
@@ -1575,7 +1583,7 @@ class DashboardServer:
                 operation_id: Operation UUID.
                 tail: Number of lines from end of log to return.
             """
-            log_path = OPERATIONS_DIR / f'{operation_id}.log'
+            log_path = _operation_path(operation_id, '.log')
             if not log_path.exists():
                 return {'lines': [], 'total_lines': 0}
             text = log_path.read_text()
@@ -1588,8 +1596,8 @@ class DashboardServer:
         @app.delete('/api/operations/{operation_id}')
         def delete_operation(operation_id: str) -> Mapping[str, bool]:
             """Delete a single operation and its log."""
-            json_path = OPERATIONS_DIR / f'{operation_id}.json'
-            log_path = OPERATIONS_DIR / f'{operation_id}.log'
+            json_path = _operation_path(operation_id, '.json')
+            log_path = _operation_path(operation_id, '.log')
             if not json_path.exists():
                 raise HTTPException(status_code=404, detail='Operation not found')
             json_path.unlink()
@@ -1682,8 +1690,22 @@ def _get_free_port() -> int:
 
 
 def _exit_for_restart() -> None:
-    """Hard-exit to release the port for the new dashboard process."""
+    """Hard-exit to release the port for the new dashboard process.
+
+    Bypasses finally blocks intentionally — immediate port release is required.
+    New process reads existing MCP registrations from state file on disk.
+    """
     os._exit(0)
+
+
+_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+
+
+def _operation_path(operation_id: str, suffix: str) -> Path:
+    """Resolve operation file path with traversal protection."""
+    if not _UUID_RE.match(operation_id):
+        raise HTTPException(status_code=400, detail='Invalid operation ID')
+    return OPERATIONS_DIR / f'{operation_id}{suffix}'
 
 
 def _read_operations() -> Sequence[OperationState]:

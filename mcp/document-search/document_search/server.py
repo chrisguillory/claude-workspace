@@ -302,6 +302,7 @@ Returns:
         if resolved_path.is_file():
             await logger.info(f'Indexing file: {resolved_path}')
             result = await indexing_service.index_file(resolved_path)
+            await cache_tasks.drain()
             await logger.info(f'Indexed: {result.chunks_created} chunks')
             return result
 
@@ -363,6 +364,9 @@ Returns:
             monitor_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await monitor_task
+            # Idempotent — ensures log handler cleanup even on CancelledError
+            # (which bypasses both try and except Exception blocks)
+            progress_writer._close_log_handler()
 
     SEARCH_DOCS_BASE = """Search indexed documents with configurable search strategy.
 
@@ -451,9 +455,9 @@ Returns:
         else:
             raise NotImplementedError
 
-        # Fetch more candidates for reranking (3x limit, max 50)
+        # Fetch more candidates for reranking (3x over-fetch for quality, cap at 200)
         effective_limit = min(max(limit, 1), 100)
-        rerank_candidates = min(effective_limit * 3, 50)
+        rerank_candidates = min(effective_limit * 3, 200)
 
         # Resolve path (defaults to CWD, "**" means no filter)
         if path == '**':
@@ -795,6 +799,10 @@ Returns:
         # Verify collection exists and delete from Qdrant
         state.get_collection(name)
         await state.qdrant_client.delete_collection(name)
+
+        # Clear Redis index state (prevents stale cache hits on re-create)
+        index_state = IndexStateStore(state.redis_client, name)
+        await index_state.clear_collection()
 
         # Remove from registry
         state.collection_registry.delete_collection(name)

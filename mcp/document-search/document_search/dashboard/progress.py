@@ -204,5 +204,8 @@ _LOG_DATEFMT = '%Y-%m-%d %H:%M:%S'
 
 
 def _now() -> datetime:
-    """Current time in local timezone."""
+    """Current time in local timezone for dashboard display.
+
+    Uses local tz (not UTC) so dashboard timestamps match the user's clock.
+    """
     return datetime.now().astimezone()
