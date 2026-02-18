@@ -37,6 +37,7 @@ from pathlib import Path
 
 import psutil
 import pydantic
+import pydantic.alias_generators
 
 # =============================================================================
 # Pydantic Models — strict, fail-fast on schema drift
@@ -51,6 +52,166 @@ class StrictModel(pydantic.BaseModel):
         strict=True,
         frozen=True,
     )
+
+
+class _ExternalModel(pydantic.BaseModel):
+    """Base for external data we don't control. Ignores unknown fields."""
+
+    model_config = pydantic.ConfigDict(extra='ignore', frozen=True)
+
+
+# =============================================================================
+# Credential Models — External Data (login files, config, keychain)
+#
+# Lightweight projections of external schemas. Only includes fields the
+# statusline needs. Uses extra='ignore' since these files have many fields
+# we don't care about (tokens, scopes, display_name, etc.).
+# =============================================================================
+
+
+class LoginFileOAuthAccount(_ExternalModel):
+    """Login file's oauth_account section (snake_case from disk)."""
+
+    email_address: str = ''
+    organization_uuid: str = ''
+    billing_type: str | None = None
+
+
+class LoginFileClaudeAiOAuth(_ExternalModel):
+    """Login file's claude_ai_oauth section (snake_case from disk)."""
+
+    subscription_type: str | None = None
+    rate_limit_tier: str | None = None
+
+
+class LoginFile(_ExternalModel):
+    """Saved login file from ~/.claude-workspace/logins/*.json."""
+
+    name: str = ''
+    oauth_account: LoginFileOAuthAccount | None = None
+    claude_ai_oauth: LoginFileClaudeAiOAuth | None = None
+    setup_token: str | None = None
+
+
+class ConfigOAuthAccount(_ExternalModel):
+    """~/.claude.json oauthAccount section (camelCase from disk)."""
+
+    model_config = pydantic.ConfigDict(
+        extra='ignore',
+        frozen=True,
+        alias_generator=pydantic.alias_generators.to_camel,
+        populate_by_name=True,
+    )
+
+    email_address: str = ''
+    organization_uuid: str = ''
+    billing_type: str = ''
+
+
+class KeychainClaudeAiOAuth(_ExternalModel):
+    """Keychain claudeAiOauth section (camelCase from disk)."""
+
+    model_config = pydantic.ConfigDict(
+        extra='ignore',
+        frozen=True,
+        alias_generator=pydantic.alias_generators.to_camel,
+        populate_by_name=True,
+    )
+
+    subscription_type: str = ''
+    rate_limit_tier: str = ''
+    access_token: str = ''
+
+
+class KeychainData(_ExternalModel):
+    """Top-level keychain JSON from macOS security command."""
+
+    model_config = pydantic.ConfigDict(
+        extra='ignore',
+        frozen=True,
+        alias_generator=pydantic.alias_generators.to_camel,
+        populate_by_name=True,
+    )
+
+    claude_ai_oauth: KeychainClaudeAiOAuth | None = None
+
+
+class SwitchPendingMarker(_ExternalModel):
+    """The .switch-pending file written by claude-login (camelCase from disk)."""
+
+    model_config = pydantic.ConfigDict(
+        extra='ignore',
+        frozen=True,
+        alias_generator=pydantic.alias_generators.to_camel,
+        populate_by_name=True,
+    )
+
+    email_address: str = ''
+    billing_type: str = ''
+
+
+# =============================================================================
+# Credential Models — Internal (resolved state flowing through pipeline)
+# =============================================================================
+
+
+class ResolvedCredentials(pydantic.BaseModel):
+    """Resolved credential state flowing through the pipeline.
+
+    Replaces Mapping[str, str] with typed fields. Uses camelCase JSON aliases
+    for backward compatibility with existing cache and snapshot files on disk.
+    """
+
+    model_config = pydantic.ConfigDict(
+        extra='forbid',
+        strict=True,
+        frozen=True,
+        alias_generator=pydantic.alias_generators.to_camel,
+        populate_by_name=True,
+    )
+
+    email_address: str = ''
+    organization_uuid: str = ''
+    billing_type: str = ''
+    subscription: str = ''
+    tier: str = ''
+    login_name: str = ''
+    auth_method: str = ''
+
+
+class CachedCredentials(StrictModel):
+    """Cache wrapper: ResolvedCredentials + timestamp for TTL and invalidation."""
+
+    timestamp: float
+    credentials: ResolvedCredentials
+
+
+class CredentialSnapshot(pydantic.BaseModel):
+    """Per-session credential snapshot, persisted to disk.
+
+    Not strict — existing snapshot files may have numeric claude_pid that
+    needs coercion. credentials sub-object handles its own alias mapping.
+    """
+
+    model_config = pydantic.ConfigDict(extra='forbid', frozen=True)
+
+    session_id: str
+    claude_pid: int
+    created_at: str
+    credentials: ResolvedCredentials
+
+
+def _extract_plan_info(login: LoginFile) -> tuple[str, str, str]:
+    """Extract (login_name, subscription_display, tier) from a LoginFile."""
+    login_name = login.name
+    subscription = ''
+    tier = ''
+    if login.claude_ai_oauth is not None:
+        sub_raw = login.claude_ai_oauth.subscription_type or ''
+        if sub_raw:
+            subscription = SUBSCRIPTION_DISPLAY.get(sub_raw, sub_raw)
+        tier = login.claude_ai_oauth.rate_limit_tier or ''
+    return login_name, subscription, tier
 
 
 # =============================================================================
@@ -250,41 +411,65 @@ SNAPSHOT_DIR = Path.home() / '.claude-workspace' / 'statusline-snapshots'
 SWITCH_PENDING_PATH = Path.home() / '.claude-workspace' / '.switch-pending'
 LOGINS_DIR = Path.home() / '.claude-workspace' / 'logins'
 
+SUBSCRIPTION_DISPLAY: Mapping[str, str] = {
+    'free': 'Free',
+    'pro': 'Pro',
+    'team': 'Team',
+    'max': 'Max',
+    'enterprise': 'Enterprise',
+}
+
 
 def _max_mtime() -> float:
-    """Return the most recent mtime of config or script, or 0 if unavailable."""
+    """Return the most recent mtime of config, script, or login files."""
     mtime = 0.0
     for path in (CONFIG_PATH, SCRIPT_PATH):
         with contextlib.suppress(OSError):
             mtime = max(mtime, path.stat().st_mtime)
+    if LOGINS_DIR.is_dir():
+        for path in LOGINS_DIR.glob('*.json'):
+            with contextlib.suppress(OSError):
+                mtime = max(mtime, path.stat().st_mtime)
     return mtime
 
 
-def _read_cached_static() -> Mapping[str, str] | None:
-    """Read cached static data if fresh and neither config nor script changed."""
+def _read_cached_static() -> CachedCredentials | None:
+    """Read cached credentials if fresh and neither config nor script changed."""
     if not CACHE_PATH.exists():
         return None
     try:
-        raw = json.loads(CACHE_PATH.read_text())
-        if not isinstance(raw, dict):
+        cached = CachedCredentials.model_validate_json(CACHE_PATH.read_text())
+        if (datetime.now(UTC).timestamp() - cached.timestamp) > CACHE_TTL_SECONDS:
             return None
-        ts = float(raw.get('_timestamp', 0))
-        if (datetime.now(UTC).timestamp() - ts) > CACHE_TTL_SECONDS:
+        if _max_mtime() > cached.timestamp:
             return None
-        # Invalidate if config or script was modified after cache was written
-        if _max_mtime() > ts:
-            return None
-        return {k: str(v) for k, v in raw.items() if not k.startswith('_')}
-    except (json.JSONDecodeError, OSError):
-        pass
-    return None
+        return cached
+    except (pydantic.ValidationError, json.JSONDecodeError, OSError):
+        return None
 
 
-def _write_cache(data: Mapping[str, str]) -> None:
-    """Write static data to cache."""
-    cache = {**data, '_timestamp': datetime.now(UTC).timestamp()}
+def _read_cache_timestamp() -> float:
+    """Read cache timestamp without TTL/invalidation checks (for debug display)."""
+    try:
+        cached = CachedCredentials.model_validate_json(CACHE_PATH.read_text())
+        return cached.timestamp
+    except (pydantic.ValidationError, json.JSONDecodeError, OSError):
+        return 0.0
+
+
+def _write_cache(creds: ResolvedCredentials) -> None:
+    """Write credentials to cache with current timestamp.
+
+    Uses default snake_case serialization (no by_alias). Snapshot files use
+    by_alias=True for camelCase backward compatibility. Both parse correctly
+    due to populate_by_name=True on ResolvedCredentials.
+    """
+    cached = CachedCredentials(
+        timestamp=datetime.now(UTC).timestamp(),
+        credentials=creds,
+    )
     with contextlib.suppress(OSError):
-        CACHE_PATH.write_text(json.dumps(cache))
+        CACHE_PATH.write_text(cached.model_dump_json())
         CACHE_PATH.chmod(0o600)
 
 
@@ -331,23 +516,20 @@ def _atomic_write_json(path: Path, data: str) -> None:
             tmp.unlink()
 
 
-def _is_switch_pending(disk_data: Mapping[str, str]) -> bool:
+def _is_switch_pending(disk_data: ResolvedCredentials) -> bool:
     """Check if switch-login's marker matches current disk state.
 
     Compares identity fields only — must match the same keys used for
     account_changed detection in _get_active_credentials.
     """
     try:
-        marker = json.loads(SWITCH_PENDING_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
+        marker = SwitchPendingMarker.model_validate_json(SWITCH_PENDING_PATH.read_text())
+    except OSError:
         return False
-    return bool(
-        marker.get('emailAddress') == disk_data.get('emailAddress')
-        and marker.get('billingType', '') == disk_data.get('billingType', '')
-    )
+    return marker.email_address == disk_data.email_address and marker.billing_type == disk_data.billing_type
 
 
-def _get_active_credentials(session_id: str, claude_pid: int) -> tuple[Mapping[str, str], bool]:
+def _get_active_credentials(session_id: str, claude_pid: int) -> tuple[ResolvedCredentials, bool]:
     """Return (credentials_to_display, switch_pending).
 
     On first call for a session, snapshots the current disk state.
@@ -356,48 +538,57 @@ def _get_active_credentials(session_id: str, claude_pid: int) -> tuple[Mapping[s
     snap_file = _snapshot_path(session_id)
     disk_data = _read_static_data()
 
-    snap = None
+    snap: CredentialSnapshot | None = None
     if snap_file.exists():
         try:
-            snap = json.loads(snap_file.read_text())
-        except (json.JSONDecodeError, OSError):
+            snap = CredentialSnapshot.model_validate_json(snap_file.read_text())
+        except OSError:
             snap_file.unlink(missing_ok=True)
 
     if snap is not None:
         # PID changed = session was resumed with new process → re-snapshot
-        if snap.get('claude_pid') != claude_pid:
+        if snap.claude_pid != claude_pid:
             snap_file.unlink(missing_ok=True)
             SWITCH_PENDING_PATH.unlink(missing_ok=True)
         else:
-            snap_creds = snap.get('credentials', {})
+            snap_creds = snap.credentials
             # Only compare identity fields — plan info can change without
             # account change (e.g., reverse mapping enriches setup-token data).
-            identity_keys = ('emailAddress', 'billingType')
-            account_changed = any(snap_creds.get(k) != disk_data.get(k) for k in identity_keys)
+            account_changed = (
+                snap_creds.email_address != disk_data.email_address or snap_creds.billing_type != disk_data.billing_type
+            )
             if account_changed:
-                # Check if switch-login caused this (marker matches disk)
                 if _is_switch_pending(disk_data):
                     return snap_creds, True
                 # /login or other cause — update snapshot to match new reality
-                snap['credentials'] = dict(disk_data)
-                snap['created_at'] = datetime.now(UTC).isoformat()
-                _atomic_write_json(snap_file, json.dumps(snap, indent=2))
+                new_snap = CredentialSnapshot(
+                    session_id=session_id,
+                    claude_pid=claude_pid,
+                    created_at=datetime.now(UTC).isoformat(),
+                    credentials=disk_data,
+                )
+                _atomic_write_json(snap_file, new_snap.model_dump_json(by_alias=True, indent=2))
                 return disk_data, False
             # Same account — update snapshot with latest display data
             # (reverse mapping may have enriched subscription/tier)
-            if snap_creds != dict(disk_data):
-                snap['credentials'] = dict(disk_data)
-                _atomic_write_json(snap_file, json.dumps(snap, indent=2))
+            if snap_creds != disk_data:
+                new_snap = CredentialSnapshot(
+                    session_id=session_id,
+                    claude_pid=claude_pid,
+                    created_at=snap.created_at,
+                    credentials=disk_data,
+                )
+                _atomic_write_json(snap_file, new_snap.model_dump_json(by_alias=True, indent=2))
             return disk_data, False
 
     # First invocation (or PID changed) — create snapshot
-    snap = {
-        'session_id': session_id,
-        'claude_pid': claude_pid,
-        'created_at': datetime.now(UTC).isoformat(),
-        'credentials': dict(disk_data),
-    }
-    _atomic_write_json(snap_file, json.dumps(snap, indent=2))
+    new_snap = CredentialSnapshot(
+        session_id=session_id,
+        claude_pid=claude_pid,
+        created_at=datetime.now(UTC).isoformat(),
+        credentials=disk_data,
+    )
+    _atomic_write_json(snap_file, new_snap.model_dump_json(by_alias=True, indent=2))
 
     # Clean up orphans on first invocation
     _cleanup_orphan_snapshots(session_id)
@@ -410,157 +601,138 @@ def _cleanup_orphan_snapshots(current_session_id: str) -> None:
     if not SNAPSHOT_DIR.exists():
         return
     for path in SNAPSHOT_DIR.glob('*.json'):
-        # Skip current session's files (both credential snapshot and health sidecar)
         if path.stem.startswith(current_session_id):
             continue
         try:
-            snap = json.loads(path.read_text())
-            pid = snap.get('claude_pid')
-            if pid is None:
-                path.unlink()
-                continue
+            # Both CredentialSnapshot and HealthSidecar have claude_pid
+            if path.stem.endswith('-health'):
+                pid = HealthSidecar.model_validate_json(path.read_text()).claude_pid
+            else:
+                pid = CredentialSnapshot.model_validate_json(path.read_text()).claude_pid
             os.kill(pid, 0)
-        except (ProcessLookupError, json.JSONDecodeError, OSError):
+        except (ProcessLookupError, OSError):
             path.unlink(missing_ok=True)
         except PermissionError:
             pass  # Process exists but owned by another user
 
 
-def _iter_logins() -> Sequence[Mapping[str, object]]:
+def _iter_logins() -> Sequence[LoginFile]:
     """Read all saved login files from disk."""
     if not LOGINS_DIR.is_dir():
         return []
-    results: list[Mapping[str, object]] = []
+    results: list[LoginFile] = []
     for path in LOGINS_DIR.glob('*.json'):
         try:
-            results.append(json.loads(path.read_text()))
-        except (json.JSONDecodeError, OSError):
+            results.append(LoginFile.model_validate_json(path.read_text()))
+        except OSError:
             continue
     return results
 
 
-def _reverse_map_setup_token(access_token: str) -> Mapping[str, str] | None:
-    """Match a keychain accessToken against saved logins' setup_token fields.
-
-    Returns plan info from the matching login, or None if no match.
-    """
+def _reverse_map_setup_token(access_token: str) -> ResolvedCredentials | None:
+    """Match a keychain accessToken against saved logins' setup_token fields."""
     if not access_token:
         return None
-    sub_display = {
-        'free': 'Free',
-        'pro': 'Pro',
-        'team': 'Team',
-        'max': 'Max',
-        'enterprise': 'Enterprise',
-    }
     for login in _iter_logins():
-        if login.get('setup_token') == access_token:
-            result: dict[str, str] = {'loginName': str(login.get('name') or '')}
-            oauth = login.get('claude_ai_oauth')
-            if isinstance(oauth, dict):
-                sub = oauth.get('subscription_type', '')
-                if sub:
-                    result['subscription'] = sub_display.get(str(sub or ''), str(sub or ''))
-                tier = oauth.get('rate_limit_tier', '')
-                if tier:
-                    result['tier'] = str(tier or '')
-            return result
+        if login.setup_token == access_token:
+            login_name, subscription, tier = _extract_plan_info(login)
+            return ResolvedCredentials(login_name=login_name, subscription=subscription, tier=tier)
     return None
 
 
-def _resolve_login_name(email: str, billing_type: str, org_name: str) -> str:
-    """Match current credentials to a saved login file by identity fields."""
+def _resolve_login(email: str, billing_type: str, org_uuid: str) -> ResolvedCredentials | None:
+    """Match current credentials to a saved login by organization UUID.
+
+    Authoritative match — overrides setup-token reverse mapping when both run.
+    """
     if not email:
-        return ''
+        return None
     for login in _iter_logins():
-        oa = login.get('oauth_account')
-        if isinstance(oa, dict) and (
-            oa.get('email_address') == email
-            and oa.get('billing_type') == billing_type
-            and oa.get('organization_name') == org_name
+        oa = login.oauth_account
+        if oa is not None and (
+            oa.email_address == email and oa.billing_type == billing_type and oa.organization_uuid == org_uuid
         ):
-            return str(login.get('name') or '')
-    return ''
+            login_name, subscription, tier = _extract_plan_info(login)
+            return ResolvedCredentials(login_name=login_name, subscription=subscription, tier=tier)
+    return None
 
 
-def _read_static_data() -> Mapping[str, str]:
+def _read_static_data() -> ResolvedCredentials:
     """Read email and subscription from ~/.claude.json and keychain."""
     cached = _read_cached_static()
     if cached is not None:
-        return cached
+        return cached.credentials
 
-    data: dict[str, str] = {}
+    email_address = ''
+    organization_uuid = ''
+    billing_type = ''
+    subscription = ''
+    tier = ''
+    login_name = ''
+    auth_method = ''
 
-    # Email from ~/.claude.json
+    # Identity from ~/.claude.json (external data — defensive parsing)
     if CONFIG_PATH.is_file():
         try:
             config = json.loads(CONFIG_PATH.read_text())
-            oa = config.get('oauthAccount', {})
-            for key in ('emailAddress', 'organizationName', 'billingType'):
-                val = oa.get(key, '')
-                if val:
-                    data[key] = str(val)
-        except (json.JSONDecodeError, OSError):
+            oa_raw = config.get('oauthAccount')
+            if isinstance(oa_raw, dict):
+                oa = ConfigOAuthAccount.model_validate(oa_raw)
+                email_address = oa.email_address
+                organization_uuid = oa.organization_uuid
+                billing_type = oa.billing_type
+        except (pydantic.ValidationError, json.JSONDecodeError, OSError):
             pass
 
-    # Subscription type from keychain
+    # Subscription from keychain (external data — defensive parsing)
     try:
         result = subprocess.run(
-            [
-                'security',
-                'find-generic-password',
-                '-w',
-                '-s',
-                'Claude Code-credentials',
-            ],
+            ['security', 'find-generic-password', '-w', '-s', 'Claude Code-credentials'],
             capture_output=True,
             text=True,
             timeout=5,
         )
         if result.returncode == 0:
-            kc = json.loads(result.stdout.strip())
-            oauth = kc.get('claudeAiOauth', {})
-            sub = oauth.get('subscriptionType', '')
-            if sub:
-                display = {
-                    'free': 'Free',
-                    'pro': 'Pro',
-                    'team': 'Team',
-                    'max': 'Max',
-                    'enterprise': 'Enterprise',
-                }.get(sub, sub)
-                data['subscription'] = display
-            tier = oauth.get('rateLimitTier', '')
-            if tier:
-                data['tier'] = tier
+            kc = KeychainData.model_validate_json(result.stdout.strip())
+            oauth = kc.claude_ai_oauth
+            if oauth is not None:
+                if oauth.subscription_type:
+                    subscription = SUBSCRIPTION_DISPLAY.get(oauth.subscription_type, oauth.subscription_type)
+                if oauth.rate_limit_tier:
+                    tier = oauth.rate_limit_tier
 
-            # Setup-token reverse mapping: when subscriptionType is null
-            # (setup-token in keychain), look up plan info from saved logins.
-            if not sub:
-                access_token = oauth.get('accessToken', '')
-                login_data = _reverse_map_setup_token(access_token)
-                if login_data:
-                    for key in ('subscription', 'tier', 'loginName'):
-                        if login_data.get(key):
-                            data[key] = login_data[key]
-                    if 'authMethod' not in data:
-                        data['authMethod'] = 'setup-token'
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError, AttributeError, TypeError):
+                # Setup-token reverse mapping: when subscriptionType is null
+                # (setup-token in keychain), look up plan info from saved logins.
+                if not oauth.subscription_type and oauth.access_token:
+                    login_data = _reverse_map_setup_token(oauth.access_token)
+                    if login_data is not None:
+                        login_name = login_data.login_name or login_name
+                        subscription = login_data.subscription or subscription
+                        tier = login_data.tier or tier
+                        if not auth_method:
+                            auth_method = 'setup-token'
+    except (subprocess.TimeoutExpired, pydantic.ValidationError, json.JSONDecodeError, OSError):
         pass
 
-    # Resolve login name from saved logins (covers OAuth path; setup-token
-    # path already sets loginName via _reverse_map_setup_token above)
-    if 'loginName' not in data:
-        login_name = _resolve_login_name(
-            data.get('emailAddress', ''),
-            data.get('billingType', ''),
-            data.get('organizationName', ''),
-        )
-        if login_name:
-            data['loginName'] = login_name
+    # Resolve login by org UUID — authoritative match that overrides
+    # setup-token reverse mapping (which can match the wrong account)
+    login_info = _resolve_login(email_address, billing_type, organization_uuid)
+    if login_info is not None:
+        login_name = login_info.login_name or login_name
+        subscription = login_info.subscription or subscription
+        tier = login_info.tier or tier
 
-    _write_cache(data)
-    return data
+    creds = ResolvedCredentials(
+        email_address=email_address,
+        organization_uuid=organization_uuid,
+        billing_type=billing_type,
+        subscription=subscription,
+        tier=tier,
+        login_name=login_name,
+        auth_method=auth_method,
+    )
+    _write_cache(creds)
+    return creds
 
 
 def _git_branch() -> str:
@@ -1048,25 +1220,20 @@ def main() -> None:
         parts.append(_format_health(health_sample, health_sidecar))
 
     # Account — login ID with compact tier in parens
-    sub = static.get('subscription', '')
-    billing = static.get('billingType', '')
-    raw_tier = static.get('tier', '')
-    auth_method = static.get('authMethod', '')
-    login_name = static.get('loginName', '')
-    is_console = billing == 'prepaid'
+    is_console = static.billing_type == 'prepaid'
 
-    plan_compact = _format_plan_compact(sub, raw_tier)
-    if auth_method == 'setup-token' and plan_compact:
-        plan_compact += ' ⚷'
-    if login_name:
+    plan_compact = _format_plan_compact(static.subscription, static.tier)
+    if static.auth_method == 'setup-token':
+        plan_compact = f'{plan_compact} ⚷'.strip() if plan_compact else '⚷'
+    if static.login_name:
         if is_console:
-            parts.append(f'{YELLOW}{login_name}{RESET}')
+            parts.append(f'{YELLOW}{static.login_name}{RESET}')
         elif plan_compact:
-            parts.append(f'{DIM}{login_name} ({plan_compact}){RESET}')
+            parts.append(f'{DIM}{static.login_name} ({plan_compact}){RESET}')
         else:
-            parts.append(f'{DIM}{login_name}{RESET}')
-    elif static.get('emailAddress'):
-        parts.append(f'{DIM}{static["emailAddress"]}{RESET}')
+            parts.append(f'{DIM}{static.login_name}{RESET}')
+    elif static.email_address:
+        parts.append(f'{DIM}{static.email_address}{RESET}')
 
     if switch_pending:
         parts.append(f'{YELLOW}(switch pending — restart to activate){RESET}')
@@ -1168,10 +1335,7 @@ def main() -> None:
     # ── Line 5: Debug ───────────────────────────────────────────────────
     mtime = _max_mtime()
     mtime_str = datetime.fromtimestamp(mtime, tz=UTC).astimezone().strftime('%H:%M:%S') if mtime else 'n/a'
-    cache_ts = 0.0
-    if CACHE_PATH.exists():
-        with contextlib.suppress(json.JSONDecodeError, OSError):
-            cache_ts = float(json.loads(CACHE_PATH.read_text()).get('_timestamp', 0))
+    cache_ts = _read_cache_timestamp()
     cache_str = datetime.fromtimestamp(cache_ts, tz=UTC).astimezone().strftime('%H:%M:%S') if cache_ts else 'n/a'
     invalidated = 'yes' if mtime > cache_ts else 'no'
     print(
