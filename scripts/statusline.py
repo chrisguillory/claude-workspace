@@ -426,12 +426,25 @@ def _cleanup_orphan_snapshots(current_session_id: str) -> None:
             pass  # Process exists but owned by another user
 
 
+def _iter_logins() -> Sequence[Mapping[str, object]]:
+    """Read all saved login files from disk."""
+    if not LOGINS_DIR.is_dir():
+        return []
+    results: list[Mapping[str, object]] = []
+    for path in LOGINS_DIR.glob('*.json'):
+        try:
+            results.append(json.loads(path.read_text()))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return results
+
+
 def _reverse_map_setup_token(access_token: str) -> Mapping[str, str] | None:
     """Match a keychain accessToken against saved logins' setup_token fields.
 
     Returns plan info from the matching login, or None if no match.
     """
-    if not access_token or not LOGINS_DIR.is_dir():
+    if not access_token:
         return None
     sub_display = {
         'free': 'Free',
@@ -440,23 +453,34 @@ def _reverse_map_setup_token(access_token: str) -> Mapping[str, str] | None:
         'max': 'Max',
         'enterprise': 'Enterprise',
     }
-    for path in LOGINS_DIR.glob('*.json'):
-        try:
-            login = json.loads(path.read_text())
-            if login.get('setup_token') == access_token:
-                result: dict[str, str] = {'loginName': login.get('name', '')}
-                oauth = login.get('claude_ai_oauth')
-                if oauth:
-                    sub = oauth.get('subscription_type', '')
-                    if sub:
-                        result['subscription'] = sub_display.get(sub, sub)
-                    tier = oauth.get('rate_limit_tier', '')
-                    if tier:
-                        result['tier'] = tier
-                return result
-        except (json.JSONDecodeError, OSError):
-            continue
+    for login in _iter_logins():
+        if login.get('setup_token') == access_token:
+            result: dict[str, str] = {'loginName': str(login.get('name') or '')}
+            oauth = login.get('claude_ai_oauth')
+            if isinstance(oauth, dict):
+                sub = oauth.get('subscription_type', '')
+                if sub:
+                    result['subscription'] = sub_display.get(str(sub or ''), str(sub or ''))
+                tier = oauth.get('rate_limit_tier', '')
+                if tier:
+                    result['tier'] = str(tier or '')
+            return result
     return None
+
+
+def _resolve_login_name(email: str, billing_type: str, org_name: str) -> str:
+    """Match current credentials to a saved login file by identity fields."""
+    if not email:
+        return ''
+    for login in _iter_logins():
+        oa = login.get('oauth_account')
+        if isinstance(oa, dict) and (
+            oa.get('email_address') == email
+            and oa.get('billing_type') == billing_type
+            and oa.get('organization_name') == org_name
+        ):
+            return str(login.get('name') or '')
+    return ''
 
 
 def _read_static_data() -> Mapping[str, str]:
@@ -524,6 +548,17 @@ def _read_static_data() -> Mapping[str, str]:
     except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError, AttributeError, TypeError):
         pass
 
+    # Resolve login name from saved logins (covers OAuth path; setup-token
+    # path already sets loginName via _reverse_map_setup_token above)
+    if 'loginName' not in data:
+        login_name = _resolve_login_name(
+            data.get('emailAddress', ''),
+            data.get('billingType', ''),
+            data.get('organizationName', ''),
+        )
+        if login_name:
+            data['loginName'] = login_name
+
     _write_cache(data)
     return data
 
@@ -572,31 +607,21 @@ def _git_remote_url() -> str:
 # =============================================================================
 
 
-def _format_plan(sub: str, tier: str) -> str:
-    """Format subscription type and rate limit tier as friendly plan name.
+def _format_plan_compact(sub: str, tier: str) -> str:
+    """Extract tier multiplier (5x, 20x) or fall back to plan name (Pro).
 
-    Tier format: default_claude_{tier_plan}_{multiplier}, e.g. default_claude_max_5x.
-    The tier_plan and multiplier are extracted and title-cased.
+    Used alongside login IDs where account type is already visible in the ID
+    (e.g., --Personal, --Team), so only the multiplier adds information.
     """
-    tier_suffix = ''
     if tier.startswith('default_claude_'):
-        # e.g. "max_5x" → "Max 5x"
         raw = tier.removeprefix('default_claude_')
         parts = raw.split('_', 1)
-        if len(parts) == 2:
-            tier_suffix = f'{parts[0].title()} {parts[1]}'
-        else:
-            tier_suffix = raw.title()
-    sub_lower = sub.lower()
-    if sub_lower == 'pro':
-        return 'Pro'
-    if sub_lower == 'max':
-        return tier_suffix or 'Max'
-    if sub_lower == 'team':
-        return tier_suffix or 'Team'
-    if sub:
-        return tier_suffix or sub
-    return tier_suffix
+        if len(parts) == 2 and parts[1]:
+            return parts[1]  # "5x", "20x"
+    # No multiplier — show plan name only if it adds info beyond the login ID
+    if sub and sub.lower() not in ('max', 'team'):
+        return sub.title()  # "Pro", "Free"
+    return ''
 
 
 def _context_bar(pct: float, window_size: int) -> str:
@@ -1022,26 +1047,26 @@ def main() -> None:
     if health_sample is not None and health_sidecar is not None:
         parts.append(_format_health(health_sample, health_sidecar))
 
-    # Account
-    email = static.get('emailAddress', '')
+    # Account — login ID with compact tier in parens
     sub = static.get('subscription', '')
-    org = static.get('organizationName', '')
     billing = static.get('billingType', '')
     raw_tier = static.get('tier', '')
     auth_method = static.get('authMethod', '')
+    login_name = static.get('loginName', '')
     is_console = billing == 'prepaid'
-    plan = _format_plan(sub, raw_tier)
-    # Append auth method indicator for setup-tokens (distinguishes from full OAuth)
-    if auth_method == 'setup-token' and plan:
-        plan += ' ⚷'
-    if is_console:
-        account_label = f'{YELLOW}Anthropic Console{RESET}'
-        account_parts = [f'{DIM}{email}{RESET}', account_label] if email else [account_label]
-        parts.append('·'.join(account_parts))
-    elif sub == 'Team':
-        parts.append(f'{DIM}{"·".join(p for p in [email, org or "Team", plan] if p)}{RESET}')
-    else:
-        parts.append(f'{DIM}{"·".join(p for p in [email, plan or "Personal"] if p)}{RESET}')
+
+    plan_compact = _format_plan_compact(sub, raw_tier)
+    if auth_method == 'setup-token' and plan_compact:
+        plan_compact += ' ⚷'
+    if login_name:
+        if is_console:
+            parts.append(f'{YELLOW}{login_name}{RESET}')
+        elif plan_compact:
+            parts.append(f'{DIM}{login_name} ({plan_compact}){RESET}')
+        else:
+            parts.append(f'{DIM}{login_name}{RESET}')
+    elif static.get('emailAddress'):
+        parts.append(f'{DIM}{static["emailAddress"]}{RESET}')
 
     if switch_pending:
         parts.append(f'{YELLOW}(switch pending — restart to activate){RESET}')
