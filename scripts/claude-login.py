@@ -1,7 +1,10 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["pydantic>=2.0", "typer>=0.9.0"]
+# dependencies = ["pydantic>=2.0", "typer>=0.9.0", "local_lib"]
+#
+# [tool.uv.sources]
+# local_lib = { path = "../local-lib/", editable = true }
 # ///
 
 """Claude Code login and MCP auth manager.
@@ -114,16 +117,11 @@ import pydantic
 import rich.console
 import rich.panel
 import typer
+from local_lib.schemas import StrictModel
 
 # =============================================================================
 # Pydantic Models
 # =============================================================================
-
-
-class StrictModel(pydantic.BaseModel):
-    """For data we own — fail on unknown fields."""
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True, frozen=True)
 
 
 class PermissiveModel(pydantic.BaseModel):

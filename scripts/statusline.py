@@ -4,7 +4,11 @@
 # dependencies = [
 #     "psutil>=5.9",
 #     "pydantic>=2.0",
+#     "local_lib",
 # ]
+#
+# [tool.uv.sources]
+# local_lib = { path = "../local-lib/", editable = true }
 # ///
 
 """Claude Code status line script.
@@ -38,20 +42,11 @@ from pathlib import Path
 import psutil
 import pydantic
 import pydantic.alias_generators
+from local_lib.schemas import StrictModel
 
 # =============================================================================
 # Pydantic Models — strict, fail-fast on schema drift
 # =============================================================================
-
-
-class StrictModel(pydantic.BaseModel):
-    """Shared base: no extra fields, strict type coercion, immutable."""
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-    )
 
 
 class _ExternalModel(pydantic.BaseModel):
