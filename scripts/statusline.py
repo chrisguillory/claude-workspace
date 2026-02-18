@@ -43,6 +43,7 @@ import psutil
 import pydantic
 import pydantic.alias_generators
 from local_lib.schemas import StrictModel
+from local_lib.session_tracker import find_claude_pid
 
 # =============================================================================
 # Pydantic Models — strict, fail-fast on schema drift
@@ -466,29 +467,6 @@ def _write_cache(creds: ResolvedCredentials) -> None:
     with contextlib.suppress(OSError):
         CACHE_PATH.write_text(cached.model_dump_json())
         CACHE_PATH.chmod(0o600)
-
-
-def _find_claude_pid() -> int:
-    """Find Claude Code PID by walking up the process tree via psutil.
-
-    Uses psutil instead of spawning `ps` subprocesses — ~0.4ms vs ~6ms per
-    ancestor hop. Checks exe() path because psutil.name() returns the version
-    number (e.g., '2.1.44'), not 'claude', on macOS.
-    """
-    current = os.getppid()
-    for _ in range(20):
-        try:
-            proc = psutil.Process(current)
-            exe = proc.exe()
-            if 'claude' in exe.lower():
-                return current
-            ppid = proc.ppid()
-            if ppid == 0:
-                break
-            current = ppid
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            break
-    raise RuntimeError('Could not find Claude Code process in parent tree')
 
 
 def _snapshot_path(session_id: str) -> Path:
@@ -1186,7 +1164,7 @@ def main() -> None:
         print(f'{RED}StatusLine: validation failed — see {log_path}{RESET}', file=sys.stderr)
         return
 
-    claude_pid = _find_claude_pid()
+    claude_pid = find_claude_pid()
 
     # Collect process health early — before slow operations (keychain, git) —
     # so the CPU delta captures Claude's behavior, not our own overhead.

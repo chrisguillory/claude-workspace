@@ -17,8 +17,6 @@ See: https://code.claude.com/docs/en/hooks#sessionstart
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,41 +25,11 @@ import packaging.version
 import psutil
 from local_lib.phantom import PhantomHandler
 from local_lib.schemas.hooks import SessionStartHookInput
-from local_lib.session_tracker import SessionManager
+from local_lib.session_tracker import SessionManager, find_claude_pid
 from local_lib.utils import Timer
 
 # Start timing
 timer = Timer()
-
-
-def find_claude_pid() -> int | None:
-    """Find Claude process PID by walking up the process tree."""
-    current = os.getppid()
-
-    for _ in range(20):  # Depth limit
-        result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            capture_output=True,
-            text=True,
-        )
-
-        if not result.stdout.strip():
-            break
-
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-
-        # Check if this is Claude
-        if 'claude' in comm.lower():
-            return current
-
-        if ppid == 0:
-            break
-
-        current = ppid
-
-    return None
 
 
 def get_claude_version(claude_pid: int) -> str:
@@ -119,9 +87,9 @@ if not encoded_from_cwd.startswith('-'):
 encoding_matches = encoded_project == encoded_from_cwd
 
 # Find Claude PID
-claude_pid = find_claude_pid()
-
-if claude_pid is None:
+try:
+    claude_pid = find_claude_pid()
+except RuntimeError:
     print(f'Error: Could not find Claude PID. Hook data: {hook_data}', file=sys.stderr)
     sys.exit(1)
 
