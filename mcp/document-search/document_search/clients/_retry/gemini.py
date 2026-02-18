@@ -51,15 +51,27 @@ def is_retryable_gemini_error(exc: BaseException) -> bool:
 
 
 def log_gemini_retry(retry_state: tenacity.RetryCallState) -> None:
-    """Log Gemini retry attempt with exception details."""
+    """Log Gemini retry attempt and track 429 errors."""
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     if exc is None:
         return
+
+    # Track 429s on client instance (args[0] is self for instance methods)
+    if retry_state.args and _is_429_error(exc):
+        client = retry_state.args[0]
+        client.errors_429 += 1
 
     exc_name = type(exc).__name__
     exc_msg = str(exc)
 
     logger.warning(f'[RETRY] Gemini embed attempt {retry_state.attempt_number} failed: {exc_name}: {exc_msg}')
+
+
+def _is_429_error(exc: BaseException | None) -> bool:
+    """Check if exception is a 429 rate limit error."""
+    if exc is None:
+        return False
+    return isinstance(exc, google.genai.errors.APIError) and exc.code == 429
 
 
 def _gemini_circuit_filter(thrown_type: type, thrown_value: BaseException) -> bool:

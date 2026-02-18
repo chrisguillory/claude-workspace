@@ -17,6 +17,8 @@ import contextlib
 import logging
 import os
 import sys
+import time
+import traceback
 import typing
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
@@ -24,15 +26,19 @@ from pathlib import Path
 
 import mcp.server.fastmcp
 import mcp.types
+from local_lib.background_tasks import BackgroundTaskGroup
 from local_lib.utils import DualLogger
 
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
+from document_search.clients.redis import RedisClient, discover_redis_port
 from document_search.dashboard.launcher import ensure_dashboard
+from document_search.dashboard.progress import ProgressWriter
 from document_search.dashboard.state import DashboardStateManager
-from document_search.paths import index_state_path
+from document_search.paths import PROJECT_ROOT
 from document_search.repositories.collection_registry import CollectionRegistryManager
 from document_search.repositories.document_vector import DocumentVectorRepository
+from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import FileType
 from document_search.schemas.collections import Collection
 from document_search.schemas.config import (
@@ -40,8 +46,9 @@ from document_search.schemas.config import (
     create_config,
     default_config,
 )
+from document_search.schemas.dashboard import OperationProgress
 from document_search.schemas.embeddings import EmbedRequest
-from document_search.schemas.indexing import IndexingProgress, IndexingResult
+from document_search.schemas.indexing import IndexingResult, StopAfterStage
 from document_search.schemas.vectors import (
     ClearResult,
     CollectionMetadata,
@@ -62,6 +69,8 @@ __all__ = [
     'ServerState',
 ]
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ServerState:
@@ -72,6 +81,7 @@ class ServerState:
     """
 
     # Shared infrastructure
+    redis_client: RedisClient
     qdrant_client: QdrantClient
     collection_registry: CollectionRegistryManager
 
@@ -90,6 +100,7 @@ class ServerState:
     @classmethod
     async def create(
         cls,
+        redis_client: RedisClient,
         qdrant_url: str = 'http://localhost:6333',
     ) -> typing.Self:
         """Async factory method to create server state with shared services.
@@ -106,6 +117,7 @@ class ServerState:
 
         return cls(
             qdrant_client=qdrant_client,
+            redis_client=redis_client,
             collection_registry=collection_registry,
             chunking_service=chunking_service,
             sparse_embedding_service=sparse_embedding_service,
@@ -136,7 +148,10 @@ class ServerState:
         Repositories are cached per collection to share batch loaders.
         """
         if collection_name not in self._repositories:
-            self._repositories[collection_name] = DocumentVectorRepository(self.qdrant_client, collection_name)
+            state_store = IndexStateStore(self.redis_client, collection_name)
+            self._repositories[collection_name] = DocumentVectorRepository(
+                self.qdrant_client, collection_name, state_store
+            )
         return self._repositories[collection_name]
 
     def get_collection(self, collection_name: str) -> Collection:
@@ -146,28 +161,46 @@ class ServerState:
             raise ValueError(f"Collection '{collection_name}' not found. Use create_collection first.")
         return collection
 
-    async def get_indexing_service(self, collection_name: str) -> IndexingService:
+    async def get_indexing_service(
+        self,
+        collection_name: str,
+        cache_tasks: BackgroundTaskGroup,
+    ) -> IndexingService:
         """Create indexing service for a collection.
 
         Uses cached embedding client and repository, but creates fresh
         IndexingService instance (lightweight).
+
+        Args:
+            collection_name: Collection to create service for.
+            cache_tasks: Background task group for cache write tracking.
         """
         collection = self.get_collection(collection_name)
         embedding_client = self.get_embedding_client(collection)
         config = default_config(collection.provider)
-        embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
+        embedding_service = EmbeddingService(
+            embedding_client,
+            batch_size=config.batch_size,
+            redis=self.redis_client,
+            cache_tasks=cache_tasks,
+            model=collection.model,
+            dimensions=collection.dimensions,
+        )
         repository = self.get_repository(collection_name)
+        state_store = IndexStateStore(self.redis_client, collection_name)
 
-        return await IndexingService.create(
+        return IndexingService(
             chunking_service=self.chunking_service,
             embedding_service=embedding_service,
             sparse_embedding_service=self.sparse_embedding_service,
             repository=repository,
-            state_path=index_state_path(collection_name),
+            state_store=state_store,
         )
 
     async def close(self) -> None:
-        """Close all cached embedding clients."""
+        """Close all cached embedding clients and shut down process pools."""
+        self.chunking_service.shutdown()
+        self.sparse_embedding_service.shutdown()
         for client in self._embedding_clients.values():
             await client.close()
 
@@ -189,15 +222,19 @@ Args:
     collection_name: Name of the collection to index into.
     path: Path to file or directory to index. Defaults to current working
         directory if not specified. Note: "**" is not supported.
-    full_reindex: If True, reindex all files regardless of whether they've changed.
-        Only applies to directories (single files are always fully indexed).
     respect_gitignore: Control .gitignore filtering behavior:
         - None (default): Auto-detect git repos, respect gitignore if found.
         - True: Strictly respect gitignore, fail if not a git repo.
         - False: Ignore gitignore, index all supported files.
+    stop_after: Stop pipeline at a stage boundary (directories only):
+        - None (default): Run full pipeline (scan → chunk → embed → store).
+        - "scan": File discovery only. No chunking, embedding, or storage.
+        - "chunk": Scan and chunk. Downstream stages drain without processing.
+        - "embed": Scan, chunk, and embed. Storage stage drains without Qdrant writes.
 
 Returns:
-    IndexingResult with counts of files processed, chunks created, and any errors."""
+    IndexingResult with counts of files processed, chunks created, and any errors.
+    The stopped_after field indicates which stage the pipeline was stopped at."""
 
     @server.tool(
         description=_inject_collections(INDEX_DOCS_BASE, collections_summary),
@@ -212,8 +249,8 @@ Returns:
     async def index_documents(
         collection_name: str,
         path: str | None = None,
-        full_reindex: bool = False,
         respect_gitignore: bool | None = None,
+        stop_after: StopAfterStage | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
         """Index documents for semantic search (file or directory auto-detected).
@@ -226,15 +263,14 @@ Returns:
             path: Path to file or directory to index. Defaults to current working
                 directory if not specified. Supports absolute, relative, or ~ expansion.
                 Note: "**" is not supported (indexing requires a specific path).
-            full_reindex: If True, reindex all files regardless of whether they've changed.
-                Only applies to directories (single files are always fully indexed).
             respect_gitignore: Control .gitignore filtering behavior:
                 - None (default): Auto-detect git repos, respect gitignore if found.
                 - True: Strictly respect gitignore, fail if not a git repo.
                 - False: Ignore gitignore, index all supported files.
+            stop_after: Stop pipeline at a stage boundary (directories only).
 
         Returns:
-            IndexingResult with counts of files processed, chunks created, and any errors.
+            IndexingResult with counts and stopped_after indicator.
         """
         if not ctx:
             raise ValueError('MCP context required')
@@ -247,7 +283,8 @@ Returns:
 
         # Get collection and indexing service
         collection = state.get_collection(collection_name)
-        indexing_service = await state.get_indexing_service(collection_name)
+        cache_tasks = BackgroundTaskGroup('embed-cache')
+        indexing_service = await state.get_indexing_service(collection_name, cache_tasks)
 
         await logger.info(f'Using collection: {collection_name} ({collection.provider})')
 
@@ -265,6 +302,7 @@ Returns:
         if resolved_path.is_file():
             await logger.info(f'Indexing file: {resolved_path}')
             result = await indexing_service.index_file(resolved_path)
+            await cache_tasks.drain()
             await logger.info(f'Indexed: {result.chunks_created} chunks')
             return result
 
@@ -272,40 +310,63 @@ Returns:
             raise ValueError(f'Path not found: {resolved_path}')
 
         await logger.info(f'Indexing directory: {resolved_path}')
-        if full_reindex:
-            await logger.info('Full reindex requested - ignoring cache')
 
-        # Progress callback that logs via MCP context
-        async def on_progress(progress: IndexingProgress) -> None:
-            if progress.percent_complete % 10 < 1 or progress.percent_complete >= 99:
-                await logger.info(
-                    f'[{progress.percent_complete:.0f}%] {progress.current_phase} | '
-                    f'{progress.files_indexed}/{progress.files_total} files | '
-                    f'{progress.chunks_created} chunks'
-                )
+        # Capture baseline 429 count for delta calculation
+        embedding_client = state.get_embedding_client(collection)
+        errors_429_start = embedding_client.errors_429
 
-        # The on_progress callback is sync in IndexingService, so wrap it
-        def sync_progress(progress: IndexingProgress) -> None:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(on_progress(progress))
-            except RuntimeError:
-                pass  # No running loop, skip logging
+        # Setup progress writer
+        progress_writer = ProgressWriter(mcp_server_pid=os.getpid())
+        operation_id = progress_writer.start_operation(collection_name, str(resolved_path))
+        await logger.info(f'Operation: {operation_id}')
 
-        result = await indexing_service.index_directory(
-            resolved_path,
-            full_reindex=full_reindex,
-            respect_gitignore=respect_gitignore,
-            on_progress=sync_progress,
+        # Start indexing as a task
+        indexing_task = asyncio.create_task(
+            indexing_service.index_directory(
+                resolved_path,
+                respect_gitignore=respect_gitignore,
+                stop_after=stop_after,
+            )
         )
 
-        await logger.info(
-            f'Indexing complete: {result.files_indexed} indexed, '
-            f'{result.files_cached} cached, {result.chunks_created} chunks, '
-            f'{len(result.errors)} errors'
-        )
+        # Monitoring coroutine
+        async def monitor_progress() -> None:
+            while not indexing_task.done():
+                snapshot = indexing_service.get_pipeline_snapshot()
+                if snapshot:
+                    errors_429_delta = embedding_client.errors_429 - errors_429_start
+                    progress = OperationProgress.from_snapshot(
+                        snapshot,
+                        status='running',
+                        errors_429=errors_429_delta,
+                    )
+                    progress_writer.update_progress(progress)
+                await asyncio.sleep(0.5)
 
-        return result
+        monitor_task = asyncio.create_task(monitor_progress())
+
+        try:
+            result = await indexing_task
+            await cache_tasks.drain()
+            progress_writer.complete_with_success(result)
+            await logger.info(
+                f'Indexing complete: {result.files_indexed} indexed, '
+                f'{result.files_cached} cached, {result.chunks_created} chunks, '
+                f'{len(result.errors)} errors'
+            )
+            return result
+        except Exception as e:
+            error_tb = ''.join(traceback.format_exception(e))
+            progress_writer.complete_with_error(error_tb)
+            raise
+        finally:
+            cache_tasks.cancel_all()
+            monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor_task
+            # Idempotent — ensures log handler cleanup even on CancelledError
+            # (which bypasses both try and except Exception blocks)
+            progress_writer._close_log_handler()
 
     SEARCH_DOCS_BASE = """Search indexed documents with configurable search strategy.
 
@@ -355,7 +416,16 @@ Returns:
         collection = state.get_collection(collection_name)
         embedding_client = state.get_embedding_client(collection)
         config = default_config(collection.provider)
-        embedding_service = EmbeddingService(embedding_client, batch_size=config.batch_size)
+        # Search uses embed() directly (not embed_text), so cache is unused but required
+        cache_tasks = BackgroundTaskGroup('search-embed')
+        embedding_service = EmbeddingService(
+            embedding_client,
+            batch_size=config.batch_size,
+            redis=state.redis_client,
+            cache_tasks=cache_tasks,
+            model=collection.model,
+            dimensions=collection.dimensions,
+        )
         repository = state.get_repository(collection_name)
 
         await logger.info(
@@ -385,9 +455,9 @@ Returns:
         else:
             raise NotImplementedError
 
-        # Fetch more candidates for reranking (3x limit, max 50)
+        # Fetch more candidates for reranking (3x over-fetch for quality, cap at 200)
         effective_limit = min(max(limit, 1), 100)
-        rerank_candidates = min(effective_limit * 3, 50)
+        rerank_candidates = min(effective_limit * 3, 200)
 
         # Resolve path (defaults to CWD, "**" means no filter)
         if path == '**':
@@ -404,7 +474,7 @@ Returns:
             sparse_indices=sparse_indices,
             sparse_values=sparse_values,
             limit=rerank_candidates,
-            file_types=tuple(typing.cast(FileType, ft) for ft in file_types) if file_types else None,
+            file_types=[typing.cast(FileType, ft) for ft in file_types] if file_types else None,
             source_path_prefix=resolved_path,
         )
 
@@ -456,7 +526,8 @@ Returns:
 
         # Verify collection exists
         collection = state.get_collection(collection_name)
-        indexing_service = await state.get_indexing_service(collection_name)
+        cache_tasks = BackgroundTaskGroup('clear-embed')
+        indexing_service = await state.get_indexing_service(collection_name, cache_tasks)
 
         await logger.info(f'Clearing from collection: {collection_name} ({collection.provider})')
 
@@ -729,6 +800,10 @@ Returns:
         state.get_collection(name)
         await state.qdrant_client.delete_collection(name)
 
+        # Clear Redis index state (prevents stale cache hits on re-create)
+        index_state = IndexStateStore(state.redis_client, name)
+        await index_state.clear_collection()
+
         # Remove from registry
         state.collection_registry.delete_collection(name)
 
@@ -757,8 +832,27 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     logging.getLogger('httpcore').setLevel(logging.WARNING)
     logging.getLogger('google').setLevel(logging.WARNING)
 
+    # Enable asyncio debug mode: logs slow callbacks (>slow_callback_duration),
+    # unawaited coroutines, and other event loop issues.
+    loop = asyncio.get_running_loop()
+    loop.set_debug(True)
+    loop.slow_callback_duration = 0.5  # warn on callbacks >500ms
+    logger.info('[ASYNCIO] debug mode enabled, slow_callback_duration=0.5s')
+
+    # Connect to Redis (embedding cache)
+    redis_port = discover_redis_port(PROJECT_ROOT)
+    redis_client = RedisClient(host='127.0.0.1', port=redis_port)
+    await redis_client.ping()
+    logger.info(f'Redis connected on port {redis_port}')
+
     # Initialize state with shared services (async for semaphore binding)
-    state = await ServerState.create()
+    state = await ServerState.create(redis_client=redis_client)
+
+    # Warm up bm25-rs (initializes rayon thread pool + thread-local stemmers)
+    warmup_t0 = time.perf_counter()
+    await state.sparse_embedding_service.embed_batch(['warmup text'])
+    warmup_elapsed = time.perf_counter() - warmup_t0
+    logger.info(f'[SPARSE-WARMUP] bm25-rs ready in {warmup_elapsed:.3f}s')
 
     # Migrate legacy collection if needed
     await _migrate_legacy_collection(state)
@@ -785,6 +879,7 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     # Cleanup resources
     dashboard_state_manager.unregister_mcp_server(os.getpid())
     await state.close()
+    await redis_client.close()
     print('✓ Document Search MCP server shutdown', file=sys.stderr)
 
 

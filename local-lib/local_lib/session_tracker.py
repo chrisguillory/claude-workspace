@@ -26,6 +26,8 @@ __all__ = [
     'SessionDatabase',
     'Session',
     'SessionMetadata',
+    'find_claude_pid',
+    'resolve_session_id',
 ]
 
 
@@ -531,3 +533,44 @@ def save_sessions(cwd: str, db: SessionDatabase) -> None:
 
     # Atomic rename
     temp_path.replace(sessions_file)
+
+
+# =============================================================================
+# Process Discovery
+# =============================================================================
+
+
+def find_claude_pid() -> int:
+    """Find Claude Code PID by walking up the process tree.
+
+    Uses psutil.Process.exe() because psutil.name() on macOS returns the
+    version number (e.g., '2.1.44'), not 'claude'. The exe path is reliable.
+    """
+    import os
+
+    current = os.getppid()
+    for _ in range(20):
+        try:
+            proc = psutil.Process(current)
+            exe = proc.exe()
+            if 'claude' in exe.lower():
+                return current
+            ppid = proc.ppid()
+            if ppid == 0:
+                break
+            current = ppid
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            break
+    raise RuntimeError('Could not find Claude Code process in parent tree')
+
+
+def resolve_session_id(claude_pid: int, cwd: str) -> str:
+    """Look up the active session ID for a Claude PID from sessions.json."""
+    db = load_sessions(cwd)
+    matching = [s for s in db.sessions if s.state == 'active' and s.metadata.claude_pid == claude_pid]
+    if len(matching) == 1:
+        return matching[0].session_id
+    if len(matching) > 1:
+        ids = [s.session_id for s in matching]
+        raise RuntimeError(f'Multiple active sessions for PID {claude_pid}: {ids}')
+    raise RuntimeError(f'No active session found for PID {claude_pid}')

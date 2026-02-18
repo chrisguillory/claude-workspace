@@ -15,9 +15,14 @@ __all__ = [
     'DASHBOARD_STATE_PATH',
     'DOCUMENT_SEARCH_DIR',
     'INDEX_STATE_DIR',
+    'OPERATIONS_DIR',
+    'PROJECT_ROOT',
     'WORKSPACE_DIR',
     'index_state_path',
 ]
+
+# Project root (directory containing pyproject.toml)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Base directories
 WORKSPACE_DIR = Path.home() / '.claude-workspace'
@@ -30,6 +35,9 @@ COLLECTIONS_LOCK_PATH = DOCUMENT_SEARCH_DIR / 'collections.lock'
 # Dashboard coordination
 DASHBOARD_STATE_PATH = DOCUMENT_SEARCH_DIR / 'dashboard.json'
 DASHBOARD_LOCK_PATH = DOCUMENT_SEARCH_DIR / 'dashboard.lock'
+
+# Operation progress files (read by dashboard)
+OPERATIONS_DIR = DOCUMENT_SEARCH_DIR / 'operations'
 
 # Per-collection index state
 INDEX_STATE_DIR = DOCUMENT_SEARCH_DIR / 'index_state'

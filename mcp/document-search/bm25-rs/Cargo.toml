@@ -1,0 +1,24 @@
+[package]
+name = "bm25-rs"
+version = "0.1.0"
+edition = "2021"
+description = "BM25 sparse embedding compatible with fastembed Qdrant/bm25, using rayon for parallel computation"
+
+[lib]
+name = "bm25_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module"] }
+rayon = "1.10"
+rust-stemmers = "1.2"
+mimalloc = { version = "0.1", optional = true }
+
+[features]
+default = ["mimalloc"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+strip = true

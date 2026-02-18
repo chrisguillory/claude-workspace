@@ -53,10 +53,15 @@ def is_retryable_openrouter_error(exc: BaseException) -> bool:
 
 
 def log_openrouter_retry(retry_state: tenacity.RetryCallState) -> None:
-    """Log OpenRouter retry attempt with exception details."""
+    """Log OpenRouter retry attempt and track 429 errors."""
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     if exc is None:
         return
+
+    # Track 429s on client instance (args[0] is self for instance methods)
+    if retry_state.args and _is_429_error(exc):
+        client = retry_state.args[0]
+        client.errors_429 += 1
 
     exc_name = type(exc).__name__
     exc_msg = str(exc)
@@ -66,6 +71,13 @@ def log_openrouter_retry(retry_state: tenacity.RetryCallState) -> None:
         exc_msg = f'HTTP {exc.response.status_code}: {exc_msg}'
 
     logger.warning(f'[RETRY] OpenRouter embed attempt {retry_state.attempt_number} failed: {exc_name}: {exc_msg}')
+
+
+def _is_429_error(exc: BaseException | None) -> bool:
+    """Check if exception is a 429 rate limit error."""
+    if exc is None:
+        return False
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429
 
 
 def _openrouter_circuit_filter(thrown_type: type, thrown_value: BaseException) -> bool:

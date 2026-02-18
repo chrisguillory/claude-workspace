@@ -491,6 +491,26 @@ All MCP servers use `uv run --script` with inline dependencies:
 # ///
 ```
 
+### PATH-Accessible Scripts (Launcher Pattern)
+
+**Problem:** uv doesn't resolve symlinks before computing relative paths in `[tool.uv.sources]`. A symlink at `~/.local/bin/my-cmd` → `~/project/scripts/my-cmd.py` causes `../local-lib/` to resolve from `~/.local/bin/` instead of `~/project/scripts/`.
+
+**Solution:** Replace symlinks with launcher scripts that pass the resolved path to `uv run --script`:
+
+```bash
+# Install with: scripts/install-launcher.sh scripts/my-cmd.py [command-name]
+# Generates ~/.local/bin/my-cmd:
+#!/bin/sh
+exec uv run --no-project --script "/absolute/path/to/scripts/my-cmd.py" "$@"
+```
+
+For typer/click scripts, pass `prog_name` at the call site for consistent help text and tab completion:
+
+```python
+if __name__ == '__main__':
+    app(prog_name=os.path.basename(sys.argv[0]).removesuffix('.py'))
+```
+
 ### Shared Logging
 
 All servers import `DualLogger` from `local_lib.utils`:

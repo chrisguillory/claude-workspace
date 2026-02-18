@@ -58,12 +58,14 @@ class VectorPoint(StrictModel):
     The chunk data is stored as payload for retrieval.
     """
 
+    __strict_typing_linter__hashable_fields__ = True
+
     id: UUID
     # Dense vector for semantic similarity
-    dense_vector: Sequence[float]
+    dense_vector: tuple[float, ...]
     # Sparse vector for keyword matching (BM25)
-    sparse_indices: Sequence[int]
-    sparse_values: Sequence[float]
+    sparse_indices: tuple[int, ...]
+    sparse_values: tuple[float, ...]
     # Payload contains chunk data for retrieval
     source_path: str
     chunk_index: int
@@ -88,9 +90,9 @@ class VectorPoint(StrictModel):
         """Create VectorPoint from Chunk and embeddings."""
         return cls(
             id=point_id,
-            dense_vector=dense_vector,
-            sparse_indices=sparse_indices,
-            sparse_values=sparse_values,
+            dense_vector=tuple(dense_vector),
+            sparse_indices=tuple(sparse_indices),
+            sparse_values=tuple(sparse_values),
             source_path=chunk.source_path,
             chunk_index=chunk.chunk_index,
             file_type=chunk.file_type,

@@ -110,6 +110,7 @@ class OpenRouterClient:
 
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._tracker = ConcurrencyTracker('OPENROUTER')
+        self.errors_429 = 0
 
     @_retry.openrouter_breaker
     @tenacity.retry(

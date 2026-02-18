@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>File Type Breakdown — Final Candidates</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 40px;
+            color: #333;
+        }
+        h1 { margin-bottom: 10px; }
+        .subtitle { color: #666; margin-bottom: 40px; font-size: 14px; }
+        .option {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+        .option-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+        .option-desc { font-size: 13px; color: #888; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+    <h1>File Type Breakdown — Final Candidates</h1>
+    <p class="subtitle">C6 compact + percentages, gradient bars, pastel palette, with file extensions.</p>
+
+    <div id="options"></div>
+
+    <script>
+        const data = [
+            { type: 'image',    exts: '.jpg .jpeg .png .heic .gif', scanned: 48673, cached: 0 },
+            { type: 'json',     exts: '.json',                      scanned: 44656, cached: 3 },
+            { type: 'text',     exts: '.txt',                       scanned: 34476, cached: 22 },
+            { type: 'markdown', exts: '.md',                        scanned: 9161,  cached: 21 },
+            { type: 'jsonl',    exts: '.jsonl .ndjson',             scanned: 6983,  cached: 66 },
+            { type: 'csv',      exts: '.csv',                       scanned: 2156,  cached: 1 },
+            { type: 'pdf',      exts: '.pdf',                       scanned: 1492,  cached: 0 },
+            { type: 'email',    exts: '.eml',                       scanned: 18,    cached: 3 },
+        ];
+        const maxScanned = Math.max(...data.map(d => d.scanned));
+        const total = data.reduce((s, d) => s + d.scanned, 0);
+        function fmt(n) { return n.toLocaleString(); }
+
+        const earth = [
+            ['#d4a373','#8b5e34'], ['#6b9080','#3a5a40'], ['#c1666b','#8b3a3a'],
+            ['#e8ac65','#b5651d'], ['#7ea8be','#4a7c94'], ['#a98467','#6f4e37'],
+            ['#d4a5a5','#9e6b6b'], ['#8fbc8f','#556b2f'],
+        ];
+
+        // ── V1: Extensions below type name ──
+        function renderV1(maxH) {
+            return `<div style="display:flex;align-items:flex-end;gap:2px">${data.map((d, i) => {
+                const bh = Math.max(2, d.scanned / maxScanned * maxH);
+                const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
+                const pct = (d.scanned / total * 100).toFixed(0);
+                const [lt, dk] = earth[i];
+                return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
+                    <div style="font-size:10px;color:#999;margin-bottom:1px">${pct}%</div>
+                    <div style="font-size:11px;font-weight:600;color:#444;margin-bottom:2px;font-variant-numeric:tabular-nums">${fmt(d.scanned)}</div>
+                    <div style="width:100%;height:${bh}px;border-radius:3px 3px 0 0;position:relative;overflow:hidden;background:linear-gradient(to bottom,${lt},${dk}22)">
+                        ${ch > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk}"></div>` : ''}
+                    </div>
+                    <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#555;margin-top:5px">${d.type}</div>
+                    <div style="font-size:9px;color:#aaa;margin-top:1px">${d.exts}</div>
+                    ${d.cached > 0 ? `<div style="font-size:9px;font-weight:600;color:${dk};margin-top:2px">${fmt(d.cached)} cached</div>` : ''}
+                </div>`;
+            }).join('')}</div>`;
+        }
+
+        // ── V2: Extensions inline with type, stronger gradient ──
+        function renderV2(maxH) {
+            return `<div style="display:flex;align-items:flex-end;gap:3px">${data.map((d, i) => {
+                const bh = Math.max(2, d.scanned / maxScanned * maxH);
+                const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
+                const pct = (d.scanned / total * 100).toFixed(0);
+                const [lt, dk] = earth[i];
+                return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
+                    <div style="font-size:10px;color:#999;margin-bottom:1px">${pct}%</div>
+                    <div style="font-size:11px;font-weight:600;color:#444;margin-bottom:2px;font-variant-numeric:tabular-nums">${fmt(d.scanned)}</div>
+                    <div style="width:100%;height:${bh}px;border-radius:3px 3px 0 0;position:relative;overflow:hidden;background:linear-gradient(180deg,${lt} 0%,${dk}66 100%)">
+                        ${ch > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk}"></div>` : ''}
+                    </div>
+                    <div style="margin-top:5px;text-align:center">
+                        <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#555">${d.type}</div>
+                        <div style="font-size:9px;color:#aaa">${d.exts}</div>
+                    </div>
+                    ${d.cached > 0 ? `<div style="font-size:9px;font-weight:600;color:${dk};margin-top:2px">${fmt(d.cached)} cached</div>` : ''}
+                </div>`;
+            }).join('')}</div>`;
+        }
+
+        // ── V3: With baseline rule, extensions in lighter font ──
+        function renderV3(maxH) {
+            return `<div style="display:flex;align-items:flex-end;gap:2px;border-bottom:2px solid #e8e8e8">${data.map((d, i) => {
+                const bh = Math.max(2, d.scanned / maxScanned * maxH);
+                const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
+                const pct = (d.scanned / total * 100).toFixed(0);
+                const [lt, dk] = earth[i];
+                return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
+                    <div style="font-size:10px;color:#999;margin-bottom:1px">${pct}%</div>
+                    <div style="font-size:11px;font-weight:600;color:#444;margin-bottom:2px;font-variant-numeric:tabular-nums">${fmt(d.scanned)}</div>
+                    <div style="width:100%;height:${bh}px;border-radius:4px 4px 0 0;position:relative;overflow:hidden;background:linear-gradient(to bottom,${lt},${dk}44)">
+                        ${ch > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk};opacity:0.7"></div>` : ''}
+                    </div>
+                </div>`;
+            }).join('')}</div>
+            <div style="display:flex;gap:2px;margin-top:6px">${data.map((d, i) => {
+                const [, dk] = earth[i];
+                return `<div style="flex:1;text-align:center">
+                    <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#555">${d.type}</div>
+                    <div style="font-size:9px;color:#bbb">${d.exts}</div>
+                    <div style="font-size:9px;font-weight:600;color:${d.cached > 0 ? dk : '#ccc'};margin-top:1px">${fmt(d.cached)} cached</div>
+                </div>`;
+            }).join('')}</div>`;
+        }
+
+        // ── V4: Rounded bars, extensions as tooltip-style subtitle ──
+        function renderV4(maxH) {
+            return `<div style="display:flex;align-items:flex-end;gap:4px">${data.map((d, i) => {
+                const bh = Math.max(2, d.scanned / maxScanned * maxH);
+                const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
+                const pct = (d.scanned / total * 100).toFixed(0);
+                const [lt, dk] = earth[i];
+                return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
+                    <div style="font-size:10px;color:#999">${pct}%</div>
+                    <div style="font-size:12px;font-weight:600;color:#444;margin-bottom:3px;font-variant-numeric:tabular-nums">${fmt(d.scanned)}</div>
+                    <div style="width:80%;height:${bh}px;border-radius:6px 6px 0 0;position:relative;overflow:hidden;background:linear-gradient(to bottom,${lt},${dk}55)">
+                        ${ch > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk}"></div>` : ''}
+                    </div>
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#444;margin-top:6px;letter-spacing:0.3px">${d.type}</div>
+                    <div style="font-size:9px;color:#bbb;font-family:'SF Mono',Monaco,monospace">${d.exts}</div>
+                    ${d.cached > 0 ? `<div style="font-size:9px;font-weight:600;color:${dk};margin-top:2px">${fmt(d.cached)} cached</div>` : ''}
+                </div>`;
+            }).join('')}</div>`;
+        }
+
+        // ── V5: Minimal — no percentage, just count + bar + type/exts ──
+        function renderV5(maxH) {
+            return `<div style="display:flex;align-items:flex-end;gap:2px">${data.map((d, i) => {
+                const bh = Math.max(2, d.scanned / maxScanned * maxH);
+                const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
+                const [lt, dk] = earth[i];
+                return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
+                    <div style="font-size:11px;font-weight:600;color:#444;margin-bottom:2px;font-variant-numeric:tabular-nums">${fmt(d.scanned)}</div>
+                    <div style="width:100%;height:${bh}px;border-radius:3px 3px 0 0;position:relative;overflow:hidden;background:linear-gradient(to bottom,${lt},${dk}33)">
+                        ${ch > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk}"></div>` : ''}
+                    </div>
+                    <div style="font-size:10px;font-weight:600;text-transform:uppercase;color:#555;margin-top:4px">${d.type}</div>
+                    <div style="font-size:8px;color:#bbb;font-family:'SF Mono',Monaco,monospace">${d.exts}</div>
+                    ${d.cached > 0 ? `<div style="font-size:9px;font-weight:600;color:${dk};margin-top:1px">${fmt(d.cached)} cached</div>` : ''}
+                </div>`;
+            }).join('')}</div>`;
+        }
+
+        const options = [
+            { title: 'V1 — Compact + Percentages + Extensions Below', desc: 'Light gradient top-down. Extensions in grey below type name. Cached count in dark accent.', render: () => renderV1(130) },
+            { title: 'V2 — Stronger Gradient', desc: 'Gradient fades from pastel to a tinted version of the dark color. Slightly wider gaps.', render: () => renderV2(130) },
+            { title: 'V3 — Baseline Rule + Split Labels', desc: 'Bars sit on a rule line. Type/extensions/cached below the line, separate from bars.', render: () => renderV3(130) },
+            { title: 'V4 — Rounded + Wider Gaps + Monospace Extensions', desc: 'Rounder tops, more breathing room. Extensions in monospace font.', render: () => renderV4(140) },
+            { title: 'V5 — Minimal (No Percentages)', desc: 'Just count, bar, type, extensions. Cleanest. Percentages might be noise for a dashboard panel.', render: () => renderV5(130) },
+        ];
+
+        document.getElementById('options').innerHTML = options.map(o =>
+            `<div class="option">
+                <div class="option-title">${o.title}</div>
+                <div class="option-desc">${o.desc}</div>
+                ${o.render()}
+            </div>`
+        ).join('');
+    </script>
+</body>
+</html>
