@@ -18,6 +18,7 @@ import attrs
 from local_lib.batch_loader import GenericBatchLoader
 
 from document_search.clients.qdrant import QdrantClient
+from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import EXTENSION_MAP, FileType
 from document_search.schemas.vectors import (
     ContentStats,
@@ -47,15 +48,17 @@ class DocumentVectorRepository:
     Uses UpsertLoader for automatic batching of concurrent upsert requests.
     """
 
-    def __init__(self, client: QdrantClient, collection_name: str) -> None:
+    def __init__(self, client: QdrantClient, collection_name: str, state_store: IndexStateStore) -> None:
         """Initialize repository for a specific collection.
 
         Args:
             client: Qdrant client instance.
             collection_name: Name of the collection to operate on.
+            state_store: Redis-backed index state store.
         """
         self._client = client
         self._collection_name = collection_name
+        self._state_store = state_store
         self._upsert_loader = UpsertLoader(client, collection_name)
 
     async def ensure_collection(self, vector_dimension: int) -> None:
@@ -186,19 +189,9 @@ class DocumentVectorRepository:
         """
         return await self._client.delete(self._collection_name, point_ids)
 
-    async def delete_by_source_path_prefix(self, prefix: str) -> int:
-        """Delete all vectors for files under a directory prefix.
-
-        Used for full_reindex to remove all existing chunks before re-indexing.
-        This is authoritative cleanup that finds orphaned chunks not tracked in state.
-
-        Args:
-            prefix: Directory path prefix.
-
-        Returns:
-            Number of points deleted.
-        """
-        return await self._client.delete_by_source_path_prefix(self._collection_name, prefix)
+    async def delete_collection(self) -> None:
+        """Delete the entire collection."""
+        await self._client.delete_collection(self._collection_name)
 
     async def count(self) -> int:
         """Get total document count."""
@@ -223,7 +216,7 @@ class DocumentVectorRepository:
     # Visibility methods for index introspection
 
     async def get_content_stats(self, path: str | None = None) -> ContentStats:
-        """Get content breakdown statistics.
+        """Get content breakdown statistics from Redis state store.
 
         Args:
             path: Scope stats to this path. Use "**" or None for global stats.
@@ -232,21 +225,24 @@ class DocumentVectorRepository:
             ContentStats with total chunks, breakdown by file type,
             unique file count, and list of supported types.
         """
+        # Get file states from Redis (SCAN for scoped, or get all for global)
         if path is None or path == '**':
-            # Global stats - use efficient facet API
-            total_chunks = await self._client.count(self._collection_name)
-            by_file_type = dict(await self._client.facet_by_file_type(self._collection_name))
-            unique_paths = await self._client.get_unique_source_paths(self._collection_name)
-            unique_files = len(unique_paths)
+            # Global: SCAN all idx:{collection}:* keys
+            file_states = await self._state_store.get_files_under_path('')
         else:
-            # Scoped stats - aggregate from filtered paths
-            raw_paths = await self._client.get_unique_source_paths(self._collection_name, path_prefix=path)
-            unique_files = len(raw_paths)
-            total_chunks = sum(count for _, _, count in raw_paths)
-            by_file_type_agg: dict[str, int] = {}
-            for _, ftype, count in raw_paths:
-                by_file_type_agg[ftype] = by_file_type_agg.get(ftype, 0) + count
-            by_file_type = by_file_type_agg
+            # Scoped: SCAN idx:{collection}:{path}/*
+            file_states = await self._state_store.get_files_under_path(path)
+
+        # Aggregate stats
+        total_chunks = sum(state.chunk_count for _, state in file_states)
+        unique_files = len(file_states)
+
+        by_file_type: dict[str, int] = {}
+        for file_path, state in file_states:
+            # Derive file_type from path extension
+            ftype = EXTENSION_MAP.get(Path(file_path).suffix.lower())
+            if ftype:
+                by_file_type[ftype] = by_file_type.get(ftype, 0) + state.chunk_count
 
         supported_types = sorted(set(EXTENSION_MAP.values()))
 
@@ -258,7 +254,7 @@ class DocumentVectorRepository:
         )
 
     async def is_file_indexed(self, path: str) -> FileIndexStatus:
-        """Check if a specific file is indexed.
+        """Check if a specific file is indexed via Redis state store.
 
         Args:
             path: Absolute path to the file.
@@ -266,7 +262,6 @@ class DocumentVectorRepository:
         Returns:
             FileIndexStatus with indexed flag, reason, chunk count, and file type.
         """
-        # Check if file type is supported
         path_obj = Path(path)
         extension = path_obj.suffix.lower()
         file_type = EXTENSION_MAP.get(extension)
@@ -279,10 +274,8 @@ class DocumentVectorRepository:
                 file_type=None,
             )
 
-        # Check if file has chunks in the index
-        chunk_count = await self._client.count_by_source_path(self._collection_name, path)
-
-        if chunk_count == 0:
+        file_state = await self._state_store.get_file_state(path)
+        if file_state is None:
             return FileIndexStatus(
                 indexed=False,
                 reason='not_found',
@@ -293,7 +286,7 @@ class DocumentVectorRepository:
         return FileIndexStatus(
             indexed=True,
             reason='indexed',
-            chunk_count=chunk_count,
+            chunk_count=file_state.chunk_count,
             file_type=file_type,
         )
 
@@ -303,7 +296,7 @@ class DocumentVectorRepository:
         file_type: str | None = None,
         limit: int = 50,
     ) -> Sequence[IndexedFile]:
-        """List files in the index with optional filtering.
+        """List files in the index via Redis state store.
 
         Args:
             path_prefix: Filter to files under this path prefix.
@@ -313,49 +306,25 @@ class DocumentVectorRepository:
         Returns:
             List of IndexedFile sorted by chunk count descending.
         """
-        raw_paths = await self._client.get_unique_source_paths(
-            self._collection_name,
-            path_prefix=path_prefix,
-            file_type=file_type,
-            limit=limit,
-        )
+        # Get file states from Redis
+        if path_prefix:
+            file_states = await self._state_store.get_files_under_path(path_prefix)
+        else:
+            file_states = await self._state_store.get_files_under_path('')
 
-        return [
-            IndexedFile(path=path, chunk_count=count, file_type=typing.cast(FileType, ftype))
-            for path, ftype, count in raw_paths
-        ]
+        # Build IndexedFile objects with file_type derived from extension
+        indexed_files: list[IndexedFile] = []
+        for file_path, state in file_states:
+            ftype = EXTENSION_MAP.get(Path(file_path).suffix.lower())
+            if ftype is None:
+                continue
+            if file_type is not None and ftype != file_type:
+                continue
+            indexed_files.append(IndexedFile(path=file_path, chunk_count=state.chunk_count, file_type=ftype))
 
-    async def clear_documents(self, path: str | None = None) -> tuple[int, int]:
-        """Clear documents from the index.
-
-        Args:
-            path: Path to clear. Use "**" for entire index.
-                  If None, this is a programming error (caller should resolve CWD).
-
-        Returns:
-            Tuple of (files_removed, chunks_removed).
-        """
-        if path == '**':
-            # Drop entire collection (instant vs scrolling through all points)
-            chunks_count = await self._client.count(self._collection_name)
-            await self._client.delete_collection(self._collection_name)
-            return 0, chunks_count  # Can't count files after drop
-
-        if path is None:
-            raise ValueError('path must be provided (use "**" for entire index)')
-
-        # Check if path is a file or directory by looking at indexed content
-        chunk_count = await self._client.count_by_source_path(self._collection_name, path)
-        if chunk_count > 0:
-            # Exact file match
-            await self._client.delete_by_source_path(self._collection_name, path)
-            return 1, chunk_count
-
-        # Directory prefix
-        raw_paths = await self._client.get_unique_source_paths(self._collection_name, path_prefix=path)
-        files_count = len(raw_paths)
-        chunks_count = await self._client.delete_by_source_path_prefix(self._collection_name, path)
-        return files_count, chunks_count
+        # Sort by chunk count descending and apply limit
+        indexed_files.sort(key=lambda f: f.chunk_count, reverse=True)
+        return indexed_files[:limit]
 
 
 class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):
