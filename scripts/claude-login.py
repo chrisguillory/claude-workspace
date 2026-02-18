@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["pydantic>=2.0", "typer>=0.9.0", "local_lib"]
+# dependencies = ["pydantic>=2.0", "psutil>=5.9", "typer>=0.9.0", "local_lib"]
 #
 # [tool.uv.sources]
 # local_lib = { path = "../local-lib/", editable = true }
@@ -118,6 +118,7 @@ import rich.console
 import rich.panel
 import typer
 from local_lib.schemas import StrictModel
+from local_lib.session_tracker import find_claude_pid, resolve_session_id
 
 # =============================================================================
 # Pydantic Models
@@ -206,6 +207,48 @@ KEYCHAIN_SERVICE_CREDENTIALS = 'Claude Code-credentials'
 KEYCHAIN_SERVICE_API_KEY = 'Claude Code'
 SETUP_TOKEN_PREFIX = 'sk-ant-oat01-'
 SETUP_TOKEN_LIFETIME_DAYS = 365
+
+
+# =============================================================================
+# Process Relaunch
+# =============================================================================
+
+_KILL_SCRIPT = """\
+import os, signal, time
+pid = {claude_pid}
+time.sleep(0.5)
+os.kill(pid, signal.SIGTERM)
+for _ in range(50):
+    time.sleep(0.1)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        break
+"""
+
+
+def _spawn_kill_and_copy_resume(claude_pid: int, session_id: str) -> None:
+    """Spawn a detached process that kills Claude, and copy the resume command.
+
+    The detached process survives the parent's death (start_new_session=True).
+    Sequence: sleep 0.5s → SIGTERM → wait up to 5s for exit.
+
+    The resume command is copied to clipboard so the user can Cmd+V + Enter
+    after Claude exits. A detached process cannot launch a TUI app in the
+    user's terminal, so we rely on the clipboard instead.
+    """
+    resume_cmd = f'claude --resume {session_id}'
+    subprocess.run(['pbcopy'], input=resume_cmd.encode(), check=False)
+
+    script = _KILL_SCRIPT.format(claude_pid=claude_pid)
+    subprocess.Popen(
+        [sys.executable, '-c', script],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
 
 
 # =============================================================================
@@ -739,7 +782,7 @@ def cmd_save_login(force: bool, inject_mcp: bool) -> None:
             print('No saved MCP logins to inject.')
 
 
-def cmd_switch_login(name: str, use_keychain: bool) -> None:
+def cmd_switch_login(name: str, use_keychain: bool, restart: bool) -> None:
     """Switch to saved login. Enforces mutual exclusivity between auth types."""
     login = load_login(name)
     is_console = login.oauth_account.billing_type == 'prepaid'
@@ -870,7 +913,21 @@ def cmd_switch_login(name: str, use_keychain: bool) -> None:
     if mcp_auths:
         print(f'  {len(mcp_auths)} MCP auth(s) injected')
     print()
-    print('Restart Claude Code to activate.')
+
+    if restart:
+        try:
+            claude_pid = find_claude_pid()
+            cwd = os.getcwd()
+            session_id = resolve_session_id(claude_pid, cwd)
+            _spawn_kill_and_copy_resume(claude_pid, session_id)
+            print(f'Killing Claude Code (PID {claude_pid})...')
+            print(f'Resume command copied to clipboard: claude --resume {session_id}')
+            print('Paste (Cmd+V) + Enter after Claude exits.')
+        except RuntimeError as e:
+            print(f'WARNING: Cannot auto-launch: {e}', file=sys.stderr)
+            print('Restart Claude Code manually to activate.')
+    else:
+        print('Restart Claude Code to activate.')
 
 
 def cmd_list_logins() -> None:
@@ -1217,6 +1274,7 @@ def cli_save_login(
 def cli_switch_login(
     login_id: str | None = typer.Argument(None, help='Login ID', autocompletion=_complete_login_id),
     use_keychain: bool = typer.Option(False, '--keychain', help='Force keychain OAuth (bypass setup-token)'),
+    restart: bool = typer.Option(False, '--restart', help='Kill Claude Code and copy resume command to clipboard'),
 ) -> None:
     """Switch to saved login + inject MCP tokens."""
     if login_id is None:
@@ -1239,7 +1297,7 @@ def cli_switch_login(
                 rich.panel.Panel(f'{msg} No saved logins.', border_style='red', title='Error', title_align='left')
             )
         raise SystemExit(1)
-    cmd_switch_login(login_id, use_keychain)
+    cmd_switch_login(login_id, use_keychain, restart)
 
 
 @app.command('list-logins')
@@ -1380,4 +1438,6 @@ def cli_completion(
 
 
 if __name__ == '__main__':
-    app()
+    # Derive clean command name for consistent help text and tab completion,
+    # regardless of invocation method (direct .py, symlink, or launcher).
+    app(prog_name=os.path.basename(sys.argv[0]).removesuffix('.py'))
