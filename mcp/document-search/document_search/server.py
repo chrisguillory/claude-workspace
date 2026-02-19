@@ -251,6 +251,7 @@ Returns:
         path: str | None = None,
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
+        include_timing: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
         """Index documents for semantic search (file or directory auto-detected).
@@ -268,6 +269,10 @@ Returns:
                 - True: Strictly respect gitignore, fail if not a git repo.
                 - False: Ignore gitignore, index all supported files.
             stop_after: Stop pipeline at a stage boundary (directories only).
+            include_timing: Include pipeline timing data in the response. Defaults
+                to False because timing grows ~90 bytes/file/stage and dominates
+                the response at scale. Dashboard always receives full timing
+                regardless of this setting.
 
         Returns:
             IndexingResult with counts and stopped_after indicator.
@@ -354,6 +359,8 @@ Returns:
                 f'{result.files_cached} cached, {result.chunks_created} chunks, '
                 f'{len(result.errors)} errors'
             )
+            if not include_timing:
+                result = result.__replace__(timing=None)
             return result
         except Exception as e:
             error_tb = ''.join(traceback.format_exception(e))
