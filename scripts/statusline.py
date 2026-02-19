@@ -39,6 +39,7 @@ import types
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import psutil
 import pydantic
@@ -392,6 +393,22 @@ MEM_TREND_SHRINK_PCT = 20.0  # % shrink between oldest/newest to show ↓
 def _osc8_link(url: str, text: str) -> str:
     """Wrap text in an OSC 8 clickable hyperlink (Cmd+click)."""
     return f'\033]8;;{url}\a{text}\033]8;;\a'
+
+
+type CwdLocation = Literal['project', 'added', 'unknown']
+
+
+def _classify_cwd(cwd: str, project_dir: str, added_dirs: Sequence[str]) -> CwdLocation:
+    """Classify cwd relative to configured workspace directories."""
+    cwd_n = cwd.rstrip('/')
+    project_n = project_dir.rstrip('/')
+    if cwd_n == project_n or cwd_n.startswith(project_n + '/'):
+        return 'project'
+    for d in added_dirs:
+        d_n = d.rstrip('/')
+        if cwd_n == d_n or cwd_n.startswith(d_n + '/'):
+            return 'added'
+    return 'unknown'
 
 
 # =============================================================================
@@ -1299,15 +1316,23 @@ def main() -> None:
     # ── Line 3: Workspace ──────────────────────────────────────────────
     line3: list[str] = []
 
+    cwd_loc = _classify_cwd(data.cwd, data.workspace.project_dir, data.workspace.added_dirs)
+    cwd_color = CYAN if cwd_loc == 'added' else YELLOW if cwd_loc == 'unknown' else DIM
+
     # Show cwd; if project_dir differs, show both
     if data.workspace.project_dir != data.workspace.current_dir:
-        line3.append(f'{DIM}cwd:{RESET} {_shorten_path(data.cwd)}')
+        line3.append(f'{DIM}cwd:{RESET} {cwd_color}{_shorten_path(data.cwd)}{RESET}')
         line3.append(f'{DIM}project:{RESET} {_shorten_path(data.workspace.project_dir)}')
     else:
         line3.append(f'{DIM}cwd:{RESET} {_shorten_path(data.cwd)}')
 
-    # Added directories (only when non-empty)
-    line3.extend(f'{DIM}+dir:{RESET} {_shorten_path(d)}' for d in data.workspace.added_dirs)
+    # Added directories — filter out the one matching cwd (already visible + colored)
+    cwd_n = data.cwd.rstrip('/')
+    line3.extend(
+        f'{DIM}+dir:{RESET} {_shorten_path(d)}'
+        for d in data.workspace.added_dirs
+        if not cwd_n.startswith(d.rstrip('/'))
+    )
 
     # Transcript path
     line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, _shorten_path(data.transcript_path))}')
