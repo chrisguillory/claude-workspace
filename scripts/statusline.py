@@ -1375,11 +1375,11 @@ def main() -> None:
     if duration is not None and duration > 0:
         metrics.append(f'{DIM}run:{_format_duration(duration)}{RESET}')
 
-    # Lines changed
+    # Lines changed — thin space (U+2009) separates counts without breaking double-click select
     added = data.cost.total_lines_added or 0
     removed = data.cost.total_lines_removed or 0
     if added or removed:
-        metrics.append(f'{GREEN}+{added}{RESET}{RED}-{removed}{RESET}')
+        metrics.append(f'{DIM}lines:{GREEN}+{added}{RESET}\u2009{RED}-{removed}{RESET}')
 
     print(' │ '.join(metrics))
 

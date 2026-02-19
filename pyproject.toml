@@ -67,7 +67,7 @@ quote-style = "single"
 
 [tool.mypy]
 python_version = "3.13"
-plugins = ["pydantic.mypy"]
+plugins = ["plugins/pydantic_replace.py"]
 strict = true
 explicit_package_bases = true
 mypy_path = "$MYPY_CONFIG_FILE_DIR:$MYPY_CONFIG_FILE_DIR/stubs:$MYPY_CONFIG_FILE_DIR/scripts"
