@@ -1,0 +1,299 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/typeddjango/pytest-mypy-plugins/master/pytest_mypy_plugins/schema.json
+
+# =============================================================================
+# Basic: typo, wrong type, valid replace
+# =============================================================================
+
+- case: typo_field_name_caught
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Metric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    m = Metric(name="test", value=1.0)
+    m.__replace__(naem="oops")  # E: Unexpected keyword argument "naem" for "__replace__" of "Metric"; did you mean "name"?  [call-arg]
+
+- case: wrong_type_caught
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Metric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    m = Metric(name="test", value=1.0)
+    m.__replace__(value="not_a_float")  # E: Argument "value" to "__replace__" of "Metric" has incompatible type "str"; expected "float"  [arg-type]
+
+- case: valid_replace_passes
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Metric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    m = Metric(name="test", value=1.0)
+    m2 = m.__replace__(name="updated", value=2.0)
+
+- case: all_args_optional
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Metric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    m = Metric(name="test", value=1.0)
+    m2 = m.__replace__()  # No args — all optional
+
+- case: return_type_is_model
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Metric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    m = Metric(name="test", value=1.0)
+    reveal_type(m.__replace__(name="x"))  # N: Revealed type is "Metric"
+
+- case: multiple_fields_at_once
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Metric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+        unit: str
+
+    m = Metric(name="test", value=1.0, unit="ms")
+    m2 = m.__replace__(name="updated", value=2.0, unit="s")
+
+# =============================================================================
+# Inheritance: narrowed fields, LSP compliance
+# =============================================================================
+
+- case: narrowed_field_no_lsp_error
+  main: |
+    from typing import Literal
+    from pydantic import BaseModel, ConfigDict
+
+    class WebVitalMetric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    class LCPMetric(WebVitalMetric):
+        name: Literal['LCP'] = 'LCP'
+        size: int | None = None
+
+    # __replace__ uses parent's str type for name, not Literal['LCP']
+    m = LCPMetric(name='LCP', value=1.0)
+    m2 = m.__replace__(name='LCP')  # Should accept str, not just Literal
+
+- case: child_adds_fields
+  main: |
+    from typing import Literal
+    from pydantic import BaseModel, ConfigDict
+
+    class WebVitalMetric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    class LCPMetric(WebVitalMetric):
+        name: Literal['LCP'] = 'LCP'
+        size: int | None = None
+        url: str | None = None
+
+    m = LCPMetric(name='LCP', value=1.0)
+    m.__replace__(size=100, url="https://example.com")
+
+- case: child_inherits_parent_fields
+  main: |
+    from typing import Literal
+    from pydantic import BaseModel, ConfigDict
+
+    class WebVitalMetric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    class LCPMetric(WebVitalMetric):
+        name: Literal['LCP'] = 'LCP'
+
+    m = LCPMetric(name='LCP', value=1.0)
+    m.__replace__(value=2.0)  # Parent field accessible
+
+- case: return_type_is_child_not_parent
+  main: |
+    from typing import Literal
+    from pydantic import BaseModel, ConfigDict
+
+    class WebVitalMetric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    class LCPMetric(WebVitalMetric):
+        name: Literal['LCP'] = 'LCP'
+
+    m = LCPMetric(name='LCP', value=1.0)
+    reveal_type(m.__replace__(value=2.0))  # N: Revealed type is "LCPMetric"
+
+# =============================================================================
+# Guards: user-defined __replace__, Python < 3.13, no fields
+# =============================================================================
+
+- case: user_defined_replace_preserved
+  main: |
+    from typing import Self
+    from pydantic import BaseModel, ConfigDict
+
+    class CustomModel(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+
+        def __replace__(self, **kwargs: str) -> Self:
+            return self.model_copy(update=kwargs)
+
+    m = CustomModel(name="test")
+    reveal_type(m.__replace__)  # N: Revealed type is "def (**kwargs: builtins.str) -> CustomModel"
+
+- case: python_312_no_synthesis
+  mypy_config: |
+    [mypy]
+    python_version = 3.12
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Metric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+
+    m = Metric(name="test")
+    m.__replace__(name="x")  # E: "Metric" has no attribute "__replace__"  [attr-defined]
+
+# =============================================================================
+# Alias compatibility
+# =============================================================================
+
+- case: alias_model_replace_uses_python_names
+  main: |
+    from typing import Literal
+    from pydantic import BaseModel, ConfigDict, Field
+
+    class Decision(BaseModel):
+        model_config = ConfigDict(frozen=True, populate_by_name=True)
+        permission_decision: Literal['allow', 'deny'] = Field(alias='permissionDecision')
+        reason: str | None = Field(default=None, alias='permissionDecisionReason')
+
+    d = Decision(permission_decision='allow')
+    # __replace__ uses Python names, not aliases
+    d.__replace__(permission_decision='deny')
+    d.__replace__(reason="updated")
+
+- case: alias_model_init_still_works_both_names
+  main: |
+    from typing import Literal
+    from pydantic import BaseModel, ConfigDict, Field
+
+    class Decision(BaseModel):
+        model_config = ConfigDict(frozen=True, populate_by_name=True)
+        permission_decision: Literal['allow', 'deny'] = Field(alias='permissionDecision')
+
+    # Both alias and Python name work for __init__ (pydantic plugin behavior preserved)
+    Decision(permissionDecision='allow')
+    Decision(permission_decision='deny')
+
+- case: alias_generator_replace_uses_python_names
+  main: |
+    from pydantic import BaseModel, ConfigDict
+    from pydantic.alias_generators import to_camel
+
+    class Config(BaseModel):
+        model_config = ConfigDict(frozen=True, alias_generator=to_camel, populate_by_name=True)
+        file_path: str
+        line_number: int
+
+    c = Config(file_path="/tmp/test", line_number=42)
+    # __replace__ uses Python snake_case names
+    c.__replace__(file_path="/tmp/updated", line_number=100)
+
+# =============================================================================
+# Real-world: IndexingResult pattern from document-search
+# =============================================================================
+
+- case: indexing_result_timing_replace
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class TimingReport(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        scan_ms: float
+        embed_ms: float
+
+    class IndexingResult(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        chunks_created: int
+        elapsed_seconds: float
+        timing: TimingReport | None = None
+
+    result = IndexingResult(chunks_created=10, elapsed_seconds=1.5, timing=None)
+
+    # Valid: set timing to None (the actual pattern in server.py)
+    result2 = result.__replace__(timing=None)
+
+    # Invalid: wrong type for timing
+    result.__replace__(timing="bad")  # E: Argument "timing" to "__replace__" of "IndexingResult" has incompatible type "str"; expected "TimingReport | None"  [arg-type]
+
+    # Invalid: typo
+    result.__replace__(timming=None)  # E: Unexpected keyword argument "timming" for "__replace__" of "IndexingResult"; did you mean "timing"?  [call-arg]
+
+# =============================================================================
+# Edge cases
+# =============================================================================
+
+- case: optional_field_accepts_none
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Model(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        optional_field: int | None = None
+
+    m = Model(name="test", optional_field=5)
+    m.__replace__(optional_field=None)
+
+- case: required_field_still_optional_in_replace
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Model(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        required_field: str  # No default
+
+    m = Model(required_field="value")
+    # All __replace__ args are optional even if field has no default
+    m2 = m.__replace__()
+
+- case: mutable_model_has_replace
+  main: |
+    from pydantic import BaseModel
+
+    class Mutable(BaseModel):
+        name: str
+        value: float
+
+    m = Mutable(name="test", value=1.0)
+    # Works on both mutable and frozen models
+    m.__replace__(name="updated")
