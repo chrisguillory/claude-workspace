@@ -231,6 +231,9 @@ Args:
         - "scan": File discovery only. No chunking, embedding, or storage.
         - "chunk": Scan and chunk. Downstream stages drain without processing.
         - "embed": Scan, chunk, and embed. Storage stage drains without Qdrant writes.
+    include_timing: Include pipeline timing breakdown in the response. Defaults
+        to False to keep responses compact. Dashboard receives full timing
+        regardless.
 
 Returns:
     IndexingResult with counts of files processed, chunks created, and any errors.
@@ -309,6 +312,8 @@ Returns:
             result = await indexing_service.index_file(resolved_path)
             await cache_tasks.drain()
             await logger.info(f'Indexed: {result.chunks_created} chunks')
+            if not include_timing:
+                result = result.__replace__(timing=None)
             return result
 
         if not resolved_path.is_dir():
