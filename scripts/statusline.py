@@ -15,27 +15,85 @@
 
 Receives JSON on stdin from Claude Code after each assistant message.
 Outputs ANSI-colored status information to display below the input area.
-
-Strict Pydantic models validate the JSON schema — if Claude Code changes
-the shape, this script fails immediately rather than showing stale data.
+Strict Pydantic models validate the schema — fail-fast on drift.
 
 Install:
     chmod +x scripts/statusline.py
     # Add to ~/.claude/settings.json:
     # { "statusLine": { "type": "command", "command": "/path/to/statusline.py" } }
 
+Output Lines:
+    Line 1 — Identity:
+        model+version, pid+up:(process uptime), session_id+age:(conversation age),
+        process health (mem/cpu/trends/anomalies), account (login·tier), git branch,
+        vim mode
+
+    Line 2 — Metrics:
+        Context bar (used/total +Nk delta) │ remaining% │ $cost │ run:duration │
+        lines:+N-N
+
+    Line 3 — Workspace:
+        cwd (color-coded: dim=project, cyan=added dir, yellow=unknown) │ project │
+        +dir: added dirs │ transcript link
+
+    Line 4 — Detail:
+        session: cumulative tokens │ last: per-turn tokens │ ⚠ >200k pricing │
+        cache: +new ↺reused │ api: duration
+
+Key Semantics:
+    Context bar: actual window occupancy = (cache_read + cache_creation + input_tokens)
+        / context_window_size. cache_read is typically the bulk (system prompt, tools,
+        conversation history at 90% discount).
+
+    session: ≠ context window state. Cumulative uncached input + output across all API
+        calls. Excludes cache tokens. Does not match the bar — by design.
+
+    last: input_tokens = uncached tokens after the last cache breakpoint, not total
+        input. Full context this turn = cache_read + cache_creation + input_tokens.
+
+    Time dimensions (spread across lines by specificity):
+        up: — process lifetime (psutil), resets on resume
+        age: — conversation age from first transcript timestamp
+        run: — cumulative runtime across all process lifetimes (odometer, pauses
+               between resumes)
+        api: — cumulative API wait time, strict subset of run:
+
+    >200k pricing: a pricing cliff, not a capacity limit. When input crosses 200k,
+        ALL tokens in the request get premium rates (2x input, 1.5x output).
+
+    lines: Claude Code's edit counter (editing effort), not git diff (net result).
+        Accumulates across resumes like cost and runtime.
+
+Data Sources:
+    JSON on stdin     All token/cost/context/workspace/model data
+    psutil            PID, process uptime, health (RSS, CPU, FDs, children)
+    ~/.claude.json    oauthAccount (email, org, billing type)
+    macOS keychain    subscription type, rate limit tier
+    git               branch, remote URL
+    transcript file   session age (first line), session title (mmap rfind)
+
+State (all under ~/.claude-workspace/statusline/):
+    cache.json                      Credential cache (TTL 300s)
+    snapshots/{session_id}.json     Credential snapshot (detects mid-session switches)
+    snapshots/{session_id}-health.json  Health ring buffer (max 60 samples, >=2s apart)
+    error.log                       Last error details (clickable OSC8 link)
+
+Schema Validation:
+    Sub-objects use extra='forbid' — any new field in a nested object fails immediately.
+    Top-level StatusLineInput uses extra='allow' — Claude Code can add new root fields
+    without breaking. External data models use extra='ignore'.
+
 Possible Improvements:
     Token insights (requires per-turn history infrastructure):
-        - Per-turn token history: persist per-session turn data (tokens,
-          timestamps). Health sidecars already use this pattern.
-        - Anomaly detection: flag turns >2.5x the running average.
-        - Trend arrows: show context burn rate direction (↗↘→).
-        - Turn counter ("Turn 47"): session depth at a glance.
-        - Estimated turns remaining: remaining_tokens / avg_turn_size.
-        - Cost per turn: total_cost / turn_count. Useful for API pricing.
+        - Per-turn token history — health sidecars already use this pattern
+        - Anomaly detection — flag turns >2.5x the running average
+        - Trend arrows — context burn rate direction (↗↘→)
+        - Turn counter ("Turn 47") — session depth at a glance
+        - Estimated turns remaining — remaining_tokens / avg_turn_size
+        - Cost per turn — total_cost / turn_count
     Display enhancements:
-        - Color-code +Xk delta relative to remaining context: dim <5%,
-          yellow 15-30%, red >30% of remaining.
+        - Color-code +Nk delta relative to remaining context: dim <5%,
+          yellow 15-30%, red >30% of remaining
 """
 
 from __future__ import annotations
@@ -1423,9 +1481,9 @@ def main() -> None:
         last_out = _format_tokens(ctx.current_usage.output_tokens)
         line4.append(f'{DIM}last:{RESET} ↓{last_in} ↑{last_out}')
 
-    # Exceeds 200k warning
+    # Exceeds 200k pricing threshold (2x input, 1.5x output on entire request)
     if data.exceeds_200k_tokens:
-        line4.append(f'{RED}⚠ >200k tokens{RESET}')
+        line4.append(f'{RED}⚠ >200k pricing{RESET}')
 
     # Cache tokens (from current usage)
     if ctx.current_usage is not None:
