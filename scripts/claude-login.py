@@ -58,15 +58,11 @@ Run directly from GitHub (no clone needed):
 Pin to a specific commit for deterministic behavior:
     uv run https://raw.githubusercontent.com/chrisguillory/claude-workspace/<sha>/scripts/claude-login.py list-logins
 
-Tab completion (requires symlink, not remote uv run):
-    ln -s ~/claude-workspace/scripts/claude-login.py ~/.local/bin/claude-login
+Local install (enables tab completion):
+    scripts/install-launcher.sh scripts/claude-login.py
     claude-login completion zsh --install
-    # Or print to stdout: claude-login completion zsh > "$ZDOTDIR/completions/_claude-login"
     # Restart shell, then:
     claude-login switch-login <TAB>
-
-    Note: typer derives the command name from sys.argv[0], so a symlink with a clean
-    name is required.
 
 Claude Code CLI auth commands (for reference):
     claude auth login [--email <email>] [--sso]   Non-interactive OAuth login
@@ -112,6 +108,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -234,7 +231,7 @@ for _ in range(50):
 """
 
 
-def _spawn_kill_and_copy_resume(claude_pid: int, session_id: str) -> None:
+def _spawn_kill_and_copy_resume(claude_pid: int, session_id: str, model: str | None) -> None:
     """Spawn a detached process that kills Claude, and copy the resume command.
 
     The detached process survives the parent's death (start_new_session=True).
@@ -245,6 +242,8 @@ def _spawn_kill_and_copy_resume(claude_pid: int, session_id: str) -> None:
     user's terminal, so we rely on the clipboard instead.
     """
     resume_cmd = f'claude --resume {session_id}'
+    if model:
+        resume_cmd += f' --model {shlex.quote(model)}'
     subprocess.run(['pbcopy'], input=resume_cmd.encode(), check=False)
 
     script = _KILL_SCRIPT.format(claude_pid=claude_pid)
@@ -810,7 +809,7 @@ def cmd_save_login(force: bool, inject_mcp: bool) -> None:
             print('No saved MCP logins to inject.')
 
 
-def cmd_switch_login(name: str, use_keychain: bool, restart: bool) -> None:
+def cmd_switch_login(name: str, use_keychain: bool, restart: bool, model: str | None) -> None:
     """Switch to saved login. Enforces mutual exclusivity between auth types."""
     login = load_login(name)
     is_console = login.oauth_account.billing_type == 'prepaid'
@@ -947,9 +946,10 @@ def cmd_switch_login(name: str, use_keychain: bool, restart: bool) -> None:
             claude_pid = find_claude_pid()
             cwd = os.getcwd()
             session_id = resolve_session_id(claude_pid, cwd)
-            _spawn_kill_and_copy_resume(claude_pid, session_id)
+            _spawn_kill_and_copy_resume(claude_pid, session_id, model)
+            model_flag = f' --model {model}' if model else ''
             print(f'Killing Claude Code (PID {claude_pid})...')
-            print(f'Resume command copied to clipboard: claude --resume {session_id}')
+            print(f'Resume command copied to clipboard: claude --resume {session_id}{model_flag}')
             print('Paste (Cmd+V) + Enter after Claude exits.')
         except RuntimeError as e:
             print(f'WARNING: Cannot auto-launch: {e}', file=sys.stderr)
@@ -1303,6 +1303,7 @@ def cli_switch_login(
     login_id: str | None = typer.Argument(None, help='Login ID', autocompletion=_complete_login_id),
     use_keychain: bool = typer.Option(False, '--keychain', help='Force keychain OAuth (bypass setup-token)'),
     restart: bool = typer.Option(False, '--restart', help='Kill Claude Code and copy resume command to clipboard'),
+    model: str | None = typer.Option(None, '--model', help='Model for resumed session (e.g. opus, sonnet)'),
 ) -> None:
     """Switch to saved login + inject MCP tokens."""
     if login_id is None:
@@ -1325,7 +1326,7 @@ def cli_switch_login(
                 rich.panel.Panel(f'{msg} No saved logins.', border_style='red', title='Error', title_align='left')
             )
         raise SystemExit(1)
-    cmd_switch_login(login_id, use_keychain, restart)
+    cmd_switch_login(login_id, use_keychain, restart, model)
 
 
 @app.command('list-logins')
