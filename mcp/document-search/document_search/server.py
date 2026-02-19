@@ -13,6 +13,7 @@ Tools:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import contextlib
 import logging
 import os
@@ -859,6 +860,10 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
 
     # Initialize state with shared services (async for semaphore binding)
     state = await ServerState.create(redis_client=redis_client)
+
+    # Ensure process pool cleanup on SIGTERM (prevents orphaned workers).
+    # Python's default SIGTERM handler calls sys.exit() → triggers atexit.
+    atexit.register(state.chunking_service.shutdown)
 
     # Warm up bm25-rs (initializes rayon thread pool + thread-local stemmers)
     warmup_t0 = time.perf_counter()

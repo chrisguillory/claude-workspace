@@ -78,26 +78,26 @@ class ChunkingService:
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
         *,
-        pdf_process_workers: int | None = None,
+        process_workers: int | None = None,
     ) -> ChunkingService:
         """Create chunking service in async context.
 
-        Preferred factory method - ensures proper initialization.
+        ProcessPoolExecutor is created lazily on first JSONL/PDF chunk
+        request, so no subprocess workers are spawned until indexing runs.
 
         Args:
             chunk_size: Target chunk size in characters.
             chunk_overlap: Overlap between chunks for context continuity.
-            pdf_process_workers: Max workers for PDF ProcessPoolExecutor.
-                Defaults to cpu_count (main process only does async I/O).
+            process_workers: Max workers for ProcessPoolExecutor.
+                Defaults to cpu_count.
         """
-        if pdf_process_workers is None:
-            # Use all CPU cores - main process only does async I/O, not CPU work
-            pdf_process_workers = os.cpu_count() or 4
+        if process_workers is None:
+            process_workers = os.cpu_count() or 4
 
         return cls(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            _process_pool=ProcessPoolExecutor(max_workers=pdf_process_workers),
+            max_workers=process_workers,
         )
 
     def __init__(
@@ -105,18 +105,19 @@ class ChunkingService:
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
         *,
-        _process_pool: ProcessPoolExecutor,
+        max_workers: int,
     ) -> None:
         """Initialize chunking service. Use create() for async context safety.
 
         Args:
             chunk_size: Target chunk size in characters.
             chunk_overlap: Overlap between chunks for context continuity.
-            _process_pool: ProcessPoolExecutor for CPU-bound PDF work.
+            max_workers: Max workers for lazy ProcessPoolExecutor creation.
         """
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
-        self._process_pool = _process_pool
+        self._max_workers = max_workers
+        self._process_pool: ProcessPoolExecutor | None = None
 
         # Reusable splitters
         self._text_splitter = RecursiveCharacterTextSplitter(
@@ -135,14 +136,6 @@ class ChunkingService:
             strip_headers=False,
         )
 
-    def shutdown(self) -> None:
-        """Shutdown the ProcessPoolExecutor and release resources.
-
-        Should be called when the service is no longer needed.
-        Also called automatically when used as a context manager.
-        """
-        self._process_pool.shutdown(wait=True)
-
     async def __aenter__(self) -> ChunkingService:
         """Async context manager entry."""
         return self
@@ -150,6 +143,15 @@ class ChunkingService:
     async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: object) -> None:
         """Async context manager exit - shutdown ProcessPoolExecutor."""
         self.shutdown()
+
+    def shutdown(self) -> None:
+        """Shutdown the ProcessPoolExecutor if it was created.
+
+        No-op if no JSONL/PDF files were ever chunked (pool never started).
+        """
+        if self._process_pool is not None:
+            self._process_pool.shutdown(wait=True)
+            self._process_pool = None
 
     async def chunk_file(self, path: Path) -> Sequence[Chunk]:
         """Chunk a single file based on its type.
@@ -173,6 +175,15 @@ class ChunkingService:
 
         chunks = await self._chunk_by_type(path, file_type)
         return self._filter_short_chunks(chunks)
+
+    # --- Private ---
+
+    @property
+    def _pool(self) -> ProcessPoolExecutor:
+        """Lazy ProcessPoolExecutor — created on first use."""
+        if self._process_pool is None:
+            self._process_pool = ProcessPoolExecutor(max_workers=self._max_workers)
+        return self._process_pool
 
     def _filter_short_chunks(self, chunks: Sequence[Chunk]) -> Sequence[Chunk]:
         """Filter out chunks below minimum length threshold."""
@@ -235,7 +246,7 @@ class ChunkingService:
         start = time.perf_counter()
         logger.debug(f'[PDF] Starting: {path.name}')
         loop = asyncio.get_running_loop()
-        extraction = await loop.run_in_executor(self._process_pool, extract_pdf, str(path))
+        extraction = await loop.run_in_executor(self._pool, extract_pdf, str(path))
         elapsed = time.perf_counter() - start
 
         if extraction.page_count == 0:
@@ -652,7 +663,7 @@ class ChunkingService:
         """
         loop = asyncio.get_running_loop()
         chunk_data = await loop.run_in_executor(
-            self._process_pool, chunk_jsonl, str(path), self._chunk_size, self._chunk_overlap
+            self._pool, chunk_jsonl, str(path), self._chunk_size, self._chunk_overlap
         )
 
         # Convert ChunkData back to Chunk objects

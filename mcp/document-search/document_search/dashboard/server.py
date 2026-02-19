@@ -358,7 +358,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         </div>
                         ${!isComplete ? `<div class="op-meta" id="meta-${op.operation_id}">${formatOperationMeta(op)}</div>` : ''}
                     </div>
-                    <div class="op-meta">${escapeHtml(op.directory)}</div>
+                    <div class="op-meta">${escapeHtml(op.directory)} <span style="font-family:monospace;font-size:11px;color:#999">${op.operation_id.slice(0,8)}</span></div>
                     ${isComplete ? formatCompletedSummary(op) : `<div id="progress-${op.operation_id}">${formatOperationProgressHtml(op)}</div>`}
                     ${op.error ? `<div class="error-msg">${escapeHtml(op.error)}</div>` : ''}
                     ${op.result?.by_file_type && Object.keys(op.result.by_file_type).length > 0 ? formatFileTypeChart(op.result.by_file_type) : ''}
