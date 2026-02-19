@@ -236,7 +236,7 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         t_end = time.perf_counter()
         hits = len(texts) - len(miss_indices)
         task_count = len(asyncio.all_tasks())
-        logger.info(
+        logger.debug(
             f'[CACHE-DETAIL] n={len(texts)} hits={hits} '
             f'keys={(t_keys - t0) * 1000:.1f}ms '
             f'mget={(t_mget - t_keys) * 1000:.1f}ms '
