@@ -342,7 +342,7 @@ class IndexingService:
 
         # Run file discovery in a thread so the event loop (and monitor) stays responsive.
         # Both paths update operation.files_found incrementally for dashboard visibility.
-        logger.info('[SCAN] Starting file discovery...')
+        logger.debug('[SCAN] Starting file discovery...')
         if respect_gitignore is not False and git_root:
             all_files, files_ignored = await asyncio.to_thread(
                 _get_git_files,
@@ -369,7 +369,7 @@ class IndexingService:
 
         # Classify files: determine which need indexing vs cached (single pass).
         # Yields to event loop periodically so the monitor can capture scan progress.
-        logger.info(f'[SCAN] Classifying {files_total:,} files...')
+        logger.debug(f'[SCAN] Classifying {files_total:,} files...')
         scanned_by_type = self._operation.scanned_by_type
         cached_by_type = self._operation.cached_by_type
         files_to_index: list[Path] = []
@@ -463,7 +463,7 @@ class IndexingService:
             tracer.record(str(path), 'chunk', 'queued')
             await file_queue.put(path)
 
-        logger.info(
+        logger.debug(
             f'[PIPELINE] Starting workers: {NUM_CHUNK_WORKERS} chunk, '
             f'{NUM_EMBED_WORKERS} embed, {NUM_UPSERT_WORKERS} upsert '
             f'for {len(files_to_index)} files'
@@ -611,7 +611,9 @@ class IndexingService:
         if orphan_chunk_ids:
             await self._repo.delete(orphan_chunk_ids)
             chunks_deleted += len(orphan_chunk_ids)
-            logger.info(f'[SWEEP] Deleted {len(orphan_chunk_ids)} orphan chunks from {len(orphan_paths)} removed files')
+            logger.debug(
+                f'[SWEEP] Deleted {len(orphan_chunk_ids)} orphan chunks from {len(orphan_paths)} removed files'
+            )
         for p in orphan_paths:
             await self._state_store.delete_file_state(p)
 
@@ -789,7 +791,7 @@ class IndexingService:
                         )
                         async with results_lock:
                             results[file_key] = 0
-                    logger.info(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
+                    logger.debug(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
 
                 elif not deleted_ids and chunks_skipped == len(all_chunk_ids):
                     # Path B: All chunk IDs unchanged, no deletions.
@@ -811,7 +813,7 @@ class IndexingService:
                     counters.chunks_skipped += chunks_skipped
                     async with results_lock:
                         results[file_key] = 0  # Chunk-cached, 0 new chunks
-                    logger.info(f'[CHUNK] {file_path.name}: all {chunks_skipped} chunks unchanged')
+                    logger.debug(f'[CHUNK] {file_path.name}: all {chunks_skipped} chunks unchanged')
 
                 else:
                     # Path C: Has changed or deleted chunks — filter to changed only.
@@ -839,7 +841,7 @@ class IndexingService:
                     counters.chunks_ingested += len(changed_chunks)
                     counters.chunks_skipped += chunks_skipped
                     counters.files_chunked += 1
-                    logger.info(
+                    logger.debug(
                         f'[CHUNK] {file_path.name}: {len(changed_chunks)} changed, '
                         f'{chunks_skipped} skipped, {len(deleted_ids)} deleted'
                     )
@@ -882,7 +884,7 @@ class IndexingService:
         sparse_threads = self._sparse_embedding.thread_count
         BATCH_THRESHOLD = max(500, sparse_threads * 300)
         BATCH_TIMEOUT = 0.05  # 50ms - don't wait forever for small files
-        logger.info(f'[EMBED] batch_threshold={BATCH_THRESHOLD} (sparse_threads={sparse_threads})')
+        logger.debug(f'[EMBED] batch_threshold={BATCH_THRESHOLD} (sparse_threads={sparse_threads})')
 
         # Accumulators
         accumulated_files: list[_ChunkedFile] = []
@@ -898,7 +900,7 @@ class IndexingService:
 
             batch_size = len(accumulated_files)
             flush_t0 = time.perf_counter()
-            logger.info(
+            logger.debug(
                 f'[EMBED-FLUSH] {batch_size} files, {len(accumulated_texts)} texts, t={flush_t0 - tracer.start_time:.3f}s'
             )
 
@@ -924,7 +926,7 @@ class IndexingService:
                     tracer.record_wall(fk, 'embed_sparse', per_file_wall)
 
                 parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
-                logger.info(
+                logger.debug(
                     f'[EMBED-SPARSE] {len(accumulated_texts)} texts in {wall_secs:.3f}s wall, '
                     f'{cpu_secs:.3f}s cpu ({parallel:.1f}x), t={time.perf_counter() - tracer.start_time:.3f}s'
                 )
@@ -938,7 +940,7 @@ class IndexingService:
                 for chunked in accumulated_files:
                     tracer.record(str(chunked.file_path), 'embed_dense', 'completed')
 
-                logger.info(
+                logger.debug(
                     f'[EMBED-DENSE] {len(accumulated_texts)} texts done in {elapsed:.3f}s, '
                     f't={time.perf_counter() - tracer.start_time:.3f}s'
                 )
@@ -1045,13 +1047,13 @@ class IndexingService:
                     )
                     get_elapsed = time.perf_counter() - get_t0
                     if get_elapsed > 0.1:  # log slow gets (>100ms)
-                        logger.info(
+                        logger.debug(
                             f'[EMBED-W{_worker_id}] get() took {get_elapsed:.3f}s, accum={len(accumulated_texts)} texts'
                         )
                 except TimeoutError:
                     # No items available, flush what we have
                     if accumulated_texts:
-                        logger.info(
+                        logger.debug(
                             f'[EMBED-W{_worker_id}] timeout flush: {len(accumulated_texts)} texts, '
                             f'{len(accumulated_files)} files, t={time.perf_counter() - tracer.start_time:.3f}s'
                         )
@@ -1168,7 +1170,7 @@ class IndexingService:
             async with results_lock:
                 results[file_key] = len(embedded.chunks)
 
-            logger.info(f'[UPSERT] {embedded.file_path.name}: {len(embedded.chunks)} chunks')
+            logger.debug(f'[UPSERT] {embedded.file_path.name}: {len(embedded.chunks)} chunks')
 
             # Only mark done on success
             upsert_queue.task_done()

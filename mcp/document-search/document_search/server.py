@@ -329,7 +329,7 @@ Returns:
         # Setup progress writer
         progress_writer = ProgressWriter(mcp_server_pid=os.getpid())
         operation_id = progress_writer.start_operation(collection_name, str(resolved_path))
-        await logger.info(f'Operation: {operation_id}')
+        await logger.debug(f'Operation: {operation_id}')
 
         # Start indexing as a task
         indexing_task = asyncio.create_task(
@@ -602,7 +602,7 @@ Returns:
         state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
 
-        await logger.info(f'Listing documents in collection: {collection_name}')
+        await logger.debug(f'Listing documents in collection: {collection_name}')
 
         # Resolve path (defaults to CWD, "**" for global)
         if path == '**':
@@ -618,7 +618,7 @@ Returns:
             limit=limit,
         )
 
-        await logger.info(f'Listed {len(files)} indexed documents')
+        await logger.debug(f'Listed {len(files)} indexed documents')
 
         return files
 
@@ -658,18 +658,18 @@ Returns:
         collection = state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
 
-        await logger.info(f'Getting info for collection: {collection_name}')
+        await logger.debug(f'Getting info for collection: {collection_name}')
 
         # Resolve path (defaults to CWD, "**" for global)
         if path == '**':
             resolved_path: str | None = '**'
-            await logger.info('Getting global collection info')
+            await logger.debug('Getting global collection info')
         elif path is None:
             resolved_path = str(Path.cwd())
-            await logger.info(f'Getting info for: {resolved_path}')
+            await logger.debug(f'Getting info for: {resolved_path}')
         else:
             resolved_path = str(Path(path).expanduser().resolve())
-            await logger.info(f'Getting info for: {resolved_path}')
+            await logger.debug(f'Getting info for: {resolved_path}')
 
         # Build embedding info from collection
         embedding_info = EmbeddingInfo.from_collection(collection)
@@ -850,7 +850,7 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     loop = asyncio.get_running_loop()
     loop.set_debug(True)
     loop.slow_callback_duration = 0.5  # warn on callbacks >500ms
-    logger.info('[ASYNCIO] debug mode enabled, slow_callback_duration=0.5s')
+    logger.debug('[ASYNCIO] debug mode enabled, slow_callback_duration=0.5s')
 
     # Connect to Redis (embedding cache)
     redis_port = discover_redis_port(PROJECT_ROOT)
@@ -869,7 +869,7 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     warmup_t0 = time.perf_counter()
     await state.sparse_embedding_service.embed_batch(['warmup text'])
     warmup_elapsed = time.perf_counter() - warmup_t0
-    logger.info(f'[SPARSE-WARMUP] bm25-rs ready in {warmup_elapsed:.3f}s')
+    logger.debug(f'[SPARSE-WARMUP] bm25-rs ready in {warmup_elapsed:.3f}s')
 
     # Migrate legacy collection if needed
     await _migrate_legacy_collection(state)

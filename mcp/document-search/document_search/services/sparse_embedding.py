@@ -34,7 +34,7 @@ class SparseEmbeddingService:
     def __init__(self) -> None:
         self._model = bm25_rs.BM25Model()
         self._thread_count = bm25_rs.BM25Model.thread_count()
-        logger.info(f'[SPARSE] rayon thread pool: {self._thread_count} threads')
+        logger.debug(f'[SPARSE] rayon thread pool: {self._thread_count} threads')
 
     @property
     def thread_count(self) -> int:
@@ -78,7 +78,7 @@ class SparseEmbeddingService:
         # the GIL via py.allow_threads, so only the conversion phase blocks.
         results, wall_secs, cpu_secs = await asyncio.to_thread(self._model.embed_batch, list(texts))
         parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
-        logger.info(
+        logger.debug(
             f'[SPARSE] {len(texts)} texts in {wall_secs:.3f}s wall, {cpu_secs:.3f}s cpu ({parallel:.1f}x parallel)'
         )
         return results, wall_secs, cpu_secs
