@@ -23,6 +23,19 @@ Install:
     chmod +x scripts/statusline.py
     # Add to ~/.claude/settings.json:
     # { "statusLine": { "type": "command", "command": "/path/to/statusline.py" } }
+
+Possible Improvements:
+    Token insights (requires per-turn history infrastructure):
+        - Per-turn token history: persist per-session turn data (tokens,
+          timestamps). Health sidecars already use this pattern.
+        - Anomaly detection: flag turns >2.5x the running average.
+        - Trend arrows: show context burn rate direction (↗↘→).
+        - Turn counter ("Turn 47"): session depth at a glance.
+        - Estimated turns remaining: remaining_tokens / avg_turn_size.
+        - Cost per turn: total_cost / turn_count. Useful for API pricing.
+    Display enhancements:
+        - Color-code +Xk delta relative to remaining context: dim <5%,
+          yellow 15-30%, red >30% of remaining.
 """
 
 from __future__ import annotations
@@ -35,7 +48,6 @@ import subprocess
 import sys
 import time
 import traceback
-import types
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,6 +56,7 @@ from typing import Literal
 import psutil
 import pydantic
 import pydantic.alias_generators
+from local_lib.error_boundary import ErrorBoundary
 from local_lib.schemas import StrictModel
 from local_lib.session_tracker import find_claude_pid
 
@@ -415,17 +428,18 @@ def _classify_cwd(cwd: str, project_dir: str, added_dirs: Sequence[str]) -> CwdL
 # Static Data Cache
 #
 # Email and subscription type don't change within a session.
-# Cache in /tmp keyed by PID of the parent claude process to avoid
-# stale data across account switches.
+# Cached per-session to avoid repeated keychain/config reads.
 # =============================================================================
 
 CONFIG_PATH = Path.home() / '.claude.json'
 SCRIPT_PATH = Path(__file__).resolve()
-CACHE_PATH = Path.home() / '.claude-workspace' / 'statusline-cache.json'
-CACHE_TTL_SECONDS = 300  # 5 minutes
-SNAPSHOT_DIR = Path.home() / '.claude-workspace' / 'statusline-snapshots'
+STATUSLINE_DIR = Path.home() / '.claude-workspace' / 'statusline'
+CACHE_PATH = STATUSLINE_DIR / 'cache.json'
+SNAPSHOT_DIR = STATUSLINE_DIR / 'snapshots'
+ERROR_LOG_PATH = STATUSLINE_DIR / 'error.log'
 SWITCH_PENDING_PATH = Path.home() / '.claude-workspace' / '.switch-pending'
 LOGINS_DIR = Path.home() / '.claude-workspace' / 'logins'
+CACHE_TTL_SECONDS = 300  # 5 minutes
 
 SUBSCRIPTION_DISPLAY: Mapping[str, str] = {
     'free': 'Free',
@@ -464,15 +478,6 @@ def _read_cached_static() -> CachedCredentials | None:
         return None
 
 
-def _read_cache_timestamp() -> float:
-    """Read cache timestamp without TTL/invalidation checks (for debug display)."""
-    try:
-        cached = CachedCredentials.model_validate_json(CACHE_PATH.read_text())
-        return cached.timestamp
-    except (pydantic.ValidationError, json.JSONDecodeError, OSError):
-        return 0.0
-
-
 def _write_cache(creds: ResolvedCredentials) -> None:
     """Write credentials to cache with current timestamp.
 
@@ -485,6 +490,7 @@ def _write_cache(creds: ResolvedCredentials) -> None:
         credentials=creds,
     )
     with contextlib.suppress(OSError):
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         CACHE_PATH.write_text(cached.model_dump_json())
         CACHE_PATH.chmod(0o600)
 
@@ -816,7 +822,11 @@ def _format_duration(ms: float) -> str:
         return f'{mins}m{secs:02d}s'
     hours = mins // 60
     remaining_mins = mins % 60
-    return f'{hours}h{remaining_mins:02d}m'
+    if hours < 24:
+        return f'{hours}h{remaining_mins:02d}m'
+    days = hours // 24
+    remaining_hours = hours % 24
+    return f'{days}d{remaining_hours}h'
 
 
 def _format_cost(usd: float) -> str:
@@ -1150,6 +1160,19 @@ def _format_health(sample: HealthSample, sidecar: HealthSidecar) -> str:
 # =============================================================================
 
 
+def _get_process_uptime_ms(claude_pid: int) -> float:
+    """Get process uptime in milliseconds from psutil."""
+    return (time.time() - psutil.Process(claude_pid).create_time()) * 1000
+
+
+def _get_session_age_ms(transcript_path: str) -> float:
+    """Get session age from first transcript line timestamp."""
+    with open(transcript_path) as f:
+        first_line = f.readline()
+    start = datetime.fromisoformat(json.loads(first_line)['timestamp'])
+    return (datetime.now(UTC) - start).total_seconds() * 1000
+
+
 def _get_session_title(transcript_path: str) -> str | None:
     """Look up user-set session title (via /rename) from the transcript.
 
@@ -1171,43 +1194,88 @@ def _get_session_title(transcript_path: str) -> str | None:
 
 
 # =============================================================================
+# Error Boundary — type-dispatched error display for the statusline
+#
+# Errors propagate out of main() to the boundary, which dispatches to
+# type-specific handlers. Each handler writes the error log and prints
+# multi-line diagnostic output to stdout (the statusline area).
+# =============================================================================
+
+
+class StatusLineValidationError(Exception):
+    """Validation failure enriched with raw input for error display."""
+
+    def __init__(self, error: pydantic.ValidationError, raw: Mapping[str, object]) -> None:
+        self.error = error
+        self.raw = raw
+        super().__init__(str(error))
+
+
+def _write_error_log(content: str) -> None:
+    """Write error details to log file."""
+    with contextlib.suppress(OSError):
+        ERROR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ERROR_LOG_PATH.write_text(content)
+        ERROR_LOG_PATH.chmod(0o600)
+
+
+boundary = ErrorBoundary(exit_code=None)
+
+
+@boundary.handler(StatusLineValidationError)
+def _handle_validation(exc: StatusLineValidationError) -> None:
+    """Schema drift — show field paths, version, clickable link to error log."""
+    version = exc.raw.get('version', '?')
+    errors = exc.error.errors()
+    error_lines = [f'  {".".join(str(x) for x in err["loc"])}: {err["msg"]}' for err in errors]
+
+    log_text = f'{datetime.now(UTC).isoformat()}\nValidation failed:\n'
+    log_text += '\n'.join(error_lines) + '\n'
+    log_text += f'\nRaw JSON:\n{json.dumps(exc.raw, indent=2)}\n'
+    _write_error_log(log_text)
+
+    link = _osc8_link(f'file://{ERROR_LOG_PATH}', 'details')
+    print(f'{RED}⚠ StatusLine: validation failed (v{version}) — {link}{RESET}')
+    for line in error_lines[:3]:
+        print(f'{DIM}{line}{RESET}')
+    if len(error_lines) > 3:
+        print(f'{DIM}  ... and {len(error_lines) - 3} more{RESET}')
+
+
+@boundary.handler(json.JSONDecodeError)
+def _handle_json_error(exc: json.JSONDecodeError) -> None:
+    """Bad input — show decode error, clickable link to error log."""
+    _write_error_log(f'{datetime.now(UTC).isoformat()}\nJSON decode failed: {exc}\n')
+    link = _osc8_link(f'file://{ERROR_LOG_PATH}', 'details')
+    print(f'{RED}⚠ StatusLine: invalid JSON — {link}{RESET}')
+    print(f'{DIM}  {exc}{RESET}')
+
+
+@boundary.handler(Exception)
+def _handle_crash(exc: Exception) -> None:
+    """Unexpected crash — show last 2 traceback frames, clickable link to error log."""
+    tb_text = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    _write_error_log(f'{datetime.now(UTC).isoformat()}\n{tb_text}\n')
+    link = _osc8_link(f'file://{ERROR_LOG_PATH}', 'details')
+    print(f'{RED}⚠ StatusLine crashed: {type(exc).__name__}: {exc} — {link}{RESET}')
+    for frame in traceback.format_tb(exc.__traceback__)[-2:]:
+        for line in frame.rstrip('\n').split('\n'):
+            print(f'{DIM}{line}{RESET}')
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
 
+@boundary
 def main() -> None:
-    log_path = Path.home() / '.claude-workspace' / 'statusline-error.log'
-
-    try:
-        raw = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        msg = f'{datetime.now(UTC).isoformat()}\nJSON decode failed: {e}\n\n'
-        with contextlib.suppress(OSError):
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_path.write_text(msg)
-            log_path.chmod(0o600)
-        print(f'{RED}StatusLine: invalid JSON: {e}{RESET}', file=sys.stderr)
-        return
+    raw = json.load(sys.stdin)  # JSONDecodeError propagates to boundary
 
     try:
         data = StatusLineInput.model_validate(raw)
     except pydantic.ValidationError as e:
-        # Log raw JSON and errors for debugging
-        error_msg = f'{datetime.now(UTC).isoformat()}\nValidation failed:\n'
-        for err in e.errors():
-            loc = '.'.join(str(x) for x in err['loc'])
-            error_msg += f'  {loc}: {err["msg"]}\n'
-        error_msg += '\nRaw JSON:\n'
-        error_msg += json.dumps(raw, indent=2)
-        error_msg += '\n\n'
-
-        with contextlib.suppress(OSError):
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_path.write_text(error_msg)
-            log_path.chmod(0o600)
-
-        print(f'{RED}StatusLine: validation failed — see {log_path}{RESET}', file=sys.stderr)
-        return
+        raise StatusLineValidationError(e, raw) from e
 
     claude_pid = find_claude_pid()
 
@@ -1233,10 +1301,13 @@ def main() -> None:
     # Model + Version
     parts.append(f'{CYAN}{data.model.id}{RESET} {DIM}v{data.version}{RESET}')
 
-    # PID + Session ID — space-separated so UUID is double-clickable, links to transcript
+    # PID + uptime + Session ID + age
     transcript_url = f'file://{data.transcript_path}'
-    pid_str = f'{DIM}pid:{RESET} {claude_pid}'
-    parts.append(f'{pid_str} {DIM}session_id:{RESET} {_osc8_link(transcript_url, data.session_id)}')
+    uptime_ms = _get_process_uptime_ms(claude_pid)
+    age_ms = _get_session_age_ms(data.transcript_path)
+    pid_str = f'{DIM}pid:{RESET} {claude_pid} {DIM}up:{RESET}{_format_duration(uptime_ms)}'
+    age_str = f'{DIM}age:{RESET}{_format_duration(age_ms)}'
+    parts.append(f'{pid_str} {DIM}session_id:{RESET} {_osc8_link(transcript_url, data.session_id)} {age_str}')
 
     # Process health (Tier 1: always, Tier 2: anomalies, Tier 3: trend)
     if health_sample is not None and health_sidecar is not None:
@@ -1280,30 +1351,29 @@ def main() -> None:
     # ── Line 2: Metrics ──────────────────────────────────────────────────
     metrics: list[str] = []
 
-    # Context bar
+    # Context bar + per-turn delta
     ctx = data.context_window
     pct = ctx.used_percentage or 0
     metrics.append(_context_bar(pct, ctx.context_window_size))
+    if ctx.current_usage is not None:
+        delta = ctx.current_usage.input_tokens + ctx.current_usage.output_tokens
+        metrics[0] += f' {DIM}+{_format_tokens(delta)}{RESET}'
 
     # Remaining percentage
     remaining = ctx.remaining_percentage
     if remaining is not None:
         rem_color = GREEN if remaining > 30 else YELLOW if remaining > 10 else RED
         metrics.append(f'{rem_color}{remaining:.0f}% remaining{RESET}')
-    if ctx.current_usage is not None:
-        in_tokens = _format_tokens(ctx.current_usage.input_tokens)
-        out_tokens = _format_tokens(ctx.current_usage.output_tokens)
-        metrics.append(f'{DIM}in:{in_tokens} out:{out_tokens}{RESET}')
 
     # Cost
     cost = data.cost.total_cost_usd
     if cost is not None:
         metrics.append(_format_cost(cost))
 
-    # Duration
+    # Cumulative runtime
     duration = data.cost.total_duration_ms
     if duration is not None and duration > 0:
-        metrics.append(f'{DIM}{_format_duration(duration)}{RESET}')
+        metrics.append(f'{DIM}run:{_format_duration(duration)}{RESET}')
 
     # Lines changed
     added = data.cost.total_lines_added or 0
@@ -1345,8 +1415,13 @@ def main() -> None:
     # Cumulative totals
     ctx_in = _format_tokens(ctx.total_input_tokens)
     ctx_out = _format_tokens(ctx.total_output_tokens)
-    line4.append(f'{DIM}total_in:{RESET} {ctx_in}')
-    line4.append(f'{DIM}total_out:{RESET} {ctx_out}')
+    line4.append(f'{DIM}total:{RESET} ↓{ctx_in} ↑{ctx_out}')
+
+    # Per-message tokens (last API call)
+    if ctx.current_usage is not None:
+        last_in = _format_tokens(ctx.current_usage.input_tokens)
+        last_out = _format_tokens(ctx.current_usage.output_tokens)
+        line4.append(f'{DIM}last:{RESET} ↓{last_in} ↑{last_out}')
 
     # Exceeds 200k warning
     if data.exceeds_200k_tokens:
@@ -1366,25 +1441,6 @@ def main() -> None:
 
     print(' │ '.join(line4))
 
-    # ── Line 5: Debug ───────────────────────────────────────────────────
-    mtime = _max_mtime()
-    mtime_str = datetime.fromtimestamp(mtime, tz=UTC).astimezone().strftime('%H:%M:%S') if mtime else 'n/a'
-    cache_ts = _read_cache_timestamp()
-    cache_str = datetime.fromtimestamp(cache_ts, tz=UTC).astimezone().strftime('%H:%M:%S') if cache_ts else 'n/a'
-    invalidated = 'yes' if mtime > cache_ts else 'no'
-    print(
-        f'{DIM}max_mtime:{RESET} {mtime_str} {DIM}│ cache written:{RESET} {cache_str} {DIM}│ invalidated:{RESET} {invalidated}'
-    )
-
-
-def _excepthook(exc_type: type[BaseException], exc_value: BaseException, exc_tb: types.TracebackType | None) -> None:
-    if issubclass(exc_type, Exception):
-        print(f'{RED}StatusLine crashed: {exc_type.__name__}: {exc_value}{RESET}', file=sys.stderr)
-        traceback.print_exception(exc_type, exc_value, exc_tb, file=sys.stderr)
-    else:
-        sys.__excepthook__(exc_type, exc_value, exc_tb)
-
 
 if __name__ == '__main__':
-    sys.excepthook = _excepthook
     main()
