@@ -618,9 +618,10 @@ class IndexingService:
         # Build timing report from tracer
         timing_report = tracer.build_report()
 
-        # Clear operation and transient state
+        # Clear operation and transient state, release process pool
         self._operation = None
         self._cached_hashes.clear()
+        self._chunking.shutdown()
 
         return IndexingResult(
             files_scanned=files_total,
