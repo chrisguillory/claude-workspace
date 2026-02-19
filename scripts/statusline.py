@@ -1415,7 +1415,7 @@ def main() -> None:
     # Cumulative totals
     ctx_in = _format_tokens(ctx.total_input_tokens)
     ctx_out = _format_tokens(ctx.total_output_tokens)
-    line4.append(f'{DIM}total:{RESET} ↓{ctx_in} ↑{ctx_out}')
+    line4.append(f'{DIM}session:{RESET} ↓{ctx_in} ↑{ctx_out}')
 
     # Per-message tokens (last API call)
     if ctx.current_usage is not None:
