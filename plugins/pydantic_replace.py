@@ -40,7 +40,7 @@ Configuration
 Replace ``pydantic.mypy`` in your mypy plugins list::
 
     [tool.mypy]
-    plugins = ["plugins.pydantic_replace"]
+    plugins = ["plugins/pydantic_replace.py"]
 
     [tool.pydantic-mypy]
     init_forbid_extra = true
@@ -51,8 +51,8 @@ Caveats
 -------
 - ``__replace__()`` uses Python field names (not aliases), matching pydantic's
   runtime behavior where ``__replace__`` delegates to ``model_copy()``.
-- Bypasses Pydantic runtime validation (same as ``model_copy``). Pydantic's
-  ``extra='forbid'`` and ``strict=True`` still validate at runtime.
+- Bypasses Pydantic runtime validation (same as ``model_copy``). Values are
+  assigned directly without running validators or enforcing ``extra``/``strict``.
 - Depends on ``PydanticPlugin``, ``PydanticModelField``, and ``METADATA_KEY``
   from ``pydantic.mypy``. These are stable across pydantic 2.x but are not
   part of pydantic's public API contract.
@@ -78,7 +78,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mypy.nodes import TypeInfo
-from mypy.plugin import ClassDefContext, Plugin
+from mypy.plugin import ClassDefContext, Plugin, ReportConfigContext
 from mypy.plugins.common import add_method_to_class
 from mypy.typevars import fill_typevars
 from pydantic.mypy import METADATA_KEY, PydanticModelField, PydanticPlugin
@@ -89,8 +89,17 @@ def plugin(version: str) -> type[Plugin]:
     return PydanticReplacePlugin
 
 
+_PLUGIN_VERSION = 1  # Increment when synthesis logic changes to invalidate mypy cache
+
+
 class PydanticReplacePlugin(PydanticPlugin):
     """Extends PydanticPlugin with ``__replace__()`` synthesis on model classes."""
+
+    def report_config_data(self, ctx: ReportConfigContext) -> dict[str, Any]:
+        """Include plugin version so mypy invalidates cache on logic changes."""
+        data = super().report_config_data(ctx)
+        data['pydantic_replace_version'] = _PLUGIN_VERSION
+        return data
 
     def get_base_class_hook(self, fullname: str) -> Callable[[ClassDefContext], None] | None:
         """Chain: pydantic transform -> __replace__ synthesis."""
@@ -105,22 +114,26 @@ class PydanticReplacePlugin(PydanticPlugin):
         return chained_hook
 
 
-def _collect_parent_fields(info: TypeInfo) -> dict[str, Any]:
-    """Collect field data from the first parent that defines each field.
+def _collect_parent_fields(info: TypeInfo) -> dict[str, tuple[TypeInfo, Any]]:
+    """Collect field data from the nearest parent that defines each field.
 
-    When a subclass narrows a field type (e.g., ``name: str`` to
-    ``name: Literal['LCP']``), ``__replace__`` must use the parent's wider
-    type to satisfy LSP. Returns a mapping of field name to the parent's
-    serialized field data for any field found in a parent's pydantic metadata.
+    For inherited fields, ``__replace__`` should use the parent's (wider) type
+    to satisfy LSP. When a subclass narrows ``name: str`` to
+    ``name: Literal['LCP']``, the parent's ``str`` is used so the synthesized
+    ``__replace__`` doesn't violate Liskov substitution.
+
+    Returns ``(defining_class_info, serialized_field_data)`` tuples keyed by
+    field name. The TypeInfo is needed to correctly deserialize type variables
+    for generic parent models (e.g., ``Response[T]`` → ``Response[str]``).
     """
-    parent_fields: dict[str, Any] = {}
+    parent_fields: dict[str, tuple[TypeInfo, Any]] = {}
     for parent in info.mro[1:]:
         parent_meta = parent.metadata.get(METADATA_KEY)
         if parent_meta is None:
             continue
         for name, data in parent_meta.get('fields', {}).items():
             if name not in parent_fields:
-                parent_fields[name] = data
+                parent_fields[name] = (parent, data)
     return parent_fields
 
 
@@ -130,15 +143,18 @@ def _synthesize_replace(ctx: ClassDefContext) -> None:
     Reads field metadata stored by the pydantic transformer and builds
     keyword-only optional arguments matching ``__init__`` fields (using
     Python names, not aliases).
+
+    For inherited fields, uses the parent's type to satisfy LSP — preventing
+    ``[override]`` errors when subclasses narrow field types.
     """
     if ctx.api.options.python_version < (3, 13):
         return
 
     info = ctx.cls.info
 
-    # Don't overwrite an explicitly defined or previously synthesized __replace__
+    # Don't overwrite a user-defined __replace__
     existing = info.names.get('__replace__')
-    if existing is not None and existing.plugin_generated:
+    if existing is not None and not existing.plugin_generated:
         return
 
     metadata = info.metadata.get(METADATA_KEY)
@@ -150,18 +166,23 @@ def _synthesize_replace(ctx: ClassDefContext) -> None:
     if not fields_data:
         return
 
-    # For inherited fields that narrow a parent type (e.g., name: str ->
-    # name: Literal['LCP']), use the parent's wider type for __replace__
-    # args to satisfy Liskov substitution.
     parent_fields = _collect_parent_fields(info)
-
     model_strict = bool(config.get('strict', False))
     typed = True  # __replace__ args are always typed for maximum safety
 
     args = []
     for name, data in fields_data.items():
-        field_data = parent_fields.get(name, data)
-        field = PydanticModelField.deserialize(info, field_data, ctx.api)
+        parent_entry = parent_fields.get(name)
+        if parent_entry is not None:
+            # Inherited field — use parent's wider type for LSP compliance.
+            # Deserialize with parent's TypeInfo, then expand type vars
+            # for the current subclass (handles generic parents).
+            parent_info, parent_data = parent_entry
+            field = PydanticModelField.deserialize(parent_info, parent_data, ctx.api)
+            field.expand_typevar_from_subtype(info, ctx.api)
+        else:
+            field = PydanticModelField.deserialize(info, data, ctx.api)
+
         arg = field.to_argument(
             current_info=info,
             typed=typed,
