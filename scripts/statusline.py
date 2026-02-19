@@ -263,6 +263,7 @@ class ModelInfo(StrictModel):
 class WorkspaceInfo(StrictModel):
     current_dir: str
     project_dir: str
+    added_dirs: Sequence[str]  # Added in v2.1.47
 
 
 class CostInfo(StrictModel):
@@ -1168,7 +1169,7 @@ def main() -> None:
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_path.write_text(msg)
             log_path.chmod(0o600)
-        print(f'{RED}StatusLine: invalid JSON{RESET}', file=sys.stderr)
+        print(f'{RED}StatusLine: invalid JSON: {e}{RESET}', file=sys.stderr)
         return
 
     try:
@@ -1304,6 +1305,9 @@ def main() -> None:
         line3.append(f'{DIM}project:{RESET} {_shorten_path(data.workspace.project_dir)}')
     else:
         line3.append(f'{DIM}cwd:{RESET} {_shorten_path(data.cwd)}')
+
+    # Added directories (only when non-empty)
+    line3.extend(f'{DIM}+dir:{RESET} {_shorten_path(d)}' for d in data.workspace.added_dirs)
 
     # Transcript path
     line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, _shorten_path(data.transcript_path))}')
