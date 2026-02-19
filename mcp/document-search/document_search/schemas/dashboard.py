@@ -158,25 +158,33 @@ class OperationProgress(StrictModel):
         result: IndexingResult,
         *,
         errors_429: int,
+        prior_progress: OperationProgress | None = None,
     ) -> OperationProgress:
         """Build final progress from IndexingResult with all queues drained.
 
-        Single source of truth for result → progress conversion.
-        Eliminates manual field-by-field construction in progress writer.
+        Per-stage file counters (files_chunked/embedded/stored) are carried
+        forward from the last live snapshot to avoid a visible jump on
+        completion. Files that skip stages (chunk-cached, no-content) are
+        not counted in those stage counters live, so recomputing them from
+        the result would inflate the values.
+
+        Without prior_progress (monitor never ran), falls back to files_done.
 
         Args:
             result: Completed IndexingResult from IndexingService.
             errors_429: Count of rate limit errors from prior progress snapshots.
+            prior_progress: Last live snapshot (carries accurate stage counters).
 
         Returns:
             Complete OperationProgress with status='complete'.
         """
+        files_done = result.files_indexed + result.files_no_content
         return cls(
             status='complete',
             elapsed_seconds=result.elapsed_seconds,
             scan_complete=True,
             files_found=result.files_scanned,
-            files_to_process=result.files_indexed + result.files_no_content,
+            files_to_process=files_done,
             files_cached=result.files_cached,
             files_errored=len(result.errors),
             files_awaiting_chunk=0,
@@ -191,13 +199,13 @@ class OperationProgress(StrictModel):
             embed_cache_misses=result.embed_cache_misses,
             chunks_stored=result.chunks_created,
             chunks_skipped=result.chunks_skipped,
-            files_chunked=result.files_indexed + result.files_no_content,
-            files_embedded=result.files_indexed + result.files_no_content,
-            files_stored=result.files_indexed + result.files_no_content,
-            files_done=result.files_indexed + result.files_no_content,
+            files_chunked=prior_progress.files_chunked if prior_progress else files_done,
+            files_embedded=prior_progress.files_embedded if prior_progress else files_done,
+            files_stored=prior_progress.files_stored if prior_progress else files_done,
+            files_done=files_done,
             errors_429=errors_429,
             by_file_type=result.by_file_type,
-            queue_depth_series=(),
+            queue_depth_series=prior_progress.queue_depth_series if prior_progress else (),
         )
 
 

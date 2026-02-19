@@ -114,7 +114,9 @@ class ProgressWriter:
     def complete_with_success(self, result: IndexingResult) -> None:
         """Mark operation as successfully completed.
 
-        Builds final progress from result with all queues drained.
+        Carries forward per-stage file counters from the last live snapshot
+        to avoid a visible counter jump (chunk-cached and no-content files
+        skip stages but from_result would count them in all stages).
 
         Args:
             result: Final indexing result.
@@ -122,11 +124,11 @@ class ProgressWriter:
         if self._state is None:
             return
 
-        # Build final progress from result (always, even if monitor never ran)
-        prior_429 = self._state.progress.errors_429 if self._state.progress else 0
+        prior = self._state.progress
         final_progress = OperationProgress.from_result(
             result,
-            errors_429=prior_429,
+            errors_429=prior.errors_429 if prior else 0,
+            prior_progress=prior,
         )
 
         self._finalize(progress=final_progress, result=result, error=None)
