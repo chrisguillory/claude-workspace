@@ -130,42 +130,74 @@ def load_bash_prefixes(cwd: str) -> Set[str]:
 _WRAPPER_COMMANDS = frozenset({'timeout', 'time', 'nice', 'nohup'})
 _SUBSTITUTION_PATTERNS = ('$(', '`', '<(', '>(')  # Patterns indicating code execution
 
-# Commands that execute arbitrary code from string arguments — bashlex can't analyze the payload
+# Commands that execute arbitrary code from string arguments — bashlex can't analyze the payload.
+# Defense-in-depth: users' prefix lists (Bash(git log:*)) already serve as the primary allowlist,
+# but this prevents auto-approval if someone accidentally adds e.g. Bash(perl:*).
 _CODE_EXEC_COMMANDS = frozenset(
     {
+        # Shell builtins that take code strings
         'eval',
         'source',
         '.',
         'exec',
+        'trap',
+        # Shell interpreters
         'bash',
         'sh',
         'zsh',
         'dash',
         'ksh',
-        'trap',
+        'csh',
+        'tcsh',
+        'fish',
+        # Language interpreters with -e/-c flags
+        'perl',
+        'python',
+        'python3',
+        'ruby',
+        'node',
+        'deno',
+        'bun',
+        'awk',
+        'gawk',
+        'mawk',
+        'nawk',
+        # Commands that execute subcommands
+        'xargs',
+        'expect',
+        'wish',
+        'tclsh',
     }
 )
 
-# Environment variables that alter process behavior when set via inline assignment (VAR=val cmd)
-_DANGEROUS_ENV_VARS = frozenset(
+# Inline env var assignments (VAR=val cmd) are dangerous unless the variable is known-safe.
+# Allowlist model: only these harmless variables pass; everything else is marked dangerous.
+# This avoids maintaining an incomplete denylist of LD_PRELOAD, DYLD_INSERT_LIBRARIES, etc.
+_SAFE_ENV_VARS = frozenset(
     {
-        'LD_PRELOAD',
-        'LD_LIBRARY_PATH',
-        'LD_AUDIT',
-        'PATH',
-        'PYTHONPATH',
-        'NODE_PATH',
-        'PERL5LIB',
-        'RUBYLIB',
-        'GIT_SSH_COMMAND',
-        'GIT_DIR',
-        'GIT_WORK_TREE',
-        'GIT_TEMPLATE_DIR',
-        'EDITOR',
-        'VISUAL',
-        'PAGER',
-        'SHELL',
-        'IFS',
+        # Terminal type
+        'TERM',
+        'COLORTERM',
+        # Locale
+        'LANG',
+        'LANGUAGE',
+        'LC_ALL',
+        'LC_COLLATE',
+        'LC_CTYPE',
+        'LC_MESSAGES',
+        'LC_MONETARY',
+        'LC_NUMERIC',
+        'LC_TIME',
+        # Timezone
+        'TZ',
+        # Color control
+        'NO_COLOR',
+        'FORCE_COLOR',
+        'CLICOLOR',
+        'CLICOLOR_FORCE',
+        # Terminal dimensions
+        'COLUMNS',
+        'LINES',
     }
 )
 
@@ -286,9 +318,10 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo
                 is_dangerous = True
 
         elif pk == 'assignment':
-            # Check for security-sensitive env vars: LD_PRELOAD=/evil.so cmd
+            # Inline assignments export env vars to the subprocess.
+            # Only known-safe vars (locale, terminal, color) are allowed through.
             var_name = getattr(part, 'word', '').split('=', 1)[0]
-            if var_name in _DANGEROUS_ENV_VARS:
+            if var_name not in _SAFE_ENV_VARS:
                 is_dangerous = True
             # Assignment values may contain substitutions: VAR=$(cmd) echo test
             if hasattr(part, 'parts') and part.parts:
