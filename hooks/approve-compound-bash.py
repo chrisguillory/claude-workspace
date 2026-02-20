@@ -52,6 +52,7 @@ __all__ = [
 import json
 import re
 import sys
+from collections.abc import Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -97,7 +98,7 @@ def decide(decision: PermissionDecision, reason: str) -> None:
 _BASH_PREFIX_RE = re.compile(r'^Bash\((.+):\*\)$')
 
 
-def load_bash_prefixes(cwd: str) -> set[str]:
+def load_bash_prefixes(cwd: str) -> Set[str]:
     """Load Bash allow prefixes from the settings hierarchy."""
     prefixes: set[str] = set()
 
@@ -129,6 +130,45 @@ def load_bash_prefixes(cwd: str) -> set[str]:
 _WRAPPER_COMMANDS = frozenset({'timeout', 'time', 'nice', 'nohup'})
 _SUBSTITUTION_PATTERNS = ('$(', '`', '<(', '>(')  # Patterns indicating code execution
 
+# Commands that execute arbitrary code from string arguments — bashlex can't analyze the payload
+_CODE_EXEC_COMMANDS = frozenset(
+    {
+        'eval',
+        'source',
+        '.',
+        'exec',
+        'bash',
+        'sh',
+        'zsh',
+        'dash',
+        'ksh',
+        'trap',
+    }
+)
+
+# Environment variables that alter process behavior when set via inline assignment (VAR=val cmd)
+_DANGEROUS_ENV_VARS = frozenset(
+    {
+        'LD_PRELOAD',
+        'LD_LIBRARY_PATH',
+        'LD_AUDIT',
+        'PATH',
+        'PYTHONPATH',
+        'NODE_PATH',
+        'PERL5LIB',
+        'RUBYLIB',
+        'GIT_SSH_COMMAND',
+        'GIT_DIR',
+        'GIT_WORK_TREE',
+        'GIT_TEMPLATE_DIR',
+        'EDITOR',
+        'VISUAL',
+        'PAGER',
+        'SHELL',
+        'IFS',
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class SubcommandInfo:
@@ -139,7 +179,7 @@ class SubcommandInfo:
     is_dangerous: bool = False
 
 
-def analyze_command(command: str) -> list[SubcommandInfo]:
+def analyze_command(command: str) -> Sequence[SubcommandInfo]:
     """Parse command into subcommands using bashlex AST.
 
     Returns one SubcommandInfo per simple command found. Compound operators
@@ -173,16 +213,20 @@ def _collect_commands(source: str, node: bashlex.ast.node, results: list[Subcomm
             if getattr(child, 'kind', '') != 'pipe':
                 _collect_commands(source, child, results)
     elif kind == 'compound':
-        # Check for redirects on the compound itself: (cmds) > file
+        # Check for file redirects on the compound itself: (cmds) > file
+        # fd-to-fd redirects like 2>&1 have int output, file redirects have node output
         if hasattr(node, 'redirects') and node.redirects:
-            start, end = node.pos
-            results.append(
-                SubcommandInfo(
-                    text=source[start:end].strip(),
-                    base_command='',
-                    is_dangerous=True,
-                )
-            )
+            for redir in node.redirects:
+                if hasattr(redir.output, 'kind'):
+                    start, end = node.pos
+                    results.append(
+                        SubcommandInfo(
+                            text=source[start:end].strip(),
+                            base_command='',
+                            is_dangerous=True,
+                        )
+                    )
+                    break
         for child in node.list:
             _collect_commands(source, child, results)
     elif kind == 'reservedword':
@@ -231,12 +275,21 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo
                         if child.kind in ('commandsubstitution', 'processsubstitution'):
                             is_dangerous = True
             elif part.type == '<<':
-                pass  # Heredoc: content not in AST, delimiter word is safe
+                # Heredoc: content stored as raw string in part.heredoc.value.
+                # Unquoted delimiters cause bash to expand $() and backticks.
+                if hasattr(part, 'heredoc') and part.heredoc is not None:
+                    heredoc_val = getattr(part.heredoc, 'value', '')
+                    if any(pat in heredoc_val for pat in _SUBSTITUTION_PATTERNS):
+                        is_dangerous = True
             elif hasattr(part.output, 'kind'):
                 # File redirect: output is a node (has .kind), not an int (fd-to-fd)
                 is_dangerous = True
 
         elif pk == 'assignment':
+            # Check for security-sensitive env vars: LD_PRELOAD=/evil.so cmd
+            var_name = getattr(part, 'word', '').split('=', 1)[0]
+            if var_name in _DANGEROUS_ENV_VARS:
+                is_dangerous = True
             # Assignment values may contain substitutions: VAR=$(cmd) echo test
             if hasattr(part, 'parts') and part.parts:
                 for child in part.parts:
@@ -248,6 +301,12 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo
                             is_dangerous = True
 
     base_command = _resolve_base_command(words)
+
+    # Commands that execute arbitrary code from string arguments
+    if base_command:
+        first_word = base_command.split(maxsplit=1)[0]
+        if first_word in _CODE_EXEC_COMMANDS:
+            is_dangerous = True
 
     return SubcommandInfo(
         text=text,
@@ -289,7 +348,7 @@ def _resolve_base_command(words: list[str]) -> str:
 # --- Prefix matching ---
 
 
-def matches_prefix(info: SubcommandInfo, prefixes: set[str]) -> bool:
+def matches_prefix(info: SubcommandInfo, prefixes: Set[str]) -> bool:
     """Check if a subcommand matches any allowed Bash prefix.
 
     Rejects subcommands containing dangerous constructs (command substitution,
@@ -316,8 +375,12 @@ def main() -> None:
     if not command:
         return
 
+    # Null bytes cause parsing divergence between bashlex and actual shell
+    if '\x00' in command:
+        return
+
     subcommands = analyze_command(command)
-    if len(subcommands) <= 1:
+    if not subcommands or len(subcommands) <= 1:
         return
 
     prefixes = load_bash_prefixes(hook_data.cwd)
