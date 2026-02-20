@@ -267,6 +267,124 @@ class TestDangerDetection:
         prefixes = {'echo', 'git log'}
         assert not all(hook_module.matches_prefix(info, prefixes) for info in result)
 
+    def test_compound_fd_redirect_safe(self, hook_module: ModuleType) -> None:
+        """fd-to-fd redirect (2>&1) on compound is NOT a file redirect."""
+        result = hook_module.analyze_command('(echo a; echo b) 2>&1 && git log')
+        assert not any(r.is_dangerous for r in result)
+
+    # -- Heredoc content scanning --
+
+    def test_heredoc_with_command_substitution_dangerous(self, hook_module: ModuleType) -> None:
+        """Unquoted heredocs expand $() at runtime — content must be scanned."""
+        result = hook_module.analyze_command('cat <<EOF && git log\n$(rm -rf /)\nEOF')
+        assert result[0].is_dangerous
+
+    def test_heredoc_with_backtick_dangerous(self, hook_module: ModuleType) -> None:
+        """Unquoted heredocs expand backticks at runtime."""
+        result = hook_module.analyze_command('cat <<EOF && git log\n`whoami`\nEOF')
+        assert result[0].is_dangerous
+
+    def test_heredoc_plain_content_safe(self, hook_module: ModuleType) -> None:
+        """Heredoc with no substitution patterns is safe."""
+        result = hook_module.analyze_command('cat <<EOF && git log\nhello world\nEOF')
+        assert not result[0].is_dangerous
+
+    # -- Environment variable injection --
+
+    def test_ld_preload_dangerous(self, hook_module: ModuleType) -> None:
+        """LD_PRELOAD= loads arbitrary .so into subprocess — must be caught."""
+        result = hook_module.analyze_command('LD_PRELOAD=/evil.so git log && echo done')
+        assert result[0].is_dangerous
+
+    def test_path_manipulation_dangerous(self, hook_module: ModuleType) -> None:
+        """PATH= manipulation changes which binary executes."""
+        result = hook_module.analyze_command('PATH=/evil git log && echo done')
+        assert result[0].is_dangerous
+
+    def test_git_dir_dangerous(self, hook_module: ModuleType) -> None:
+        """GIT_DIR= points git at attacker-controlled repository."""
+        result = hook_module.analyze_command('GIT_DIR=/evil/.git git log && echo done')
+        assert result[0].is_dangerous
+
+    def test_git_ssh_command_dangerous(self, hook_module: ModuleType) -> None:
+        """GIT_SSH_COMMAND= executes arbitrary code on remote operations."""
+        result = hook_module.analyze_command('GIT_SSH_COMMAND="rm -rf /" git fetch && echo done')
+        assert result[0].is_dangerous
+
+    def test_ifs_manipulation_dangerous(self, hook_module: ModuleType) -> None:
+        """IFS= changes word splitting, can alter command interpretation."""
+        result = hook_module.analyze_command('IFS=/ echo test && git log')
+        assert result[0].is_dangerous
+
+    def test_ld_library_path_dangerous(self, hook_module: ModuleType) -> None:
+        """LD_LIBRARY_PATH= library search path poisoning."""
+        result = hook_module.analyze_command('LD_LIBRARY_PATH=/evil git log && echo done')
+        assert result[0].is_dangerous
+
+    def test_plain_env_var_safe(self, hook_module: ModuleType) -> None:
+        """Non-sensitive env vars (e.g. TERM, LANG) are safe."""
+        result = hook_module.analyze_command('TERM=xterm git log && echo done')
+        assert not result[0].is_dangerous
+
+    # -- Code-execution command denylist --
+
+    def test_eval_marked_dangerous(self, hook_module: ModuleType) -> None:
+        """eval executes arbitrary code from string arguments."""
+        result = hook_module.analyze_command('eval "rm -rf /" && git log')
+        assert result[0].is_dangerous
+
+    def test_source_marked_dangerous(self, hook_module: ModuleType) -> None:
+        """source executes arbitrary file contents."""
+        result = hook_module.analyze_command('source /tmp/evil.sh && git log')
+        assert result[0].is_dangerous
+
+    def test_dot_source_marked_dangerous(self, hook_module: ModuleType) -> None:
+        """. is equivalent to source."""
+        result = hook_module.analyze_command('. /tmp/evil.sh && git log')
+        assert result[0].is_dangerous
+
+    def test_bash_c_marked_dangerous(self, hook_module: ModuleType) -> None:
+        """bash -c spawns shell with arbitrary command string."""
+        result = hook_module.analyze_command('bash -c "rm -rf /" && echo done')
+        assert result[0].is_dangerous
+
+    def test_trap_marked_dangerous(self, hook_module: ModuleType) -> None:
+        """trap defers arbitrary code execution to signal/exit."""
+        result = hook_module.analyze_command('trap "rm -rf /" EXIT && echo done')
+        assert result[0].is_dangerous
+
+    def test_exec_marked_dangerous(self, hook_module: ModuleType) -> None:
+        """exec replaces shell process with arbitrary command."""
+        result = hook_module.analyze_command('exec git log && echo done')
+        assert result[0].is_dangerous
+
+    # -- Additional coverage: safe constructs --
+
+    def test_simple_parameter_expansion_safe(self, hook_module: ModuleType) -> None:
+        """Simple $VAR expansion (no substitution) is safe."""
+        result = hook_module.analyze_command('echo $HOME && git log')
+        assert not result[0].is_dangerous
+
+    def test_assignment_simple_parameter_safe(self, hook_module: ModuleType) -> None:
+        """Assignment with simple $VAR (no substitution) is safe."""
+        result = hook_module.analyze_command('VAR=$HOME echo test && git log')
+        assert not result[0].is_dangerous
+
+    def test_assignment_process_substitution_dangerous(self, hook_module: ModuleType) -> None:
+        """Process substitution in assignment position is dangerous."""
+        result = hook_module.analyze_command('X=<(echo test) echo done && git log')
+        assert result[0].is_dangerous
+
+    def test_here_string_process_substitution_dangerous(self, hook_module: ModuleType) -> None:
+        """Here-strings (<<<) with process substitution are dangerous."""
+        result = hook_module.analyze_command('cat <<< <(echo test) && git log')
+        assert result[0].is_dangerous
+
+    def test_backtick_in_parameter_expansion_dangerous(self, hook_module: ModuleType) -> None:
+        """Backticks inside parameter expansion are caught."""
+        result = hook_module.analyze_command('echo ${x:-`whoami`} && git log')
+        assert result[0].is_dangerous
+
 
 # ---------------------------------------------------------------------------
 # TestResolveBaseCommand — wrapper prefix stripping
@@ -315,6 +433,20 @@ class TestResolveBaseCommand:
     )
     def test_privilege_wrappers_not_stripped(self, hook_module: ModuleType, words: list[str], expected: str) -> None:
         """sudo/env/command are NOT stripped — conservative by design."""
+        assert hook_module._resolve_base_command(words) == expected
+
+    @pytest.mark.parametrize(
+        'words, expected',
+        [
+            (['timeout', '--signal=KILL', '5s', 'git', 'log'], '5s git log'),
+            (['timeout', '-k', '5', '10', 'git', 'log'], '5 10 git log'),
+            (['nice', '-5', 'git', 'log'], '-5 git log'),
+            (['nice', '--adjustment=5', 'git', 'log'], '--adjustment=5 git log'),
+        ],
+        ids=['timeout-signal', 'timeout-kill', 'nice-bsd', 'nice-gnu'],
+    )
+    def test_wrapper_flag_limitations(self, hook_module: ModuleType, words: list[str], expected: str) -> None:
+        """Wrapper flags produce imperfect base_command (safe direction — falls through)."""
         assert hook_module._resolve_base_command(words) == expected
 
 
@@ -550,6 +682,91 @@ class TestMainIntegration:
         (home / '.claude' / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Bash(echo:*)']}}))
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo test && rm -rf /')))
+
+        hook_module.main.__wrapped__()
+        assert capsys.readouterr().out == ''
+
+    # -- ErrorBoundary integration --
+
+    def test_parse_error_passthrough_via_boundary(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Parse errors in main() passthrough safely (exit 0, no decision).
+
+        Calls main() WITH ErrorBoundary (not __wrapped__) to verify the full
+        decorator chain handles bashlex failures gracefully.
+        """
+        monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo "unterminated')))
+
+        with pytest.raises(SystemExit) as exc_info:
+            hook_module.main()
+
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert captured.out == ''
+        assert 'error' in captured.err.lower()
+
+    def test_unknown_field_passthrough_via_boundary(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """extra='forbid' is intentional: unknown fields trigger safe passthrough.
+
+        StrictModel(extra='forbid') rejects payloads with unknown fields. This
+        is a deliberate design choice: when Claude Code adds new fields, the hook
+        fails safely (ErrorBoundary catches ValidationError, exits 0, passes
+        through to built-in permissions) rather than silently ignoring potentially
+        important new fields. The tradeoff is that the hook stops auto-approving
+        until the schema is updated — a loud failure that gets fixed, rather than
+        a silent one that hides new behavior.
+        """
+        payload = json.dumps(
+            {
+                'session_id': 'test',
+                'cwd': '/tmp',
+                'transcript_path': '/tmp/transcript.jsonl',
+                'hook_event_name': 'PreToolUse',
+                'tool_name': 'Bash',
+                'tool_input': {'command': 'echo a && echo b'},
+                'tool_use_id': 'tu_test',
+                'new_future_field': 'surprise',
+            }
+        )
+        monkeypatch.setattr('sys.stdin', io.StringIO(payload))
+
+        with pytest.raises(SystemExit) as exc_info:
+            hook_module.main()
+
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert captured.out == ''
+        assert 'error' in captured.err.lower()
+
+    # -- Null byte protection --
+
+    def test_null_byte_passthrough(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Null bytes cause parsing divergence — must not auto-approve."""
+        home = tmp_path / 'home'
+        (home / '.claude').mkdir(parents=True)
+        (home / '.claude' / 'settings.json').write_text(
+            json.dumps({'permissions': {'allow': ['Bash(echo:*)', 'Bash(git log:*)']}})
+        )
+        monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
+        monkeypatch.setattr(
+            'sys.stdin',
+            io.StringIO(self._hook_input('echo safe\x00 && git log')),
+        )
 
         hook_module.main.__wrapped__()
         assert capsys.readouterr().out == ''
