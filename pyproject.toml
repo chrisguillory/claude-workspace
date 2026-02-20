@@ -85,17 +85,33 @@ init_forbid_extra = true
 init_typed = true
 
 # =============================================================================
+# Pytest Configuration
+# =============================================================================
+
+[tool.pytest.ini_options]
+# pythonpath: repo root on sys.path so unit tests can `from plugins... import`
+pythonpath = ["."]
+# --mypy-only-local-stub: silence site-package errors in mypy subprocess.
+# pytest-mypy-plugins passes --no-silence-site-packages by default (!),
+# which is the opposite of mypy's own default. See typeddjango/pytest-mypy-plugins#134.
+addopts = "--mypy-only-local-stub"
+testpaths = ["tests"]
+
+# =============================================================================
 # Development Dependencies
 # =============================================================================
 
 [dependency-groups]
 dev = [
+    "bashlex",
+    "gitpython>=3.1",
     "mypy>=1.19.1",
     "pandas-stubs>=2.3.3.260113",
     "pre-commit>=4.5.1",
     "pydantic>=2.12.5", # Required for pydantic.mypy plugin
     "pymupdf-stubs>=1.26.1.post1",
     "pytest>=9.0.2",
+    "pytest-mypy-plugins>=3.3.0",
     "ruff>=0.14.10",
     "typer>=0.9.0",
     "types-psutil>=7.2.1.20251231",
