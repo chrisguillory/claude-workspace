@@ -119,6 +119,13 @@ class TestAnalyzeCommand:
         result = hook_module.analyze_command('f() { rm -rf /; } && echo done')
         assert len(result) >= 2
 
+    def test_negated_pipeline(self, hook_module: ModuleType) -> None:
+        """! (negation) is a reservedword — inner command must still be extracted."""
+        result = hook_module.analyze_command('! false && echo done')
+        assert len(result) == 2
+        assert result[0].base_command == 'false'
+        assert not result[0].is_dangerous
+
 
 # ---------------------------------------------------------------------------
 # TestDangerDetection — security-critical AST inspection
@@ -369,6 +376,16 @@ class TestDangerDetection:
 
     # -- Additional coverage: safe constructs --
 
+    def test_tilde_expansion_safe(self, hook_module: ModuleType) -> None:
+        """Tilde expansion (~, ~/path) is path resolution, not code execution."""
+        result = hook_module.analyze_command('echo ~/test && git log')
+        assert not result[0].is_dangerous
+
+    def test_tilde_bare_safe(self, hook_module: ModuleType) -> None:
+        """Bare ~ is safe path resolution."""
+        result = hook_module.analyze_command('ls ~ && git status')
+        assert not result[0].is_dangerous
+
     def test_simple_parameter_expansion_safe(self, hook_module: ModuleType) -> None:
         """Simple $VAR expansion (no substitution) is safe."""
         result = hook_module.analyze_command('echo $HOME && git log')
@@ -548,6 +565,18 @@ class TestLoadBashPrefixes:
         (cwd / '.claude' / 'settings.json').write_text('{invalid json')
         assert hook_module.load_bash_prefixes(str(cwd)) == set()
 
+    def test_skips_non_string_entries(
+        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Non-string entries in allow list are skipped, not crash the loader."""
+        monkeypatch.setattr(Path, 'home', staticmethod(lambda: tmp_path / 'home'))
+        cwd = tmp_path / 'project'
+        (cwd / '.claude').mkdir(parents=True)
+        (cwd / '.claude' / 'settings.json').write_text(
+            json.dumps({'permissions': {'allow': [123, None, 'Bash(echo:*)']}})
+        )
+        assert hook_module.load_bash_prefixes(str(cwd)) == {'echo'}
+
 
 # ---------------------------------------------------------------------------
 # TestMainIntegration — full stdin/stdout flow
@@ -638,6 +667,52 @@ class TestMainIntegration:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('')))
+
+        hook_module.main.__wrapped__()
+        assert capsys.readouterr().out == ''
+
+    def test_skips_missing_command_key(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """tool_input without command key — passthrough."""
+        payload = json.dumps(
+            {
+                'session_id': 'test',
+                'cwd': '/tmp',
+                'transcript_path': '/tmp/transcript.jsonl',
+                'hook_event_name': 'PreToolUse',
+                'tool_name': 'Bash',
+                'tool_input': {},
+                'tool_use_id': 'tu_test',
+            }
+        )
+        monkeypatch.setattr('sys.stdin', io.StringIO(payload))
+
+        hook_module.main.__wrapped__()
+        assert capsys.readouterr().out == ''
+
+    def test_skips_non_string_command(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Non-string command value — passthrough (type guard)."""
+        payload = json.dumps(
+            {
+                'session_id': 'test',
+                'cwd': '/tmp',
+                'transcript_path': '/tmp/transcript.jsonl',
+                'hook_event_name': 'PreToolUse',
+                'tool_name': 'Bash',
+                'tool_input': {'command': 12345},
+                'tool_use_id': 'tu_test',
+            }
+        )
+        monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
         hook_module.main.__wrapped__()
         assert capsys.readouterr().out == ''

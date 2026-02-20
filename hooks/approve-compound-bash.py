@@ -76,7 +76,7 @@ boundary = ErrorBoundary(exit_code=0)
 
 @boundary.handler(Exception)
 def _handle_error(exc: Exception) -> None:
-    print(f'approve-compound-bash hook error: {exc}', file=sys.stderr)
+    print(f'approve-compound-bash hook error: {exc!r}', file=sys.stderr)
 
 
 # --- Decision helper ---
@@ -120,6 +120,8 @@ def load_bash_prefixes(cwd: str) -> Set[str]:
             continue
 
         for entry in data.get('permissions', {}).get('allow', []):
+            if not isinstance(entry, str):
+                continue
             if m := _BASH_PREFIX_RE.match(entry):
                 prefixes.add(m.group(1))
 
@@ -251,9 +253,11 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo
 
 
 def _all_safe_word_children(children: Sequence[bashlex.ast.node]) -> bool:
-    """True only if all children are simple parameter expansions ($VAR)."""
+    """True only if all children are tilde or simple parameter expansions ($VAR)."""
     for child in children:
-        if child.kind == 'parameter':
+        if child.kind == 'tilde':
+            continue  # Tilde expansion (~, ~/path) is safe path resolution
+        elif child.kind == 'parameter':
             val = getattr(child, 'value', '')
             if any(pat in val for pat in _SUBSTITUTION_PATTERNS):
                 return False
@@ -289,7 +293,7 @@ def main() -> None:
         return
 
     command = hook_data.tool_input.get('command', '')
-    if not command:
+    if not isinstance(command, str) or not command:
         return
 
     # Null bytes cause parsing divergence between bashlex and actual shell
