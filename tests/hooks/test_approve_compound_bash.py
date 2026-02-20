@@ -185,10 +185,10 @@ class TestDangerDetection:
         result = hook_module.analyze_command('X=$(whoami) echo test && git log')
         assert result[0].is_dangerous
 
-    def test_assignment_plain_safe(self, hook_module: ModuleType) -> None:
-        """Plain assignment without substitution is safe."""
+    def test_assignment_unknown_var_dangerous(self, hook_module: ModuleType) -> None:
+        """Unknown env var in assignment is dangerous (allowlist model)."""
         result = hook_module.analyze_command('VAR=hello echo test && git log')
-        assert not result[0].is_dangerous
+        assert result[0].is_dangerous
 
     def test_eval_base_command_preserved(self, hook_module: ModuleType) -> None:
         """eval is parsed as a regular command — base_command includes 'eval'."""
@@ -320,10 +320,20 @@ class TestDangerDetection:
         result = hook_module.analyze_command('LD_LIBRARY_PATH=/evil git log && echo done')
         assert result[0].is_dangerous
 
-    def test_plain_env_var_safe(self, hook_module: ModuleType) -> None:
-        """Non-sensitive env vars (e.g. TERM, LANG) are safe."""
+    def test_safe_env_var_allowed(self, hook_module: ModuleType) -> None:
+        """Known-safe env vars (TERM, LANG, TZ, etc.) pass through."""
         result = hook_module.analyze_command('TERM=xterm git log && echo done')
         assert not result[0].is_dangerous
+
+    def test_locale_env_var_allowed(self, hook_module: ModuleType) -> None:
+        """Locale variables are known-safe."""
+        result = hook_module.analyze_command('LC_ALL=C git log && echo done')
+        assert not result[0].is_dangerous
+
+    def test_unknown_env_var_dangerous(self, hook_module: ModuleType) -> None:
+        """Unknown env vars are dangerous (allowlist model, not denylist)."""
+        result = hook_module.analyze_command('MY_CUSTOM_VAR=hello git log && echo done')
+        assert result[0].is_dangerous
 
     # -- Code-execution command denylist --
 
@@ -364,10 +374,10 @@ class TestDangerDetection:
         result = hook_module.analyze_command('echo $HOME && git log')
         assert not result[0].is_dangerous
 
-    def test_assignment_simple_parameter_safe(self, hook_module: ModuleType) -> None:
-        """Assignment with simple $VAR (no substitution) is safe."""
+    def test_assignment_unknown_var_with_parameter_dangerous(self, hook_module: ModuleType) -> None:
+        """Unknown env var is dangerous regardless of safe value content."""
         result = hook_module.analyze_command('VAR=$HOME echo test && git log')
-        assert not result[0].is_dangerous
+        assert result[0].is_dangerous
 
     def test_assignment_process_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """Process substitution in assignment position is dangerous."""
