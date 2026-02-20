@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import FileType
-from document_search.schemas.indexing import IndexingResult
-from document_search.schemas.tracing import QueueDepthSample
+from document_search.schemas.indexing import FileProcessingError, IndexingResult
+from document_search.schemas.tracing import QueueDepthSample, StageTimingReport
 
 __all__ = [
     'DashboardState',
@@ -99,11 +99,18 @@ class OperationProgress(StrictModel):
     files_done: int
     errors_429: int
 
-    # File type breakdown (live during scan, mirrors IndexingResult.by_file_type)
+    # File type breakdown (enriched with per-type outcomes during pipeline)
     by_file_type: Mapping[FileType, str]
 
     # Queue depth time series (1Hz samples from tracer)
     queue_depth_series: Sequence[QueueDepthSample]
+
+    # Live dashboard parity enrichments (all optional for backward compat)
+    files_ignored: int = 0
+    files_chunk_cached: int = 0
+    file_errors: Sequence[FileProcessingError] = ()
+    timing_stats: Sequence[StageTimingReport] = ()
+    scan_seconds: float | None = None
 
     @classmethod
     def from_snapshot(
@@ -150,6 +157,11 @@ class OperationProgress(StrictModel):
             errors_429=errors_429,
             by_file_type=snapshot.by_file_type,
             queue_depth_series=snapshot.queue_depth_series,
+            files_ignored=snapshot.files_ignored,
+            files_chunk_cached=snapshot.files_chunk_cached,
+            file_errors=snapshot.file_errors,
+            timing_stats=snapshot.timing_stats,
+            scan_seconds=snapshot.scan_seconds,
         )
 
     @classmethod
@@ -206,6 +218,10 @@ class OperationProgress(StrictModel):
             errors_429=errors_429,
             by_file_type=result.by_file_type,
             queue_depth_series=prior_progress.queue_depth_series if prior_progress else (),
+            files_ignored=result.files_ignored,
+            file_errors=result.errors,
+            timing_stats=prior_progress.timing_stats if prior_progress else (),
+            scan_seconds=result.timing.scan_seconds if result.timing else None,
         )
 
 

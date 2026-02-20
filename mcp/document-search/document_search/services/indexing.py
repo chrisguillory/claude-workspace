@@ -45,7 +45,7 @@ from document_search.schemas.indexing import (
     ProgressCallback,
     StopAfterStage,
 )
-from document_search.schemas.tracing import QueueDepthSample
+from document_search.schemas.tracing import PipelineTimingReport, QueueDepthSample, StageTimingReport
 from document_search.schemas.vectors import ClearResult, VectorPoint
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
@@ -103,6 +103,10 @@ class IndexingService:
         self._cached_hashes: dict[str, str] = {}
         self._operation: _OperationState | None = None
 
+        # Cached aggregate timing stats (updated every ~5s by monitor loop)
+        self._cached_timing_stats: Sequence[StageTimingReport] = ()
+        self._cached_scan_seconds: float | None = None
+
     async def get_index_stats(self) -> Mapping[str, int | str]:
         """Get current index statistics."""
         stats = await self._repo.get_storage_stats()
@@ -128,12 +132,36 @@ class IndexingService:
         files_to_process = op.files_found - op.files_cached
         in_chunk, in_embed, in_store = op.tracer.get_in_flight_counts()
 
-        # Build live file type summary from scan data
+        # Build enriched file type summary: scan data + pipeline outcomes
         by_file_type: dict[FileType, str] = {}
+        indexed_by_type: dict[FileType, int] = {}
+        errored_by_type: dict[FileType, int] = {}
+        no_content_by_type: dict[FileType, int] = {}
+        chunks_by_type: dict[FileType, int] = {}
+        file_errors: list[FileProcessingError] = []
+
+        for file_key, result in op.results.items():
+            ft = get_file_type(Path(file_key))
+            if isinstance(result, FileProcessingError):
+                if ft is not None:
+                    errored_by_type[ft] = errored_by_type.get(ft, 0) + 1
+                file_errors.append(result)
+            elif result == 0:
+                if ft is not None:
+                    no_content_by_type[ft] = no_content_by_type.get(ft, 0) + 1
+            else:
+                if ft is not None:
+                    indexed_by_type[ft] = indexed_by_type.get(ft, 0) + 1
+                    chunks_by_type[ft] = chunks_by_type.get(ft, 0) + result
+
         for ft in op.scanned_by_type:
             stats = FileTypeStats(
                 scanned=op.scanned_by_type.get(ft, 0),
                 cached=op.cached_by_type.get(ft, 0),
+                indexed=indexed_by_type.get(ft, 0),
+                errored=errored_by_type.get(ft, 0),
+                no_content=no_content_by_type.get(ft, 0),
+                chunks=chunks_by_type.get(ft, 0),
             )
             by_file_type[ft] = stats.to_summary()
 
@@ -142,6 +170,8 @@ class IndexingService:
             files_found=op.files_found,
             files_to_process=files_to_process,
             files_cached=op.files_cached,
+            files_ignored=op.files_ignored,
+            files_chunk_cached=op.counters.files_chunk_cached,
             chunks_ingested=op.counters.chunks_ingested,
             chunks_embedded=op.counters.chunks_embedded,
             embed_cache_hits=self._embedding.cache_hits,
@@ -157,12 +187,29 @@ class IndexingService:
             files_in_chunk=in_chunk,
             files_in_embed=in_embed,
             files_in_store=in_store,
+            file_errors=file_errors,
+            timing_stats=self._cached_timing_stats,
+            scan_seconds=self._cached_scan_seconds,
             by_file_type=by_file_type,
             files_done=len(op.results),
-            files_errored=sum(1 for v in op.results.values() if isinstance(v, FileProcessingError)),
+            files_errored=len(file_errors),
             elapsed_seconds=time.monotonic() - op.start_time,
             queue_depth_series=list(op.tracer.get_queue_depths()),
         )
+
+    def get_partial_timing(self) -> PipelineTimingReport | None:
+        """Build partial timing report and cache aggregate stats.
+
+        Called by the monitor loop every ~5s. Updates cached timing stats
+        that get_pipeline_snapshot() includes in the fast 500ms updates.
+        """
+        op = self._operation
+        if op is None:
+            return None
+        report = op.tracer.build_partial_report()
+        self._cached_timing_stats = report.stages
+        self._cached_scan_seconds = report.scan_seconds
+        return report
 
     async def index_file(self, file_path: Path) -> IndexingResult:
         """Index a single file directly (bypasses pipeline for simplicity).
@@ -334,6 +381,7 @@ class IndexingService:
             scan_complete=False,
             files_found=0,
             files_cached=0,
+            files_ignored=0,
             start_time=time.monotonic(),
             scanned_by_type={},
             cached_by_type={},
@@ -361,6 +409,7 @@ class IndexingService:
 
         files_total = len(all_files)
         self._operation.files_found = files_total
+        self._operation.files_ignored = files_ignored
         ignored_text = f' ({files_ignored:,} ignored)' if files_ignored else ''
         logger.info(f'[SCAN] Discovered {files_total:,} files{ignored_text}')
 
@@ -622,6 +671,8 @@ class IndexingService:
 
         # Clear operation and transient state, release process pool
         self._operation = None
+        self._cached_timing_stats = ()
+        self._cached_scan_seconds = None
         self._cached_hashes.clear()
         self._chunking.shutdown()
 
@@ -1210,6 +1261,8 @@ class PipelineSnapshot:
     files_found: int
     files_to_process: int
     files_cached: int
+    files_ignored: int
+    files_chunk_cached: int
 
     # Pipeline stages (cumulative chunk counts)
     chunks_ingested: int
@@ -1238,10 +1291,17 @@ class PipelineSnapshot:
     files_done: int
     files_errored: int
 
+    # Per-file error details (not just count)
+    file_errors: Sequence[FileProcessingError]
+
     # Timing
     elapsed_seconds: float
 
-    # File type breakdown (live during scan)
+    # Aggregate timing stats (updated every ~5s by monitor loop)
+    timing_stats: Sequence[StageTimingReport]
+    scan_seconds: float | None
+
+    # File type breakdown (enriched with per-type outcomes during pipeline)
     by_file_type: Mapping[FileType, str]
 
     # Queue depth time series (from tracer, 1Hz samples)
@@ -1342,6 +1402,7 @@ class _OperationState:
     # Metadata
     files_found: int
     files_cached: int
+    files_ignored: int
     start_time: float  # From time.monotonic()
 
     # File type breakdown (populated during scan, exposed via snapshot)

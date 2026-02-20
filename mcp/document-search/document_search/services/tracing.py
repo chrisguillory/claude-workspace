@@ -239,6 +239,74 @@ class PipelineTracer:
             completion_series=completion_series,
         )
 
+    def build_partial_report(self) -> PipelineTimingReport:
+        """Build timing report from data collected so far.
+
+        Functionally identical to build_report() — the _collect_* methods
+        already filter to items with both start and end events, naturally
+        excluding in-flight items. Adds partial metadata (item counts).
+
+        Percentile stats reflect only completed items. In-flight items
+        (started but not completed) are excluded, which biases stats
+        toward faster items during active processing.
+        """
+        total_elapsed = time.perf_counter() - self._start
+        warmup_ids = set(self._item_order[:_WARMUP_ITEMS])
+
+        stage_reports: list[StageTimingReport] = []
+
+        for stage in _ALL_STAGES:
+            processing_times = self._collect_processing_times(stage, warmup_ids)
+            if not processing_times:
+                continue
+
+            queue_wait = self._collect_queue_wait(stage, warmup_ids)
+            batch_wait = self._collect_batch_wait(stage, warmup_ids)
+            cpu_times = self._collect_cpu_times(stage, warmup_ids)
+            wall_times = self._collect_wall_times(stage, warmup_ids)
+
+            throughput = len(processing_times) / total_elapsed if total_elapsed > 0 else 0.0
+
+            avg_batch: float | None = None
+            if stage == 'embed':
+                batch_sizes = [
+                    self._batch_sizes[item_id]
+                    for item_id in self._events
+                    if item_id not in warmup_ids and item_id in self._batch_sizes
+                ]
+                if batch_sizes:
+                    avg_batch = sum(batch_sizes) / len(batch_sizes)
+
+            stage_reports.append(
+                StageTimingReport(
+                    stage=stage,
+                    processing=_percentiles(processing_times),
+                    queue_wait=_percentiles(queue_wait) if queue_wait else None,
+                    batch_wait=_percentiles(batch_wait) if batch_wait else None,
+                    cpu=_percentiles(cpu_times) if cpu_times else None,
+                    wall=_percentiles(wall_times) if wall_times else None,
+                    throughput_per_sec=round(throughput, 2),
+                    avg_batch_size=round(avg_batch, 1) if avg_batch is not None else None,
+                )
+            )
+
+        completion_series = self._build_completion_series()
+        chunk_done, embed_done, store_done = self.get_completion_counts()
+        chunk_in, embed_in, store_in = self.get_in_flight_counts()
+
+        return PipelineTimingReport(
+            scan_seconds=round(self._scan_seconds, 3),
+            stages=tuple(stage_reports),
+            queue_depth_series=tuple(self._queue_depths),
+            total_items=len(self._events),
+            total_elapsed_seconds=round(total_elapsed, 3),
+            sparse_threads=self._sparse_threads,
+            completion_series=completion_series,
+            is_partial=True,
+            items_completed=store_done,
+            items_in_flight=chunk_in + embed_in + store_in,
+        )
+
     # ── Private: queue monitoring ────────────────────────────────
 
     async def _monitor_loop(self, interval: float) -> None:

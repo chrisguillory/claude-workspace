@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse
 from document_search.dashboard.state import DashboardStateManager
 from document_search.paths import OPERATIONS_DIR
 from document_search.schemas.dashboard import DashboardState, McpServer, OperationState
+from document_search.schemas.tracing import PipelineTimingReport
 
 __all__ = [
     'DashboardServer',
@@ -158,6 +159,63 @@ INDEX_HTML = """<!DOCTYPE html>
         .chart-legend { display: flex; gap: 16px; font-size: 11px; color: #666; margin-top: 4px; }
         .chart-legend span { display: flex; align-items: center; gap: 4px; }
         .chart-legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .timing-live {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: #388e3c;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .timing-live::before {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #4caf50;
+            animation: pulse-dot 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .timing-chart-live {
+            min-height: 120px;
+            margin-top: 12px;
+        }
+        .error-list {
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-top: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 11px;
+        }
+        .error-item {
+            padding: 6px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            line-height: 1.5;
+        }
+        .error-item:last-child { border-bottom: none; }
+        .error-item .error-type {
+            color: #c62828;
+            font-weight: 600;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        .error-item .error-path {
+            color: #555;
+            word-break: break-all;
+        }
+        .error-item .error-msg-text {
+            color: #888;
+            font-size: 10px;
+        }
         .empty { text-align: center; padding: 40px; color: #999; }
         .server { padding: 8px 0; }
         .error-msg {
@@ -314,6 +372,12 @@ INDEX_HTML = """<!DOCTYPE html>
                 </div>
                 ${p.by_file_type && Object.keys(p.by_file_type).length > 0 ? formatFileTypeChart(p.by_file_type) : ''}
                 ${formatQueueDepthChart(p.queue_depth_series)}
+                ${p.file_errors && p.file_errors.length > 0 ? formatErrorList(p.file_errors, op.operation_id) : ''}
+                ${p.timing_stats && p.timing_stats.length > 0 ? `
+                    <div style="margin-top:12px">
+                        ${formatTimingTable(p.timing_stats, p.scan_seconds, null, null, p.elapsed_seconds, true)}
+                        <div id="timing-chart-${op.operation_id}" class="timing-chart-live"></div>
+                    </div>` : ''}
             `;
         }
 
@@ -363,6 +427,8 @@ INDEX_HTML = """<!DOCTYPE html>
                     ${op.error ? `<div class="error-msg">${escapeHtml(op.error)}</div>` : ''}
                     ${op.result?.by_file_type && Object.keys(op.result.by_file_type).length > 0 ? formatFileTypeChart(op.result.by_file_type) : ''}
                     ${op.result?.timing ? formatTimingReport(op.result.timing, op.operation_id) : ''}
+                    ${isComplete && op.result?.errors && op.result.errors.length > 0 ? formatErrorList(op.result.errors, op.operation_id) : ''}
+                    ${!isComplete && op.progress?.file_errors && op.progress.file_errors.length > 0 && status === 'failed' ? formatErrorList(op.progress.file_errors, op.operation_id) : ''}
                     <div class="log-header" onclick="toggleLogs('${op.operation_id}')">
                         <span id="log-toggle-${op.operation_id}">▶ Logs</span>
                         <span id="log-count-${op.operation_id}"></span>
@@ -407,33 +473,75 @@ INDEX_HTML = """<!DOCTYPE html>
             ['#d4a5a5','#9e6b6b'], ['#8fbc8f','#556b2f'],
         ];
 
+        // Outcome segment colors for file type chart
+        const OUTCOME_COLORS = {
+            indexed: '#4caf50',     // green
+            cached: '#42a5f5',     // blue
+            no_content: '#bdbdbd', // gray
+            errored: '#ef5350',    // red
+        };
+
         function formatFileTypeChart(byFileType) {
-            // Parse "scanned=X cached=Y" into structured data
+            // Parse "scanned=X cached=Y indexed=Z no_content=W errored=E chunks=C" into structured data
             const items = Object.entries(byFileType).map(([ft, summary]) => {
                 const parts = {};
                 summary.split(' ').forEach(pair => {
                     const [k, v] = pair.split('=');
                     parts[k] = parseInt(v);
                 });
-                return { type: ft, scanned: parts.scanned || 0, cached: parts.cached || 0 };
+                return {
+                    type: ft,
+                    scanned: parts.scanned || 0,
+                    cached: parts.cached || 0,
+                    indexed: parts.indexed || 0,
+                    no_content: parts.no_content || 0,
+                    errored: parts.errored || 0,
+                    chunks: parts.chunks || 0,
+                };
             }).sort((a, b) => b.scanned - a.scanned);
 
             const maxScanned = Math.max(...items.map(d => d.scanned));
             const total = items.reduce((s, d) => s + d.scanned, 0);
             const BAR_MAX_H = 130;
+            // Detect if enhanced fields are present (any item has indexed > 0 or no_content > 0 or errored > 0)
+            const hasOutcomes = items.some(d => d.indexed > 0 || d.no_content > 0 || d.errored > 0);
 
             return `
                 <div style="display:flex;align-items:flex-end;gap:2px;border-bottom:2px solid #e8e8e8;margin-top:12px">
                     ${items.map((d, i) => {
                         const bh = Math.max(2, d.scanned / maxScanned * BAR_MAX_H);
-                        const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
                         const pct = (d.scanned / total * 100).toFixed(0);
                         const [lt, dk] = EARTH_PALETTE[i % EARTH_PALETTE.length];
+
+                        // Build stacked segments inside the bar
+                        let segments = '';
+                        if (hasOutcomes) {
+                            // Stacked from bottom: errored, no_content, cached, indexed
+                            const segData = [
+                                {val: d.errored, color: OUTCOME_COLORS.errored},
+                                {val: d.no_content, color: OUTCOME_COLORS.no_content},
+                                {val: d.cached, color: OUTCOME_COLORS.cached},
+                                {val: d.indexed, color: OUTCOME_COLORS.indexed},
+                            ];
+                            let bottomPx = 0;
+                            for (const seg of segData) {
+                                if (seg.val > 0 && d.scanned > 0) {
+                                    const sh = Math.max(1, seg.val / d.scanned * bh);
+                                    segments += `<div style="position:absolute;bottom:${bottomPx}px;width:100%;height:${sh}px;background:${seg.color};opacity:0.65"></div>`;
+                                    bottomPx += sh;
+                                }
+                            }
+                        } else {
+                            // Legacy: just show cached segment
+                            const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
+                            if (ch > 0) segments = `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk};opacity:0.7"></div>`;
+                        }
+
                         return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
                             <div style="font-size:10px;color:#999;margin-bottom:1px">${pct}%</div>
                             <div style="font-size:11px;font-weight:600;color:#444;margin-bottom:2px;font-variant-numeric:tabular-nums">${d.scanned.toLocaleString()}</div>
                             <div style="width:100%;height:${bh}px;border-radius:4px 4px 0 0;position:relative;overflow:hidden;background:linear-gradient(to bottom,${lt},${dk}44)">
-                                ${ch > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk};opacity:0.7"></div>` : ''}
+                                ${segments}
                             </div>
                         </div>`;
                     }).join('')}
@@ -442,13 +550,30 @@ INDEX_HTML = """<!DOCTYPE html>
                     ${items.map((d, i) => {
                         const [, dk] = EARTH_PALETTE[i % EARTH_PALETTE.length];
                         const exts = FILE_TYPE_EXTS[d.type] || '';
+                        let detailLine;
+                        if (hasOutcomes) {
+                            const parts = [];
+                            if (d.indexed > 0) parts.push(`${d.indexed} idx`);
+                            if (d.cached > 0) parts.push(`${d.cached} cache`);
+                            if (d.no_content > 0) parts.push(`${d.no_content} empty`);
+                            if (d.errored > 0) parts.push(`<span style="color:#c62828">${d.errored} err</span>`);
+                            detailLine = parts.join(' · ') || '—';
+                        } else {
+                            detailLine = `${d.cached.toLocaleString()} cached`;
+                        }
                         return `<div style="flex:1;text-align:center">
                             <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#555">${d.type}</div>
                             <div style="font-size:9px;color:#bbb">${exts}</div>
-                            <div style="font-size:9px;font-weight:600;color:${d.cached > 0 ? dk : '#ccc'};margin-top:1px">${d.cached.toLocaleString()} cached</div>
+                            <div style="font-size:9px;font-weight:600;color:${d.cached > 0 ? dk : '#999'};margin-top:1px">${detailLine}</div>
                         </div>`;
                     }).join('')}
                 </div>
+                ${hasOutcomes ? `<div style="display:flex;gap:12px;font-size:10px;color:#888;margin-top:4px;justify-content:center">
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${OUTCOME_COLORS.indexed};vertical-align:middle;margin-right:2px"></span>indexed</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${OUTCOME_COLORS.cached};vertical-align:middle;margin-right:2px"></span>cached</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${OUTCOME_COLORS.no_content};vertical-align:middle;margin-right:2px"></span>no content</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${OUTCOME_COLORS.errored};vertical-align:middle;margin-right:2px"></span>errored</span>
+                </div>` : ''}
             `;
         }
 
@@ -1203,7 +1328,20 @@ INDEX_HTML = """<!DOCTYPE html>
                 bind(qOver);
             }
 
+            function updateData(newData, newQueueData, newElapsed, newAggStages) {
+                const wasAtFullRange = Math.abs(state.end - totalElapsed) < 0.5;
+                data = newData;
+                queueData = newQueueData;
+                totalElapsed = newElapsed;
+                aggStages = newAggStages;
+                if (wasAtFullRange) {
+                    state.end = newElapsed;
+                }
+                render();
+            }
+
             render();
+            return { update: updateData };
         }
 
         function initPendingCharts() {
@@ -1212,29 +1350,30 @@ INDEX_HTML = """<!DOCTYPE html>
                 const d = pendingCharts[el.id];
                 if (d) {
                     el.classList.remove('ts-chart-pending');
-                    createTimeSeriesChart(el.id, d.series, d.qSeries, d.elapsed, d.stages);
+                    const chart = createTimeSeriesChart(el.id, d.series, d.qSeries, d.elapsed, d.stages);
+                    if (chart && d.liveOpId) {
+                        liveCharts[d.liveOpId] = chart;
+                    }
                     consumed.add(el.id);
                 }
             });
             for (const id of consumed) delete pendingCharts[id];
         }
 
-        function formatTimingReport(timing, opId) {
-            if (!timing || !timing.stages || timing.stages.length === 0) return '';
+        function formatTimingTable(stages, scanSeconds, sparseThreads, totalItems, totalElapsed, isPartial) {
+            if (!stages || stages.length === 0) return '';
             const SUB_STAGES = new Set(['embed_dense', 'embed_sparse']);
             const fmtMs = (v) => v < 1 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v).toLocaleString();
             const fmtPct = (stats) => stats ? `${fmtMs(stats.p50_ms)} / ${fmtMs(stats.p95_ms)} / ${fmtMs(stats.p99_ms)} / ${fmtMs(stats.max_ms)}` : '—';
 
-            const threads = timing.sparse_threads;
-            let rows = timing.stages.map(s => {
+            let rows = stages.map(s => {
                 const isSub = SUB_STAGES.has(s.stage);
                 const label = s.stage.replace('embed_', '↳ ');
-                // Efficiency: mean cpu / mean wall / threads (only for embed_sparse)
                 let effHtml = '—';
-                if (s.cpu && s.wall && threads && s.wall.p50_ms > 0) {
+                if (s.cpu && s.wall && sparseThreads && s.wall.p50_ms > 0) {
                     const parallel = s.cpu.p50_ms / s.wall.p50_ms;
-                    const eff = parallel / threads;
-                    effHtml = `${parallel.toFixed(1)}x / ${threads}t = ${(eff * 100).toFixed(0)}%`;
+                    const eff = parallel / sparseThreads;
+                    effHtml = `${parallel.toFixed(1)}x / ${sparseThreads}t = ${(eff * 100).toFixed(0)}%`;
                 }
                 return `<tr class="${isSub ? 'sub-stage' : ''}">
                     <td>${label}</td>
@@ -1248,6 +1387,40 @@ INDEX_HTML = """<!DOCTYPE html>
                     <td>${s.processing.count.toLocaleString()}</td>
                 </tr>`;
             }).join('');
+
+            const scanText = scanSeconds != null ? `Scan: ${scanSeconds.toFixed(1)}s | ` : '';
+            const itemsText = totalItems != null ? `${totalItems.toLocaleString()} items | ` : '';
+            const elapsedText = totalElapsed != null ? `${totalElapsed.toFixed(1)}s elapsed` : '';
+            const threadsText = sparseThreads ? ` | ${sparseThreads} rayon threads` : '';
+            const partialText = isPartial ? ' | <span class="timing-live">LIVE</span>' : '';
+
+            return `
+                <table class="timing-table">
+                    <tr>
+                        <th>Stage</th>
+                        <th>Processing p50/p95/p99/max (ms)</th>
+                        <th>Queue Wait</th>
+                        <th>Batch Wait</th>
+                        <th>CPU p50/p95/p99/max (ms)</th>
+                        <th>Wall p50/p95/p99/max (ms)</th>
+                        <th>Efficiency</th>
+                        <th>Throughput</th>
+                        <th>Items</th>
+                    </tr>
+                    ${rows}
+                </table>
+                <div style="font-size:11px;color:#888;margin-top:4px">
+                    ${scanText}${itemsText}${elapsedText}${threadsText}${partialText}
+                </div>`;
+        }
+
+        function formatTimingReport(timing, opId) {
+            if (!timing || !timing.stages || timing.stages.length === 0) return '';
+
+            const tableHtml = formatTimingTable(
+                timing.stages, timing.scan_seconds, timing.sparse_threads,
+                timing.total_items, timing.total_elapsed_seconds, timing.is_partial || false
+            );
 
             let chartHtml;
             if (timing.completion_series && timing.completion_series.length > 0 && opId) {
@@ -1265,23 +1438,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
             return `
                 <div style="margin-top: 12px;">
-                    <table class="timing-table">
-                        <tr>
-                            <th>Stage</th>
-                            <th>Processing p50/p95/p99/max (ms)</th>
-                            <th>Queue Wait</th>
-                            <th>Batch Wait</th>
-                            <th>CPU p50/p95/p99/max (ms)</th>
-                            <th>Wall p50/p95/p99/max (ms)</th>
-                            <th>Efficiency</th>
-                            <th>Throughput</th>
-                            <th>Items</th>
-                        </tr>
-                        ${rows}
-                    </table>
-                    <div style="font-size:11px;color:#888;margin-top:4px">
-                        Scan: ${timing.scan_seconds.toFixed(1)}s | ${timing.total_items.toLocaleString()} items | ${timing.total_elapsed_seconds.toFixed(1)}s total${timing.sparse_threads ? ` | ${timing.sparse_threads} rayon threads` : ''}
-                    </div>
+                    ${tableHtml}
                     ${chartHtml}
                 </div>`;
         }
@@ -1297,7 +1454,41 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         const openLogs = new Set();
+        const openErrors = new Set();
         const pendingCharts = {};
+        const liveCharts = {};
+        let lastTimingFetch = 0;
+
+        function toggleErrors(opId) {
+            const el = document.getElementById('errors-' + opId);
+            const toggle = document.getElementById('error-toggle-' + opId);
+            if (openErrors.has(opId)) {
+                openErrors.delete(opId);
+                el.style.display = 'none';
+                toggle.textContent = '\\u25b6 Errors';
+            } else {
+                openErrors.add(opId);
+                el.style.display = 'block';
+                toggle.textContent = '\\u25bc Errors';
+            }
+        }
+
+        function formatErrorList(errors, opId) {
+            if (!errors || errors.length === 0) return '';
+            const isOpen = openErrors.has(opId);
+            const items = errors.map(e =>
+                `<div class="error-item">` +
+                `<span class="error-type">${escapeHtml(e.error_type)}</span> ` +
+                `<span class="error-path">${escapeHtml(e.file_path)}</span>` +
+                `<div class="error-msg-text">${escapeHtml(e.message)}</div>` +
+                `</div>`
+            ).join('');
+            return `
+                <div class="log-header" onclick="toggleErrors('${opId}')">
+                    <span id="error-toggle-${opId}">${isOpen ? '\\u25bc' : '\\u25b6'} Errors (${errors.length})</span>
+                </div>
+                <div id="errors-${opId}" class="error-list" style="display:${isOpen ? 'block' : 'none'}">${items}</div>`;
+        }
 
         function toggleLogs(opId) {
             const el = document.getElementById('logs-' + opId);
@@ -1371,11 +1562,13 @@ INDEX_HTML = """<!DOCTYPE html>
                 const activeIds = activeOps.map(o => o.operation_id).join(',');
                 if (activeIds !== lastActiveIds) {
                     lastActiveIds = activeIds;
+                    // Full re-render invalidates all live chart DOM references
+                    for (const opId of Object.keys(liveCharts)) delete liveCharts[opId];
                     document.getElementById('active-ops').innerHTML =
                         activeOps.length === 0
                             ? '<div class="empty">No active operations</div>'
                             : activeOps.map(formatOperation).join('');
-                    // Re-expand logs after full re-render
+                    // Re-expand logs and errors after full re-render
                     for (const opId of openLogs) {
                         const el = document.getElementById('logs-' + opId);
                         if (el && activeOps.some(o => o.operation_id === opId)) {
@@ -1385,13 +1578,23 @@ INDEX_HTML = """<!DOCTYPE html>
                             fetchLogs(opId);
                         }
                     }
+                    for (const opId of openErrors) {
+                        const el = document.getElementById('errors-' + opId);
+                        const toggle = document.getElementById('error-toggle-' + opId);
+                        if (el) { el.style.display = 'block'; if (toggle) toggle.textContent = '\\u25bc Errors'; }
+                    }
                 } else if (activeOps.length > 0) {
                     // Same ops — update only progress and meta, leave logs untouched
                     for (const op of activeOps) {
                         const metaEl = document.getElementById('meta-' + op.operation_id);
                         const progressEl = document.getElementById('progress-' + op.operation_id);
                         if (metaEl) metaEl.innerHTML = formatOperationMeta(op);
-                        if (progressEl) progressEl.innerHTML = formatOperationProgressHtml(op);
+                        if (progressEl) {
+                            progressEl.innerHTML = formatOperationProgressHtml(op);
+                            // Progress replacement destroys live chart DOM; clear stale reference
+                            // so next timing poll recreates on the fresh container
+                            delete liveCharts[op.operation_id];
+                        }
                     }
                     // Refresh open logs (fetchLogs skips if unchanged)
                     for (const opId of openLogs) {
@@ -1421,7 +1624,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         completedOps.length === 0
                             ? '<div class="empty">No recent operations</div>'
                             : completedOps.slice(0, 5).map(formatOperation).join('');
-                    // Re-expand logs after DOM replacement
+                    // Re-expand logs and errors after DOM replacement
                     for (const opId of openLogs) {
                         const el = document.getElementById('logs-' + opId);
                         const toggle = document.getElementById('log-toggle-' + opId);
@@ -1433,9 +1636,49 @@ INDEX_HTML = """<!DOCTYPE html>
                             openLogs.delete(opId);
                         }
                     }
+                    for (const opId of openErrors) {
+                        const el = document.getElementById('errors-' + opId);
+                        const toggle = document.getElementById('error-toggle-' + opId);
+                        if (el) { el.style.display = 'block'; if (toggle) toggle.textContent = '\\u25bc Errors'; }
+                        else { openErrors.delete(opId); }
+                    }
                 }
 
                 initPendingCharts();
+
+                // Clean up liveCharts for operations no longer active
+                const activeIdSet = new Set(activeOps.map(o => o.operation_id));
+                for (const opId of Object.keys(liveCharts)) {
+                    if (!activeIdSet.has(opId)) delete liveCharts[opId];
+                }
+
+                // Poll timing endpoint for active operations (every 5s)
+                if (activeOps.length > 0 && Date.now() - lastTimingFetch > 5000) {
+                    lastTimingFetch = Date.now();
+                    for (const op of activeOps) {
+                        const chartEl = document.getElementById('timing-chart-' + op.operation_id);
+                        if (!chartEl) continue;
+                        try {
+                            const resp = await fetch('/api/operations/' + op.operation_id + '/timing');
+                            if (!resp.ok) continue;
+                            const timing = await resp.json();
+                            if (!timing || !timing.completion_series || timing.completion_series.length === 0) continue;
+                            if (liveCharts[op.operation_id]) {
+                                liveCharts[op.operation_id].update(
+                                    timing.completion_series, timing.queue_depth_series,
+                                    timing.total_elapsed_seconds, timing.stages
+                                );
+                            } else {
+                                const chart = createTimeSeriesChart(
+                                    'timing-chart-' + op.operation_id,
+                                    timing.completion_series, timing.queue_depth_series,
+                                    timing.total_elapsed_seconds, timing.stages
+                                );
+                                if (chart) liveCharts[op.operation_id] = chart;
+                            }
+                        } catch (e) { /* ignore timing fetch errors */ }
+                    }
+                }
             } catch (e) {
                 console.error('Update failed:', e);
             }
@@ -1593,16 +1836,37 @@ class DashboardServer:
                 'total_lines': len(all_lines),
             }
 
+        @app.get('/api/operations/{operation_id}/timing')
+        def get_operation_timing(operation_id: str) -> PipelineTimingReport | None:
+            """Get timing report — live from timing file, or from completed result."""
+            # Check completed result first (authoritative)
+            op_path = _operation_path(operation_id, '.json')
+            if op_path.exists():
+                data = json.loads(op_path.read_text())
+                op = OperationState.model_validate(data)
+                if op.result and op.result.timing:
+                    return op.result.timing
+
+            # Fall back to live timing file
+            timing_path = _operation_path(operation_id, '-timing.json')
+            if not timing_path.exists():
+                return None
+            data = json.loads(timing_path.read_text())
+            return PipelineTimingReport.model_validate(data)
+
         @app.delete('/api/operations/{operation_id}')
         def delete_operation(operation_id: str) -> Mapping[str, bool]:
-            """Delete a single operation and its log."""
+            """Delete a single operation, its log, and timing file."""
             json_path = _operation_path(operation_id, '.json')
             log_path = _operation_path(operation_id, '.log')
+            timing_path = _operation_path(operation_id, '-timing.json')
             if not json_path.exists():
                 raise HTTPException(status_code=404, detail='Operation not found')
             json_path.unlink()
             if log_path.exists():
                 log_path.unlink()
+            if timing_path.exists():
+                timing_path.unlink()
             return {'deleted': True}
 
         @app.delete('/api/operations')
@@ -1611,7 +1875,9 @@ class DashboardServer:
             count = 0
             if OPERATIONS_DIR.exists():
                 for f in OPERATIONS_DIR.glob('*.json'):
-                    # Skip active operations
+                    # Skip timing files and active operations
+                    if f.stem.endswith('-timing'):
+                        continue
                     data = json.loads(f.read_text())
                     if data.get('ended_at') is None:
                         continue
@@ -1620,6 +1886,9 @@ class DashboardServer:
                     log_path = OPERATIONS_DIR / f'{op_id}.log'
                     if log_path.exists():
                         log_path.unlink()
+                    timing_path = OPERATIONS_DIR / f'{op_id}-timing.json'
+                    if timing_path.exists():
+                        timing_path.unlink()
                     count += 1
             return {'cleared': count}
 
@@ -1715,6 +1984,8 @@ def _read_operations() -> Sequence[OperationState]:
 
     ops: list[OperationState] = []
     for file_path in OPERATIONS_DIR.glob('*.json'):
+        if file_path.stem.endswith('-timing'):
+            continue
         data = json.loads(file_path.read_text())
         ops.append(OperationState.model_validate(data))
 
