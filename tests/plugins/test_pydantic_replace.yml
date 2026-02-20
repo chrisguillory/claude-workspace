@@ -5,6 +5,14 @@
 # =============================================================================
 
 - case: typo_field_name_caught
+  mypy_config: &mypy_config |
+    [mypy]
+    plugins = plugins.pydantic_replace
+    python_version = 3.13
+    strict = true
+    [pydantic-mypy]
+    init_forbid_extra = true
+    init_typed = true
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -14,9 +22,10 @@
         value: float
 
     m = Metric(name="test", value=1.0)
-    m.__replace__(naem="oops")  # E: Unexpected keyword argument "naem" for "__replace__" of "Metric"; did you mean "name"?  [call-arg]
+    m.__replace__(naem="oops")  # E: Unexpected keyword argument "naem" for "__replace__" of "Metric"  [call-arg]
 
 - case: wrong_type_caught
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -29,6 +38,7 @@
     m.__replace__(value="not_a_float")  # E: Argument "value" to "__replace__" of "Metric" has incompatible type "str"; expected "float"  [arg-type]
 
 - case: valid_replace_passes
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -41,6 +51,7 @@
     m2 = m.__replace__(name="updated", value=2.0)
 
 - case: all_args_optional
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -53,6 +64,7 @@
     m2 = m.__replace__()  # No args — all optional
 
 - case: return_type_is_model
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -62,9 +74,10 @@
         value: float
 
     m = Metric(name="test", value=1.0)
-    reveal_type(m.__replace__(name="x"))  # N: Revealed type is "Metric"
+    reveal_type(m.__replace__(name="x"))  # N: Revealed type is "main.Metric"
 
 - case: multiple_fields_at_once
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -82,6 +95,7 @@
 # =============================================================================
 
 - case: narrowed_field_no_lsp_error
+  mypy_config: *mypy_config
   main: |
     from typing import Literal
     from pydantic import BaseModel, ConfigDict
@@ -100,6 +114,7 @@
     m2 = m.__replace__(name='LCP')  # Should accept str, not just Literal
 
 - case: child_adds_fields
+  mypy_config: *mypy_config
   main: |
     from typing import Literal
     from pydantic import BaseModel, ConfigDict
@@ -118,6 +133,7 @@
     m.__replace__(size=100, url="https://example.com")
 
 - case: child_inherits_parent_fields
+  mypy_config: *mypy_config
   main: |
     from typing import Literal
     from pydantic import BaseModel, ConfigDict
@@ -134,6 +150,7 @@
     m.__replace__(value=2.0)  # Parent field accessible
 
 - case: return_type_is_child_not_parent
+  mypy_config: *mypy_config
   main: |
     from typing import Literal
     from pydantic import BaseModel, ConfigDict
@@ -147,13 +164,75 @@
         name: Literal['LCP'] = 'LCP'
 
     m = LCPMetric(name='LCP', value=1.0)
-    reveal_type(m.__replace__(value=2.0))  # N: Revealed type is "LCPMetric"
+    reveal_type(m.__replace__(value=2.0))  # N: Revealed type is "main.LCPMetric"
+
+- case: generic_parent_type_expansion
+  mypy_config: *mypy_config
+  main: |
+    from typing import Generic, TypeVar
+    from pydantic import BaseModel, ConfigDict
+
+    T = TypeVar('T')
+
+    class Response(BaseModel, Generic[T]):
+        model_config = ConfigDict(frozen=True)
+        data: T
+        status: int
+
+    class StringResponse(Response[str]):
+        pass
+
+    r = StringResponse(data="hello", status=200)
+    r.__replace__(data="world")
+    r.__replace__(data=123)  # E: Argument "data" to "__replace__" of "StringResponse" has incompatible type "int"; expected "str"  [arg-type]
+    reveal_type(r.__replace__())  # N: Revealed type is "main.StringResponse"
+
+- case: pure_inheritance_no_new_fields
+  mypy_config: *mypy_config
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Parent(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    class Child(Parent):
+        pass
+
+    m = Child(name="test", value=1.0)
+    m.__replace__(name="updated")
+    reveal_type(m.__replace__())  # N: Revealed type is "main.Child"
+
+- case: three_level_inheritance_uses_widest_type
+  mypy_config: *mypy_config
+  main: |
+    from typing import Literal
+    from pydantic import BaseModel, ConfigDict
+
+    class Base(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    class Middle(Base):
+        name: Literal['metric', 'LCP'] = 'metric'
+
+    class Leaf(Middle):
+        name: Literal['LCP'] = 'LCP'
+        extra: int = 0
+
+    m = Leaf(value=1.0)
+    # name should accept str (Base's type), not Literal['metric', 'LCP'] or Literal['LCP']
+    m.__replace__(name='anything', value=2.0, extra=5)
+    reveal_type(m.__replace__())  # N: Revealed type is "main.Leaf"
 
 # =============================================================================
 # Guards: user-defined __replace__, Python < 3.13, no fields
 # =============================================================================
 
 - case: user_defined_replace_preserved
+  mypy_config: *mypy_config
   main: |
     from typing import Self
     from pydantic import BaseModel, ConfigDict
@@ -166,12 +245,19 @@
             return self.model_copy(update=kwargs)
 
     m = CustomModel(name="test")
-    reveal_type(m.__replace__)  # N: Revealed type is "def (**kwargs: builtins.str) -> CustomModel"
+    reveal_type(m.__replace__)  # N: Revealed type is "def (**kwargs: builtins.str) -> main.CustomModel"
 
 - case: python_312_no_synthesis
+  # disable_cache required: pytest-mypy-plugins cleans cache using host Python
+  # version (3.13), missing files cached under target version (3.12).
+  disable_cache: true
   mypy_config: |
     [mypy]
+    plugins = plugins.pydantic_replace
     python_version = 3.12
+    [pydantic-mypy]
+    init_forbid_extra = true
+    init_typed = true
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -182,11 +268,23 @@
     m = Metric(name="test")
     m.__replace__(name="x")  # E: "Metric" has no attribute "__replace__"  [attr-defined]
 
+- case: empty_model_no_synthesis
+  mypy_config: *mypy_config
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class Empty(BaseModel):
+        model_config = ConfigDict(frozen=True)
+
+    m = Empty()
+    m.__replace__()  # E: "Empty" has no attribute "__replace__"  [attr-defined]
+
 # =============================================================================
 # Alias compatibility
 # =============================================================================
 
 - case: alias_model_replace_uses_python_names
+  mypy_config: *mypy_config
   main: |
     from typing import Literal
     from pydantic import BaseModel, ConfigDict, Field
@@ -201,7 +299,8 @@
     d.__replace__(permission_decision='deny')
     d.__replace__(reason="updated")
 
-- case: alias_model_init_still_works_both_names
+- case: alias_rejected_in_replace
+  mypy_config: *mypy_config
   main: |
     from typing import Literal
     from pydantic import BaseModel, ConfigDict, Field
@@ -210,11 +309,11 @@
         model_config = ConfigDict(frozen=True, populate_by_name=True)
         permission_decision: Literal['allow', 'deny'] = Field(alias='permissionDecision')
 
-    # Both alias and Python name work for __init__ (pydantic plugin behavior preserved)
-    Decision(permissionDecision='allow')
-    Decision(permission_decision='deny')
+    d = Decision(permission_decision='allow')
+    d.__replace__(permissionDecision='deny')  # E: Unexpected keyword argument "permissionDecision" for "__replace__" of "Decision"; did you mean "permission_decision"?  [call-arg]
 
 - case: alias_generator_replace_uses_python_names
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
     from pydantic.alias_generators import to_camel
@@ -233,6 +332,7 @@
 # =============================================================================
 
 - case: indexing_result_timing_replace
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -263,6 +363,7 @@
 # =============================================================================
 
 - case: optional_field_accepts_none
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -275,6 +376,7 @@
     m.__replace__(optional_field=None)
 
 - case: required_field_still_optional_in_replace
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel, ConfigDict
 
@@ -287,6 +389,7 @@
     m2 = m.__replace__()
 
 - case: mutable_model_has_replace
+  mypy_config: *mypy_config
   main: |
     from pydantic import BaseModel
 
@@ -297,3 +400,34 @@
     m = Mutable(name="test", value=1.0)
     # Works on both mutable and frozen models
     m.__replace__(name="updated")
+
+- case: intermediate_base_class_config
+  mypy_config: *mypy_config
+  main: |
+    from pydantic import BaseModel, ConfigDict
+
+    class StrictModel(BaseModel):
+        model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
+
+    class Metric(StrictModel):
+        name: str
+        value: float
+
+    m = Metric(name="test", value=1.0)
+    m.__replace__(name="updated")
+    m.__replace__(bad_field=1)  # E: Unexpected keyword argument "bad_field" for "__replace__" of "Metric"  [call-arg]
+
+- case: copy_replace_integration
+  mypy_config: *mypy_config
+  main: |
+    import copy
+    from pydantic import BaseModel, ConfigDict
+
+    class Metric(BaseModel):
+        model_config = ConfigDict(frozen=True)
+        name: str
+        value: float
+
+    m = Metric(name="test", value=1.0)
+    m2 = copy.replace(m, name="updated")
+    reveal_type(m2)  # N: Revealed type is "main.Metric"
