@@ -19,6 +19,7 @@ from uuid6 import uuid7
 from document_search.paths import OPERATIONS_DIR
 from document_search.schemas.dashboard import OperationProgress, OperationState
 from document_search.schemas.indexing import IndexingResult
+from document_search.schemas.tracing import PipelineTimingReport
 
 __all__ = [
     'ProgressWriter',
@@ -84,6 +85,21 @@ class ProgressWriter:
 
         self._write()
         return op_id
+
+    def update_timing(self, timing: PipelineTimingReport) -> None:
+        """Write timing detail to separate file (called every ~5s).
+
+        The timing file contains the full PipelineTimingReport including
+        completion series data for the interactive chart. Kept separate
+        from the main progress JSON to avoid writing large data at 500ms.
+        """
+        if self._operation_id is None:
+            return
+        OPERATIONS_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = OPERATIONS_DIR / f'{self._operation_id}-timing.json'
+        temp_path = file_path.with_suffix('.tmp')
+        temp_path.write_text(json.dumps(timing.model_dump(mode='json'), indent=2) + '\n')
+        temp_path.rename(file_path)
 
     def update_progress(self, progress: OperationProgress) -> None:
         """Update operation progress.
