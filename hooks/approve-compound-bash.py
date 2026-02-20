@@ -127,6 +127,7 @@ def load_bash_prefixes(cwd: str) -> set[str]:
 
 # Commands that wrap other commands — skip these + their args to find the real command
 _WRAPPER_COMMANDS = frozenset({'timeout', 'time', 'nice', 'nohup'})
+_SUBSTITUTION_PATTERNS = ('$(', '`', '<(', '>(')  # Patterns indicating code execution
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +173,16 @@ def _collect_commands(source: str, node: bashlex.ast.node, results: list[Subcomm
             if getattr(child, 'kind', '') != 'pipe':
                 _collect_commands(source, child, results)
     elif kind == 'compound':
+        # Check for redirects on the compound itself: (cmds) > file
+        if hasattr(node, 'redirects') and node.redirects:
+            start, end = node.pos
+            results.append(
+                SubcommandInfo(
+                    text=source[start:end].strip(),
+                    base_command='',
+                    is_dangerous=True,
+                )
+            )
         for child in node.list:
             _collect_commands(source, child, results)
     elif kind == 'reservedword':
@@ -201,11 +212,16 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo
 
         if pk == 'word':
             words.append(part.word)
-            # Check word's children for command/process substitution
             if hasattr(part, 'parts') and part.parts:
                 for child in part.parts:
                     if child.kind in ('commandsubstitution', 'processsubstitution'):
                         is_dangerous = True
+                    elif child.kind == 'parameter':
+                        # bashlex stores expansion text as opaque string,
+                        # e.g. ${x:-$(cmd)} → parameter.value = 'x:-$(cmd)'
+                        val = getattr(child, 'value', '')
+                        if any(pat in val for pat in _SUBSTITUTION_PATTERNS):
+                            is_dangerous = True
 
         elif pk == 'redirect':
             if part.type == '<<<':
@@ -226,6 +242,10 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo
                 for child in part.parts:
                     if child.kind in ('commandsubstitution', 'processsubstitution'):
                         is_dangerous = True
+                    elif child.kind == 'parameter':
+                        val = getattr(child, 'value', '')
+                        if any(pat in val for pat in _SUBSTITUTION_PATTERNS):
+                            is_dangerous = True
 
     base_command = _resolve_base_command(words)
 
@@ -263,7 +283,7 @@ def _resolve_base_command(words: list[str]) -> str:
     # Reconstruct the real command from remaining words
     if i < len(words):
         return ' '.join(words[i:])
-    return ' '.join(words)
+    return ''  # No real command after stripping wrappers
 
 
 # --- Prefix matching ---
