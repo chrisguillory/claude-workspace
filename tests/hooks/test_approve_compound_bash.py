@@ -232,6 +232,41 @@ class TestDangerDetection:
         prefixes = {'echo'}
         assert not all(hook_module.matches_prefix(info, prefixes) for info in result)
 
+    # -- Parameter expansion bypass vectors --
+
+    def test_parameter_default_with_substitution_dangerous(self, hook_module: ModuleType) -> None:
+        """${x:-$(cmd)} hides command substitution inside parameter expansion."""
+        result = hook_module.analyze_command('echo ${x:-$(whoami)} && git log')
+        assert result[0].is_dangerous
+
+    def test_parameter_assign_default_with_substitution_dangerous(self, hook_module: ModuleType) -> None:
+        """${x:=$(cmd)} hides command substitution inside assign-default expansion."""
+        result = hook_module.analyze_command('echo ${x:=$(whoami)} && git log')
+        assert result[0].is_dangerous
+
+    def test_assignment_parameter_expansion_dangerous(self, hook_module: ModuleType) -> None:
+        """Parameter expansion with substitution in assignment position."""
+        result = hook_module.analyze_command('X=${a:-$(whoami)} echo test && git log')
+        assert result[0].is_dangerous
+
+    # -- Compound redirect bypass vectors --
+
+    def test_subshell_redirect_dangerous(self, hook_module: ModuleType) -> None:
+        """File redirect on subshell is invisible to inner command analysis."""
+        result = hook_module.analyze_command('(echo a; echo b) > /tmp/file && git log')
+        assert any(r.is_dangerous for r in result)
+
+    def test_brace_group_redirect_dangerous(self, hook_module: ModuleType) -> None:
+        """File redirect on brace group is invisible to inner command analysis."""
+        result = hook_module.analyze_command('{ echo a; echo b; } > /tmp/file && git log')
+        assert any(r.is_dangerous for r in result)
+
+    def test_compound_redirect_blocks_auto_approve(self, hook_module: ModuleType) -> None:
+        """Compound with redirect must NOT be auto-approved even if commands match."""
+        result = hook_module.analyze_command('(echo a; echo b) > /tmp/file && git log')
+        prefixes = {'echo', 'git log'}
+        assert not all(hook_module.matches_prefix(info, prefixes) for info in result)
+
 
 # ---------------------------------------------------------------------------
 # TestResolveBaseCommand — wrapper prefix stripping
@@ -251,8 +286,20 @@ class TestResolveBaseCommand:
             (['nice', '-n', '10', 'git', 'log'], 'git log'),
             (['timeout', '5s', 'nohup', 'git', 'log'], 'git log'),
             ([], ''),
+            (['timeout', '5s'], ''),
+            (['nice', '-n', '10'], ''),
         ],
-        ids=['plain', 'timeout', 'nohup', 'time', 'nice', 'chained', 'empty'],
+        ids=[
+            'plain',
+            'timeout',
+            'nohup',
+            'time',
+            'nice',
+            'chained',
+            'empty',
+            'wrapper-only-timeout',
+            'wrapper-only-nice',
+        ],
     )
     def test_wrapper_stripping(self, hook_module: ModuleType, words: list[str], expected: str) -> None:
         assert hook_module._resolve_base_command(words) == expected
@@ -300,6 +347,11 @@ class TestMatchesPrefix:
         """Prefix must match at word boundary (space), not just string prefix."""
         info = hook_module.SubcommandInfo(text='git logistics', base_command='git logistics')
         assert not hook_module.matches_prefix(info, {'git log'})
+
+    def test_empty_base_command_never_matches(self, hook_module: ModuleType) -> None:
+        """Assignment-only subcommands (empty base_command) never match any prefix."""
+        info = hook_module.SubcommandInfo(text='VAR=hello', base_command='')
+        assert not hook_module.matches_prefix(info, {'echo', 'git'})
 
     def test_mixed_safe_dangerous_blocks_all(self, hook_module: ModuleType) -> None:
         """One dangerous subcommand blocks the entire compound."""
@@ -445,6 +497,59 @@ class TestMainIntegration:
         )
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo $(whoami) && git log')))
+
+        hook_module.main.__wrapped__()
+        assert capsys.readouterr().out == ''
+
+    def test_skips_empty_command(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('')))
+
+        hook_module.main.__wrapped__()
+        assert capsys.readouterr().out == ''
+
+    def test_skips_no_prefixes(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """No Bash prefixes loaded — passthrough to built-in permissions."""
+        home = tmp_path / 'home'
+        (home / '.claude').mkdir(parents=True)
+        (home / '.claude' / 'settings.json').write_text(json.dumps({'permissions': {'allow': []}}))
+        monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
+        monkeypatch.setattr(
+            'sys.stdin',
+            io.StringIO(
+                self._hook_input(
+                    'echo "---" && git log',
+                    cwd=str(tmp_path / 'noproject'),
+                )
+            ),
+        )
+
+        hook_module.main.__wrapped__()
+        assert capsys.readouterr().out == ''
+
+    def test_passthrough_on_no_match(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Safe but non-matching subcommand — passthrough to built-in permissions."""
+        home = tmp_path / 'home'
+        (home / '.claude').mkdir(parents=True)
+        (home / '.claude' / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Bash(echo:*)']}}))
+        monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
+        monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo test && rm -rf /')))
 
         hook_module.main.__wrapped__()
         assert capsys.readouterr().out == ''
