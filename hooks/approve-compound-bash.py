@@ -9,9 +9,11 @@ Simple (non-compound) commands are ignored — the built-in permission system
 handles those correctly. This hook only intervenes when the command contains
 ``&&``, ``||``, ``;``, ``|``, or newline operators.
 
-Uses bashlex (a port of bash's own parser) to produce a typed AST, enabling
-structural detection of dangerous constructs (command substitution, process
-substitution, file redirections) rather than fragile regex matching.
+Uses bashlex (a port of bash's own parser) to produce a typed AST. Safety
+is enforced via an **allowlist of safe AST patterns** — only simple words,
+simple ``$VAR`` expansions, and fd-to-fd redirects are approved. Everything
+else (file redirects, assignments, heredocs, substitutions, unknown constructs)
+triggers passthrough to built-in permissions.
 
 Reads Bash allow prefixes from the settings hierarchy:
   1. ``~/.claude/settings.json`` (user scope)
@@ -126,80 +128,8 @@ def load_bash_prefixes(cwd: str) -> Set[str]:
 
 # --- bashlex AST analysis ---
 
-# Commands that wrap other commands — skip these + their args to find the real command
-_WRAPPER_COMMANDS = frozenset({'timeout', 'time', 'nice', 'nohup'})
-_SUBSTITUTION_PATTERNS = ('$(', '`', '<(', '>(')  # Patterns indicating code execution
-
-# Commands that execute arbitrary code from string arguments — bashlex can't analyze the payload.
-# Defense-in-depth: users' prefix lists (Bash(git log:*)) already serve as the primary allowlist,
-# but this prevents auto-approval if someone accidentally adds e.g. Bash(perl:*).
-_CODE_EXEC_COMMANDS = frozenset(
-    {
-        # Shell builtins that take code strings
-        'eval',
-        'source',
-        '.',
-        'exec',
-        'trap',
-        # Shell interpreters
-        'bash',
-        'sh',
-        'zsh',
-        'dash',
-        'ksh',
-        'csh',
-        'tcsh',
-        'fish',
-        # Language interpreters with -e/-c flags
-        'perl',
-        'python',
-        'python3',
-        'ruby',
-        'node',
-        'deno',
-        'bun',
-        'awk',
-        'gawk',
-        'mawk',
-        'nawk',
-        # Commands that execute subcommands
-        'xargs',
-        'expect',
-        'wish',
-        'tclsh',
-    }
-)
-
-# Inline env var assignments (VAR=val cmd) are dangerous unless the variable is known-safe.
-# Allowlist model: only these harmless variables pass; everything else is marked dangerous.
-# This avoids maintaining an incomplete denylist of LD_PRELOAD, DYLD_INSERT_LIBRARIES, etc.
-_SAFE_ENV_VARS = frozenset(
-    {
-        # Terminal type
-        'TERM',
-        'COLORTERM',
-        # Locale
-        'LANG',
-        'LANGUAGE',
-        'LC_ALL',
-        'LC_COLLATE',
-        'LC_CTYPE',
-        'LC_MESSAGES',
-        'LC_MONETARY',
-        'LC_NUMERIC',
-        'LC_TIME',
-        # Timezone
-        'TZ',
-        # Color control
-        'NO_COLOR',
-        'FORCE_COLOR',
-        'CLICOLOR',
-        'CLICOLOR_FORCE',
-        # Terminal dimensions
-        'COLUMNS',
-        'LINES',
-    }
-)
+# Substitution patterns in parameter expansion values: ${x:-$(cmd)}, ${x:-`cmd`}
+_SUBSTITUTION_PATTERNS = ('$(', '`', '<(', '>(')
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,11 +175,10 @@ def _collect_commands(source: str, node: bashlex.ast.node, results: list[Subcomm
             if getattr(child, 'kind', '') != 'pipe':
                 _collect_commands(source, child, results)
     elif kind == 'compound':
-        # Check for file redirects on the compound itself: (cmds) > file
-        # fd-to-fd redirects like 2>&1 have int output, file redirects have node output
+        # Any non-fd-to-fd redirect on the compound itself is dangerous
         if hasattr(node, 'redirects') and node.redirects:
             for redir in node.redirects:
-                if hasattr(redir.output, 'kind'):
+                if not isinstance(redir.output, int):
                     start, end = node.pos
                     results.append(
                         SubcommandInfo(
@@ -262,7 +191,7 @@ def _collect_commands(source: str, node: bashlex.ast.node, results: list[Subcomm
         for child in node.list:
             _collect_commands(source, child, results)
     elif kind == 'reservedword':
-        pass  # Syntax delimiters: (, ), {, }, do, done, then, fi, etc.
+        pass  # Syntax delimiters: (, ), {, }, do, done, then, fi, !, etc.
     else:
         # Unrecognized construct — mark as unanalyzable (fail closed)
         start, end = node.pos
@@ -276,7 +205,12 @@ def _collect_commands(source: str, node: bashlex.ast.node, results: list[Subcomm
 
 
 def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo:
-    """Inspect a single command node for its base command and danger signals."""
+    """Inspect a single command node using an allowlist of safe AST patterns.
+
+    Safe patterns: simple words, simple $VAR expansions, fd-to-fd redirects.
+    Everything else (file redirects, assignments, heredocs, here-strings,
+    substitutions, unknown part kinds) is marked dangerous.
+    """
     start, end = node.pos
     text = source[start:end].strip()
 
@@ -288,58 +222,26 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo
 
         if pk == 'word':
             words.append(part.word)
+            # Words with children must have ONLY safe parameter expansions
             if hasattr(part, 'parts') and part.parts:
-                for child in part.parts:
-                    if child.kind in ('commandsubstitution', 'processsubstitution'):
-                        is_dangerous = True
-                    elif child.kind == 'parameter':
-                        # bashlex stores expansion text as opaque string,
-                        # e.g. ${x:-$(cmd)} → parameter.value = 'x:-$(cmd)'
-                        val = getattr(child, 'value', '')
-                        if any(pat in val for pat in _SUBSTITUTION_PATTERNS):
-                            is_dangerous = True
+                if not _all_safe_word_children(part.parts):
+                    is_dangerous = True
 
         elif pk == 'redirect':
-            if part.type == '<<<':
-                # Here-string: data input, but value may contain substitutions
-                if hasattr(part.output, 'parts') and part.output.parts:
-                    for child in part.output.parts:
-                        if child.kind in ('commandsubstitution', 'processsubstitution'):
-                            is_dangerous = True
-            elif part.type == '<<':
-                # Heredoc: content stored as raw string in part.heredoc.value.
-                # Unquoted delimiters cause bash to expand $() and backticks.
-                if hasattr(part, 'heredoc') and part.heredoc is not None:
-                    heredoc_val = getattr(part.heredoc, 'value', '')
-                    if any(pat in heredoc_val for pat in _SUBSTITUTION_PATTERNS):
-                        is_dangerous = True
-            elif hasattr(part.output, 'kind'):
-                # File redirect: output is a node (has .kind), not an int (fd-to-fd)
+            # Only fd-to-fd redirects (output is int, e.g. 2>&1) are safe
+            if not isinstance(part.output, int):
                 is_dangerous = True
 
         elif pk == 'assignment':
-            # Inline assignments export env vars to the subprocess.
-            # Only known-safe vars (locale, terminal, color) are allowed through.
-            var_name = getattr(part, 'word', '').split('=', 1)[0]
-            if var_name not in _SAFE_ENV_VARS:
-                is_dangerous = True
-            # Assignment values may contain substitutions: VAR=$(cmd) echo test
-            if hasattr(part, 'parts') and part.parts:
-                for child in part.parts:
-                    if child.kind in ('commandsubstitution', 'processsubstitution'):
-                        is_dangerous = True
-                    elif child.kind == 'parameter':
-                        val = getattr(child, 'value', '')
-                        if any(pat in val for pat in _SUBSTITUTION_PATTERNS):
-                            is_dangerous = True
-
-    base_command = _resolve_base_command(words)
-
-    # Commands that execute arbitrary code from string arguments
-    if base_command:
-        first_word = base_command.split(maxsplit=1)[0]
-        if first_word in _CODE_EXEC_COMMANDS:
+            # All inline env var assignments are dangerous — avoids incomplete
+            # denylists of LD_PRELOAD, DYLD_INSERT_LIBRARIES, BASH_ENV, etc.
             is_dangerous = True
+
+        else:
+            # Unknown part kind — fail closed
+            is_dangerous = True
+
+    base_command = ' '.join(words) if words else ''
 
     return SubcommandInfo(
         text=text,
@@ -348,34 +250,17 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> SubcommandInfo
     )
 
 
-def _resolve_base_command(words: list[str]) -> str:
-    """Find the real command, skipping wrapper prefixes like timeout/nohup.
-
-    bashlex parses ``timeout 5s git log`` as a single command with words
-    ['timeout', '5s', 'git', 'log']. This skips known wrappers and their
-    arguments to find the actual command being wrapped.
-    """
-    if not words:
-        return ''
-
-    i = 0
-    while i < len(words) and words[i] in _WRAPPER_COMMANDS:
-        cmd = words[i]
-        i += 1  # skip the wrapper command itself
-
-        if cmd == 'timeout' and i < len(words):
-            # timeout takes a duration arg (e.g., '5s', '10', '30m')
-            i += 1
-        elif cmd == 'nice' and i < len(words) and words[i] == '-n':
-            # nice -n <priority>
-            i += 2
-
-        # time, nohup take no required args before the command
-
-    # Reconstruct the real command from remaining words
-    if i < len(words):
-        return ' '.join(words[i:])
-    return ''  # No real command after stripping wrappers
+def _all_safe_word_children(children: Sequence[bashlex.ast.node]) -> bool:
+    """True only if all children are simple parameter expansions ($VAR)."""
+    for child in children:
+        if child.kind == 'parameter':
+            val = getattr(child, 'value', '')
+            if any(pat in val for pat in _SUBSTITUTION_PATTERNS):
+                return False
+        else:
+            # commandsubstitution, processsubstitution, or anything else
+            return False
+    return True
 
 
 # --- Prefix matching ---
@@ -384,8 +269,7 @@ def _resolve_base_command(words: list[str]) -> str:
 def matches_prefix(info: SubcommandInfo, prefixes: Set[str]) -> bool:
     """Check if a subcommand matches any allowed Bash prefix.
 
-    Rejects subcommands containing dangerous constructs (command substitution,
-    process substitution, file redirections) regardless of prefix match.
+    Rejects subcommands containing dangerous constructs regardless of match.
     """
     if info.is_dangerous:
         return False

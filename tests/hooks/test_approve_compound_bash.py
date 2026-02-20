@@ -1,7 +1,7 @@
 """Tests for the approve-compound-bash PreToolUse hook.
 
 Validates bashlex-based compound command parsing, dangerous construct
-detection, wrapper prefix stripping, prefix matching, and settings loading.
+detection via allowlist of safe AST patterns, prefix matching, and settings loading.
 """
 
 from __future__ import annotations
@@ -165,20 +165,20 @@ class TestDangerDetection:
         result = hook_module.analyze_command('cat <(echo test) && git log')
         assert result[0].is_dangerous
 
-    def test_here_string_safe(self, hook_module: ModuleType) -> None:
-        """Here-strings (<<<) with plain data are safe."""
+    def test_here_string_dangerous(self, hook_module: ModuleType) -> None:
+        """Here-strings (<<<) are non-fd redirects — always dangerous."""
         result = hook_module.analyze_command('cat <<< hello && git log')
-        assert not result[0].is_dangerous
+        assert result[0].is_dangerous
 
     def test_here_string_with_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """Here-strings (<<<) with command substitution are dangerous."""
         result = hook_module.analyze_command('cat <<< $(whoami) && git log')
         assert result[0].is_dangerous
 
-    def test_heredoc_safe(self, hook_module: ModuleType) -> None:
-        """Heredocs (<<) are data input, not file redirections."""
+    def test_heredoc_dangerous(self, hook_module: ModuleType) -> None:
+        """Heredocs (<<) are non-fd redirects — always dangerous."""
         result = hook_module.analyze_command('cat <<EOF && git log\nhello\nEOF')
-        assert not result[0].is_dangerous
+        assert result[0].is_dangerous
 
     def test_assignment_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """Command substitution in assignment position is executed at runtime."""
@@ -283,10 +283,10 @@ class TestDangerDetection:
         result = hook_module.analyze_command('cat <<EOF && git log\n`whoami`\nEOF')
         assert result[0].is_dangerous
 
-    def test_heredoc_plain_content_safe(self, hook_module: ModuleType) -> None:
-        """Heredoc with no substitution patterns is safe."""
+    def test_heredoc_plain_content_dangerous(self, hook_module: ModuleType) -> None:
+        """Heredocs are always dangerous — no content scanning needed."""
         result = hook_module.analyze_command('cat <<EOF && git log\nhello world\nEOF')
-        assert not result[0].is_dangerous
+        assert result[0].is_dangerous
 
     # -- Environment variable injection --
 
@@ -320,52 +320,52 @@ class TestDangerDetection:
         result = hook_module.analyze_command('LD_LIBRARY_PATH=/evil git log && echo done')
         assert result[0].is_dangerous
 
-    def test_safe_env_var_allowed(self, hook_module: ModuleType) -> None:
-        """Known-safe env vars (TERM, LANG, TZ, etc.) pass through."""
+    def test_safe_env_var_dangerous(self, hook_module: ModuleType) -> None:
+        """All assignments are dangerous — no env var allowlist."""
         result = hook_module.analyze_command('TERM=xterm git log && echo done')
-        assert not result[0].is_dangerous
+        assert result[0].is_dangerous
 
-    def test_locale_env_var_allowed(self, hook_module: ModuleType) -> None:
-        """Locale variables are known-safe."""
+    def test_locale_env_var_dangerous(self, hook_module: ModuleType) -> None:
+        """All assignments are dangerous — no env var allowlist."""
         result = hook_module.analyze_command('LC_ALL=C git log && echo done')
-        assert not result[0].is_dangerous
+        assert result[0].is_dangerous
 
     def test_unknown_env_var_dangerous(self, hook_module: ModuleType) -> None:
-        """Unknown env vars are dangerous (allowlist model, not denylist)."""
+        """All assignments are dangerous — no env var allowlist."""
         result = hook_module.analyze_command('MY_CUSTOM_VAR=hello git log && echo done')
         assert result[0].is_dangerous
 
-    # -- Code-execution command denylist --
+    # -- Code-execution commands (handled by prefix matching, not AST) --
 
-    def test_eval_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """eval executes arbitrary code from string arguments."""
+    def test_eval_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
+        """eval is plain words at AST level — blocked by prefix matching instead."""
         result = hook_module.analyze_command('eval "rm -rf /" && git log')
-        assert result[0].is_dangerous
+        assert not result[0].is_dangerous
 
-    def test_source_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """source executes arbitrary file contents."""
+    def test_source_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
+        """source is plain words at AST level — blocked by prefix matching instead."""
         result = hook_module.analyze_command('source /tmp/evil.sh && git log')
-        assert result[0].is_dangerous
+        assert not result[0].is_dangerous
 
-    def test_dot_source_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """. is equivalent to source."""
+    def test_dot_source_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
+        """. is plain words at AST level — blocked by prefix matching instead."""
         result = hook_module.analyze_command('. /tmp/evil.sh && git log')
-        assert result[0].is_dangerous
+        assert not result[0].is_dangerous
 
-    def test_bash_c_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """bash -c spawns shell with arbitrary command string."""
+    def test_bash_c_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
+        """bash -c is plain words at AST level — blocked by prefix matching instead."""
         result = hook_module.analyze_command('bash -c "rm -rf /" && echo done')
-        assert result[0].is_dangerous
+        assert not result[0].is_dangerous
 
-    def test_trap_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """trap defers arbitrary code execution to signal/exit."""
+    def test_trap_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
+        """trap is plain words at AST level — blocked by prefix matching instead."""
         result = hook_module.analyze_command('trap "rm -rf /" EXIT && echo done')
-        assert result[0].is_dangerous
+        assert not result[0].is_dangerous
 
-    def test_exec_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """exec replaces shell process with arbitrary command."""
+    def test_exec_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
+        """exec is plain words at AST level — blocked by prefix matching instead."""
         result = hook_module.analyze_command('exec git log && echo done')
-        assert result[0].is_dangerous
+        assert not result[0].is_dangerous
 
     # -- Additional coverage: safe constructs --
 
@@ -396,67 +396,56 @@ class TestDangerDetection:
 
 
 # ---------------------------------------------------------------------------
-# TestResolveBaseCommand — wrapper prefix stripping
+# TestWrapperCommandsPreserved — wrappers are NOT stripped (YAGNI)
 # ---------------------------------------------------------------------------
 
 
-class TestResolveBaseCommand:
-    """Verify wrapper command stripping (timeout, nohup, nice, time)."""
+class TestWrapperCommandsPreserved:
+    """Verify wrapper commands (timeout, nohup, nice, time) are preserved in base_command.
+
+    Wrapper stripping was removed (YAGNI). Users add prefixes like Bash(timeout:*)
+    if needed. These tests confirm wrappers stay in base_command via analyze_command.
+    """
 
     @pytest.mark.parametrize(
-        'words, expected',
+        'command, expected_base',
         [
-            (['git', 'log'], 'git log'),
-            (['timeout', '5s', 'git', 'log'], 'git log'),
-            (['nohup', 'git', 'log'], 'git log'),
-            (['time', 'git', 'log'], 'git log'),
-            (['nice', '-n', '10', 'git', 'log'], 'git log'),
-            (['timeout', '5s', 'nohup', 'git', 'log'], 'git log'),
-            ([], ''),
-            (['timeout', '5s'], ''),
-            (['nice', '-n', '10'], ''),
+            ('timeout 5s git log && echo done', 'timeout 5s git log'),
+            ('nohup git log && echo done', 'nohup git log'),
+            # 'time' is a bash reserved word — bashlex raises NotImplementedError,
+            # caught by ErrorBoundary in production (passthrough). Tested separately.
+            ('nice -n 10 git log && echo done', 'nice -n 10 git log'),
+            ('timeout 5s nohup git log && echo done', 'timeout 5s nohup git log'),
         ],
-        ids=[
-            'plain',
-            'timeout',
-            'nohup',
-            'time',
-            'nice',
-            'chained',
-            'empty',
-            'wrapper-only-timeout',
-            'wrapper-only-nice',
-        ],
+        ids=['timeout', 'nohup', 'nice', 'chained'],
     )
-    def test_wrapper_stripping(self, hook_module: ModuleType, words: list[str], expected: str) -> None:
-        assert hook_module._resolve_base_command(words) == expected
+    def test_wrapper_preserved(self, hook_module: ModuleType, command: str, expected_base: str) -> None:
+        result = hook_module.analyze_command(command)
+        assert result[0].base_command == expected_base
 
     @pytest.mark.parametrize(
-        'words, expected',
+        'command, expected_base',
         [
-            (['sudo', 'git', 'status'], 'sudo git status'),
-            (['env', 'VAR=1', 'git', 'status'], 'env VAR=1 git status'),
-            (['command', 'git', 'status'], 'command git status'),
+            ('sudo git status && echo done', 'sudo git status'),
+            ('command git status && echo done', 'command git status'),
         ],
-        ids=['sudo', 'env', 'command'],
+        ids=['sudo', 'command'],
     )
-    def test_privilege_wrappers_not_stripped(self, hook_module: ModuleType, words: list[str], expected: str) -> None:
-        """sudo/env/command are NOT stripped — conservative by design."""
-        assert hook_module._resolve_base_command(words) == expected
+    def test_privilege_wrappers_preserved(self, hook_module: ModuleType, command: str, expected_base: str) -> None:
+        """sudo/command stay in base_command — handled by prefix matching."""
+        result = hook_module.analyze_command(command)
+        assert result[0].base_command == expected_base
 
-    @pytest.mark.parametrize(
-        'words, expected',
-        [
-            (['timeout', '--signal=KILL', '5s', 'git', 'log'], '5s git log'),
-            (['timeout', '-k', '5', '10', 'git', 'log'], '5 10 git log'),
-            (['nice', '-5', 'git', 'log'], '-5 git log'),
-            (['nice', '--adjustment=5', 'git', 'log'], '--adjustment=5 git log'),
-        ],
-        ids=['timeout-signal', 'timeout-kill', 'nice-bsd', 'nice-gnu'],
-    )
-    def test_wrapper_flag_limitations(self, hook_module: ModuleType, words: list[str], expected: str) -> None:
-        """Wrapper flags produce imperfect base_command (safe direction — falls through)."""
-        assert hook_module._resolve_base_command(words) == expected
+    def test_time_raises_not_implemented(self, hook_module: ModuleType) -> None:
+        """bashlex doesn't support 'time' — ErrorBoundary catches this in production."""
+        with pytest.raises(NotImplementedError):
+            hook_module.analyze_command('time git log && echo done')
+
+    def test_wrapper_without_prefix_no_match(self, hook_module: ModuleType) -> None:
+        """Wrapped command won't match unwrapped prefix — safe direction."""
+        result = hook_module.analyze_command('timeout 5s git log && echo done')
+        prefixes = {'git log'}  # No 'timeout' prefix
+        assert not hook_module.matches_prefix(result[0], prefixes)
 
 
 # ---------------------------------------------------------------------------
