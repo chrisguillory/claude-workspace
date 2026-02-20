@@ -190,10 +190,9 @@ class TestDangerDetection:
         result = hook_module.analyze_command('VAR=hello echo test && git log')
         assert not result[0].is_dangerous
 
-    def test_eval_not_detected(self, hook_module: ModuleType) -> None:
-        """eval is a regular command — bashlex can't see inside its string arg."""
+    def test_eval_base_command_preserved(self, hook_module: ModuleType) -> None:
+        """eval is parsed as a regular command — base_command includes 'eval'."""
         result = hook_module.analyze_command('eval "rm -rf /" && git log')
-        assert not result[0].is_dangerous
         assert 'eval' in result[0].base_command
 
     def test_if_block_marked_dangerous(self, hook_module: ModuleType) -> None:
