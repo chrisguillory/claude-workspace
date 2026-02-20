@@ -247,8 +247,9 @@ class ErrorBoundary:
         for process boundaries. Returns False for non-application exceptions.
 
         Handler failures cannot breach the boundary — if the registered handler
-        raises, we fall back to stderr reporting of the original exception,
-        then proceed with the configured suppress/exit behavior.
+        raises, we fall back to stderr reporting of the original exception.
+        If that also fails (e.g. stderr broken), we proceed silently with
+        the configured suppress/exit behavior.
         """
         if not isinstance(exc_value, Exception):
             return False  # No exception, or system exception — pass through
@@ -256,7 +257,10 @@ class ErrorBoundary:
         try:
             self._dispatch(exc_value)
         except Exception:
-            _default_handler(exc_value)
+            try:  # noqa: SIM105 — explicit try/except/pass preserves comment explaining why
+                _default_handler(exc_value)
+            except Exception:
+                pass  # Both handlers failed (e.g. stderr broken); proceed with exit/suppress
 
         if self._exit_code is not None:
             sys.exit(self._exit_code)

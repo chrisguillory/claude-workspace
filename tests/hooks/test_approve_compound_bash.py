@@ -278,6 +278,16 @@ class TestDangerDetection:
         result = hook_module.analyze_command('(echo a; echo b) 2>&1 && git log')
         assert not any(r.is_dangerous for r in result)
 
+    def test_compound_mixed_fd_then_file_redirect(self, hook_module: ModuleType) -> None:
+        """fd redirect first, file redirect second — file redirect must trigger danger."""
+        result = hook_module.analyze_command('(echo a; echo b) 2>&1 >/tmp/file && git log')
+        assert any(r.is_dangerous for r in result)
+
+    def test_compound_multiple_fd_redirects_safe(self, hook_module: ModuleType) -> None:
+        """Multiple fd-to-fd redirects on compound — all safe."""
+        result = hook_module.analyze_command('(echo a; echo b) 2>&1 3>&2 && git log')
+        assert not any(r.is_dangerous for r in result)
+
     # -- Heredoc content scanning --
 
     def test_heredoc_with_command_substitution_dangerous(self, hook_module: ModuleType) -> None:
@@ -409,6 +419,23 @@ class TestDangerDetection:
     def test_backtick_in_parameter_expansion_dangerous(self, hook_module: ModuleType) -> None:
         """Backticks inside parameter expansion are caught."""
         result = hook_module.analyze_command('echo ${x:-`whoami`} && git log')
+        assert result[0].is_dangerous
+
+    # -- Parameter transform operators (@P, @E, @A, etc.) --
+
+    def test_prompt_expansion_dangerous(self, hook_module: ModuleType) -> None:
+        """${x@P} interprets value as PS1 prompt, executing embedded $(cmd)."""
+        result = hook_module.analyze_command('echo ${PS1@P} && git log')
+        assert result[0].is_dangerous
+
+    def test_assign_transform_dangerous(self, hook_module: ModuleType) -> None:
+        """${x@A} produces assignment statement — could leak values."""
+        result = hook_module.analyze_command('echo ${x@A} && git log')
+        assert result[0].is_dangerous
+
+    def test_escape_transform_dangerous(self, hook_module: ModuleType) -> None:
+        """${x@E} interprets escape sequences — fail closed on all @ operators."""
+        result = hook_module.analyze_command('echo ${x@E} && git log')
         assert result[0].is_dangerous
 
 
@@ -879,6 +906,85 @@ class TestParseErrors:
     def test_unterminated_quote(self, hook_module: ModuleType) -> None:
         with pytest.raises(Exception):
             hook_module.analyze_command('echo "unterminated')
+
+    def test_arithmetic_expansion_passthrough_via_boundary(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Arithmetic expansion ($(())) triggers NotImplementedError in bashlex.
+
+        NotImplementedError is a subclass of Exception, so ErrorBoundary must
+        catch it and exit 0 (passthrough), not crash with exit 1.
+        """
+        payload = json.dumps(
+            {
+                'session_id': 'test',
+                'cwd': '/tmp',
+                'transcript_path': '/tmp/transcript.jsonl',
+                'hook_event_name': 'PreToolUse',
+                'tool_name': 'Bash',
+                'tool_input': {'command': 'echo $((1+2)) && git log'},
+                'tool_use_id': 'tu_test',
+            }
+        )
+        monkeypatch.setattr('sys.stdin', io.StringIO(payload))
+
+        with pytest.raises(SystemExit) as exc_info:
+            hook_module.main()
+
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert captured.out == ''
+        assert 'NotImplementedError' in captured.err
+
+    def test_time_keyword_passthrough_via_boundary(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """'time' keyword triggers NotImplementedError — must passthrough safely."""
+        payload = json.dumps(
+            {
+                'session_id': 'test',
+                'cwd': '/tmp',
+                'transcript_path': '/tmp/transcript.jsonl',
+                'hook_event_name': 'PreToolUse',
+                'tool_name': 'Bash',
+                'tool_input': {'command': 'time git log && echo done'},
+                'tool_use_id': 'tu_test',
+            }
+        )
+        monkeypatch.setattr('sys.stdin', io.StringIO(payload))
+
+        with pytest.raises(SystemExit) as exc_info:
+            hook_module.main()
+
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert captured.out == ''
+        assert 'NotImplementedError' in captured.err
+
+
+# ---------------------------------------------------------------------------
+# TestMultiRootCommands — newline-separated compound statements
+# ---------------------------------------------------------------------------
+
+
+class TestMultiRootCommands:
+    """Newline-separated statements produce multiple AST roots."""
+
+    def test_newline_separated_compounds(self, hook_module: ModuleType) -> None:
+        """Each newline-separated statement is a separate top-level AST node."""
+        result = hook_module.analyze_command('echo a && echo b\ngit log && git status')
+        assert len(result) == 4
+
+    def test_newline_single_commands(self, hook_module: ModuleType) -> None:
+        """Newline-separated simple commands still produce multiple subcommands."""
+        result = hook_module.analyze_command('echo a\ngit log')
+        assert len(result) == 2
 
     def test_empty_string(self, hook_module: ModuleType) -> None:
         with pytest.raises(Exception):

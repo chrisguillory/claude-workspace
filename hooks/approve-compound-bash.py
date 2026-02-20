@@ -11,9 +11,16 @@ handles those correctly. This hook only intervenes when the command contains
 
 Uses bashlex (a port of bash's own parser) to produce a typed AST. Safety
 is enforced via an **allowlist of safe AST patterns** — only simple words,
-simple ``$VAR`` expansions, and fd-to-fd redirects are approved. Everything
-else (file redirects, assignments, heredocs, substitutions, unknown constructs)
-triggers passthrough to built-in permissions.
+simple ``$VAR`` expansions, tilde expansion, and fd-to-fd redirects are
+approved. Everything else (file redirects, assignments, heredocs,
+substitutions, parameter transform operators, unknown constructs) triggers
+passthrough to built-in permissions.
+
+**Limitation — pipe composition:** Each subcommand in a pipe is validated
+independently. Two individually-safe commands can be dangerous when composed
+via pipe (e.g. ``cat .env | python3 -c "exec(sys.stdin.read())"``). Users
+should audit prefix combinations — pipe compositions inherit the combined
+power of all allowed prefixes.
 
 Reads Bash allow prefixes from the settings hierarchy:
   1. ``~/.claude/settings.json`` (user scope)
@@ -132,6 +139,11 @@ def load_bash_prefixes(cwd: str) -> Set[str]:
 
 # Substitution patterns in parameter expansion values: ${x:-$(cmd)}, ${x:-`cmd`}
 _SUBSTITUTION_PATTERNS = ('$(', '`', '<(', '>(')
+
+# Parameter transform operators: ${x@P} executes prompt expansion, ${x@E} interprets
+# escapes, etc. Fail closed on all @ operators — they transform values in ways that
+# may execute code or leak information.
+_TRANSFORM_OPERATOR_RE = re.compile(r'@[A-Za-z]')
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +272,8 @@ def _all_safe_word_children(children: Sequence[bashlex.ast.node]) -> bool:
         elif child.kind == 'parameter':
             val = getattr(child, 'value', '')
             if any(pat in val for pat in _SUBSTITUTION_PATTERNS):
+                return False
+            if _TRANSFORM_OPERATOR_RE.search(val):
                 return False
         else:
             # commandsubstitution, processsubstitution, or anything else
