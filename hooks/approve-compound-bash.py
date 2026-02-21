@@ -7,19 +7,18 @@ pattern. For example::
 
     git diff --cached --stat 2>&1 && echo "---" && git log --oneline -5 2>&1
 
-This should auto-approve since all three subcommands (git diff, echo, git log)
-match allowed prefixes, but Claude Code prompts due to the quoted "---" and 2>&1.
+All three subcommands (git diff, echo, git log) match allowed prefixes, but
+Claude Code prompts due to the quoted "---" and 2>&1 redirects.
 
-Uses bashlex to parse into subcommands. Only intervenes for compounds (&&, ||, ;,
-|, newline). Simple commands are handled by built-in permissions.
+Parses commands into a bashlex AST, walks it to extract base command strings
+(rejecting unanalyzable constructs), then checks each against allowed Bash
+prefixes. Only emits allow decisions for compounds (&&, ||, ;, |, newline).
+Simple commands defer to built-in permissions.
 
-Related Claude Code bugs:
-  - Wildcard rejects quoted arguments:
-    https://github.com/anthropics/claude-code/issues/23670
-  - Pattern matching fails with quoted hyphen args:
-    https://github.com/anthropics/claude-code/issues/16449
-  - Permission bypass with ``&&`` chaining:
-    https://github.com/anthropics/claude-code/issues/16180
+Related bugs:
+  - https://github.com/anthropics/claude-code/issues/23670
+  - https://github.com/anthropics/claude-code/issues/16449
+  - https://github.com/anthropics/claude-code/issues/16180
 
 Hook docs: https://code.claude.com/docs/en/hooks#pretooluse
 """
@@ -35,6 +34,7 @@ Hook docs: https://code.claude.com/docs/en/hooks#pretooluse
 # [tool.uv.sources]
 # local_lib = { path = "../local-lib/", editable = true }
 # ///
+
 from __future__ import annotations
 
 import json
@@ -68,9 +68,8 @@ class ApproveCompoundBashException(Exception):
 # Ignores: "WebSearch", "mcp__foo__bar", "Bash(git log:something)"
 BASH_PREFIX_RE = re.compile(r'^Bash\((.+):\*\)$')
 
-# Only simple variable names and empty values (from $"..." locale quoting) are safe.
-# Anything else (${!FOO}, ${x:-$(cmd)}, ${x@P}, ${#x}) is not a simple $VAR.
-SIMPLE_VAR_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
+# Simple shell variable name; rejects complex expansions (${!FOO}, ${x:-$(cmd)}, ${x@P}).
+SIMPLE_VAR_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 
 
 @boundary
@@ -111,11 +110,11 @@ def main() -> None:
 def analyze_command(command: str) -> Sequence[str]:
     """Parse command into base command strings using bashlex AST.
 
-    Returns one base_command per simple command. Compound operators (&&, ||, ;),
+    Returns one entry per simple command. Compound operators (&&, ||, ;),
     pipes, and newlines produce separate entries.
 
-    Raises ApproveCompoundBashException on dangerous/unanalyzable constructs (file redirects,
-    assignments, substitutions, control flow). ErrorBoundary handles exceptions.
+    Raises ApproveCompoundBashException on unanalyzable constructs (file redirects,
+    assignments, substitutions, control flow).
     """
     parts = bashlex.parse(command)
     return [cmd for part in parts for cmd in _iter_subcommands(command, part)]
@@ -147,7 +146,7 @@ def load_bash_prefixes(cwd: str) -> Set[str]:
 
 
 def matches_prefix(base_command: str, prefixes: Set[str]) -> bool:
-    """Check if a base command matches any allowed Bash prefix."""
+    """True if base_command equals a prefix or starts with 'prefix '."""
     if not base_command:
         return False
     return any(base_command == prefix or base_command.startswith(prefix + ' ') for prefix in prefixes)
@@ -156,9 +155,8 @@ def matches_prefix(base_command: str, prefixes: Set[str]) -> bool:
 def _iter_subcommands(source: str, node: bashlex.ast.node) -> Iterator[str]:
     """Walk the AST, yielding one base command string per simple command.
 
-    Only decomposes node kinds we can fully analyze. Unknown kinds (if, for,
-    while, until, function, case) raise ApproveCompoundBashException so the hook falls
-    through to built-in permissions rather than silently approving hidden commands.
+    Decomposes commands, lists, pipelines, and compounds. Unknown node kinds
+    (if, for, while, until, function) raise ApproveCompoundBashException.
     """
     kind = node.kind
 
@@ -187,32 +185,30 @@ def _iter_subcommands(source: str, node: bashlex.ast.node) -> Iterator[str]:
 
 
 def _extract_base_command(source: str, node: bashlex.ast.node) -> str:
-    """Inspect a single command node using an allowlist of safe AST patterns.
+    """Extract the base command string from a command node.
 
-    Safe patterns: simple words, simple $VAR expansions, fd-to-fd redirects.
-    Everything else (file redirects, assignments, heredocs, substitutions,
-    unknown part kinds) raises ApproveCompoundBashException.
+    Allows simple words, $VAR expansions, and fd-to-fd redirects. Raises
+    ApproveCompoundBashException on non-fd redirects, assignments, substitutions,
+    or unknown part kinds.
     """
     start, end = node.pos
     words: list[str] = []
 
     for part in node.parts:
-        pk = part.kind
-
-        if pk == 'word':
+        if part.kind == 'word':
             words.append(part.word)
             if part.parts:
                 _check_word_expansions(part.parts, part.word)
 
-        elif pk == 'redirect':
+        elif part.kind == 'redirect':
             if not isinstance(part.output, int):
                 raise ApproveCompoundBashException(f'file redirect in: {source[start:end].strip()}')
 
-        elif pk == 'assignment':
+        elif part.kind == 'assignment':
             raise ApproveCompoundBashException(f'inline assignment in: {source[start:end].strip()}')
 
         else:
-            raise ApproveCompoundBashException(f'unknown part kind ({pk}) in: {source[start:end].strip()}')
+            raise ApproveCompoundBashException(f'unknown part kind ({part.kind}) in: {source[start:end].strip()}')
 
     return ' '.join(words)
 
