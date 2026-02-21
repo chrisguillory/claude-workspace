@@ -15,6 +15,7 @@ from pathlib import Path
 from types import ModuleType
 
 import git
+import pydantic
 import pytest
 
 REPO_ROOT = Path(git.Repo(__file__, search_parent_directories=True).working_tree_dir or '.').resolve(strict=True)
@@ -566,6 +567,26 @@ class TestLoadBashPrefixes:
         with pytest.raises(json.JSONDecodeError):
             hook_module.load_bash_prefixes(str(cwd))
 
+    def test_malformed_second_file_discards_all_prefixes(
+        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """One corrupted settings file discards all prefixes, not just its own.
+
+        Intentional: uncertain config state defers to built-in permissions
+        rather than proceeding with partial configuration.
+        """
+        home = tmp_path / 'home'
+        (home / '.claude').mkdir(parents=True)
+        (home / '.claude' / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Bash(git log:*)']}}))
+        monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
+
+        cwd = tmp_path / 'project'
+        (cwd / '.claude').mkdir(parents=True)
+        (cwd / '.claude' / 'settings.json').write_text('{invalid json')
+
+        with pytest.raises(json.JSONDecodeError):
+            hook_module.load_bash_prefixes(str(cwd))
+
     def test_non_string_entry_raises(
         self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -672,13 +693,12 @@ class TestMainIntegration:
         hook_module.main.__wrapped__()
         assert capsys.readouterr().out == ''
 
-    def test_skips_missing_command_key(
+    def test_missing_command_key_raises(
         self,
         hook_module: ModuleType,
         monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """tool_input without command key — passthrough."""
+        """tool_input without command key — ValidationError defers via ErrorBoundary."""
         payload = json.dumps(
             {
                 'session_id': 'test',
@@ -692,16 +712,15 @@ class TestMainIntegration:
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
-        hook_module.main.__wrapped__()
-        assert capsys.readouterr().out == ''
+        with pytest.raises(pydantic.ValidationError):
+            hook_module.main.__wrapped__()
 
-    def test_skips_non_string_command(
+    def test_non_string_command_raises(
         self,
         hook_module: ModuleType,
         monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """Non-string command value — passthrough (type guard)."""
+        """Non-string command value — ValidationError defers via ErrorBoundary."""
         payload = json.dumps(
             {
                 'session_id': 'test',
@@ -715,8 +734,8 @@ class TestMainIntegration:
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
-        hook_module.main.__wrapped__()
-        assert capsys.readouterr().out == ''
+        with pytest.raises(pydantic.ValidationError):
+            hook_module.main.__wrapped__()
 
     def test_skips_no_prefixes(
         self,
