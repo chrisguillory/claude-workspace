@@ -19,6 +19,7 @@ members = [
     "mcp/document-search",
     "mcp/python-interpreter",
     "mcp/selenium-browser-automation",
+    "stubs",
     # "hooks" - decide later if hooks should be workspace member or stay inline
 ]
 

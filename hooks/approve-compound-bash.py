@@ -40,12 +40,10 @@ from __future__ import annotations
 import json
 import re
 import sys
-from collections.abc import Sequence, Set
+from collections.abc import Iterator, Sequence, Set
 from pathlib import Path
-from typing import Literal
 
 import bashlex
-import bashlex.ast
 from local_lib.error_boundary import ErrorBoundary
 from local_lib.schemas.hooks import (
     PreToolUseDecision,
@@ -61,24 +59,66 @@ def _handle_error(exc: Exception) -> None:
     print(f'approve-compound-bash hook error: {exc!r}', file=sys.stderr)
 
 
-type PermissionDecision = Literal['allow', 'deny', 'ask']
-
-
-def decide(decision: PermissionDecision, reason: str) -> None:
-    """Emit a permission decision to stdout."""
-    output = PreToolUseHookOutput(
-        hook_specific_output=PreToolUseDecision(
-            permission_decision=decision,
-            permission_decision_reason=reason,
-        )
-    )
-    print(output.model_dump_json(by_alias=True, exclude_none=True))
+class ApproveCompoundBashException(Exception):
+    """Base exception for this hook. Defers to Claude Code's native permissions."""
 
 
 # Extract the prefix from Claude Code's Bash permission pattern.
 # Matches: "Bash(git log:*)" → "git log", "Bash(echo:*)" → "echo"
 # Ignores: "WebSearch", "mcp__foo__bar", "Bash(git log:something)"
 BASH_PREFIX_RE = re.compile(r'^Bash\((.+):\*\)$')
+
+# Only simple variable names and empty values (from $"..." locale quoting) are safe.
+# Anything else (${!FOO}, ${x:-$(cmd)}, ${x@P}, ${#x}) is not a simple $VAR.
+SIMPLE_VAR_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
+
+
+@boundary
+def main() -> None:
+    """Read a PreToolUse hook event from stdin and auto-approve if safe.
+
+    Emits an 'allow' decision only when every subcommand in a compound command
+    matches an allowed Bash prefix. All other cases produce no output, deferring
+    to Claude Code's native permission system.
+    """
+    hook_data = PreToolUseHookInput.model_validate_json(sys.stdin.read())
+
+    if hook_data.tool_name != 'Bash':
+        return  # Only handle Bash tool invocations
+
+    command = hook_data.tool_input.get('command', '')
+    if not isinstance(command, str) or not command:
+        return  # No command to analyze
+
+    subcommands = analyze_command(command)
+    if len(subcommands) <= 1:
+        return  # Simple commands are handled by built-in permissions
+
+    prefixes = load_bash_prefixes(hook_data.cwd)
+    if not prefixes:
+        return  # No allowed prefixes configured
+
+    if all(matches_prefix(cmd, prefixes) for cmd in subcommands):
+        output = PreToolUseHookOutput(
+            hook_specific_output=PreToolUseDecision(
+                permission_decision='allow',
+                permission_decision_reason=f'all {len(subcommands)} subcommands match allowed Bash prefixes',
+            )
+        )
+        print(output.model_dump_json(by_alias=True, exclude_none=True))
+
+
+def analyze_command(command: str) -> Sequence[str]:
+    """Parse command into base command strings using bashlex AST.
+
+    Returns one base_command per simple command. Compound operators (&&, ||, ;),
+    pipes, and newlines produce separate entries.
+
+    Raises ApproveCompoundBashException on dangerous/unanalyzable constructs (file redirects,
+    assignments, substitutions, control flow). ErrorBoundary handles exceptions.
+    """
+    parts = bashlex.parse(command)
+    return [cmd for part in parts for cmd in _iter_subcommands(command, part)]
 
 
 def load_bash_prefixes(cwd: str) -> Set[str]:
@@ -106,71 +146,52 @@ def load_bash_prefixes(cwd: str) -> Set[str]:
     return prefixes
 
 
-# Substitution patterns in parameter expansion values: ${x:-$(cmd)}, ${x:-`cmd`}
-SUBSTITUTION_PATTERNS = ('$(', '`', '<(', '>(')
-
-# Parameter transform operators: ${x@P} executes prompt expansion, ${x@E} interprets
-# escapes, etc. Fail closed on all @ operators — they transform values in ways that
-# may execute code or leak information.
-TRANSFORM_OPERATOR_RE = re.compile(r'@[A-Za-z]')
+def matches_prefix(base_command: str, prefixes: Set[str]) -> bool:
+    """Check if a base command matches any allowed Bash prefix."""
+    if not base_command:
+        return False
+    return any(base_command == prefix or base_command.startswith(prefix + ' ') for prefix in prefixes)
 
 
-def analyze_command(command: str) -> Sequence[str]:
-    """Parse command into base command strings using bashlex AST.
-
-    Returns one base_command per simple command. Compound operators (&&, ||, ;),
-    pipes, and newlines produce separate entries.
-
-    Raises ValueError on dangerous/unanalyzable constructs (file redirects,
-    assignments, substitutions, control flow). ErrorBoundary handles exceptions.
-    """
-    parts = bashlex.parse(command)
-    results: list[str] = []
-    for part in parts:
-        _collect_commands(command, part, results)
-    return results
-
-
-def _collect_commands(source: str, node: bashlex.ast.node, results: list[str]) -> None:
-    """Recursively extract simple commands from the AST.
+def _iter_subcommands(source: str, node: bashlex.ast.node) -> Iterator[str]:
+    """Walk the AST, yielding one base command string per simple command.
 
     Only decomposes node kinds we can fully analyze. Unknown kinds (if, for,
-    while, until, function, case) raise ValueError so the hook falls through
-    to built-in permissions rather than silently approving hidden commands.
+    while, until, function, case) raise ApproveCompoundBashException so the hook falls
+    through to built-in permissions rather than silently approving hidden commands.
     """
     kind = node.kind
 
     if kind == 'command':
-        results.append(_analyze_command_node(source, node))
+        yield _extract_base_command(source, node)
     elif kind == 'list':
         for child in node.parts:
-            if getattr(child, 'kind', '') != 'operator':
-                _collect_commands(source, child, results)
+            if child.kind != 'operator':
+                yield from _iter_subcommands(source, child)
     elif kind == 'pipeline':
         for child in node.parts:
-            if getattr(child, 'kind', '') != 'pipe':
-                _collect_commands(source, child, results)
+            if child.kind != 'pipe':
+                yield from _iter_subcommands(source, child)
     elif kind == 'compound':
-        if hasattr(node, 'redirects') and node.redirects:
-            for redir in node.redirects:
-                if not isinstance(redir.output, int):
-                    start, end = node.pos
-                    raise ValueError(f'file redirect on compound: {source[start:end].strip()}')
+        for redir in node.redirects:
+            if not isinstance(redir.output, int):
+                start, end = node.pos
+                raise ApproveCompoundBashException(f'file redirect on compound: {source[start:end].strip()}')
         for child in node.list:
-            _collect_commands(source, child, results)
+            yield from _iter_subcommands(source, child)
     elif kind == 'reservedword':
         pass  # Syntax delimiters: (, ), {, }, do, done, then, fi, !, etc.
     else:
         start, end = node.pos
-        raise ValueError(f'unanalyzable construct ({kind}): {source[start:end].strip()}')
+        raise ApproveCompoundBashException(f'unanalyzable construct ({kind}): {source[start:end].strip()}')
 
 
-def _analyze_command_node(source: str, node: bashlex.ast.node) -> str:
+def _extract_base_command(source: str, node: bashlex.ast.node) -> str:
     """Inspect a single command node using an allowlist of safe AST patterns.
 
     Safe patterns: simple words, simple $VAR expansions, fd-to-fd redirects.
     Everything else (file redirects, assignments, heredocs, substitutions,
-    unknown part kinds) raises ValueError.
+    unknown part kinds) raises ApproveCompoundBashException.
     """
     start, end = node.pos
     words: list[str] = []
@@ -180,68 +201,30 @@ def _analyze_command_node(source: str, node: bashlex.ast.node) -> str:
 
         if pk == 'word':
             words.append(part.word)
-            if hasattr(part, 'parts') and part.parts:
-                if not _all_safe_word_children(part.parts):
-                    raise ValueError(f'unsafe parameter expansion in: {part.word}')
+            if part.parts:
+                _check_word_expansions(part.parts, part.word)
 
         elif pk == 'redirect':
             if not isinstance(part.output, int):
-                raise ValueError(f'file redirect in: {source[start:end].strip()}')
+                raise ApproveCompoundBashException(f'file redirect in: {source[start:end].strip()}')
 
         elif pk == 'assignment':
-            raise ValueError(f'inline assignment in: {source[start:end].strip()}')
+            raise ApproveCompoundBashException(f'inline assignment in: {source[start:end].strip()}')
 
         else:
-            raise ValueError(f'unknown part kind ({pk}) in: {source[start:end].strip()}')
+            raise ApproveCompoundBashException(f'unknown part kind ({pk}) in: {source[start:end].strip()}')
 
-    return ' '.join(words) if words else ''
+    return ' '.join(words)
 
 
-def _all_safe_word_children(children: Sequence[bashlex.ast.node]) -> bool:
-    """True only if all children are tilde or simple parameter expansions ($VAR)."""
+def _check_word_expansions(children: Sequence[bashlex.ast.node], word: str) -> None:
+    """Raise if any child is not a tilde or simple parameter expansion ($VAR)."""
     for child in children:
         if child.kind == 'tilde':
             continue  # Tilde expansion (~, ~/path) is safe path resolution
-        elif child.kind == 'parameter':
-            val = child.value
-            if any(pat in val for pat in SUBSTITUTION_PATTERNS):
-                return False
-            if TRANSFORM_OPERATOR_RE.search(val):
-                return False
-        else:
-            # commandsubstitution, processsubstitution, or anything else
-            return False
-    return True
-
-
-def matches_prefix(base_command: str, prefixes: Set[str]) -> bool:
-    """Check if a base command matches any allowed Bash prefix."""
-    if not base_command:
-        return False
-    return any(base_command == prefix or base_command.startswith(prefix + ' ') for prefix in prefixes)
-
-
-@boundary
-def main() -> None:
-    hook_data = PreToolUseHookInput.model_validate_json(sys.stdin.read())
-
-    if hook_data.tool_name != 'Bash':
-        return
-
-    command = hook_data.tool_input.get('command', '')
-    if not isinstance(command, str) or not command:
-        return
-
-    subcommands = analyze_command(command)
-    if not subcommands or len(subcommands) <= 1:
-        return
-
-    prefixes = load_bash_prefixes(hook_data.cwd)
-    if not prefixes:
-        return
-
-    if all(matches_prefix(cmd, prefixes) for cmd in subcommands):
-        decide('allow', f'all {len(subcommands)} subcommands match allowed Bash prefixes')
+        if child.kind == 'parameter' and (not child.value or SIMPLE_VAR_RE.fullmatch(child.value)):
+            continue  # Simple $VAR or empty value ($"..." locale quoting)
+        raise ApproveCompoundBashException(f'unsafe expansion in: {word}')
 
 
 if __name__ == '__main__':
