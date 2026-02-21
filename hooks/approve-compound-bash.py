@@ -46,6 +46,7 @@ from pathlib import Path
 import bashlex
 from local_lib.error_boundary import ErrorBoundary
 from local_lib.schemas.hooks import (
+    BashToolInput,
     PreToolUseDecision,
     PreToolUseHookInput,
     PreToolUseHookOutput,
@@ -85,11 +86,11 @@ def main() -> None:
     if hook_data.tool_name != 'Bash':
         return  # Only handle Bash tool invocations
 
-    command = hook_data.tool_input.get('command', '')
-    if not isinstance(command, str) or not command:
+    bash_input = BashToolInput.model_validate(hook_data.tool_input)
+    if not bash_input.command:
         return  # No command to analyze
 
-    subcommands = analyze_command(command)
+    subcommands = analyze_command(bash_input.command)
     if len(subcommands) <= 1:
         return  # Simple commands are handled by built-in permissions
 
