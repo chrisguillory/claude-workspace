@@ -1,7 +1,7 @@
 """Tests for the approve-compound-bash PreToolUse hook.
 
 Validates bashlex-based compound command parsing, dangerous construct
-detection via ValueError raises, prefix matching, and settings loading.
+detection via ApproveCompoundBashException, prefix matching, and settings loading.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ class TestAnalyzeCommand:
 
     def test_env_var_assignment(self, hook_module: ModuleType) -> None:
         """Assignment raises ValueError — inline assignments are dangerous."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('VAR=val echo test && git status')
 
     def test_newline_separated(self, hook_module: ModuleType) -> None:
@@ -95,27 +95,27 @@ class TestAnalyzeCommand:
 
     def test_assignment_only(self, hook_module: ModuleType) -> None:
         """Assignment-only subcommand raises ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('VAR=hello && echo test')
 
     def test_if_then_visible(self, hook_module: ModuleType) -> None:
         """if/then blocks raise ValueError — unanalyzable construct."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo safe && if true; then rm -rf /; fi')
 
     def test_for_loop_visible(self, hook_module: ModuleType) -> None:
         """for loops raise ValueError — unanalyzable construct."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo safe && for i in a b; do echo $i; done')
 
     def test_while_loop_visible(self, hook_module: ModuleType) -> None:
         """while loops raise ValueError — unanalyzable construct."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo safe && while true; do echo test; done')
 
     def test_function_definition_visible(self, hook_module: ModuleType) -> None:
         """Function definitions raise ValueError — unanalyzable construct."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('f() { rm -rf /; } && echo done')
 
     def test_negated_pipeline(self, hook_module: ModuleType) -> None:
@@ -144,52 +144,52 @@ class TestDangerDetection:
         assert len(result) == 2
 
     def test_file_redirect_dangerous(self, hook_module: ModuleType) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo test > /tmp/file && git log')
 
     def test_append_redirect_dangerous(self, hook_module: ModuleType) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo test >> /tmp/file && git log')
 
     def test_input_redirect_dangerous(self, hook_module: ModuleType) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat < /tmp/file && git log')
 
     def test_command_substitution_dangerous(self, hook_module: ModuleType) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo $(rm -rf /) && git log')
 
     def test_backtick_substitution_dangerous(self, hook_module: ModuleType) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo `whoami` && git log')
 
     def test_process_substitution_dangerous(self, hook_module: ModuleType) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <(echo test) && git log')
 
     def test_here_string_dangerous(self, hook_module: ModuleType) -> None:
         """Here-strings (<<<) are non-fd redirects — always dangerous."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <<< hello && git log')
 
     def test_here_string_with_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """Here-strings (<<<) with command substitution are dangerous."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <<< $(whoami) && git log')
 
     def test_heredoc_dangerous(self, hook_module: ModuleType) -> None:
         """Heredocs (<<) are non-fd redirects — always dangerous."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <<EOF && git log\nhello\nEOF')
 
     def test_assignment_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """Command substitution in assignment position is executed at runtime."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('X=$(whoami) echo test && git log')
 
     def test_assignment_unknown_var_dangerous(self, hook_module: ModuleType) -> None:
         """Unknown env var in assignment is dangerous (allowlist model)."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('VAR=hello echo test && git log')
 
     def test_eval_base_command_preserved(self, hook_module: ModuleType) -> None:
@@ -199,61 +199,61 @@ class TestDangerDetection:
 
     def test_if_block_marked_dangerous(self, hook_module: ModuleType) -> None:
         """if/then blocks are unanalyzable — must raise ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo safe && if true; then rm -rf /; fi')
 
     def test_for_loop_marked_dangerous(self, hook_module: ModuleType) -> None:
         """for loops are unanalyzable — must raise ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo safe && for i in a b; do echo $i; done')
 
     def test_while_loop_marked_dangerous(self, hook_module: ModuleType) -> None:
         """while loops are unanalyzable — must raise ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo safe && while true; do echo test; done')
 
     def test_until_loop_marked_dangerous(self, hook_module: ModuleType) -> None:
         """until loops are unanalyzable — must raise ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo safe && until false; do echo test; done')
 
     def test_function_definition_marked_dangerous(self, hook_module: ModuleType) -> None:
         """Function definitions are unanalyzable — must raise ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('f() { rm -rf /; } && echo done')
 
     # -- Parameter expansion bypass vectors --
 
     def test_parameter_default_with_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """${x:-$(cmd)} hides command substitution inside parameter expansion."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo ${x:-$(whoami)} && git log')
 
     def test_parameter_assign_default_with_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """${x:=$(cmd)} hides command substitution inside assign-default expansion."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo ${x:=$(whoami)} && git log')
 
     def test_assignment_parameter_expansion_dangerous(self, hook_module: ModuleType) -> None:
         """Parameter expansion with substitution in assignment position."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('X=${a:-$(whoami)} echo test && git log')
 
     # -- Compound redirect bypass vectors --
 
     def test_subshell_redirect_dangerous(self, hook_module: ModuleType) -> None:
         """File redirect on subshell is invisible to inner command analysis."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('(echo a; echo b) > /tmp/file && git log')
 
     def test_brace_group_redirect_dangerous(self, hook_module: ModuleType) -> None:
         """File redirect on brace group is invisible to inner command analysis."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('{ echo a; echo b; } > /tmp/file && git log')
 
     def test_compound_redirect_blocks_auto_approve(self, hook_module: ModuleType) -> None:
         """Compound with redirect must raise ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('(echo a; echo b) > /tmp/file && git log')
 
     def test_compound_fd_redirect_safe(self, hook_module: ModuleType) -> None:
@@ -263,7 +263,7 @@ class TestDangerDetection:
 
     def test_compound_mixed_fd_then_file_redirect(self, hook_module: ModuleType) -> None:
         """fd redirect first, file redirect second — file redirect must trigger danger."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('(echo a; echo b) 2>&1 >/tmp/file && git log')
 
     def test_compound_multiple_fd_redirects_safe(self, hook_module: ModuleType) -> None:
@@ -275,64 +275,64 @@ class TestDangerDetection:
 
     def test_heredoc_with_command_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """Unquoted heredocs expand $() at runtime — content must be scanned."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <<EOF && git log\n$(rm -rf /)\nEOF')
 
     def test_heredoc_with_backtick_dangerous(self, hook_module: ModuleType) -> None:
         """Unquoted heredocs expand backticks at runtime."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <<EOF && git log\n`whoami`\nEOF')
 
     def test_heredoc_plain_content_dangerous(self, hook_module: ModuleType) -> None:
         """Heredocs are always dangerous — no content scanning needed."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <<EOF && git log\nhello world\nEOF')
 
     # -- Environment variable injection --
 
     def test_ld_preload_dangerous(self, hook_module: ModuleType) -> None:
         """LD_PRELOAD= loads arbitrary .so into subprocess — must be caught."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('LD_PRELOAD=/evil.so git log && echo done')
 
     def test_path_manipulation_dangerous(self, hook_module: ModuleType) -> None:
         """PATH= manipulation changes which binary executes."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('PATH=/evil git log && echo done')
 
     def test_git_dir_dangerous(self, hook_module: ModuleType) -> None:
         """GIT_DIR= points git at attacker-controlled repository."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('GIT_DIR=/evil/.git git log && echo done')
 
     def test_git_ssh_command_dangerous(self, hook_module: ModuleType) -> None:
         """GIT_SSH_COMMAND= executes arbitrary code on remote operations."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('GIT_SSH_COMMAND="rm -rf /" git fetch && echo done')
 
     def test_ifs_manipulation_dangerous(self, hook_module: ModuleType) -> None:
         """IFS= changes word splitting, can alter command interpretation."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('IFS=/ echo test && git log')
 
     def test_ld_library_path_dangerous(self, hook_module: ModuleType) -> None:
         """LD_LIBRARY_PATH= library search path poisoning."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('LD_LIBRARY_PATH=/evil git log && echo done')
 
     def test_safe_env_var_dangerous(self, hook_module: ModuleType) -> None:
         """All assignments are dangerous — no env var allowlist."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('TERM=xterm git log && echo done')
 
     def test_locale_env_var_dangerous(self, hook_module: ModuleType) -> None:
         """All assignments are dangerous — no env var allowlist."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('LC_ALL=C git log && echo done')
 
     def test_unknown_env_var_dangerous(self, hook_module: ModuleType) -> None:
         """All assignments are dangerous — no env var allowlist."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('MY_CUSTOM_VAR=hello git log && echo done')
 
     # -- Code-execution commands (handled by prefix matching, not AST) --
@@ -386,39 +386,39 @@ class TestDangerDetection:
 
     def test_assignment_unknown_var_with_parameter_dangerous(self, hook_module: ModuleType) -> None:
         """Unknown env var is dangerous regardless of safe value content."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('VAR=$HOME echo test && git log')
 
     def test_assignment_process_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """Process substitution in assignment position is dangerous."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('X=<(echo test) echo done && git log')
 
     def test_here_string_process_substitution_dangerous(self, hook_module: ModuleType) -> None:
         """Here-strings (<<<) with process substitution are dangerous."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <<< <(echo test) && git log')
 
     def test_backtick_in_parameter_expansion_dangerous(self, hook_module: ModuleType) -> None:
         """Backticks inside parameter expansion are caught."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo ${x:-`whoami`} && git log')
 
     # -- Parameter transform operators (@P, @E, @A, etc.) --
 
     def test_prompt_expansion_dangerous(self, hook_module: ModuleType) -> None:
         """${x@P} interprets value as PS1 prompt, executing embedded $(cmd)."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo ${PS1@P} && git log')
 
     def test_assign_transform_dangerous(self, hook_module: ModuleType) -> None:
         """${x@A} produces assignment statement — could leak values."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo ${x@A} && git log')
 
     def test_escape_transform_dangerous(self, hook_module: ModuleType) -> None:
         """${x@E} interprets escape sequences — fail closed on all @ operators."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo ${x@E} && git log')
 
 
@@ -502,7 +502,7 @@ class TestMatchesPrefix:
 
     def test_mixed_safe_dangerous_raises(self, hook_module: ModuleType) -> None:
         """One dangerous subcommand raises ValueError for the entire compound."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('git log && echo $(whoami) && git status')
 
 
@@ -658,7 +658,7 @@ class TestMainIntegration:
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo $(whoami) && git log')))
 
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.main.__wrapped__()
 
     def test_skips_empty_command(
@@ -1025,7 +1025,7 @@ class TestSurvivingMutations:
 
     def test_lowercase_transform_operator_dangerous(self, hook_module: ModuleType) -> None:
         """Lowercase transform operators (@a, @k, @q) must also be caught."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('echo ${x@a} && git log')
 
     def test_empty_prefix_regex_rejected(
@@ -1112,7 +1112,7 @@ class TestQuotingEdgeCases:
 
     def test_indented_heredoc_dangerous(self, hook_module: ModuleType) -> None:
         """Indented heredocs (<<-) are non-fd redirects — always dangerous."""
-        with pytest.raises(ValueError):
+        with pytest.raises(hook_module.ApproveCompoundBashException):
             hook_module.analyze_command('cat <<-EOF && git log\n\thello\n\tEOF')
 
     def test_malformed_json_passthrough_via_boundary(

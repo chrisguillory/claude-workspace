@@ -14,6 +14,7 @@ members = [
     "local-lib",
     "python-interpreter-mcp",
     "selenium-browser-automation-mcp",
+    "stubs",
 ]
 
 [[package]]
@@ -3005,6 +3006,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/ba/b8/73a0e6a6e079a9d9c
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/52/1064f510b141bd54025f9b55105e26d1fa970b9be67ad766380a3c9b74b0/starlette-0.50.0-py3-none-any.whl", hash = "sha256:9e5391843ec9b6e472eed1365a78c8098cfceb7a74bfd4d6b1c0c0095efb3bca", size = 74033, upload-time = "2025-11-01T15:25:25.461Z" },
 ]
+
+[[package]]
+name = "stubs"
+version = "0.0.0"
+source = { virtual = "stubs" }
 
 [[package]]
 name = "sympy"
