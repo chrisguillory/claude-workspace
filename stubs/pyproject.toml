@@ -1,0 +1,10 @@
+[project]
+name = "stubs"
+version = "0.0.0"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv]
+# Not a real package — just type stubs for untyped third-party libraries.
+# Listed as a workspace member so PyCharm picks up the path automatically.
+package = false
