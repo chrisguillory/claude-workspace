@@ -45,6 +45,7 @@ from pathlib import Path
 
 import bashlex
 from local_lib.error_boundary import ErrorBoundary
+from local_lib.library_boundary import LibraryBoundary
 from local_lib.schemas.hooks import (
     BashToolInput,
     PreToolUseDecision,
@@ -52,16 +53,17 @@ from local_lib.schemas.hooks import (
     PreToolUseHookOutput,
 )
 
-boundary = ErrorBoundary(exit_code=0)
-
-
-@boundary.handler(Exception)
-def _handle_error(exc: Exception) -> None:
-    print(f'approve-compound-bash hook error: {exc!r}', file=sys.stderr)
-
 
 class ApproveCompoundBashException(Exception):
     """Base exception for this hook. Defers to Claude Code's native permissions."""
+
+
+class BashlexBoundaryException(Exception):
+    """Translated exception from bashlex — wraps ParsingError, NotImplementedError, etc."""
+
+
+bashlex = LibraryBoundary(BashlexBoundaryException).wrap(bashlex)
+boundary = ErrorBoundary(exit_code=0)
 
 
 # Extract the prefix from Claude Code's Bash permission pattern.
@@ -114,8 +116,11 @@ def analyze_command(command: str) -> Sequence[str]:
     Returns one entry per simple command. Compound operators (&&, ||, ;),
     pipes, and newlines produce separate entries.
 
-    Raises ApproveCompoundBashException on unanalyzable constructs (file redirects,
-    assignments, substitutions, control flow).
+    Raises:
+        ApproveCompoundBashException: Unanalyzable constructs (file redirects,
+            assignments, substitutions, control flow).
+        BashlexBoundaryException: bashlex parser limitations (arithmetic
+            expansion, unsupported syntax). Translated via LibraryBoundary.
     """
     parts = bashlex.parse(command)
     return [cmd for part in parts for cmd in _iter_subcommands(command, part)]
@@ -222,6 +227,20 @@ def _check_word_expansions(children: Sequence[bashlex.ast.node], word: str) -> N
         if child.kind == 'parameter' and (not child.value or SIMPLE_VAR_RE.fullmatch(child.value)):
             continue  # Simple $VAR or empty value ($"..." locale quoting)
         raise ApproveCompoundBashException(f'unsafe expansion in: {word}')
+
+
+# Boundary handlers — registered after main, dispatched when main raises
+
+
+@boundary.handler(BashlexBoundaryException)
+def _handle_bashlex_error(exc: BashlexBoundaryException) -> None:
+    cause = f' from {type(exc.__cause__).__name__}' if exc.__cause__ else ''
+    print(f'approve-compound-bash hook error: {exc!r}{cause}', file=sys.stderr)
+
+
+@boundary.handler(Exception)
+def _handle_error(exc: Exception) -> None:
+    print(f'approve-compound-bash hook error: {exc!r}', file=sys.stderr)
 
 
 if __name__ == '__main__':
