@@ -12,3 +12,5 @@ target/
 # Auth/session files (sensitive)
 *_auth.json
 *.auth.json
+
+/.obsidian/
