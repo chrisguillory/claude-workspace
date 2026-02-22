@@ -695,6 +695,7 @@ class BrowserState:
         capture_counter: int,
     ) -> None:
         self.driver = driver  # Lazy-initialized: None until first navigation
+        self.current_browser: Browser | None = None  # Tracks which browser launched the current driver
         self.temp_dir = temp_dir
         self.screenshot_dir = screenshot_dir
         self.capture_temp_dir = capture_temp_dir
@@ -736,6 +737,7 @@ class BrowserService:
         if self.state.driver:
             await asyncio.to_thread(self.state.driver.quit)
             self.state.driver = None
+            self.state.current_browser = None
         # Clear origin tracking and storage caches - new browser = new session
         self.state.origin_tracker.clear()
         self.state.local_storage_cache.clear()
@@ -820,6 +822,7 @@ class BrowserService:
 
         # Initialize driver in thread pool (blocking operation)
         self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
+        self.state.current_browser = browser
 
         # CRITICAL: CDP injection AFTER driver creation but BEFORE first navigation
         # This is what makes Selenium bypass Cloudflare where Playwright fails
@@ -919,6 +922,12 @@ def register_tools(service: BrowserService) -> None:
         if not url.startswith(valid_prefixes):
             raise fastmcp.exceptions.ValidationError(
                 'URL must start with http://, https://, file://, about:, data:, or blob:'
+            )
+
+        if service.state.current_browser is not None and browser != service.state.current_browser and not fresh_browser:
+            raise fastmcp.exceptions.ValidationError(
+                f"Browser changed from '{service.state.current_browser}' to '{browser}'. "
+                'Pass fresh_browser=True to restart with the new browser.'
             )
 
         if enable_har_capture and not fresh_browser:
