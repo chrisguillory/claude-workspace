@@ -82,6 +82,27 @@ def fail_during_creation() -> Iterator[None]:
     yield  # pragma: no cover — makes this a generator function
 
 
+# -- Factory functions returning generators (NOT generator functions) --
+# These exercise _wrap_result's GeneratorType branch, which is unreachable
+# when the callable is a generator function (caught by isgeneratorfunction).
+
+
+def make_items() -> Iterator[int]:
+    """Regular function that returns a generator — NOT a generator function itself."""
+
+    def _inner() -> Iterator[int]:
+        yield 1
+        yield 2
+        raise ValueError('factory gen failure')
+
+    return _inner()
+
+
+def make_good_items() -> Iterator[int]:
+    """Regular function returning a generator expression (not a generator function)."""
+    return (x for x in [10, 20])
+
+
 # -- Async functions --
 
 
@@ -105,6 +126,22 @@ async def async_items() -> AsyncIterator[int]:
 async def async_good_items() -> AsyncIterator[int]:
     yield 10
     yield 20
+
+
+async def async_echo_gen() -> AsyncIterator[str]:
+    """Async generator that echoes sent values."""
+    value = yield 'ready'
+    while True:
+        value = yield f'echo:{value}'
+
+
+async def async_throw_converter() -> AsyncIterator[str]:
+    """Async generator that converts thrown exceptions into ValueError."""
+    while True:
+        try:
+            yield 'waiting'
+        except RuntimeError:
+            raise ValueError('async converted from RuntimeError')
 
 
 # -- Context managers returned by factory functions --
@@ -188,6 +225,16 @@ class _GoodAsyncConnection:
         pass
 
 
+class _AsyncExitFailingConnection:
+    """Async connection that fails on exit (cleanup error)."""
+
+    async def __aenter__(self) -> str:
+        return 'async connected'
+
+    async def __aexit__(self, *args: object) -> None:
+        raise ConnectionError('async disconnect failed')
+
+
 # -- Factory functions (module-level, like sqlite3.connect()) --
 
 
@@ -217,6 +264,10 @@ def async_connect_failing() -> _AsyncConnection:
 
 def async_connect() -> _GoodAsyncConnection:
     return _GoodAsyncConnection()
+
+
+def async_connect_exit_failing() -> _AsyncExitFailingConnection:
+    return _AsyncExitFailingConnection()
 
 
 # -- Callable objects (class instances with __call__) --
