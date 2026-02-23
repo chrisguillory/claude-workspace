@@ -80,9 +80,9 @@ _F = TypeVar('_F', bound=Callable[..., object])
 
 # Control-flow exceptions that are Exception subclasses but must never be
 # translated. StopIteration terminates iteration; StopAsyncIteration terminates
-# async iteration; GeneratorExit closes generators. Translating any of these
-# breaks Python's iterator/generator protocols.
-_PASSTHROUGH = (StopIteration, StopAsyncIteration, GeneratorExit)
+# async iteration. Translating these breaks Python's iterator/generator protocols.
+# (GeneratorExit is BaseException, not Exception, so it's caught by the prior check.)
+_PASSTHROUGH = (StopIteration, StopAsyncIteration)
 
 
 class LibraryBoundary:
@@ -193,8 +193,10 @@ class LibraryBoundary:
         returned by library calls, so exceptions during iteration or context
         management are translated too.
 
-        Limitation:
-            Type checkers see ``Any`` for proxy attribute access.
+        Limitations:
+            - Type checkers see ``Any`` for proxy attribute access.
+            - Property access on the wrapped object executes outside the boundary.
+              Exceptions from ``@property`` methods are not translated.
         """
         return _TranslatingProxy(library, self)
 
@@ -216,6 +218,8 @@ class _TranslatingProxy:
     5. Regular callable → sync wrapper, ``_wrap_result()``
     """
 
+    __slots__ = ('_target', '_boundary')
+
     def __init__(self, target: object, boundary: LibraryBoundary) -> None:
         object.__setattr__(self, '_target', target)
         object.__setattr__(self, '_boundary', boundary)
@@ -223,6 +227,10 @@ class _TranslatingProxy:
     def __getattr__(self, name: str) -> Any:
         target = object.__getattribute__(self, '_target')
         boundary = object.__getattribute__(self, '_boundary')
+        # getattr() is outside the boundary to preserve hasattr() semantics.
+        # Wrapping it would translate AttributeError for missing attributes,
+        # breaking hasattr() and Python's attribute lookup protocol.
+        # Trade-off: @property exceptions on the target escape untranslated.
         attr = getattr(target, name)
 
         if not callable(attr):

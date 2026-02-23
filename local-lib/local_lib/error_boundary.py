@@ -4,17 +4,21 @@ Distinguishes boundary-level error handling (unexpected failures at architectura
 edges) from business-logic error handling (expected failures in domain code).
 Python's try/except conflates these — ErrorBoundary makes the intent explicit.
 
-Three layers of error handling:
+Four layers of error handling:
 
     Layer 1 — Business Logic:
         Local try/except for expected domain errors.
         ``try: find_user(id) except UserNotFound: return ErrorResponse(...)``
 
-    Layer 2 — Scope Boundary:
+    Layer 2 — Library Boundary:
+        Translate third-party exceptions (``library_boundary.py``).
+        ``with boundary: lib.parse(cmd)``
+
+    Layer 3 — Scope Boundary:
         ErrorBoundary(exit_code=None) at request/task edges.
         Handles unexpected errors, continues serving.
 
-    Layer 3 — Process Boundary:
+    Layer 4 — Process Boundary:
         ErrorBoundary() at entry points.
         Handles unexpected errors, exits with non-zero code.
 
