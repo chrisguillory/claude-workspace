@@ -127,6 +127,7 @@ class TestContextManager:
         with pytest.raises(AppError) as exc_info, boundary, boundary:
             raise ValueError('inner')
         assert exc_info.value.args == ('inner',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
 
 class TestAsyncContextManager:
@@ -138,6 +139,7 @@ class TestAsyncContextManager:
             async with boundary:
                 raise ValueError('async error')
         assert exc_info.value.args == ('async error',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     async def test_no_exception_passes_through(self) -> None:
         boundary = LibraryBoundary(AppError)
@@ -159,6 +161,7 @@ class TestDecorator:
         with pytest.raises(AppError) as exc_info:
             failing()
         assert exc_info.value.args == ('decorated',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_sync_decorator_returns_value(self) -> None:
         boundary = LibraryBoundary(AppError)
@@ -195,6 +198,7 @@ class TestDecorator:
         with pytest.raises(AppError) as exc_info:
             await failing()
         assert exc_info.value.args == ('async decorated',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     async def test_async_decorator_returns_value(self) -> None:
         boundary = LibraryBoundary(AppError)
@@ -229,6 +233,7 @@ class TestProxy:
         with pytest.raises(AppError) as exc_info:
             proxy.fail()
         assert exc_info.value.args == ('sync failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_callable_returns_value(self) -> None:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
@@ -316,6 +321,7 @@ class TestProxyCallableObjects:
         with pytest.raises(AppError) as exc_info:
             proxy.failing_processor('data')
         assert exc_info.value.args == ('processing failed: data',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_callable_object_direct_wrap_not_callable(self) -> None:
         """Wrapping a callable object directly -- proxy itself is NOT callable.
@@ -413,6 +419,7 @@ class TestProxyNestedAccess:
         with pytest.raises(AppError) as exc_info:
             sub_proxy.fail()
         assert exc_info.value.args == ('submodule failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
 
 class TestProxyMultipleBoundaries:
@@ -468,6 +475,7 @@ class TestProxyAsync:
         with pytest.raises(AppError) as exc_info:
             await proxy.async_fail()
         assert exc_info.value.args == ('async failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     async def test_async_callable_returns_value(self) -> None:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
@@ -482,6 +490,7 @@ class TestProxyGenerator:
         with pytest.raises(AppError) as exc_info:
             list(proxy.items())
         assert exc_info.value.args == ('mid-iteration failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_generator_success(self) -> None:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
@@ -521,6 +530,7 @@ class TestProxyGenerator:
         with pytest.raises(AppError) as exc_info:
             gen.throw(RuntimeError('trigger'))
         assert exc_info.value.args == ('converted from RuntimeError',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_generator_throw_with_target_type(self) -> None:
         """Throwing the target exception type into a generator -- double-wrap guard."""
@@ -557,6 +567,7 @@ class TestProxyGenerator:
         with pytest.raises(AppError) as exc_info:
             next(gen)
         assert exc_info.value.args == ('creation failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_factory_returning_generator_translates(self) -> None:
         """Regular function returning a generator (not a generator function).
@@ -614,6 +625,7 @@ class TestProxyAsyncGenerator:
             async for _ in proxy.async_items():
                 pass
         assert exc_info.value.args == ('async mid-iteration failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     async def test_async_generator_success(self) -> None:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
@@ -656,6 +668,7 @@ class TestProxyAsyncGenerator:
         with pytest.raises(AppError) as exc_info:
             await agen.athrow(RuntimeError('trigger'))
         assert exc_info.value.args == ('async converted from RuntimeError',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
 
     async def test_async_generator_aclose(self) -> None:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
@@ -730,6 +743,7 @@ class TestProxyContextManager:
         with pytest.raises(AppError) as exc_info, proxy.connect_failing():
             pass
         assert exc_info.value.args == ('connect failed',)
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
 
     def test_cm_success(self) -> None:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
@@ -758,6 +772,7 @@ class TestProxyContextManager:
         with pytest.raises(AppError) as exc_info, proxy.connect_exit_failing():
             pass  # no body exception, but __exit__ raises
         assert exc_info.value.args == ('disconnect failed',)
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
 
     def test_cm_exit_raises_on_body_error(self) -> None:
         """__exit__ raises NEW exception while handling body exception.
@@ -771,6 +786,7 @@ class TestProxyContextManager:
         with pytest.raises(AppError) as exc_info, proxy.connect_exit_raises_on_body_error():
             raise RuntimeError('body error')
         assert exc_info.value.args == ('cleanup failed during error handling',)
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
 
     def test_cm_exit_returning_true_suppresses(self) -> None:
         """__exit__ returning True suppresses the body exception.
@@ -789,6 +805,7 @@ class TestProxyContextManager:
             async with proxy.async_connect_failing():
                 pass
         assert exc_info.value.args == ('async connect failed',)
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
 
     async def test_async_cm_success(self) -> None:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
@@ -819,6 +836,7 @@ class TestProxyContextManager:
             async with proxy.async_connect_exit_raises_on_body_error():
                 raise RuntimeError('async body error')
         assert exc_info.value.args == ('async cleanup failed during error handling',)
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
 
     async def test_async_cm_exit_returning_true_suppresses(self) -> None:
         """Async __aexit__ returning True suppresses the body exception."""
