@@ -1223,8 +1223,10 @@ def _get_process_uptime_ms(claude_pid: int) -> float:
     return (time.time() - psutil.Process(claude_pid).create_time()) * 1000
 
 
-def _get_session_age_ms(transcript_path: str) -> float:
+def _get_session_age_ms(transcript_path: str) -> float | None:
     """Get session age from first transcript line timestamp."""
+    if not os.path.isfile(transcript_path):
+        return None
     with open(transcript_path) as f:
         first_line = f.readline()
     start = datetime.fromisoformat(json.loads(first_line)['timestamp'])
@@ -1364,7 +1366,7 @@ def main() -> None:
     uptime_ms = _get_process_uptime_ms(claude_pid)
     age_ms = _get_session_age_ms(data.transcript_path)
     pid_str = f'{DIM}pid:{RESET} {claude_pid} {DIM}up:{RESET}{_format_duration(uptime_ms)}'
-    age_str = f'{DIM}age:{RESET}{_format_duration(age_ms)}'
+    age_str = f'{DIM}age:{RESET}{_format_duration(age_ms or uptime_ms)}'
     parts.append(f'{pid_str} {DIM}session_id:{RESET} {_osc8_link(transcript_url, data.session_id)} {age_str}')
 
     # Process health (Tier 1: always, Tier 2: anomalies, Tier 3: trend)
