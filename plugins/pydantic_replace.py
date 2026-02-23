@@ -37,7 +37,9 @@ both errors because ``update`` is ``dict[str, Any]``.
 
 Configuration
 -------------
-Replace ``pydantic.mypy`` in your mypy plugins list::
+**Replace** ``pydantic.mypy`` in your mypy plugins list — do not list both.
+Mypy returns the first plugin's hook and ignores the rest, so having both
+causes this plugin to silently never fire::
 
     [tool.mypy]
     plugins = ["plugins/pydantic_replace.py"]
@@ -54,10 +56,13 @@ Caveats
 - Bypasses Pydantic runtime validation (same as ``model_copy``). Values are
   assigned directly without running validators or enforcing ``extra``/``strict``.
 - Depends on ``PydanticPlugin``, ``PydanticModelField``, and ``METADATA_KEY``
-  from ``pydantic.mypy``. These are stable across pydantic 2.x but are not
-  part of pydantic's public API contract.
-- If pydantic adds native ``__replace__`` synthesis, the ``plugin_generated``
-  guard makes this a no-op — the plugin remains safe to keep installed.
+  from ``pydantic.mypy``. These are internal APIs without stability guarantees;
+  ``to_argument()`` changed signature in pydantic 2.8. Tested against
+  pydantic >=2.12.5 with mypy >=1.19.
+- If pydantic adds native ``__replace__`` synthesis, this plugin overwrites it
+  with an equivalent signature (same field metadata). The result is idempotent,
+  so the plugin remains safe to keep installed. The ``plugin_generated`` guard
+  only skips synthesis when a *user-defined* ``__replace__`` exists.
 
 Upstream context
 ----------------
@@ -97,7 +102,7 @@ class PydanticReplacePlugin(PydanticPlugin):
 
     def report_config_data(self, ctx: ReportConfigContext) -> dict[str, Any]:
         """Include plugin version so mypy invalidates cache on logic changes."""
-        data = super().report_config_data(ctx)
+        data = dict(super().report_config_data(ctx))
         data['pydantic_replace_version'] = _PLUGIN_VERSION
         return data
 
@@ -115,12 +120,16 @@ class PydanticReplacePlugin(PydanticPlugin):
 
 
 def _collect_parent_fields(info: TypeInfo) -> dict[str, tuple[TypeInfo, Any]]:
-    """Collect field data from the nearest parent that defines each field.
+    """Collect the widest parent type for each inherited field.
 
     For inherited fields, ``__replace__`` should use the parent's (wider) type
     to satisfy LSP. When a subclass narrows ``name: str`` to
     ``name: Literal['LCP']``, the parent's ``str`` is used so the synthesized
     ``__replace__`` doesn't violate Liskov substitution.
+
+    Walks the MRO forward (nearest → highest ancestor). Each higher parent
+    overwrites narrower definitions, so the final entry per field holds the
+    widest type from the highest defining ancestor.
 
     Returns ``(defining_class_info, serialized_field_data)`` tuples keyed by
     field name. The TypeInfo is needed to correctly deserialize type variables
@@ -132,8 +141,7 @@ def _collect_parent_fields(info: TypeInfo) -> dict[str, tuple[TypeInfo, Any]]:
         if parent_meta is None:
             continue
         for name, data in parent_meta.get('fields', {}).items():
-            if name not in parent_fields:
-                parent_fields[name] = (parent, data)
+            parent_fields[name] = (parent, data)
     return parent_fields
 
 
@@ -152,7 +160,9 @@ def _synthesize_replace(ctx: ClassDefContext) -> None:
 
     info = ctx.cls.info
 
-    # Don't overwrite a user-defined __replace__
+    # Skip if the user defined their own __replace__ (not plugin-generated).
+    # Plugin-generated __replace__ (e.g., future pydantic native) gets overwritten
+    # with an equivalent signature — safe because we use the same field metadata.
     existing = info.names.get('__replace__')
     if existing is not None and not existing.plugin_generated:
         return
@@ -183,11 +193,14 @@ def _synthesize_replace(ctx: ClassDefContext) -> None:
         else:
             field = PydanticModelField.deserialize(info, data, ctx.api)
 
+        # force_optional=True is critical: it ensures all args are keyword-optional
+        # regardless of the field's has_default flag. For inherited fields, we use
+        # the parent's field data which may have a different has_default than the child.
         arg = field.to_argument(
             current_info=info,
             typed=typed,
             model_strict=model_strict,
-            force_optional=True,  # All __replace__ args are optional
+            force_optional=True,
             use_alias=False,  # Python names, matching runtime behavior
             api=ctx.api,
             force_typevars_invariant=False,
