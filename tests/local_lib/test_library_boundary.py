@@ -286,9 +286,14 @@ class TestProxy:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
         with pytest.raises(AttributeError) as exc_info:
             proxy.new_attr = 'test'
-        assert exc_info.value.args == (
-            "'_TranslatingProxy' object has no attribute 'new_attr' and no __dict__ for setting new attributes",
-        )
+        assert exc_info.value.args == ("'_TranslatingProxy' object has no attribute 'new_attr'",)
+
+    def test_delattr_fails_fast(self) -> None:
+        """Deleting attributes on the proxy raises AttributeError (fail-fast via __delattr__)."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        with pytest.raises(AttributeError) as exc_info:
+            del proxy.version
+        assert exc_info.value.args == ("cannot delete attribute 'version' on _TranslatingProxy",)
 
     def test_wrapping_none(self) -> None:
         """Wrapping None — getattr raises AttributeError for any access."""
@@ -570,6 +575,35 @@ class TestProxyGenerator:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
         assert list(proxy.make_good_items()) == [10, 20]
 
+    def test_generator_send_failure_translated(self) -> None:
+        """send() that causes generator to raise — exception is translated."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        gen = proxy.send_then_fail()
+        assert next(gen) == 'ready'
+        assert gen.send(None) == 'ok'
+        with pytest.raises(AppError) as exc_info:
+            gen.send(None)
+        assert exc_info.value.args == ('send failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
+
+    def test_generator_close_cleanup_failure_translated(self) -> None:
+        """close() translates exceptions from generator's finally block."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        gen = proxy.bad_cleanup()
+        next(gen)
+        with pytest.raises(AppError) as exc_info:
+            gen.close()
+        assert exc_info.value.args == ('cleanup error',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
+
+    def test_generator_wrong_args_translated(self) -> None:
+        """Calling a generator function with wrong args raises TypeError at call
+        time (before a generator object exists). The boundary must catch this."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        with pytest.raises(AppError) as exc_info:
+            proxy.echo_gen('unexpected_arg')
+        assert isinstance(exc_info.value.__cause__, TypeError)
+
 
 class TestProxyAsyncGenerator:
     """Verify async generator wrapping translates exceptions during iteration."""
@@ -628,6 +662,64 @@ class TestProxyAsyncGenerator:
         agen = proxy.async_items()
         await agen.__anext__()
         await agen.aclose()  # should not raise
+
+    async def test_factory_returning_async_generator_translates(self) -> None:
+        """Regular function returning an async generator (not an async gen function).
+
+        Exercises _wrap_result's AsyncGeneratorType branch, which is unreachable
+        for async generator functions (caught by isasyncgenfunction in __getattr__).
+        """
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        with pytest.raises(AppError) as exc_info:
+            async for _ in proxy.make_async_items():
+                pass
+        assert exc_info.value.args == ('async factory gen failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
+
+    async def test_factory_returning_async_generator_success(self) -> None:
+        """Async generator returned by a regular function — same _wrap_result path."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        result = [item async for item in proxy.make_async_good_items()]
+        assert result == [10, 20]
+
+    async def test_async_generator_athrow_with_target_type(self) -> None:
+        """Throwing the target exception type into async generator — double-wrap guard."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        agen = proxy.async_echo_gen()
+        await agen.__anext__()
+        with pytest.raises(AppError) as exc_info:
+            await agen.athrow(AppError('already target'))
+        assert exc_info.value.args == ('already target',)
+        assert exc_info.value.__cause__ is None
+
+    async def test_async_generator_asend_failure_translated(self) -> None:
+        """asend() that causes async generator to raise — exception is translated."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        agen = proxy.async_send_then_fail()
+        assert await agen.__anext__() == 'ready'
+        assert await agen.asend(None) == 'ok'
+        with pytest.raises(AppError) as exc_info:
+            await agen.asend(None)
+        assert exc_info.value.args == ('async send failure',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
+
+    async def test_async_generator_aclose_cleanup_failure_translated(self) -> None:
+        """aclose() translates exceptions from async generator's finally block."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        agen = proxy.async_bad_cleanup()
+        await agen.__anext__()
+        with pytest.raises(AppError) as exc_info:
+            await agen.aclose()
+        assert exc_info.value.args == ('async cleanup error',)
+        assert isinstance(exc_info.value.__cause__, ValueError)
+
+    async def test_async_generator_wrong_args_translated(self) -> None:
+        """Calling an async generator function with wrong args raises TypeError
+        at call time (before a generator object exists). The boundary must catch this."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        with pytest.raises(AppError) as exc_info:
+            proxy.async_echo_gen('unexpected_arg')
+        assert isinstance(exc_info.value.__cause__, TypeError)
 
 
 class TestProxyContextManager:
@@ -712,6 +804,28 @@ class TestProxyContextManager:
         assert exc_info.value.args == ('async disconnect failed',)
         assert isinstance(exc_info.value.__cause__, ConnectionError)
 
+    async def test_async_cm_body_exception_not_translated(self) -> None:
+        """Exceptions from user code inside async with-body are NOT translated."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        with pytest.raises(RuntimeError) as exc_info:
+            async with proxy.async_connect():
+                raise RuntimeError('async user code')
+        assert exc_info.value.args == ('async user code',)
+
+    async def test_async_cm_exit_raises_on_body_error(self) -> None:
+        """Async __aexit__ raises NEW exception while handling body exception."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        with pytest.raises(AppError) as exc_info:
+            async with proxy.async_connect_exit_raises_on_body_error():
+                raise RuntimeError('async body error')
+        assert exc_info.value.args == ('async cleanup failed during error handling',)
+
+    async def test_async_cm_exit_returning_true_suppresses(self) -> None:
+        """Async __aexit__ returning True suppresses the body exception."""
+        proxy = LibraryBoundary(AppError).wrap(fake_lib)
+        async with proxy.async_connect_suppressing():
+            raise RuntimeError('suppressed by async CM')
+
 
 class TestTargetExceptionVariants:
     """Verify behavior with unusual target exception types."""
@@ -734,6 +848,23 @@ class TestTargetExceptionVariants:
         with pytest.raises(TypeError) as exc_info, boundary:
             raise ValueError('oops')
         assert exc_info.value.args == ('NoArgError.__init__() takes 1 positional argument but 2 were given',)
+
+
+class TestBrokenStr:
+    """Verify translation works when exception has broken __str__."""
+
+    def test_broken_str_falls_back_to_type_name(self) -> None:
+        """Exception with broken __str__ -- fallback to '<TypeName>'."""
+
+        class BrokenStrError(Exception):
+            def __str__(self) -> str:
+                raise RuntimeError('__str__ is broken')
+
+        boundary = LibraryBoundary(AppError)
+        with pytest.raises(AppError) as exc_info, boundary:
+            raise BrokenStrError('original')
+        assert exc_info.value.args == ('<BrokenStrError>',)
+        assert isinstance(exc_info.value.__cause__, BrokenStrError)
 
 
 class TestWithBashlex:
