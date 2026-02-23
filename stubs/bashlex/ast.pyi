@@ -2,8 +2,7 @@
 
 bashlex uses a single ``node`` class with different attributes per ``kind``.
 All attributes are declared here for permissive access — runtime code uses
-``hasattr()``/``getattr()`` to handle per-kind variation. See task #13 for
-planned type-safe cleanup.
+``hasattr()``/``getattr()`` to handle per-kind variation.
 """
 
 import builtins

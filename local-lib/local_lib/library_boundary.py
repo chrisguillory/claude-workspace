@@ -298,8 +298,8 @@ class _TranslatingProxy:
         3. Async context manager — has ``__aenter__``/``__aexit__``
         4. Sync context manager — has ``__enter__``/``__exit__``
 
-        Generators are checked first because they are also context managers in
-        some cases — the generator check is more specific.
+        Generators are checked first via isinstance (exact type match) before
+        the duck-typed hasattr checks for context managers.
         """
         if isinstance(result, types.GeneratorType):
             return _WrappedGenerator(result, boundary)
