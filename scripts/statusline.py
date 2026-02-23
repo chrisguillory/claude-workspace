@@ -99,6 +99,7 @@ Possible Improvements:
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import mmap
 import os
@@ -217,6 +218,7 @@ class SwitchPendingMarker(_ExternalModel):
 
     email_address: str = ''
     billing_type: str = ''
+    login_name: str = ''
 
 
 # =============================================================================
@@ -266,6 +268,7 @@ class CredentialSnapshot(pydantic.BaseModel):
 
     session_id: str
     claude_pid: int
+    claude_pid_created_at: float = 0.0  # psutil create_time(); 0.0 for pre-existing snapshots
     created_at: str
     credentials: ResolvedCredentials
 
@@ -573,84 +576,223 @@ def _atomic_write_json(path: Path, data: str) -> None:
             tmp.unlink()
 
 
-def _is_switch_pending(disk_data: ResolvedCredentials) -> bool:
-    """Check if switch-login's marker matches current disk state.
+_LOGIN_SUCCESS_MARKER = b'<local-command-stdout>Login successful</local-command-stdout>'
 
-    Compares identity fields only — must match the same keys used for
-    account_changed detection in _get_active_credentials.
+
+def _is_switch_pending_for(snap: CredentialSnapshot) -> bool:
+    """A switch is pending if it happened after this snapshot's credentials were captured."""
+    try:
+        switch_time = SWITCH_PENDING_PATH.stat().st_mtime
+    except OSError:
+        return False
+    credential_time = datetime.fromisoformat(snap.created_at).timestamp()
+    return switch_time > credential_time
+
+
+@functools.lru_cache(maxsize=1)
+def _read_config_identity(config_mtime: float) -> tuple[str, str, str] | None:
+    """Extract oauthAccount identity from ~/.claude.json without full parse.
+
+    Finds the oauthAccount object by byte offset, parses only that fragment.
+    Cached by mtime — redundant calls within the same invocation are free.
+    The config_mtime parameter is unused in the body but serves as cache key.
+    """
+    _ = config_mtime  # cache key only
+    try:
+        raw = CONFIG_PATH.read_bytes()
+    except OSError:
+        return None
+    marker = b'"oauthAccount"'
+    pos = raw.find(marker)
+    if pos == -1:
+        return None
+    brace_start = raw.find(b'{', pos + len(marker))
+    if brace_start == -1:
+        return None
+    # oauthAccount is a flat object (no nested {}) — find the closing brace
+    brace_end = raw.find(b'}', brace_start)
+    if brace_end == -1:
+        return None
+    oa: dict[str, object] = json.loads(raw[brace_start : brace_end + 1])
+    email = oa.get('emailAddress', '')
+    org = oa.get('organizationUuid', '')
+    billing = oa.get('billingType', '')
+    if not isinstance(email, str) or not isinstance(org, str) or not isinstance(billing, str):
+        return None
+    return email, org, billing
+
+
+def _is_config_identity_changed(snap: CredentialSnapshot) -> bool:
+    """Detect external credential changes (e.g., /login from another session).
+
+    Mtime-gated: only stats ~/.claude.json. When modified after the snapshot,
+    reads just the oauthAccount fragment (not the full 67KB file parse).
+    Identity-only: ignores display field changes.
     """
     try:
-        marker = SwitchPendingMarker.model_validate_json(SWITCH_PENDING_PATH.read_text())
-    except OSError:  # ValidationError/JSONDecodeError: fail-fast on schema drift (our data)
+        config_mtime = CONFIG_PATH.stat().st_mtime
+    except OSError:
         return False
-    return marker.email_address == disk_data.email_address and marker.billing_type == disk_data.billing_type
+    credential_time = datetime.fromisoformat(snap.created_at).timestamp()
+    if config_mtime <= credential_time:
+        return False
+    identity = _read_config_identity(config_mtime)
+    if identity is None:
+        return False
+    email, org, billing = identity
+    return (
+        email != snap.credentials.email_address
+        or org != snap.credentials.organization_uuid
+        or billing != snap.credentials.billing_type
+    )
 
 
-def _get_active_credentials(session_id: str, claude_pid: int) -> tuple[ResolvedCredentials, bool]:
-    """Return (credentials_to_display, switch_pending).
+def _read_switch_pending_marker() -> SwitchPendingMarker | None:
+    """Read the switch-pending marker, or None if missing."""
+    try:
+        return SwitchPendingMarker.model_validate_json(SWITCH_PENDING_PATH.read_text())
+    except OSError:  # ValidationError/JSONDecodeError: fail-fast on schema drift (our data)
+        return None
 
-    On first call for a session, snapshots the current disk state.
-    On subsequent calls, compares snapshot vs disk to detect mid-session switches.
+
+def _has_recent_login(transcript_path: str, after_iso: str) -> bool:
+    """Check if /login succeeded in the transcript after the given ISO timestamp.
+
+    Searches backward via mmap rfind. Validates each match is a genuine /login
+    record (type="user", content is a plain string equal to the marker) to
+    reject false positives from tool results that contain the marker as quoted text.
+    """
+    try:
+        size = os.path.getsize(transcript_path)
+    except OSError:
+        return False
+    if size == 0:
+        return False
+    marker_str = _LOGIN_SUCCESS_MARKER.decode()
+    with open(transcript_path, 'rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        search_end = len(mm)
+        while True:
+            pos = mm.rfind(_LOGIN_SUCCESS_MARKER, 0, search_end)
+            if pos == -1:
+                return False
+            line_start = mm.rfind(b'\n', 0, pos) + 1
+            line_end = mm.find(b'\n', pos)
+            if line_end == -1:
+                line_end = len(mm)
+            record = json.loads(mm[line_start:line_end])
+            msg = record.get('message')
+            if (
+                record.get('type') == 'user'
+                and isinstance(msg, dict)
+                and isinstance(msg.get('content'), str)
+                and msg['content'] == marker_str
+            ):
+                ts: str = record.get('timestamp', '')
+                if ts > after_iso:
+                    return True
+            # False positive or too old — search backward
+            search_end = line_start
+
+
+def _resolve_pending_from_marker() -> str:
+    """Resolve pending login name from the .switch-pending marker."""
+    marker = _read_switch_pending_marker()
+    if marker is not None and marker.login_name:
+        return marker.login_name
+    return '?'
+
+
+def _resolve_pending_from_config() -> str:
+    """Resolve pending login name from ~/.claude.json oauthAccount.
+
+    Reads config identity and looks up the matching saved login file.
+    Falls back to email if no login file matches.
+    """
+    try:
+        config_mtime = CONFIG_PATH.stat().st_mtime
+    except OSError:
+        return '?'
+    identity = _read_config_identity(config_mtime)
+    if identity is None:
+        return '?'
+    email, org, billing = identity
+    login_info = _resolve_login(email, billing, org)
+    if login_info is not None and login_info.login_name:
+        return login_info.login_name
+    return email or '?'
+
+
+def _get_active_credentials(
+    session_id: str, claude_pid: int, claude_pid_created_at: float, transcript_path: str
+) -> tuple[ResolvedCredentials, str]:
+    """Return (credentials_to_display, pending_login_name).
+
+    The snapshot is immutable per process EXCEPT when /login runs in this
+    session — which actually changes the process's in-memory credentials.
+
+    Three signals, checked in order:
+    1. Transcript "Login successful" (from /login this session) → re-snapshot
+    2. .switch-pending marker mtime > snapshot (from switch-login) → pending
+    3. ~/.claude.json oauthAccount identity differs (from /login other session) → pending
     """
     snap_file = _snapshot_path(session_id)
-    disk_data = _read_static_data()
 
     snap: CredentialSnapshot | None = None
     if snap_file.exists():
         try:
             snap = CredentialSnapshot.model_validate_json(snap_file.read_text())
-        except OSError:  # ValidationError/JSONDecodeError: fail-fast on schema drift (our data)
+        except OSError:
             snap_file.unlink(missing_ok=True)
 
-    if snap is not None:
-        # PID changed = session was resumed with new process → re-snapshot
-        if snap.claude_pid != claude_pid:
-            snap_file.unlink(missing_ok=True)
-            SWITCH_PENDING_PATH.unlink(missing_ok=True)
-        else:
-            snap_creds = snap.credentials
-            # Only compare identity fields — plan info can change without
-            # account change (e.g., reverse mapping enriches setup-token data).
-            account_changed = (
-                snap_creds.email_address != disk_data.email_address or snap_creds.billing_type != disk_data.billing_type
-            )
-            if account_changed:
-                if _is_switch_pending(disk_data):
-                    return snap_creds, True
-                # /login or other cause — update snapshot to match new reality
-                new_snap = CredentialSnapshot(
-                    session_id=session_id,
-                    claude_pid=claude_pid,
-                    created_at=datetime.now(UTC).isoformat(),
-                    credentials=disk_data,
-                )
-                _atomic_write_json(snap_file, new_snap.model_dump_json(by_alias=True, indent=2))
-                return disk_data, False
-            # Same account — update snapshot with latest display data
-            # (reverse mapping may have enriched subscription/tier)
-            if snap_creds != disk_data:
-                new_snap = CredentialSnapshot(
-                    session_id=session_id,
-                    claude_pid=claude_pid,
-                    created_at=snap.created_at,
-                    credentials=disk_data,
-                )
-                _atomic_write_json(snap_file, new_snap.model_dump_json(by_alias=True, indent=2))
-            return disk_data, False
+    def _save_snapshot(creds: ResolvedCredentials) -> CredentialSnapshot:
+        new = CredentialSnapshot(
+            session_id=session_id,
+            claude_pid=claude_pid,
+            claude_pid_created_at=claude_pid_created_at,
+            created_at=datetime.now(UTC).isoformat(),
+            credentials=creds,
+        )
+        _atomic_write_json(snap_file, new.model_dump_json(by_alias=True, indent=2))
+        return new
 
-    # First invocation (or PID changed) — create snapshot
-    new_snap = CredentialSnapshot(
-        session_id=session_id,
-        claude_pid=claude_pid,
-        created_at=datetime.now(UTC).isoformat(),
-        credentials=disk_data,
+    same_process = (
+        snap is not None and snap.claude_pid == claude_pid and snap.claude_pid_created_at == claude_pid_created_at
     )
-    _atomic_write_json(snap_file, new_snap.model_dump_json(by_alias=True, indent=2))
 
-    # Clean up orphans on first invocation
+    if same_process:
+        assert snap is not None
+
+        # Signal 1: /login in THIS session — process actually changed credentials.
+        # Must check first: supersedes switch-pending and config identity checks.
+        if _has_recent_login(transcript_path, snap.created_at):
+            disk_data = _read_static_data()
+            snap = _save_snapshot(disk_data)
+            # After re-snapshot, check if a further switch happened after /login
+            if _is_switch_pending_for(snap):
+                return snap.credentials, _resolve_pending_from_marker()
+            return snap.credentials, ''
+
+        # Signal 2: switch-login wrote marker after snapshot
+        if _is_switch_pending_for(snap):
+            return snap.credentials, _resolve_pending_from_marker()
+
+        # Signal 3: /login from another session changed config identity
+        if _is_config_identity_changed(snap):
+            return snap.credentials, _resolve_pending_from_config()
+
+        return snap.credentials, ''
+
+    # New process or first invocation — snapshot from current disk state
+    if snap is not None:
+        snap_file.unlink(missing_ok=True)
+
+    disk_data = _read_static_data()
+    snap = _save_snapshot(disk_data)
     _cleanup_orphan_snapshots(session_id)
 
-    return disk_data, False
+    if _is_switch_pending_for(snap):
+        return disk_data, _resolve_pending_from_marker()
+    return disk_data, ''
 
 
 def _cleanup_orphan_snapshots(current_session_id: str) -> None:
@@ -1346,7 +1488,10 @@ def main() -> None:
     if health_sample is not None:
         health_sidecar = _update_health_sidecar(data.session_id, claude_pid, health_sample)
 
-    static, switch_pending = _get_active_credentials(data.session_id, claude_pid)
+    claude_pid_created_at = psutil.Process(claude_pid).create_time()
+    static, pending_login = _get_active_credentials(
+        data.session_id, claude_pid, claude_pid_created_at, data.transcript_path
+    )
     branch = _git_branch()
     remote_url = _git_remote_url()
 
@@ -1389,8 +1534,8 @@ def main() -> None:
     elif static.email_address:
         parts.append(f'{DIM}{static.email_address}{RESET}')
 
-    if switch_pending:
-        parts.append(f'{YELLOW}(switch pending — restart to activate){RESET}')
+    if pending_login:
+        parts.append(f'{YELLOW}(switch pending: {pending_login} — restart to activate){RESET}')
 
     # Git branch — links to GitHub branch page
     if branch:
