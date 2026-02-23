@@ -752,13 +752,14 @@ class BrowserService:
     async def get_browser(
         self,
         enable_har_capture: bool = False,
-        browser: Browser = 'chrome',
+        browser: Browser | None = None,
     ) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
         Args:
             enable_har_capture: Enable Chrome performance logging for HAR export.
-            browser: Which browser to use - "chrome" (default) or "chromium".
+            browser: Which browser to use - "chrome" or "chromium". Defaults to
+                    the currently running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when
                     your personal Chrome is running (different bundle ID).
 
@@ -767,6 +768,9 @@ class BrowserService:
         """
         if self.state.driver is not None:
             return self.state.driver
+
+        if browser is None:
+            browser = self.state.current_browser or 'chromium'
 
         # CRITICAL: Stealth configuration to bypass Cloudflare bot detection
         opts = Options()
@@ -858,7 +862,7 @@ def register_tools(service: BrowserService) -> None:
         fresh_browser: bool = False,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
-        browser: Browser = 'chrome',
+        browser: Browser | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -874,7 +878,8 @@ def register_tools(service: BrowserService) -> None:
             init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
-            browser: Which browser to use - "chrome" (default) or "chromium".
+            browser: Which browser to use - "chrome" or "chromium". Defaults to the currently
+                    running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when
                     your personal Chrome is running (different bundle ID).
 
@@ -918,6 +923,10 @@ def register_tools(service: BrowserService) -> None:
         in the current page context. Blob URLs are ephemeral in-memory resources (PDFs, images,
         file downloads) and cannot be accessed from a different browsing context.
         """
+        # Resolve browser: use current if running, otherwise default to 'chromium'
+        if browser is None:
+            browser = service.state.current_browser or 'chromium'
+
         valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
         if not url.startswith(valid_prefixes):
             raise fastmcp.exceptions.ValidationError(
@@ -1007,7 +1016,7 @@ def register_tools(service: BrowserService) -> None:
         origins_filter: Sequence[str] | None = None,
         live_session_storage_via_applescript: bool = False,
         # Browser configuration (all fresh_browser capabilities)
-        browser: Browser = 'chrome',
+        browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
         ctx: Context[Any, Any, Any] | None = None,
@@ -1037,7 +1046,8 @@ def register_tools(service: BrowserService) -> None:
                 If multiple profiles are open, sessionStorage may include data from other profiles.
                 Requires Chrome setting: View > Developer > Allow JavaScript from Apple Events.
                 Only used with chrome_profile, ignored with profile_state_file.
-            browser: Which browser to use - "chrome" (default) or "chromium".
+            browser: Which browser to use - "chrome" or "chromium". Defaults to the currently
+                running browser, or "chromium" if none is running.
                 Use "chromium" to avoid AppleScript targeting conflicts when
                 your personal Chrome is running (different bundle ID).
             enable_har_capture: Enable performance logging for HAR export
@@ -1189,6 +1199,10 @@ def register_tools(service: BrowserService) -> None:
                 f'and {len(filtered_origins)} origins matching {origins_filter}',
                 file=sys.stderr,
             )
+
+        # Resolve browser before close_browser() clears current_browser
+        if browser is None:
+            browser = service.state.current_browser or 'chromium'
 
         # Always start fresh browser for session import
         await service.close_browser()
