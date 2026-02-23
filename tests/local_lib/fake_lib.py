@@ -256,10 +256,10 @@ class _ExitRaisesOnBodyError:
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
+        exc_value: BaseException | None,
         exc_tb: object,
     ) -> None:
-        if exc_val is not None:
+        if exc_value is not None:
             raise ConnectionError('cleanup failed during error handling')
 
 
@@ -310,10 +310,10 @@ class _AsyncExitRaisesOnBodyError:
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
+        exc_value: BaseException | None,
         exc_tb: object,
     ) -> None:
-        if exc_val is not None:
+        if exc_value is not None:
             raise ConnectionError('async cleanup failed during error handling')
 
 
