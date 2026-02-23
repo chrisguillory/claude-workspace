@@ -212,6 +212,105 @@ KEYCHAIN_SERVICE_API_KEY = 'Claude Code'
 SETUP_TOKEN_PREFIX = 'sk-ant-oat01-'
 SETUP_TOKEN_LIFETIME_DAYS = 365
 
+# Fields cleared on account switch (account/org-specific cached state).
+# Each server-populated field is re-fetched by Claude Code on startup or first API call.
+ACCOUNT_SPECIFIC_FIELDS: frozenset[str] = frozenset(
+    {
+        # Server-populated caches (re-fetched on startup or first API call)
+        'cachedExtraUsageDisabledReason',  # Org billing: API rate limit headers
+        'cachedGrowthBookFeatures',  # Statsig flags: per user/org evaluation
+        'cachedStatsigGates',  # Statsig gates: per user/org evaluation
+        'cachedDynamicConfigs',  # Statsig configs: per user/org evaluation
+        'clientDataCache',  # Server client_data: auth-scoped API response
+        'penguinModeOrgEnabled',  # Fast mode: per-org setting from API
+        # Account-specific UX state (not re-fetched, but wrong account's state)
+        'hasVisitedExtraUsage',  # UX: extra usage page visit for this account
+        'hasVisitedPasses',  # UX: passes page visit for this account
+        'hasAcknowledgedCostThreshold',  # UX: cost threshold ack for this account
+        'passesLastSeenRemaining',  # Passes: remaining count for this account
+        'passesUpsellSeenCount',  # Passes: upsell counter for this account
+        'subscriptionNoticeCount',  # Subscription: notice counter for this account
+    }
+)
+
+# Fields handled separately by existing switch-login logic.
+SWITCH_HANDLED_FIELDS: frozenset[str] = frozenset(
+    {
+        'oauthAccount',  # Replaced by write_oauth_account()
+        'primaryApiKey',  # Removed by remove_primary_api_key()
+    }
+)
+
+# UUID-keyed multi-account fields (already scoped by org/account UUID).
+UUID_KEYED_FIELDS: frozenset[str] = frozenset(
+    {
+        's1mAccessCache',
+        's1mNonSubscriberAccessCache',
+        'passesEligibilityCache',
+        'groveConfigCache',
+        'hasShownOpus46Notice',
+        'hasShownOpus45Notice',
+        'hasShownS1MWelcomeV2',
+        'hasIdeOnboardingBeenShown',
+    }
+)
+
+# Global/device-level fields that persist across account switches.
+GLOBAL_FIELDS: frozenset[str] = frozenset(
+    {
+        'anonymousId',
+        'appleTerminalBackupPath',
+        'appleTerminalSetupInProgress',
+        'autoCompactEnabled',
+        'autoConnectIde',
+        'autoUpdates',
+        'autoUpdatesProtectedForNative',
+        'birthdayHatAnimationCount',
+        'cachedChromeExtensionInstalled',
+        'changelogLastFetched',
+        'claudeCodeFirstTokenDate',
+        'codeDiffFooterEnabled',
+        'customApiKeyResponses',
+        'effortCalloutDismissed',
+        'feedbackSurveyState',
+        'fileCheckpointingEnabled',
+        'firstStartTime',
+        'githubRepoPaths',
+        'hasCompletedClaudeInChromeOnboarding',
+        'hasCompletedOnboarding',
+        'hasIdeAutoConnectDialogBeenShown',
+        'hasSeenStashHint',
+        'hasSeenTasksHint',
+        'hasUsedBackslashReturn',
+        'hasUsedStash',
+        'installMethod',
+        'lastOnboardingVersion',
+        'lastPlanModeUse',
+        'lastReleaseNotesSeen',
+        'mcpServers',
+        'numStartups',
+        'officialMarketplaceAutoInstallAttempted',
+        'officialMarketplaceAutoInstalled',
+        'optionAsMetaKeyInstalled',
+        'opus45MigrationComplete',
+        'opus46FeedSeenCount',
+        'opus46MigrationComplete',
+        'opusProMigrationComplete',
+        'projects',
+        'promptQueueUseCount',
+        'shiftEnterKeyBindingInstalled',
+        'showExpandedTodos',
+        'showSpinnerTree',
+        'sonnet1m45MigrationComplete',
+        'sonnet45MigrationComplete',
+        'theme',
+        'thinkingMigrationComplete',
+        'tipsHistory',
+        'userID',
+        'verbose',
+    }
+)
+
 
 # =============================================================================
 # Process Relaunch
@@ -455,6 +554,42 @@ def remove_primary_api_key() -> None:
     if 'primaryApiKey' in config:
         del config['primaryApiKey']
         _write_file_atomically(CONFIG_PATH, json.dumps(config, indent=2))
+
+
+def clear_account_specific_cache(*, verbose: bool = True) -> int:
+    """Clear account-specific cached fields from ~/.claude.json on login switch.
+
+    Prevents cross-account contamination when switching between accounts on
+    the same machine. Fields like cachedExtraUsageDisabledReason (org billing
+    state) and cachedGrowthBookFeatures (Statsig flags) are per-account but
+    stored in the shared config file. Claude Code re-fetches all of these on
+    startup or first API call.
+
+    Warns on unknown fields not yet categorized in the field sets.
+
+    Returns count of fields cleared.
+    """
+    if not CONFIG_PATH.is_file():
+        return 0
+    config = json.loads(CONFIG_PATH.read_text())
+    known = ACCOUNT_SPECIFIC_FIELDS | SWITCH_HANDLED_FIELDS | UUID_KEYED_FIELDS | GLOBAL_FIELDS
+    cleared = 0
+
+    for key in config:
+        if key not in known:
+            print(f'WARNING: Unknown field {key!r} in {CONFIG_PATH} — not cleared.', file=sys.stderr)
+            print('         Add to field sets in claude-login.py.', file=sys.stderr)
+
+    for key in ACCOUNT_SPECIFIC_FIELDS:
+        if key in config:
+            del config[key]
+            cleared += 1
+
+    if cleared:
+        _write_file_atomically(CONFIG_PATH, json.dumps(config, indent=2))
+        if verbose:
+            print(f'  Cleared {cleared} cached field(s) from {CONFIG_PATH.name}')
+    return cleared
 
 
 # =============================================================================
@@ -833,6 +968,10 @@ def cmd_switch_login(name: str, use_keychain: bool, restart: bool, model: str | 
 
     # Clean up primaryApiKey fallback regardless of account type
     remove_primary_api_key()
+
+    # Clear account-specific cached state to prevent cross-account contamination.
+    # Claude Code re-fetches these on startup or first API call.
+    clear_account_specific_cache()
 
     # Load MCP auths for injection into credentials keychain
     mcp_auths = load_mcp_auths()
