@@ -8,7 +8,7 @@ from typing import Any, Literal
 import pydantic
 import pydantic.alias_generators
 
-# Browser selection for Selenium automation
+# Browser selection for Selenium automation (default: chromium)
 # Use "chromium" to avoid AppleScript targeting conflicts when personal Chrome is running
 type Browser = Literal['chrome', 'chromium']
 
