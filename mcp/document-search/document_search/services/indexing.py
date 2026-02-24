@@ -140,7 +140,10 @@ class IndexingService:
         chunks_by_type: dict[FileType, int] = {}
         file_errors: list[FileProcessingError] = []
 
-        for file_key, result in op.results.items():
+        # Snapshot to avoid iteration during concurrent mutation (no await in loop,
+        # but dict.copy() is cheap and eliminates implicit synchronous-only contract)
+        results_snapshot = dict(op.results)
+        for file_key, result in results_snapshot.items():
             ft = get_file_type(Path(file_key))
             if isinstance(result, FileProcessingError):
                 if ft is not None:

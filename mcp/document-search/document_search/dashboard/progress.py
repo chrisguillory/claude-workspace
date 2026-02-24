@@ -194,6 +194,7 @@ class ProgressWriter:
         )
 
         self._write()
+        self._clean_timing_file()
         self._close_log_handler()
 
     def _write(self) -> None:
@@ -207,6 +208,12 @@ class ProgressWriter:
 
         temp_path.write_text(json.dumps(self._state.model_dump(mode='json'), indent=2) + '\n')
         temp_path.rename(file_path)
+
+    def _clean_timing_file(self) -> None:
+        """Remove timing file on completion (data is in the result JSON)."""
+        if self._operation_id is not None:
+            timing_path = OPERATIONS_DIR / f'{self._operation_id}-timing.json'
+            timing_path.unlink(missing_ok=True)
 
     def _close_log_handler(self) -> None:
         """Flush and remove per-operation log handler."""
