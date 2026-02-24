@@ -522,6 +522,9 @@ Args:
     collection_name: Name of the collection to clear documents from.
     path: Path to clear. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
+    clear_cache: Also delete cached embeddings for the cleared files.
+        Uses a Redis reverse index (decoupled from Qdrant). Next re-index
+        will call the embedding API instead of serving from cache.
 
 Returns:
     ClearResult with counts of files and chunks removed."""
@@ -539,6 +542,7 @@ Returns:
     async def clear_documents(
         collection_name: str,
         path: str | None = None,
+        clear_cache: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
         if not ctx:
@@ -564,7 +568,10 @@ Returns:
             resolved_path = str(Path.cwd())
             await logger.info(f'Clearing documents under: {resolved_path}')
 
-        result = await indexing_service.clear_documents(resolved_path)
+        if clear_cache:
+            await logger.info('Clearing embedding cache via reverse index')
+
+        result = await indexing_service.clear_documents(resolved_path, clear_cache=clear_cache)
 
         await logger.info(f'Cleared: {result.files_removed} files, {result.chunks_removed} chunks')
 

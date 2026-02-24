@@ -264,6 +264,7 @@ class IndexingService:
         texts = [c.text for c in chunks]
         responses = await self._embedding.embed_texts(texts)
         dense = [r.values for r in responses]
+        await self._embedding.update_file_cache_index(file_key, texts)
 
         sparse_results, _wall, _cpu = await self._sparse_embedding.embed_batch(texts)
         # Build points using same factory as pipeline
@@ -707,15 +708,28 @@ class IndexingService:
         self._chunking.shutdown()
         self._sparse_embedding.shutdown()
 
-    async def clear_documents(self, path: str) -> ClearResult:
+    async def clear_documents(self, path: str, *, clear_cache: bool) -> ClearResult:
         """Clear documents from the index.
 
         Args:
             path: Resolved path to clear. Use "**" for entire index.
+            clear_cache: Also delete cached embeddings via reverse index.
+                Decoupled from Qdrant — uses Redis reverse index only.
 
         Returns:
             ClearResult with counts of files and chunks removed.
         """
+        if clear_cache:
+            if path == '**':
+                # Empty prefix matches all embed-idx:file:* keys
+                await self._embedding.invalidate_path_cache('')
+            else:
+                # Works for both single file and directory prefix
+                invalidated = await self._embedding.invalidate_file_cache(path)
+                if invalidated == 0:
+                    # No exact file match — try as directory prefix
+                    await self._embedding.invalidate_path_cache(path)
+
         if path == '**':
             # Drop entire Qdrant collection + clear all Redis state
             chunks_count = await self._repo.count()
@@ -1033,6 +1047,9 @@ class IndexingService:
                 counters.chunks_embedded += len(chunked.chunks)
                 counters.files_embedded += 1
 
+                # Update reverse index (file → cache keys) — fast Redis transaction
+                await self._embedding.update_file_cache_index(fk, [c.text for c in chunked.chunks])
+
                 start_idx = end_idx
 
             # Reset accumulators
@@ -1087,6 +1104,9 @@ class IndexingService:
             embed_queue.task_done()
             counters.chunks_embedded += len(chunked.chunks)
             counters.files_embedded += 1
+
+            # Update reverse index (file → cache keys) — fast Redis transaction
+            await self._embedding.update_file_cache_index(fk, texts)
 
         _worker_id = id(asyncio.current_task()) % 10000  # short ID for logs
 
