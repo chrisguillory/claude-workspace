@@ -428,7 +428,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     ${op.result?.by_file_type && Object.keys(op.result.by_file_type).length > 0 ? formatFileTypeChart(op.result.by_file_type) : ''}
                     ${op.result?.timing ? formatTimingReport(op.result.timing, op.operation_id) : ''}
                     ${isComplete && op.result?.errors && op.result.errors.length > 0 ? formatErrorList(op.result.errors, op.operation_id) : ''}
-                    ${!isComplete && op.progress?.file_errors && op.progress.file_errors.length > 0 && status === 'failed' ? formatErrorList(op.progress.file_errors, op.operation_id) : ''}
+                    ${!isComplete && op.progress?.file_errors && op.progress.file_errors.length > 0 ? formatErrorList(op.progress.file_errors, op.operation_id) : ''}
                     <div class="log-header" onclick="toggleLogs('${op.operation_id}')">
                         <span id="log-toggle-${op.operation_id}">▶ Logs</span>
                         <span id="log-count-${op.operation_id}"></span>
@@ -1718,7 +1718,9 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         update();
-        setInterval(update, 500);
+        // Self-scheduling loop prevents overlapping async invocations
+        async function pollLoop() { await update(); setTimeout(pollLoop, 500); }
+        pollLoop();
     </script>
 </body>
 </html>"""
