@@ -158,15 +158,18 @@ class LibraryBoundary:
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
+        exc_value: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        if exc_val is None or isinstance(exc_val, self._target):
+        if exc_value is None or isinstance(exc_value, self._target):
             return  # No exception, or already translated (double-wrap guard)
-        if not isinstance(exc_val, Exception) or isinstance(exc_val, _PASSTHROUGH):
+        if not isinstance(exc_value, Exception) or isinstance(exc_value, _PASSTHROUGH):
             return  # System or control-flow exception — pass through
-        original_message = str(exc_val)  # type preserved in __cause__, not here
-        raise self._target(original_message).with_traceback(exc_tb) from exc_val
+        try:
+            original_message = str(exc_value)  # type preserved in __cause__, not here
+        except Exception:
+            original_message = f'<{type(exc_value).__name__}>'
+        raise self._target(original_message).with_traceback(exc_tb) from exc_value
 
     # -- Async context manager --
 
@@ -176,10 +179,10 @@ class LibraryBoundary:
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
+        exc_value: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        self.__exit__(exc_type, exc_val, exc_tb)
+        self.__exit__(exc_type, exc_value, exc_tb)
 
     # -- Proxy --
 
@@ -197,6 +200,11 @@ class LibraryBoundary:
             - Type checkers see ``Any`` for proxy attribute access.
             - Property access on the wrapped object executes outside the boundary.
               Exceptions from ``@property`` methods are not translated.
+            - Magic methods (``__len__``, ``__getitem__``, ``__call__``, ``__iter__``)
+              are not intercepted. Python resolves them on the type, bypassing
+              ``__getattr__``. Access them via named methods instead.
+            - Wrapping is single-level. ``proxy.sub.method()`` returns the raw
+              sub-object — wrap sub-objects explicitly if needed.
         """
         return _TranslatingProxy(library, self)
 
@@ -242,7 +250,9 @@ class _TranslatingProxy:
 
             @functools.wraps(attr)
             def async_gen_wrapper(*args: Any, **kwargs: Any) -> _WrappedAsyncGenerator:
-                return _WrappedAsyncGenerator(attr(*args, **kwargs), boundary)
+                with boundary:
+                    gen = attr(*args, **kwargs)
+                return _WrappedAsyncGenerator(gen, boundary)
 
             return async_gen_wrapper
 
@@ -274,6 +284,9 @@ class _TranslatingProxy:
 
         return sync_wrapper
 
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"cannot delete attribute '{name}' on {type(self).__name__}")
+
     @staticmethod
     def _wrap_result(result: Any, boundary: LibraryBoundary) -> Any:
         """Wrap generators, async generators, and context managers returned by calls.
@@ -285,8 +298,8 @@ class _TranslatingProxy:
         3. Async context manager — has ``__aenter__``/``__aexit__``
         4. Sync context manager — has ``__enter__``/``__exit__``
 
-        Generators are checked first because they are also context managers in
-        some cases — the generator check is more specific.
+        Generators are checked first via isinstance (exact type match) before
+        the duck-typed hasattr checks for context managers.
         """
         if isinstance(result, types.GeneratorType):
             return _WrappedGenerator(result, boundary)
@@ -334,7 +347,8 @@ class _WrappedGenerator:
             return self._gen.throw(value)
 
     def close(self) -> None:
-        self._gen.close()
+        with self._boundary:
+            self._gen.close()
 
 
 class _WrappedAsyncGenerator:
@@ -362,7 +376,8 @@ class _WrappedAsyncGenerator:
             return await self._gen.athrow(value)
 
     async def aclose(self) -> None:
-        await self._gen.aclose()
+        async with self._boundary:
+            await self._gen.aclose()
 
 
 class _WrappedContextManager:
@@ -381,11 +396,11 @@ class _WrappedContextManager:
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
+        exc_value: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> Any:
         with self._boundary:
-            return self._cm.__exit__(exc_type, exc_val, exc_tb)
+            return self._cm.__exit__(exc_type, exc_value, exc_tb)
 
 
 class _WrappedAsyncContextManager:
@@ -404,8 +419,8 @@ class _WrappedAsyncContextManager:
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
+        exc_value: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> Any:
         async with self._boundary:
-            return await self._cm.__aexit__(exc_type, exc_val, exc_tb)
+            return await self._cm.__aexit__(exc_type, exc_value, exc_tb)

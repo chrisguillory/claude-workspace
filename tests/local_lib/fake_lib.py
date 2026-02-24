@@ -103,6 +103,21 @@ def make_good_items() -> Iterator[int]:
     return (x for x in [10, 20])
 
 
+def send_then_fail() -> Iterator[str]:
+    """Generator that raises on the second send."""
+    yield 'ready'
+    yield 'ok'
+    raise ValueError('send failure')
+
+
+def bad_cleanup() -> Iterator[int]:
+    """Generator whose finally block raises during close()."""
+    try:
+        yield 1
+    finally:
+        raise ValueError('cleanup error')
+
+
 # -- Async functions --
 
 
@@ -135,6 +150,21 @@ async def async_echo_gen() -> AsyncIterator[str]:
         value = yield f'echo:{value}'
 
 
+async def async_send_then_fail() -> AsyncIterator[str]:
+    """Async generator that raises on the second send."""
+    yield 'ready'
+    yield 'ok'
+    raise ValueError('async send failure')
+
+
+async def async_bad_cleanup() -> AsyncIterator[int]:
+    """Async generator whose finally block raises during aclose()."""
+    try:
+        yield 1
+    finally:
+        raise ValueError('async cleanup error')
+
+
 async def async_throw_converter() -> AsyncIterator[str]:
     """Async generator that converts thrown exceptions into ValueError."""
     while True:
@@ -142,6 +172,32 @@ async def async_throw_converter() -> AsyncIterator[str]:
             yield 'waiting'
         except RuntimeError:
             raise ValueError('async converted from RuntimeError')
+
+
+# -- Factory functions returning async generators (NOT async generator functions) --
+# These exercise _wrap_result's AsyncGeneratorType branch, which is unreachable
+# when the callable is an async generator function (caught by isasyncgenfunction).
+
+
+def make_async_items() -> AsyncIterator[int]:
+    """Regular function that returns an async generator — NOT an async gen function itself."""
+
+    async def _inner() -> AsyncIterator[int]:
+        yield 1
+        yield 2
+        raise ValueError('async factory gen failure')
+
+    return _inner()
+
+
+def make_async_good_items() -> AsyncIterator[int]:
+    """Regular function returning an async generator (not an async gen function)."""
+
+    async def _inner() -> AsyncIterator[int]:
+        yield 10
+        yield 20
+
+    return _inner()
 
 
 # -- Context managers returned by factory functions --
@@ -200,10 +256,10 @@ class _ExitRaisesOnBodyError:
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
+        exc_value: BaseException | None,
         exc_tb: object,
     ) -> None:
-        if exc_val is not None:
+        if exc_value is not None:
             raise ConnectionError('cleanup failed during error handling')
 
 
@@ -233,6 +289,32 @@ class _AsyncExitFailingConnection:
 
     async def __aexit__(self, *args: object) -> None:
         raise ConnectionError('async disconnect failed')
+
+
+class _AsyncSuppressingConnection:
+    """Async connection whose __aexit__ returns True, suppressing exceptions."""
+
+    async def __aenter__(self) -> str:
+        return 'async suppressed'
+
+    async def __aexit__(self, *args: object) -> bool:
+        return True
+
+
+class _AsyncExitRaisesOnBodyError:
+    """Async connection whose __aexit__ raises a NEW exception when body fails."""
+
+    async def __aenter__(self) -> str:
+        return 'async resource'
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        if exc_value is not None:
+            raise ConnectionError('async cleanup failed during error handling')
 
 
 # -- Factory functions (module-level, like sqlite3.connect()) --
@@ -268,6 +350,14 @@ def async_connect() -> _GoodAsyncConnection:
 
 def async_connect_exit_failing() -> _AsyncExitFailingConnection:
     return _AsyncExitFailingConnection()
+
+
+def async_connect_suppressing() -> _AsyncSuppressingConnection:
+    return _AsyncSuppressingConnection()
+
+
+def async_connect_exit_raises_on_body_error() -> _AsyncExitRaisesOnBodyError:
+    return _AsyncExitRaisesOnBodyError()
 
 
 # -- Callable objects (class instances with __call__) --
