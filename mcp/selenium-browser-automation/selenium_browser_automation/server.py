@@ -19,6 +19,7 @@ import base64
 import contextlib
 import io
 import json
+import os
 import re
 import signal
 import subprocess
@@ -4379,7 +4380,8 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     # This is critical for `claude mcp reconnect` which sends SIGTERM
     def signal_handler(signum: int, frame: typing.Any) -> None:
         _sync_cleanup(state)
-        sys.exit(0)
+        sys.stderr.flush()
+        os._exit(0)
 
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
