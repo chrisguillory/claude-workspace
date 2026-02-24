@@ -6,6 +6,7 @@ from local_lib.background_tasks import BackgroundTaskGroup
 from local_lib.batch_loader import GenericBatchLoader
 from local_lib.concurrency_tracker import ConcurrencyTracker
 from local_lib.error_boundary import ErrorBoundary, ErrorHandler
+from local_lib.library_boundary import LibraryBoundary
 
 __all__ = [
     'BackgroundTaskGroup',
@@ -13,4 +14,5 @@ __all__ = [
     'ErrorBoundary',
     'ErrorHandler',
     'GenericBatchLoader',
+    'LibraryBoundary',
 ]
