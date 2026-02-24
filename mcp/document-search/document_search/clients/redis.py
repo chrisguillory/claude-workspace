@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence, Set
 from pathlib import Path
 
 import redis.asyncio as aioredis
@@ -100,6 +100,21 @@ class RedisClient:
         async with self._semaphore:
             return await self._client.delete(*names)
 
+    async def unlink(self, *names: str) -> int:
+        """Unlink one or more keys (non-blocking memory deallocation).
+
+        Preferred over delete() for Sets and large values — O(1) on the
+        main thread, defers memory freeing to a background thread.
+        """
+        async with self._semaphore:
+            return await self._client.unlink(*names)
+
+    async def smembers(self, name: str) -> Set[str]:
+        """Get all members of a set, decoded to strings."""
+        async with self._semaphore:
+            raw = await self._client.smembers(name)
+            return {m.decode() for m in raw}
+
     async def scan_iter(self, *, match: str, count: int = 100) -> AsyncIterator[str]:
         """Iterate keys matching glob pattern. Decodes bytes to strings.
 
@@ -116,6 +131,14 @@ class RedisClient:
         NOT held — pipelines manage their own connection lifecycle.
         """
         return self._client.pipeline(transaction=False)
+
+    def transaction(self) -> aioredis.Pipeline:
+        """Get a transactional pipeline (MULTI/EXEC) for atomic operations.
+
+        All commands execute as a single atomic unit — no interleaving
+        from other clients between commands.
+        """
+        return self._client.pipeline(transaction=True)
 
     async def close(self) -> None:
         """Close connection pool."""

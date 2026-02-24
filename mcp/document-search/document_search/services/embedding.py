@@ -151,6 +151,20 @@ class EmbeddingService:
         embeddings = [EmbedResponse(values=v, dimensions=len(v)) for v in vectors]
         return EmbedBatchResponse(embeddings=embeddings)
 
+    # ── Reverse index pass-through ────────────────────────────
+
+    async def update_file_cache_index(self, file_path: str, texts: Sequence[str]) -> None:
+        """Update reverse index mapping file → embedding cache keys."""
+        await self._cache_loader.update_file_index(file_path, texts)
+
+    async def invalidate_file_cache(self, file_path: str) -> int:
+        """Delete cached embeddings for a file via reverse index."""
+        return await self._cache_loader.invalidate_file_cache(file_path)
+
+    async def invalidate_path_cache(self, path_prefix: str) -> int:
+        """Delete cached embeddings for files under a directory."""
+        return await self._cache_loader.invalidate_path_prefix(path_prefix)
+
 
 class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
     """Batch cache lookups with miss forwarding.
@@ -187,10 +201,55 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
             coalesce_delay=CACHE_COALESCE_DELAY,
         )
 
-    def _cache_key(self, text: str) -> str:
-        """Generate cache key for a text."""
+    def cache_key(self, text: str) -> str:
+        """Generate cache key for a text.
+
+        Key format: embed:{model}:{dims}:document:{sha256[:16]}
+        Content-addressed for cross-file deduplication.
+        """
         text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         return f'embed:{self._model}:{self._dimensions}:document:{text_hash}'
+
+    # ── Reverse index: file path → cache keys ───────────────────
+
+    async def update_file_index(self, file_path: str, texts: Sequence[str]) -> None:
+        """Atomically replace reverse index mapping file → cache keys.
+
+        Uses MULTI/EXEC transaction: UNLINK old set → SADD new keys → EXPIRE.
+        """
+        cache_keys = [self.cache_key(t) for t in texts]
+        index_key = self._index_key(file_path)
+        pipe = self._redis.transaction()
+        pipe.unlink(index_key)
+        pipe.sadd(index_key, *[k.encode() for k in cache_keys])
+        pipe.expire(index_key, CACHE_TTL_SECONDS)
+        await pipe.execute()
+
+    async def invalidate_file_cache(self, file_path: str) -> int:
+        """Delete all cached embeddings for a file via reverse index."""
+        index_key = self._index_key(file_path)
+        cache_keys = await self._redis.smembers(index_key)
+        if cache_keys:
+            await self._redis.unlink(*cache_keys, index_key)
+        return len(cache_keys)
+
+    async def invalidate_path_prefix(self, path_prefix: str) -> int:
+        """Delete all cached embeddings for files under a directory."""
+        pattern = f'embed-idx:file:{path_prefix}*'
+        total = 0
+        async for index_key in self._redis.scan_iter(match=pattern):
+            cache_keys = await self._redis.smembers(index_key)
+            if cache_keys:
+                await self._redis.unlink(*cache_keys, index_key)
+                total += len(cache_keys)
+        return total
+
+    # ── Private: batch loading, cache writes, helpers ──────────────
+
+    @staticmethod
+    def _index_key(file_path: str) -> str:
+        """Reverse index key for a file path."""
+        return f'embed-idx:file:{file_path}'
 
     async def _bulk_lookup(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
         """Look up cached embeddings, forward misses to embed loader.
@@ -201,7 +260,7 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         self._cache_tasks.check_health()
 
         t0 = time.perf_counter()
-        keys = [self._cache_key(t) for t in texts]
+        keys = [self.cache_key(t) for t in texts]
         t_keys = time.perf_counter()
 
         cached = await self._redis.mget(keys)
@@ -249,7 +308,7 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
 
     async def _cache_write(self, text: str, response: EmbedResponse) -> None:
         """Write embedding to cache with TTL."""
-        key = self._cache_key(text)
+        key = self.cache_key(text)
         value = np.array(response.values, dtype=np.float32).tobytes()
         await self._redis.set(key, value, ex=CACHE_TTL_SECONDS)
 
