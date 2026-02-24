@@ -4333,13 +4333,25 @@ Workflow:
         )
 
 
-def _sync_cleanup(state: BrowserState) -> None:
-    """Synchronous cleanup for signal handlers (runs in main thread)."""
+def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:
+    """Synchronous cleanup for signal handlers (runs in main thread).
+
+    Uses a thread with timeout to prevent hanging on unresponsive ChromeDriver.
+    """
+    import threading
+
     print('\n⚠ Signal received, cleaning up browser...', file=sys.stderr)
     if state.driver:
         try:
-            state.driver.quit()
-            print('✓ Browser closed', file=sys.stderr)
+            # driver.quit() sends an HTTP request to ChromeDriver which can hang
+            # if Chrome/ChromeDriver is unresponsive. Run in a thread with timeout.
+            quit_thread = threading.Thread(target=state.driver.quit, daemon=True)
+            quit_thread.start()
+            quit_thread.join(timeout=timeout)
+            if quit_thread.is_alive():
+                print(f'✗ Browser close timed out after {timeout}s, abandoning', file=sys.stderr)
+            else:
+                print('✓ Browser closed', file=sys.stderr)
         except Exception as e:
             print(f'✗ Browser close error: {e}', file=sys.stderr)
     if state.mitmproxy_process:
