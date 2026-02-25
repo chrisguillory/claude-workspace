@@ -703,7 +703,7 @@ class TestMainIntegration:
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo "---" && git log')))
 
-        hook_module.main.__wrapped__()
+        hook_module.handle_hook.__wrapped__()
 
         output = json.loads(capsys.readouterr().out)
         assert output['hookSpecificOutput']['permissionDecision'] == 'allow'
@@ -716,7 +716,7 @@ class TestMainIntegration:
     ) -> None:
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('test', tool_name='Write')))
 
-        hook_module.main.__wrapped__()
+        hook_module.handle_hook.__wrapped__()
         assert capsys.readouterr().out == ''
 
     def test_skips_single_command(
@@ -727,7 +727,7 @@ class TestMainIntegration:
     ) -> None:
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('git log')))
 
-        hook_module.main.__wrapped__()
+        hook_module.handle_hook.__wrapped__()
         assert capsys.readouterr().out == ''
 
     def test_passthrough_on_dangerous(
@@ -747,7 +747,7 @@ class TestMainIntegration:
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo $(whoami) && git log')))
 
         with pytest.raises(hook_module.ApproveCompoundBashException) as exc_info:
-            hook_module.main.__wrapped__()
+            hook_module.handle_hook.__wrapped__()
         assert exc_info.value.args == ('unsafe expansion in: $(whoami)',)
 
     def test_skips_empty_command(
@@ -758,7 +758,7 @@ class TestMainIntegration:
     ) -> None:
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('')))
 
-        hook_module.main.__wrapped__()
+        hook_module.handle_hook.__wrapped__()
         assert capsys.readouterr().out == ''
 
     def test_missing_command_key_raises(
@@ -781,7 +781,7 @@ class TestMainIntegration:
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
         with pytest.raises(pydantic.ValidationError):
-            hook_module.main.__wrapped__()
+            hook_module.handle_hook.__wrapped__()
 
     def test_non_string_command_raises(
         self,
@@ -803,7 +803,7 @@ class TestMainIntegration:
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
         with pytest.raises(pydantic.ValidationError):
-            hook_module.main.__wrapped__()
+            hook_module.handle_hook.__wrapped__()
 
     def test_skips_no_prefixes(
         self,
@@ -827,7 +827,7 @@ class TestMainIntegration:
             ),
         )
 
-        hook_module.main.__wrapped__()
+        hook_module.handle_hook.__wrapped__()
         assert capsys.readouterr().out == ''
 
     def test_passthrough_on_no_match(
@@ -844,7 +844,7 @@ class TestMainIntegration:
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo test && rm -rf /')))
 
-        hook_module.main.__wrapped__()
+        hook_module.handle_hook.__wrapped__()
         assert capsys.readouterr().out == ''
 
     # -- ErrorBoundary integration --
@@ -863,7 +863,7 @@ class TestMainIntegration:
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo "unterminated')))
 
         with pytest.raises(SystemExit) as exc_info:
-            hook_module.main()
+            hook_module.handle_hook()
 
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
@@ -905,7 +905,7 @@ class TestMainIntegration:
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
         with pytest.raises(SystemExit) as exc_info:
-            hook_module.main()
+            hook_module.handle_hook()
 
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
@@ -1005,7 +1005,7 @@ class TestBashlexExceptions:
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
         with pytest.raises(SystemExit) as exc_info:
-            hook_module.main()
+            hook_module.handle_hook()
 
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
@@ -1036,7 +1036,7 @@ class TestBashlexExceptions:
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
         with pytest.raises(SystemExit) as exc_info:
-            hook_module.main()
+            hook_module.handle_hook()
 
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
@@ -1097,7 +1097,7 @@ class TestSurvivingMutations:
             }
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
-        hook_module.main.__wrapped__()
+        hook_module.handle_hook.__wrapped__()
         assert capsys.readouterr().out == ''
 
     def test_lowercase_transform_operator_dangerous(self, hook_module: ModuleType) -> None:
@@ -1219,5 +1219,127 @@ class TestQuotingEdgeCases:
         """Completely invalid JSON on stdin passthroughs via ErrorBoundary."""
         monkeypatch.setattr('sys.stdin', io.StringIO('not json at all'))
         with pytest.raises(SystemExit) as exc_info:
-            hook_module.main()
+            hook_module.handle_hook()
         assert exc_info.value.code == 0
+
+
+class TestCheckBatch:
+    """Verify --check-batch JSON-lines output."""
+
+    @staticmethod
+    def _setup_prefixes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+        """Create a settings file with common prefixes and return cwd."""
+        home = tmp_path / 'home'
+        (home / '.claude').mkdir(parents=True)
+        (home / '.claude' / 'settings.json').write_text(
+            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}})
+        )
+        monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
+        return str(tmp_path)
+
+    @staticmethod
+    def _run_batch(
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        commands: str,
+        cwd: str,
+    ) -> list[dict[str, object]]:
+        monkeypatch.setattr('sys.stdin', io.StringIO(commands))
+        hook_module.check_batch(cwd)
+        return [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+
+    def test_simple_match(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        cwd = self._setup_prefixes(monkeypatch, tmp_path)
+        results = self._run_batch(hook_module, monkeypatch, capsys, 'echo hello\n', cwd)
+        assert len(results) == 1
+        assert results[0]['match'] is True
+        assert results[0]['compound'] is False
+        assert results[0]['base_commands'] == ['echo hello']
+
+    def test_compound_match(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        cwd = self._setup_prefixes(monkeypatch, tmp_path)
+        results = self._run_batch(hook_module, monkeypatch, capsys, 'git log --oneline && echo done\n', cwd)
+        assert len(results) == 1
+        assert results[0]['match'] is True
+        assert results[0]['compound'] is True
+        assert results[0]['base_commands'] == ['git log --oneline', 'echo done']
+
+    def test_no_match(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        cwd = self._setup_prefixes(monkeypatch, tmp_path)
+        results = self._run_batch(hook_module, monkeypatch, capsys, 'rm -rf /\n', cwd)
+        assert len(results) == 1
+        assert results[0]['match'] is False
+
+    def test_approve_compound_bash_exception(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        cwd = self._setup_prefixes(monkeypatch, tmp_path)
+        results = self._run_batch(hook_module, monkeypatch, capsys, 'if true; then echo x; fi\n', cwd)
+        assert len(results) == 1
+        assert results[0]['match'] is False
+        assert results[0]['error'] == 'approve_compound_bash_exception'
+        assert results[0]['detail'] == 'unanalyzable construct (if): if true; then echo x; fi'
+
+    def test_bashlex_exception(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        cwd = self._setup_prefixes(monkeypatch, tmp_path)
+        results = self._run_batch(hook_module, monkeypatch, capsys, 'echo $((1+2))\n', cwd)
+        assert len(results) == 1
+        assert results[0]['match'] is False
+        assert results[0]['error'] == 'bashlex_exception'
+        assert results[0]['detail'] == 'NotImplementedError: arithmetic expansion'
+
+    def test_empty_lines_skipped(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        cwd = self._setup_prefixes(monkeypatch, tmp_path)
+        results = self._run_batch(hook_module, monkeypatch, capsys, '\necho hello\n\n', cwd)
+        assert len(results) == 1
+        assert results[0]['command'] == 'echo hello'
+
+    def test_multiple_commands(
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        cwd = self._setup_prefixes(monkeypatch, tmp_path)
+        commands = 'echo hello\nrm -rf /\nif true; then echo x; fi\n'
+        results = self._run_batch(hook_module, monkeypatch, capsys, commands, cwd)
+        assert len(results) == 3
+        assert results[0]['match'] is True
+        assert results[1]['match'] is False
+        assert results[2]['error'] == 'approve_compound_bash_exception'

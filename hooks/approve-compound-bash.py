@@ -37,7 +37,9 @@ Hook docs: https://code.claude.com/docs/en/hooks#pretooluse
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import re
 import sys
 from collections.abc import Iterator, Sequence, Set
@@ -75,8 +77,56 @@ BASH_PREFIX_RE = re.compile(r'^Bash\((.+):\*\)$')
 SIMPLE_VAR_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 
 
-@boundary
 def main() -> None:
+    """Entry point: dispatch to hook handler or batch analysis mode."""
+    args = parse_args()
+    if args.check_batch:
+        check_batch(args.cwd)
+    else:
+        handle_hook()
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for hook mode or batch analysis mode."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--check-batch', action='store_true', help='read commands from stdin, emit JSON-lines')
+    parser.add_argument('--cwd', help='project directory for loading settings (default: os.getcwd())')
+    return parser.parse_args()
+
+
+def check_batch(cwd: str | None = None) -> None:
+    """Process commands from stdin in batch, emitting JSON-lines to stdout.
+
+    Loads prefixes once, then analyzes each line as a Bash command.
+    Per-command errors are captured in the JSON output, not raised.
+    """
+    prefixes = load_bash_prefixes(cwd or os.getcwd())
+
+    for line in sys.stdin:
+        command = line.rstrip('\n')
+        if not command:
+            continue
+
+        result: dict[str, object] = {'command': command}
+        try:
+            subcommands = list(analyze_command(command))
+            result['base_commands'] = subcommands
+            result['compound'] = len(subcommands) > 1
+            result['match'] = bool(subcommands) and all(matches_prefix(sub, prefixes) for sub in subcommands)
+        except ApproveCompoundBashException as e:
+            result['match'] = False
+            result['error'] = 'approve_compound_bash_exception'
+            result['detail'] = str(e)
+        except BashlexBoundaryException as e:
+            result['match'] = False
+            result['error'] = 'bashlex_exception'
+            result['detail'] = f'{type(e.__cause__).__name__}: {e.__cause__}'
+
+        print(json.dumps(result))
+
+
+@boundary
+def handle_hook() -> None:
     """Read a PreToolUse hook event from stdin and auto-approve if safe.
 
     Emits an 'allow' decision only when every subcommand in a compound command
@@ -229,7 +279,7 @@ def _check_word_expansions(children: Sequence[bashlex.ast.node], word: str) -> N
         raise ApproveCompoundBashException(f'unsafe expansion in: {word}')
 
 
-# Boundary handlers — registered after main, dispatched when main raises
+# Boundary handlers — registered after handle_hook, dispatched when it raises
 
 
 @boundary.handler(BashlexBoundaryException)
