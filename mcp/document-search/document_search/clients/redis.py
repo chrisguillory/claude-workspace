@@ -123,8 +123,8 @@ class RedisClient:
     async def scan_iter(self, *, match: str, count: int = 100) -> AsyncIterator[str]:
         """Iterate keys matching glob pattern. Decodes bytes to strings.
 
-        SCAN is cursor-based and non-blocking. The semaphore is NOT held
-        across the full iteration — each cursor step acquires independently.
+        SCAN is cursor-based and non-blocking. Bypasses the semaphore —
+        redis-py manages its own connection for scan iteration.
         """
         async for key in self._client.scan_iter(match=match, count=count):
             yield key.decode()
