@@ -77,6 +77,7 @@ from types import TracebackType
 from typing import Any, Self, TypeVar, cast
 
 _F = TypeVar('_F', bound=Callable[..., object])
+_T = TypeVar('_T')
 
 # Control-flow exceptions that are Exception subclasses but must never be
 # translated. StopIteration terminates iteration; StopAsyncIteration terminates
@@ -186,7 +187,7 @@ class LibraryBoundary:
 
     # -- Proxy --
 
-    def wrap(self, library: object) -> Any:
+    def wrap(self, library: _T) -> _T:
         """Wrap a library object so all calls translate exceptions automatically.
 
         Returns a proxy that intercepts attribute access. Callable attributes
@@ -197,7 +198,8 @@ class LibraryBoundary:
         management are translated too.
 
         Limitations:
-            - Type checkers see ``Any`` for proxy attribute access.
+            - Return type is ``_T`` (preserves input type for static analysis).
+              At runtime, a proxy object is returned; attribute access is dynamic.
             - Property access on the wrapped object executes outside the boundary.
               Exceptions from ``@property`` methods are not translated.
             - Magic methods (``__len__``, ``__getitem__``, ``__call__``, ``__iter__``)
@@ -206,7 +208,7 @@ class LibraryBoundary:
             - Wrapping is single-level. ``proxy.sub.method()`` returns the raw
               sub-object — wrap sub-objects explicitly if needed.
         """
-        return _TranslatingProxy(library, self)
+        return cast(_T, _TranslatingProxy(library, self))
 
 
 # ---------------------------------------------------------------------------
