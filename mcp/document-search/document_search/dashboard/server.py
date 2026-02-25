@@ -1341,7 +1341,10 @@ INDEX_HTML = """<!DOCTYPE html>
             }
 
             render();
-            return { update: updateData };
+            return {
+                update: updateData,
+                destroy() { if (raf) cancelAnimationFrame(raf); tooltip.remove(); }
+            };
         }
 
         function initPendingCharts() {
@@ -1563,7 +1566,10 @@ INDEX_HTML = """<!DOCTYPE html>
                 if (activeIds !== lastActiveIds) {
                     lastActiveIds = activeIds;
                     // Full re-render invalidates all live chart DOM references
-                    for (const opId of Object.keys(liveCharts)) delete liveCharts[opId];
+                    for (const opId of Object.keys(liveCharts)) {
+                        if (liveCharts[opId].destroy) liveCharts[opId].destroy();
+                        delete liveCharts[opId];
+                    }
                     document.getElementById('active-ops').innerHTML =
                         activeOps.length === 0
                             ? '<div class="empty">No active operations</div>'
@@ -1591,8 +1597,8 @@ INDEX_HTML = """<!DOCTYPE html>
                         if (metaEl) metaEl.innerHTML = formatOperationMeta(op);
                         if (progressEl) {
                             progressEl.innerHTML = formatOperationProgressHtml(op);
-                            // Progress replacement destroys live chart DOM; clear stale reference
-                            // so next timing poll recreates on the fresh container
+                            // Progress replacement destroys live chart DOM; clean up and clear
+                            if (liveCharts[op.operation_id]?.destroy) liveCharts[op.operation_id].destroy();
                             delete liveCharts[op.operation_id];
                         }
                     }
@@ -1649,7 +1655,10 @@ INDEX_HTML = """<!DOCTYPE html>
                 // Clean up liveCharts for operations no longer active
                 const activeIdSet = new Set(activeOps.map(o => o.operation_id));
                 for (const opId of Object.keys(liveCharts)) {
-                    if (!activeIdSet.has(opId)) delete liveCharts[opId];
+                    if (!activeIdSet.has(opId)) {
+                        if (liveCharts[opId].destroy) liveCharts[opId].destroy();
+                        delete liveCharts[opId];
+                    }
                 }
 
                 // Poll timing endpoint for active operations (every 5s)
