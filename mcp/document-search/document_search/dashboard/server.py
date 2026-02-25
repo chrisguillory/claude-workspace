@@ -1726,7 +1726,6 @@ INDEX_HTML = """<!DOCTYPE html>
             update();
         }
 
-        update();
         // Self-scheduling loop prevents overlapping async invocations
         async function pollLoop() { await update(); setTimeout(pollLoop, 500); }
         pollLoop();
