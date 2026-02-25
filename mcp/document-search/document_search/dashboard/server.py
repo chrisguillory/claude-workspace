@@ -373,11 +373,6 @@ INDEX_HTML = """<!DOCTYPE html>
                 ${p.by_file_type && Object.keys(p.by_file_type).length > 0 ? formatFileTypeChart(p.by_file_type) : ''}
                 ${formatQueueDepthChart(p.queue_depth_series)}
                 ${p.file_errors && p.file_errors.length > 0 ? formatErrorList(p.file_errors, op.operation_id) : ''}
-                ${p.timing_stats && p.timing_stats.length > 0 ? `
-                    <div style="margin-top:12px">
-                        ${formatTimingTable(p.timing_stats, p.scan_seconds, null, null, p.elapsed_seconds, true)}
-                        <div id="timing-chart-${op.operation_id}" class="timing-chart-live"></div>
-                    </div>` : ''}
             `;
         }
 
@@ -424,6 +419,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     </div>
                     <div class="op-meta">${escapeHtml(op.directory)} <span style="font-family:monospace;font-size:11px;color:#999">${op.operation_id.slice(0,8)}</span></div>
                     ${isComplete ? formatCompletedSummary(op) : `<div id="progress-${op.operation_id}">${formatOperationProgressHtml(op)}</div>`}
+                    ${!isComplete ? `<div id="timing-${op.operation_id}"></div>` : ''}
                     ${op.error ? `<div class="error-msg">${escapeHtml(op.error)}</div>` : ''}
                     ${op.result?.by_file_type && Object.keys(op.result.by_file_type).length > 0 ? formatFileTypeChart(op.result.by_file_type) : ''}
                     ${op.result?.timing ? formatTimingReport(op.result.timing, op.operation_id) : ''}
@@ -1597,9 +1593,6 @@ INDEX_HTML = """<!DOCTYPE html>
                         if (metaEl) metaEl.innerHTML = formatOperationMeta(op);
                         if (progressEl) {
                             progressEl.innerHTML = formatOperationProgressHtml(op);
-                            // Progress replacement destroys live chart DOM; clean up and clear
-                            if (liveCharts[op.operation_id]?.destroy) liveCharts[op.operation_id].destroy();
-                            delete liveCharts[op.operation_id];
                         }
                     }
                     // Refresh open logs (fetchLogs skips if unchanged)
@@ -1662,28 +1655,50 @@ INDEX_HTML = """<!DOCTYPE html>
                 }
 
                 // Poll timing endpoint for active operations (every 5s)
+                // Timing section lives in timing-{id} div (sibling of progress-{id})
+                // so the 500ms progress update doesn't destroy the chart canvas
                 if (activeOps.length > 0 && Date.now() - lastTimingFetch > 5000) {
                     lastTimingFetch = Date.now();
                     for (const op of activeOps) {
-                        const chartEl = document.getElementById('timing-chart-' + op.operation_id);
-                        if (!chartEl) continue;
+                        const timingEl = document.getElementById('timing-' + op.operation_id);
+                        if (!timingEl) continue;
                         try {
                             const resp = await fetch('/api/operations/' + op.operation_id + '/timing');
                             if (!resp.ok) continue;
                             const timing = await resp.json();
-                            if (!timing || !timing.completion_series || timing.completion_series.length === 0) continue;
-                            if (liveCharts[op.operation_id]) {
-                                liveCharts[op.operation_id].update(
-                                    timing.completion_series, timing.queue_depth_series,
-                                    timing.total_elapsed_seconds, timing.stages
-                                );
+                            if (!timing || !timing.stages || timing.stages.length === 0) continue;
+
+                            // Render timing table (updates every 5s with new percentiles)
+                            const tableHtml = formatTimingTable(
+                                timing.stages, timing.scan_seconds, null, null,
+                                timing.total_elapsed_seconds, true
+                            );
+
+                            // Ensure chart container exists (create once, preserved across updates)
+                            const chartId = 'timing-chart-' + op.operation_id;
+                            if (!document.getElementById(chartId)) {
+                                timingEl.innerHTML = `<div style="margin-top:12px"><div class="timing-table-container">${tableHtml}</div><div id="${chartId}" class="timing-chart-live"></div></div>`;
                             } else {
-                                const chart = createTimeSeriesChart(
-                                    'timing-chart-' + op.operation_id,
-                                    timing.completion_series, timing.queue_depth_series,
-                                    timing.total_elapsed_seconds, timing.stages
-                                );
-                                if (chart) liveCharts[op.operation_id] = chart;
+                                // Update just the table, leave chart container untouched
+                                const tableContainer = timingEl.querySelector('.timing-table-container');
+                                if (tableContainer) tableContainer.innerHTML = tableHtml;
+                            }
+
+                            // Create or update chart
+                            if (timing.completion_series && timing.completion_series.length > 0) {
+                                if (liveCharts[op.operation_id]) {
+                                    liveCharts[op.operation_id].update(
+                                        timing.completion_series, timing.queue_depth_series,
+                                        timing.total_elapsed_seconds, timing.stages
+                                    );
+                                } else {
+                                    const chart = createTimeSeriesChart(
+                                        chartId,
+                                        timing.completion_series, timing.queue_depth_series,
+                                        timing.total_elapsed_seconds, timing.stages
+                                    );
+                                    if (chart) liveCharts[op.operation_id] = chart;
+                                }
                             }
                         } catch (e) { /* ignore timing fetch errors */ }
                     }
