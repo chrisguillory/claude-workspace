@@ -631,6 +631,8 @@ class IndexingService:
                 errors.append(result)
                 if ft is not None:
                     errored_by_type[ft] = errored_by_type.get(ft, 0) + 1
+            elif result == _CHUNK_CACHED:
+                pass  # Counted via files_cached below, not files_indexed
             elif result == 0:
                 files_no_content += 1
                 if ft is not None:
@@ -725,27 +727,27 @@ class IndexingService:
         Returns:
             ClearResult with counts of files and chunks removed.
         """
-        if clear_cache:
-            if path == '**':
+        if path == '**':
+            if clear_cache:
                 # Empty prefix matches all embed-idx:file:* keys
                 await self._embedding.invalidate_path_cache('')
-            elif await self._state_store.get_file_state(path) is not None:
-                # Known single file — invalidate exact key only
-                await self._embedding.invalidate_file_cache(path)
-            else:
-                # Directory prefix — SCAN with trailing / for safety
-                await self._embedding.invalidate_path_cache(path)
-
-        if path == '**':
             # Drop entire Qdrant collection + clear all Redis state
             chunks_count = await self._repo.count()
             await self._repo.delete_collection()
             await self._state_store.clear_collection()
             return ClearResult(files_removed=0, chunks_removed=chunks_count, path=None)
 
-        # Get chunk IDs from Redis for the target path
-        # Single file or directory — Redis SCAN handles prefix matching
+        # Single lookup, reused for both cache invalidation and chunk retrieval
         file_state = await self._state_store.get_file_state(path)
+
+        if clear_cache:
+            if file_state is not None:
+                # Known single file — invalidate exact key only
+                await self._embedding.invalidate_file_cache(path)
+            else:
+                # Directory prefix — SCAN with trailing / for safety
+                await self._embedding.invalidate_path_cache(path)
+
         if file_state is not None:
             # Exact file match
             chunk_ids = list(file_state.chunk_ids)
@@ -844,6 +846,7 @@ class IndexingService:
                                 chunks=[],
                                 chunk_ids=[],
                                 all_chunk_ids=[],
+                                all_chunk_texts=[],
                                 deleted_chunk_ids=deleted_ids,
                                 chunks_skipped=0,
                             )
@@ -910,6 +913,7 @@ class IndexingService:
                             chunks=changed_chunks,
                             chunk_ids=changed_ids,
                             all_chunk_ids=all_chunk_ids,
+                            all_chunk_texts=[c.text for c in chunks],
                             deleted_chunk_ids=deleted_ids,
                             chunks_skipped=chunks_skipped,
                         )
@@ -1056,7 +1060,7 @@ class IndexingService:
                 counters.files_embedded += 1
 
                 # Fire-and-forget: reverse index update drained at operation completion
-                self._embedding.submit_file_cache_index(fk, [c.text for c in chunked.chunks])
+                self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
 
                 start_idx = end_idx
 
@@ -1114,7 +1118,7 @@ class IndexingService:
             counters.files_embedded += 1
 
             # Fire-and-forget: reverse index update drained at operation completion
-            self._embedding.submit_file_cache_index(fk, texts)
+            self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
 
         _worker_id = id(asyncio.current_task()) % 10000  # short ID for logs
 
@@ -1458,6 +1462,7 @@ class _ChunkedFile:
     chunks: Sequence[Chunk]  # Only changed chunks (need embedding)
     chunk_ids: Sequence[UUID]  # IDs for chunks above (parallel arrays)
     all_chunk_ids: Sequence[UUID]  # ALL chunk IDs (for Redis state)
+    all_chunk_texts: Sequence[str]  # ALL chunk texts (for reverse index)
     deleted_chunk_ids: Sequence[UUID]  # Old chunks to delete from Qdrant
     chunks_skipped: int  # Count of unchanged chunks
 
