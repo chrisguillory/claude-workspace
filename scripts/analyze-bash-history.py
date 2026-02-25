@@ -26,20 +26,20 @@ clean for the report. Progress messages go to stderr.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import sys
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import lazy_object_proxy
 import pydantic
 from local_lib.error_boundary import ErrorBoundary
 from local_lib.schemas.hooks import BashToolInput
 from local_lib.types import JsonDatetime
+from local_lib.utils import load_module_from_path
 
 
 class CommandRecord(pydantic.BaseModel):
@@ -359,16 +359,12 @@ class HookModule:
 
     @staticmethod
     def load() -> HookModule.Interface:
-        """Import approve-compound-bash.py via importlib."""
+        """Import approve-compound-bash.py via load_module_from_path."""
         hook_path = Path(__file__).parent.parent / 'hooks' / 'approve-compound-bash.py'
-        if not hook_path.is_file():
-            raise HookModule.LoadError(f'hook not found at {hook_path}')
-        spec = importlib.util.spec_from_file_location('approve_compound_bash', hook_path)
-        if spec is None or spec.loader is None:
-            raise HookModule.LoadError(f'failed to create module spec for {hook_path}')
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod  # type: ignore[return-value]
+        try:
+            return cast(HookModule.Interface, load_module_from_path(hook_path))
+        except (FileNotFoundError, ImportError) as e:
+            raise HookModule.LoadError(str(e)) from e
 
 
 hook: HookModule.Interface = lazy_object_proxy.Proxy(HookModule.load)  # type: ignore[assignment]

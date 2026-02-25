@@ -6,10 +6,8 @@ detection via ApproveCompoundBashException, prefix matching, and settings loadin
 
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
-import sys
 from collections.abc import Generator
 from pathlib import Path
 from types import ModuleType
@@ -19,6 +17,7 @@ import bashlex.tokenizer
 import git
 import pydantic
 import pytest
+from local_lib.utils import temporary_module
 
 REPO_ROOT = Path(git.Repo(__file__, search_parent_directories=True).working_tree_dir or '.').resolve(strict=True)
 
@@ -26,14 +25,8 @@ REPO_ROOT = Path(git.Repo(__file__, search_parent_directories=True).working_tree
 @pytest.fixture(scope='session')
 def hook_module() -> Generator[ModuleType]:
     """Import approve-compound-bash.py (hyphenated filename requires importlib)."""
-    path = REPO_ROOT / 'hooks' / 'approve-compound-bash.py'
-    spec = importlib.util.spec_from_file_location('approve_compound_bash', path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules['approve_compound_bash'] = mod
-    spec.loader.exec_module(mod)
-    yield mod
-    sys.modules.pop('approve_compound_bash', None)
+    with temporary_module(REPO_ROOT / 'hooks' / 'approve-compound-bash.py') as mod:
+        yield mod
 
 
 class TestAnalyzeCommand:
