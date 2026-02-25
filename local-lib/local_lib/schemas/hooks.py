@@ -5,6 +5,7 @@ See: https://code.claude.com/docs/en/hooks
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal
 
 import pydantic
@@ -50,6 +51,22 @@ class SessionEndHookInput(StrictModel):
     permission_mode: str | None = None
 
 
+# --- Tool input types ---
+
+
+class BashToolInput(StrictModel):
+    """Bash tool input schema.
+
+    See also: claude-session-mcp/src/schemas/session/models.py (validated against 23K+ occurrences).
+    """
+
+    command: str
+    description: str | None = None
+    timeout: int | None = None
+    run_in_background: bool | None = None
+    dangerouslyDisableSandbox: bool | None = None
+
+
 # --- PreToolUse hook types ---
 
 
@@ -64,7 +81,7 @@ class PreToolUseHookInput(StrictModel):
     transcript_path: str
     hook_event_name: Literal['PreToolUse']
     tool_name: str
-    tool_input: dict[str, Any]
+    tool_input: Mapping[str, Any]
     tool_use_id: str
     permission_mode: str | None = None
 
