@@ -157,6 +157,18 @@ class EmbeddingService:
         """Update reverse index mapping file → embedding cache keys."""
         await self._cache_loader.update_file_index(file_path, texts)
 
+    def submit_file_cache_index(self, file_path: str, texts: Sequence[str]) -> None:
+        """Fire-and-forget reverse index update via BackgroundTaskGroup.
+
+        Same as update_file_cache_index but non-blocking. Drained with
+        cache_tasks at operation completion.
+        """
+        self._cache_loader.submit_file_index(file_path, texts)
+
+    async def refresh_file_cache_index_ttl(self, file_path: str) -> None:
+        """Refresh TTL on reverse index for a chunk-cached file."""
+        await self._cache_loader.refresh_file_index_ttl(file_path)
+
     async def invalidate_file_cache(self, file_path: str) -> int:
         """Delete cached embeddings for a file via reverse index."""
         return await self._cache_loader.invalidate_file_cache(file_path)
@@ -212,13 +224,26 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
 
     # ── Reverse index: file path → cache keys ───────────────────
 
+    def submit_file_index(self, file_path: str, texts: Sequence[str]) -> None:
+        """Fire-and-forget reverse index update. Drained at operation completion."""
+        self._cache_tasks.submit(self.update_file_index(file_path, texts))
+
+    async def refresh_file_index_ttl(self, file_path: str) -> None:
+        """Refresh TTL on an existing reverse index entry (no content change)."""
+        index_key = self._index_key(file_path)
+        await self._redis.expire(index_key, CACHE_TTL_SECONDS)
+
     async def update_file_index(self, file_path: str, texts: Sequence[str]) -> None:
         """Atomically replace reverse index mapping file → cache keys.
 
         Uses MULTI/EXEC transaction: UNLINK old set → SADD new keys → EXPIRE.
         """
-        cache_keys = [self.cache_key(t) for t in texts]
         index_key = self._index_key(file_path)
+        if not texts:
+            # No embeddings to track — remove stale reverse index
+            await self._redis.unlink(index_key)
+            return
+        cache_keys = [self.cache_key(t) for t in texts]
         pipe = self._redis.transaction()
         pipe.unlink(index_key)
         pipe.sadd(index_key, *[k.encode() for k in cache_keys])
@@ -235,6 +260,9 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
 
     async def invalidate_path_prefix(self, path_prefix: str) -> int:
         """Delete all cached embeddings for files under a directory."""
+        # Ensure directory boundary to avoid /dir1* matching /dir10/
+        if path_prefix and not path_prefix.endswith('/'):
+            path_prefix += '/'
         pattern = f'embed-idx:file:{path_prefix}*'
         total = 0
         async for index_key in self._redis.scan_iter(match=pattern):

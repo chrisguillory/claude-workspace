@@ -75,6 +75,10 @@ UPSERT_QUEUE_SIZE = 500
 # Timeout for file chunking operations (detects deadlocks)
 FILE_CHUNK_TIMEOUT_SECONDS = 60
 
+# Sentinel value in results dict: file was chunk-cached (all chunks unchanged).
+# Distinct from 0 (no content) to avoid inflating no_content stats in snapshot.
+_CHUNK_CACHED = -1
+
 
 class IndexingService:
     """Orchestrates document indexing pipeline.
@@ -149,6 +153,8 @@ class IndexingService:
                 if ft is not None:
                     errored_by_type[ft] = errored_by_type.get(ft, 0) + 1
                 file_errors.append(result)
+            elif result == _CHUNK_CACHED:
+                pass  # Chunk-cached files have content; don't count as no_content
             elif result == 0:
                 if ft is not None:
                     no_content_by_type[ft] = no_content_by_type.get(ft, 0) + 1
@@ -723,12 +729,12 @@ class IndexingService:
             if path == '**':
                 # Empty prefix matches all embed-idx:file:* keys
                 await self._embedding.invalidate_path_cache('')
+            elif await self._state_store.get_file_state(path) is not None:
+                # Known single file — invalidate exact key only
+                await self._embedding.invalidate_file_cache(path)
             else:
-                # Works for both single file and directory prefix
-                invalidated = await self._embedding.invalidate_file_cache(path)
-                if invalidated == 0:
-                    # No exact file match — try as directory prefix
-                    await self._embedding.invalidate_path_cache(path)
+                # Directory prefix — SCAN with trailing / for safety
+                await self._embedding.invalidate_path_cache(path)
 
         if path == '**':
             # Drop entire Qdrant collection + clear all Redis state
@@ -879,8 +885,10 @@ class IndexingService:
                     )
                     counters.files_chunk_cached += 1
                     counters.chunks_skipped += chunks_skipped
+                    # Refresh reverse index TTL so it doesn't expire before cache entries
+                    await self._embedding.refresh_file_cache_index_ttl(file_key)
                     async with results_lock:
-                        results[file_key] = 0  # Chunk-cached, 0 new chunks
+                        results[file_key] = _CHUNK_CACHED
                     logger.debug(f'[CHUNK] {file_path.name}: all {chunks_skipped} chunks unchanged')
 
                 else:
@@ -1047,8 +1055,8 @@ class IndexingService:
                 counters.chunks_embedded += len(chunked.chunks)
                 counters.files_embedded += 1
 
-                # Update reverse index (file → cache keys) — fast Redis transaction
-                await self._embedding.update_file_cache_index(fk, [c.text for c in chunked.chunks])
+                # Fire-and-forget: reverse index update drained at operation completion
+                self._embedding.submit_file_cache_index(fk, [c.text for c in chunked.chunks])
 
                 start_idx = end_idx
 
@@ -1105,8 +1113,8 @@ class IndexingService:
             counters.chunks_embedded += len(chunked.chunks)
             counters.files_embedded += 1
 
-            # Update reverse index (file → cache keys) — fast Redis transaction
-            await self._embedding.update_file_cache_index(fk, texts)
+            # Fire-and-forget: reverse index update drained at operation completion
+            self._embedding.submit_file_cache_index(fk, texts)
 
         _worker_id = id(asyncio.current_task()) % 10000  # short ID for logs
 

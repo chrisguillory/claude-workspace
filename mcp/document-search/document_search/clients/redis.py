@@ -109,6 +109,11 @@ class RedisClient:
         async with self._semaphore:
             return await self._client.unlink(*names)
 
+    async def expire(self, name: str, time: int) -> bool:
+        """Set TTL on a key. Returns True if key exists and TTL was set."""
+        async with self._semaphore:
+            return await self._client.expire(name, time)
+
     async def smembers(self, name: str) -> Set[str]:
         """Get all members of a set, decoded to strings."""
         async with self._semaphore:
