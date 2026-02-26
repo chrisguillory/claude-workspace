@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -12,8 +13,11 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
+import git
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -24,6 +28,7 @@ from document_search.schemas.dashboard import DashboardState, McpServer, Operati
 from document_search.schemas.tracing import PipelineTimingReport
 
 __all__ = [
+    'BuildInfo',
     'DashboardServer',
 ]
 
@@ -31,6 +36,18 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8765
 MONITOR_INTERVAL_SECONDS = 5
+_START_TIME = time.strftime('%Y-%m-%d %H:%M:%S')
+_START_EPOCH = int(time.time())
+
+
+class BuildInfo(TypedDict):
+    """Build metadata returned by /api/build-id."""
+
+    build_id: str
+    git_hash: str
+    git_commit_date: str
+    server_started: str
+
 
 INDEX_HTML = """<!DOCTYPE html>
 <html>
@@ -279,6 +296,8 @@ INDEX_HTML = """<!DOCTYPE html>
             line-height: 1;
         }
         .btn-delete:hover { color: #d32f2f; }
+        .footer { text-align: center; padding: 16px 0 8px; font-size: 11px; color: #aaa; }
+        .footer code { background: #eee; padding: 1px 5px; border-radius: 3px; font-size: 10px; color: #999; }
     </style>
 </head>
 <body>
@@ -305,6 +324,8 @@ INDEX_HTML = """<!DOCTYPE html>
             </div>
             <div id="recent-ops"></div>
         </div>
+
+        <div class="footer" id="build-info"></div>
     </div>
 
     <script>
@@ -644,7 +665,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 colors: {grid: '#e0e0e0', gridVert: '#e8e8e8', axis: '#ccc', text: '#999', textMuted: '#aaa', border: '#ddd'},
                 spacing: {ml: 44, mr: 28, mt: 4, mb: 20, tickLen: 3, dataPad: 4},
                 type: {axis: 8, axisSmall: 7, legend: 11},
-                chart: {dotR: 1.0, dotHoverR: 3.5, lineW: 1, lineOp: 0.5, dotOp: 0.85, qLineW: 1, qLineOp: 0.7},
+                chart: {dotR: 1.0, dotHoverR: 3.5, lineW: 1, lineOp: 0.7, dotOp: 0.85, qLineW: 1, qLineOp: 0.7},
             };
             const COLORS = {embed_sparse:'#c62828', embed_dense:'#1565c0', store:'#2e7d32', embed:'#6a1b9a', chunk:'#78909c'};
             const QCOLORS = {file_queue:'#e65100', embed_queue:'#1976d2', upsert_queue:'#388e3c', chunk_inflight:'#ff6f00', embed_inflight:'#1e88e5', store_inflight:'#43a047', cumulative:'#6a1b9a', chunk_done:'#ef5350', embed_done:'#42a5f5', store_done:'#66bb6a'};
@@ -864,24 +885,22 @@ INDEX_HTML = """<!DOCTYPE html>
                 const px = xAxis.px;
                 state.px = px;
 
-                // Dot+line chart (dots at window midpoints, thin connecting lines)
+                // Dot+line chart (dots at window midpoints, continuous connecting lines)
                 let paths = '';
                 for (const [sid, wins] of Object.entries(state.wins)) {
                     const pts = [];
-                    let lastEnd = -Infinity;
                     for (const w of wins) {
                         if (w.v === null) continue;
                         const cx = px((w.s + w.e) / 2).toFixed(1);
                         const cy = py(w.v).toFixed(1);
-                        pts.push({cx, cy, brk: (w.s - lastEnd) > state.ws * 2});
-                        lastEnd = w.e;
+                        pts.push({cx, cy});
                     }
-                    // Connecting lines (thin, behind dots, break on large gaps)
-                    let ld = '';
-                    for (const p of pts) {
-                        ld += (p.brk ? (ld ? ' M' : 'M') : ' L') + p.cx + ',' + p.cy;
+                    // Connecting lines (continuous, no gap breaks — Datadog style)
+                    if (pts.length > 1) {
+                        let ld = 'M' + pts[0].cx + ',' + pts[0].cy;
+                        for (let i = 1; i < pts.length; i++) ld += ' L' + pts[i].cx + ',' + pts[i].cy;
+                        paths += '<path d="' + ld + '" fill="none" stroke="' + COLORS[sid] + '" stroke-width="' + THEME.chart.lineW + '" opacity="' + THEME.chart.lineOp + '"/>';
                     }
-                    if (ld) paths += '<path d="' + ld + '" fill="none" stroke="' + COLORS[sid] + '" stroke-width="' + THEME.chart.lineW + '" opacity="' + THEME.chart.lineOp + '"/>';
                     // Dots (on top of lines)
                     for (const p of pts) {
                         paths += '<circle cx="' + p.cx + '" cy="' + p.cy + '" r="' + THEME.chart.dotR + '" fill="' + COLORS[sid] + '" opacity="' + THEME.chart.dotOp + '"/>';
@@ -1544,9 +1563,36 @@ INDEX_HTML = """<!DOCTYPE html>
         let lastRecentIds = '';
         let lastServerCount = -1;
         const lastLogLines = {};  // opId -> total_lines (skip re-render when unchanged)
+        let knownBuildId = null;
+        let lastBuildCheck = 0;
 
         async function update() {
             try {
+                // Check for server restart every 10s — auto-reload to pick up code changes
+                if (Date.now() - lastBuildCheck > 10000) {
+                    lastBuildCheck = Date.now();
+                    try {
+                        const buildResp = await fetch('/api/build-id');
+                        if (buildResp.ok) {
+                            const bd = await buildResp.json();
+                            if (knownBuildId && bd.build_id !== knownBuildId) {
+                                console.log('Server restarted (build ' + knownBuildId + ' \\u2192 ' + bd.build_id + '), reloading...');
+                                location.href = '/?v=' + Date.now();
+                                return;
+                            }
+                            knownBuildId = bd.build_id;
+                            const footer = document.getElementById('build-info');
+                            if (footer && !footer.dataset.set) {
+                                let info = '<code>' + bd.git_hash + '</code>';
+                                if (bd.git_commit_date) info += ' \\u00b7 committed ' + bd.git_commit_date;
+                                info += ' \\u00b7 server started ' + bd.server_started;
+                                footer.innerHTML = info;
+                                footer.dataset.set = '1';
+                            }
+                        }
+                    } catch (e) { /* server may be restarting */ }
+                }
+
                 const [activeResp, serversResp, recentResp] = await Promise.all([
                     fetch('/api/operations/active'),
                     fetch('/api/mcp-servers'),
@@ -1818,6 +1864,16 @@ class DashboardServer:
                 raise HTTPException(status_code=503, detail='Dashboard state not available')
             return state
 
+        @app.get('/api/build-id')
+        def get_build_id() -> BuildInfo:
+            git_hash, git_commit_date = _git_info()
+            return BuildInfo(
+                build_id=f'{git_hash}-{_START_EPOCH}',
+                git_hash=git_hash,
+                git_commit_date=git_commit_date,
+                server_started=_START_TIME,
+            )
+
         @app.get('/api/mcp-servers')
         def get_mcp_servers() -> Sequence[McpServer]:
             return state_manager.get_live_mcp_servers()
@@ -1830,9 +1886,22 @@ class DashboardServer:
 
         @app.get('/api/operations/active')
         def get_active_operations() -> Sequence[OperationState]:
-            """Get currently running operations."""
+            """Get currently running operations.
+
+            Detects orphaned operations whose MCP server PID is dead and
+            marks them as failed so they don't appear as perpetually running.
+            """
             ops = _read_operations()
-            return [o for o in ops if o.ended_at is None]
+            active: list[OperationState] = []
+            for op in ops:
+                if op.ended_at is not None:
+                    continue
+                # Check if the MCP server that started this operation is still alive
+                if op.mcp_server_pid and not _pid_alive(op.mcp_server_pid):
+                    _mark_orphaned(op)
+                    continue
+                active.append(op)
+            return active
 
         @app.get('/api/operations/{operation_id}')
         def get_operation(operation_id: str) -> OperationState:
@@ -1941,6 +2010,23 @@ class DashboardServer:
         return app
 
 
+@functools.cache
+def _git_info() -> tuple[str, str]:
+    """Get git short hash and commit date.
+
+    Cached — computed once on first call. Falls back to 'unknown'
+    if not running from a git repo (e.g., installed via uv tool).
+    """
+    try:
+        repo = git.Repo(Path(__file__).resolve().parent, search_parent_directories=True)
+        commit = repo.head.commit
+        short_hash = commit.hexsha[:7]
+        commit_date = datetime.fromtimestamp(commit.committed_date, tz=UTC).strftime('%Y-%m-%d %H:%M')
+        return short_hash, commit_date
+    except (git.InvalidGitRepositoryError, git.NoSuchPathError, ValueError):
+        return 'unknown', ''
+
+
 def _find_port(preferred: int | None, *, retries: int = 10, retry_delay: float = 0.2) -> int:
     """Find available port. Retries preferred port before falling back.
 
@@ -2015,3 +2101,23 @@ def _read_operations() -> Sequence[OperationState]:
         ops.append(OperationState.model_validate(data))
 
     return sorted(ops, key=lambda o: o.created_at, reverse=True)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Check if a process is alive (signal 0 = existence check)."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def _mark_orphaned(op: OperationState) -> None:
+    """Mark an orphaned operation as failed on disk."""
+    file_path = OPERATIONS_DIR / f'{op.operation_id}.json'
+    if not file_path.exists():
+        return
+    data = json.loads(file_path.read_text())
+    data['ended_at'] = data['updated_at']
+    data['error'] = f'MCP server (PID {op.mcp_server_pid}) exited before operation completed'
+    file_path.write_text(json.dumps(data))
