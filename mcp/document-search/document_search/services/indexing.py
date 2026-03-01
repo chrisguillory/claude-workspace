@@ -26,7 +26,6 @@ from pathlib import Path
 from uuid import UUID
 
 import git
-from local_lib.background_tasks import BackgroundTaskGroup
 from local_lib.utils import Timer
 
 from document_search.clients import QdrantClient, create_embedding_client
@@ -219,6 +218,22 @@ class IndexingService:
         self._cached_timing_stats = report.stages
         self._cached_scan_seconds = report.scan_seconds
         return report
+
+    # ── Write lifecycle ────────────────────────────────────────
+
+    async def drain_writes(self) -> None:
+        """Flush all pending cache and index writes."""
+        await self._embedding.drain_writes()
+
+    def check_write_health(self) -> None:
+        """Raise first error from fire-and-forget write operations."""
+        self._embedding.check_write_health()
+
+    def cancel_writes(self) -> None:
+        """Cancel in-flight write batchers."""
+        self._embedding.cancel_writes()
+
+    # ── Single-file indexing ───────────────────────────────────
 
     async def index_file(self, file_path: Path) -> IndexingResult:
         """Index a single file directly (bypasses pipeline for simplicity).
@@ -1059,8 +1074,8 @@ class IndexingService:
                 counters.chunks_embedded += len(chunked.chunks)
                 counters.files_embedded += 1
 
-                # Fire-and-forget: reverse index update drained at operation completion
-                self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
+                # Enqueue reverse index update (await is lock only, not I/O). Drained at operation end.
+                await self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
 
                 start_idx = end_idx
 
@@ -1118,7 +1133,7 @@ class IndexingService:
             counters.files_embedded += 1
 
             # Fire-and-forget: reverse index update drained at operation completion
-            self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
+            await self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
 
         _worker_id = id(asyncio.current_task()) % 10000  # short ID for logs
 
@@ -1348,7 +1363,6 @@ async def create_indexing_service(
     collection_name: str,
     *,
     redis: RedisClient,
-    cache_tasks: BackgroundTaskGroup,
     qdrant_url: str = 'http://localhost:6333',
 ) -> IndexingService:
     """Factory function to create IndexingService with default dependencies.
@@ -1359,7 +1373,6 @@ async def create_indexing_service(
         config: Embedding configuration with provider selection.
         collection_name: Name of the collection to operate on.
         redis: Redis client for embedding cache and index state.
-        cache_tasks: Background task group for cache write tracking.
         qdrant_url: URL of Qdrant server.
 
     Returns:
@@ -1373,7 +1386,6 @@ async def create_indexing_service(
         embedding_client,
         batch_size=config.batch_size,
         redis=redis,
-        cache_tasks=cache_tasks,
         model=config.embedding_model,
         dimensions=config.embedding_dimensions,
     )
