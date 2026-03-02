@@ -45,7 +45,12 @@ def encode_project_path(path: Path | str) -> str:
 
 
 class DualLogger:
-    """Logs messages to both stdout and MCP client context."""
+    """DEPRECATED: Writes to stdout (breaks MCP stdio) and uses ctx.info()
+    (silently swallowed by Claude Code).
+
+    Use logging.getLogger(__name__) with logging.basicConfig(stream=sys.stderr) instead.
+    See document-search, browser-automation, and python-interpreter for the pattern.
+    """
 
     def __init__(self, ctx: Context[Any, Any, Any]):
         self.ctx = ctx
