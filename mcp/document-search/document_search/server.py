@@ -353,6 +353,7 @@ Returns:
                         snapshot,
                         status='running',
                         errors_429=errors_429_delta,
+                        redis_conn_stats=state.redis_client.connection_stats,
                     )
                     progress_writer.update_progress(progress)
                 await asyncio.sleep(0.5)
@@ -369,7 +370,7 @@ Returns:
                 f'{len(result.errors)} errors'
             )
             logger.info(f'Redis connections: {conn_stats}')
-            progress_writer.complete_with_success(result)
+            progress_writer.complete_with_success(result, redis_conn_stats=conn_stats)
             if not include_timing:
                 result = result.__replace__(timing=None)
             return result

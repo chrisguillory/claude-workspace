@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Literal
 
 from local_lib.types import JsonDatetime
 
+from document_search.clients.redis import ConnectionStats
+
 if TYPE_CHECKING:
     from document_search.services.indexing import PipelineSnapshot
 
@@ -105,12 +107,17 @@ class OperationProgress(StrictModel):
     # Queue depth time series (1Hz samples from tracer)
     queue_depth_series: Sequence[QueueDepthSample]
 
-    # Live dashboard parity enrichments (all optional for backward compat)
+    # Live dashboard parity enrichments
     files_ignored: int = 0
     files_chunk_cached: int = 0
     file_errors: Sequence[FileProcessingError] = ()
     timing_stats: Sequence[StageTimingReport] = ()
     scan_seconds: float | None = None
+
+    # Redis connection diagnostics (high-water marks per operation)
+    redis_hwm_single: int = 0
+    redis_hwm_pipeline: int = 0
+    redis_hwm_total: int = 0
 
     @classmethod
     def from_snapshot(
@@ -119,6 +126,7 @@ class OperationProgress(StrictModel):
         *,
         status: OperationStatus,
         errors_429: int,
+        redis_conn_stats: ConnectionStats | None = None,
     ) -> OperationProgress:
         """Build from PipelineSnapshot with cross-layer metrics.
 
@@ -126,6 +134,7 @@ class OperationProgress(StrictModel):
             snapshot: PipelineSnapshot from IndexingService.
             status: Lifecycle status ('running', 'complete', 'failed').
             errors_429: Count of rate limit errors (tracked by embedding client).
+            redis_conn_stats: Redis connection diagnostics (HWM tracking).
 
         Returns:
             Complete OperationProgress ready for dashboard.
@@ -162,6 +171,9 @@ class OperationProgress(StrictModel):
             file_errors=snapshot.file_errors,
             timing_stats=snapshot.timing_stats,
             scan_seconds=snapshot.scan_seconds,
+            redis_hwm_single=redis_conn_stats.hwm_single if redis_conn_stats else 0,
+            redis_hwm_pipeline=redis_conn_stats.hwm_pipeline if redis_conn_stats else 0,
+            redis_hwm_total=redis_conn_stats.hwm_total if redis_conn_stats else 0,
         )
 
     @classmethod
@@ -171,6 +183,7 @@ class OperationProgress(StrictModel):
         *,
         errors_429: int,
         prior_progress: OperationProgress | None = None,
+        redis_conn_stats: ConnectionStats | None = None,
     ) -> OperationProgress:
         """Build final progress from IndexingResult with all queues drained.
 
@@ -186,6 +199,7 @@ class OperationProgress(StrictModel):
             result: Completed IndexingResult from IndexingService.
             errors_429: Count of rate limit errors from prior progress snapshots.
             prior_progress: Last live snapshot (carries accurate stage counters).
+            redis_conn_stats: Final Redis connection diagnostics (post-drain HWM).
 
         Returns:
             Complete OperationProgress with status='complete'.
@@ -222,6 +236,9 @@ class OperationProgress(StrictModel):
             file_errors=result.errors,
             timing_stats=prior_progress.timing_stats if prior_progress else (),
             scan_seconds=result.timing.scan_seconds if result.timing else None,
+            redis_hwm_single=redis_conn_stats.hwm_single if redis_conn_stats else 0,
+            redis_hwm_pipeline=redis_conn_stats.hwm_pipeline if redis_conn_stats else 0,
+            redis_hwm_total=redis_conn_stats.hwm_total if redis_conn_stats else 0,
         )
 
 

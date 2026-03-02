@@ -390,6 +390,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="stat"><div class="stat-label">Cache Misses</div><div class="stat-value">${p.embed_cache_misses.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Errored</div><div class="stat-value">${p.files_errored}</div></div>
                     <div class="stat"><div class="stat-label">429 Errors</div><div class="stat-value">${p.errors_429}</div></div>
+                    <div class="stat"><div class="stat-label">Redis HWM</div><div class="stat-value">${p.redis_hwm_total || 0}</div></div>
                 </div>
                 ${p.by_file_type && Object.keys(p.by_file_type).length > 0 ? formatFileTypeChart(p.by_file_type) : ''}
                 ${formatQueueDepthChart(p.queue_depth_series)}
@@ -415,6 +416,8 @@ INDEX_HTML = """<!DOCTYPE html>
                 const skipPct = (r.chunks_skipped / totalChunks * 100).toFixed(0);
                 line2Parts.push(`Chunk cache: ${skipPct}%`);
             }
+            const p = op.progress;
+            if (p && p.redis_hwm_total > 0) line2Parts.push(`Redis: ${p.redis_hwm_total} peak conns`);
             const errCount = r.errors ? r.errors.length : 0;
             if (errCount > 0) line2Parts.push(`<span style="color:#c62828">Errors: ${errCount}</span>`);
             if (r.stopped_after) line2Parts.push(`Stopped after ${r.stopped_after}`);

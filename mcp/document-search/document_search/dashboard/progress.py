@@ -16,6 +16,7 @@ from datetime import datetime
 
 from uuid6 import uuid7
 
+from document_search.clients.redis import ConnectionStats
 from document_search.paths import OPERATIONS_DIR
 from document_search.schemas.dashboard import OperationProgress, OperationState
 from document_search.schemas.indexing import IndexingResult
@@ -127,7 +128,11 @@ class ProgressWriter:
 
         self._write()
 
-    def complete_with_success(self, result: IndexingResult) -> None:
+    def complete_with_success(
+        self,
+        result: IndexingResult,
+        redis_conn_stats: ConnectionStats | None = None,
+    ) -> None:
         """Mark operation as successfully completed.
 
         Carries forward per-stage file counters from the last live snapshot
@@ -136,6 +141,7 @@ class ProgressWriter:
 
         Args:
             result: Final indexing result.
+            redis_conn_stats: Final Redis connection diagnostics (post-drain HWM).
         """
         if self._state is None:
             return
@@ -145,6 +151,7 @@ class ProgressWriter:
             result,
             errors_429=prior.errors_429 if prior else 0,
             prior_progress=prior,
+            redis_conn_stats=redis_conn_stats,
         )
 
         self._finalize(progress=final_progress, result=result, error=None)
