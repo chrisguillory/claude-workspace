@@ -431,7 +431,7 @@ local-lib/                  # Project root
 └── local_lib/             # Python package (importable as "local_lib")
     ├── __init__.py
     ├── types.py           # Shared type aliases and annotations
-    ├── utils.py           # DualLogger and shared utilities
+    ├── utils.py           # Shared utilities
     └── session_tracker.py
 ```
 
@@ -513,17 +513,24 @@ if __name__ == '__main__':
 
 ### Shared Logging
 
-All servers import `DualLogger` from `local_lib.utils`:
+All MCP servers use Python's `logging` module with stderr output:
 
 ```python
-from local_lib.utils import DualLogger
+import logging
+logger = logging.getLogger(__name__)
 
-# In tools:
-logger = DualLogger(ctx)
-await logger.info("message")
+# In lifespan() — configure once
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    stream=sys.stderr,
+)
+
+# In tool functions — use the logger
+logger.info("message")  # sync, not await
 ```
 
-This logs to both MCP context (visible in Claude) and stderr (visible in debug logs).
+Messages appear in `~/.claude/debug/{session_id}.txt`. Servers with operation logs (like document-search) can attach FileHandlers to the root logger for per-operation log files.
 
 ## Configuration
 
@@ -689,7 +696,7 @@ When modifying MCP servers:
 3. Add `pyproject.toml` with entry points following naming convention
 4. Include `local_lib` in dependencies for shared utilities
 5. Use relative path: `local_lib = { path = "../../local-lib/", editable = true }`
-6. Import shared code: `from local_lib.utils import DualLogger`
+6. Configure logging in `lifespan()`: `logging.basicConfig(stream=sys.stderr, ...)`
 7. Write tool docstrings that guide Claude's behavior
 
 ### Adding Shared Utilities

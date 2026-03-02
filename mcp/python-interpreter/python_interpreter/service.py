@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import logging
 import pathlib
 import subprocess
 import sys
@@ -28,11 +29,11 @@ from python_interpreter.models import (
 )
 from python_interpreter.registry import InterpreterRegistryManager
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     'ServerState',
     'PythonInterpreterService',
-    'LoggerProtocol',
-    'SimpleLogger',
     'PackageInstallationError',
     'CHARACTER_LIMIT',
 ]
@@ -58,27 +59,6 @@ IMPORT_TO_PACKAGE_MAP = {
 
 class PackageInstallationError(Exception):
     """Raised when auto-installation of a package fails."""
-
-
-class LoggerProtocol(typing.Protocol):
-    """Protocol for logger - allows service to be MCP-agnostic."""
-
-    async def info(self, message: str) -> None: ...
-    async def warning(self, message: str) -> None: ...
-    async def error(self, message: str) -> None: ...
-
-
-class SimpleLogger:
-    """Simple logger for HTTP endpoint - logs to stdout."""
-
-    async def info(self, message: str) -> None:
-        print(f'INFO: {message}')
-
-    async def warning(self, message: str) -> None:
-        print(f'WARNING: {message}')
-
-    async def error(self, message: str) -> None:
-        print(f'ERROR: {message}')
 
 
 class ServerState:
@@ -211,7 +191,7 @@ class PythonInterpreterService:
             self._start_locks[name] = asyncio.Lock()
         return self._start_locks[name]
 
-    async def _auto_start_interpreter(self, name: str, logger: LoggerProtocol) -> None:
+    async def _auto_start_interpreter(self, name: str) -> None:
         """Auto-start a stopped interpreter from known config.
 
         Resolution order: builtin -> saved registry -> jetbrains-run -> jetbrains-sdk.
@@ -274,11 +254,11 @@ class PythonInterpreterService:
                             f'or list_interpreters to see available options.'
                         )
 
-        await logger.info(f"Auto-starting '{name}' ({source}, {config.python_path})")
+        logger.info(f"Auto-starting '{name}' ({source}, {config.python_path})")
         await asyncio.to_thread(self.state.interpreter_manager.add_interpreter, config)
         self._interpreter_sources[name] = source
 
-    async def execute(self, code: str, logger: LoggerProtocol, interpreter: str = 'builtin') -> str:
+    async def execute(self, code: str, interpreter: str = 'builtin') -> str:
         """Execute Python code in persistent scope.
 
         Auto-starts stopped interpreters from known configs (saved, JetBrains, builtin).
@@ -291,13 +271,13 @@ class PythonInterpreterService:
         Returns:
             Plain string output (stdout + stderr + result + truncation notice)
         """
-        await logger.info(f"Executing in '{interpreter}' ({len(code)} chars)")
+        logger.info(f"Executing in '{interpreter}' ({len(code)} chars)")
 
         # Auto-start if not running (with per-interpreter lock to prevent races)
         if not await asyncio.to_thread(self.state.interpreter_manager.is_running, interpreter):
             async with self._get_start_lock(interpreter):
                 if not await asyncio.to_thread(self.state.interpreter_manager.is_running, interpreter):
-                    await self._auto_start_interpreter(interpreter, logger)
+                    await self._auto_start_interpreter(interpreter)
 
         # Auto-install retry loop (only for builtin)
         max_attempts = 3 if interpreter == 'builtin' else 1
@@ -307,9 +287,9 @@ class PythonInterpreterService:
             # Handle auto-install for builtin
             if response.error_type == 'ModuleNotFoundError' and response.module_name and interpreter == 'builtin':
                 if attempt < max_attempts - 1:
-                    await logger.info(f"Auto-installing '{response.module_name}'")
+                    logger.info(f"Auto-installing '{response.module_name}'")
                     install_msg = await asyncio.to_thread(_install_package, response.module_name)
-                    await logger.info(install_msg)
+                    logger.info(install_msg)
                     continue
 
             # Return error if present
@@ -326,7 +306,7 @@ class PythonInterpreterService:
                 file_path = self.state.output_dir / f'output_{timestamp}.txt'
                 file_path.write_text(output, encoding='utf-8')
                 separator = '=' * 50
-                await logger.warning(f'Output truncated: {len(output)} chars')
+                logger.warning(f'Output truncated: {len(output)} chars')
                 return f'{output[:CHARACTER_LIMIT]}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {len(output):,} chars\n# Full output: {file_path}\n{separator}'
 
             return output
@@ -337,7 +317,6 @@ class PythonInterpreterService:
         self,
         name: str,
         python_path: pathlib.Path,
-        logger: LoggerProtocol,
         cwd: pathlib.Path | None = None,
         env: dict[str, str] | None = None,
         startup_script: str | None = None,
@@ -351,7 +330,7 @@ class PythonInterpreterService:
         if name == 'builtin':
             raise ValueError("Cannot register 'builtin' — it uses the server's Python automatically")
 
-        await logger.info(f"Registering interpreter '{name}' ({python_path})")
+        logger.info(f"Registering interpreter '{name}' ({python_path})")
 
         saved_config = SavedInterpreterConfig(
             python_path=str(python_path),
@@ -361,7 +340,7 @@ class PythonInterpreterService:
             description=description,
         )
         self.state.interpreter_registry.save_interpreter(name, saved_config)
-        await logger.info(f"Saved interpreter '{name}' to registry")
+        logger.info(f"Saved interpreter '{name}' to registry")
 
         # Single atomic call — avoids TOCTOU race between is_running and get_interpreters
         running = await asyncio.to_thread(self.state.interpreter_manager.get_interpreters)
@@ -394,14 +373,14 @@ class PythonInterpreterService:
             uptime=None,
         )
 
-    async def stop_interpreter(self, name: str, logger: LoggerProtocol, remove: bool) -> str:
+    async def stop_interpreter(self, name: str, remove: bool) -> str:
         """Stop an interpreter subprocess.
 
         All interpreters (including builtin) can be stopped.
         Stopped interpreters auto-restart on next execute() call.
         If remove=True, also deletes the saved config permanently.
         """
-        await logger.info(f"Stopping interpreter '{name}'")
+        logger.info(f"Stopping interpreter '{name}'")
         await asyncio.to_thread(self.state.interpreter_manager.stop_interpreter, name)
         self._interpreter_sources.pop(name, None)
 
@@ -413,9 +392,9 @@ class PythonInterpreterService:
 
         return f"Interpreter '{name}' stopped (will auto-restart on next execute)"
 
-    async def list_interpreters(self, logger: LoggerProtocol) -> list[InterpreterInfo]:
+    async def list_interpreters(self) -> list[InterpreterInfo]:
         """List all interpreters (running, saved, and discovered)."""
-        await logger.info('Listing interpreters')
+        logger.info('Listing interpreters')
 
         running = self.state.interpreter_manager.get_interpreters()
         running_names = {name for name, _, _, _ in running}
