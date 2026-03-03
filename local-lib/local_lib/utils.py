@@ -1,10 +1,15 @@
-"""Shared utilities for MCP servers."""
+"""Shared utilities for MCP servers, hooks, and scripts."""
 
 from __future__ import annotations
 
-# Standard Library
+import importlib.util
+import sys
 import time
+import unittest.mock
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from types import ModuleType
 
 
 def encode_project_path(path: Path | str) -> str:
@@ -83,3 +88,46 @@ def humanize_seconds(seconds: float) -> str:
             return f'{value_str} {unit}'
 
     return '0 sec'
+
+
+def load_module_from_path(path: str | Path, module_name: str | None = None) -> ModuleType:
+    """Load a Python module from a filesystem path.
+
+    Bypasses normal import machinery — useful for files with non-identifier
+    names (e.g. ``approve-compound-bash.py``).
+
+    Does NOT register the module in ``sys.modules``. Use ``temporary_module()``
+    for automatic registration and cleanup.
+
+    Note:
+        Registration happens after ``exec_module``. If the loaded module
+        imports itself during execution, use the importlib primitives directly
+        with pre-registration.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f'module file not found: {path}')
+    if module_name is None:
+        module_name = path.stem.replace('-', '_')
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f'failed to create module spec for {path}')
+    loader = spec.loader  # bind for type narrowing
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+@contextmanager
+def temporary_module(
+    path: str | Path,
+    module_name: str | None = None,
+) -> Iterator[ModuleType]:
+    """Load a module and temporarily register it in ``sys.modules``.
+
+    Restores prior ``sys.modules`` state on exit via ``patch.dict``.
+    Useful in test fixtures where submodule imports need the parent registered.
+    """
+    mod = load_module_from_path(path, module_name)
+    with unittest.mock.patch.dict(sys.modules, {mod.__name__: mod}):
+        yield mod
