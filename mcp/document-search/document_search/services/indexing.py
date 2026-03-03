@@ -26,7 +26,6 @@ from pathlib import Path
 from uuid import UUID
 
 import git
-from local_lib.background_tasks import BackgroundTaskGroup
 from local_lib.utils import Timer
 
 from document_search.clients import QdrantClient, create_embedding_client
@@ -45,7 +44,7 @@ from document_search.schemas.indexing import (
     ProgressCallback,
     StopAfterStage,
 )
-from document_search.schemas.tracing import QueueDepthSample
+from document_search.schemas.tracing import PipelineTimingReport, QueueDepthSample, StageTimingReport
 from document_search.schemas.vectors import ClearResult, VectorPoint
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
@@ -75,6 +74,10 @@ UPSERT_QUEUE_SIZE = 500
 # Timeout for file chunking operations (detects deadlocks)
 FILE_CHUNK_TIMEOUT_SECONDS = 60
 
+# Sentinel value in results dict: file was chunk-cached (all chunks unchanged).
+# Distinct from 0 (no content) to avoid inflating no_content stats in snapshot.
+_CHUNK_CACHED = -1
+
 
 class IndexingService:
     """Orchestrates document indexing pipeline.
@@ -103,6 +106,10 @@ class IndexingService:
         self._cached_hashes: dict[str, str] = {}
         self._operation: _OperationState | None = None
 
+        # Cached aggregate timing stats (updated every ~5s by monitor loop)
+        self._cached_timing_stats: Sequence[StageTimingReport] = ()
+        self._cached_scan_seconds: float | None = None
+
     async def get_index_stats(self) -> Mapping[str, int | str]:
         """Get current index statistics."""
         stats = await self._repo.get_storage_stats()
@@ -128,12 +135,41 @@ class IndexingService:
         files_to_process = op.files_found - op.files_cached
         in_chunk, in_embed, in_store = op.tracer.get_in_flight_counts()
 
-        # Build live file type summary from scan data
+        # Build enriched file type summary: scan data + pipeline outcomes
         by_file_type: dict[FileType, str] = {}
+        indexed_by_type: dict[FileType, int] = {}
+        errored_by_type: dict[FileType, int] = {}
+        no_content_by_type: dict[FileType, int] = {}
+        chunks_by_type: dict[FileType, int] = {}
+        file_errors: list[FileProcessingError] = []
+
+        # Snapshot to avoid iteration during concurrent mutation (no await in loop,
+        # but dict.copy() is cheap and eliminates implicit synchronous-only contract)
+        results_snapshot = dict(op.results)
+        for file_key, result in results_snapshot.items():
+            ft = get_file_type(Path(file_key))
+            if isinstance(result, FileProcessingError):
+                if ft is not None:
+                    errored_by_type[ft] = errored_by_type.get(ft, 0) + 1
+                file_errors.append(result)
+            elif result == _CHUNK_CACHED:
+                pass  # Chunk-cached files have content; don't count as no_content
+            elif result == 0:
+                if ft is not None:
+                    no_content_by_type[ft] = no_content_by_type.get(ft, 0) + 1
+            else:
+                if ft is not None:
+                    indexed_by_type[ft] = indexed_by_type.get(ft, 0) + 1
+                    chunks_by_type[ft] = chunks_by_type.get(ft, 0) + result
+
         for ft in op.scanned_by_type:
             stats = FileTypeStats(
                 scanned=op.scanned_by_type.get(ft, 0),
                 cached=op.cached_by_type.get(ft, 0),
+                indexed=indexed_by_type.get(ft, 0),
+                errored=errored_by_type.get(ft, 0),
+                no_content=no_content_by_type.get(ft, 0),
+                chunks=chunks_by_type.get(ft, 0),
             )
             by_file_type[ft] = stats.to_summary()
 
@@ -142,6 +178,8 @@ class IndexingService:
             files_found=op.files_found,
             files_to_process=files_to_process,
             files_cached=op.files_cached,
+            files_ignored=op.files_ignored,
+            files_chunk_cached=op.counters.files_chunk_cached,
             chunks_ingested=op.counters.chunks_ingested,
             chunks_embedded=op.counters.chunks_embedded,
             embed_cache_hits=self._embedding.cache_hits,
@@ -157,12 +195,45 @@ class IndexingService:
             files_in_chunk=in_chunk,
             files_in_embed=in_embed,
             files_in_store=in_store,
+            file_errors=file_errors,
+            timing_stats=self._cached_timing_stats,
+            scan_seconds=self._cached_scan_seconds,
             by_file_type=by_file_type,
             files_done=len(op.results),
-            files_errored=sum(1 for v in op.results.values() if isinstance(v, FileProcessingError)),
+            files_errored=len(file_errors),
             elapsed_seconds=time.monotonic() - op.start_time,
             queue_depth_series=list(op.tracer.get_queue_depths()),
         )
+
+    def get_partial_timing(self) -> PipelineTimingReport | None:
+        """Build partial timing report and cache aggregate stats.
+
+        Called by the monitor loop every ~5s. Updates cached timing stats
+        that get_pipeline_snapshot() includes in the fast 500ms updates.
+        """
+        op = self._operation
+        if op is None:
+            return None
+        report = op.tracer.build_partial_report()
+        self._cached_timing_stats = report.stages
+        self._cached_scan_seconds = report.scan_seconds
+        return report
+
+    # ── Write lifecycle ────────────────────────────────────────
+
+    async def drain_writes(self) -> None:
+        """Flush all pending cache and index writes."""
+        await self._embedding.drain_writes()
+
+    def check_write_health(self) -> None:
+        """Raise first error from fire-and-forget write operations."""
+        self._embedding.check_write_health()
+
+    def cancel_writes(self) -> None:
+        """Cancel in-flight write batchers."""
+        self._embedding.cancel_writes()
+
+    # ── Single-file indexing ───────────────────────────────────
 
     async def index_file(self, file_path: Path) -> IndexingResult:
         """Index a single file directly (bypasses pipeline for simplicity).
@@ -214,6 +285,7 @@ class IndexingService:
         texts = [c.text for c in chunks]
         responses = await self._embedding.embed_texts(texts)
         dense = [r.values for r in responses]
+        await self._embedding.update_file_cache_index(file_key, texts)
 
         sparse_results, _wall, _cpu = await self._sparse_embedding.embed_batch(texts)
         # Build points using same factory as pipeline
@@ -334,6 +406,7 @@ class IndexingService:
             scan_complete=False,
             files_found=0,
             files_cached=0,
+            files_ignored=0,
             start_time=time.monotonic(),
             scanned_by_type={},
             cached_by_type={},
@@ -361,6 +434,7 @@ class IndexingService:
 
         files_total = len(all_files)
         self._operation.files_found = files_total
+        self._operation.files_ignored = files_ignored
         ignored_text = f' ({files_ignored:,} ignored)' if files_ignored else ''
         logger.info(f'[SCAN] Discovered {files_total:,} files{ignored_text}')
 
@@ -572,6 +646,8 @@ class IndexingService:
                 errors.append(result)
                 if ft is not None:
                     errored_by_type[ft] = errored_by_type.get(ft, 0) + 1
+            elif result == _CHUNK_CACHED:
+                pass  # Counted via files_cached below, not files_indexed
             elif result == 0:
                 files_no_content += 1
                 if ft is not None:
@@ -622,6 +698,8 @@ class IndexingService:
 
         # Clear operation and transient state, release process pool
         self._operation = None
+        self._cached_timing_stats = ()
+        self._cached_scan_seconds = None
         self._cached_hashes.clear()
         self._chunking.shutdown()
 
@@ -653,25 +731,38 @@ class IndexingService:
         self._chunking.shutdown()
         self._sparse_embedding.shutdown()
 
-    async def clear_documents(self, path: str) -> ClearResult:
+    async def clear_documents(self, path: str, *, clear_cache: bool) -> ClearResult:
         """Clear documents from the index.
 
         Args:
             path: Resolved path to clear. Use "**" for entire index.
+            clear_cache: Also delete cached embeddings via reverse index.
+                Decoupled from Qdrant — uses Redis reverse index only.
 
         Returns:
             ClearResult with counts of files and chunks removed.
         """
         if path == '**':
+            if clear_cache:
+                # Empty prefix matches all embed-idx:file:* keys
+                await self._embedding.invalidate_path_cache('')
             # Drop entire Qdrant collection + clear all Redis state
             chunks_count = await self._repo.count()
             await self._repo.delete_collection()
             await self._state_store.clear_collection()
             return ClearResult(files_removed=0, chunks_removed=chunks_count, path=None)
 
-        # Get chunk IDs from Redis for the target path
-        # Single file or directory — Redis SCAN handles prefix matching
+        # Single lookup, reused for both cache invalidation and chunk retrieval
         file_state = await self._state_store.get_file_state(path)
+
+        if clear_cache:
+            if file_state is not None:
+                # Known single file — invalidate exact key only
+                await self._embedding.invalidate_file_cache(path)
+            else:
+                # Directory prefix — SCAN with trailing / for safety
+                await self._embedding.invalidate_path_cache(path)
+
         if file_state is not None:
             # Exact file match
             chunk_ids = list(file_state.chunk_ids)
@@ -770,6 +861,7 @@ class IndexingService:
                                 chunks=[],
                                 chunk_ids=[],
                                 all_chunk_ids=[],
+                                all_chunk_texts=[],
                                 deleted_chunk_ids=deleted_ids,
                                 chunks_skipped=0,
                             )
@@ -811,8 +903,10 @@ class IndexingService:
                     )
                     counters.files_chunk_cached += 1
                     counters.chunks_skipped += chunks_skipped
+                    # Refresh reverse index TTL so it doesn't expire before cache entries
+                    await self._embedding.refresh_file_cache_index_ttl(file_key)
                     async with results_lock:
-                        results[file_key] = 0  # Chunk-cached, 0 new chunks
+                        results[file_key] = _CHUNK_CACHED
                     logger.debug(f'[CHUNK] {file_path.name}: all {chunks_skipped} chunks unchanged')
 
                 else:
@@ -834,6 +928,7 @@ class IndexingService:
                             chunks=changed_chunks,
                             chunk_ids=changed_ids,
                             all_chunk_ids=all_chunk_ids,
+                            all_chunk_texts=[c.text for c in chunks],
                             deleted_chunk_ids=deleted_ids,
                             chunks_skipped=chunks_skipped,
                         )
@@ -979,6 +1074,9 @@ class IndexingService:
                 counters.chunks_embedded += len(chunked.chunks)
                 counters.files_embedded += 1
 
+                # Enqueue reverse index update (await is lock only, not I/O). Drained at operation end.
+                await self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
+
                 start_idx = end_idx
 
             # Reset accumulators
@@ -1033,6 +1131,9 @@ class IndexingService:
             embed_queue.task_done()
             counters.chunks_embedded += len(chunked.chunks)
             counters.files_embedded += 1
+
+            # Fire-and-forget: reverse index update drained at operation completion
+            await self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
 
         _worker_id = id(asyncio.current_task()) % 10000  # short ID for logs
 
@@ -1210,6 +1311,8 @@ class PipelineSnapshot:
     files_found: int
     files_to_process: int
     files_cached: int
+    files_ignored: int
+    files_chunk_cached: int
 
     # Pipeline stages (cumulative chunk counts)
     chunks_ingested: int
@@ -1238,10 +1341,17 @@ class PipelineSnapshot:
     files_done: int
     files_errored: int
 
+    # Per-file error details (not just count)
+    file_errors: Sequence[FileProcessingError]
+
     # Timing
     elapsed_seconds: float
 
-    # File type breakdown (live during scan)
+    # Aggregate timing stats (updated every ~5s by monitor loop)
+    timing_stats: Sequence[StageTimingReport]
+    scan_seconds: float | None
+
+    # File type breakdown (enriched with per-type outcomes during pipeline)
     by_file_type: Mapping[FileType, str]
 
     # Queue depth time series (from tracer, 1Hz samples)
@@ -1253,7 +1363,6 @@ async def create_indexing_service(
     collection_name: str,
     *,
     redis: RedisClient,
-    cache_tasks: BackgroundTaskGroup,
     qdrant_url: str = 'http://localhost:6333',
 ) -> IndexingService:
     """Factory function to create IndexingService with default dependencies.
@@ -1264,7 +1373,6 @@ async def create_indexing_service(
         config: Embedding configuration with provider selection.
         collection_name: Name of the collection to operate on.
         redis: Redis client for embedding cache and index state.
-        cache_tasks: Background task group for cache write tracking.
         qdrant_url: URL of Qdrant server.
 
     Returns:
@@ -1278,7 +1386,6 @@ async def create_indexing_service(
         embedding_client,
         batch_size=config.batch_size,
         redis=redis,
-        cache_tasks=cache_tasks,
         model=config.embedding_model,
         dimensions=config.embedding_dimensions,
     )
@@ -1342,6 +1449,7 @@ class _OperationState:
     # Metadata
     files_found: int
     files_cached: int
+    files_ignored: int
     start_time: float  # From time.monotonic()
 
     # File type breakdown (populated during scan, exposed via snapshot)
@@ -1366,6 +1474,7 @@ class _ChunkedFile:
     chunks: Sequence[Chunk]  # Only changed chunks (need embedding)
     chunk_ids: Sequence[UUID]  # IDs for chunks above (parallel arrays)
     all_chunk_ids: Sequence[UUID]  # ALL chunk IDs (for Redis state)
+    all_chunk_texts: Sequence[str]  # ALL chunk texts (for reverse index)
     deleted_chunk_ids: Sequence[UUID]  # Old chunks to delete from Qdrant
     chunks_skipped: int  # Count of unchanged chunks
 
