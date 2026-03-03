@@ -298,7 +298,9 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
     async def drain_writes(self) -> None:
         """Flush all pending cache and index writes.
 
-        Uses try/finally so both batchers always drain, even if the first raises.
+        Both batchers always drain via try/finally. If both raise, the index
+        error propagates with cache error chained as __context__ (Python
+        auto-chaining when exception occurs during exception handling).
         """
         try:
             await self._cache_write_batcher.drain()
@@ -372,15 +374,16 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
 
         t_end = time.perf_counter()
         hits = len(texts) - len(miss_indices)
-        task_count = len(asyncio.all_tasks())
-        logger.debug(
-            f'[CACHE-DETAIL] n={len(texts)} hits={hits} '
-            f'keys={(t_keys - t0) * 1000:.1f}ms '
-            f'mget={(t_mget - t_keys) * 1000:.1f}ms '
-            f'deser={(t_deser - t_mget) * 1000:.1f}ms '
-            f'total={(t_end - t0) * 1000:.1f}ms '
-            f'tasks={task_count}'
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            task_count = len(asyncio.all_tasks())
+            logger.debug(
+                f'[CACHE-DETAIL] n={len(texts)} hits={hits} '
+                f'keys={(t_keys - t0) * 1000:.1f}ms '
+                f'mget={(t_mget - t_keys) * 1000:.1f}ms '
+                f'deser={(t_deser - t_mget) * 1000:.1f}ms '
+                f'total={(t_end - t0) * 1000:.1f}ms '
+                f'tasks={task_count}'
+            )
 
         return results  # type: ignore[return-value]
 
