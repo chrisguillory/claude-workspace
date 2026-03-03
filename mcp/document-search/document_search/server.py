@@ -302,8 +302,11 @@ Returns:
         # Auto-detect file vs directory
         if resolved_path.is_file():
             logger.info(f'Indexing file: {resolved_path}')
-            result = await indexing_service.index_file(resolved_path)
-            await indexing_service.drain_writes()
+            try:
+                result = await indexing_service.index_file(resolved_path)
+                await indexing_service.drain_writes()
+            finally:
+                indexing_service.cancel_writes()
             logger.info(f'Indexed: {result.chunks_created} chunks')
             if not include_timing:
                 result = result.__replace__(timing=None)
@@ -829,9 +832,10 @@ Returns:
 async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
 
-    # Configure logging with timestamps to stderr for performance observability
+    # Configure logging with timestamps to stderr
+    # Set level=logging.DEBUG temporarily for performance investigation
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format='%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
         datefmt='%H:%M:%S',
         stream=sys.stderr,

@@ -132,10 +132,9 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
         Raises:
             RuntimeError: If submit path is closed (drain() was called).
         """
-        if self._submit_closed:
-            raise RuntimeError(f'{self!r}: submit() after drain()')
-
         async with self._lock:
+            if self._submit_closed:
+                raise RuntimeError(f'{self!r}: submit() after drain()')
             self._submitted.add(request)
             if not self._load_task:
                 self._load_task = asyncio.create_task(self._process_pending())
@@ -148,12 +147,11 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
         Raises:
             RuntimeError: If submit path is closed (drain() was called).
         """
-        if self._submit_closed:
-            raise RuntimeError(f'{self!r}: submit_many() after drain()')
-        if not requests:
-            return
-
         async with self._lock:
+            if self._submit_closed:
+                raise RuntimeError(f'{self!r}: submit_many() after drain()')
+            if not requests:
+                return
             self._submitted.update(requests)
             if not self._load_task:
                 self._load_task = asyncio.create_task(self._process_pending())
@@ -177,7 +175,6 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
             else:
                 break
         if self._first_error is not None:
-            self._first_error.__traceback__ = None
             raise self._first_error
 
     def check_health(self) -> None:
@@ -186,11 +183,15 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
         O(1) field read. Call in hot loops for early failure detection.
         """
         if self._first_error is not None:
-            self._first_error.__traceback__ = None
             raise self._first_error
 
     def cancel_all(self) -> None:
-        """Cancel in-flight processing, discard pending submits, close submit path."""
+        """Cancel in-flight processing, discard pending submits, close submit path.
+
+        Note: Only safe when no load() callers are awaiting Futures. CancelledError
+        bypasses the except Exception handler in _process_pending, leaving Futures
+        unresolved. This is fine for submit-only batchers (the current usage).
+        """
         self._submit_closed = True
         if self._load_task is not None:
             self._load_task.cancel()

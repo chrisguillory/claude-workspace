@@ -228,6 +228,7 @@ class OperationProgress(StrictModel):
             files_chunked=prior_progress.files_chunked if prior_progress else files_done,
             files_embedded=prior_progress.files_embedded if prior_progress else files_done,
             files_stored=prior_progress.files_stored if prior_progress else files_done,
+            files_chunk_cached=prior_progress.files_chunk_cached if prior_progress else 0,
             files_done=files_done,
             errors_429=errors_429,
             by_file_type=result.by_file_type,

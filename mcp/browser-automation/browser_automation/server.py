@@ -15,6 +15,7 @@ from __future__ import annotations
 # Standard Library
 import asyncio
 import logging
+import sys
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -53,7 +54,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        stream=__import__('sys').stderr,
+        stream=sys.stderr,
     )
 
     # Browser is lazy-initialized on first use
@@ -364,7 +365,7 @@ async def navigate(
             errors=errors,
         )
 
-        print(f'[navigate] Captured {len(captured_list)} resources ({result.resources.total_size_mb}MB)')
+        logger.info(f'[navigate] Captured {len(captured_list)} resources ({result.resources.total_size_mb}MB)')
 
     return result
 

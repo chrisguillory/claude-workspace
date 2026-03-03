@@ -4,12 +4,7 @@ from __future__ import annotations
 
 # Standard Library
 import time
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-
-# Third-Party Libraries
-from mcp.server.fastmcp import Context
 
 
 def encode_project_path(path: Path | str) -> str:
@@ -42,37 +37,6 @@ def encode_project_path(path: Path | str) -> str:
     for char in ['/', '.', ' ', '~', '_']:
         result = result.replace(char, '-')
     return result
-
-
-class DualLogger:
-    """DEPRECATED: Writes to stdout (breaks MCP stdio) and uses ctx.info()
-    (silently swallowed by Claude Code).
-
-    Use logging.getLogger(__name__) with logging.basicConfig(stream=sys.stderr) instead.
-    See document-search, browser-automation, and python-interpreter for the pattern.
-    """
-
-    def __init__(self, ctx: Context[Any, Any, Any]):
-        self.ctx = ctx
-
-    def _timestamp(self) -> str:
-        return datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')
-
-    async def info(self, msg: str) -> None:
-        print(f'[{self._timestamp()}] [INFO] {msg}')
-        await self.ctx.info(msg)
-
-    async def debug(self, msg: str) -> None:
-        print(f'[{self._timestamp()}] [DEBUG] {msg}')
-        await self.ctx.debug(msg)
-
-    async def warning(self, msg: str) -> None:
-        print(f'[{self._timestamp()}] [WARNING] {msg}')
-        await self.ctx.warning(msg)
-
-    async def error(self, msg: str) -> None:
-        print(f'[{self._timestamp()}] [ERROR] {msg}')
-        await self.ctx.error(msg)
 
 
 class Timer:

@@ -19,6 +19,7 @@ import base64
 import contextlib
 import io
 import json
+import logging
 import os
 import re
 import signal
@@ -149,16 +150,7 @@ def _save_large_output_to_file(
     )
 
 
-class PrintLogger:
-    """Simple logger that logs to stderr (MCP servers must not write to stdout)."""
-
-    def __init__(self, ctx: Context[Any, Any, Any] | None = None):
-        """Initialize logger. Context is ignored."""
-        pass
-
-    async def info(self, message: str) -> None:
-        """Log info message to stderr."""
-        print(f'[selenium-browser-automation] {message}', file=sys.stderr)
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -716,12 +708,6 @@ class BrowserState:
         self.restored_origins: set[str] = set()
         # Response body capture: True when JS interceptor is installed for HAR export
         self.response_body_capture_enabled: bool = False
-
-
-class LoggerProtocol(typing.Protocol):
-    """Protocol for logger - allows service to be MCP-agnostic."""
-
-    async def info(self, message: str) -> None: ...
 
 
 class BrowserService:
@@ -1352,10 +1338,9 @@ def register_tools(service: BrowserService) -> None:
             - For page structure, use get_aria_snapshot() first
             - Iframe content is not extracted (matches Chrome behavior)
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f"Extracting text from '{selector}'")
+        logger.info(f"Extracting text from '{selector}'")
 
         # Execute the extraction script (loaded from scripts/)
         try:
@@ -1401,7 +1386,7 @@ def register_tools(service: BrowserService) -> None:
                 body_character_count=result.get('bodyCharacterCount', 0),
             )
 
-        await logger.info(f'Extracted {char_count:,} characters from <{source_element}>')
+        logger.info(f'Extracted {char_count:,} characters from <{source_element}>')
 
         # Save large text to file to preserve line structure
         saved_to_file = False
@@ -1467,11 +1452,10 @@ def register_tools(service: BrowserService) -> None:
             # Specific form by ID
             html = get_page_html(selector="form#login")
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         if selector:
-            await logger.info(f"Extracting HTML for '{selector}'" + (f' (limit: {limit})' if limit else ''))
+            logger.info(f"Extracting HTML for '{selector}'" + (f' (limit: {limit})' if limit else ''))
 
             try:
                 elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, selector)
@@ -1496,7 +1480,7 @@ def register_tools(service: BrowserService) -> None:
                 except WebDriverException:
                     continue  # Element may have become stale
 
-            await logger.info(
+            logger.info(
                 f'Extracted {len(html_parts)} of {count} elements'
                 + (f' (limited to {limit})' if limit and count > limit else '')
             )
@@ -1514,14 +1498,14 @@ def register_tools(service: BrowserService) -> None:
             return html_output
 
         else:
-            await logger.info('Extracting full page HTML source')
+            logger.info('Extracting full page HTML source')
 
             try:
                 page_html: str = await asyncio.to_thread(lambda: driver.page_source)
             except WebDriverException as e:
                 raise fastmcp.exceptions.ToolError(f'Failed to get page source: {e}')
 
-            await logger.info(f'Extracted {len(page_html):,} characters of HTML')
+            logger.info(f'Extracted {len(page_html):,} characters of HTML')
 
             if len(page_html) > LARGE_OUTPUT_THRESHOLD:
                 return _save_large_output_to_file(
@@ -1553,13 +1537,12 @@ def register_tools(service: BrowserService) -> None:
 
         Note: Requires vision processing. full_page=True uses CDP Page.captureScreenshot.
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         screenshot_path = service.state.screenshot_dir / filename
 
         if full_page:
-            await logger.info(f'Taking full-page screenshot: {filename}')
+            logger.info(f'Taking full-page screenshot: {filename}')
             # Use CDP to capture full page
             result = await asyncio.to_thread(
                 driver.execute_cdp_cmd,
@@ -1574,13 +1557,13 @@ def register_tools(service: BrowserService) -> None:
 
             screenshot_data = base64.b64decode(result['data'])
             screenshot_path.write_bytes(screenshot_data)
-            await logger.info(f'Full-page screenshot saved to {screenshot_path}')
+            logger.info(f'Full-page screenshot saved to {screenshot_path}')
             return str(screenshot_path)
 
         # Viewport screenshot
-        await logger.info(f'Taking viewport screenshot: {filename}')
+        logger.info(f'Taking viewport screenshot: {filename}')
         await asyncio.to_thread(driver.save_screenshot, str(screenshot_path))
-        await logger.info(f'Screenshot saved to {screenshot_path}')
+        logger.info(f'Screenshot saved to {screenshot_path}')
         return str(screenshot_path)
 
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
@@ -2137,10 +2120,9 @@ def register_tools(service: BrowserService) -> None:
             2. Look for nearby buttons or the CHEVRON_RIGHT pattern
             3. Scope search with selector_scope to reduce false positives
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Finding interactive elements in scope: {selector_scope}')
+        logger.info(f'Finding interactive elements in scope: {selector_scope}')
 
         # Prepare filter values for JS
         text_filter_lower = text_contains.lower() if text_contains else None
@@ -2215,7 +2197,7 @@ def register_tools(service: BrowserService) -> None:
             },
         )
 
-        await logger.info(f'Found {len(elements)} interactive elements (filtered)')
+        logger.info(f'Found {len(elements)} interactive elements (filtered)')
         return [InteractiveElement(**el) for el in elements]
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
@@ -2230,10 +2212,9 @@ def register_tools(service: BrowserService) -> None:
         Returns:
             list[FocusableElement]: Sorted by tab order, each with tag, text, selector, tab_index
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Finding focusable elements (only_tabbable={only_tabbable})')
+        logger.info(f'Finding focusable elements (only_tabbable={only_tabbable})')
 
         min_tab_index = 0 if only_tabbable else -1
 
@@ -2280,7 +2261,7 @@ def register_tools(service: BrowserService) -> None:
             {'minTabIndex': min_tab_index},
         )
 
-        await logger.info(f'Found {len(elements)} focusable elements')
+        logger.info(f'Found {len(elements)} focusable elements')
         return [FocusableElement(**el) for el in elements]
 
     @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))
@@ -2306,14 +2287,13 @@ def register_tools(service: BrowserService) -> None:
             3. wait_for_network_idle() - wait for dynamic content
             4. get_aria_snapshot() - understand new page state
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         # PRE-ACTION: Capture localStorage before click (might navigate away)
         await _capture_current_origin_storage(service, driver)
         url_before = driver.current_url
 
-        await logger.info(f'Clicking element: {selector}' + (' (with delay)' if wait_for_network else ''))
+        logger.info(f'Clicking element: {selector}' + (' (with delay)' if wait_for_network else ''))
 
         # Wait for element to be clickable (up to 10 seconds)
         element = await asyncio.to_thread(
@@ -2326,19 +2306,19 @@ def register_tools(service: BrowserService) -> None:
 
         if wait_for_network:
             delay_sec = network_timeout / 1000
-            await logger.info(f'Waiting {delay_sec}s for content to load')
+            logger.info(f'Waiting {delay_sec}s for content to load')
             await asyncio.sleep(delay_sec)
-            await logger.info('Delay complete')
+            logger.info('Delay complete')
 
         # POST-ACTION: Check if navigation occurred, track new origin and restore localStorage
         url_after = driver.current_url
         if url_after != url_before:
             service.state.origin_tracker.add_origin(url_after)
-            await logger.info(f'Navigation detected: {url_before} -> {url_after}')
+            logger.info(f'Navigation detected: {url_before} -> {url_after}')
             # Lazy restore: if we navigated to a new origin with pending storage state
             await _restore_pending_profile_state_for_current_origin(service, driver)
 
-        await logger.info('Click successful')
+        logger.info('Click successful')
 
     @mcp.tool(annotations=ToolAnnotations(title='Wait for Network Idle', readOnlyHint=True, idempotentHint=True))
     async def wait_for_network_idle(ctx: Context[Any, Any, Any], timeout: int = 10000) -> None:
@@ -2354,12 +2334,11 @@ def register_tools(service: BrowserService) -> None:
         Note: Uses JavaScript instrumentation of Fetch/XHR APIs to track network activity.
               Waits for no active requests + 500ms idle threshold.
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         # Step 1: Inject monitoring script (loaded from scripts/)
         await asyncio.to_thread(driver.execute_script, NETWORK_MONITOR_SETUP_SCRIPT)
-        await logger.info('Network monitor injected')
+        logger.info('Network monitor injected')
 
         # Step 2: Poll for idle state (500ms threshold)
         start_time = time.time()
@@ -2374,18 +2353,18 @@ def register_tools(service: BrowserService) -> None:
                     # No requests made yet - check elapsed time since monitoring started
                     elapsed = time.time() - start_time
                     if elapsed >= idle_threshold_ms / 1000:
-                        await logger.info('Network idle (no requests made)')
+                        logger.info('Network idle (no requests made)')
                         return
                 else:
                     # Check time since last request completed
                     elapsed_since_last = status['currentTime'] - status['lastRequestTime']
                     if elapsed_since_last >= idle_threshold_ms:
-                        await logger.info(f'Network idle after {elapsed_since_last / 1000:.2f}s')
+                        logger.info(f'Network idle after {elapsed_since_last / 1000:.2f}s')
                         return
 
             await asyncio.sleep(0.05)  # Poll every 50ms
 
-        await logger.info(f'Network idle timeout after {timeout_s}s')
+        logger.info(f'Network idle timeout after {timeout_s}s')
 
     @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
     async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
@@ -2408,14 +2387,13 @@ def register_tools(service: BrowserService) -> None:
         Note: Key names use Selenium's Keys enum (uppercase with underscores).
               For combinations, use + (e.g., 'CONTROL+A').
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         # PRE-ACTION: Capture localStorage before key press (ENTER might submit form and navigate)
         await _capture_current_origin_storage(service, driver)
         url_before = driver.current_url
 
-        await logger.info(f'Pressing key: {key}')
+        logger.info(f'Pressing key: {key}')
 
         # Map common key names to Selenium Keys
         # Handle key combinations (e.g., "CONTROL+A")
@@ -2447,11 +2425,11 @@ def register_tools(service: BrowserService) -> None:
         url_after = driver.current_url
         if url_after != url_before:
             service.state.origin_tracker.add_origin(url_after)
-            await logger.info(f'Navigation detected: {url_before} -> {url_after}')
+            logger.info(f'Navigation detected: {url_before} -> {url_after}')
             # Lazy restore: if we navigated to a new origin with pending storage state
             await _restore_pending_profile_state_for_current_origin(service, driver)
 
-        await logger.info('Key press successful')
+        logger.info('Key press successful')
 
     @mcp.tool(annotations=ToolAnnotations(title='Type Text', destructiveHint=False, idempotentHint=False))
     async def type_text(text: str, ctx: Context[Any, Any, Any], delay_ms: int = 0) -> None:
@@ -2469,10 +2447,9 @@ def register_tools(service: BrowserService) -> None:
             - type_text('Hello, world!') - Type text instantly
             - type_text('search query', delay_ms=50) - Type with 50ms delay between chars
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Typing text: "{text}"' + (f' with {delay_ms}ms delay' if delay_ms > 0 else ''))
+        logger.info(f'Typing text: "{text}"' + (f' with {delay_ms}ms delay' if delay_ms > 0 else ''))
 
         active_element = await asyncio.to_thread(lambda: driver.switch_to.active_element)
 
@@ -2485,7 +2462,7 @@ def register_tools(service: BrowserService) -> None:
             # Type all at once
             await asyncio.to_thread(active_element.send_keys, text)
 
-        await logger.info('Text typing successful')
+        logger.info('Text typing successful')
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2515,7 +2492,6 @@ def register_tools(service: BrowserService) -> None:
             3. get_aria_snapshot() - see dropdown content
             4. click(dropdown_item_selector) - select item
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         # Validate duration
@@ -2524,7 +2500,7 @@ def register_tools(service: BrowserService) -> None:
         if duration_ms > 30000:
             raise ValueError('duration_ms exceeds maximum of 30000ms (30 seconds)')
 
-        await logger.info(f'Hovering over element: {selector}')
+        logger.info(f'Hovering over element: {selector}')
 
         # Wait for element to be present
         element = await asyncio.to_thread(
@@ -2640,16 +2616,16 @@ def register_tools(service: BrowserService) -> None:
 
         # Log stability check results
         if stability_result.get('hasInfiniteAnimation'):
-            await logger.info('Warning: Element has infinite animation - hover may be inconsistent')
+            logger.info('Warning: Element has infinite animation - hover may be inconsistent')
 
         if not stability_result.get('stable'):
             if stability_result.get('runningAnimations', 0) > 0:
-                await logger.info(
+                logger.info(
                     f'Element has {stability_result["runningAnimations"]} running animation(s), '
                     f'proceeding after {stability_result["framesChecked"]} frame checks'
                 )
             else:
-                await logger.info(
+                logger.info(
                     f'Element did not stabilize after {stability_result["framesChecked"]} frames '
                     f'(final distance: {stability_result.get("finalDistance", 0):.1f}px)'
                 )
@@ -2685,10 +2661,10 @@ def register_tools(service: BrowserService) -> None:
 
         # Hold if duration specified (for menus that need sustained hover)
         if duration_ms > 0:
-            await logger.info(f'Holding hover for {duration_ms}ms')
+            logger.info(f'Holding hover for {duration_ms}ms')
             await asyncio.sleep(duration_ms / 1000)
 
-        await logger.info('Hover successful')
+        logger.info('Hover successful')
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2722,7 +2698,6 @@ def register_tools(service: BrowserService) -> None:
         Returns:
             Dict with slept_ms confirming the sleep duration
         """
-        logger = PrintLogger(ctx)
 
         # Validation
         if duration_ms < 0:
@@ -2736,15 +2711,15 @@ def register_tools(service: BrowserService) -> None:
 
         # Graduated warnings for AI agents
         if duration_ms > 10000:
-            await logger.info(
+            logger.info(
                 f'Warning: Long sleep({duration_ms}ms) requested. '
                 'Consider wait_for_selector() or wait_for_network_idle() for dynamic content.'
             )
 
         if reason:
-            await logger.info(f'Sleeping {duration_ms}ms: {reason}')
+            logger.info(f'Sleeping {duration_ms}ms: {reason}')
         else:
-            await logger.info(f'Sleeping {duration_ms}ms')
+            logger.info(f'Sleeping {duration_ms}ms')
 
         await asyncio.sleep(duration_ms / 1000)
 
@@ -2790,7 +2765,6 @@ def register_tools(service: BrowserService) -> None:
             ValueError: If timeout is invalid or selector is empty
             TimeoutError: If element doesn't reach desired state within timeout
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         # Validation
@@ -2801,7 +2775,7 @@ def register_tools(service: BrowserService) -> None:
         if timeout > 300000:
             raise ValueError('timeout exceeds maximum of 300000ms (5 minutes)')
 
-        await logger.info(f"Waiting for selector '{selector}' to be {state}")
+        logger.info(f"Waiting for selector '{selector}' to be {state}")
 
         start_time = time.time()
         timeout_s = timeout / 1000
@@ -2815,7 +2789,7 @@ def register_tools(service: BrowserService) -> None:
                     # Element exists in DOM
                     if elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        await logger.info(f"Selector '{selector}' attached after {elapsed_ms}ms")
+                        logger.info(f"Selector '{selector}' attached after {elapsed_ms}ms")
                         return {
                             'selector': selector,
                             'state': 'attached',
@@ -2827,7 +2801,7 @@ def register_tools(service: BrowserService) -> None:
                     # Element removed from DOM
                     if not elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        await logger.info(f"Selector '{selector}' detached after {elapsed_ms}ms")
+                        logger.info(f"Selector '{selector}' detached after {elapsed_ms}ms")
                         return {
                             'selector': selector,
                             'state': 'detached',
@@ -2840,7 +2814,7 @@ def register_tools(service: BrowserService) -> None:
                         is_displayed = await asyncio.to_thread(element.is_displayed)
                         if is_displayed:
                             elapsed_ms = int((time.time() - start_time) * 1000)
-                            await logger.info(f"Selector '{selector}' visible after {elapsed_ms}ms")
+                            logger.info(f"Selector '{selector}' visible after {elapsed_ms}ms")
                             return {
                                 'selector': selector,
                                 'state': 'visible',
@@ -2852,7 +2826,7 @@ def register_tools(service: BrowserService) -> None:
                     # Element not in DOM OR not displayed
                     if not elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        await logger.info(f"Selector '{selector}' hidden (not in DOM) after {elapsed_ms}ms")
+                        logger.info(f"Selector '{selector}' hidden (not in DOM) after {elapsed_ms}ms")
                         return {
                             'selector': selector,
                             'state': 'hidden',
@@ -2868,7 +2842,7 @@ def register_tools(service: BrowserService) -> None:
                             break
                     if all_hidden:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        await logger.info(f"Selector '{selector}' hidden (not displayed) after {elapsed_ms}ms")
+                        logger.info(f"Selector '{selector}' hidden (not displayed) after {elapsed_ms}ms")
                         return {
                             'selector': selector,
                             'state': 'hidden',
@@ -2927,15 +2901,12 @@ def register_tools(service: BrowserService) -> None:
         Example (verbose):
             Returns all fields including avatar settings, creation time, etc.
         """
-        if ctx:
-            logger = PrintLogger(ctx)
-            await logger.info(f'Listing Chrome profiles (verbose={verbose})')
+        logger.info(f'Listing Chrome profiles (verbose={verbose})')
 
         # Call module function
         result = await asyncio.to_thread(list_all_profiles, verbose=verbose)
 
-        if ctx:
-            await logger.info(f'Found {result.total_count} profiles')
+        logger.info(f'Found {result.total_count} profiles')
 
         return result
 
@@ -2977,21 +2948,20 @@ def register_tools(service: BrowserService) -> None:
             (e.g., macOS enforces minimum ~500px width). The returned dimensions
             reflect the actual size achieved.
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         # Validation: positive integers only
         if width <= 0 or height <= 0:
             raise ValueError(f'Width and height must be positive integers. Got: {width}x{height}')
 
-        await logger.info(f'Resizing window to {width}x{height}')
+        logger.info(f'Resizing window to {width}x{height}')
 
         await asyncio.to_thread(driver.set_window_size, width, height)
 
         # Get actual size (may differ due to OS constraints)
         size = await asyncio.to_thread(driver.get_window_size)
 
-        await logger.info(f'Window resized to {size["width"]}x{size["height"]}')
+        logger.info(f'Window resized to {size["width"]}x{size["height"]}')
 
         return {'width': size['width'], 'height': size['height']}
 
@@ -3030,13 +3000,12 @@ def register_tools(service: BrowserService) -> None:
         Note: INP requires user interaction to measure. LCP may not be final
               until user interacts with the page.
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         start_time = time.time()
         current_url = driver.current_url
 
-        await logger.info(f'Capturing Core Web Vitals for {current_url}')
+        logger.info(f'Capturing Core Web Vitals for {current_url}')
 
         errors: list[str] = []
 
@@ -3085,7 +3054,7 @@ def register_tools(service: BrowserService) -> None:
         if vitals.inp:
             metrics_found.append(f'INP={vitals.inp.value:.0f}ms ({vitals.inp.rating})')
 
-        await logger.info(f'Web Vitals captured in {collection_duration:.0f}ms: {", ".join(metrics_found) or "none"}')
+        logger.info(f'Web Vitals captured in {collection_duration:.0f}ms: {", ".join(metrics_found) or "none"}')
 
         return vitals
 
@@ -3115,13 +3084,12 @@ Note:
         clear_resource_timing_buffer: bool = False,
         min_duration_ms: int = 0,
     ) -> NetworkCapture:
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
         start_time = time.time()
         current_url = driver.current_url
 
-        await logger.info(f'Getting resource timings for {current_url}')
+        logger.info(f'Getting resource timings for {current_url}')
 
         # Collect resource timing via JavaScript Performance API (script from scripts/)
         raw_entries = await asyncio.to_thread(driver.execute_script, RESOURCE_TIMING_SCRIPT)
@@ -3204,12 +3172,12 @@ Note:
             # Truncate URL for logging
             if len(slowest_url) > 60:
                 slowest_url = slowest_url[:57] + '...'
-            await logger.info(
+            logger.info(
                 f'Captured {len(requests)} requests in {collection_duration:.0f}ms, '
                 f'slowest: {slowest[0]["duration_ms"]:.0f}ms ({slowest_url})'
             )
         else:
-            await logger.info(f'Captured {len(requests)} requests in {collection_duration:.0f}ms')
+            logger.info(f'Captured {len(requests)} requests in {collection_duration:.0f}ms')
 
         return result
 
@@ -3311,10 +3279,9 @@ Workflow:
         include_response_bodies: bool = False,
         max_body_size_mb: int = 10,
     ) -> HARExportResult:
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Exporting HAR to {filename}')
+        logger.info(f'Exporting HAR to {filename}')
         errors: list[str] = []
 
         # Get performance logs (clears buffer - subsequent calls return only newer entries)
@@ -3325,7 +3292,7 @@ Workflow:
             logs = []
 
         if not logs:
-            await logger.info('No performance logs available')
+            logger.info('No performance logs available')
             har_path = service.state.capture_dir / filename
             empty_har = {
                 'log': {
@@ -3555,7 +3522,7 @@ Workflow:
         har_json = json.dumps(har, indent=2)
         har_path.write_text(har_json)
 
-        await logger.info(f'Exported {len(har_entries)} entries to {har_path}')
+        logger.info(f'Exported {len(har_entries)} entries to {har_path}')
 
         return HARExportResult(
             path=str(har_path),
@@ -3609,16 +3576,15 @@ Workflow:
             click(selector)
             get_console_logs()  # Check for interaction errors
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info('Getting browser console logs')
+        logger.info('Getting browser console logs')
 
         # Get browser logs (clears buffer after retrieval)
         try:
             raw_logs = await asyncio.to_thread(driver.get_log, 'browser')
         except WebDriverException as e:
-            await logger.info(f'Failed to get console logs: {e}')
+            logger.info(f'Failed to get console logs: {e}')
             return ConsoleLogsResult(
                 logs=[],
                 total_count=0,
@@ -3676,13 +3642,13 @@ Workflow:
 
         # Log summary
         if result.total_count > 0:
-            await logger.info(
+            logger.info(
                 f'Console logs: {result.severe_count} errors, '
                 f'{result.warning_count} warnings, {result.info_count} info '
                 f'({len(entries)} returned after filtering)'
             )
         else:
-            await logger.info('No console logs captured')
+            logger.info('No console logs captured')
 
         return result
 
@@ -3741,9 +3707,7 @@ Workflow:
             navigate("https://api.ipify.org")  # Shows proxy IP, not your real IP
             navigate(url, fresh_browser=True)  # Gets NEW IP from proxy pool
         """
-        if ctx:
-            logger = PrintLogger(ctx)
-            await logger.info(f'Configuring proxy via mitmproxy: {host}:{port}')
+        logger.info(f'Configuring proxy via mitmproxy: {host}:{port}')
 
         # Close existing browser and mitmproxy
         await service.close_browser()
@@ -3800,8 +3764,7 @@ Workflow:
                 )
                 raise RuntimeError(f'mitmproxy failed to start: {stderr}')
 
-            if ctx:
-                await logger.info('mitmproxy started on localhost:8080')
+            logger.info('mitmproxy started on localhost:8080')
 
         except FileNotFoundError:
             service.state.proxy_config = None
@@ -3835,9 +3798,7 @@ Workflow:
         Returns:
             Status dict confirming proxy cleared
         """
-        if ctx:
-            logger = PrintLogger(ctx)
-            await logger.info('Clearing proxy configuration')
+        logger.info('Clearing proxy configuration')
 
         # Close browser first
         await service.close_browser()
@@ -3850,8 +3811,7 @@ Workflow:
             except subprocess.TimeoutExpired:
                 service.state.mitmproxy_process.kill()
             service.state.mitmproxy_process = None
-            if ctx:
-                await logger.info('mitmproxy stopped')
+            logger.info('mitmproxy stopped')
 
         service.state.proxy_config = None
 
@@ -3929,10 +3889,9 @@ Workflow:
             - Map → object, Set → array, circular references → "[Circular Reference]"
             - Sites with strict CSP may block execution
         """
-        logger = PrintLogger(ctx)
         driver = await service.get_browser()
 
-        await logger.info(f'Executing JavaScript ({len(code)} chars)')
+        logger.info(f'Executing JavaScript ({len(code)} chars)')
 
         # Escape user code as JSON string to prevent injection
         # json.dumps handles quotes, backslashes, newlines, etc.
@@ -3957,15 +3916,15 @@ Workflow:
             success = result.get('success', False) if isinstance(result, dict) else False
 
             if success:
-                await logger.info(f'JS execution successful: {result_type}')
+                logger.info(f'JS execution successful: {result_type}')
             else:
                 error = result.get('error', 'Unknown error') if isinstance(result, dict) else 'Unknown error'
-                await logger.info(f'JS execution failed: {error}')
+                logger.info(f'JS execution failed: {error}')
 
             return JavaScriptResult(**result)
 
         except TimeoutError:
-            await logger.info(f'JS execution timed out after {timeout_ms}ms')
+            logger.info(f'JS execution timed out after {timeout_ms}ms')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -3973,7 +3932,7 @@ Workflow:
                 error_type='timeout',
             )
         except WebDriverException as e:
-            await logger.info(f'JS execution WebDriver error: {e}')
+            logger.info(f'JS execution WebDriver error: {e}')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -3981,7 +3940,7 @@ Workflow:
                 error_type='execution',
             )
         except Exception as e:
-            await logger.info(f'JS execution unexpected error: {e}')
+            logger.info(f'JS execution unexpected error: {e}')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -4050,13 +4009,12 @@ Workflow:
         Limitations:
             - Tokens may expire between save and restore - re-authenticate if needed
         """
-        logger = PrintLogger(ctx)
 
         driver = service.state.driver
         if driver is None:
             raise fastmcp.exceptions.ToolError('Browser not initialized. Call navigate() first to establish a session.')
 
-        await logger.info(f'Exporting storage state to {filename}')
+        logger.info(f'Exporting storage state to {filename}')
 
         # Get all cookies via CDP Network.getCookies
         cookies_result = await asyncio.to_thread(
@@ -4180,7 +4138,7 @@ Workflow:
         if include_indexeddb:
             log_storage_parts.append(f'{indexeddb_databases_count} IndexedDB databases')
 
-        await logger.info(
+        logger.info(
             f'Captured storage: {" + ".join(log_storage_parts)} '
             f'across {len(origins_data)} origins (of {len(tracked_origins)} tracked)'
         )
@@ -4220,7 +4178,7 @@ Workflow:
         if include_indexeddb and indexeddb_databases_count > 0:
             log_parts.append(f'{indexeddb_databases_count} IndexedDB databases ({indexeddb_records_count} records)')
 
-        await logger.info(f'{" + ".join(log_parts)} for {current_origin} to {file_path} ({result.size_bytes} bytes)')
+        logger.info(f'{" + ".join(log_parts)} for {current_origin} to {file_path} ({result.size_bytes} bytes)')
 
         return result
 
@@ -4288,9 +4246,8 @@ Workflow:
             Output file created with 0o600 permissions (owner read/write only).
             Contains sensitive auth tokens - treat as credentials.
         """
-        logger = PrintLogger(ctx)
 
-        await logger.info(f"Exporting Chrome profile state from profile '{chrome_profile}' to {output_file}")
+        logger.info(f"Exporting Chrome profile state from profile '{chrome_profile}' to {output_file}")
 
         # Convert Sequence to list for the export function
         filter_list = list(origins_filter) if origins_filter else None
@@ -4316,11 +4273,11 @@ Workflow:
         if result.indexeddb_origins > 0:
             parts.append(f'{result.indexeddb_origins} IndexedDB origins')
 
-        await logger.info(f'Exported {", ".join(parts)} across {result.origin_count} origins to {result.path}')
+        logger.info(f'Exported {", ".join(parts)} across {result.origin_count} origins to {result.path}')
 
         if result.warnings:
             for warning in result.warnings:
-                await logger.info(f'Warning: {warning}')
+                logger.info(f'Warning: {warning}')
 
         return ChromeProfileStateExportResult(
             path=result.path,
@@ -4372,6 +4329,13 @@ def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:
 @contextlib.asynccontextmanager
 async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     """Manage browser lifecycle - initialization before requests, cleanup after shutdown."""
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        stream=sys.stderr,
+    )
+
     state = await BrowserState.create()
     service = BrowserService(state)
     register_tools(service)
