@@ -290,7 +290,7 @@ class TestProxy:
         """Setting attributes on the proxy raises AttributeError (fail-fast via __slots__)."""
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
         with pytest.raises(AttributeError) as exc_info:
-            proxy.new_attr = 'test'
+            proxy.new_attr = 'test'  # type: ignore[attr-defined]  # intentionally invalid attr
         assert exc_info.value.args == ("'_TranslatingProxy' object has no attribute 'new_attr'",)
 
     def test_delattr_fails_fast(self) -> None:
@@ -304,7 +304,7 @@ class TestProxy:
         """Wrapping None — getattr raises AttributeError for any access."""
         proxy = LibraryBoundary(AppError).wrap(None)
         with pytest.raises(AttributeError) as exc_info:
-            proxy.anything
+            proxy.anything  # type: ignore[attr-defined]  # intentionally invalid attr
         assert exc_info.value.args == ("'NoneType' object has no attribute 'anything'",)
 
 
