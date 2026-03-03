@@ -1,19 +1,14 @@
-"""Generic batch loader for coalescing individual requests into bulk operations.
-
-Aggregates concurrent individual requests into efficient batch API calls.
-Services create typed wrappers with domain-specific defaults.
-
-Pattern from mainstay-io/monorepo.
-"""
-
 from __future__ import annotations
 
 import asyncio
 import collections
+import logging
 from collections.abc import Callable, Coroutine, Hashable, Sequence
 from typing import Any
 
 import more_itertools
+
+logger = logging.getLogger(__name__)
 
 
 class GenericBatchLoader[TRequest: Hashable, TResponse]:
@@ -21,6 +16,13 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
 
     Concurrent callers of load() have their requests coalesced into batches,
     reducing API calls while maintaining per-request semantics.
+
+    Two usage modes:
+    - Request-response: load() / load_many() — caller awaits, self-draining.
+    - Fire-and-forget: submit() / submit_many() — caller returns immediately.
+      Requires drain() at operation end. drain() closes the submit path.
+
+    All modes share the same coalescing, deduplication, and bulk_load pipeline.
 
     Type Parameters:
         TRequest: Request type (must be hashable for deduplication).
@@ -50,10 +52,15 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
         self.sort_requests = sort_requests
 
         self._lock = asyncio.Lock()
-        # Split pools: load() → Futures, load_many() → BatchRecords
+        # Three pools: load() → Futures, load_many() → BatchRecords, submit() → set
         self._individual: dict[TRequest, list[asyncio.Future[TResponse]]] = collections.defaultdict(list)
         self._batches: list[_BatchRecord[TRequest, TResponse]] = []
+        self._submitted: set[TRequest] = set()
         self._load_task: asyncio.Task[None] | None = None
+
+        # Fire-and-forget lifecycle
+        self._submit_closed = False
+        self._first_error: BaseException | None = None
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(bulk_load={self.bulk_load.__name__}, batch_size={self.batch_size})'
@@ -114,27 +121,109 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
         await batch.future
         return batch.results  # type: ignore[return-value]
 
+    # ── Fire-and-forget: submit / drain ──────────────────────────
+
+    async def submit(self, request: TRequest) -> None:
+        """Submit a request without waiting for its result.
+
+        The request is coalesced into the next bulk_load batch.
+        Errors are captured and raised on drain() or check_health().
+
+        Raises:
+            RuntimeError: If submit path is closed (drain() was called).
+        """
+        async with self._lock:
+            if self._submit_closed:
+                raise RuntimeError(f'{self!r}: submit() after drain()')
+            self._submitted.add(request)
+            if not self._load_task:
+                self._load_task = asyncio.create_task(self._process_pending())
+
+    async def submit_many(self, requests: Sequence[TRequest]) -> None:
+        """Submit multiple requests without waiting for results.
+
+        All requests are enqueued in one lock acquisition.
+
+        Raises:
+            RuntimeError: If submit path is closed (drain() was called).
+        """
+        async with self._lock:
+            if self._submit_closed:
+                raise RuntimeError(f'{self!r}: submit_many() after drain()')
+            if not requests:
+                return
+            self._submitted.update(requests)
+            if not self._load_task:
+                self._load_task = asyncio.create_task(self._process_pending())
+
+    async def drain(self) -> None:
+        """Flush all submitted items and close the submit path.
+
+        Awaits completion of all in-flight processing cycles.
+        After drain returns, submit() and submit_many() raise RuntimeError.
+        load() and load_many() are unaffected (they are self-draining).
+        """
+        self._submit_closed = True
+        while True:
+            async with self._lock:
+                load_task = self._load_task
+                has_pending = bool(self._submitted)
+            if load_task is not None:
+                await load_task
+            elif has_pending:
+                await asyncio.sleep(0)
+            else:
+                break
+        if self._first_error is not None:
+            raise self._first_error
+
+    def check_health(self) -> None:
+        """Raise first captured error from fire-and-forget operations.
+
+        O(1) field read. Call in hot loops for early failure detection.
+        """
+        if self._first_error is not None:
+            raise self._first_error
+
+    def cancel_all(self) -> None:
+        """Cancel in-flight processing, discard pending submits, close submit path.
+
+        Note: Only safe when no load() callers are awaiting Futures. CancelledError
+        bypasses the except Exception handler in _process_pending, leaving Futures
+        unresolved. This is fine for submit-only batchers (the current usage).
+        """
+        self._submit_closed = True
+        if self._load_task is not None:
+            self._load_task.cancel()
+        self._submitted.clear()
+
+    # ── Internal processing ──────────────────────────────────────
+
     async def _process_pending(self) -> None:
         """Process all pending requests in batches.
 
-        Unified processing for both load() and load_many() pools.
-        Collects unique requests across both, chunks, calls bulk_load,
-        and delivers to Futures (load) and BatchRecords (load_many).
+        Collects unique requests across all three pools, chunks them,
+        calls bulk_load, and delivers results to Futures (load),
+        BatchRecords (load_many). Submitted items are processed but
+        results are discarded.
         """
         # Wait for more requests to coalesce
         await asyncio.sleep(self.coalesce_delay)
 
-        # Swap out both pools atomically
+        # Swap out all three pools atomically
         async with self._lock:
             individual = self._individual
             self._individual = collections.defaultdict(list)
             batches = self._batches
             self._batches = []
+            submitted = self._submitted
+            self._submitted = set()
 
-        # Collect unique requests across both pools
+        # Collect unique requests across all pools
         all_unique: dict[TRequest, None] = dict.fromkeys(individual.keys())
         for batch in batches:
             all_unique.update(dict.fromkeys(batch.pending_requests))
+        all_unique.update(dict.fromkeys(submitted))
 
         if self.sort_requests:
             all_unique = dict(sorted(all_unique.items(), key=lambda x: str(x[0])))
@@ -177,9 +266,14 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
             for batch in batches:
                 batch.deliver_error(e)
 
+            # Capture for fire-and-forget callers
+            if submitted and self._first_error is None:
+                self._first_error = e
+                logger.error(f'{self!r}: bulk_load failed: {e}')
+
             # Schedule next batch if more requests arrived
             async with self._lock:
-                if self._individual or self._batches:
+                if self._individual or self._batches or self._submitted:
                     self._load_task = asyncio.create_task(self._process_pending())
                 else:
                     self._load_task = None
@@ -192,7 +286,7 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
 
         # Schedule next batch if more requests arrived during processing
         async with self._lock:
-            if self._individual or self._batches:
+            if self._individual or self._batches or self._submitted:
                 self._load_task = asyncio.create_task(self._process_pending())
             else:
                 self._load_task = None

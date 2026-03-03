@@ -18,3 +18,16 @@
 
 * Dashboard `server.py` is 1,700 lines of mixed Python + inline HTML/JS/CSS. Extracting the frontend to a
   separate file would improve maintainability (JS linting, syntax highlighting in editors, etc.)
+
+* Embedding cache scaling refinements (relevant if keyspace reaches millions):
+  - **Collection-level reverse index** - `embed-idx:collection:{name}` → Set of file reverse index keys;
+    avoids Redis SCAN for collection-level cache invalidation (SCAN throughput degrades significantly at
+    scale with concurrent operations)
+  - **SSCAN for large reverse index sets** - replace SMEMBERS with cursor-based SSCAN for files producing
+    thousands of chunks (e.g., large JSONL files with 77K+ chunks); prevents large single-response payloads
+  - **Lua scripts for atomic invalidation** - server-side SMEMBERS + UNLINK in a single Lua script prevents
+    partial invalidation on client crash mid-operation; currently benign (orphans TTL away) but matters if
+    cache correctness becomes critical
+  - **Extend content hash from 64-bit to 128/256-bit** - current `sha256[:16]` has birthday collision at
+    ~2^32 entries (safe at current scale); extending eliminates theoretical collisions but forces
+    re-embedding of all existing cached content (migration path or dual-read fallback needed)

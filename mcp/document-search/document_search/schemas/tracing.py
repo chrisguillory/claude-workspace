@@ -105,11 +105,15 @@ class StageCompletionData(StrictModel):
 
 
 class PipelineTimingReport(StrictModel):
-    """Complete timing report for a pipeline run.
+    """Timing report for a pipeline run (complete or partial).
 
-    Produced by PipelineTracer.build_report() after pipeline completion.
-    Includes per-stage timing percentiles, queue depth time series,
-    and raw completion data for interactive windowed analysis.
+    Produced by PipelineTracer.build_report() after pipeline completion,
+    or build_partial_report() during live operation. Includes per-stage
+    timing percentiles, queue depth time series, and raw completion data
+    for interactive windowed analysis.
+
+    When is_partial=True, percentile stats reflect only completed items.
+    In-flight items are excluded, biasing stats toward faster items.
     """
 
     scan_seconds: float
@@ -121,3 +125,8 @@ class PipelineTimingReport(StrictModel):
 
     # Raw completion data for client-side interactive charts (zoom, hover, toggle)
     completion_series: Sequence[StageCompletionData]
+
+    # Partial report metadata (set by build_partial_report)
+    is_partial: bool = False
+    items_completed: int | None = None
+    items_in_flight: int | None = None

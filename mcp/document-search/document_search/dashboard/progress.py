@@ -16,9 +16,11 @@ from datetime import datetime
 
 from uuid6 import uuid7
 
+from document_search.clients.redis import ConnectionStats
 from document_search.paths import OPERATIONS_DIR
 from document_search.schemas.dashboard import OperationProgress, OperationState
 from document_search.schemas.indexing import IndexingResult
+from document_search.schemas.tracing import PipelineTimingReport
 
 __all__ = [
     'ProgressWriter',
@@ -85,6 +87,21 @@ class ProgressWriter:
         self._write()
         return op_id
 
+    def update_timing(self, timing: PipelineTimingReport) -> None:
+        """Write timing detail to separate file (called every ~5s).
+
+        The timing file contains the full PipelineTimingReport including
+        completion series data for the interactive chart. Kept separate
+        from the main progress JSON to avoid writing large data at 500ms.
+        """
+        if self._operation_id is None:
+            return
+        OPERATIONS_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = OPERATIONS_DIR / f'{self._operation_id}-timing.json'
+        temp_path = file_path.with_suffix('.tmp')
+        temp_path.write_text(json.dumps(timing.model_dump(mode='json'), indent=2) + '\n')
+        temp_path.rename(file_path)
+
     def update_progress(self, progress: OperationProgress) -> None:
         """Update operation progress.
 
@@ -111,7 +128,11 @@ class ProgressWriter:
 
         self._write()
 
-    def complete_with_success(self, result: IndexingResult) -> None:
+    def complete_with_success(
+        self,
+        result: IndexingResult,
+        redis_conn_stats: ConnectionStats | None = None,
+    ) -> None:
         """Mark operation as successfully completed.
 
         Carries forward per-stage file counters from the last live snapshot
@@ -120,6 +141,7 @@ class ProgressWriter:
 
         Args:
             result: Final indexing result.
+            redis_conn_stats: Final Redis connection diagnostics (post-drain HWM).
         """
         if self._state is None:
             return
@@ -129,6 +151,7 @@ class ProgressWriter:
             result,
             errors_429=prior.errors_429 if prior else 0,
             prior_progress=prior,
+            redis_conn_stats=redis_conn_stats,
         )
 
         self._finalize(progress=final_progress, result=result, error=None)
@@ -178,6 +201,7 @@ class ProgressWriter:
         )
 
         self._write()
+        self._clean_timing_file()
         self._close_log_handler()
 
     def _write(self) -> None:
@@ -191,6 +215,12 @@ class ProgressWriter:
 
         temp_path.write_text(json.dumps(self._state.model_dump(mode='json'), indent=2) + '\n')
         temp_path.rename(file_path)
+
+    def _clean_timing_file(self) -> None:
+        """Remove timing file on completion (data is in the result JSON)."""
+        if self._operation_id is not None:
+            timing_path = OPERATIONS_DIR / f'{self._operation_id}-timing.json'
+            timing_path.unlink(missing_ok=True)
 
     def _close_log_handler(self) -> None:
         """Flush and remove per-operation log handler."""
