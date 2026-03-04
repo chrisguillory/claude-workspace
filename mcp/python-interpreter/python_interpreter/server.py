@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import pathlib
 import sys
 import traceback
@@ -28,10 +29,9 @@ import fastapi
 import mcp.server.fastmcp
 import mcp.types
 import uvicorn
-from local_lib.utils import DualLogger
 
 from python_interpreter.models import ExecuteRequest, InterpreterInfo
-from python_interpreter.service import PythonInterpreterService, ServerState, SimpleLogger
+from python_interpreter.service import PythonInterpreterService, ServerState
 
 __all__ = [
     'server',
@@ -143,8 +143,7 @@ def register_tools(service: PythonInterpreterService) -> None:
             code: Python code to execute
             interpreter: Interpreter name (defaults to 'builtin' with auto-install)
         """
-        logger = DualLogger(ctx)
-        return await service.execute(code, logger, interpreter)
+        return await service.execute(code, interpreter)
 
     REGISTER_INTERPRETER_BASE = """Save an external Python interpreter configuration.
 
@@ -182,8 +181,6 @@ def register_tools(service: PythonInterpreterService) -> None:
         startup_script: str | None = None,
         description: str | None = None,
     ) -> InterpreterInfo:
-        logger = DualLogger(ctx)
-
         resolved_path = pathlib.Path(python_path)
         if not resolved_path.is_absolute():
             resolved_path = service.state.project_dir / resolved_path
@@ -191,7 +188,6 @@ def register_tools(service: PythonInterpreterService) -> None:
         return await service.register_interpreter(
             name=name,
             python_path=resolved_path,
-            logger=logger,
             cwd=pathlib.Path(cwd) if cwd else None,
             env=env,
             startup_script=startup_script,
@@ -225,8 +221,7 @@ def register_tools(service: PythonInterpreterService) -> None:
             name: Name of the interpreter to stop
             remove: Permanently delete saved config (default: False)
         """
-        logger = DualLogger(ctx)
-        return await service.stop_interpreter(name, logger, remove=remove)
+        return await service.stop_interpreter(name, remove=remove)
 
     LIST_INTERPRETERS_BASE = """List all interpreters (running, saved, and discovered).
 
@@ -248,8 +243,7 @@ def register_tools(service: PythonInterpreterService) -> None:
     async def list_interpreters(
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
     ) -> list[InterpreterInfo]:
-        logger = DualLogger(ctx)
-        return await service.list_interpreters(logger)
+        return await service.list_interpreters()
 
 
 @contextlib.asynccontextmanager
@@ -257,6 +251,13 @@ async def lifespan(
     server_instance: mcp.server.fastmcp.FastMCP,
 ) -> typing.AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        stream=sys.stderr,
+    )
+
     state = ServerState.create()
     service = PythonInterpreterService(state)
     register_tools(service)
@@ -314,16 +315,10 @@ def get_interpreter_service(request: fastapi.Request) -> PythonInterpreterServic
     return service
 
 
-def get_simple_logger() -> SimpleLogger:
-    """Create logger instance."""
-    return SimpleLogger()
-
-
 @fastapi_app.post('/execute')
 async def http_execute(
     request: ExecuteRequest,
     service: PythonInterpreterService = fastapi.Depends(get_interpreter_service),
-    logger: SimpleLogger = fastapi.Depends(get_simple_logger),
 ) -> dict[str, str]:
     """HTTP endpoint for executing Python code.
 
@@ -335,7 +330,7 @@ async def http_execute(
 
     The client auto-discovers this endpoint via Unix socket.
     """
-    result = await service.execute(request.code, logger, request.interpreter)
+    result = await service.execute(request.code, request.interpreter)
     return {'result': result}
 
 

@@ -184,9 +184,24 @@ class PipelineTracer:
 
     def build_report(self) -> PipelineTimingReport:
         """Compute final timing report from collected data."""
-        total_elapsed = time.perf_counter() - self._start
+        return self._build_report(partial=False)
 
-        # Identify warm-up items (first N)
+    def build_partial_report(self) -> PipelineTimingReport:
+        """Build timing report from data collected so far.
+
+        Functionally identical to build_report() — the _collect_* methods
+        already filter to items with both start and end events, naturally
+        excluding in-flight items. Adds partial metadata (item counts).
+
+        Percentile stats reflect only completed items. In-flight items
+        (started but not completed) are excluded, which biases stats
+        toward faster items during active processing.
+        """
+        return self._build_report(partial=True)
+
+    def _build_report(self, *, partial: bool) -> PipelineTimingReport:
+        """Shared report generation logic."""
+        total_elapsed = time.perf_counter() - self._start
         warmup_ids = set(self._item_order[:_WARMUP_ITEMS])
 
         stage_reports: list[StageTimingReport] = []
@@ -229,6 +244,16 @@ class PipelineTracer:
 
         completion_series = self._build_completion_series()
 
+        partial_kwargs: dict[str, object] = {}
+        if partial:
+            chunk_done, embed_done, store_done = self.get_completion_counts()
+            chunk_in, embed_in, store_in = self.get_in_flight_counts()
+            partial_kwargs = {
+                'is_partial': True,
+                'items_completed': store_done,
+                'items_in_flight': chunk_in + embed_in + store_in,
+            }
+
         return PipelineTimingReport(
             scan_seconds=round(self._scan_seconds, 3),
             stages=tuple(stage_reports),
@@ -237,6 +262,7 @@ class PipelineTracer:
             total_elapsed_seconds=round(total_elapsed, 3),
             sparse_threads=self._sparse_threads,
             completion_series=completion_series,
+            **partial_kwargs,  # type: ignore[arg-type]
         )
 
     # ── Private: queue monitoring ────────────────────────────────

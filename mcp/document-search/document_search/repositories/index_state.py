@@ -71,7 +71,7 @@ class IndexStateStore:
         pipe = self._redis.pipeline()
         for path in file_paths:
             pipe.hgetall(self._key(path))
-        results = await pipe.execute()
+        results = await self._redis.execute_pipeline(pipe)
 
         states: dict[str, FileIndexState] = {}
         for path, raw in zip(file_paths, results):
@@ -96,7 +96,7 @@ class IndexStateStore:
         pipe = self._redis.pipeline()
         for key in keys:
             pipe.hget(key, b'chunk_ids')
-        results = await pipe.execute()
+        results = await self._redis.execute_pipeline(pipe)
 
         all_ids: list[str] = []
         for raw_ids in results:
@@ -119,7 +119,7 @@ class IndexStateStore:
         pipe = self._redis.pipeline()
         for key in keys:
             pipe.hgetall(key)
-        results = await pipe.execute()
+        results = await self._redis.execute_pipeline(pipe)
 
         prefix_len = len(self._prefix)
         entries: list[tuple[str, FileIndexState]] = []
@@ -141,7 +141,7 @@ class IndexStateStore:
         pipe = self._redis.pipeline()
         for key in keys:
             pipe.delete(key)
-        results = await pipe.execute()
+        results = await self._redis.execute_pipeline(pipe)
         return sum(1 for r in results if r)
 
     async def clear_collection(self) -> int:
@@ -155,7 +155,7 @@ class IndexStateStore:
         pipe = self._redis.pipeline()
         for key in keys:
             pipe.delete(key)
-        results = await pipe.execute()
+        results = await self._redis.execute_pipeline(pipe)
         return sum(1 for r in results if r)
 
     # --- Private ---

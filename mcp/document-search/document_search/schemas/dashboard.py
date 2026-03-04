@@ -12,13 +12,15 @@ from typing import TYPE_CHECKING, Literal
 
 from local_lib.types import JsonDatetime
 
+from document_search.clients.redis import ConnectionStats
+
 if TYPE_CHECKING:
     from document_search.services.indexing import PipelineSnapshot
 
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import FileType
-from document_search.schemas.indexing import IndexingResult
-from document_search.schemas.tracing import QueueDepthSample
+from document_search.schemas.indexing import FileProcessingError, IndexingResult
+from document_search.schemas.tracing import QueueDepthSample, StageTimingReport
 
 __all__ = [
     'DashboardState',
@@ -99,11 +101,23 @@ class OperationProgress(StrictModel):
     files_done: int
     errors_429: int
 
-    # File type breakdown (live during scan, mirrors IndexingResult.by_file_type)
+    # File type breakdown (enriched with per-type outcomes during pipeline)
     by_file_type: Mapping[FileType, str]
 
     # Queue depth time series (1Hz samples from tracer)
     queue_depth_series: Sequence[QueueDepthSample]
+
+    # Live dashboard parity enrichments
+    files_ignored: int = 0
+    files_chunk_cached: int = 0
+    file_errors: Sequence[FileProcessingError] = ()
+    timing_stats: Sequence[StageTimingReport] = ()
+    scan_seconds: float | None = None
+
+    # Redis connection diagnostics (high-water marks per operation)
+    redis_hwm_single: int = 0
+    redis_hwm_pipeline: int = 0
+    redis_hwm_total: int = 0
 
     @classmethod
     def from_snapshot(
@@ -112,6 +126,7 @@ class OperationProgress(StrictModel):
         *,
         status: OperationStatus,
         errors_429: int,
+        redis_conn_stats: ConnectionStats | None = None,
     ) -> OperationProgress:
         """Build from PipelineSnapshot with cross-layer metrics.
 
@@ -119,6 +134,7 @@ class OperationProgress(StrictModel):
             snapshot: PipelineSnapshot from IndexingService.
             status: Lifecycle status ('running', 'complete', 'failed').
             errors_429: Count of rate limit errors (tracked by embedding client).
+            redis_conn_stats: Redis connection diagnostics (HWM tracking).
 
         Returns:
             Complete OperationProgress ready for dashboard.
@@ -150,6 +166,14 @@ class OperationProgress(StrictModel):
             errors_429=errors_429,
             by_file_type=snapshot.by_file_type,
             queue_depth_series=snapshot.queue_depth_series,
+            files_ignored=snapshot.files_ignored,
+            files_chunk_cached=snapshot.files_chunk_cached,
+            file_errors=snapshot.file_errors,
+            timing_stats=snapshot.timing_stats,
+            scan_seconds=snapshot.scan_seconds,
+            redis_hwm_single=redis_conn_stats.hwm_single if redis_conn_stats else 0,
+            redis_hwm_pipeline=redis_conn_stats.hwm_pipeline if redis_conn_stats else 0,
+            redis_hwm_total=redis_conn_stats.hwm_total if redis_conn_stats else 0,
         )
 
     @classmethod
@@ -159,6 +183,7 @@ class OperationProgress(StrictModel):
         *,
         errors_429: int,
         prior_progress: OperationProgress | None = None,
+        redis_conn_stats: ConnectionStats | None = None,
     ) -> OperationProgress:
         """Build final progress from IndexingResult with all queues drained.
 
@@ -174,6 +199,7 @@ class OperationProgress(StrictModel):
             result: Completed IndexingResult from IndexingService.
             errors_429: Count of rate limit errors from prior progress snapshots.
             prior_progress: Last live snapshot (carries accurate stage counters).
+            redis_conn_stats: Final Redis connection diagnostics (post-drain HWM).
 
         Returns:
             Complete OperationProgress with status='complete'.
@@ -202,10 +228,18 @@ class OperationProgress(StrictModel):
             files_chunked=prior_progress.files_chunked if prior_progress else files_done,
             files_embedded=prior_progress.files_embedded if prior_progress else files_done,
             files_stored=prior_progress.files_stored if prior_progress else files_done,
+            files_chunk_cached=prior_progress.files_chunk_cached if prior_progress else 0,
             files_done=files_done,
             errors_429=errors_429,
             by_file_type=result.by_file_type,
             queue_depth_series=prior_progress.queue_depth_series if prior_progress else (),
+            files_ignored=result.files_ignored,
+            file_errors=result.errors,
+            timing_stats=prior_progress.timing_stats if prior_progress else (),
+            scan_seconds=result.timing.scan_seconds if result.timing else None,
+            redis_hwm_single=redis_conn_stats.hwm_single if redis_conn_stats else 0,
+            redis_hwm_pipeline=redis_conn_stats.hwm_pipeline if redis_conn_stats else 0,
+            redis_hwm_total=redis_conn_stats.hwm_total if redis_conn_stats else 0,
         )
 
 
