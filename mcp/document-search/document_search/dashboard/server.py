@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -12,8 +13,11 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
+import git
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -21,8 +25,10 @@ from fastapi.responses import HTMLResponse
 from document_search.dashboard.state import DashboardStateManager
 from document_search.paths import OPERATIONS_DIR
 from document_search.schemas.dashboard import DashboardState, McpServer, OperationState
+from document_search.schemas.tracing import PipelineTimingReport
 
 __all__ = [
+    'BuildInfo',
     'DashboardServer',
 ]
 
@@ -30,6 +36,18 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8765
 MONITOR_INTERVAL_SECONDS = 5
+_START_TIME = time.strftime('%Y-%m-%d %H:%M:%S')
+_START_EPOCH = int(time.time())
+
+
+class BuildInfo(TypedDict):
+    """Build metadata returned by /api/build-id."""
+
+    build_id: str
+    git_hash: str
+    git_commit_date: str
+    server_started: str
+
 
 INDEX_HTML = """<!DOCTYPE html>
 <html>
@@ -158,6 +176,63 @@ INDEX_HTML = """<!DOCTYPE html>
         .chart-legend { display: flex; gap: 16px; font-size: 11px; color: #666; margin-top: 4px; }
         .chart-legend span { display: flex; align-items: center; gap: 4px; }
         .chart-legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .timing-live {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: #388e3c;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .timing-live::before {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #4caf50;
+            animation: pulse-dot 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .timing-chart-live {
+            min-height: 120px;
+            margin-top: 12px;
+        }
+        .error-list {
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-top: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 11px;
+        }
+        .error-item {
+            padding: 6px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            line-height: 1.5;
+        }
+        .error-item:last-child { border-bottom: none; }
+        .error-item .error-type {
+            color: #c62828;
+            font-weight: 600;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        .error-item .error-path {
+            color: #555;
+            word-break: break-all;
+        }
+        .error-item .error-msg-text {
+            color: #888;
+            font-size: 10px;
+        }
         .empty { text-align: center; padding: 40px; color: #999; }
         .server { padding: 8px 0; }
         .error-msg {
@@ -221,6 +296,8 @@ INDEX_HTML = """<!DOCTYPE html>
             line-height: 1;
         }
         .btn-delete:hover { color: #d32f2f; }
+        .footer { text-align: center; padding: 16px 0 8px; font-size: 11px; color: #aaa; }
+        .footer code { background: #eee; padding: 1px 5px; border-radius: 3px; font-size: 10px; color: #999; }
     </style>
 </head>
 <body>
@@ -247,6 +324,8 @@ INDEX_HTML = """<!DOCTYPE html>
             </div>
             <div id="recent-ops"></div>
         </div>
+
+        <div class="footer" id="build-info"></div>
     </div>
 
     <script>
@@ -311,9 +390,11 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="stat"><div class="stat-label">Cache Misses</div><div class="stat-value">${p.embed_cache_misses.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Errored</div><div class="stat-value">${p.files_errored}</div></div>
                     <div class="stat"><div class="stat-label">429 Errors</div><div class="stat-value">${p.errors_429}</div></div>
+                    <div class="stat"><div class="stat-label">Redis HWM</div><div class="stat-value">${p.redis_hwm_total || 0}</div></div>
                 </div>
                 ${p.by_file_type && Object.keys(p.by_file_type).length > 0 ? formatFileTypeChart(p.by_file_type) : ''}
                 ${formatQueueDepthChart(p.queue_depth_series)}
+                ${p.file_errors && p.file_errors.length > 0 ? formatErrorList(p.file_errors, op.operation_id) : ''}
             `;
         }
 
@@ -335,6 +416,8 @@ INDEX_HTML = """<!DOCTYPE html>
                 const skipPct = (r.chunks_skipped / totalChunks * 100).toFixed(0);
                 line2Parts.push(`Chunk cache: ${skipPct}%`);
             }
+            const p = op.progress;
+            if (p && p.redis_hwm_total > 0) line2Parts.push(`Redis: ${p.redis_hwm_total} peak conns`);
             const errCount = r.errors ? r.errors.length : 0;
             if (errCount > 0) line2Parts.push(`<span style="color:#c62828">Errors: ${errCount}</span>`);
             if (r.stopped_after) line2Parts.push(`Stopped after ${r.stopped_after}`);
@@ -360,9 +443,12 @@ INDEX_HTML = """<!DOCTYPE html>
                     </div>
                     <div class="op-meta">${escapeHtml(op.directory)} <span style="font-family:monospace;font-size:11px;color:#999">${op.operation_id.slice(0,8)}</span></div>
                     ${isComplete ? formatCompletedSummary(op) : `<div id="progress-${op.operation_id}">${formatOperationProgressHtml(op)}</div>`}
+                    ${!isComplete ? `<div id="timing-${op.operation_id}"></div>` : ''}
                     ${op.error ? `<div class="error-msg">${escapeHtml(op.error)}</div>` : ''}
                     ${op.result?.by_file_type && Object.keys(op.result.by_file_type).length > 0 ? formatFileTypeChart(op.result.by_file_type) : ''}
                     ${op.result?.timing ? formatTimingReport(op.result.timing, op.operation_id) : ''}
+                    ${isComplete && op.result?.errors && op.result.errors.length > 0 ? formatErrorList(op.result.errors, op.operation_id) : ''}
+                    ${!isComplete && op.progress?.file_errors && op.progress.file_errors.length > 0 ? formatErrorList(op.progress.file_errors, op.operation_id) : ''}
                     <div class="log-header" onclick="toggleLogs('${op.operation_id}')">
                         <span id="log-toggle-${op.operation_id}">▶ Logs</span>
                         <span id="log-count-${op.operation_id}"></span>
@@ -407,33 +493,75 @@ INDEX_HTML = """<!DOCTYPE html>
             ['#d4a5a5','#9e6b6b'], ['#8fbc8f','#556b2f'],
         ];
 
+        // Outcome segment colors for file type chart
+        const OUTCOME_COLORS = {
+            indexed: '#4caf50',     // green
+            cached: '#42a5f5',     // blue
+            no_content: '#bdbdbd', // gray
+            errored: '#ef5350',    // red
+        };
+
         function formatFileTypeChart(byFileType) {
-            // Parse "scanned=X cached=Y" into structured data
+            // Parse "scanned=X cached=Y indexed=Z no_content=W errored=E chunks=C" into structured data
             const items = Object.entries(byFileType).map(([ft, summary]) => {
                 const parts = {};
                 summary.split(' ').forEach(pair => {
                     const [k, v] = pair.split('=');
                     parts[k] = parseInt(v);
                 });
-                return { type: ft, scanned: parts.scanned || 0, cached: parts.cached || 0 };
+                return {
+                    type: ft,
+                    scanned: parts.scanned || 0,
+                    cached: parts.cached || 0,
+                    indexed: parts.indexed || 0,
+                    no_content: parts.no_content || 0,
+                    errored: parts.errored || 0,
+                    chunks: parts.chunks || 0,
+                };
             }).sort((a, b) => b.scanned - a.scanned);
 
             const maxScanned = Math.max(...items.map(d => d.scanned));
             const total = items.reduce((s, d) => s + d.scanned, 0);
             const BAR_MAX_H = 130;
+            // Detect if enhanced fields are present (any item has indexed > 0 or no_content > 0 or errored > 0)
+            const hasOutcomes = items.some(d => d.indexed > 0 || d.no_content > 0 || d.errored > 0);
 
             return `
                 <div style="display:flex;align-items:flex-end;gap:2px;border-bottom:2px solid #e8e8e8;margin-top:12px">
                     ${items.map((d, i) => {
                         const bh = Math.max(2, d.scanned / maxScanned * BAR_MAX_H);
-                        const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
                         const pct = (d.scanned / total * 100).toFixed(0);
                         const [lt, dk] = EARTH_PALETTE[i % EARTH_PALETTE.length];
+
+                        // Build stacked segments inside the bar
+                        let segments = '';
+                        if (hasOutcomes) {
+                            // Stacked from bottom: errored, no_content, cached, indexed
+                            const segData = [
+                                {val: d.errored, color: OUTCOME_COLORS.errored},
+                                {val: d.no_content, color: OUTCOME_COLORS.no_content},
+                                {val: d.cached, color: OUTCOME_COLORS.cached},
+                                {val: d.indexed, color: OUTCOME_COLORS.indexed},
+                            ];
+                            let bottomPx = 0;
+                            for (const seg of segData) {
+                                if (seg.val > 0 && d.scanned > 0) {
+                                    const sh = Math.max(1, seg.val / d.scanned * bh);
+                                    segments += `<div style="position:absolute;bottom:${bottomPx}px;width:100%;height:${sh}px;background:${seg.color};opacity:0.65"></div>`;
+                                    bottomPx += sh;
+                                }
+                            }
+                        } else {
+                            // Legacy: just show cached segment
+                            const ch = d.cached > 0 ? Math.max(3, d.cached / d.scanned * bh) : 0;
+                            if (ch > 0) segments = `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk};opacity:0.7"></div>`;
+                        }
+
                         return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
                             <div style="font-size:10px;color:#999;margin-bottom:1px">${pct}%</div>
                             <div style="font-size:11px;font-weight:600;color:#444;margin-bottom:2px;font-variant-numeric:tabular-nums">${d.scanned.toLocaleString()}</div>
                             <div style="width:100%;height:${bh}px;border-radius:4px 4px 0 0;position:relative;overflow:hidden;background:linear-gradient(to bottom,${lt},${dk}44)">
-                                ${ch > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${ch}px;background:${dk};opacity:0.7"></div>` : ''}
+                                ${segments}
                             </div>
                         </div>`;
                     }).join('')}
@@ -442,13 +570,30 @@ INDEX_HTML = """<!DOCTYPE html>
                     ${items.map((d, i) => {
                         const [, dk] = EARTH_PALETTE[i % EARTH_PALETTE.length];
                         const exts = FILE_TYPE_EXTS[d.type] || '';
+                        let detailLine;
+                        if (hasOutcomes) {
+                            const parts = [];
+                            if (d.indexed > 0) parts.push(`${d.indexed} idx`);
+                            if (d.cached > 0) parts.push(`${d.cached} cache`);
+                            if (d.no_content > 0) parts.push(`${d.no_content} empty`);
+                            if (d.errored > 0) parts.push(`<span style="color:#c62828">${d.errored} err</span>`);
+                            detailLine = parts.join(' · ') || '—';
+                        } else {
+                            detailLine = `${d.cached.toLocaleString()} cached`;
+                        }
                         return `<div style="flex:1;text-align:center">
                             <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#555">${d.type}</div>
                             <div style="font-size:9px;color:#bbb">${exts}</div>
-                            <div style="font-size:9px;font-weight:600;color:${d.cached > 0 ? dk : '#ccc'};margin-top:1px">${d.cached.toLocaleString()} cached</div>
+                            <div style="font-size:9px;font-weight:600;color:${d.cached > 0 ? dk : '#999'};margin-top:1px">${detailLine}</div>
                         </div>`;
                     }).join('')}
                 </div>
+                ${hasOutcomes ? `<div style="display:flex;gap:12px;font-size:10px;color:#888;margin-top:4px;justify-content:center">
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${OUTCOME_COLORS.indexed};vertical-align:middle;margin-right:2px"></span>indexed</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${OUTCOME_COLORS.cached};vertical-align:middle;margin-right:2px"></span>cached</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${OUTCOME_COLORS.no_content};vertical-align:middle;margin-right:2px"></span>no content</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${OUTCOME_COLORS.errored};vertical-align:middle;margin-right:2px"></span>errored</span>
+                </div>` : ''}
             `;
         }
 
@@ -523,7 +668,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 colors: {grid: '#e0e0e0', gridVert: '#e8e8e8', axis: '#ccc', text: '#999', textMuted: '#aaa', border: '#ddd'},
                 spacing: {ml: 44, mr: 28, mt: 4, mb: 20, tickLen: 3, dataPad: 4},
                 type: {axis: 8, axisSmall: 7, legend: 11},
-                chart: {dotR: 1.0, dotHoverR: 3.5, lineW: 1, lineOp: 0.5, dotOp: 0.85, qLineW: 1, qLineOp: 0.7},
+                chart: {dotR: 1.0, dotHoverR: 3.5, lineW: 1, lineOp: 0.7, dotOp: 0.85, qLineW: 1, qLineOp: 0.7},
             };
             const COLORS = {embed_sparse:'#c62828', embed_dense:'#1565c0', store:'#2e7d32', embed:'#6a1b9a', chunk:'#78909c'};
             const QCOLORS = {file_queue:'#e65100', embed_queue:'#1976d2', upsert_queue:'#388e3c', chunk_inflight:'#ff6f00', embed_inflight:'#1e88e5', store_inflight:'#43a047', cumulative:'#6a1b9a', chunk_done:'#ef5350', embed_done:'#42a5f5', store_done:'#66bb6a'};
@@ -743,24 +888,22 @@ INDEX_HTML = """<!DOCTYPE html>
                 const px = xAxis.px;
                 state.px = px;
 
-                // Dot+line chart (dots at window midpoints, thin connecting lines)
+                // Dot+line chart (dots at window midpoints, continuous connecting lines)
                 let paths = '';
                 for (const [sid, wins] of Object.entries(state.wins)) {
                     const pts = [];
-                    let lastEnd = -Infinity;
                     for (const w of wins) {
                         if (w.v === null) continue;
                         const cx = px((w.s + w.e) / 2).toFixed(1);
                         const cy = py(w.v).toFixed(1);
-                        pts.push({cx, cy, brk: (w.s - lastEnd) > state.ws * 2});
-                        lastEnd = w.e;
+                        pts.push({cx, cy});
                     }
-                    // Connecting lines (thin, behind dots, break on large gaps)
-                    let ld = '';
-                    for (const p of pts) {
-                        ld += (p.brk ? (ld ? ' M' : 'M') : ' L') + p.cx + ',' + p.cy;
+                    // Connecting lines (continuous, no gap breaks — Datadog style)
+                    if (pts.length > 1) {
+                        let ld = 'M' + pts[0].cx + ',' + pts[0].cy;
+                        for (let i = 1; i < pts.length; i++) ld += ' L' + pts[i].cx + ',' + pts[i].cy;
+                        paths += '<path d="' + ld + '" fill="none" stroke="' + COLORS[sid] + '" stroke-width="' + THEME.chart.lineW + '" opacity="' + THEME.chart.lineOp + '"/>';
                     }
-                    if (ld) paths += '<path d="' + ld + '" fill="none" stroke="' + COLORS[sid] + '" stroke-width="' + THEME.chart.lineW + '" opacity="' + THEME.chart.lineOp + '"/>';
                     // Dots (on top of lines)
                     for (const p of pts) {
                         paths += '<circle cx="' + p.cx + '" cy="' + p.cy + '" r="' + THEME.chart.dotR + '" fill="' + COLORS[sid] + '" opacity="' + THEME.chart.dotOp + '"/>';
@@ -1203,7 +1346,23 @@ INDEX_HTML = """<!DOCTYPE html>
                 bind(qOver);
             }
 
+            function updateData(newData, newQueueData, newElapsed, newAggStages) {
+                const wasAtFullRange = Math.abs(state.end - totalElapsed) < 0.5;
+                data = newData;
+                queueData = newQueueData;
+                totalElapsed = newElapsed;
+                aggStages = newAggStages;
+                if (wasAtFullRange) {
+                    state.end = newElapsed;
+                }
+                render();
+            }
+
             render();
+            return {
+                update: updateData,
+                destroy() { if (raf) cancelAnimationFrame(raf); tooltip.remove(); }
+            };
         }
 
         function initPendingCharts() {
@@ -1212,29 +1371,30 @@ INDEX_HTML = """<!DOCTYPE html>
                 const d = pendingCharts[el.id];
                 if (d) {
                     el.classList.remove('ts-chart-pending');
-                    createTimeSeriesChart(el.id, d.series, d.qSeries, d.elapsed, d.stages);
+                    const chart = createTimeSeriesChart(el.id, d.series, d.qSeries, d.elapsed, d.stages);
+                    if (chart && d.liveOpId) {
+                        liveCharts[d.liveOpId] = chart;
+                    }
                     consumed.add(el.id);
                 }
             });
             for (const id of consumed) delete pendingCharts[id];
         }
 
-        function formatTimingReport(timing, opId) {
-            if (!timing || !timing.stages || timing.stages.length === 0) return '';
+        function formatTimingTable(stages, scanSeconds, sparseThreads, totalItems, totalElapsed, isPartial) {
+            if (!stages || stages.length === 0) return '';
             const SUB_STAGES = new Set(['embed_dense', 'embed_sparse']);
             const fmtMs = (v) => v < 1 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v).toLocaleString();
             const fmtPct = (stats) => stats ? `${fmtMs(stats.p50_ms)} / ${fmtMs(stats.p95_ms)} / ${fmtMs(stats.p99_ms)} / ${fmtMs(stats.max_ms)}` : '—';
 
-            const threads = timing.sparse_threads;
-            let rows = timing.stages.map(s => {
+            let rows = stages.map(s => {
                 const isSub = SUB_STAGES.has(s.stage);
                 const label = s.stage.replace('embed_', '↳ ');
-                // Efficiency: mean cpu / mean wall / threads (only for embed_sparse)
                 let effHtml = '—';
-                if (s.cpu && s.wall && threads && s.wall.p50_ms > 0) {
+                if (s.cpu && s.wall && sparseThreads && s.wall.p50_ms > 0) {
                     const parallel = s.cpu.p50_ms / s.wall.p50_ms;
-                    const eff = parallel / threads;
-                    effHtml = `${parallel.toFixed(1)}x / ${threads}t = ${(eff * 100).toFixed(0)}%`;
+                    const eff = parallel / sparseThreads;
+                    effHtml = `${parallel.toFixed(1)}x / ${sparseThreads}t = ${(eff * 100).toFixed(0)}%`;
                 }
                 return `<tr class="${isSub ? 'sub-stage' : ''}">
                     <td>${label}</td>
@@ -1248,6 +1408,40 @@ INDEX_HTML = """<!DOCTYPE html>
                     <td>${s.processing.count.toLocaleString()}</td>
                 </tr>`;
             }).join('');
+
+            const scanText = scanSeconds != null ? `Scan: ${scanSeconds.toFixed(1)}s | ` : '';
+            const itemsText = totalItems != null ? `${totalItems.toLocaleString()} items | ` : '';
+            const elapsedText = totalElapsed != null ? `${totalElapsed.toFixed(1)}s elapsed` : '';
+            const threadsText = sparseThreads ? ` | ${sparseThreads} rayon threads` : '';
+            const partialText = isPartial ? ' | <span class="timing-live">LIVE</span>' : '';
+
+            return `
+                <table class="timing-table">
+                    <tr>
+                        <th>Stage</th>
+                        <th>Processing p50/p95/p99/max (ms)</th>
+                        <th>Queue Wait</th>
+                        <th>Batch Wait</th>
+                        <th>CPU p50/p95/p99/max (ms)</th>
+                        <th>Wall p50/p95/p99/max (ms)</th>
+                        <th>Efficiency</th>
+                        <th>Throughput</th>
+                        <th>Items</th>
+                    </tr>
+                    ${rows}
+                </table>
+                <div style="font-size:11px;color:#888;margin-top:4px">
+                    ${scanText}${itemsText}${elapsedText}${threadsText}${partialText}
+                </div>`;
+        }
+
+        function formatTimingReport(timing, opId) {
+            if (!timing || !timing.stages || timing.stages.length === 0) return '';
+
+            const tableHtml = formatTimingTable(
+                timing.stages, timing.scan_seconds, timing.sparse_threads,
+                timing.total_items, timing.total_elapsed_seconds, timing.is_partial || false
+            );
 
             let chartHtml;
             if (timing.completion_series && timing.completion_series.length > 0 && opId) {
@@ -1265,23 +1459,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
             return `
                 <div style="margin-top: 12px;">
-                    <table class="timing-table">
-                        <tr>
-                            <th>Stage</th>
-                            <th>Processing p50/p95/p99/max (ms)</th>
-                            <th>Queue Wait</th>
-                            <th>Batch Wait</th>
-                            <th>CPU p50/p95/p99/max (ms)</th>
-                            <th>Wall p50/p95/p99/max (ms)</th>
-                            <th>Efficiency</th>
-                            <th>Throughput</th>
-                            <th>Items</th>
-                        </tr>
-                        ${rows}
-                    </table>
-                    <div style="font-size:11px;color:#888;margin-top:4px">
-                        Scan: ${timing.scan_seconds.toFixed(1)}s | ${timing.total_items.toLocaleString()} items | ${timing.total_elapsed_seconds.toFixed(1)}s total${timing.sparse_threads ? ` | ${timing.sparse_threads} rayon threads` : ''}
-                    </div>
+                    ${tableHtml}
                     ${chartHtml}
                 </div>`;
         }
@@ -1297,7 +1475,41 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         const openLogs = new Set();
+        const openErrors = new Set();
         const pendingCharts = {};
+        const liveCharts = {};
+        let lastTimingFetch = 0;
+
+        function toggleErrors(opId) {
+            const el = document.getElementById('errors-' + opId);
+            const toggle = document.getElementById('error-toggle-' + opId);
+            if (openErrors.has(opId)) {
+                openErrors.delete(opId);
+                el.style.display = 'none';
+                toggle.textContent = '\\u25b6 Errors';
+            } else {
+                openErrors.add(opId);
+                el.style.display = 'block';
+                toggle.textContent = '\\u25bc Errors';
+            }
+        }
+
+        function formatErrorList(errors, opId) {
+            if (!errors || errors.length === 0) return '';
+            const isOpen = openErrors.has(opId);
+            const items = errors.map(e =>
+                `<div class="error-item">` +
+                `<span class="error-type">${escapeHtml(e.error_type)}</span> ` +
+                `<span class="error-path">${escapeHtml(e.file_path)}</span>` +
+                `<div class="error-msg-text">${escapeHtml(e.message)}</div>` +
+                `</div>`
+            ).join('');
+            return `
+                <div class="log-header" onclick="toggleErrors('${opId}')">
+                    <span id="error-toggle-${opId}">${isOpen ? '\\u25bc' : '\\u25b6'} Errors (${errors.length})</span>
+                </div>
+                <div id="errors-${opId}" class="error-list" style="display:${isOpen ? 'block' : 'none'}">${items}</div>`;
+        }
 
         function toggleLogs(opId) {
             const el = document.getElementById('logs-' + opId);
@@ -1354,9 +1566,36 @@ INDEX_HTML = """<!DOCTYPE html>
         let lastRecentIds = '';
         let lastServerCount = -1;
         const lastLogLines = {};  // opId -> total_lines (skip re-render when unchanged)
+        let knownBuildId = null;
+        let lastBuildCheck = 0;
 
         async function update() {
             try {
+                // Check for server restart every 10s — auto-reload to pick up code changes
+                if (Date.now() - lastBuildCheck > 10000) {
+                    lastBuildCheck = Date.now();
+                    try {
+                        const buildResp = await fetch('/api/build-id');
+                        if (buildResp.ok) {
+                            const bd = await buildResp.json();
+                            if (knownBuildId && bd.build_id !== knownBuildId) {
+                                console.log('Server restarted (build ' + knownBuildId + ' \\u2192 ' + bd.build_id + '), reloading...');
+                                location.href = '/?v=' + Date.now();
+                                return;
+                            }
+                            knownBuildId = bd.build_id;
+                            const footer = document.getElementById('build-info');
+                            if (footer && !footer.dataset.set) {
+                                let info = '<code>' + bd.git_hash + '</code>';
+                                if (bd.git_commit_date) info += ' \\u00b7 committed ' + bd.git_commit_date;
+                                info += ' \\u00b7 server started ' + bd.server_started;
+                                footer.innerHTML = info;
+                                footer.dataset.set = '1';
+                            }
+                        }
+                    } catch (e) { /* server may be restarting */ }
+                }
+
                 const [activeResp, serversResp, recentResp] = await Promise.all([
                     fetch('/api/operations/active'),
                     fetch('/api/mcp-servers'),
@@ -1371,11 +1610,16 @@ INDEX_HTML = """<!DOCTYPE html>
                 const activeIds = activeOps.map(o => o.operation_id).join(',');
                 if (activeIds !== lastActiveIds) {
                     lastActiveIds = activeIds;
+                    // Full re-render invalidates all live chart DOM references
+                    for (const opId of Object.keys(liveCharts)) {
+                        if (liveCharts[opId].destroy) liveCharts[opId].destroy();
+                        delete liveCharts[opId];
+                    }
                     document.getElementById('active-ops').innerHTML =
                         activeOps.length === 0
                             ? '<div class="empty">No active operations</div>'
                             : activeOps.map(formatOperation).join('');
-                    // Re-expand logs after full re-render
+                    // Re-expand logs and errors after full re-render
                     for (const opId of openLogs) {
                         const el = document.getElementById('logs-' + opId);
                         if (el && activeOps.some(o => o.operation_id === opId)) {
@@ -1385,13 +1629,20 @@ INDEX_HTML = """<!DOCTYPE html>
                             fetchLogs(opId);
                         }
                     }
+                    for (const opId of openErrors) {
+                        const el = document.getElementById('errors-' + opId);
+                        const toggle = document.getElementById('error-toggle-' + opId);
+                        if (el) { el.style.display = 'block'; if (toggle) toggle.textContent = '\\u25bc Errors'; }
+                    }
                 } else if (activeOps.length > 0) {
                     // Same ops — update only progress and meta, leave logs untouched
                     for (const op of activeOps) {
                         const metaEl = document.getElementById('meta-' + op.operation_id);
                         const progressEl = document.getElementById('progress-' + op.operation_id);
                         if (metaEl) metaEl.innerHTML = formatOperationMeta(op);
-                        if (progressEl) progressEl.innerHTML = formatOperationProgressHtml(op);
+                        if (progressEl) {
+                            progressEl.innerHTML = formatOperationProgressHtml(op);
+                        }
                     }
                     // Refresh open logs (fetchLogs skips if unchanged)
                     for (const opId of openLogs) {
@@ -1421,7 +1672,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         completedOps.length === 0
                             ? '<div class="empty">No recent operations</div>'
                             : completedOps.slice(0, 5).map(formatOperation).join('');
-                    // Re-expand logs after DOM replacement
+                    // Re-expand logs and errors after DOM replacement
                     for (const opId of openLogs) {
                         const el = document.getElementById('logs-' + opId);
                         const toggle = document.getElementById('log-toggle-' + opId);
@@ -1433,9 +1684,74 @@ INDEX_HTML = """<!DOCTYPE html>
                             openLogs.delete(opId);
                         }
                     }
+                    for (const opId of openErrors) {
+                        const el = document.getElementById('errors-' + opId);
+                        const toggle = document.getElementById('error-toggle-' + opId);
+                        if (el) { el.style.display = 'block'; if (toggle) toggle.textContent = '\\u25bc Errors'; }
+                        else { openErrors.delete(opId); }
+                    }
                 }
 
                 initPendingCharts();
+
+                // Clean up liveCharts for operations no longer active
+                const activeIdSet = new Set(activeOps.map(o => o.operation_id));
+                for (const opId of Object.keys(liveCharts)) {
+                    if (!activeIdSet.has(opId)) {
+                        if (liveCharts[opId].destroy) liveCharts[opId].destroy();
+                        delete liveCharts[opId];
+                    }
+                }
+
+                // Poll timing endpoint for active operations (every 5s)
+                // Timing section lives in timing-{id} div (sibling of progress-{id})
+                // so the 500ms progress update doesn't destroy the chart canvas
+                if (activeOps.length > 0 && Date.now() - lastTimingFetch > 5000) {
+                    lastTimingFetch = Date.now();
+                    for (const op of activeOps) {
+                        const timingEl = document.getElementById('timing-' + op.operation_id);
+                        if (!timingEl) continue;
+                        try {
+                            const resp = await fetch('/api/operations/' + op.operation_id + '/timing');
+                            if (!resp.ok) continue;
+                            const timing = await resp.json();
+                            if (!timing || !timing.stages || timing.stages.length === 0) continue;
+
+                            // Render timing table (updates every 5s with new percentiles)
+                            const tableHtml = formatTimingTable(
+                                timing.stages, timing.scan_seconds, null, null,
+                                timing.total_elapsed_seconds, true
+                            );
+
+                            // Ensure chart container exists (create once, preserved across updates)
+                            const chartId = 'timing-chart-' + op.operation_id;
+                            if (!document.getElementById(chartId)) {
+                                timingEl.innerHTML = `<div style="margin-top:12px"><div class="timing-table-container">${tableHtml}</div><div id="${chartId}" class="timing-chart-live"></div></div>`;
+                            } else {
+                                // Update just the table, leave chart container untouched
+                                const tableContainer = timingEl.querySelector('.timing-table-container');
+                                if (tableContainer) tableContainer.innerHTML = tableHtml;
+                            }
+
+                            // Create or update chart
+                            if (timing.completion_series && timing.completion_series.length > 0) {
+                                if (liveCharts[op.operation_id]) {
+                                    liveCharts[op.operation_id].update(
+                                        timing.completion_series, timing.queue_depth_series,
+                                        timing.total_elapsed_seconds, timing.stages
+                                    );
+                                } else {
+                                    const chart = createTimeSeriesChart(
+                                        chartId,
+                                        timing.completion_series, timing.queue_depth_series,
+                                        timing.total_elapsed_seconds, timing.stages
+                                    );
+                                    if (chart) liveCharts[op.operation_id] = chart;
+                                }
+                            }
+                        } catch (e) { /* ignore timing fetch errors */ }
+                    }
+                }
             } catch (e) {
                 console.error('Update failed:', e);
             }
@@ -1474,8 +1790,9 @@ INDEX_HTML = """<!DOCTYPE html>
             update();
         }
 
-        update();
-        setInterval(update, 500);
+        // Self-scheduling loop prevents overlapping async invocations
+        async function pollLoop() { await update(); setTimeout(pollLoop, 500); }
+        pollLoop();
     </script>
 </body>
 </html>"""
@@ -1550,6 +1867,16 @@ class DashboardServer:
                 raise HTTPException(status_code=503, detail='Dashboard state not available')
             return state
 
+        @app.get('/api/build-id')
+        def get_build_id() -> BuildInfo:
+            git_hash, git_commit_date = _git_info()
+            return BuildInfo(
+                build_id=f'{git_hash}-{_START_EPOCH}',
+                git_hash=git_hash,
+                git_commit_date=git_commit_date,
+                server_started=_START_TIME,
+            )
+
         @app.get('/api/mcp-servers')
         def get_mcp_servers() -> Sequence[McpServer]:
             return state_manager.get_live_mcp_servers()
@@ -1562,9 +1889,22 @@ class DashboardServer:
 
         @app.get('/api/operations/active')
         def get_active_operations() -> Sequence[OperationState]:
-            """Get currently running operations."""
+            """Get currently running operations.
+
+            Detects orphaned operations whose MCP server PID is dead and
+            marks them as failed so they don't appear as perpetually running.
+            """
             ops = _read_operations()
-            return [o for o in ops if o.ended_at is None]
+            active: list[OperationState] = []
+            for op in ops:
+                if op.ended_at is not None:
+                    continue
+                # Check if the MCP server that started this operation is still alive
+                if op.mcp_server_pid and not _pid_alive(op.mcp_server_pid):
+                    _mark_orphaned(op)
+                    continue
+                active.append(op)
+            return active
 
         @app.get('/api/operations/{operation_id}')
         def get_operation(operation_id: str) -> OperationState:
@@ -1593,16 +1933,37 @@ class DashboardServer:
                 'total_lines': len(all_lines),
             }
 
+        @app.get('/api/operations/{operation_id}/timing')
+        def get_operation_timing(operation_id: str) -> PipelineTimingReport | None:
+            """Get timing report — live from timing file, or from completed result."""
+            # Check completed result first (authoritative)
+            op_path = _operation_path(operation_id, '.json')
+            if op_path.exists():
+                data = json.loads(op_path.read_text())
+                op = OperationState.model_validate(data)
+                if op.result and op.result.timing:
+                    return op.result.timing
+
+            # Fall back to live timing file
+            timing_path = _operation_path(operation_id, '-timing.json')
+            if not timing_path.exists():
+                return None
+            data = json.loads(timing_path.read_text())
+            return PipelineTimingReport.model_validate(data)
+
         @app.delete('/api/operations/{operation_id}')
         def delete_operation(operation_id: str) -> Mapping[str, bool]:
-            """Delete a single operation and its log."""
+            """Delete a single operation, its log, and timing file."""
             json_path = _operation_path(operation_id, '.json')
             log_path = _operation_path(operation_id, '.log')
+            timing_path = _operation_path(operation_id, '-timing.json')
             if not json_path.exists():
                 raise HTTPException(status_code=404, detail='Operation not found')
             json_path.unlink()
             if log_path.exists():
                 log_path.unlink()
+            if timing_path.exists():
+                timing_path.unlink()
             return {'deleted': True}
 
         @app.delete('/api/operations')
@@ -1611,7 +1972,9 @@ class DashboardServer:
             count = 0
             if OPERATIONS_DIR.exists():
                 for f in OPERATIONS_DIR.glob('*.json'):
-                    # Skip active operations
+                    # Skip timing files and active operations
+                    if f.stem.endswith('-timing'):
+                        continue
                     data = json.loads(f.read_text())
                     if data.get('ended_at') is None:
                         continue
@@ -1620,6 +1983,9 @@ class DashboardServer:
                     log_path = OPERATIONS_DIR / f'{op_id}.log'
                     if log_path.exists():
                         log_path.unlink()
+                    timing_path = OPERATIONS_DIR / f'{op_id}-timing.json'
+                    if timing_path.exists():
+                        timing_path.unlink()
                     count += 1
             return {'cleared': count}
 
@@ -1645,6 +2011,23 @@ class DashboardServer:
             return INDEX_HTML
 
         return app
+
+
+@functools.cache
+def _git_info() -> tuple[str, str]:
+    """Get git short hash and commit date.
+
+    Cached — computed once on first call. Falls back to 'unknown'
+    if not running from a git repo (e.g., installed via uv tool).
+    """
+    try:
+        repo = git.Repo(Path(__file__).resolve().parent, search_parent_directories=True)
+        commit = repo.head.commit
+        short_hash = commit.hexsha[:7]
+        commit_date = datetime.fromtimestamp(commit.committed_date, tz=UTC).strftime('%Y-%m-%d %H:%M')
+        return short_hash, commit_date
+    except (git.InvalidGitRepositoryError, git.NoSuchPathError, ValueError):
+        return 'unknown', ''
 
 
 def _find_port(preferred: int | None, *, retries: int = 10, retry_delay: float = 0.2) -> int:
@@ -1715,7 +2098,29 @@ def _read_operations() -> Sequence[OperationState]:
 
     ops: list[OperationState] = []
     for file_path in OPERATIONS_DIR.glob('*.json'):
+        if file_path.stem.endswith('-timing'):
+            continue
         data = json.loads(file_path.read_text())
         ops.append(OperationState.model_validate(data))
 
     return sorted(ops, key=lambda o: o.created_at, reverse=True)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Check if a process is alive (signal 0 = existence check)."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def _mark_orphaned(op: OperationState) -> None:
+    """Mark an orphaned operation as failed on disk."""
+    file_path = OPERATIONS_DIR / f'{op.operation_id}.json'
+    if not file_path.exists():
+        return
+    data = json.loads(file_path.read_text())
+    data['ended_at'] = data['updated_at']
+    data['error'] = f'MCP server (PID {op.mcp_server_pid}) exited before operation completed'
+    file_path.write_text(json.dumps(data))

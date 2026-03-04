@@ -14,6 +14,8 @@ from __future__ import annotations
 
 # Standard Library
 import asyncio
+import logging
+import sys
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,7 +26,6 @@ from urllib.parse import urlparse
 # Third-Party Libraries
 import fastmcp.exceptions
 import yaml
-from local_lib.utils import DualLogger
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
@@ -43,10 +44,19 @@ Browser Context: All requests share session/cookies - bypasses bot detection.
 Temp Files: Auto-cleanup on shutdown via _temp_dir.
 """
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     """Manage browser lifecycle - cleanup on shutdown."""
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        stream=sys.stderr,
+    )
+
     # Browser is lazy-initialized on first use
     try:
         yield {}
@@ -255,8 +265,8 @@ async def navigate(
     if not url.startswith(('http://', 'https://')):
         raise fastmcp.exceptions.ValidationError('URL must start with http:// or https://')
 
-    print(
-        f'[navigate] Navigating to {url}'
+    logger.info(
+        f'Navigating to {url}'
         + (' with resource capture' if capture_resources else '')
         + (' (fresh browser)' if fresh_browser else '')
     )
@@ -320,7 +330,7 @@ async def navigate(
     if capture_resources:
         await asyncio.sleep(2)
 
-    print(f'[navigate] Successfully navigated to {page.url}')
+    logger.info(f'Successfully navigated to {page.url}')
 
     result = NavigationResult(current_url=page.url, title=await page.title())
 
@@ -355,7 +365,7 @@ async def navigate(
             errors=errors,
         )
 
-        print(f'[navigate] Captured {len(captured_list)} resources ({result.resources.total_size_mb}MB)')
+        logger.info(f'[navigate] Captured {len(captured_list)} resources ({result.resources.total_size_mb}MB)')
 
     return result
 
@@ -382,10 +392,9 @@ async def get_page_content(
     Returns:
         Page content as string. When selector is used, returns outer HTML of matched elements.
     """
-    logger = DualLogger(ctx)
     _, _, page = await get_browser()
 
-    await logger.info(f'Extracting as {format}' + (f' with selector "{selector}"' if selector else ''))
+    logger.info(f'Extracting as {format}' + (f' with selector "{selector}"' if selector else ''))
 
     if selector:
         # Extract specific elements
@@ -399,7 +408,7 @@ async def get_page_content(
             html = await locator.nth(i).evaluate('el => el.outerHTML')
             html_parts.append(html)
 
-        await logger.info(f'Matched {len(html_parts)} elements')
+        logger.info(f'Matched {len(html_parts)} elements')
         return '\n'.join(html_parts)
 
     # Full page extraction
@@ -427,15 +436,14 @@ async def screenshot(filename: str, ctx: Context[Any, Any, Any]) -> str:
     Returns:
         Absolute path to temp file (use Read tool to view image)
     """
-    logger = DualLogger(ctx)
     _, _, page = await get_browser()
 
-    await logger.info(f'Taking screenshot: {filename}')
+    logger.info(f'Taking screenshot: {filename}')
 
     screenshot_path = _screenshot_dir / filename
     await page.screenshot(path=str(screenshot_path), full_page=True)
 
-    await logger.info(f'Screenshot saved to {screenshot_path}')
+    logger.info(f'Screenshot saved to {screenshot_path}')
     return str(screenshot_path)
 
 
@@ -468,7 +476,7 @@ async def download_resource(url: str, output_filename: str) -> dict[str, Any]:
             'Browser not initialized. Call navigate() first to establish browser session.'
         )
 
-    print(f'[download_resource] Downloading: {url}')
+    logger.info(f'Downloading: {url}')
 
     # Use page context to maintain session/cookies
     response = await page.request.get(url)
@@ -497,7 +505,7 @@ async def download_resource(url: str, output_filename: str) -> dict[str, Any]:
         'url': url,
     }
 
-    print(f'[download_resource] Downloaded {len(body)} bytes to {save_path}')
+    logger.info(f'Downloaded {len(body)} bytes to {save_path}')
 
     return result
 
@@ -550,10 +558,9 @@ async def get_interactive_elements(
     Returns:
         list[InteractiveElement]: Filtered interactive elements with selectors for clicking
     """
-    logger = DualLogger(ctx)
     _, _, page = await get_browser()
 
-    await logger.info(f'Finding interactive elements in scope: {selector_scope}')
+    logger.info(f'Finding interactive elements in scope: {selector_scope}')
 
     # Prepare filter values for JS
     text_filter_lower = text_contains.lower() if text_contains else None
@@ -618,7 +625,7 @@ async def get_interactive_elements(
         },
     )
 
-    await logger.info(f'Found {len(elements)} interactive elements (filtered)')
+    logger.info(f'Found {len(elements)} interactive elements (filtered)')
     return [InteractiveElement(**el) for el in elements]
 
 
@@ -634,10 +641,9 @@ async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any
     Returns:
         list[FocusableElement]: Sorted by tab order, each with tag, text, selector, tab_index
     """
-    logger = DualLogger(ctx)
     _, _, page = await get_browser()
 
-    await logger.info(f'Finding focusable elements (only_tabbable={only_tabbable})')
+    logger.info(f'Finding focusable elements (only_tabbable={only_tabbable})')
 
     min_tab_index = 0 if only_tabbable else -1
 
@@ -682,7 +688,7 @@ async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any
         {'minTabIndex': min_tab_index},
     )
 
-    await logger.info(f'Found {len(elements)} focusable elements')
+    logger.info(f'Found {len(elements)} focusable elements')
     return [FocusableElement(**el) for el in elements]
 
 
@@ -704,19 +710,18 @@ async def click(
     Note: Set wait_for_network=True for navigation clicks that trigger dynamic content.
           For non-navigation clicks (modals, dropdowns), leave False for faster execution.
     """
-    logger = DualLogger(ctx)
     _, _, page = await get_browser()
 
-    await logger.info(f'Clicking element: {selector}' + (' (with network wait)' if wait_for_network else ''))
+    logger.info(f'Clicking element: {selector}' + (' (with network wait)' if wait_for_network else ''))
 
     await page.click(selector)
 
     if wait_for_network:
-        await logger.info(f'Waiting for network idle (timeout={network_timeout}ms)')
+        logger.info(f'Waiting for network idle (timeout={network_timeout}ms)')
         await page.wait_for_load_state('networkidle', timeout=network_timeout)
-        await logger.info('Network idle')
+        logger.info('Network idle')
 
-    await logger.info('Click successful')
+    logger.info('Click successful')
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Wait for Network Idle', readOnlyHint=True, idempotentHint=True))
@@ -729,14 +734,13 @@ async def wait_for_network_idle(ctx: Context[Any, Any, Any], timeout: int = 1000
         ctx: MCP context
         timeout: Timeout in milliseconds (default 10000ms)
     """
-    logger = DualLogger(ctx)
     _, _, page = await get_browser()
 
-    await logger.info(f'Waiting for network idle (timeout={timeout}ms)')
+    logger.info(f'Waiting for network idle (timeout={timeout}ms)')
 
     await page.wait_for_load_state('networkidle', timeout=timeout)
 
-    await logger.info('Network idle')
+    logger.info('Network idle')
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
@@ -760,14 +764,13 @@ async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
 
     Note: Key names are case-sensitive. Use logical key names (e.g., 'KeyA' for letter A, 'Digit1' for number 1).
     """
-    logger = DualLogger(ctx)
     _, _, page = await get_browser()
 
-    await logger.info(f'Pressing key: {key}')
+    logger.info(f'Pressing key: {key}')
 
     await page.keyboard.press(key)
 
-    await logger.info('Key press successful')
+    logger.info('Key press successful')
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Type Text', destructiveHint=False, idempotentHint=False))
@@ -786,19 +789,18 @@ async def type_text(text: str, ctx: Context[Any, Any, Any], delay_ms: int = 0) -
         - type_text('Hello, world!') - Type text instantly
         - type_text('search query', delay_ms=50) - Type with 50ms delay between chars
     """
-    logger = DualLogger(ctx)
     _, _, page = await get_browser()
 
-    await logger.info(f'Typing text: "{text}"' + (f' with {delay_ms}ms delay' if delay_ms > 0 else ''))
+    logger.info(f'Typing text: "{text}"' + (f' with {delay_ms}ms delay' if delay_ms > 0 else ''))
 
     await page.keyboard.type(text, delay=delay_ms)
 
-    await logger.info('Text typing successful')
+    logger.info('Text typing successful')
 
 
 def main() -> None:
     """Entry point for uvx installation."""
-    print('Starting Browser Automation MCP server')
+    logger.info('Starting Browser Automation MCP server')
     mcp.run()
 
 

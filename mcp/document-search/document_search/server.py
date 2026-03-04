@@ -27,8 +27,6 @@ from pathlib import Path
 
 import mcp.server.fastmcp
 import mcp.types
-from local_lib.background_tasks import BackgroundTaskGroup
-from local_lib.utils import DualLogger
 
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
@@ -165,7 +163,6 @@ class ServerState:
     async def get_indexing_service(
         self,
         collection_name: str,
-        cache_tasks: BackgroundTaskGroup,
     ) -> IndexingService:
         """Create indexing service for a collection.
 
@@ -174,7 +171,6 @@ class ServerState:
 
         Args:
             collection_name: Collection to create service for.
-            cache_tasks: Background task group for cache write tracking.
         """
         collection = self.get_collection(collection_name)
         embedding_client = self.get_embedding_client(collection)
@@ -183,7 +179,6 @@ class ServerState:
             embedding_client,
             batch_size=config.batch_size,
             redis=self.redis_client,
-            cache_tasks=cache_tasks,
             model=collection.model,
             dimensions=collection.dimensions,
         )
@@ -288,14 +283,11 @@ Returns:
         if path == '**':
             raise ValueError("index_documents does not support '**'. Specify a file or directory path.")
 
-        logger = DualLogger(ctx)
-
         # Get collection and indexing service
         collection = state.get_collection(collection_name)
-        cache_tasks = BackgroundTaskGroup('embed-cache')
-        indexing_service = await state.get_indexing_service(collection_name, cache_tasks)
+        indexing_service = await state.get_indexing_service(collection_name)
 
-        await logger.info(f'Using collection: {collection_name} ({collection.provider})')
+        logger.info(f'Using collection: {collection_name} ({collection.provider})')
 
         # Default to current working directory
         if path is None:
@@ -309,10 +301,13 @@ Returns:
 
         # Auto-detect file vs directory
         if resolved_path.is_file():
-            await logger.info(f'Indexing file: {resolved_path}')
-            result = await indexing_service.index_file(resolved_path)
-            await cache_tasks.drain()
-            await logger.info(f'Indexed: {result.chunks_created} chunks')
+            logger.info(f'Indexing file: {resolved_path}')
+            try:
+                result = await indexing_service.index_file(resolved_path)
+                await indexing_service.drain_writes()
+            finally:
+                indexing_service.cancel_writes()
+            logger.info(f'Indexed: {result.chunks_created} chunks')
             if not include_timing:
                 result = result.__replace__(timing=None)
             return result
@@ -320,16 +315,18 @@ Returns:
         if not resolved_path.is_dir():
             raise ValueError(f'Path not found: {resolved_path}')
 
-        await logger.info(f'Indexing directory: {resolved_path}')
-
         # Capture baseline 429 count for delta calculation
         embedding_client = state.get_embedding_client(collection)
         errors_429_start = embedding_client.errors_429
 
-        # Setup progress writer
+        # Setup progress writer (attaches FileHandler to root logger)
         progress_writer = ProgressWriter(mcp_server_pid=os.getpid())
         operation_id = progress_writer.start_operation(collection_name, str(resolved_path))
-        await logger.debug(f'Operation: {operation_id}')
+        logger.debug(f'Operation: {operation_id}')
+        logger.info(f'Indexing directory: {resolved_path}')
+
+        # Reset connection high-water marks for this operation
+        state.redis_client.reset_hwm()
 
         # Start indexing as a task
         indexing_task = asyncio.create_task(
@@ -342,14 +339,24 @@ Returns:
 
         # Monitoring coroutine
         async def monitor_progress() -> None:
+            tick = 0
             while not indexing_task.done():
                 snapshot = indexing_service.get_pipeline_snapshot()
                 if snapshot:
                     errors_429_delta = embedding_client.errors_429 - errors_429_start
+
+                    # Build partial timing report every 5s (10 ticks × 500ms)
+                    tick += 1
+                    if tick % 10 == 0:
+                        partial_timing = indexing_service.get_partial_timing()
+                        if partial_timing:
+                            progress_writer.update_timing(partial_timing)
+
                     progress = OperationProgress.from_snapshot(
                         snapshot,
                         status='running',
                         errors_429=errors_429_delta,
+                        redis_conn_stats=state.redis_client.connection_stats,
                     )
                     progress_writer.update_progress(progress)
                 await asyncio.sleep(0.5)
@@ -358,13 +365,15 @@ Returns:
 
         try:
             result = await indexing_task
-            await cache_tasks.drain()
-            progress_writer.complete_with_success(result)
-            await logger.info(
+            await indexing_service.drain_writes()
+            conn_stats = state.redis_client.connection_stats
+            logger.info(
                 f'Indexing complete: {result.files_indexed} indexed, '
                 f'{result.files_cached} cached, {result.chunks_created} chunks, '
                 f'{len(result.errors)} errors'
             )
+            logger.info(f'Redis connections: {conn_stats}')
+            progress_writer.complete_with_success(result, redis_conn_stats=conn_stats)
             if not include_timing:
                 result = result.__replace__(timing=None)
             return result
@@ -373,7 +382,7 @@ Returns:
             progress_writer.complete_with_error(error_tb)
             raise
         finally:
-            cache_tasks.cancel_all()
+            indexing_service.cancel_writes()
             monitor_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await monitor_task
@@ -423,25 +432,21 @@ Returns:
         if not ctx:
             raise ValueError('MCP context required')
 
-        logger = DualLogger(ctx)
-
         # Get collection and services
         collection = state.get_collection(collection_name)
         embedding_client = state.get_embedding_client(collection)
         config = default_config(collection.provider)
-        # Search uses embed() directly (not embed_text), so cache is unused but required
-        cache_tasks = BackgroundTaskGroup('search-embed')
+        # Search uses embed() directly (not embed_text), bypasses cache
         embedding_service = EmbeddingService(
             embedding_client,
             batch_size=config.batch_size,
             redis=state.redis_client,
-            cache_tasks=cache_tasks,
             model=collection.model,
             dimensions=collection.dimensions,
         )
         repository = state.get_repository(collection_name)
 
-        await logger.info(
+        logger.info(
             f'Searching {collection_name} ({search_type}): "{query[:50]}..."'
             if len(query) > 50
             else f'Searching {collection_name} ({search_type}): "{query}"'
@@ -501,7 +506,7 @@ Returns:
             top_k=effective_limit,
         )
 
-        await logger.info(f'Found {result.total} results (reranked top {effective_limit})')
+        logger.info(f'Found {result.total} results (reranked top {effective_limit})')
 
         return result
 
@@ -513,6 +518,9 @@ Args:
     collection_name: Name of the collection to clear documents from.
     path: Path to clear. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
+    clear_cache: Also delete cached embeddings for the cleared files.
+        Uses a Redis reverse index (decoupled from Qdrant). Next re-index
+        will call the embedding API instead of serving from cache.
 
 Returns:
     ClearResult with counts of files and chunks removed."""
@@ -530,34 +538,35 @@ Returns:
     async def clear_documents(
         collection_name: str,
         path: str | None = None,
+        clear_cache: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
         if not ctx:
             raise ValueError('MCP context required')
 
-        logger = DualLogger(ctx)
-
         # Verify collection exists
         collection = state.get_collection(collection_name)
-        cache_tasks = BackgroundTaskGroup('clear-embed')
-        indexing_service = await state.get_indexing_service(collection_name, cache_tasks)
+        indexing_service = await state.get_indexing_service(collection_name)
 
-        await logger.info(f'Clearing from collection: {collection_name} ({collection.provider})')
+        logger.info(f'Clearing from collection: {collection_name} ({collection.provider})')
 
         # Resolve path (defaults to CWD)
         if path == '**':
             resolved_path = '**'
-            await logger.info('Clearing entire collection')
+            logger.info('Clearing entire collection')
         elif path:
             resolved_path = str(Path(path).expanduser().resolve())
-            await logger.info(f'Clearing documents: {resolved_path}')
+            logger.info(f'Clearing documents: {resolved_path}')
         else:
             resolved_path = str(Path.cwd())
-            await logger.info(f'Clearing documents under: {resolved_path}')
+            logger.info(f'Clearing documents under: {resolved_path}')
 
-        result = await indexing_service.clear_documents(resolved_path)
+        if clear_cache:
+            logger.info('Clearing embedding cache via reverse index')
 
-        await logger.info(f'Cleared: {result.files_removed} files, {result.chunks_removed} chunks')
+        result = await indexing_service.clear_documents(resolved_path, clear_cache=clear_cache)
+
+        logger.info(f'Cleared: {result.files_removed} files, {result.chunks_removed} chunks')
 
         return result
 
@@ -596,13 +605,11 @@ Returns:
         if ctx is None:
             raise ValueError('MCP context required')
 
-        logger = DualLogger(ctx)
-
         # Verify collection exists and get repository
         state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
 
-        await logger.debug(f'Listing documents in collection: {collection_name}')
+        logger.debug(f'Listing documents in collection: {collection_name}')
 
         # Resolve path (defaults to CWD, "**" for global)
         if path == '**':
@@ -618,7 +625,7 @@ Returns:
             limit=limit,
         )
 
-        await logger.debug(f'Listed {len(files)} indexed documents')
+        logger.debug(f'Listed {len(files)} indexed documents')
 
         return files
 
@@ -652,24 +659,22 @@ Returns:
         if ctx is None:
             raise ValueError('MCP context required')
 
-        logger = DualLogger(ctx)
-
         # Get collection metadata from registry
         collection = state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
 
-        await logger.debug(f'Getting info for collection: {collection_name}')
+        logger.debug(f'Getting info for collection: {collection_name}')
 
         # Resolve path (defaults to CWD, "**" for global)
         if path == '**':
             resolved_path: str | None = '**'
-            await logger.debug('Getting global collection info')
+            logger.debug('Getting global collection info')
         elif path is None:
             resolved_path = str(Path.cwd())
-            await logger.debug(f'Getting info for: {resolved_path}')
+            logger.debug(f'Getting info for: {resolved_path}')
         else:
             resolved_path = str(Path(path).expanduser().resolve())
-            await logger.debug(f'Getting info for: {resolved_path}')
+            logger.debug(f'Getting info for: {resolved_path}')
 
         # Build embedding info from collection
         embedding_info = EmbeddingInfo.from_collection(collection)
@@ -696,9 +701,7 @@ Returns:
             path=resolved_path,
         )
 
-        await logger.info(
-            f'Collection: {content.total_chunks} chunks, {content.unique_files} files, status={storage.status}'
-        )
+        logger.info(f'Collection: {content.total_chunks} chunks, {content.unique_files} files, status={storage.status}')
 
         return info
 
@@ -739,8 +742,6 @@ Returns:
         if ctx is None:
             raise ValueError('MCP context required')
 
-        logger = DualLogger(ctx)
-
         # Validate name
         if name == '**':
             raise ValueError("Collection name '**' is reserved")
@@ -753,7 +754,7 @@ Returns:
             dimensions=dimensions,
         )
 
-        await logger.info(f'Created collection: {name} ({provider}, {collection.model}, {collection.dimensions}d)')
+        logger.info(f'Created collection: {name} ({provider}, {collection.model}, {collection.dimensions}d)')
 
         return collection
 
@@ -807,8 +808,6 @@ Returns:
         if ctx is None:
             raise ValueError('MCP context required')
 
-        logger = DualLogger(ctx)
-
         # Verify collection exists and delete from Qdrant
         state.get_collection(name)
         await state.qdrant_client.delete_collection(name)
@@ -824,7 +823,7 @@ Returns:
         if name in state._repositories:
             del state._repositories[name]
 
-        await logger.info(f'Deleted collection: {name}')
+        logger.info(f'Deleted collection: {name}')
 
         return True
 
@@ -833,9 +832,10 @@ Returns:
 async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
 
-    # Configure logging with timestamps to stderr for performance observability
+    # Configure logging with timestamps to stderr
+    # Set level=logging.DEBUG temporarily for performance investigation
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format='%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
         datefmt='%H:%M:%S',
         stream=sys.stderr,

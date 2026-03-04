@@ -8,12 +8,8 @@ import time
 import unittest.mock
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
-from typing import Any
-
-from mcp.server.fastmcp import Context
 
 
 def encode_project_path(path: Path | str) -> str:
@@ -46,32 +42,6 @@ def encode_project_path(path: Path | str) -> str:
     for char in ['/', '.', ' ', '~', '_']:
         result = result.replace(char, '-')
     return result
-
-
-class DualLogger:
-    """Logs messages to both stdout and MCP client context."""
-
-    def __init__(self, ctx: Context[Any, Any, Any]):
-        self.ctx = ctx
-
-    def _timestamp(self) -> str:
-        return datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')
-
-    async def info(self, msg: str) -> None:
-        print(f'[{self._timestamp()}] [INFO] {msg}')
-        await self.ctx.info(msg)
-
-    async def debug(self, msg: str) -> None:
-        print(f'[{self._timestamp()}] [DEBUG] {msg}')
-        await self.ctx.debug(msg)
-
-    async def warning(self, msg: str) -> None:
-        print(f'[{self._timestamp()}] [WARNING] {msg}')
-        await self.ctx.warning(msg)
-
-    async def error(self, msg: str) -> None:
-        print(f'[{self._timestamp()}] [ERROR] {msg}')
-        await self.ctx.error(msg)
 
 
 class Timer:
