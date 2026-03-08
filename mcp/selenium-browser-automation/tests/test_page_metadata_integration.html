@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Page Metadata Integration Test</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+        h1 { border-bottom: 2px solid #333; padding-bottom: 0.5rem; }
+        h2 { color: #555; margin-top: 2rem; }
+        section { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+        .label { font-size: 0.8rem; color: #888; font-family: monospace; }
+        code { background: #f0f0f0; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+
+        /* --- Hiding mechanisms --- */
+        .display-none { display: none; }
+        .visibility-hidden { visibility: hidden; }
+        .opacity-zero { opacity: 0; }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        .offscreen { position: absolute; left: -9999px; top: -9999px; }
+
+        /* Make zero-height elements visible for manual inspection */
+        .test-marker { font-size: 0.7rem; color: #999; }
+    </style>
+</head>
+<body>
+
+<!--
+  ============================================================================
+  INTEGRATION TEST: Two-Tier Page Metadata System
+  ============================================================================
+
+  This page exercises every metadata feature for both get_aria_snapshot and
+  get_visual_tree. Expected outputs differ between the two tools because
+  they count hidden elements differently.
+
+  ANALYSIS MATRIX (run each and compare metadata footer):
+
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ Test 1: get_aria_snapshot(selector="body")                              │
+  │   → Should show: tier 1 only (hidden count + iframe count)             │
+  │   → Should NOT show: shadow_roots, images, links, tree, depth          │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │ Test 2: get_aria_snapshot(selector="body", include_page_info=True)      │
+  │   → Should show: ALL metadata lines                                    │
+  │   → Hidden reasons: aria-hidden, display-none, visibility-hidden, inert│
+  │   → Links count shown (include_urls defaults to False)                 │
+  │   → Compaction stats: raw > compacted (verify decrease, not increase!) │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │ Test 3: get_aria_snapshot(..., include_page_info=True, include_urls=True│
+  │   → Links count line should be ABSENT (URLs already visible)           │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │ Test 4: get_aria_snapshot(..., include_page_info=True, compact_tree=Fals│
+  │   → Compaction stats line should be ABSENT                             │
+  │   → Tree output will be larger (no compaction applied)                 │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │ Test 5: get_visual_tree(selector="body", include_page_info=True)       │
+  │   → Hidden reasons DIFFER from ARIA:                                   │
+  │     - opacity (not in ARIA), clipped (not in ARIA), offscreen          │
+  │     - aria-hidden elements are VISIBLE (not counted as hidden)         │
+  │     - inert is NOT a visual hidden category                            │
+  │   → Same images, links, iframes, shadow_roots as ARIA                  │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │ Test 6: get_aria_snapshot(..., include_hidden=True)                     │
+  │   → Hidden elements appear in tree with [hidden:X] markers            │
+  │   → Metadata footer still shows counts                                 │
+  │   → Compaction stats will differ (more nodes when hidden included)     │
+  └───────────────────────────────────────────────────────────────────────────┘
+
+  KEY ASYMMETRY TO VERIFY:
+  The ARIA hidden total and Visual hidden total should be DIFFERENT for this
+  page because:
+  - ARIA counts: aria-hidden, display-none, visibility-hidden, inert
+  - Visual counts: display-none, visibility-hidden, opacity, clipped, offscreen
+  - aria-hidden elements are VISIBLE to sighted users (Visual tree includes them)
+  - opacity:0, sr-only, offscreen are VISIBLE to screen readers (ARIA includes them)
+
+  ============================================================================
+-->
+
+<h1>Page Metadata Integration Test</h1>
+<p>Each section below targets a specific metadata feature. Sections are labeled
+   with which metadata line(s) they affect.</p>
+
+
+<!-- ======================================================================
+     SECTION 1: Hidden Elements — ARIA-Only Reasons
+     These are hidden in ARIA tree but VISIBLE in Visual tree
+     ====================================================================== -->
+<section>
+    <h2>1. Hidden Elements — ARIA-Only</h2>
+    <p class="label">Affects: ARIA hidden count (NOT Visual hidden count)</p>
+
+    <!-- aria-hidden: 2 elements (the div + its child span) are hidden from ARIA -->
+    <div aria-hidden="true">
+        <span>ARIA-hidden content (visible to sighted users)</span>
+    </div>
+    <p class="test-marker">Above: aria-hidden div with child span</p>
+
+    <!-- aria-hidden on inline element -->
+    <p>Text with <span aria-hidden="true">aria-hidden inline</span> content</p>
+
+    <!-- inert: elements are non-interactive AND hidden from accessibility tree -->
+    <div inert>
+        <button>Inert button (non-interactive)</button>
+        <a href="https://example.com/inert">Inert link</a>
+    </div>
+    <p class="test-marker">Above: inert div with button and link</p>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 2: Hidden Elements — Visual-Only Reasons
+     These are hidden in Visual tree but VISIBLE in ARIA tree
+     ====================================================================== -->
+<section>
+    <h2>2. Hidden Elements — Visual-Only</h2>
+    <p class="label">Affects: Visual hidden count (NOT ARIA hidden count)</p>
+
+    <!-- opacity: 0 — screen readers still read this -->
+    <div class="opacity-zero">
+        <p>Zero opacity paragraph (screen readers read this)</p>
+    </div>
+    <p class="test-marker">Above: opacity:0 div with paragraph</p>
+
+    <!-- sr-only / clipped — visually hidden but accessible -->
+    <span class="sr-only">Screen reader only text (clipped pattern)</span>
+    <p class="test-marker">Above: sr-only span (clipped)</p>
+
+    <!-- offscreen positioning -->
+    <div class="offscreen">
+        <p>Off-screen content (accessible but not visible)</p>
+    </div>
+    <p class="test-marker">Above: offscreen div with paragraph</p>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 3: Hidden Elements — Both Trees
+     These are hidden in BOTH ARIA and Visual trees
+     ====================================================================== -->
+<section>
+    <h2>3. Hidden Elements — Both Trees</h2>
+    <p class="label">Affects: both ARIA and Visual hidden counts</p>
+
+    <!-- display: none -->
+    <div class="display-none">
+        <p>Display-none content</p>
+        <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="Hidden image">
+    </div>
+    <p class="test-marker">Above: display:none div with paragraph and image</p>
+
+    <!-- visibility: hidden -->
+    <div class="visibility-hidden">
+        <span>Visibility-hidden content</span>
+    </div>
+    <p class="test-marker">Above: visibility:hidden div with span</p>
+
+    <!-- Double-hidden: aria-hidden AND display:none -->
+    <div aria-hidden="true" class="display-none">
+        <span>Double-hidden (aria-hidden + display:none)</span>
+    </div>
+    <p class="test-marker">Above: double-hidden element (aria-hidden + display:none)</p>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 4: Images
+     Tests image counting with alt/without alt categorization
+     ====================================================================== -->
+<section>
+    <h2>4. Images</h2>
+    <p class="label">Affects: # images line (tier 2)</p>
+
+    <!-- with alt text -->
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="Descriptive alt text">
+
+    <!-- with alt text (second) -->
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="Another described image">
+
+    <!-- empty alt (decorative) — how is this categorized? -->
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="">
+
+    <!-- no alt at all -->
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==">
+
+    <!-- no alt (second) -->
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==">
+
+    <p class="test-marker">Above: 2 with alt, 1 empty alt, 2 without alt.
+       Note: image inside display:none in Section 3 — verify if counted.</p>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 5: Links
+     Tests link counting and nameless link URL display
+     ====================================================================== -->
+<section>
+    <h2>5. Links</h2>
+    <p class="label">Affects: # links line (tier 2), nameless link URL display</p>
+
+    <!-- Standard named link -->
+    <a href="https://example.com/named">Named link with text</a>
+
+    <!-- Nameless link — URL should show as name when include_urls=false -->
+    <a href="https://example.com/nameless"></a>
+
+    <!-- Link with only whitespace text — treated as nameless? -->
+    <a href="https://example.com/whitespace">   </a>
+
+    <!-- Link with ARIA label (has name, even though no visible text) -->
+    <a href="https://example.com/aria-labeled" aria-label="ARIA labeled link"></a>
+
+    <!-- Link wrapping an image -->
+    <a href="https://example.com/image-link">
+        <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="Click this image">
+    </a>
+
+    <!-- Link with title attribute only -->
+    <a href="https://example.com/title-only" title="Title attribute link"></a>
+
+    <p class="test-marker">Above: 6 links — verify count in metadata and how
+       nameless links display their URL.</p>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 6: Iframes
+     Tests iframe counting (tier 1, always shown)
+     ====================================================================== -->
+<section>
+    <h2>6. Iframes</h2>
+    <p class="label">Affects: # iframes line (tier 1, always-on)</p>
+
+    <!-- Visible iframe -->
+    <iframe src="about:blank" title="Visible iframe" width="200" height="50"
+            style="border: 1px solid #ccc;"></iframe>
+
+    <!-- Another visible iframe -->
+    <iframe src="about:blank" title="Second iframe" width="200" height="50"
+            style="border: 1px solid #ccc;"></iframe>
+
+    <!-- Hidden iframe (display:none) — still counted? -->
+    <iframe src="about:blank" title="Hidden iframe" style="display:none"></iframe>
+
+    <p class="test-marker">Above: 2 visible iframes + 1 hidden iframe.
+       Verify: does the hidden iframe get counted?</p>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 7: Shadow DOM
+     Tests shadow root counting (tier 2)
+     ====================================================================== -->
+<section>
+    <h2>7. Shadow DOM</h2>
+    <p class="label">Affects: # shadow_roots line (tier 2)</p>
+
+    <!-- Open shadow root -->
+    <div id="shadow-host-open">
+        <span>Fallback content (replaced by shadow)</span>
+    </div>
+
+    <!-- Another open shadow root with richer content -->
+    <div id="shadow-host-rich">
+        <span>Fallback</span>
+    </div>
+
+    <p class="test-marker">Above: 2 shadow hosts. Shadow roots are created by
+       script below. Verify count in metadata.</p>
+
+    <script>
+        // Open shadow root with simple content
+        const hostOpen = document.getElementById('shadow-host-open');
+        if (hostOpen) {
+            const shadow1 = hostOpen.attachShadow({mode: 'open'});
+            shadow1.innerHTML = '<button>Shadow button</button>';
+        }
+
+        // Open shadow root with richer content
+        const hostRich = document.getElementById('shadow-host-rich');
+        if (hostRich) {
+            const shadow2 = hostRich.attachShadow({mode: 'open'});
+            shadow2.innerHTML = `
+                <div>
+                    <span>Shadow content A</span>
+                    <a href="https://example.com/shadow-link">Shadow link</a>
+                </div>
+            `;
+        }
+    </script>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 8: Compaction Targets
+     Tests that compaction reduces node count (NOT increases it)
+     ====================================================================== -->
+<section>
+    <h2>8. Compaction Targets</h2>
+    <p class="label">Affects: # tree line (tier 2, compaction stats)</p>
+
+    <!-- Rule 1: Empty generics — should be REMOVED by compaction -->
+    <div></div>
+    <div></div>
+    <div></div>
+    <p class="test-marker">Above: 3 empty divs (should be removed by compaction)</p>
+
+    <!-- Rule 2: Single-child generic chains — should be COLLAPSED -->
+    <div>
+        <div>
+            <div>
+                <button>Deeply nested button</button>
+            </div>
+        </div>
+    </div>
+    <p class="test-marker">Above: div > div > div > button (chain should collapse to button)</p>
+
+    <!-- Another single-child chain -->
+    <div>
+        <div>
+            <span>Nested span</span>
+        </div>
+    </div>
+    <p class="test-marker">Above: div > div > span (should collapse)</p>
+
+    <!-- Rule 3: Redundant text children — text matches element name -->
+    <button>Submit</button>
+    <a href="https://example.com/redundant">Click here</a>
+    <p class="test-marker">Above: button and link where text content = accessible name
+       (text children should be removed as redundant)</p>
+
+    <!-- Should NOT be compacted: generic with name -->
+    <div aria-label="Important container">
+        <p>Content inside named generic</p>
+    </div>
+    <p class="test-marker">Above: named generic — should NOT be removed</p>
+
+    <!-- Should NOT be compacted: generic with multiple children -->
+    <div>
+        <span>Child A</span>
+        <span>Child B</span>
+    </div>
+    <p class="test-marker">Above: generic with 2 children — should NOT collapse</p>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 9: Depth Nesting
+     Tests depth truncation reporting (at depth 50)
+     ====================================================================== -->
+<section>
+    <h2>9. Depth Nesting</h2>
+    <p class="label">Affects: # depth_truncated line (tier 2)</p>
+
+    <div id="depth-container"></div>
+    <p class="test-marker">Above: programmatically generated 55-level deep nesting.
+       Should trigger depth truncation at level 50.</p>
+
+    <script>
+        const depthContainer = document.getElementById('depth-container');
+        if (depthContainer) {
+            let current = depthContainer;
+            for (let i = 0; i < 55; i++) {
+                const child = document.createElement('div');
+                if (i === 54) {
+                    child.textContent = 'Deepest element (level 55)';
+                }
+                current.appendChild(child);
+                current = child;
+            }
+        }
+    </script>
+</section>
+
+
+<!-- ======================================================================
+     SECTION 10: Complex Interactions
+     Tests how features interact with each other
+     ====================================================================== -->
+<section>
+    <h2>10. Feature Interactions</h2>
+    <p class="label">Tests: hidden+image, hidden+link, compaction+hidden</p>
+
+    <!-- Hidden container with image and link inside -->
+    <div aria-hidden="true">
+        <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt="Image inside aria-hidden">
+        <a href="https://example.com/hidden-link">Link inside aria-hidden</a>
+    </div>
+    <p class="test-marker">Above: aria-hidden container with image and link.
+       Verify: are the image and link counted in metadata?
+       ARIA: container hidden, but do children count separately?
+       Visual: container is VISIBLE, so image/link should be in tree.</p>
+
+    <!-- Opacity-zero container with link -->
+    <div class="opacity-zero">
+        <a href="https://example.com/transparent">Transparent link</a>
+    </div>
+    <p class="test-marker">Above: opacity:0 container with link.
+       ARIA: visible (link should appear). Visual: hidden.</p>
+
+    <!-- Empty generic inside named element (compaction edge case) -->
+    <nav aria-label="Main navigation">
+        <div>
+            <div>
+                <a href="https://example.com/nav1">Nav item 1</a>
+            </div>
+        </div>
+        <div>
+            <a href="https://example.com/nav2">Nav item 2</a>
+        </div>
+    </nav>
+    <p class="test-marker">Above: nav with generic wrapper chains around links.
+       Compaction should collapse the wrappers but preserve the nav.</p>
+</section>
+
+</body>
+</html>
