@@ -21,10 +21,10 @@ Four layers of error handling:
         ``with boundary: lib.parse(cmd)``
 
     Layer 3 — Scope Boundary:
-        ErrorBoundary(exit_code=None) at request/task edges.
+        ErrorBoundary() at request/task edges.
 
     Layer 4 — Process Boundary:
-        ErrorBoundary() at entry points.
+        ErrorBoundary(exit_code=1) at entry points.
 
 Two modes:
 

@@ -17,7 +17,7 @@ import bashlex.tokenizer
 import git
 import pydantic
 import pytest
-from local_lib.utils import temporary_module
+from cc_lib.utils import temporary_module
 
 REPO_ROOT = Path(git.Repo(__file__, search_parent_directories=True).working_tree_dir or '.').resolve(strict=True)
 

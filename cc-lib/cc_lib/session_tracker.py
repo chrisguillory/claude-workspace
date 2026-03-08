@@ -19,7 +19,7 @@ import psutil
 import pydantic
 from filelock import FileLock
 
-from local_lib.types import JsonDatetime, SessionSource, SessionState
+from cc_lib.types import JsonDatetime, SessionSource, SessionState
 
 __all__ = [
     'SessionManager',

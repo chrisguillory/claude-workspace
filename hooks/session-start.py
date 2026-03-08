@@ -8,11 +8,11 @@ See: https://code.claude.com/docs/en/hooks#sessionstart
 # dependencies = [
 #   "pydantic>=2.0.0",
 #   "packaging",
-#   "local_lib",
+#   "cc_lib",
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 from __future__ import annotations
 
@@ -23,10 +23,10 @@ from pathlib import Path
 
 import packaging.version
 import psutil
-from local_lib.phantom import PhantomHandler
-from local_lib.schemas.hooks import SessionStartHookInput
-from local_lib.session_tracker import SessionManager, find_claude_pid
-from local_lib.utils import Timer
+from cc_lib.phantom import PhantomHandler
+from cc_lib.schemas.hooks import SessionStartHookInput
+from cc_lib.session_tracker import SessionManager, find_claude_pid
+from cc_lib.utils import Timer
 
 # Start timing
 timer = Timer()

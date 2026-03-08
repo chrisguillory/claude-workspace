@@ -17,7 +17,7 @@ from uuid import UUID
 
 import httpx
 import tenacity
-from local_lib import ConcurrencyTracker
+from cc_lib import ConcurrencyTracker
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import (
     Distance,

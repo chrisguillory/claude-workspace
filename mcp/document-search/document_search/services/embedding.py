@@ -16,7 +16,7 @@ import time
 from collections.abc import Sequence
 
 import numpy as np
-from local_lib.batch_loader import GenericBatchLoader
+from cc_lib.batch_loader import GenericBatchLoader
 
 from document_search.clients.protocols import EmbeddingClient
 from document_search.clients.redis import RedisClient

@@ -7,7 +7,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from local_lib.utils import load_module_from_path, temporary_module
+from cc_lib.utils import load_module_from_path, temporary_module
 
 
 class TestLoadModuleFromPath:

@@ -14,7 +14,7 @@ package = false
 [tool.uv.workspace]
 # Workspace members - each must have its own pyproject.toml
 members = [
-    "local-lib",
+    "cc-lib",
     "mcp/browser-automation",
     "mcp/document-search",
     "mcp/python-interpreter",

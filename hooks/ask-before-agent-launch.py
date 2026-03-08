@@ -10,11 +10,11 @@ See: https://code.claude.com/docs/en/hooks#pretooluse
 # /// script
 # dependencies = [
 #   "pydantic>=2.0.0",
-#   "local_lib",
+#   "cc_lib",
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def ask_stdlib(reason: str) -> None:
 
 try:
     import pydantic
-    from local_lib.schemas.hooks import (
+    from cc_lib.schemas.hooks import (
         PreToolUseDecision,
         PreToolUseHookInput,
         PreToolUseHookOutput,

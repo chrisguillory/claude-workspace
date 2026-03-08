@@ -6,7 +6,7 @@ This is how bashlex, requests, sqlite3, etc. actually look.
 
 Usage in tests::
 
-    from tests.local_lib import fake_lib
+    from tests.cc_lib import fake_lib
 
     proxy = boundary.wrap(fake_lib)
     proxy.parse("hello")

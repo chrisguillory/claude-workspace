@@ -20,8 +20,8 @@ claude-workspace/
 │   ├── document-search/
 │   ├── python-interpreter/
 │   └── selenium-browser-automation/
-├── local-lib/                  # Shared Python package
-│   └── local_lib/
+├── cc-lib/                  # Shared Python package
+│   └── cc_lib/
 │       ├── session_tracker.py
 │       └── utils.py
 ├── scripts/                    # Linters and diagnostics

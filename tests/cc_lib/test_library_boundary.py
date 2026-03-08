@@ -13,9 +13,9 @@ import asyncio
 import bashlex
 import bashlex.errors
 import pytest
-from local_lib.library_boundary import LibraryBoundary
+from cc_lib.library_boundary import LibraryBoundary
 
-from tests.local_lib import fake_lib
+from tests.cc_lib import fake_lib
 
 
 class AppError(Exception):
@@ -249,7 +249,7 @@ class TestProxy:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
         with pytest.raises(AttributeError) as exc_info:
             proxy.nonexistent
-        assert exc_info.value.args == ("module 'tests.local_lib.fake_lib' has no attribute 'nonexistent'",)
+        assert exc_info.value.args == ("module 'tests.cc_lib.fake_lib' has no attribute 'nonexistent'",)
 
     def test_hasattr_false_for_missing(self) -> None:
         """hasattr() returns False for nonexistent attributes (not AppError)."""

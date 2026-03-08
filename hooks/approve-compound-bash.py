@@ -28,11 +28,11 @@ Hook docs: https://code.claude.com/docs/en/hooks#pretooluse
 # dependencies = [
 #   "bashlex",
 #   "pydantic>=2.0.0",
-#   "local_lib",
+#   "cc_lib",
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 
 from __future__ import annotations
@@ -46,9 +46,9 @@ from collections.abc import Iterator, Sequence, Set
 from pathlib import Path
 
 import bashlex
-from local_lib.error_boundary import ErrorBoundary
-from local_lib.library_boundary import LibraryBoundary
-from local_lib.schemas.hooks import (
+from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.library_boundary import LibraryBoundary
+from cc_lib.schemas.hooks import (
     BashToolInput,
     PreToolUseDecision,
     PreToolUseHookInput,

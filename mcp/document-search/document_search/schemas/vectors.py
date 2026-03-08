@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import pydantic
-from local_lib.types import JsonDatetime
+from cc_lib.types import JsonDatetime
 
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import Chunk, FileType

@@ -15,11 +15,11 @@ Four layers of error handling:
         ``with boundary: lib.parse(cmd)``
 
     Layer 3 — Scope Boundary:
-        ErrorBoundary(exit_code=None) at request/task edges.
+        ErrorBoundary() at request/task edges.
         Handles unexpected errors, continues serving.
 
     Layer 4 — Process Boundary:
-        ErrorBoundary() at entry points.
+        ErrorBoundary(exit_code=1) at entry points.
         Handles unexpected errors, exits with non-zero code.
 
 System exceptions (KeyboardInterrupt, SystemExit, GeneratorExit, CancelledError)
@@ -29,17 +29,29 @@ that covers all application errors without brittle enumeration.
 
 Patterns:
 
-    Type-based dispatch (like FastAPI's ``@app.exception_handler``)::
+    Type-based dispatch with fallback return values (HTTP handlers)::
 
-        boundary = ErrorBoundary(exit_code=None)
+        boundary = ErrorBoundary()
+
+        @boundary.handler(ValidationError)
+        def handle_validation(exc: ValidationError) -> JSONResponse:
+            return JSONResponse({'error': str(exc)}, status_code=422)
+
+        @boundary.handler(Exception)
+        def handle_crash(exc: Exception) -> JSONResponse:
+            return JSONResponse({'error': 'Internal error'}, status_code=500)
+
+        @boundary
+        async def handle_request(request: Request) -> JSONResponse:
+            ...  # on error, handler's return value IS the function's return value
+
+    Side-effect-only handlers (CLI tools, task runners)::
+
+        boundary = ErrorBoundary(exit_code=1)
 
         @boundary.handler(ValidationError)
         def handle_validation(exc: ValidationError) -> None:
             show_field_errors(exc)
-
-        @boundary.handler(Exception)
-        def handle_crash(exc: Exception) -> None:
-            show_traceback(exc)
 
         @boundary
         def main() -> None:
@@ -58,11 +70,13 @@ Patterns:
         except ValidationError as e:
             raise RichValidationError(e, raw_input) from e
 
-    See ``scripts/statusline.py`` for the canonical real-world example.
+    See ``scripts/claude-patch-statusline.py`` for the canonical real-world example.
 
 Cross-language equivalents:
-    React <ErrorBoundary>, Rust panic::set_hook(), Elixir supervisor trees,
-    Trio cancel scopes, Go defer+recover(), Java UncaughtExceptionHandler.
+    React <ErrorBoundary> (renders fallback UI on error),
+    Go defer+recover() (sets return value from deferred function),
+    Rust panic::set_hook(), Elixir supervisor trees,
+    Trio cancel scopes, Java UncaughtExceptionHandler.
 
 See also:
     - ``functools.singledispatch``: Powers the type-based handler dispatch
@@ -89,7 +103,7 @@ from functools import singledispatch
 from types import TracebackType
 from typing import Any, Self, TypeVar, cast
 
-type ErrorHandler = Callable[[Exception], None]
+type ErrorHandler = Callable[[Exception], Any]
 
 _F = TypeVar('_F', bound=Callable[..., object])
 
@@ -100,11 +114,12 @@ class ErrorBoundary:
     Catches application exceptions (Exception subclasses) and delegates to
     registered handlers. System exceptions pass through unconditionally.
 
-    Supports three usage forms:
+    Two usage forms with different return semantics:
 
-    - **Decorator**: ``@boundary`` on sync or async functions
-    - **Context manager**: ``with boundary:`` or ``async with boundary:``
-    - **Simple handler**: ``ErrorBoundary(handler=func)`` for single-function handling
+    - **Decorator**: ``@boundary`` — handler's return value becomes the
+      function's return value. Use for HTTP handlers, task runners.
+    - **Context manager**: ``with boundary:`` — exception is suppressed,
+      handler's return value is discarded. Use for loop iterations.
 
     Type dispatch uses ``functools.singledispatch`` internally — handlers are
     matched by MRO, so registering for ``Exception`` acts as a catch-all.
@@ -114,44 +129,37 @@ class ErrorBoundary:
             to ``@boundary.handler(Exception)``). Defaults to printing
             the traceback to stderr.
         exit_code: Process exit code after handling. ``None`` for scope
-            boundaries that should suppress and continue. Defaults to 1
-            (entry-point boundary).
+            boundaries that should suppress and continue. Defaults to
+            ``None`` (scope boundary).
 
     Examples:
-        Entry point with typed handlers (decorator form)::
+        Scope boundary with fallback return value (decorator form)::
 
-            boundary = ErrorBoundary(exit_code=None)
+            boundary = ErrorBoundary()
 
-            @boundary.handler(ValidationError)
-            def handle_validation(exc: ValidationError) -> None:
-                show_field_errors(exc)
-
-            @boundary.handler(Exception)
-            def handle_crash(exc: Exception) -> None:
-                show_traceback(exc)
+            @boundary.handler(DatabaseError)
+            def handle_db(exc: DatabaseError) -> Response:
+                return ErrorResponse(str(exc))
 
             @boundary
-            def main() -> None:
-                ...
-
-            if __name__ == '__main__':
-                main()
+            async def handle_request(request: Request) -> Response:
+                ...  # if DatabaseError, returns the ErrorResponse
 
         Entry point with simple handler::
 
-            @ErrorBoundary(handler=log_error)
+            @ErrorBoundary(exit_code=1, handler=log_error)
             def main() -> None:
                 ...
 
         Scope boundary (context manager, suppress and continue)::
 
             for request in requests:
-                with ErrorBoundary(exit_code=None, handler=log_error):
+                with ErrorBoundary(handler=log_error):
                     process_request(request)
 
         Async entry point (auto-detected)::
 
-            @ErrorBoundary(handler=log_error)
+            @ErrorBoundary(exit_code=1, handler=log_error)
             async def serve() -> None:
                 await start_server()
 
@@ -168,24 +176,28 @@ class ErrorBoundary:
         self,
         *,
         handler: ErrorHandler | None = None,
-        exit_code: int | None = 1,
+        exit_code: int | None = None,
     ) -> None:
         self._dispatch = singledispatch(_default_handler)
         if handler is not None:
             self._dispatch.register(Exception, handler)
         self._exit_code = exit_code
 
-    def handler(self, exc_type: type[Exception]) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    def handler(self, exc_type: type[Exception]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a handler for a specific exception type.
 
         Uses ``functools.singledispatch`` for MRO-based matching — registering
         for ``Exception`` acts as a catch-all default.
 
+        Handlers can return values. In decorator form, the return value becomes
+        the decorated function's return value on error. In context manager form,
+        the return value is discarded.
+
         Example::
 
             @boundary.handler(ValidationError)
-            def handle_validation(exc: ValidationError) -> None:
-                ...
+            def handle_validation(exc: ValidationError) -> JSONResponse:
+                return JSONResponse({'error': str(exc)})
         """
         return self._dispatch.register(exc_type)
 
@@ -194,6 +206,7 @@ class ErrorBoundary:
     def __call__(self, func: _F) -> _F:
         """Decorate a function with this error boundary.
 
+        On error, the handler's return value becomes the function's return value.
         Auto-detects sync vs async and wraps accordingly. Parens required::
 
             @ErrorBoundary()          # correct
@@ -204,15 +217,19 @@ class ErrorBoundary:
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                async with self:
+                try:
                     return await func(*args, **kwargs)
+                except Exception as exc:
+                    return self._handle(exc)
 
             return cast(_F, async_wrapper)
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            with self:
+            try:
                 return func(*args, **kwargs)
+            except Exception as exc:
+                return self._handle(exc)
 
         return cast(_F, sync_wrapper)
 
@@ -227,7 +244,10 @@ class ErrorBoundary:
         exc_value: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> bool:
-        return self._handle(exc_value)
+        if not isinstance(exc_value, Exception):
+            return False
+        self._handle(exc_value)
+        return True
 
     # -- Async context manager --
 
@@ -240,38 +260,36 @@ class ErrorBoundary:
         exc_value: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> bool:
-        return self._handle(exc_value)
+        if not isinstance(exc_value, Exception):
+            return False
+        self._handle(exc_value)
+        return True
 
     # -- Core logic --
 
-    def _handle(self, exc_value: BaseException | None) -> bool:
-        """Core boundary logic — shared by all protocol paths.
-
-        Returns True to suppress (scope boundary) or calls sys.exit()
-        for process boundaries. Returns False for non-application exceptions.
+    def _handle(self, exc: Exception) -> Any:
+        """Dispatch to handler, optionally exit. Returns handler result.
 
         Handler failures cannot breach the boundary — if the registered handler
         raises, we fall back to stderr reporting of the original exception.
         If that also fails (e.g. stderr broken), we proceed silently with
         the configured suppress/exit behavior.
         """
-        if not isinstance(exc_value, Exception):
-            return False  # No exception, or system exception — pass through
-
+        result = None
         try:
-            self._dispatch(exc_value)
+            result = self._dispatch(exc)
         except Exception:
             try:  # noqa: SIM105 — explicit try/except/pass preserves comment explaining why
-                _default_handler(exc_value)
+                _default_handler(exc)
             except Exception:
                 pass  # Both handlers failed (e.g. stderr broken); proceed with exit/suppress
 
         if self._exit_code is not None:
             sys.exit(self._exit_code)
 
-        return True  # Suppress at scope boundary
+        return result
 
 
 def _default_handler(exc: Exception) -> None:
     """Print exception with traceback to stderr."""
-    traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
+    traceback.print_exception(exc, file=sys.stderr)

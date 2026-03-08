@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 import httpx
 import tenacity
-from local_lib import ConcurrencyTracker
+from cc_lib import ConcurrencyTracker
 
 from document_search.clients import _retry
 from document_search.schemas.embeddings import TaskIntent

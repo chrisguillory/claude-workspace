@@ -109,7 +109,7 @@ class BaseModel(pydantic.BaseModel):
 **Use Python 3.12+ `type` keyword for type aliases** - particularly for Literal types and reusable field specifications:
 
 ```python
-# local_lib/types.py
+# cc_lib/types.py
 from typing import Literal, Annotated
 from datetime import datetime
 from pydantic import Field
@@ -119,11 +119,11 @@ type SessionState = Literal["active", "exited", "completed", "crashed"]
 type JsonDatetime = Annotated[datetime, Field(strict=False)]  # JSON-serializable datetime
 ```
 
-**Centralize shared types** in `local-lib/local_lib/types.py` for reuse across files:
+**Centralize shared types** in `cc-lib/cc_lib/types.py` for reuse across files:
 
 ```python
 # session_tracker.py
-from local_lib.types import SessionSource, SessionState, JsonDatetime
+from cc_lib.types import SessionSource, SessionState, JsonDatetime
 
 class Session(BaseModel):
     source: SessionSource  # Not str - enforces specific values
@@ -409,8 +409,8 @@ Document **what's in the PR, not the journey**. Focus on deliverables and result
 │   ├── browser-automation/
 │   ├── python-interpreter/
 │   └── selenium-browser-automation/
-├── local-lib/                  # Shared library code
-│   └── local_lib/             # Python package
+├── cc-lib/                  # Shared library code
+│   └── cc_lib/             # Python package
 │       ├── types.py           # Shared type aliases
 │       ├── session_tracker.py
 │       └── utils.py
@@ -421,14 +421,14 @@ Document **what's in the PR, not the journey**. Focus on deliverables and result
 
 ## Architecture
 
-### local-lib Package Structure
+### cc-lib Package Structure
 
-We use a **proper Python package** (`local-lib/`) to share code between MCP servers:
+We use a **proper Python package** (`cc-lib/`) to share code between MCP servers:
 
 ```
-local-lib/                  # Project root
+cc-lib/                  # Project root
 ├── pyproject.toml         # Package metadata (requires hatchling, depends on fastmcp)
-└── local_lib/             # Python package (importable as "local_lib")
+└── cc_lib/             # Python package (importable as "cc_lib")
     ├── __init__.py
     ├── types.py           # Shared type aliases and annotations
     ├── utils.py           # Shared utilities
@@ -437,7 +437,7 @@ local-lib/                  # Project root
 
 **Why this structure?**
 - Enables **uv inline script dependencies** with relative paths
-- Each MCP server references: `local_lib = { path = "../../local-lib/", editable = true }`
+- Each MCP server references: `cc_lib = { path = "../../cc-lib/", editable = true }`
 - No hardcoded absolute paths - portable across machines
 - Standard Python packaging conventions (PEP 517/518)
 
@@ -482,18 +482,18 @@ All MCP servers use `uv run --script` with inline dependencies:
 # /// script
 # dependencies = [
 #   "fastmcp>=2.12.5",
-#   "local_lib",
+#   "cc_lib",
 #   ...
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../../local-lib/", editable = true }
+# cc_lib = { path = "../../cc-lib/", editable = true }
 # ///
 ```
 
 ### PATH-Accessible Scripts (Launcher Pattern)
 
-**Problem:** uv doesn't resolve symlinks before computing relative paths in `[tool.uv.sources]`. A symlink at `~/.local/bin/my-cmd` → `~/project/scripts/my-cmd.py` causes `../local-lib/` to resolve from `~/.local/bin/` instead of `~/project/scripts/`.
+**Problem:** uv doesn't resolve symlinks before computing relative paths in `[tool.uv.sources]`. A symlink at `~/.local/bin/my-cmd` → `~/project/scripts/my-cmd.py` causes `../cc-lib/` to resolve from `~/.local/bin/` instead of `~/project/scripts/`.
 
 **Solution:** Replace symlinks with launcher scripts that pass the resolved path to `uv run --script`:
 
@@ -694,14 +694,14 @@ When modifying MCP servers:
 1. Create directory under `mcp/your-server/`
 2. Add `server.py` with uv inline dependencies
 3. Add `pyproject.toml` with entry points following naming convention
-4. Include `local_lib` in dependencies for shared utilities
-5. Use relative path: `local_lib = { path = "../../local-lib/", editable = true }`
+4. Include `cc_lib` in dependencies for shared utilities
+5. Use relative path: `cc_lib = { path = "../../cc-lib/", editable = true }`
 6. Configure logging in `lifespan()`: `logging.basicConfig(stream=sys.stderr, ...)`
 7. Write tool docstrings that guide Claude's behavior
 
 ### Adding Shared Utilities
 
-Add to `local-lib/local_lib/` directory. All MCP servers can import them. Follow public-first organization with explicit `__all__` exports.
+Add to `cc-lib/cc_lib/` directory. All MCP servers can import them. Follow public-first organization with explicit `__all__` exports.
 
 ## Testing
 
@@ -710,7 +710,7 @@ Test inline dependencies work:
 uv run --directory mcp/python-interpreter --script python_interpreter/server.py
 ```
 
-Should successfully import `local_lib` and start the server.
+Should successfully import `cc_lib` and start the server.
 
 Test entry points work:
 ```bash

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from local_lib.schemas.hooks import (
+from cc_lib.schemas.hooks import (
     PreToolUseDecision,
     PreToolUseHookInput,
     PreToolUseHookOutput,

@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING
 from filelock import FileLock
 
 if TYPE_CHECKING:
-    from local_lib.session_tracker import SessionManager
+    from cc_lib.session_tracker import SessionManager
 
 PHANTOM_LOG_PATH = Path('~/.claude-workspace/phantom_log.json').expanduser()
 PHANTOM_LOCK_PATH = Path('~/.claude-workspace/.phantom_log.json.lock').expanduser()

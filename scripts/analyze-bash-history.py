@@ -16,11 +16,11 @@ clean for the report. Progress messages go to stderr.
 # requires-python = ">=3.13"
 # dependencies = [
 #   "lazy-object-proxy",
-#   "local_lib",
+#   "cc_lib",
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 
 from __future__ import annotations
@@ -36,10 +36,10 @@ from typing import Any, Literal, Protocol, cast
 
 import lazy_object_proxy
 import pydantic
-from local_lib.error_boundary import ErrorBoundary
-from local_lib.schemas.hooks import BashToolInput
-from local_lib.types import JsonDatetime
-from local_lib.utils import load_module_from_path
+from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.schemas.hooks import BashToolInput
+from cc_lib.types import JsonDatetime
+from cc_lib.utils import load_module_from_path
 
 
 class CommandRecord(pydantic.BaseModel):

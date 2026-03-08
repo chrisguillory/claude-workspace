@@ -1,10 +1,10 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["pydantic>=2.0", "psutil>=5.9", "typer>=0.9.0", "local_lib"]
+# dependencies = ["pydantic>=2.0", "psutil>=5.9", "typer>=0.9.0", "cc_lib"]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 
 """Claude Code login and MCP auth manager.
@@ -121,8 +121,8 @@ import pydantic
 import rich.console
 import rich.panel
 import typer
-from local_lib.schemas import StrictModel
-from local_lib.session_tracker import find_claude_pid, resolve_session_id
+from cc_lib.schemas import StrictModel
+from cc_lib.session_tracker import find_claude_pid, resolve_session_id
 
 # =============================================================================
 # Pydantic Models

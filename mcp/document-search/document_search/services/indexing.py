@@ -26,7 +26,7 @@ from pathlib import Path
 from uuid import UUID
 
 import git
-from local_lib.utils import Timer
+from cc_lib.utils import Timer
 
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.redis import RedisClient

@@ -10,7 +10,7 @@
     python_version = 3.13
     strict = true
   main: |
-    from local_lib.library_boundary import LibraryBoundary
+    from cc_lib.library_boundary import LibraryBoundary
 
     class MyError(Exception): ...
 
@@ -28,7 +28,7 @@
     - MYPYPATH=stubs
   main: |
     import bashlex
-    from local_lib.library_boundary import LibraryBoundary
+    from cc_lib.library_boundary import LibraryBoundary
 
     class MyError(Exception): ...
 
@@ -43,7 +43,7 @@
     - MYPYPATH=stubs
   main: |
     import bashlex
-    from local_lib.library_boundary import LibraryBoundary
+    from cc_lib.library_boundary import LibraryBoundary
 
     class MyError(Exception): ...
 

@@ -4,11 +4,11 @@
 # dependencies = [
 #   "httpx",
 #   "pydantic>=2.0.0",
-#   "local_lib",
+#   "cc_lib",
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 """Upload local files to GitHub issues/PRs using saved browser session cookies.
 
@@ -33,8 +33,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import httpx
-from local_lib.error_boundary import ErrorBoundary
-from local_lib.types import JsonDatetime
+from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.types import JsonDatetime
 from pydantic import BaseModel
 
 # Hardcoded for personal use with mainstay-io/monorepo
