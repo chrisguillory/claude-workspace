@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test: Nameless Links URL Fallback</title>
+</head>
+<body>
+    <h1>Nameless Link Test Cases</h1>
+
+    <!-- Test Case 1: Icon link with empty alt (should show URL) -->
+    <a href="/contact" id="test1">
+        <img src="contact-icon.png" alt="">
+    </a>
+
+    <!-- Test Case 2: Icon link with no alt attribute (should show URL) -->
+    <a href="/about" id="test2">
+        <img src="about-icon.png">
+    </a>
+
+    <!-- Test Case 3: Link with visible text (should NOT show URL when includeUrls=false) -->
+    <a href="/products" id="test3">Products</a>
+
+    <!-- Test Case 4: Link with aria-label (should NOT show URL when includeUrls=false) -->
+    <a href="/services" id="test4" aria-label="Our Services">
+        <img src="services-icon.png" alt="">
+    </a>
+
+    <!-- Test Case 5: Multiple nameless icon links (should all show URLs to differentiate) -->
+    <div class="social-icons">
+        <a href="https://twitter.com/example">
+            <img src="twitter.svg" alt="">
+        </a>
+        <a href="https://facebook.com/example">
+            <img src="facebook.svg" alt="">
+        </a>
+        <a href="https://linkedin.com/example">
+            <img src="linkedin.svg" alt="">
+        </a>
+    </div>
+
+    <!-- Test Case 6: Link with text content but also an image (should NOT show URL) -->
+    <a href="/blog" id="test6">
+        <img src="blog-icon.png" alt="">
+        Read Our Blog
+    </a>
+
+    <!-- Test Case 7: Empty link with href="#" (should show URL even if useless) -->
+    <a href="#" id="test7">
+        <span style="display:none;">Hidden</span>
+    </a>
+
+    <!-- Test Case 8: Link with includeUrls=true (should always show URL regardless) -->
+    <a href="/includeUrls-test" id="test8">
+        <img src="test.png" alt="Test Icon">
+    </a>
+</body>
+</html>

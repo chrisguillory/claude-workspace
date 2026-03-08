@@ -29,6 +29,15 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
     // Skip non-content elements (never included regardless of includeHidden)
     const SKIP_TAGS = ['SCRIPT', 'STYLE', 'META', 'LINK', 'NOSCRIPT', 'TEMPLATE'];
 
+    // Page metadata counters (always collected, negligible overhead)
+    const stats = {
+        hidden: { total: 0, ariaHidden: 0, displayNone: 0, visibilityHidden: 0, inert: 0, other: 0 },
+        images: { total: 0, withAlt: 0, withoutAlt: 0 },
+        links: 0,
+        totalNodes: 0,
+        depthTruncated: 0
+    };
+
     // Shared whitespace normalization helper
     // Per WAI-ARIA 1.2 and CSS Text Module Level 3
     function normalize(text) {
@@ -270,7 +279,7 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
     // ancestorHidden: true if any ancestor is not in accessibility tree
     // ancestorHiddenReason: why ancestor is hidden (for visibility:visible override check)
     function walkTree(el, depth = 0, ancestorHidden = false, ancestorHiddenReason = null) {
-        if (depth > 50) return null; // Prevent infinite recursion
+        if (depth > 50) { stats.depthTruncated++; return null; }
 
         // Handle text nodes
         if (el.nodeType === Node.TEXT_NODE) {
@@ -299,11 +308,29 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         // 1. includeHidden is true, OR
         // 2. Element has visibility:hidden/collapse (children may override)
         if (!visState.inAT && !includeHidden && !isVisibilityHiddenType) {
+            stats.hidden.total++;
+            switch (visState.marker) {
+                case 'aria-hidden': stats.hidden.ariaHidden++; break;
+                case 'display-none': stats.hidden.displayNone++; break;
+                case 'visibility-hidden': case 'visibility-collapse':
+                    stats.hidden.visibilityHidden++; break;
+                case 'inert': stats.hidden.inert++; break;
+                default: stats.hidden.other++; break;
+            }
             return null;
         }
 
         const role = el.getAttribute('role') || getImplicitRole(el);
         const name = computeAccessibleName(el);
+
+        // Count visible elements for page metadata
+        stats.totalNodes++;
+        if (el.tagName === 'IMG') {
+            stats.images.total++;
+            if (el.getAttribute('alt')) stats.images.withAlt++;
+            else stats.images.withoutAlt++;
+        }
+        if (role === 'link') stats.links++;
 
         const node = { role: role };
 
@@ -404,8 +431,9 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
             node.disabled = el.disabled;
         }
 
-        // Add URL for links if requested
-        if (includeUrls && role === 'link' && el.href) {
+        // Add URL for links: always if no name (provides essential info),
+        // or if includeUrls explicitly requested
+        if (role === 'link' && el.href && (includeUrls || !name)) {
             node.url = el.href;
         }
 
@@ -438,7 +466,9 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
                 c.type === 'text' || !c.hidden
             );
             if (visibleChildren.length === 0) {
-                return null;  // No visible children, skip this subtree
+                stats.hidden.total++;
+                stats.hidden.visibilityHidden++;
+                return null;
             }
             // Return visible children without hidden parent wrapper
             if (visibleChildren.length === 1) {
@@ -451,7 +481,27 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         return node;
     }
 
-    return walkTree(root);
+    // Pre-walk: count iframes and shadow roots (may be inside hidden containers)
+    const iframeCount = root.querySelectorAll('iframe').length;
+    let shadowRootCount = 0;
+    const shadowWalker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    while (shadowWalker.nextNode()) {
+        if (shadowWalker.currentNode.shadowRoot) shadowRootCount++;
+    }
+
+    const tree = walkTree(root);
+    return {
+        tree,
+        stats: {
+            hidden: stats.hidden,
+            iframes: iframeCount,
+            shadowRoots: shadowRootCount,
+            images: stats.images,
+            links: stats.links,
+            totalNodes: stats.totalNodes,
+            depthTruncated: stats.depthTruncated
+        }
+    };
 }
 
 return getAccessibilitySnapshot(arguments[0], arguments[1], arguments[2]);

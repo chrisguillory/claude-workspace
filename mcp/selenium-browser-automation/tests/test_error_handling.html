@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test: Error Handling for click/hover/wait_for_selector</title>
+</head>
+<body>
+    <h1>Error Handling Test Cases</h1>
+
+    <!-- Clickable button (valid target) -->
+    <button id="submit-btn">Submit</button>
+
+    <!-- Button obscured by overlay (for ElementClickInterceptedException) -->
+    <div style="position: relative; margin-top: 20px;">
+        <button id="obscured-btn">Hidden Behind Overlay</button>
+        <div id="overlay" style="position: absolute; top: 0; left: 0; width: 200px; height: 50px; background: rgba(0,0,0,0.5); z-index: 10;"></div>
+    </div>
+
+    <!-- Hoverable dropdown -->
+    <div id="menu-trigger" style="padding: 10px; background: #eee; cursor: pointer; display: inline-block;">
+        Hover Me
+    </div>
+
+    <!-- Element that appears after delay (for wait_for_selector) -->
+    <div id="delayed-container"></div>
+    <script>
+        setTimeout(function() {
+            var el = document.createElement('div');
+            el.id = 'delayed-element';
+            el.textContent = 'I appeared after 2 seconds';
+            document.getElementById('delayed-container').appendChild(el);
+        }, 2000);
+    </script>
+</body>
+</html>
