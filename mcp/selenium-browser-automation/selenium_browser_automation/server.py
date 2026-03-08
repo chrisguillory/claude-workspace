@@ -104,12 +104,126 @@ from .scripts import (
     build_execute_javascript_async_script,
 )
 
+# Common non-CSS selector patterns (Playwright, XPath, etc.) for actionable error messages.
+_NON_CSS_SELECTOR_RE = re.compile(
+    r':(?:has-text|text|nth-match)\s*\('
+    r'|:(?:visible|hidden)\b'
+    r'|\b(?:text|role|data-testid)\s*='
+    r'|>>'
+)
+
+
+def _validate_css_selector(selector: str) -> None:
+    """Detect non-CSS selector syntax and raise actionable ToolError."""
+    match = _NON_CSS_SELECTOR_RE.search(selector)
+    if match:
+        raise fastmcp.exceptions.ToolError(
+            f"Selector '{selector}' contains non-CSS syntax ('{match.group()}'). "
+            f'Only standard CSS selectors are supported.\n'
+            f"To find elements by text: get_interactive_elements(text_contains='...')\n"
+            f"To discover selectors: get_aria_snapshot('body', include_urls=True)"
+        )
+
+
 # Large output threshold for file saving.
 # When tool output exceeds this, save to file to preserve line structure.
 # Matches python-interpreter MCP server for consistency.
 # Without this, Claude Code's JSON-wrapped file saving escapes newlines,
 # making Read tool's line-based offset/limit useless.
 LARGE_OUTPUT_THRESHOLD = 25_000  # characters
+
+# Hidden reason key mappings for metadata footer (JS key → display label).
+# Different for ARIA vs visual tree because they filter on different criteria.
+_ARIA_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
+    ('ariaHidden', 'aria-hidden'),
+    ('displayNone', 'display-none'),
+    ('visibilityHidden', 'visibility-hidden'),
+    ('inert', 'inert'),
+    ('other', 'other'),
+]
+
+_VISUAL_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
+    ('displayNone', 'display-none'),
+    ('visibilityHidden', 'visibility-hidden'),
+    ('opacity', 'opacity'),
+    ('clipped', 'clipped'),
+    ('offscreen', 'offscreen'),
+    ('other', 'other'),
+]
+
+
+def _count_tree_nodes(node: dict[str, Any] | None) -> int:
+    """Count nodes in a tree for compaction stats."""
+    if node is None:
+        return 0
+    count = 1
+    for child in node.get('children', []):
+        count += _count_tree_nodes(child)
+    return count
+
+
+def _build_page_metadata(
+    page_stats: dict[str, Any],
+    include_page_info: bool,
+    include_urls: bool,
+    compact_tree: bool,
+    raw_node_count: int,
+    compacted_node_count: int,
+    hidden_reason_keys: Sequence[tuple[str, str]],
+) -> str:
+    """Build YAML comment metadata footer from JS page stats.
+
+    Tier 1 (always shown when > 0): hidden element count + iframe count.
+    Tier 2 (only with include_page_info): shadow DOM, images, links, compaction, depth.
+
+    raw_node_count and compacted_node_count both use _count_tree_nodes
+    for apples-to-apples comparison.
+    """
+    lines: list[str] = []
+
+    # Tier 1: Always shown when > 0
+    hidden = page_stats.get('hidden', {})
+    hidden_total = hidden.get('total', 0)
+    if hidden_total > 0:
+        reasons = []
+        for key, label in hidden_reason_keys:
+            count = hidden.get(key, 0)
+            if count > 0:
+                reasons.append(f'{label}: {count}')
+        lines.append(f'# hidden: {hidden_total} ({", ".join(reasons)})')
+
+    iframe_count = page_stats.get('iframes', 0)
+    if iframe_count > 0:
+        lines.append(f'# iframes: {iframe_count} (content not traversed)')
+
+    # Tier 2: Only with include_page_info=True
+    if include_page_info:
+        shadow_count = page_stats.get('shadowRoots', 0)
+        if shadow_count > 0:
+            lines.append(f'# shadow_roots: {shadow_count} (content not traversed)')
+
+        images = page_stats.get('images', {})
+        img_total = images.get('total', 0)
+        if img_total > 0:
+            lines.append(
+                f'# images: {img_total} '
+                f'(with_alt: {images.get("withAlt", 0)}, without_alt: {images.get("withoutAlt", 0)})'
+            )
+
+        link_count = page_stats.get('links', 0)
+        if link_count > 0 and not include_urls:
+            lines.append(f'# links: {link_count} (urls not included \u2014 use include_urls=True)')
+
+        if raw_node_count > 0 and compact_tree and raw_node_count != compacted_node_count:
+            lines.append(f'# tree: {raw_node_count} nodes \u2192 {compacted_node_count} after compaction')
+
+        depth_trunc = page_stats.get('depthTruncated', 0)
+        if depth_trunc > 0:
+            lines.append(f'# depth_truncated: {depth_trunc} subtrees cut at depth 50')
+
+    if not lines:
+        return ''
+    return '\n# --- page metadata ---\n' + '\n'.join(lines)
 
 
 def _save_large_output_to_file(
@@ -1644,6 +1758,7 @@ def register_tools(service: BrowserService) -> None:
         include_urls: bool = False,
         compact_tree: bool = True,
         include_hidden: bool = False,
+        include_page_info: bool = False,
     ) -> str:
         """Understand page structure and find elements. PRIMARY tool for page comprehension.
 
@@ -1666,10 +1781,13 @@ def register_tools(service: BrowserService) -> None:
                     hiding mechanism (aria, inert, css, or combinations).
                     Use for debugging "why can't I find this element?" or
                     seeing collapsed menus, hidden modals, full page structure.
+            include_page_info: Show extended page statistics (shadow roots, images, links,
+                compaction ratio). Hidden element and iframe counts always appear when > 0.
 
         Returns:
             YAML with ARIA roles, accessible names, element hierarchy, and states.
             When include_hidden=True, hidden elements show [hidden:X] markers.
+            Always appends hidden element and iframe counts (when > 0) as YAML comments.
 
         Workflow:
             1. Call this after navigate() to understand available elements
@@ -1680,9 +1798,17 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
 
         # Execute ARIA snapshot script (loaded from scripts/)
-        snapshot_data = await asyncio.to_thread(
+        result = await asyncio.to_thread(
             driver.execute_script, ARIA_SNAPSHOT_SCRIPT, selector, include_urls, include_hidden
         )
+
+        # Destructure: JS returns {tree, stats} or null (selector not found)
+        if result is None:
+            snapshot_data = None
+            page_stats: dict[str, Any] = {}
+        else:
+            snapshot_data = result.get('tree')
+            page_stats = result.get('stats', {})
 
         def normalize_for_comparison(s: str) -> str:
             """Normalize using NFKC for visually-equivalent character comparison.
@@ -1772,6 +1898,9 @@ def register_tools(service: BrowserService) -> None:
             if compacted_children:
                 result['children'] = compacted_children
             return result
+
+        # Count nodes before compaction (for page metadata stats)
+        raw_node_count = _count_tree_nodes(snapshot_data)
 
         # Apply compaction if requested
         if compact_tree:
@@ -1876,6 +2005,19 @@ def register_tools(service: BrowserService) -> None:
 
         yaml_output = serialize_aria_snapshot(snapshot_data)
 
+        # Append page metadata footer
+        metadata = _build_page_metadata(
+            page_stats=page_stats,
+            include_page_info=include_page_info,
+            include_urls=include_urls,
+            compact_tree=compact_tree,
+            raw_node_count=raw_node_count,
+            compacted_node_count=_count_tree_nodes(snapshot_data),
+            hidden_reason_keys=_ARIA_HIDDEN_REASON_KEYS,
+        )
+        if metadata:
+            yaml_output += metadata
+
         if len(yaml_output) > LARGE_OUTPUT_THRESHOLD:
             return _save_large_output_to_file(
                 yaml_output,
@@ -1892,6 +2034,7 @@ def register_tools(service: BrowserService) -> None:
         include_urls: bool = False,
         compact_tree: bool = True,
         include_hidden: bool = False,
+        include_page_info: bool = False,
     ) -> str:
         """Show what sighted users see. Complements get_aria_snapshot() (what AT sees).
 
@@ -1911,10 +2054,13 @@ def register_tools(service: BrowserService) -> None:
             include_urls: Include href values (default False)
             compact_tree: Remove structural noise (default True)
             include_hidden: Include visually hidden content with markers (default False)
+            include_page_info: Show extended page statistics (shadow roots, images, links,
+                compaction ratio). Hidden element and iframe counts always appear when > 0.
 
         Returns:
             YAML tree of visually rendered elements.
             When include_hidden=True, hidden elements show [hidden:X] markers.
+            Always appends hidden element and iframe counts (when > 0) as YAML comments.
 
         Comparison:
             | Mechanism       | ARIA Tree  | Visual Tree |
@@ -1927,9 +2073,15 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
 
         # Execute visual tree script
-        snapshot_data = await asyncio.to_thread(
+        result = await asyncio.to_thread(
             driver.execute_script, VISUAL_TREE_SCRIPT, selector, include_urls, include_hidden
         )
+
+        # Destructure: JS returns {tree, stats} or null (selector not found)
+        if result is None:
+            return f'Selector not found: {selector}'
+        snapshot_data = result.get('tree')
+        page_stats: dict[str, Any] = result.get('stats', {})
 
         if snapshot_data is None:
             return f'Selector not found: {selector}'
@@ -1989,6 +2141,9 @@ def register_tools(service: BrowserService) -> None:
             if compacted_children:
                 result['children'] = compacted_children
             return result
+
+        # Count nodes before compaction (for page metadata stats)
+        raw_node_count = _count_tree_nodes(snapshot_data)
 
         if compact_tree:
             snapshot_data = compact_visual_tree(snapshot_data)
@@ -2066,6 +2221,19 @@ def register_tools(service: BrowserService) -> None:
 
         yaml_output = serialize_visual_tree(snapshot_data)
 
+        # Append page metadata footer
+        metadata = _build_page_metadata(
+            page_stats=page_stats,
+            include_page_info=include_page_info,
+            include_urls=include_urls,
+            compact_tree=compact_tree,
+            raw_node_count=raw_node_count,
+            compacted_node_count=_count_tree_nodes(snapshot_data),
+            hidden_reason_keys=_VISUAL_HIDDEN_REASON_KEYS,
+        )
+        if metadata:
+            yaml_output += metadata
+
         if len(yaml_output) > LARGE_OUTPUT_THRESHOLD:
             return _save_large_output_to_file(
                 yaml_output,
@@ -2084,10 +2252,10 @@ def register_tools(service: BrowserService) -> None:
         limit: int | None,
         ctx: Context[Any, Any, Any],
     ) -> list[InteractiveElement]:
-        """Get clickable elements with optional filters for targeted extraction.
+        """Find clickable elements by text or other filters. Returns CSS selectors for click().
 
-        Workflow: Use this tool to find elements, then use click() with returned selectors.
-        Example: get_interactive_elements(text_contains="Continue") → just Continue button
+        This is the tool for finding elements by text content.
+        Example: get_interactive_elements(text_contains="Continue") → returns CSS selector for click()
 
         Args:
             selector_scope: CSS selector to limit search (e.g., ".wizard" or "body")
@@ -2266,24 +2434,24 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))
     async def click(
-        selector: str,
+        css_selector: str,
         ctx: Context[Any, Any, Any],
         wait_for_network: bool = False,
         network_timeout: int = 10000,
     ) -> None:
         """Click an element. Auto-waits for visibility and clickability.
 
-        Use selector from get_interactive_elements(). For dynamic content that loads after
-        clicking, use wait_for_network_idle() afterward instead of wait_for_network parameter.
+        Accepts standard CSS selectors only. To find elements by text content,
+        use get_interactive_elements(text_contains='...') which returns CSS selectors.
 
         Args:
-            selector: CSS selector from get_interactive_elements()
+            css_selector: Standard CSS selector from get_interactive_elements()
             wait_for_network: Add fixed delay after click (use wait_for_network_idle() instead)
             network_timeout: Delay duration in ms
 
         Workflow:
-            1. get_interactive_elements(text_contains='Submit') - get selector
-            2. click(selector) - perform click
+            1. get_interactive_elements(text_contains='Submit') - find element by text
+            2. click(css_selector) - click using the CSS selector it returned
             3. wait_for_network_idle() - wait for dynamic content
             4. get_aria_snapshot() - understand new page state
         """
@@ -2293,16 +2461,34 @@ def register_tools(service: BrowserService) -> None:
         await _capture_current_origin_storage(service, driver)
         url_before = driver.current_url
 
-        logger.info(f'Clicking element: {selector}' + (' (with delay)' if wait_for_network else ''))
+        logger.info(f'Clicking element: {css_selector}' + (' (with delay)' if wait_for_network else ''))
+
+        _validate_css_selector(css_selector)
 
         # Wait for element to be clickable (up to 10 seconds)
-        element = await asyncio.to_thread(
-            WebDriverWait(driver, 10).until,
-            EC.element_to_be_clickable((By.CSS_SELECTOR, selector)),
-        )
+        try:
+            element = await asyncio.to_thread(
+                WebDriverWait(driver, 10).until,
+                EC.element_to_be_clickable((By.CSS_SELECTOR, css_selector)),
+            )
+        except WebDriverException as e:
+            raise fastmcp.exceptions.ToolError(
+                f"Failed to find clickable element '{css_selector}': {e}\n"
+                f"Use get_interactive_elements(text_contains='...') to discover valid selectors."
+            ) from None
 
         # Click element
-        await asyncio.to_thread(element.click)
+        try:
+            await asyncio.to_thread(element.click)
+        except WebDriverException as e:
+            error_msg = str(e).lower()
+            if 'intercepted' in error_msg or 'other element would receive' in error_msg:
+                raise fastmcp.exceptions.ToolError(
+                    f"Element '{css_selector}' is obscured by another element. "
+                    f'Try: close overlays/modals, scroll into view, or use '
+                    f'execute_javascript("document.querySelector(\'{css_selector}\').click()")'
+                ) from None
+            raise fastmcp.exceptions.ToolError(f"Click failed on '{css_selector}': {e}") from None
 
         if wait_for_network:
             delay_sec = network_timeout / 1000
@@ -2472,7 +2658,7 @@ def register_tools(service: BrowserService) -> None:
         )
     )
     async def hover(
-        selector: str,
+        css_selector: str,
         ctx: Context[Any, Any, Any],
         duration_ms: int = 0,
     ) -> None:
@@ -2482,13 +2668,16 @@ def register_tools(service: BrowserService) -> None:
         JavaScript events (mouseover/mouseenter) don't trigger CSS :hover -
         this tool uses real mouse simulation via ActionChains.
 
+        Accepts standard CSS selectors only. To find elements by text content,
+        use get_interactive_elements(text_contains='...') which returns CSS selectors.
+
         Args:
-            selector: CSS selector from get_interactive_elements()
+            css_selector: Standard CSS selector from get_interactive_elements()
             duration_ms: Hold duration in ms (for menus that need sustained hover)
 
         Workflow:
             1. get_interactive_elements(text_contains='Products') - find menu trigger
-            2. hover(selector) - reveal dropdown
+            2. hover(css_selector) - reveal dropdown
             3. get_aria_snapshot() - see dropdown content
             4. click(dropdown_item_selector) - select item
         """
@@ -2500,13 +2689,21 @@ def register_tools(service: BrowserService) -> None:
         if duration_ms > 30000:
             raise ValueError('duration_ms exceeds maximum of 30000ms (30 seconds)')
 
-        logger.info(f'Hovering over element: {selector}')
+        logger.info(f'Hovering over element: {css_selector}')
+
+        _validate_css_selector(css_selector)
 
         # Wait for element to be present
-        element = await asyncio.to_thread(
-            WebDriverWait(driver, 10).until,
-            EC.presence_of_element_located((By.CSS_SELECTOR, selector)),
-        )
+        try:
+            element = await asyncio.to_thread(
+                WebDriverWait(driver, 10).until,
+                EC.presence_of_element_located((By.CSS_SELECTOR, css_selector)),
+            )
+        except WebDriverException as e:
+            raise fastmcp.exceptions.ToolError(
+                f"Failed to find element for hover '{css_selector}': {e}\n"
+                f"Use get_interactive_elements(text_contains='...') to discover valid selectors."
+            ) from None
 
         # Scroll element into view (Playwright does this automatically)
         await asyncio.to_thread(
@@ -2518,7 +2715,7 @@ def register_tools(service: BrowserService) -> None:
         # Verify element is visible (not display:none, visibility:hidden, etc.)
         is_displayed = await asyncio.to_thread(element.is_displayed)
         if not is_displayed:
-            raise ValueError(f"Element '{selector}' is not visible - cannot hover")
+            raise ValueError(f"Element '{css_selector}' is not visible - cannot hover")
 
         # Multi-signal stability check (based on Playwright's approach)
         # Uses: requestAnimationFrame timing, getAnimations() API, distance threshold
@@ -2651,7 +2848,7 @@ def register_tools(service: BrowserService) -> None:
         )
         if pointer_check == 'obscured':
             raise ValueError(
-                f"Element '{selector}' is obscured by another element at its center. "
+                f"Element '{css_selector}' is obscured by another element at its center. "
                 'A modal, overlay, or other element may be blocking it.'
             )
 
@@ -2733,7 +2930,7 @@ def register_tools(service: BrowserService) -> None:
         )
     )
     async def wait_for_selector(
-        selector: str,
+        css_selector: str,
         ctx: Context[Any, Any, Any],
         state: Literal['visible', 'hidden', 'attached', 'detached'] = 'visible',
         timeout: int = 30000,
@@ -2744,8 +2941,10 @@ def register_tools(service: BrowserService) -> None:
         for specific UI state rather than network activity. Use this when you need
         to interact with a specific element after dynamic content loads.
 
+        Accepts standard CSS selectors only.
+
         Args:
-            selector: CSS selector to wait for
+            css_selector: Standard CSS selector to wait for
             state: Target state (default "visible"):
                 - "visible": Element in DOM AND displayed (not display:none/visibility:hidden)
                 - "hidden": Element not visible OR not in DOM
@@ -2768,14 +2967,27 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
 
         # Validation
-        if not selector or not selector.strip():
-            raise ValueError('selector cannot be empty')
+        if not css_selector or not css_selector.strip():
+            raise ValueError('css_selector cannot be empty')
         if timeout < 0:
             raise ValueError('timeout cannot be negative')
         if timeout > 300000:
             raise ValueError('timeout exceeds maximum of 300000ms (5 minutes)')
 
-        logger.info(f"Waiting for selector '{selector}' to be {state}")
+        logger.info(f"Waiting for selector '{css_selector}' to be {state}")
+
+        _validate_css_selector(css_selector)
+
+        # Early validation: detect invalid CSS before entering polling loop.
+        # Without this, an invalid selector silently wastes the full timeout.
+        try:
+            await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, css_selector)
+        except WebDriverException as e:
+            raise fastmcp.exceptions.ToolError(
+                f"Invalid CSS selector '{css_selector}': {e}\n"
+                f'Use get_aria_snapshot() to discover valid selectors, or '
+                f'get_interactive_elements() to find elements by text.'
+            ) from None
 
         start_time = time.time()
         timeout_s = timeout / 1000
@@ -2783,15 +2995,15 @@ def register_tools(service: BrowserService) -> None:
 
         while time.time() - start_time < timeout_s:
             try:
-                elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, selector)
+                elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, css_selector)
 
                 if state == 'attached':
                     # Element exists in DOM
                     if elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info(f"Selector '{selector}' attached after {elapsed_ms}ms")
+                        logger.info(f"Selector '{css_selector}' attached after {elapsed_ms}ms")
                         return {
-                            'selector': selector,
+                            'selector': css_selector,
                             'state': 'attached',
                             'elapsed_ms': elapsed_ms,
                             'element_count': len(elements),
@@ -2801,9 +3013,9 @@ def register_tools(service: BrowserService) -> None:
                     # Element removed from DOM
                     if not elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info(f"Selector '{selector}' detached after {elapsed_ms}ms")
+                        logger.info(f"Selector '{css_selector}' detached after {elapsed_ms}ms")
                         return {
-                            'selector': selector,
+                            'selector': css_selector,
                             'state': 'detached',
                             'elapsed_ms': elapsed_ms,
                         }
@@ -2814,9 +3026,9 @@ def register_tools(service: BrowserService) -> None:
                         is_displayed = await asyncio.to_thread(element.is_displayed)
                         if is_displayed:
                             elapsed_ms = int((time.time() - start_time) * 1000)
-                            logger.info(f"Selector '{selector}' visible after {elapsed_ms}ms")
+                            logger.info(f"Selector '{css_selector}' visible after {elapsed_ms}ms")
                             return {
-                                'selector': selector,
+                                'selector': css_selector,
                                 'state': 'visible',
                                 'elapsed_ms': elapsed_ms,
                                 'element_count': len(elements),
@@ -2826,9 +3038,9 @@ def register_tools(service: BrowserService) -> None:
                     # Element not in DOM OR not displayed
                     if not elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info(f"Selector '{selector}' hidden (not in DOM) after {elapsed_ms}ms")
+                        logger.info(f"Selector '{css_selector}' hidden (not in DOM) after {elapsed_ms}ms")
                         return {
-                            'selector': selector,
+                            'selector': css_selector,
                             'state': 'hidden',
                             'elapsed_ms': elapsed_ms,
                             'reason': 'not_in_dom',
@@ -2842,9 +3054,9 @@ def register_tools(service: BrowserService) -> None:
                             break
                     if all_hidden:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info(f"Selector '{selector}' hidden (not displayed) after {elapsed_ms}ms")
+                        logger.info(f"Selector '{css_selector}' hidden (not displayed) after {elapsed_ms}ms")
                         return {
-                            'selector': selector,
+                            'selector': css_selector,
                             'state': 'hidden',
                             'elapsed_ms': elapsed_ms,
                             'reason': 'not_displayed',
@@ -2862,7 +3074,7 @@ def register_tools(service: BrowserService) -> None:
 
         # Build helpful error message for AI agents
         try:
-            elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, selector)
+            elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, css_selector)
             element_count = len(elements)
             if elements:
                 first_displayed = await asyncio.to_thread(elements[0].is_displayed)
@@ -2874,7 +3086,7 @@ def register_tools(service: BrowserService) -> None:
             current_state = 'unknown (selector may be invalid)'
 
         raise TimeoutError(
-            f"wait_for_selector('{selector}', state='{state}') timed out after {elapsed_ms}ms. "
+            f"wait_for_selector('{css_selector}', state='{state}') timed out after {elapsed_ms}ms. "
             f'Current state: {current_state} (found {element_count} element(s)). '
             f'Possible causes: (1) Selector is incorrect, (2) Element is in iframe, '
             f"(3) Element requires user action to appear, (4) Page didn't finish loading. "

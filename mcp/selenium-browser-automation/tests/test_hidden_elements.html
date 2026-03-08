@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test: Hidden Element Count</title>
+    <style>
+        .sr-only { position: absolute; width: 1px; height: 1px; clip: rect(0,0,0,0); overflow: hidden; }
+        .accordion-content { display: none; }
+        .accordion-content.open { display: block; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 100; }
+        .modal-content { background: white; padding: 20px; margin: 100px auto; width: 400px; }
+        .offscreen-nav { position: absolute; left: -9999px; }
+    </style>
+</head>
+<body>
+    <h1>Hidden Element Count Test</h1>
+
+    <!-- Visible content -->
+    <nav>
+        <a href="/home">Home</a>
+        <a href="/about">About</a>
+        <a href="/contact">Contact</a>
+    </nav>
+
+    <main>
+        <p>This is visible content.</p>
+
+        <!-- Accordion: 1 visible header, 3 hidden panels -->
+        <div class="accordion">
+            <button aria-expanded="false">Section 1</button>
+            <div class="accordion-content">
+                <p>Hidden panel 1 with <a href="/link1">a link</a> and <button>a button</button></p>
+            </div>
+            <button aria-expanded="false">Section 2</button>
+            <div class="accordion-content">
+                <p>Hidden panel 2 with <a href="/link2">another link</a></p>
+                <ul><li>Item A</li><li>Item B</li><li>Item C</li></ul>
+            </div>
+            <button aria-expanded="false">Section 3</button>
+            <div class="accordion-content">
+                <p>Hidden panel 3 with a <input type="text" placeholder="form field"></p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Hidden modal (display:none) -->
+    <div class="modal-overlay" id="login-modal">
+        <div class="modal-content" role="dialog" aria-label="Login">
+            <h2>Log In</h2>
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@example.com">
+            <label for="password">Password</label>
+            <input type="password" id="password">
+            <button>Submit</button>
+            <button>Cancel</button>
+        </div>
+    </div>
+
+    <!-- aria-hidden SVG sprite sheet (decorative noise) -->
+    <div aria-hidden="true" style="display:none">
+        <svg><symbol id="icon-home"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></symbol></svg>
+        <svg><symbol id="icon-star"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></symbol></svg>
+        <svg><symbol id="icon-search"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol></svg>
+    </div>
+
+    <!-- Off-screen nav (screen reader accessible but visually hidden) -->
+    <nav class="offscreen-nav" aria-label="Skip links">
+        <a href="#main">Skip to main content</a>
+        <a href="#footer">Skip to footer</a>
+    </nav>
+
+    <!-- Hidden via aria-hidden (e.g., decorative elements) -->
+    <div aria-hidden="true">
+        <span>Decorative separator</span>
+        <span>•</span>
+        <span>Another decoration</span>
+    </div>
+
+    <footer id="footer">
+        <p>&copy; 2025 Test Company</p>
+    </footer>
+</body>
+</html>
