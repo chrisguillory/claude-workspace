@@ -48,6 +48,9 @@ MIME_TYPES: Mapping[str, str] = {
     '.json': 'application/json',
     '.txt': 'text/plain',
     '.md': 'text/markdown',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
 }
 DEFAULT_MIME_TYPE = 'application/octet-stream'
 
