@@ -1,0 +1,233 @@
+# Page Metadata Integration Tests
+# ================================
+# Test specification for the two-tier page metadata system
+#
+# Usage:
+#   1. Start fixture server: cd tests && python -m http.server 8765
+#   2. Navigate to fixture: navigate("http://localhost:8765/test_page_metadata_integration.html")
+#   3. For each scenario: run the tool with specified args
+#   4. Verify the metadata footer matches expectations below
+#
+# Expectation format:
+#   metadata.includes: strings that MUST appear in the metadata footer
+#   metadata.excludes: strings that MUST NOT appear in the metadata footer
+#   tree.includes: strings that MUST appear in the tree body (not footer)
+#   tree.excludes: strings that MUST NOT appear in the tree body
+
+metadata:
+  description: Two-tier page metadata system integration tests
+  version: "1.0"
+  fixture: tests/test_page_metadata_integration.html
+  fixture_url: http://localhost:8765/test_page_metadata_integration.html
+
+# =============================================================================
+# SCENARIO 1: ARIA — Default flags (tier 1 only)
+# =============================================================================
+aria_tier1_only:
+  description: >
+    With include_page_info=false, only tier 1 metadata (hidden counts and
+    iframe counts) should appear. All tier 2 lines must be absent.
+  tool: get_aria_snapshot
+  args:
+    selector: "body"
+    include_page_info: false
+    compact_tree: true
+    include_urls: false
+
+  metadata:
+    includes:
+      - "# hidden: 9 (aria-hidden: 4, display-none: 2, visibility-hidden: 1, inert: 1, other: 1)"
+      - "# iframes: 3 (content not traversed)"
+    excludes:
+      - "# shadow_roots:"
+      - "# images:"
+      - "# links:"
+      - "# tree:"
+      - "after compaction"
+      - "# depth_truncated:"
+
+# =============================================================================
+# SCENARIO 2: ARIA — Full page info
+# =============================================================================
+aria_full_page_info:
+  description: >
+    With include_page_info=true, all metadata lines should appear.
+    Compaction stats must show a DECREASE (raw > compacted).
+    Hidden reasons use ARIA categories (aria-hidden, inert — not opacity, clipped).
+  tool: get_aria_snapshot
+  args:
+    selector: "body"
+    include_page_info: true
+    compact_tree: true
+    include_urls: false
+
+  metadata:
+    includes:
+      # Tier 1
+      - "# hidden: 9 (aria-hidden: 4, display-none: 2, visibility-hidden: 1, inert: 1, other: 1)"
+      - "# iframes: 3 (content not traversed)"
+      # Tier 2
+      - "# shadow_roots: 2 (content not traversed)"
+      - "# images: 6 (with_alt: 3, without_alt: 3)"
+      - "# links: 10 (urls not included"
+      - "# tree: 215 nodes"
+      - "130 after compaction"
+      - "# depth_truncated: 1 subtrees cut at depth 50"
+    excludes:
+      # ARIA tree must NOT use visual hidden reasons
+      - "opacity:"
+      - "clipped:"
+      - "offscreen:"
+
+# =============================================================================
+# SCENARIO 3: ARIA — include_urls=True suppresses link count
+# =============================================================================
+aria_urls_included:
+  description: >
+    When include_urls=true, the links count line should be absent since
+    URLs are already visible in the tree output.
+  tool: get_aria_snapshot
+  args:
+    selector: "body"
+    include_page_info: true
+    compact_tree: true
+    include_urls: true
+
+  metadata:
+    includes:
+      - "# hidden: 9"
+      - "# images: 6"
+      - "# tree: 215 nodes"
+    excludes:
+      - "# links:"
+      - "urls not included"
+
+# =============================================================================
+# SCENARIO 4: ARIA — compact_tree=False suppresses compaction stats
+# =============================================================================
+aria_no_compaction:
+  description: >
+    When compact_tree=false, the compaction stats line should be absent.
+    All other tier 2 lines should still appear.
+  tool: get_aria_snapshot
+  args:
+    selector: "body"
+    include_page_info: true
+    compact_tree: false
+    include_urls: false
+
+  metadata:
+    includes:
+      - "# hidden: 9"
+      - "# iframes: 3"
+      - "# shadow_roots: 2"
+      - "# images: 6"
+      - "# links: 10"
+      - "# depth_truncated: 1"
+    excludes:
+      - "# tree:"
+      - "after compaction"
+
+  tree:
+    includes:
+      # Without compaction, empty generics and wrapper chains are preserved
+      - "- generic\n"  # Empty generics visible
+
+# =============================================================================
+# SCENARIO 5: Visual tree — Full page info (different hidden reasons)
+# =============================================================================
+visual_full_page_info:
+  description: >
+    Visual tree uses different hidden reason categories than ARIA.
+    aria-hidden elements are VISIBLE (sighted users see them), so they
+    appear in the tree body. opacity:0, clipped, offscreen elements are
+    HIDDEN (sighted users can't see them).
+
+    Key asymmetries vs ARIA:
+    - Hidden total is the same (9) but with different reason breakdown
+    - Images: 7 (vs ARIA's 6) because aria-hidden image is visible
+    - Links: 11 (vs ARIA's 10) because aria-hidden link is visible
+  tool: get_visual_tree
+  args:
+    selector: "body"
+    include_page_info: true
+    compact_tree: true
+    include_urls: false
+
+  metadata:
+    includes:
+      # Visual hidden reasons (different from ARIA)
+      - "# hidden: 9 (display-none: 3, visibility-hidden: 1, opacity: 2, clipped: 1, offscreen: 1, other: 1)"
+      - "# iframes: 3 (content not traversed)"
+      - "# shadow_roots: 2 (content not traversed)"
+      # Higher counts because aria-hidden content is visible to sighted users
+      - "# images: 7 (with_alt: 4, without_alt: 3)"
+      - "# links: 11 (urls not included"
+      - "# tree: 218 nodes"
+      - "128 after compaction"
+      - "# depth_truncated: 1"
+    excludes:
+      # Visual tree must NOT use ARIA hidden reasons
+      - "aria-hidden:"
+      - "inert:"
+
+  tree:
+    includes:
+      # aria-hidden content appears in visual tree (sighted users see it)
+      - "ARIA-hidden content (visible to sighted users)"
+      - "aria-hidden inline"
+      - 'img "Image inside aria-hidden"'
+      - 'link "Link inside aria-hidden"'
+    excludes:
+      # opacity:0, clipped, offscreen content hidden from visual tree
+      - "Zero opacity paragraph"
+      - "Screen reader only text"
+      - "Off-screen content"
+
+# =============================================================================
+# SCENARIO 6: Visual tree — Tier 1 only
+# =============================================================================
+visual_tier1_only:
+  description: >
+    Visual tree tier 1 only. Hidden reasons should use visual categories
+    (opacity, clipped, offscreen) not ARIA categories.
+  tool: get_visual_tree
+  args:
+    selector: "body"
+    include_page_info: false
+    compact_tree: true
+
+  metadata:
+    includes:
+      - "# hidden: 9 (display-none: 3, visibility-hidden: 1, opacity: 2, clipped: 1, offscreen: 1, other: 1)"
+      - "# iframes: 3 (content not traversed)"
+    excludes:
+      - "# shadow_roots:"
+      - "# images:"
+      - "# links:"
+      - "# tree:"
+      - "# depth_truncated:"
+      - "aria-hidden:"
+      - "inert:"
+
+# =============================================================================
+# CROSS-TOOL VERIFICATION
+# =============================================================================
+# The following asymmetries MUST hold between ARIA and Visual for this page:
+#
+#   | Metric        | ARIA | Visual | Reason                                |
+#   |---------------|------|--------|---------------------------------------|
+#   | Hidden total  |    9 |      9 | Same total, different reasons         |
+#   | Images        |    6 |      7 | Visual sees aria-hidden img           |
+#   | Links         |   10 |     11 | Visual sees aria-hidden link          |
+#   | Raw nodes     |  215 |    218 | Visual includes aria-hidden subtree   |
+#   | Compacted     |  130 |    128 | Different trees compact differently   |
+#
+# Hidden reason breakdown:
+#   ARIA:   aria-hidden: 4, display-none: 2, visibility-hidden: 1, inert: 1, other: 1
+#   Visual: display-none: 3, visibility-hidden: 1, opacity: 2, clipped: 1, offscreen: 1, other: 1
+#
+# Note: display-none is 2 in ARIA but 3 in Visual because the double-hidden
+# element (aria-hidden + display:none) is counted as aria-hidden in ARIA
+# (first match wins) but as display-none in Visual (aria-hidden is not a
+# visual hiding mechanism).
