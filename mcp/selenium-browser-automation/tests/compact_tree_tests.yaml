@@ -247,18 +247,18 @@ rule_3_redundant_text:
           # Enhanced implementation: text children removed (concat matches)
 
 # =============================================================================
-# ENHANCEMENT: MULTI-TEXT CONCATENATION
+# RULE 4: MULTI-TEXT CONCATENATION
 # =============================================================================
-enhancement_multi_text:
+rule_4_multi_text:
   description: When ALL children are text and concat matches name, remove them
-  status: proposed  # Not yet implemented
+  status: implemented
 
   tests:
     - id: "4.1"
       name: two_texts_concat_matches
       selector: "#test-4-1 .actual"
       description: '"Python" + " " + "33.8%" = "Python 33.8%" = name'
-      enhanced_compact:
+      compact:
         includes:
           - 'link "Python 33.8%"'
         excludes:
@@ -269,7 +269,7 @@ enhancement_multi_text:
       name: three_texts_concat_matches
       selector: "#test-4-2 .actual"
       description: Three text children, concat matches name
-      enhanced_compact:
+      compact:
         includes:
           - 'button "A B C"'
         excludes:
@@ -317,34 +317,40 @@ enhancement_multi_text:
           - 'generic "5000+"'  # Named span preserved
 
 # =============================================================================
-# ENHANCEMENT: UNICODE NORMALIZATION
+# RULE 5: UNICODE NORMALIZATION (NFKC)
 # =============================================================================
-enhancement_unicode:
+rule_5_unicode_normalization:
   description: NFKC normalization for visually-equivalent characters
-  status: proposed  # Not yet implemented
+  status: implemented
 
   tests:
     - id: "5.1"
-      name: ellipsis_vs_periods
+      name: ellipsis_normalized
       selector: "#test-5-1 .actual"
-      description: Ellipsis (U+2026) matches three periods via NFKC
-      enhanced_compact:
+      description: Ellipsis (…) matches three periods (...) via NFKC → text removed
+      compact:
         includes:
-          - 'button "Search or jump to'  # Name preserved (partial match)
+          - 'button "Search or jump to…"'  # Name with ellipsis
         excludes:
-          - "text: Search"  # Text removed after NFKC normalization
+          - "text: Search or jump to..."  # Text with periods removed (NFKC matched!)
 
     - id: "5.2"
-      name: curly_vs_straight_quotes
+      name: curly_quotes_NOT_normalized
       selector: "#test-5-2 .actual"
-      description: Curly apostrophe vs straight - NFKC behavior varies
-      note: "NFKC may not normalize quotes - verify actual behavior"
+      description: Curly apostrophe (') ≠ straight (') via NFKC → text preserved
+      compact:
+        includes:
+          - 'button "Don''t stop"'  # Name with curly quote
+          - "text: Don't stop"  # Text with straight quote preserved (NFKC didn't match)
 
     - id: "5.3"
-      name: em_dash_vs_hyphen
+      name: em_dash_NOT_normalized
       selector: "#test-5-3 .actual"
-      description: Em-dash (U+2014) vs hyphen - NFKC behavior varies
-      note: "NFKC may not normalize dashes - verify actual behavior"
+      description: Em-dash (—) ≠ hyphen (-) via NFKC → text preserved
+      compact:
+        includes:
+          - 'link "A—B"'  # Name with em-dash
+          - "text: A-B"  # Text with hyphen preserved (NFKC didn't match)
 
     - id: "5.4"
       name: exact_match_baseline

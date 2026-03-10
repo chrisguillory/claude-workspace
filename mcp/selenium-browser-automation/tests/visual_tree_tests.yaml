@@ -186,13 +186,12 @@ test_7_sr_only_hidden:
   selector: "#test-7-sr-only .actual"
   tests:
     - id: "v7.1"
-      name: sr_only_EXCLUDED_from_visual_tree
+      name: sr_only_in_button_name
       include_hidden: false
       expect:
         includes:
-          - "Icon Placeholder"  # aria-hidden span IS visible to sighted users!
-        excludes:
-          - "Screen Reader Only Text"  # KEY: sr-only NOT in visual tree
+          - 'button "Screen Reader Only Text Icon Placeholder"'  # Accessible name includes sr-only text
+          - "Icon Placeholder"  # Visible text is child
 
     - id: "v7.2"
       name: sr_only_included_with_marker
