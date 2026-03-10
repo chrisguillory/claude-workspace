@@ -68,7 +68,7 @@ def load_yaml_test_specs(yaml_path: Path) -> list[dict[str, Any]]:
             section_defaults = {k: v for k, v in section.items() if k not in ['tests', 'description']}
             cases.extend(
                 {
-                    'id': test.get('id', 'unknown'),
+                    'id': test.get('id', test.get('name', 'unknown')),
                     'name': test.get('name', 'unnamed'),
                     'section': section_key,
                     'spec': {**global_defaults, **section_defaults, **test},
