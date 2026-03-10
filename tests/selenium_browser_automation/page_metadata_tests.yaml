@@ -17,8 +17,8 @@
 metadata:
   description: Two-tier page metadata system integration tests
   version: "1.0"
-  fixture: tests/test_page_metadata_integration.html
-  fixture_url: http://localhost:8765/test_page_metadata_integration.html
+  fixture: examples/test_page_metadata_integration.html
+  fixture_url: http://localhost:8765/examples/test_page_metadata_integration.html
 
 # =============================================================================
 # SCENARIO 1: ARIA — Default flags (tier 1 only)
