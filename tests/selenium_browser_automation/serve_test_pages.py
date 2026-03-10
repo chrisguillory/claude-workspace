@@ -5,7 +5,7 @@ Start HTTP servers on multiple ports for multi-origin localStorage testing.
 Usage:
     python tests/serve_test_pages.py
 
-Starts servers on ports 8001, 8002, 8003, each serving tests/fixtures/.
+Starts servers on ports 8001, 8002, 8003, each serving examples/.
 Each port is a different origin for localStorage isolation testing.
 
 Press Ctrl+C to stop all servers.
@@ -18,8 +18,10 @@ import os
 import threading
 from pathlib import Path
 
+import selenium_browser_automation
+
 PORTS = [8001, 8002, 8003]
-FIXTURES_DIR = Path(__file__).parent / 'fixtures'
+FIXTURES_DIR = Path(selenium_browser_automation.__file__).parent.parent / 'examples'
 
 
 def start_server(port: int) -> http.server.HTTPServer:
