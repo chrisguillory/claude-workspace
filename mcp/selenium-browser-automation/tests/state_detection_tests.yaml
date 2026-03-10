@@ -42,25 +42,24 @@ test_1_native_checkboxes:
       expect:
         includes:
           - 'checkbox "Unchecked checkbox" [unchecked]'
-        excludes:
-          - "[checked]"
+          - 'checkbox "Checked checkbox" [checked]'
+          - 'checkbox "Indeterminate checkbox" [checked=mixed]'
 
     - id: "1.2"
       name: checked_checkbox
       expect:
         includes:
+          - 'checkbox "Unchecked checkbox" [unchecked]'
           - 'checkbox "Checked checkbox" [checked]'
-        excludes:
-          - "[unchecked]"
+          - 'checkbox "Indeterminate checkbox" [checked=mixed]'
 
     - id: "1.3"
       name: indeterminate_checkbox
       expect:
         includes:
+          - 'checkbox "Unchecked checkbox" [unchecked]'
+          - 'checkbox "Checked checkbox" [checked]'
           - 'checkbox "Indeterminate checkbox" [checked=mixed]'
-        excludes:
-          - "[checked]"  # Should not be plain [checked]
-          - "[unchecked]"
 
     - id: "1.4"
       name: disabled_unchecked
@@ -111,19 +110,28 @@ test_3_aria_checkboxes:
       name: aria_unchecked
       expect:
         includes:
-          - 'checkbox "ARIA unchecked" [unchecked]'
+          - 'checkbox [unchecked]:'
+          - 'checkbox [checked]:'
+          - 'checkbox [checked=mixed]:'
+          - 'text: ARIA unchecked'
+          - 'text: ARIA checked'
 
     - id: "3.2"
       name: aria_checked
       expect:
         includes:
-          - 'checkbox "ARIA checked" [checked]'
+          - 'checkbox [unchecked]:'
+          - 'checkbox [checked]:'
+          - 'checkbox [checked=mixed]:'
+          - 'text: ARIA unchecked'
+          - 'text: ARIA checked'
 
     - id: "3.3"
       name: aria_mixed
       expect:
         includes:
-          - 'checkbox "ARIA mixed (indeterminate)" [checked=mixed]'
+          - 'checkbox [checked=mixed]:'
+          - 'text: ARIA mixed (indeterminate)'
 
 # =============================================================================
 # Test 4: Visually Hidden Checkboxes (Apple Pattern)
@@ -204,14 +212,16 @@ test_7_listbox:
       name: selected_option
       expect:
         includes:
-          - 'option "Green (selected)" [selected]'
+          - 'option [selected]:'
+          - 'text: Green (selected)'
 
     - id: "7.2"
       name: unselected_options
       expect:
         includes:
-          - 'option "Red" [selected=false]'
-          - 'option "Blue" [selected=false]'
+          - 'option [selected=false]:'
+          - 'text: Red'
+          - 'text: Blue'
 
 # =============================================================================
 # Test 8: Toggle Buttons with aria-pressed
@@ -251,15 +261,15 @@ test_9_accordion:
       name: expanded_section
       expect:
         includes:
-          - 'button "Expanded Section" [expanded]'
-        excludes:
-          - 'button "Expanded Section" [expanded=false]'
+          - 'button "Expanded Section ▼" [expanded]:'
+          - 'text: Expanded Section'
 
     - id: "9.2"
       name: collapsed_section
       expect:
         includes:
-          - 'button "Collapsed Section" [expanded=false]'
+          - 'button "Collapsed Section ▶" [expanded=false]:'
+          - 'text: Collapsed Section'
 
 # =============================================================================
 # Test 10: Menu Items (menuitemcheckbox and menuitemradio)
@@ -272,32 +282,37 @@ test_10_menu_items:
       name: menuitemcheckbox_checked
       expect:
         includes:
-          - 'menuitemcheckbox "Show toolbar" [checked]'
+          - 'menuitemcheckbox [checked]:'
+          - 'text: Show toolbar'
 
     - id: "10.2"
       name: menuitemcheckbox_unchecked
       expect:
         includes:
-          - 'menuitemcheckbox "Show sidebar" [unchecked]'
+          - 'menuitemcheckbox [unchecked]:'
+          - 'text: Show sidebar'
 
     - id: "10.3"
       name: menuitemcheckbox_mixed
       expect:
         includes:
-          - 'menuitemcheckbox "Show all panels" [checked=mixed]'
+          - 'menuitemcheckbox [checked=mixed]:'
+          - 'text: Show all panels'
 
     - id: "10.4"
       name: menuitemradio_checked
       expect:
         includes:
-          - 'menuitemradio "Small icons" [checked]'
+          - 'menuitemradio [checked]:'
+          - 'text: Small icons'
 
     - id: "10.5"
       name: menuitemradio_unchecked
       expect:
         includes:
-          - 'menuitemradio "Medium icons" [unchecked]'
-          - 'menuitemradio "Large icons" [unchecked]'
+          - 'menuitemradio [unchecked]:'
+          - 'text: Medium icons'
+          - 'text: Large icons'
 
 # =============================================================================
 # Test 11: Treeview with aria-selected and aria-expanded
@@ -310,20 +325,23 @@ test_11_tree:
       name: selected_expanded_treeitem
       expect:
         includes:
-          - 'treeitem "Documents" [selected, expanded]'
+          - 'treeitem [selected, expanded]:'
+          - 'text: Documents'
 
     - id: "11.2"
       name: unselected_collapsed_treeitem
       expect:
         includes:
-          - 'treeitem "Pictures" [selected=false, expanded=false]'
+          - 'treeitem [selected=false, expanded=false]:'
+          - 'text: Pictures'
 
     - id: "11.3"
       name: nested_treeitems
       expect:
         includes:
-          - 'treeitem "Report.pdf" [selected=false]'
-          - 'treeitem "Notes.txt" [selected=false]'
+          - 'treeitem [selected=false]:'
+          - 'text: Report.pdf'
+          - 'text: Notes.txt'
 
 # =============================================================================
 # Test 12: Grid Cells with aria-selected
@@ -336,25 +354,28 @@ test_12_grid:
       name: selected_columnheader
       expect:
         includes:
-          - 'columnheader "Value" [selected]'
+          - 'columnheader [selected]:'
+          - 'text: Value'
 
     - id: "12.2"
       name: unselected_columnheader
       expect:
         includes:
-          - 'columnheader "Name" [selected=false]'
+          - 'columnheader [selected=false]:'
+          - 'text: Name'
 
     - id: "12.3"
       name: selected_row
       expect:
         includes:
-          - 'row [selected]'
+          - 'row [selected]:'
 
     - id: "12.4"
       name: selected_gridcell
       expect:
         includes:
-          - 'gridcell "100" [selected]'
+          - 'gridcell [selected]:'
+          - 'text: 100'
 
 # =============================================================================
 # Test 13: Combined States
