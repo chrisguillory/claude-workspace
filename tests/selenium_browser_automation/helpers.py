@@ -125,6 +125,85 @@ def collect_roles(node: dict[str, Any]) -> set[str]:
     return roles
 
 
+def load_yaml_test_specs_nested(yaml_path: Path) -> list[dict[str, Any]]:
+    """Load test specs from YAML with section > categories > tests 3-level nesting.
+
+    Used for execute_javascript_tests.yaml which groups tests by category
+    within each execution context (about_blank, dom_basic, etc.).
+
+    Returns a list of dicts with: id, name, section, category, spec.
+    """
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+
+    cases: list[dict[str, Any]] = []
+
+    for section_key, section in data.items():
+        if section_key == 'metadata' or not isinstance(section, dict):
+            continue
+
+        # Section-level defaults (page, fixture, etc.)
+        section_defaults = {k: v for k, v in section.items() if k not in ['categories', 'description', 'note']}
+
+        categories = section.get('categories', {})
+        if not isinstance(categories, dict):
+            continue
+
+        for cat_key, category in categories.items():
+            if not isinstance(category, dict):
+                continue
+
+            cases.extend(
+                {
+                    'id': f'{section_key}.{cat_key}.{test["name"]}',
+                    'name': test['name'],
+                    'section': section_key,
+                    'category': cat_key,
+                    'spec': {**section_defaults, **test},
+                }
+                for test in category.get('tests', [])
+            )
+
+    return cases
+
+
+def assert_structured_result(result: dict[str, Any], expect: dict[str, Any]) -> None:
+    """Assert structured fields of a JavaScriptResult-like dict against expected values.
+
+    Supports:
+      - success: exact bool match
+      - result: exact value match (when present)
+      - result_type: exact string match
+      - error_type: exact string match
+      - note_contains: substring match on note field
+    """
+    if 'success' in expect:
+        assert result['success'] == expect['success'], (
+            f'Expected success={expect["success"]}, got {result["success"]}\nResult: {result}'
+        )
+
+    if 'result' in expect:
+        assert result.get('result') == expect['result'], (
+            f'Expected result={expect["result"]!r}, got {result.get("result")!r}\nResult: {result}'
+        )
+
+    if 'result_type' in expect:
+        assert result.get('result_type') == expect['result_type'], (
+            f'Expected result_type={expect["result_type"]!r}, got {result.get("result_type")!r}\nResult: {result}'
+        )
+
+    if 'error_type' in expect:
+        assert result.get('error_type') == expect['error_type'], (
+            f'Expected error_type={expect["error_type"]!r}, got {result.get("error_type")!r}\nResult: {result}'
+        )
+
+    if 'note_contains' in expect:
+        note = result.get('note') or ''
+        assert expect['note_contains'] in note, (
+            f'Expected note to contain {expect["note_contains"]!r}, got {note!r}\nResult: {result}'
+        )
+
+
 # ============================================================================
 # TREE TEST RUNNER
 # ============================================================================
