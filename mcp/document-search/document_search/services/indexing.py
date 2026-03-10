@@ -1565,9 +1565,9 @@ def _get_git_files(
     for line in included.stdout.splitlines():
         if any(line.endswith(ext) for ext in extensions):
             file_path = (directory / line).resolve()
-            # Only include files actually under the target directory
-            # (git ls-files can return ../paths for files outside cwd)
-            if file_path.is_relative_to(directory_resolved):
+            # Only include files that exist and are under the target directory.
+            # --cached returns git-tracked files that may have been deleted from disk.
+            if file_path.is_relative_to(directory_resolved) and file_path.is_file():
                 files.append(file_path)
                 if operation is not None and len(files) % 100 == 0:
                     operation.files_found = len(files)
