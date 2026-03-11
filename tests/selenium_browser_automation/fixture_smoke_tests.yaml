@@ -1,0 +1,342 @@
+# Fixture Smoke Tests
+#
+# ARIA tree snapshot tests for HTML fixtures that previously had zero coverage.
+# Each section targets a specific fixture and uses scoped selectors for precision.
+#
+# Test format:
+#   name: Unique identifier
+#   selector: CSS selector to scope the snapshot (defaults to section fixture)
+#   expect:
+#     includes: Strings that MUST appear in tree output
+#     excludes: Strings that MUST NOT appear in tree output
+
+metadata:
+  description: Fixture smoke tests for uncovered HTML examples
+  version: "1.0"
+
+# =============================================================================
+# SHADOW DOM TRAVERSAL
+# =============================================================================
+# Tests that ARIA snapshot traverses open shadow root boundaries.
+# Fixture has 5 web components with open shadow roots.
+
+shadow_dom:
+  fixture: examples/shadow-dom.html
+
+  tests:
+    - name: simple_open_shadow
+      description: Content inside simple open shadow root appears in tree
+      selector: "#test-1"
+      expect:
+        includes:
+          - "Shadow DOM Test 1 passed"
+
+    - name: nested_shadow_roots
+      description: Recursively traverses shadow-within-shadow
+      selector: "#test-2"
+      expect:
+        includes:
+          - "Outer shadow content"
+          - "Inner shadow content"
+
+    - name: slotted_content
+      description: Slotted light DOM content projected into shadow root
+      selector: "#test-3"
+      expect:
+        includes:
+          - "slotted light DOM content"
+
+    - name: multiple_shadow_hosts
+      description: Multiple independent shadow hosts on same page
+      selector: "#test-5"
+      expect:
+        includes:
+          - "First component"
+          - "Second component"
+          - "Third component"
+
+# =============================================================================
+# ROLE MAPPING (explicit ARIA roles)
+# =============================================================================
+# Tests that explicit role attributes are correctly identified in ARIA tree.
+# Fixture has 14 test sections covering dialog, search, listbox, tree, etc.
+
+role_mapping:
+  fixture: examples/role-mapping.html
+
+  tests:
+    - name: dialog_roles
+      description: Explicit role="dialog" and role="alertdialog"
+      selector: "#test-1"
+      expect:
+        includes:
+          - "- dialog"
+          - "- alertdialog"
+          - "Close"
+          - "Acknowledge"
+
+    - name: details_summary
+      description: Native details/summary elements
+      selector: "#test-2"
+      expect:
+        includes:
+          - "Open details summary"
+          - "This content is visible"
+
+    - name: search_landmark
+      description: Search form landmark and searchbox input
+      selector: "#test-5"
+      expect:
+        includes:
+          - "- search"
+
+    - name: listbox_option
+      description: ARIA listbox with option children
+      selector: "#test-7"
+      expect:
+        includes:
+          - "- listbox"
+          - "- option"
+
+    - name: tree_treeitem
+      description: Tree widget with treeitem hierarchy
+      selector: "#test-8"
+      expect:
+        includes:
+          - "- tree"
+          - "- treeitem"
+          - "Documents"
+
+    - name: grid_gridcell
+      description: Grid widget with row/gridcell structure
+      selector: "#test-9"
+      expect:
+        includes:
+          - "- grid"
+          - "- row"
+          - "- gridcell"
+
+    - name: menu_roles
+      description: Menu, menubar, menuitem, menuitemcheckbox, menuitemradio
+      selector: "#test-10"
+      expect:
+        includes:
+          - "- menubar"
+          - "- menuitem"
+
+    - name: tab_interface
+      description: Tablist with tab and tabpanel roles
+      selector: "#test-11"
+      expect:
+        includes:
+          - "- tablist"
+          - "- tab"
+          - "- tabpanel"
+
+# =============================================================================
+# CONTEXT-DEPENDENT ROLES
+# =============================================================================
+# Tests that roles change based on element context and attributes.
+# Fixture has 15 tests for header/footer scoping, section naming, etc.
+
+context_roles:
+  fixture: examples/context-roles.html
+
+  tests:
+    - name: anchor_with_href_is_link
+      description: Anchor elements with href get link role
+      selector: "#test-7"
+      expect:
+        includes:
+          - "- link"
+          - "Link with href"
+
+    - name: img_with_alt_has_role
+      description: Image with non-empty alt text gets img role
+      selector: "#test-9"
+      expect:
+        includes:
+          - "- img"
+          - "Meaningful image"
+
+    - name: fieldset_legend
+      description: Fieldset renders with legend text content
+      selector: "#test-15"
+      expect:
+        # Note: fieldset does not yet map to group role (renders as generic).
+        # Legend text still appears as content.
+        includes:
+          - "Personal Information"
+          - "Disabled fieldset"
+
+    - name: named_section_is_region
+      description: Section with aria-label gets region role
+      selector: "#test-5"
+      expect:
+        includes:
+          - "- region"
+
+# =============================================================================
+# NAMELESS LINK URL FALLBACK (include_urls=false)
+# =============================================================================
+# Tests the URL fallback feature for links without accessible names.
+# When include_urls=false, nameless links still show URL as fallback name.
+# Feature added in commit 47b26e6.
+
+nameless_links_urls_off:
+  fixture: examples/test_nameless_links.html
+  include_urls: false
+
+  tests:
+    - name: nameless_icon_link_gets_url_fallback
+      description: Icon link with empty alt shows URL as fallback name
+      expect:
+        includes:
+          - "/contact"
+
+    - name: named_text_link_no_url
+      description: Link with visible text does not need URL fallback
+      expect:
+        includes:
+          - "Products"
+
+    - name: aria_labeled_link_no_url
+      description: Link with aria-label does not need URL fallback
+      expect:
+        includes:
+          - "Our Services"
+
+# =============================================================================
+# NAMELESS LINK URL FALLBACK (include_urls=true)
+# =============================================================================
+# With include_urls=true, all links show URLs regardless of name.
+
+nameless_links_urls_on:
+  fixture: examples/test_nameless_links.html
+  include_urls: true
+
+  tests:
+    - name: all_links_show_urls
+      description: All links show URLs when include_urls=true
+      expect:
+        includes:
+          - "/contact"
+          - "/products"
+          - "/services"
+          - "Products"
+
+# =============================================================================
+# FORMS
+# =============================================================================
+# Tests form control role mapping in ARIA tree.
+
+forms:
+  fixture: examples/forms.html
+
+  tests:
+    - name: form_controls
+      description: Basic form elements get correct ARIA roles
+      expect:
+        includes:
+          - "- textbox"
+          - "- button"
+
+# =============================================================================
+# TABLES
+# =============================================================================
+# Tests table structure role mapping.
+
+tables:
+  fixture: examples/tables.html
+
+  tests:
+    - name: table_structure
+      description: Table elements map to table/row/cell roles
+      expect:
+        includes:
+          - "- table"
+          - "- row"
+
+# =============================================================================
+# IFRAMES
+# =============================================================================
+# Tests that iframe metadata is captured (content not traversed).
+
+iframes:
+  fixture: examples/iframes.html
+  include_page_info: true
+
+  tests:
+    - name: iframe_metadata
+      description: Iframe count appears in metadata footer
+      expect:
+        includes:
+          - "iframe"
+
+# =============================================================================
+# HIDDEN ELEMENTS (include_hidden=true)
+# =============================================================================
+# Tests hidden element detection with include_hidden enabled.
+
+hidden_elements:
+  fixture: examples/test_hidden_elements.html
+  include_hidden: true
+
+  tests:
+    - name: hidden_content_included
+      description: Hidden accordion panels appear with hidden marker
+      expect:
+        includes:
+          - "Hidden panel 1"
+          - "[hidden"
+
+# =============================================================================
+# HIDDEN ELEMENTS (default, include_hidden=false)
+# =============================================================================
+# Tests that hidden content is excluded by default.
+
+hidden_elements_default:
+  fixture: examples/test_hidden_elements.html
+
+  tests:
+    - name: hidden_content_excluded
+      description: Hidden accordion panels not in default tree
+      expect:
+        includes:
+          - "Section 1"
+          - "Section 2"
+        excludes:
+          - "Hidden panel 1"
+
+# =============================================================================
+# INTERACTIVE ELEMENTS
+# =============================================================================
+# Smoke test that interactive elements fixture renders correctly.
+
+interactive_elements:
+  fixture: examples/interactive-elements.html
+
+  tests:
+    - name: native_interactive
+      description: Native interactive elements appear in ARIA tree
+      expect:
+        includes:
+          - "- button"
+          - "- link"
+          - "- textbox"
+
+# =============================================================================
+# ERROR HANDLING FIXTURE
+# =============================================================================
+# Smoke test for the error handling fixture structure.
+
+error_handling:
+  fixture: examples/test_error_handling.html
+
+  tests:
+    - name: basic_structure
+      description: Error handling fixture renders with expected elements
+      expect:
+        includes:
+          - "Submit"
+          - "Hidden Behind Overlay"
