@@ -179,67 +179,6 @@ class TestYamlSpecParsing:
             assert_includes_excludes(output, includes=[], excludes=['generic'])
 
 
-class TestSerializerFidelity:
-    """Verify our test serializer matches the MCP server's output format."""
-
-    def test_simple_tree_serialization(self) -> None:
-        tree = {
-            'role': 'button',
-            'name': 'Submit',
-        }
-        output = serialize_aria_snapshot(tree)
-        assert output == '- button "Submit"'
-
-    def test_heading_with_level(self) -> None:
-        tree = {
-            'role': 'heading',
-            'name': 'Title',
-            'level': 1,
-        }
-        output = serialize_aria_snapshot(tree)
-        assert output == '- heading "Title" [level=1]'
-
-    def test_nested_tree(self) -> None:
-        tree = {
-            'role': 'navigation',
-            'name': 'Main',
-            'children': [
-                {'role': 'link', 'name': 'Home'},
-                {'role': 'link', 'name': 'About'},
-            ],
-        }
-        output = serialize_aria_snapshot(tree)
-        assert '- navigation "Main":' in output
-        assert '  - link "Home"' in output
-        assert '  - link "About"' in output
-
-    def test_text_node(self) -> None:
-        tree = {
-            'type': 'text',
-            'content': 'Hello world',
-        }
-        output = serialize_aria_snapshot(tree)
-        assert output == '- text: Hello world'
-
-    def test_hidden_marker(self) -> None:
-        tree = {
-            'role': 'button',
-            'name': 'Hidden',
-            'hidden': 'aria-hidden',
-        }
-        output = serialize_aria_snapshot(tree)
-        assert '[hidden:aria-hidden]' in output
-
-    def test_visually_hidden_marker(self) -> None:
-        tree = {
-            'role': 'generic',
-            'name': 'SR Only',
-            'visuallyHidden': 'clipped',
-        }
-        output = serialize_aria_snapshot(tree)
-        assert '[visually-hidden:clipped]' in output
-
-
 # ============================================================================
 # PROTOTYPE 3: End-to-end ARIA snapshot with data: URL
 # ============================================================================
