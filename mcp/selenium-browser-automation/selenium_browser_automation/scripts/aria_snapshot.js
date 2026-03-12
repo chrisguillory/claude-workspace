@@ -240,25 +240,64 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
     // Implicit role mapping per HTML AAM spec
     function getImplicitRole(el) {
         const tagName = el.tagName.toLowerCase();
-        const type = el.getAttribute('type')?.toLowerCase();
 
+        // Input types have complex mapping per HTML-AAM
+        if (tagName === 'input') {
+            const type = (el.getAttribute('type') || 'text').toLowerCase();
+            switch (type) {
+                case 'checkbox': return 'checkbox';
+                case 'radio': return 'radio';
+                case 'button': case 'submit': case 'reset': case 'image': return 'button';
+                case 'number': return 'spinbutton';
+                case 'range': return 'slider';
+                case 'search': return 'searchbox';
+                default: return 'textbox';
+            }
+        }
+
+        // Context-sensitive: header/footer are landmarks only at page level
+        if (tagName === 'header' || tagName === 'footer') {
+            const sectioning = ['article', 'aside', 'main', 'nav', 'section'];
+            let parent = el.parentElement;
+            while (parent) {
+                if (sectioning.includes(parent.tagName.toLowerCase())) return 'generic';
+                parent = parent.parentElement;
+            }
+            return tagName === 'header' ? 'banner' : 'contentinfo';
+        }
+
+        // Context-sensitive: section is region only with an accessible name
+        if (tagName === 'section') {
+            return (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby'))
+                ? 'region' : 'generic';
+        }
+
+        // Context-sensitive: anchor is link only with href
+        if (tagName === 'a') return el.hasAttribute('href') ? 'link' : 'generic';
+
+        // Context-sensitive: summary is button only as direct child of details
+        if (tagName === 'summary') {
+            return el.parentElement?.tagName.toLowerCase() === 'details' ? 'button' : 'generic';
+        }
+
+        // Context-sensitive: select is listbox when multiple or size > 1
+        if (tagName === 'select') {
+            return (el.hasAttribute('multiple') || parseInt(el.getAttribute('size'), 10) > 1)
+                ? 'listbox' : 'combobox';
+        }
+
+        // Static implicit role map
         const implicitRoles = {
-            'a': 'link',
             'button': 'button',
             'h1': 'heading', 'h2': 'heading', 'h3': 'heading',
             'h4': 'heading', 'h5': 'heading', 'h6': 'heading',
-            'header': 'banner',
-            'footer': 'contentinfo',
             'nav': 'navigation',
             'main': 'main',
             'article': 'article',
-            'section': 'region',
             'aside': 'complementary',
             'form': 'form',
             'p': 'paragraph',
-            'input': type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : 'textbox',
             'textarea': 'textbox',
-            'select': 'combobox',
             'ul': 'list',
             'ol': 'list',
             'li': 'listitem',
@@ -269,7 +308,19 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
             'img': 'img',
             'strong': 'strong',
             'em': 'emphasis',
-            'code': 'code'
+            'code': 'code',
+            'fieldset': 'group',
+            'details': 'group',
+            'dt': 'term',
+            'dd': 'definition',
+            'figure': 'figure',
+            'meter': 'meter',
+            'progress': 'progressbar',
+            'output': 'status',
+            'hr': 'separator',
+            'option': 'option',
+            'optgroup': 'group',
+            'address': 'group',
         };
 
         return implicitRoles[tagName] || 'generic';
@@ -422,6 +473,10 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         // Add expanded state for disclosure widgets, accordions, menus, etc.
         if (el.hasAttribute('aria-expanded')) {
             node.expanded = el.getAttribute('aria-expanded') === 'true';
+        } else if (el.tagName.toLowerCase() === 'details') {
+            node.expanded = el.open;
+        } else if (el.tagName.toLowerCase() === 'summary' && el.parentElement?.tagName.toLowerCase() === 'details') {
+            node.expanded = el.parentElement.open;
         }
 
         // Add disabled state

@@ -76,10 +76,12 @@ role_mapping:
           - "Acknowledge"
 
     - name: details_summary
-      description: Native details/summary elements
+      description: Native details/summary maps to group/button with expanded state
       selector: "#test-2"
       expect:
         includes:
+          - "- group"
+          - "- button"
           - "Open details summary"
           - "This content is visible"
 
@@ -133,6 +135,37 @@ role_mapping:
           - "- tab"
           - "- tabpanel"
 
+    - name: figure_role
+      description: Native figure element maps to figure role
+      selector: "#test-3"
+      expect:
+        includes:
+          - "- figure"
+
+    - name: progress_meter_roles
+      description: Progress maps to progressbar, meter maps to meter
+      selector: "#test-4"
+      expect:
+        includes:
+          - "- progressbar"
+          - "- meter"
+
+    - name: definition_list_roles
+      description: dt maps to term, dd maps to definition
+      selector: "#test-13"
+      expect:
+        includes:
+          - "- term"
+          - "- definition"
+
+    - name: output_status_role
+      description: Output element maps to status role
+      selector: "#test-14"
+      expect:
+        includes:
+          - "- status"
+          - "- spinbutton"
+
 # =============================================================================
 # CONTEXT-DEPENDENT ROLES
 # =============================================================================
@@ -160,12 +193,11 @@ context_roles:
           - "Meaningful image"
 
     - name: fieldset_legend
-      description: Fieldset renders with legend text content
+      description: Fieldset maps to group role with legend text
       selector: "#test-15"
       expect:
-        # Note: fieldset does not yet map to group role (renders as generic).
-        # Legend text still appears as content.
         includes:
+          - "- group"
           - "Personal Information"
           - "Disabled fieldset"
 
@@ -175,6 +207,33 @@ context_roles:
       expect:
         includes:
           - "- region"
+
+    - name: header_inside_article_not_banner
+      description: Header inside article is generic, not banner
+      selector: "#test-2"
+      expect:
+        includes:
+          - "Article header (NOT banner)"
+        excludes:
+          - "- banner"
+
+    - name: footer_inside_section_not_contentinfo
+      description: Footer inside section is generic, not contentinfo
+      selector: "#test-4"
+      expect:
+        includes:
+          - "Section footer (NOT contentinfo)"
+        excludes:
+          - "- contentinfo"
+
+    - name: anchor_without_href_not_link
+      description: Anchor without href is generic, not link
+      selector: "#test-8"
+      expect:
+        includes:
+          - "Anchor without href"
+        excludes:
+          - "- link"
 
 # =============================================================================
 # NAMELESS LINK URL FALLBACK (include_urls=false)
