@@ -38,23 +38,7 @@ test_1_native_checkboxes:
   selector: "#test-1-native-checkboxes .demo"
   tests:
     - id: "1.1"
-      name: unchecked_checkbox
-      expect:
-        includes:
-          - 'checkbox "Unchecked checkbox" [unchecked]'
-          - 'checkbox "Checked checkbox" [checked]'
-          - 'checkbox "Indeterminate checkbox" [checked=mixed]'
-
-    - id: "1.2"
-      name: checked_checkbox
-      expect:
-        includes:
-          - 'checkbox "Unchecked checkbox" [unchecked]'
-          - 'checkbox "Checked checkbox" [checked]'
-          - 'checkbox "Indeterminate checkbox" [checked=mixed]'
-
-    - id: "1.3"
-      name: indeterminate_checkbox
+      name: all_checkbox_states
       expect:
         includes:
           - 'checkbox "Unchecked checkbox" [unchecked]'
@@ -107,17 +91,7 @@ test_3_aria_checkboxes:
   selector: "#test-3-aria-checkboxes .demo"
   tests:
     - id: "3.1"
-      name: aria_unchecked
-      expect:
-        includes:
-          - 'checkbox [unchecked]:'
-          - 'checkbox [checked]:'
-          - 'checkbox [checked=mixed]:'
-          - 'text: ARIA unchecked'
-          - 'text: ARIA checked'
-
-    - id: "3.2"
-      name: aria_checked
+      name: aria_checkbox_all_states
       expect:
         includes:
           - 'checkbox [unchecked]:'
