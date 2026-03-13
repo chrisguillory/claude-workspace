@@ -136,7 +136,9 @@ if __name__ == '__main__':
         hook_data = read_hook_input()
         info = get_session_info(hook_data)
         print_session_info(info)
-    except Exception as e:
+    except (
+        Exception
+    ) as e:  # exception_safety_linter.py: swallowed-exception — hook must not crash; logs error and exits cleanly
         # Hooks should not crash - print error and continue
         print(f'Error detecting session: {e}', file=sys.stderr)
         sys.exit(0)  # Exit successfully to not block Claude

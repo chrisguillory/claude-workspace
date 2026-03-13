@@ -157,7 +157,7 @@ def handle_hook() -> None:
                 permission_decision_reason=f'all {len(subcommands)} subcommands match allowed Bash prefixes',
             )
         )
-        print(output.model_dump_json(by_alias=True, exclude_none=True))
+        print(output.model_dump_json())
 
 
 def analyze_command(command: str) -> Sequence[str]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import pydantic
 from pydantic.alias_generators import to_camel
@@ -27,6 +28,7 @@ class StrictModel(pydantic.BaseModel):
         use_attribute_docstrings=True,
         validate_by_alias=True,
         validate_by_name=True,
+        serialize_by_alias=True,
     )
 
 
@@ -35,11 +37,26 @@ class CamelModel(StrictModel):
 
     For Claude Code's JSON protocol, which uses camelCase keys
     (hookSpecificOutput, permissionDecision, etc.) while Python convention
-    is snake_case. Accepts both forms on input; serializes to camelCase.
-
-    Serialize with: ``model_dump_json(by_alias=True, exclude_none=True)``
+    is snake_case. Accepts both forms on input; serializes to camelCase
+    with None fields excluded by default.
     """
 
     model_config = pydantic.ConfigDict(
         alias_generator=to_camel,
     )
+
+    def model_dump(
+        self,
+        *,
+        exclude_none: bool = True,
+        **kwargs: Any,  # strict_typing_linter.py: loose-typing — override must match BaseModel.model_dump signature
+    ) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — override must match BaseModel.model_dump signature
+        return super().model_dump(exclude_none=exclude_none, **kwargs)
+
+    def model_dump_json(
+        self,
+        *,
+        exclude_none: bool = True,
+        **kwargs: Any,  # strict_typing_linter.py: loose-typing — override must match BaseModel.model_dump_json signature
+    ) -> str:
+        return super().model_dump_json(exclude_none=exclude_none, **kwargs)

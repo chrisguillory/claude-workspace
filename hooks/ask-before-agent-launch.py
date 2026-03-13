@@ -49,7 +49,7 @@ try:
         PreToolUseHookInput,
         PreToolUseHookOutput,
     )
-except Exception as e:
+except Exception as e:  # exception_safety_linter.py: swallowed-exception — fail closed: import error triggers manual approval, not silent pass
     # Fail CLOSED: if deps can't be imported, require manual approval
     print(f'hook import error: {e}', file=sys.stderr)
     ask_stdlib('hook import error — requesting manual approval')
@@ -63,7 +63,7 @@ def ask(reason: str) -> None:
             permission_decision_reason=reason,
         )
     )
-    print(output.model_dump_json(by_alias=True, exclude_none=True))
+    print(output.model_dump_json())
     sys.exit(0)
 
 

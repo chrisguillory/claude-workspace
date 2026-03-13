@@ -121,8 +121,6 @@ class PreToolUseDecision(CamelModel):
 class PreToolUseHookOutput(CamelModel):
     """PreToolUse hook output.
 
-    Serialize with: ``model_dump_json(by_alias=True, exclude_none=True)``
-
     See: https://code.claude.com/docs/en/hooks#pretooluse
     """
 

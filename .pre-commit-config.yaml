@@ -42,7 +42,7 @@ repos:
       - id: strict-typing-linter
         name: strict-typing-linter
         description: Check for mutable/loose types in annotations
-        entry: ./linters/strict_typing_linter.py --report-unused-directives mcp/document-search/ scripts/ linters/ cc-lib/
+        entry: ./linters/strict_typing_linter.py --report-unused-directives hooks/ mcp/document-search/ scripts/ linters/ cc-lib/
         language: system
         pass_filenames: false
         always_run: true
@@ -50,7 +50,7 @@ repos:
       - id: exception-safety-linter
         name: exception-safety-linter
         description: Check for exception handling anti-patterns
-        entry: ./linters/exception_safety_linter.py --report-unused-directives mcp/document-search/ scripts/ linters/ cc-lib/
+        entry: ./linters/exception_safety_linter.py --report-unused-directives hooks/ mcp/document-search/ scripts/ linters/ cc-lib/
         language: system
         pass_filenames: false
         always_run: true
@@ -58,7 +58,7 @@ repos:
       - id: suppression-rationale-linter
         name: suppression-rationale-linter
         description: Check that lint suppression directives include rationale
-        entry: ./linters/suppression_rationale_linter.py mcp/document-search/ scripts/ linters/ cc-lib/
+        entry: ./linters/suppression_rationale_linter.py hooks/ mcp/document-search/ scripts/ linters/ cc-lib/
         language: system
         pass_filenames: false
         always_run: true
