@@ -179,59 +179,86 @@ function getAccessibilitySnapshot(rootSelector, includeUrls, includeHidden = fal
         return { inAT: true, marker: null };
     }
 
-    // Accessible name computation per WAI-ARIA spec
-    // IMPORTANT: This uses getElementById which accesses hidden elements.
-    // Per W3C, aria-labelledby references MUST include hidden element content.
+    // Accessible name computation per WAI-ARIA AccName 1.2 spec (simplified)
+    // Priority: aria-labelledby (2B) → aria-label (2D) → host language (2E) → content → title (2I)
+    // Uses textContent for labeling elements (not recursive per-element computation)
     function computeAccessibleName(el) {
-        // Step 1: aria-label
-        if (el.getAttribute('aria-label')) {
-            return normalize(el.getAttribute('aria-label'));
-        }
-
-        // Step 2: aria-labelledby
-        // Note: Referenced elements are accessed via getElementById regardless of
-        // their hidden state. This is W3C-mandated behavior.
+        // Step 2B: aria-labelledby (MUST be before aria-label per spec)
+        // Referenced elements accessed via getElementById regardless of hidden state (W3C-mandated)
         if (el.getAttribute('aria-labelledby')) {
             const ids = el.getAttribute('aria-labelledby').split(/\s+/);
-            return ids
+            const name = ids
                 .map(id => {
                     const refEl = document.getElementById(id);
                     return refEl ? normalize(refEl.textContent) : '';
                 })
                 .filter(Boolean)
                 .join(' ');
+            if (name) return name;
         }
 
-        // Step 3: Label element association
-        if (el.id) {
-            const label = document.querySelector(`label[for="${el.id}"]`);
-            if (label) return normalize(label.textContent);
+        // Step 2D: aria-label
+        if (el.getAttribute('aria-label')) {
+            return normalize(el.getAttribute('aria-label'));
         }
 
-        // Step 4: Implicit label (form control inside label)
-        if (el.closest('label')) {
-            return normalize(el.closest('label').textContent);
-        }
-
-        // Step 5: Element content for links, buttons, headings
         const tagName = el.tagName.toLowerCase();
+
+        // Step 2E: Host language label
+        // Form controls: label element (handles both for= and wrapping via native API)
+        if (el.labels && el.labels.length) {
+            return Array.from(el.labels)
+                .map(label => normalize(label.textContent))
+                .filter(Boolean)
+                .join(' ');
+        }
+
+        // Fieldset: first legend child
+        if (tagName === 'fieldset') {
+            for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+                if (child.tagName.toLowerCase() === 'legend') {
+                    return normalize(child.textContent);
+                }
+            }
+        }
+
+        // Figure: first figcaption child
+        if (tagName === 'figure') {
+            for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+                if (child.tagName.toLowerCase() === 'figcaption') {
+                    return normalize(child.textContent);
+                }
+            }
+        }
+
+        // Table: first caption child
+        if (tagName === 'table') {
+            for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+                if (child.tagName.toLowerCase() === 'caption') {
+                    return normalize(child.textContent);
+                }
+            }
+        }
+
+        // Image: alt attribute
+        if (tagName === 'img') {
+            const alt = el.getAttribute('alt');
+            if (alt != null) return normalize(alt);
+        }
+
+        // Name from content: buttons, links, headings
         if (['button', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
             return normalize(el.textContent);
         }
 
-        // Step 6: Title attribute
-        if (el.getAttribute('title')) {
-            return normalize(el.getAttribute('title'));
-        }
-
-        // Step 7: Alt text for images
-        if (tagName === 'img') {
-            return normalize(el.getAttribute('alt') || '');
-        }
-
-        // Step 8: Placeholder for inputs
+        // Input value/placeholder
         if (['input', 'textarea'].includes(tagName)) {
             return normalize(el.placeholder || el.value || '');
+        }
+
+        // Step 2I: Tooltip (title attribute) as last resort
+        if (el.getAttribute('title')) {
+            return normalize(el.getAttribute('title'));
         }
 
         return '';
