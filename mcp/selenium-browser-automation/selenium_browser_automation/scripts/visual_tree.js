@@ -163,40 +163,72 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
         return { visible: true, marker: null };
     }
 
-    // Accessible name computation (same as ARIA tree)
+    // Accessible name computation per WAI-ARIA AccName 1.2 spec (same as ARIA tree)
     function computeAccessibleName(el) {
-        if (el.getAttribute('aria-label')) {
-            return normalize(el.getAttribute('aria-label'));
-        }
+        // Step 2B: aria-labelledby (before aria-label per spec)
         if (el.getAttribute('aria-labelledby')) {
             const ids = el.getAttribute('aria-labelledby').split(/\s+/);
-            return ids
+            const name = ids
                 .map(id => {
                     const refEl = document.getElementById(id);
                     return refEl ? normalize(refEl.textContent) : '';
                 })
                 .filter(Boolean)
                 .join(' ');
+            if (name) return name;
         }
-        if (el.id) {
-            const label = document.querySelector(`label[for="${el.id}"]`);
-            if (label) return normalize(label.textContent);
-        }
-        if (el.closest('label')) {
-            return normalize(el.closest('label').textContent);
+        // Step 2D: aria-label
+        if (el.getAttribute('aria-label')) {
+            return normalize(el.getAttribute('aria-label'));
         }
         const tagName = el.tagName.toLowerCase();
+        // Step 2E: Host language label — form controls via native API
+        if (el.labels && el.labels.length) {
+            return Array.from(el.labels)
+                .map(label => normalize(label.textContent))
+                .filter(Boolean)
+                .join(' ');
+        }
+        // Fieldset: first legend child
+        if (tagName === 'fieldset') {
+            for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+                if (child.tagName.toLowerCase() === 'legend') {
+                    return normalize(child.textContent);
+                }
+            }
+        }
+        // Figure: first figcaption child
+        if (tagName === 'figure') {
+            for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+                if (child.tagName.toLowerCase() === 'figcaption') {
+                    return normalize(child.textContent);
+                }
+            }
+        }
+        // Table: first caption child
+        if (tagName === 'table') {
+            for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+                if (child.tagName.toLowerCase() === 'caption') {
+                    return normalize(child.textContent);
+                }
+            }
+        }
+        // Image: alt attribute
+        if (tagName === 'img') {
+            const alt = el.getAttribute('alt');
+            if (alt != null) return normalize(alt);
+        }
+        // Name from content: buttons, links, headings
         if (['button', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
             return normalize(el.textContent);
         }
-        if (el.getAttribute('title')) {
-            return normalize(el.getAttribute('title'));
-        }
-        if (tagName === 'img') {
-            return normalize(el.getAttribute('alt') || '');
-        }
+        // Input value/placeholder
         if (['input', 'textarea'].includes(tagName)) {
             return normalize(el.placeholder || el.value || '');
+        }
+        // Step 2I: Tooltip (title attribute) as last resort
+        if (el.getAttribute('title')) {
+            return normalize(el.getAttribute('title'));
         }
         return '';
     }
