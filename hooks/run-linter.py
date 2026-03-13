@@ -31,6 +31,12 @@ Usage in .claude/settings.local.json::
 
 The linter path is relative to the repository root (cwd of the hook).
 Multiple linters can be configured as separate hook entries.
+
+Exit codes (Claude Code hook protocol):
+    0 — Success, no feedback shown.
+    1 — Hook error, logged but non-blocking.
+    2 — Blocking error: stderr is shown to Claude as inline feedback
+        and Claude must address the violation before continuing.
 """
 
 from __future__ import annotations
