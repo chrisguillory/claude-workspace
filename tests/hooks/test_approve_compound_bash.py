@@ -6,18 +6,23 @@ detection via ApproveCompoundBashException, prefix matching, and settings loadin
 
 from __future__ import annotations
 
+import importlib
 import io
 import json
+import os
 from collections.abc import Generator
 from pathlib import Path
 from types import ModuleType
 
 import bashlex.errors
 import bashlex.tokenizer
+import cc_lib.schemas
+import cc_lib.schemas.base
+import cc_lib.schemas.hooks
 import git
 import pydantic
 import pytest
-from cc_lib.utils import temporary_module
+from cc_lib.utils import load_module_from_path, temporary_module
 
 REPO_ROOT = Path(git.Repo(__file__, search_parent_directories=True).working_tree_dir or '.').resolve(strict=True)
 
@@ -874,21 +879,17 @@ class TestMainIntegration:
             'from MatchedPairError\n'
         )
 
-    def test_unknown_field_passthrough_via_boundary(
+    def test_unknown_field_forward_compatible(
         self,
         hook_module: ModuleType,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """extra='forbid' is intentional: unknown fields trigger safe passthrough.
+        """extra='allow' (default): unknown fields preserved, hook processes normally.
 
-        StrictModel(extra='forbid') rejects payloads with unknown fields. This
-        is a deliberate design choice: when Claude Code adds new fields, the hook
-        fails safely (ErrorBoundary catches ValidationError, exits 0, passes
-        through to built-in permissions) rather than silently ignoring potentially
-        important new fields. The tradeoff is that the hook stops auto-approving
-        until the schema is updated — a loud failure that gets fixed, rather than
-        a silent one that hides new behavior.
+        StrictModel defaults to extra='allow' so upstream schema evolution
+        (Claude Code adding new fields) doesn't break consumers.
+        Set CC_SCHEMA_EXTRA_FORBID=1 for strict mode (see sibling test).
         """
         payload = json.dumps(
             {
@@ -904,19 +905,79 @@ class TestMainIntegration:
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
-        with pytest.raises(SystemExit) as exc_info:
-            hook_module.handle_hook()
+        hook_module.handle_hook()
 
-        assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert captured.out == ''
-        assert captured.err == (
-            'approve-compound-bash hook error: 1 validation error for PreToolUseHookInput\n'
-            'new_future_field\n'
-            '  Extra inputs are not permitted '
-            "[type=extra_forbidden, input_value='surprise', input_type=str]\n"
-            '    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden\n'
-        )
+        output = json.loads(captured.out)
+        assert output == {
+            'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse',
+                'permissionDecision': 'allow',
+                'permissionDecisionReason': 'all 2 subcommands match allowed Bash prefixes',
+            }
+        }
+        assert captured.err == ''
+
+    def test_unknown_field_rejected_in_strict_mode(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """extra='forbid' (CC_SCHEMA_EXTRA_FORBID=1): unknown fields trigger safe passthrough.
+
+        StrictModel(extra='forbid') rejects payloads with unknown fields. The hook
+        fails safely (ErrorBoundary catches ValidationError, exits 0, passes
+        through to built-in permissions) rather than silently ignoring potentially
+        important new fields.
+
+        Requires module reload because StrictModel evaluates the env var at class
+        definition time, not at validation time.
+        """
+        try:
+            # Use os.environ directly (not monkeypatch.setenv) because the finally
+            # block must remove the var BEFORE reloading modules. monkeypatch doesn't
+            # tear down until after the function returns, which would be too late.
+            os.environ['CC_SCHEMA_EXTRA_FORBID'] = '1'
+
+            importlib.reload(cc_lib.schemas.base)
+            importlib.reload(cc_lib.schemas.hooks)
+            importlib.reload(cc_lib.schemas)
+
+            hook_module = load_module_from_path(REPO_ROOT / 'hooks' / 'approve-compound-bash.py')
+
+            payload = json.dumps(
+                {
+                    'session_id': 'test',
+                    'cwd': '/tmp',
+                    'transcript_path': '/tmp/transcript.jsonl',
+                    'hook_event_name': 'PreToolUse',
+                    'tool_name': 'Bash',
+                    'tool_input': {'command': 'echo a && echo b'},
+                    'tool_use_id': 'tu_test',
+                    'new_future_field': 'surprise',
+                }
+            )
+            monkeypatch.setattr('sys.stdin', io.StringIO(payload))
+
+            with pytest.raises(SystemExit) as exc_info:
+                hook_module.handle_hook()
+
+            assert exc_info.value.code == 0
+            captured = capsys.readouterr()
+            assert captured.out == ''
+            assert captured.err == (
+                'approve-compound-bash hook error: 1 validation error for PreToolUseHookInput\n'
+                'new_future_field\n'
+                '  Extra inputs are not permitted '
+                "[type=extra_forbidden, input_value='surprise', input_type=str]\n"
+                '    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden\n'
+            )
+
+        finally:
+            os.environ.pop('CC_SCHEMA_EXTRA_FORBID', None)
+            importlib.reload(cc_lib.schemas.base)
+            importlib.reload(cc_lib.schemas.hooks)
+            importlib.reload(cc_lib.schemas)
 
 
 class TestRealWorldCommands:

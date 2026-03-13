@@ -10,15 +10,9 @@ from typing import Any, Literal
 
 import pydantic
 
+from cc_lib.schemas.base import CamelModel, StrictModel
 
-class StrictModel(pydantic.BaseModel):
-    """Base model with strict validation."""
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',  # Reject unknown fields (fail-fast)
-        strict=True,  # Strict type coercion
-        frozen=True,  # Immutable after creation
-    )
+# -- Hook inputs --------------------------------------------------------------
 
 
 class SessionStartHookInput(StrictModel):
@@ -34,7 +28,7 @@ class SessionStartHookInput(StrictModel):
     source: Literal['startup', 'resume', 'compact', 'clear']
     model: str | None = None
     permission_mode: str | None = None
-    agent_type: str | None = None  # Present when started with --agent
+    agent_type: str | None = None
 
 
 class SessionEndHookInput(StrictModel):
@@ -51,25 +45,6 @@ class SessionEndHookInput(StrictModel):
     permission_mode: str | None = None
 
 
-# --- Tool input types ---
-
-
-class BashToolInput(StrictModel):
-    """Bash tool input schema.
-
-    See also: claude-session-mcp/src/schemas/session/models.py (validated against 23K+ occurrences).
-    """
-
-    command: str
-    description: str | None = None
-    timeout: int | None = None
-    run_in_background: bool | None = None
-    dangerouslyDisableSandbox: bool | None = None
-
-
-# --- PreToolUse hook types ---
-
-
 class PreToolUseHookInput(StrictModel):
     """PreToolUse hook input schema.
 
@@ -81,27 +56,74 @@ class PreToolUseHookInput(StrictModel):
     transcript_path: str
     hook_event_name: Literal['PreToolUse']
     tool_name: str
-    tool_input: Mapping[str, Any]
+    tool_input: Mapping[str, Any]  # strict_typing_linter.py: loose-typing — Claude Code sends arbitrary JSON per tool
     tool_use_id: str
     permission_mode: str | None = None
 
 
-class PreToolUseHookOutput(StrictModel):
-    """PreToolUse hook output — serialize with model_dump_json(by_alias=True).
+class PostToolUseHookInput(StrictModel):
+    """PostToolUse hook input schema.
+
+    See: https://code.claude.com/docs/en/hooks#posttooluse
+    """
+
+    session_id: str
+    cwd: str
+    transcript_path: str
+    hook_event_name: Literal['PostToolUse']
+    tool_name: str
+    tool_input: Mapping[str, Any]  # strict_typing_linter.py: loose-typing — Claude Code sends arbitrary JSON per tool
+    tool_response: Any = None  # strict_typing_linter.py: loose-typing — response format varies by tool type
+    tool_use_id: str
+    permission_mode: str | None = None
+
+
+# -- Tool input types ---------------------------------------------------------
+
+
+class BashToolInput(StrictModel):
+    """Bash tool input schema."""
+
+    command: str
+    description: str | None = None
+    timeout: int | None = None
+    run_in_background: bool | None = None
+    dangerously_disable_sandbox: bool | None = pydantic.Field(default=None, alias='dangerouslyDisableSandbox')
+
+
+class WriteToolInput(StrictModel):
+    """Write tool input schema."""
+
+    file_path: str
+    content: str
+
+
+class EditToolInput(StrictModel):
+    """Edit tool input schema."""
+
+    file_path: str
+    old_string: str
+    new_string: str
+    replace_all: bool | None = None
+
+
+# -- Hook outputs -------------------------------------------------------------
+
+
+class PreToolUseDecision(CamelModel):
+    """Permission decision within a PreToolUse hook output."""
+
+    hook_event_name: Literal['PreToolUse'] = 'PreToolUse'
+    permission_decision: Literal['allow', 'deny', 'ask']
+    permission_decision_reason: str | None = None
+
+
+class PreToolUseHookOutput(CamelModel):
+    """PreToolUse hook output.
+
+    Serialize with: ``model_dump_json(by_alias=True, exclude_none=True)``
 
     See: https://code.claude.com/docs/en/hooks#pretooluse
     """
 
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-    hook_specific_output: PreToolUseDecision = pydantic.Field(alias='hookSpecificOutput')
-
-
-class PreToolUseDecision(StrictModel):
-    """Permission decision within a PreToolUse hook output."""
-
-    model_config = pydantic.ConfigDict(populate_by_name=True)
-
-    hook_event_name: Literal['PreToolUse'] = pydantic.Field(default='PreToolUse', alias='hookEventName')
-    permission_decision: Literal['allow', 'deny', 'ask'] = pydantic.Field(alias='permissionDecision')
-    permission_decision_reason: str | None = pydantic.Field(default=None, alias='permissionDecisionReason')
+    hook_specific_output: PreToolUseDecision

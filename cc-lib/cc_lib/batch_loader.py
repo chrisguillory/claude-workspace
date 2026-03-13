@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import logging
-from collections.abc import Callable, Coroutine, Hashable, Sequence
+from collections.abc import Callable, Coroutine, Hashable, Sequence, Set
 from typing import Any
 
 import more_itertools
@@ -119,7 +119,7 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
                 self._load_task = asyncio.create_task(self._process_pending())
 
         await batch.future
-        return batch.results  # type: ignore[return-value]
+        return batch.results  # type: ignore[return-value]  # Batch.results is list[T|None], narrowed by caller
 
     # ── Fire-and-forget: submit / drain ──────────────────────────
 
@@ -256,7 +256,7 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
                     for batch in batches:
                         batch.deliver(request, response)
 
-        except Exception as e:
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception — error delivered to callers via futures, not re-raised in background task
             # Propagate exception to all waiting callers
             for futures in individual.values():
                 for future in futures:
@@ -269,7 +269,9 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
             # Capture for fire-and-forget callers
             if submitted and self._first_error is None:
                 self._first_error = e
-                logger.error(f'{self!r}: bulk_load failed: {e}')
+                logger.error(
+                    f'{self!r}: bulk_load failed: {e}'
+                )  # exception_safety_linter.py: logger-no-exc-info — traceback delivered via future, log is summary only
 
             # Schedule next batch if more requests arrived
             async with self._lock:
@@ -304,9 +306,11 @@ class _BatchRecord[TRequest: Hashable, TResponse]:
 
     def __init__(
         self,
-        results: list[TResponse | None],
+        results: list[TResponse | None],  # strict_typing_linter.py: mutable-type — deliver() mutates via __setitem__
         future: asyncio.Future[None],
-        position_map: dict[TRequest, tuple[int, ...]],
+        position_map: dict[
+            TRequest, tuple[int, ...]
+        ],  # strict_typing_linter.py: mutable-type — deliver() mutates via .pop()
         remaining: int,
     ) -> None:
         self.results = results
@@ -345,6 +349,6 @@ class _BatchRecord[TRequest: Hashable, TResponse]:
             self.future.set_exception(exc)
 
     @property
-    def pending_requests(self) -> set[TRequest]:
+    def pending_requests(self) -> Set[TRequest]:
         """Requests still waiting for delivery."""
         return set(self._position_map.keys())

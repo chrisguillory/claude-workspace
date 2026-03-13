@@ -167,7 +167,7 @@ class OpenRouterClient:
             embeddings = sorted(data['data'], key=lambda x: x['index'])
             return [e['embedding'] for e in embeddings]
 
-    async def list_models(  # strict_typing_linter.py: loose-typing
+    async def list_models(  # strict_typing_linter.py: loose-typing — API returns arbitrary model metadata dicts with no stable schema
         self,
     ) -> Sequence[Mapping[str, Any]]:
         """List all available embedding models.

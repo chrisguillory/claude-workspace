@@ -1,4 +1,6 @@
 # strict_typing_linter.py: skip-file
+# exception_safety_linter.py: skip-file
+# suppression_rationale_linter.py: skip-file
 # ruff: noqa: F841
 # mypy: disable-error-code="type-arg"
 """Strict typing linter test cases - demonstrates tuple-field and hashable-field rules.
@@ -20,9 +22,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
-# =============================================================================
-# tuple-field: Variable-length tuple in class fields
-# =============================================================================
+# -- tuple-field: Variable-length tuple in class fields -----------------------
 
 
 class TupleFieldViolationBasic:
@@ -98,9 +98,7 @@ class TupleFieldSuppressed:
     values: tuple[int, ...]  # strict_typing_linter.py: tuple-field
 
 
-# =============================================================================
-# hashable-field: Unhashable types in hashable class fields
-# =============================================================================
+# -- hashable-field: Unhashable types in hashable class fields ----------------
 
 
 @dataclass(frozen=True)
@@ -191,9 +189,7 @@ class HashableFieldSuppressed:
     items: Sequence[int]  # strict_typing_linter.py: hashable-field
 
 
-# =============================================================================
-# Interaction: Without hashable flag, Sequence/Mapping are fine
-# =============================================================================
+# -- Interaction: Without hashable flag, Sequence/Mapping are fine ------------
 
 
 class NonHashableClassSequenceOk:
@@ -208,9 +204,7 @@ class NonHashableClassMappingOk:
     data: Mapping[str, int]  # OK: not in hashable class
 
 
-# =============================================================================
-# Context: Hashable flag does NOT inherit to nested classes
-# =============================================================================
+# -- Context: Hashable flag does NOT inherit to nested classes ----------------
 
 
 @dataclass(frozen=True)
@@ -227,9 +221,7 @@ class OuterHashable:
         inner_values: tuple[int, ...]  # tuple-field: flag doesn't inherit
 
 
-# =============================================================================
-# Context: Non-frozen dataclasses are skipped entirely
-# =============================================================================
+# -- Context: Non-frozen dataclasses are skipped entirely ---------------------
 
 
 @dataclass
@@ -244,9 +236,7 @@ class NonFrozenDataclass:
 # raises ValueError (contradiction). See edge_cases for error test.
 
 
-# =============================================================================
-# Context: Frozen dataclass with hashable flag
-# =============================================================================
+# -- Context: Frozen dataclass with hashable flag -----------------------------
 
 
 @dataclass(frozen=True)
@@ -259,9 +249,7 @@ class FrozenDataclassHashable:
     values: tuple[int, ...]  # OK: tuple allowed in hashable
 
 
-# =============================================================================
-# Context: Regular class (not dataclass) with hashable flag
-# =============================================================================
+# -- Context: Regular class (not dataclass) with hashable flag ----------------
 
 
 class RegularClassHashable:
@@ -280,9 +268,7 @@ class RegularClassHashableViolation:
     items: Sequence[int]  # hashable-field: Sequence not hashable
 
 
-# =============================================================================
-# Stub Functions (for class method signatures)
-# =============================================================================
+# -- Stub Functions (for class method signatures) -----------------------------
 
 
 def standalone_function(items: tuple[int, ...]) -> tuple[str, ...]:

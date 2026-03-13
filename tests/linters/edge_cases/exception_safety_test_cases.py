@@ -1,4 +1,6 @@
 # exception_safety_linter.py: skip-file
+# strict_typing_linter.py: skip-file
+# suppression_rationale_linter.py: skip-file
 # ruff: noqa: E722, F841, SIM105
 # E722: bare except required for EXC001 test
 # F841: unused exception variable required for EXC005 test
@@ -42,9 +44,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# EXC001: Bare except (catches KeyboardInterrupt, SystemExit, CancelledError, GeneratorExit)
-# =============================================================================
+# -- EXC001: Bare except (catches KeyboardInterrupt, SystemExit, CancelledError, GeneratorExit)
 
 
 def exc001_violation_basic() -> None:
@@ -92,9 +92,7 @@ def exc001_correct() -> None:
 # If you truly need to catch everything, use `except BaseException:`.
 
 
-# =============================================================================
-# EXC002: Swallowed exception (broad catch without re-raise)
-# =============================================================================
+# -- EXC002: Swallowed exception (broad catch without re-raise) ---------------
 
 
 def exc002_violation_basic() -> None:
@@ -219,9 +217,7 @@ def exc002_suppressed_intentional() -> None:
         pass
 
 
-# =============================================================================
-# EXC003: Control flow in finally (return/break/continue suppresses exceptions)
-# =============================================================================
+# -- EXC003: Control flow in finally (return/break/continue suppresses exceptions)
 
 
 def exc003_violation_return() -> str:
@@ -324,9 +320,7 @@ def exc003_suppressed_top_level() -> int:
         return 0  # exception_safety_linter.py: finally-control-flow
 
 
-# =============================================================================
-# EXC004: Raise without from (implicit vs explicit exception chaining)
-# =============================================================================
+# -- EXC004: Raise without from (implicit vs explicit exception chaining) -----
 #
 # IMPORTANT: Raising a new exception inside an except block does NOT lose
 # the original traceback. Python automatically sets __context__ (implicit
@@ -401,9 +395,7 @@ def exc004_correct_reraise() -> None:
 # depending on intent - the goal is to be explicit about which you mean.
 
 
-# =============================================================================
-# EXC005: Unused exception variable (captured but never used)
-# =============================================================================
+# -- EXC005: Unused exception variable (captured but never used) --------------
 
 
 def exc005_violation_basic() -> None:
@@ -431,9 +423,7 @@ def exc005_correct_use_variable() -> None:
         return None
 
 
-# =============================================================================
-# EXC006: Logger without exc_info (loses traceback in logs)
-# =============================================================================
+# -- EXC006: Logger without exc_info (loses traceback in logs) ----------------
 
 
 def exc006_violation_basic() -> None:
@@ -486,9 +476,7 @@ def exc006_correct_when_suppressing() -> None:
         logger.exception('Optional feature failed, continuing')  # Traceback preserved
 
 
-# =============================================================================
-# EXC007: CancelledError not raised (breaks async cancellation)
-# =============================================================================
+# -- EXC007: CancelledError not raised (breaks async cancellation) ------------
 
 
 async def exc007_violation_basic() -> None:
@@ -595,9 +583,7 @@ async def exc007_correct_taskgroup() -> None:
         # CancelledError propagation is handled by TaskGroup.
 
 
-# =============================================================================
-# EXC008: GeneratorExit not raised (breaks generator cleanup protocol)
-# =============================================================================
+# -- EXC008: GeneratorExit not raised (breaks generator cleanup protocol) -----
 
 
 def exc008_violation_basic() -> Generator[int]:
@@ -672,9 +658,7 @@ def exc008_correct_contextmanager() -> None:
         process(conn)
 
 
-# =============================================================================
-# Combined Example: Error Boundary Pattern (Strong Exception Safety)
-# =============================================================================
+# -- Combined Example: Error Boundary Pattern (Strong Exception Safety) -------
 
 
 async def error_boundary_example() -> ErrorResult | SuccessResult:
@@ -726,14 +710,10 @@ async def error_boundary_example() -> ErrorResult | SuccessResult:
     return SuccessResult()
 
 
-# =============================================================================
-# Private Helper Functions (for examples above)
-# =============================================================================
+# -- Private Helper Functions (for examples above) ----------------------------
 
 
-# -----------------------------------------------------------------------------
-# Exception Classes
-# -----------------------------------------------------------------------------
+# -- Exception Classes --------------------------------------------------------
 
 
 class CustomError(Exception):
@@ -754,9 +734,7 @@ class PublicError(Exception):
     pass
 
 
-# -----------------------------------------------------------------------------
-# Result Classes
-# -----------------------------------------------------------------------------
+# -- Result Classes -----------------------------------------------------------
 
 
 class ErrorResult:
@@ -772,9 +750,7 @@ class SuccessResult:
     pass
 
 
-# -----------------------------------------------------------------------------
-# Stub Functions (alphabetical)
-# -----------------------------------------------------------------------------
+# -- Stub Functions (alphabetical) --------------------------------------------
 
 
 def acquire_resource() -> str:

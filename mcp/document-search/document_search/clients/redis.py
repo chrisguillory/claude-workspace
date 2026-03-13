@@ -208,7 +208,7 @@ class RedisClient:
         async for key in self._client.scan_iter(match=match, count=count):
             yield key.decode()
 
-    async def execute_pipeline(  # strict_typing_linter.py: loose-typing
+    async def execute_pipeline(  # strict_typing_linter.py: loose-typing — redis pipeline returns heterogeneous command results
         self, pipe: aioredis.Pipeline
     ) -> Sequence[Any]:
         """Execute a pipeline, gated by pipeline semaphore.

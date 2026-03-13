@@ -69,7 +69,7 @@ def log_qdrant_retry(retry_state: tenacity.RetryCallState) -> None:
     )
 
 
-def _qdrant_circuit_filter(thrown_type: type, thrown_value: BaseException) -> bool:  # noqa: ARG001
+def _qdrant_circuit_filter(thrown_type: type, thrown_value: BaseException) -> bool:  # noqa: ARG001 — circuitbreaker callback signature requires both args, only thrown_value is needed
     """Only count retryable errors toward circuit breaker."""
     return is_retryable_qdrant_error(thrown_value)
 

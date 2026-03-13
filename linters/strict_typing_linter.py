@@ -35,8 +35,8 @@ Design Philosophy:
       - # strict_typing_linter.py: ordering - suppress ordering violations
 
 Usage:
-    ./scripts/strict_typing_linter.py <files...>
-    ./scripts/strict_typing_linter.py .          # All .py files in cwd
+    ./linters/strict_typing_linter.py <files...>
+    ./linters/strict_typing_linter.py .          # All .py files in cwd
 
 File selection is handled by the caller (pre-commit, shell globs, etc.).
 This script is a pure analysis function - it checks what it's given.
@@ -62,9 +62,7 @@ from typing import Literal
 
 from hashability_inspector import HashabilityInspector, QualifiedName
 
-# =============================================================================
-# Configuration - What to check (not WHERE to check - that's the caller's job)
-# =============================================================================
+# -- Configuration ------------------------------------------------------------
 
 # Builtin names — skip these in the inspector (int, str, bool, etc. are not user-defined types)
 BUILTIN_NAMES: Set[str] = set(dir(builtins))
@@ -136,111 +134,17 @@ ANY_ALLOWED_POSITIONS: Mapping[QualifiedName, Sequence[int] | None] = {
     # AsyncGenerator[YieldType, SendType] - SendType often unused
     'typing.AsyncGenerator': (1,),
     'collections.abc.AsyncGenerator': (1,),
+    # Coroutine[T_co, T_contra, V_co] - all positions commonly Any in fire-and-forget patterns
+    'typing.Coroutine': None,
+    'collections.abc.Coroutine': None,
 }
-
-
-def _build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
-    """Build a mapping from local names to fully qualified names from imports.
-
-    Examples:
-        import typing -> {'typing': 'typing'}
-        import typing as t -> {'t': 'typing'}
-        from typing import Generator -> {'Generator': 'typing.Generator'}
-        from typing import Generator as Gen -> {'Gen': 'typing.Generator'}
-    """
-    import_map: dict[LocalName, QualifiedName] = {}
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                local_name = alias.asname or alias.name
-                import_map[local_name] = alias.name
-
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                for alias in node.names:
-                    local_name = alias.asname or alias.name
-                    import_map[local_name] = f'{node.module}.{alias.name}'
-
-    return import_map
-
-
-def _compute_module_path(filepath: Path) -> str:
-    """Compute importable module path by walking the package hierarchy.
-
-    Resolves to absolute path first to prevent infinite loops when
-    Path('.').parent returns Path('.') on relative paths.
-
-    Walks up from filepath through __init__.py chain to find the top-level package.
-    Example: mcp/document-search/document_search/schemas/vectors.py
-             -> 'document_search.schemas.vectors'
-    """
-    filepath = filepath.resolve()
-    # __init__.py represents the package itself, not a submodule named '__init__'
-    if filepath.name == '__init__.py':
-        parts: list[str] = []
-        parent = filepath.parent
-    else:
-        parts = [filepath.stem]
-        parent = filepath.parent
-    while (parent / '__init__.py').exists():
-        parts.append(parent.name)
-        parent = parent.parent
-    return '.'.join(reversed(parts))
-
-
-def _find_source_root(path: Path) -> Path:
-    """Find the source root for a path (directory above the top-level package).
-
-    For directories, returns the directory itself (resolved to absolute).
-    For files, walks up past __init__.py chain to find the package root.
-    Resolves to absolute first to prevent infinite loops on relative paths.
-    """
-    if path.is_dir():
-        return path.resolve()
-    path = path.resolve()
-    parent = path.parent
-    while (parent / '__init__.py').exists():
-        parent = parent.parent
-    return parent
-
-
-def _resolve_qualified_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> QualifiedName:
-    """Resolve a type node to its fully qualified canonical name.
-
-    Uses the import map to resolve local names to their fully qualified origins.
-    For attribute access (e.g., typing.Generator), resolves the base module.
-    """
-    if isinstance(node, ast.Name):
-        # Simple name - look up in import map
-        return import_map.get(node.id, node.id)
-
-    elif isinstance(node, ast.Attribute):
-        # Qualified name like typing.Generator or t.Generator
-        # Get the base (could be a module alias)
-        base_node = node.value
-        if isinstance(base_node, ast.Name):
-            # Resolve the base module name
-            resolved_base = import_map.get(base_node.id, base_node.id)
-            return f'{resolved_base}.{node.attr}'
-        else:
-            # Nested attributes - recursively resolve
-            resolved_base = _resolve_qualified_name(base_node, import_map)
-            return f'{resolved_base}.{node.attr}'
-
-    return ''
-
 
 # Directive prefix uses the script filename for discoverability - readers immediately
 # know which tool owns the directive, and searching for the filename finds both the
 # script and all its annotations in the codebase.
 DIRECTIVE_PREFIX = '# strict_typing_linter.py:'
 
-
-# =============================================================================
-# Data Types
-# =============================================================================
-
+# -- Data Types ---------------------------------------------------------------
 
 # Type aliases for constrained string values
 # Name resolution
@@ -248,11 +152,13 @@ type LocalName = str  # Local identifier as it appears in source (e.g., 'Generat
 type TypeClassification = Literal['mutable', 'transparent', 'allowed', 'unknown']
 
 type FieldContext = Literal['field', 'parameter', 'return']
-type DirectiveCode = Literal['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering']
+type DirectiveCode = Literal[
+    'mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering', 'unused-directive'
+]
 
 # Violation kind literals - used in discriminated unions
 type TypeViolationKind = Literal['mutable', 'loose', 'tuple-field', 'hashable-field']
-type OrderingViolationKind = Literal['ordering', 'missing-all', 'trailing-comma']
+type OrderingViolationKind = Literal['ordering', 'missing-all', 'trailing-comma', 'unused-directive']
 type ViolationKind = TypeViolationKind | OrderingViolationKind
 
 
@@ -286,160 +192,289 @@ class OrderingViolation:
 type Violation = TypeViolation | OrderingViolation
 
 
-# =============================================================================
-# AST Visitor
-# =============================================================================
+@dataclass(frozen=True)
+class DirectiveInstance:
+    """A suppression directive found in source code."""
+
+    line: int
+    codes: Sequence[str]
+    raw_text: str
 
 
-def _is_frozen_dataclass(node: ast.ClassDef) -> bool | None:
-    """Check if class has @dataclass decorator and whether it's frozen.
-
-    Returns:
-        True if @dataclass(frozen=True)
-        False if @dataclass (not frozen)
-        None if not a dataclass
-    """
-    for decorator in node.decorator_list:
-        # @dataclass (no args)
-        if isinstance(decorator, ast.Name) and decorator.id == 'dataclass':
-            return False
-        # @dataclasses.dataclass (qualified name, no args)
-        if isinstance(decorator, ast.Attribute) and decorator.attr == 'dataclass':
-            return False
-        # @dataclass(...) or @dataclasses.dataclass(...) with args
-        if isinstance(decorator, ast.Call):
-            func = decorator.func
-            if isinstance(func, ast.Name) and func.id == 'dataclass':
-                # Check for frozen=True
-                for keyword in decorator.keywords:
-                    if keyword.arg == 'frozen':
-                        if isinstance(keyword.value, ast.Constant):
-                            return keyword.value.value is True
-                return False
-            # dataclasses.dataclass(...)
-            if isinstance(func, ast.Attribute) and func.attr == 'dataclass':
-                for keyword in decorator.keywords:
-                    if keyword.arg == 'frozen':
-                        if isinstance(keyword.value, ast.Constant):
-                            return keyword.value.value is True
-                return False
-    return None
+# -- Main Entry Point ---------------------------------------------------------
 
 
-def _is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[LocalName, QualifiedName]) -> bool | None:
-    """Check if class has an attrs decorator and whether it's frozen.
-
-    Uses import tracking to resolve decorator names, avoiding false positives
-    from custom decorators with similar names.
-
-    Returns:
-        True if frozen attrs class (@frozen, @define(frozen=True), etc.)
-        False if non-frozen attrs class (@define, @mutable, etc.)
-        None if not an attrs class
-    """
-    # Fully qualified attrs decorator names
-    ALWAYS_FROZEN = {'attrs.frozen', 'attr.frozen'}
-    ALWAYS_MUTABLE = {'attrs.mutable', 'attr.mutable'}
-    CONFIGURABLE = {'attrs.define', 'attr.define', 'attrs.s', 'attr.s', 'attrs.attrs', 'attr.attrs'}
-
-    for decorator in node.decorator_list:
-        # Resolve decorator to qualified name
-        decorator_node = decorator.func if isinstance(decorator, ast.Call) else decorator
-        resolved = _resolve_qualified_name(decorator_node, import_map)
-
-        # Check against known attrs patterns
-        if resolved in ALWAYS_FROZEN:
-            return True
-        if resolved in ALWAYS_MUTABLE:
-            return False
-        if resolved in CONFIGURABLE:
-            # For Call decorators with frozen= keyword
-            if isinstance(decorator, ast.Call):
-                for kw in decorator.keywords:
-                    if kw.arg == 'frozen' and isinstance(kw.value, ast.Constant):
-                        return kw.value.value is True
-            # Default for configurable decorators without frozen=True
-            return False
-
-    return None
+# Map from directive codes to violation kinds for --ignore flag
+# 'ordering' maps to both 'ordering' and 'missing-all' since they're both ordering-related
+CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
+    'mutable-type': {'mutable'},
+    'loose-typing': {'loose'},
+    'tuple-field': {'tuple-field'},
+    'hashable-field': {'hashable-field'},
+    'ordering': {'ordering', 'missing-all', 'trailing-comma'},
+}
 
 
-def _is_variable_length_tuple(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> bool:
-    """Check if an AST node is a variable-length tuple annotation: tuple[X, ...].
+def main() -> int:
+    """CLI entry point: parse args, collect files, check, report."""
+    args = parse_args()
+    exclude_dirs = set(args.exclude)
+    ignored_kinds: set[ViolationKind] = set()
+    for code in args.ignore:
+        ignored_kinds.update(CODE_TO_KINDS[code])
+    respect_gitignore = not args.no_gitignore
 
-    Only matches the homogeneous form with Ellipsis. Does NOT match:
-    - tuple (bare, no subscript)
-    - tuple[int, str] (fixed-length)
-    - tuple[()] (empty tuple)
-    """
-    if not isinstance(node, ast.Subscript):
-        return False
+    # Collect files to check
+    files: list[Path] = []
+    for arg in args.paths:
+        path = Path(arg)
+        if arg == '.' or path.is_dir():
+            # Directory: find all .py files recursively
+            files.extend(find_python_files(path, exclude_dirs, respect_gitignore))
+        elif path.suffix == '.py' and path.is_file():
+            files.append(path)
+        # Silently skip non-.py files (allows pre-commit to pass mixed file lists)
 
-    # Check the container resolves to tuple
-    resolved = _resolve_qualified_name(node.value, import_map)
-    if isinstance(node.value, ast.Name):
-        if node.value.id != 'tuple' and resolved not in ('builtins.tuple', 'typing.Tuple'):
-            return False
-    elif isinstance(node.value, ast.Attribute):
-        if resolved not in ('builtins.tuple', 'typing.Tuple'):
-            return False
-    else:
-        return False
+    if not files:
+        return 0
 
-    # Check slice is (Type, Ellipsis)
-    if not isinstance(node.slice, ast.Tuple):
-        return False
-    if len(node.slice.elts) != 2:
-        return False
-    return isinstance(node.slice.elts[1], ast.Constant) and node.slice.elts[1].value is Ellipsis
+    # Discover packages with strict module ordering enabled
+    # Raises ValueError on unrecognized __strict_* variables (fail-fast on typos)
+    strict_ordering_packages = discover_strict_ordering_packages(files)
 
+    # Compute source roots from expanded files so the inspector can import project types.
+    # Uses files (not args.paths) to handle nested projects when scanning from repo root.
+    source_roots = tuple(sorted({find_source_root(f) for f in files}))
 
-def _is_strict_var(name: str) -> bool:
-    """Check if a name matches any recognized strict variable prefix."""
-    return any(name.startswith(prefix) for prefix in STRICT_VAR_PREFIXES) and name.endswith('__')
+    # Shared inspector for runtime hashability checking across all files
+    inspector = HashabilityInspector(source_roots=source_roots)
 
-
-def _validate_strict_var_in_class(name: str, class_name: str, lineno: int) -> None:
-    """Validate a __strict_*__ variable found in a class body.
-
-    Raises:
-        ValueError: If unrecognized or misplaced
-    """
-    if name not in RECOGNIZED_STRICT_VARS:
-        raise ValueError(
-            f'{class_name}:{lineno}: Unrecognized strict variable '
-            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?"
+    # Check all files
+    all_violations: list[Violation] = []
+    for filepath in files:
+        violations = check_file(
+            filepath,
+            strict_ordering_packages,
+            inspector=inspector,
+            respect_skip_file=not args.no_skip_file,
+            report_unused_directives=args.report_unused_directives,
         )
-    if name in MODULE_LEVEL_STRICT_VARS:
-        raise ValueError(
-            f"{class_name}:{lineno}: '{name}' is a module-level variable. Place it in __init__.py, not inside a class."
+        all_violations.extend(violations)
+
+    # Filter out ignored violation kinds
+    if ignored_kinds:
+        all_violations = [v for v in all_violations if v.kind not in ignored_kinds]
+
+    # Report violations
+    if all_violations:
+        for v in sorted(all_violations, key=lambda x: (x.filepath, x.line)):
+            print(format_violation(v))
+            print()
+
+        file_count = len({v.filepath for v in all_violations})
+        mutable_count = sum(1 for v in all_violations if v.kind == 'mutable')
+        loose_count = sum(1 for v in all_violations if v.kind == 'loose')
+        tuple_count = sum(1 for v in all_violations if v.kind == 'tuple-field')
+        hashable_count = sum(1 for v in all_violations if v.kind == 'hashable-field')
+        ordering_count = sum(1 for v in all_violations if v.kind in ('ordering', 'missing-all', 'trailing-comma'))
+        summary_parts = []
+        if mutable_count:
+            summary_parts.append(f'{mutable_count} mutable')
+        if loose_count:
+            summary_parts.append(f'{loose_count} loose')
+        if tuple_count:
+            summary_parts.append(f'{tuple_count} tuple-field')
+        if hashable_count:
+            summary_parts.append(f'{hashable_count} hashable-field')
+        if ordering_count:
+            summary_parts.append(f'{ordering_count} ordering')
+        print(f'Found {len(all_violations)} violation(s) ({", ".join(summary_parts)}) in {file_count} file(s).')
+        return 1
+
+    return 0
+
+
+def parse_args() -> argparse.Namespace:
+    """Build and parse CLI arguments."""
+    parser = argparse.ArgumentParser(
+        description='Check for mutable and loose types in annotations.',
+        epilog='Example: %(prog)s . --exclude .venv .git',
+    )
+    parser.add_argument(
+        'paths',
+        nargs='+',
+        help='Files or directories to check (use . for current directory)',
+    )
+    parser.add_argument(
+        '--exclude',
+        nargs='*',
+        default=[],
+        metavar='DIR',
+        help='Directories to exclude when searching recursively',
+    )
+    parser.add_argument(
+        '--ignore',
+        nargs='*',
+        default=[],
+        metavar='CODE',
+        choices=['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering'],
+        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, hashable-field, ordering)',
+    )
+    parser.add_argument(
+        '--no-gitignore',
+        action='store_true',
+        help='Do not respect .gitignore when scanning directories',
+    )
+    parser.add_argument(
+        '--no-skip-file',
+        action='store_true',
+        help='Ignore skip-file directives (used by validation harnesses)',
+    )
+    parser.add_argument(
+        '--report-unused-directives',
+        action='store_true',
+        help='Report suppression directives that do not match any violation',
+    )
+    return parser.parse_args()
+
+
+# -- File Processing ----------------------------------------------------------
+
+
+def check_file(
+    filepath: Path,
+    strict_ordering_packages: Set[Path],
+    inspector: HashabilityInspector | None = None,
+    *,
+    respect_skip_file: bool = True,
+    report_unused_directives: bool = False,
+) -> Sequence[Violation]:
+    """Check a single file for all violations."""
+    source = filepath.read_text(encoding='utf-8')
+    source_lines = source.splitlines()
+
+    # File-level skip directive (check first 10 lines)
+    has_skip_file = False
+    prefix_lower = DIRECTIVE_PREFIX.lower()
+    for line in source_lines[:10]:
+        if prefix_lower in line.lower() and 'skip-file' in line.lower():
+            has_skip_file = True
+            break
+
+    if has_skip_file and respect_skip_file and not report_unused_directives:
+        return []
+
+    tree = ast.parse(source, filename=str(filepath))
+    violations: list[Violation] = []
+
+    # Build import map for resolving type names
+    import_map = build_import_map(tree)
+
+    # Type checking
+    type_checker = AnnotationChecker(filepath, source_lines, import_map, inspector=inspector)
+    type_checker.visit(tree)
+
+    # Collect all raw violations (type + ordering) for unused directive detection
+    all_raw: list[tuple[int, str]] = list(type_checker.raw_violations)
+
+    # If skip-file is present and valid, suppress normal violations
+    if has_skip_file and respect_skip_file:
+        if report_unused_directives and not all_raw:
+            # skip-file is stale — no violations to suppress
+            skip_line = next(
+                i + 1
+                for i, line in enumerate(source_lines[:10])
+                if prefix_lower in line.lower() and 'skip-file' in line.lower()
+            )
+            return [
+                OrderingViolation(
+                    filepath=filepath,
+                    line=skip_line,
+                    kind='unused-directive',
+                    message='skip-file directive does not suppress any violations',
+                    source_line=source_lines[skip_line - 1].strip(),
+                    suggestion='Remove the stale skip-file directive',
+                )
+            ]
+        return []
+
+    violations.extend(type_checker.violations)
+
+    # Module ordering (if package or any parent opted in - recursive inheritance)
+    if is_under_strict_package(filepath, strict_ordering_packages):
+        # Skip __main__.py (entry point, never exports)
+        if filepath.name != '__main__.py':
+            # Skip __init__.py only if it has no definitions (just boilerplate)
+            if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
+                violations.extend(check_all_defined(filepath, tree, source_lines))
+                violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
+                violations.extend(check_module_ordering(filepath, tree, source_lines))
+                violations.extend(check_class_method_ordering(filepath, tree, source_lines))
+
+    if report_unused_directives:
+        directives = collect_directives(source_lines)
+        unused = find_unused_directives(
+            directives, all_raw, filepath, source_lines, type_checker.matched_directive_lines
         )
+        violations.extend(unused)
+
+    return violations
 
 
-def _get_strict_hashable_fields(node: ast.ClassDef) -> bool:
-    """Check if class body declares __strict_typing_linter__hashable_fields__ = True.
+def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: bool = True) -> Sequence[Path]:
+    """Find all .py files recursively under root, skipping excluded directories."""
+    all_files = sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
 
-    Also validates unrecognized __strict_*__ variables at the class level (fail-fast on typos).
+    if respect_gitignore:
+        ignored = get_git_ignored_files(all_files, root)
+        all_files = [f for f in all_files if f not in ignored]
 
-    Raises:
-        ValueError: If unrecognized or misplaced __strict_*__ variable found
+    return all_files
+
+
+def discover_strict_ordering_packages(files: Sequence[Path]) -> Set[Path]:
+    """Find packages that have opted into strict module ordering.
+
+    Two discovery methods:
+    1. Scan __init__.py files in the input list
+    2. Walk up from each input file to find parent __init__.py files
+
+    This ensures single-file invocations still respect package-level settings.
+    Raises ValueError on unrecognized __strict_* variables (fail-fast on typos).
+
+    Strictness is inherited: if a parent package has the flag, all child packages
+    are also considered strict.
     """
-    for item in node.body:
-        if isinstance(item, ast.Assign):
-            for target in item.targets:
-                if isinstance(target, ast.Name) and _is_strict_var(target.id):
-                    _validate_strict_var_in_class(target.id, node.name, item.lineno)
-                    if target.id == '__strict_typing_linter__hashable_fields__':
-                        if isinstance(item.value, ast.Constant):
-                            return item.value.value is True
-        # Also handle annotated assignment: ClassVar[bool] = True
-        elif isinstance(item, ast.AnnAssign):
-            if isinstance(item.target, ast.Name) and _is_strict_var(item.target.id):
-                _validate_strict_var_in_class(item.target.id, node.name, item.lineno)
-                if item.target.id == '__strict_typing_linter__hashable_fields__' and item.value is not None:
-                    if isinstance(item.value, ast.Constant):
-                        return item.value.value is True
-    return False
+    packages: set[Path] = set()
+    checked_init_files: set[Path] = set()
+
+    # Method 1: Check __init__.py files in input list
+    for f in files:
+        if f.name == '__init__.py':
+            checked_init_files.add(f)
+            if get_strict_module_ordering(f):
+                packages.add(f.parent)
+
+    # Method 2: Walk up from each file to find parent __init__.py files
+    for f in files:
+        for parent in f.parents:
+            init_path = parent / '__init__.py'
+            if init_path in checked_init_files:
+                continue
+            checked_init_files.add(init_path)
+            if init_path.exists():
+                if get_strict_module_ordering(init_path):
+                    packages.add(parent)
+
+    return packages
+
+
+def is_under_strict_package(filepath: Path, strict_packages: Set[Path]) -> bool:
+    """Check if filepath is under any strict ordering package (recursive inheritance)."""
+    return any(parent in strict_packages for parent in filepath.parents)
+
+
+# -- AST Visitor --------------------------------------------------------------
 
 
 class AnnotationChecker(ast.NodeVisitor):
@@ -468,10 +503,113 @@ class AnnotationChecker(ast.NodeVisitor):
         self.source_lines = source_lines
         self.import_map = import_map
         self.violations: list[Violation] = []  # Internal - OK to be mutable
+        self.raw_violations: list[tuple[int, DirectiveCode]] = []
         self._function_depth = 0  # Track nesting depth in functions
         self._skip_class_fields = False  # Skip field checking for non-frozen dataclasses
         self._hashable_fields = False  # In a __strict_typing_linter__hashable_fields__ class
         self._inspector = inspector
+        self._class_name_stack: list[str] = []  # Track enclosing class names for private-class detection
+        self._skip_any = False  # When True, _check_annotation uses _find_forbidden_type_no_any
+        self.matched_directive_lines: set[tuple[int, str]] = (
+            set()
+        )  # (line, code) pairs of directives that suppressed violations
+
+    # -- Visitor Methods ------------------------------------------------------
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Handle class definitions, skipping non-frozen dataclasses."""
+        frozen = is_frozen_dataclass(node)
+        if frozen is None:
+            frozen = is_frozen_attrs(node, self.import_map)
+        hashable = get_strict_hashable_fields(node)
+
+        # Save previous state
+        prev_skip = self._skip_class_fields
+        prev_hashable = self._hashable_fields
+
+        # Skip field checking for non-frozen dataclasses/attrs (mutable by design)
+        # Must unconditionally assign (not just set True) so nested classes reset properly
+        self._skip_class_fields = frozen is False
+
+        if frozen is False and hashable:
+            raise ValueError(
+                f"Class '{node.name}' at line {node.lineno}: "
+                f'__strict_typing_linter__hashable_fields__ = True is incompatible with non-frozen class. '
+                f'Non-frozen classes are mutable and cannot be hashable.'
+            )
+
+        # Set hashable fields mode - each class starts fresh (no inheritance from parent)
+        self._hashable_fields = hashable
+
+        # Track class name for private-class detection
+        self._class_name_stack.append(node.name)
+
+        # Visit children
+        self.generic_visit(node)
+
+        # Restore state
+        self._class_name_stack.pop()
+        self._skip_class_fields = prev_skip
+        self._hashable_fields = prev_hashable
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        """Check annotated assignments (x: Type = value)."""
+        # Check all annotated assignments at module/class level (not in functions)
+        # Skip if we're in a non-frozen dataclass
+        if self._function_depth == 0 and not self._skip_class_fields:
+            self._check_annotation(node.annotation, node.lineno, 'field')
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Check function parameter annotations."""
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Check async function parameter annotations."""
+        self._visit_function(node)
+
+    # -- Private Helper Methods -----------------------------------------------
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        """Shared logic for visiting function definitions."""
+        # Skip loose-typing (Any) checks on internal methods where Any is idiomatic:
+        # - Dunder methods: implement Python protocols (__getattr__, __next__, __enter__, etc.)
+        # - Private methods: internal implementation with small blast radius
+        # - Methods on private classes: public protocol methods on _-prefixed proxy classes
+        # Mutable type checks (list, dict, set) still apply in all cases.
+        is_dunder = node.name.startswith('__') and node.name.endswith('__')
+        is_private = node.name.startswith('_')
+        in_private_class = bool(self._class_name_stack and self._class_name_stack[-1].startswith('_'))
+        prev_skip_any = self._skip_any
+        self._skip_any = is_dunder or is_private or in_private_class
+
+        # Check ALL function parameters
+        self._check_function_parameters(node)
+
+        # Check return type annotation — but skip -> Any on generic wrapper
+        # functions identified by *args: Any, **kwargs: Any (the full decorator
+        # wrapper pattern: accept anything, return anything).
+        if node.returns:
+            if self._is_generic_wrapper(node) and self._get_type_name(node.returns) == 'Any':
+                pass  # Skip -> Any on decorator wrappers
+            else:
+                # Scope covers entire signature: from `def` line to last line before body.
+                # Uses body start - 1 (not annotation end) because the ): closing line
+                # may be after the annotation and is a natural place for directives.
+                scope_end = node.body[0].lineno - 1 if node.body else node.returns.lineno
+                self._check_annotation(
+                    node.returns, node.returns.lineno, 'return', scope_start=node.lineno, scope_end=scope_end
+                )
+
+        self._skip_any = prev_skip_any
+
+        # Track that we're in a function body
+        self._function_depth += 1
+
+        # Visit function body
+        self.generic_visit(node)
+
+        self._function_depth -= 1
 
     def _get_type_name(self, node: ast.expr) -> str:
         """Extract the name from a type expression."""
@@ -493,7 +631,7 @@ class AnnotationChecker(ast.NodeVisitor):
         Returns 'unknown' when qualified name doesn't provide disambiguation,
         signaling the caller to fall back to short name matching.
         """
-        qualified = _resolve_qualified_name(node, self.import_map)
+        qualified = resolve_qualified_name(node, self.import_map)
 
         if qualified in QUALIFIED_MUTABLE:
             return 'mutable'
@@ -503,70 +641,13 @@ class AnnotationChecker(ast.NodeVisitor):
             return 'allowed'
         return 'unknown'
 
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Handle class definitions, skipping non-frozen dataclasses."""
-        frozen = _is_frozen_dataclass(node)
-        if frozen is None:
-            frozen = _is_frozen_attrs(node, self.import_map)
-        hashable = _get_strict_hashable_fields(node)
-
-        # Save previous state
-        prev_skip = self._skip_class_fields
-        prev_hashable = self._hashable_fields
-
-        # Skip field checking for non-frozen dataclasses/attrs (mutable by design)
-        # Must unconditionally assign (not just set True) so nested classes reset properly
-        self._skip_class_fields = frozen is False
-
-        if frozen is False and hashable:
-            raise ValueError(
-                f"Class '{node.name}' at line {node.lineno}: "
-                f'__strict_typing_linter__hashable_fields__ = True is incompatible with non-frozen class. '
-                f'Non-frozen classes are mutable and cannot be hashable.'
-            )
-
-        # Set hashable fields mode - each class starts fresh (no inheritance from parent)
-        self._hashable_fields = hashable
-
-        # Visit children
-        self.generic_visit(node)
-
-        # Restore state
-        self._skip_class_fields = prev_skip
-        self._hashable_fields = prev_hashable
-
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        """Check annotated assignments (x: Type = value)."""
-        # Check all annotated assignments at module/class level (not in functions)
-        # Skip if we're in a non-frozen dataclass
-        if self._function_depth == 0 and not self._skip_class_fields:
-            self._check_annotation(node.annotation, node.lineno, 'field')
-        self.generic_visit(node)
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Check function parameter annotations."""
-        self._visit_function(node)
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        """Check async function parameter annotations."""
-        self._visit_function(node)
-
-    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        """Shared logic for visiting function definitions."""
-        # Check ALL function parameters
-        self._check_function_parameters(node)
-
-        # Check return type annotation
-        if node.returns:
-            self._check_annotation(node.returns, node.lineno, 'return')
-
-        # Track that we're in a function body
-        self._function_depth += 1
-
-        # Visit function body
-        self.generic_visit(node)
-
-        self._function_depth -= 1
+    def _is_generic_wrapper(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        """Check if function is a generic wrapper (*args: Any, **kwargs: Any)."""
+        vararg = node.args.vararg
+        kwarg = node.args.kwarg
+        vararg_is_any = vararg and vararg.annotation and self._get_type_name(vararg.annotation) == 'Any'
+        kwarg_is_any = kwarg and kwarg.annotation and self._get_type_name(kwarg.annotation) == 'Any'
+        return bool(vararg_is_any and kwarg_is_any)
 
     def _check_function_parameters(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         """Check parameter annotations on a function/method."""
@@ -576,15 +657,25 @@ class AnnotationChecker(ast.NodeVisitor):
             if arg.annotation:
                 self._check_annotation(arg.annotation, arg.lineno, 'parameter')
 
-        # Check *args annotation
-        if node.args.vararg and node.args.vararg.annotation:
-            self._check_annotation(node.args.vararg.annotation, node.args.vararg.lineno, 'parameter')
+        # Skip *args: Any, **kwargs: Any on generic wrappers (decorator pattern).
+        vararg = node.args.vararg
+        kwarg = node.args.kwarg
+        both_any = self._is_generic_wrapper(node)
 
-        # Check **kwargs annotation
-        if node.args.kwarg and node.args.kwarg.annotation:
-            self._check_annotation(node.args.kwarg.annotation, node.args.kwarg.lineno, 'parameter')
+        if vararg and vararg.annotation and not both_any:
+            self._check_annotation(vararg.annotation, vararg.lineno, 'parameter')
+        if kwarg and kwarg.annotation and not both_any:
+            self._check_annotation(kwarg.annotation, kwarg.lineno, 'parameter')
 
-    def _check_annotation(self, node: ast.expr, lineno: int, context: FieldContext) -> None:
+    def _check_annotation(
+        self,
+        node: ast.expr,
+        lineno: int,
+        context: FieldContext,
+        *,
+        scope_start: int | None = None,
+        scope_end: int | None = None,
+    ) -> None:
         """Check if an annotation contains forbidden types.
 
         Three-pass checking for field annotations:
@@ -600,7 +691,8 @@ class AnnotationChecker(ast.NodeVisitor):
         # Check ClassVar too — prefer abstract interfaces (Sequence) everywhere for consistency
         if context == 'field' and not self._hashable_fields:
             if self._find_tuple_field(node):
-                if not self._has_directive(lineno, 'tuple-field'):
+                self.raw_violations.append((lineno, 'tuple-field'))
+                if not self._has_directive(lineno, 'tuple-field', scope_start=scope_start, scope_end=scope_end):
                     self.violations.append(
                         TypeViolation(
                             filepath=self.filepath,
@@ -619,7 +711,8 @@ class AnnotationChecker(ast.NodeVisitor):
         if context == 'field' and self._hashable_fields and not self._is_classvar(node):
             unhashable = self._find_unhashable_field(node)
             if unhashable:
-                if not self._has_directive(lineno, 'hashable-field'):
+                self.raw_violations.append((lineno, 'hashable-field'))
+                if not self._has_directive(lineno, 'hashable-field', scope_start=scope_start, scope_end=scope_end):
                     self.violations.append(
                         TypeViolation(
                             filepath=self.filepath,
@@ -634,11 +727,14 @@ class AnnotationChecker(ast.NodeVisitor):
                     )
 
         # Pass 3: existing mutable/loose check (all contexts)
-        bad_type = self._find_forbidden_type(node)
+        # When _skip_any is set (dunders, private methods, methods on private classes),
+        # only check for mutable types — Any is allowed in internal/protocol code.
+        bad_type = self._find_forbidden_type_no_any(node) if self._skip_any else self._find_forbidden_type(node)
         if bad_type:
             kind: TypeViolationKind = 'loose' if bad_type in LOOSE_TYPES else 'mutable'
+            self.raw_violations.append((lineno, self._DIRECTIVE_CODES[kind]))
 
-            if self._has_directive(lineno, kind):
+            if self._has_directive(lineno, kind, scope_start=scope_start, scope_end=scope_end):
                 return
 
             suggestion = self.SUGGESTIONS.get(bad_type, 'a more specific type')
@@ -667,10 +763,10 @@ class AnnotationChecker(ast.NodeVisitor):
     def _is_classvar(self, node: ast.expr) -> bool:
         """Check if annotation is a ClassVar (not an instance field)."""
         if isinstance(node, ast.Subscript):
-            resolved = _resolve_qualified_name(node.value, self.import_map)
+            resolved = resolve_qualified_name(node.value, self.import_map)
             return resolved in ('typing.ClassVar', 'typing_extensions.ClassVar')
         if isinstance(node, ast.Name):
-            resolved = _resolve_qualified_name(node, self.import_map)
+            resolved = resolve_qualified_name(node, self.import_map)
             return resolved in ('typing.ClassVar', 'typing_extensions.ClassVar')
         return False
 
@@ -688,11 +784,11 @@ class AnnotationChecker(ast.NodeVisitor):
 
         Walks the entire type tree to catch nested tuples like Mapping[str, tuple[X, ...]].
         """
-        if _is_variable_length_tuple(node, self.import_map):
+        if is_variable_length_tuple(node, self.import_map):
             return True
 
         if isinstance(node, ast.Subscript):
-            resolved = _resolve_qualified_name(node.value, self.import_map)
+            resolved = resolve_qualified_name(node.value, self.import_map)
             # Annotated: check first type arg only (rest is metadata)
             if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
                 if isinstance(node.slice, ast.Tuple) and node.slice.elts:
@@ -745,7 +841,7 @@ class AnnotationChecker(ast.NodeVisitor):
             if container_class == 'transparent':
                 return self._get_type_name(node.value)
 
-            resolved = _resolve_qualified_name(node.value, self.import_map)
+            resolved = resolve_qualified_name(node.value, self.import_map)
             # Annotated: check first type arg only
             if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
                 if isinstance(node.slice, ast.Tuple) and node.slice.elts:
@@ -775,7 +871,7 @@ class AnnotationChecker(ast.NodeVisitor):
         if self._inspector is None:
             return None
 
-        qualified = _resolve_qualified_name(node, self.import_map)
+        qualified = resolve_qualified_name(node, self.import_map)
         if not qualified:
             return None
 
@@ -783,7 +879,7 @@ class AnnotationChecker(ast.NodeVisitor):
         if '.' not in qualified:
             if qualified in BUILTIN_NAMES:
                 return None
-            module_path = _compute_module_path(self.filepath)
+            module_path = compute_module_path(self.filepath)
             if not module_path:
                 return None  # Standalone __init__.py with no package — can't resolve
             qualified = f'{module_path}.{qualified}'
@@ -844,7 +940,7 @@ class AnnotationChecker(ast.NodeVisitor):
                 return None
 
             # Resolve qualified name for remaining checks
-            resolved_name = _resolve_qualified_name(node.value, self.import_map)
+            resolved_name = resolve_qualified_name(node.value, self.import_map)
 
             # Union, Optional - check all components
             if resolved_name in (
@@ -1010,7 +1106,7 @@ class AnnotationChecker(ast.NodeVisitor):
                 return None
 
             # Resolve qualified name for remaining checks
-            resolved_name = _resolve_qualified_name(node.value, self.import_map)
+            resolved_name = resolve_qualified_name(node.value, self.import_map)
 
             # Union, Optional - check all components
             if resolved_name in (
@@ -1104,46 +1200,210 @@ class AnnotationChecker(ast.NodeVisitor):
         'hashable-field': 'hashable-field',
     }
 
-    def _has_directive(self, lineno: int, violation_kind: TypeViolationKind) -> bool:
-        """Check if line has a directive comment for this check.
+    def _has_directive(
+        self,
+        lineno: int,
+        violation_kind: TypeViolationKind,
+        *,
+        scope_start: int | None = None,
+        scope_end: int | None = None,
+    ) -> bool:
+        """Check if line (or nearby lines within scope) has a directive comment.
 
-        Args:
-            lineno: Line number to check
-            violation_kind: Type violation kind - determines which code to check
+        When scope boundaries are provided, scans the full scope range. This
+        handles ruff-format wrapping function signatures across multiple lines:
+        the directive may be on the ``def`` line (above the violation) or on
+        the closing ``):`` line (below the violation).
 
-        Returns:
-            True if a matching directive comment is found
+        Without scope boundaries, falls back to scanning 4 lines forward from
+        the violation (the original heuristic for non-scoped annotations).
         """
-        if 0 < lineno <= len(self.source_lines):
-            line = self.source_lines[lineno - 1]
+        prefix_lower = DIRECTIVE_PREFIX.lower()
+        expected_code = self._DIRECTIVE_CODES.get(violation_kind)
+        if not expected_code:
+            return False
 
-            # Look for our directive prefix
-            prefix_lower = DIRECTIVE_PREFIX.lower()
+        start = scope_start if scope_start is not None else lineno
+        end = min(scope_end if scope_end is not None else lineno + 4, len(self.source_lines))
+
+        for check_lineno in range(start, end + 1):
+            if check_lineno < 1:
+                continue
+            line = self.source_lines[check_lineno - 1]
+
             if prefix_lower not in line.lower():
-                return False
+                continue
 
-            # Find the directive part
             directive_idx = line.lower().find(prefix_lower)
             codes_part = line[directive_idx + len(DIRECTIVE_PREFIX) :].strip()
 
-            # Strip trailing comment (# explanation)
+            # Strip trailing comment (# explanation) and rationale after separator
             if ' #' in codes_part:
                 codes_part = codes_part.split(' #')[0].strip()
 
-            # Split by comma and extract just the code (strip any trailing text)
             codes = [c.strip().lower().split()[0] for c in codes_part.split(',') if c.strip()]
-
-            # Look up the code for this violation kind
-            expected_code = self._DIRECTIVE_CODES.get(violation_kind)
-            if expected_code and expected_code in codes:
+            if expected_code in codes:
+                self.matched_directive_lines.add((check_lineno, expected_code))
                 return True
 
         return False
 
 
-# =============================================================================
-# Module Ordering Checks (opt-in via __strict_module_ordering__)
-# =============================================================================
+# -- Decorator & Class Inspection Helpers -------------------------------------
+
+
+def is_frozen_dataclass(node: ast.ClassDef) -> bool | None:
+    """Check if class has @dataclass decorator and whether it's frozen.
+
+    Returns:
+        True if @dataclass(frozen=True)
+        False if @dataclass (not frozen)
+        None if not a dataclass
+    """
+    for decorator in node.decorator_list:
+        # @dataclass (no args)
+        if isinstance(decorator, ast.Name) and decorator.id == 'dataclass':
+            return False
+        # @dataclasses.dataclass (qualified name, no args)
+        if isinstance(decorator, ast.Attribute) and decorator.attr == 'dataclass':
+            return False
+        # @dataclass(...) or @dataclasses.dataclass(...) with args
+        if isinstance(decorator, ast.Call):
+            func = decorator.func
+            if isinstance(func, ast.Name) and func.id == 'dataclass':
+                # Check for frozen=True
+                for keyword in decorator.keywords:
+                    if keyword.arg == 'frozen':
+                        if isinstance(keyword.value, ast.Constant):
+                            return keyword.value.value is True
+                return False
+            # dataclasses.dataclass(...)
+            if isinstance(func, ast.Attribute) and func.attr == 'dataclass':
+                for keyword in decorator.keywords:
+                    if keyword.arg == 'frozen':
+                        if isinstance(keyword.value, ast.Constant):
+                            return keyword.value.value is True
+                return False
+    return None
+
+
+def is_frozen_attrs(node: ast.ClassDef, import_map: Mapping[LocalName, QualifiedName]) -> bool | None:
+    """Check if class has an attrs decorator and whether it's frozen.
+
+    Uses import tracking to resolve decorator names, avoiding false positives
+    from custom decorators with similar names.
+
+    Returns:
+        True if frozen attrs class (@frozen, @define(frozen=True), etc.)
+        False if non-frozen attrs class (@define, @mutable, etc.)
+        None if not an attrs class
+    """
+    # Fully qualified attrs decorator names
+    ALWAYS_FROZEN = {'attrs.frozen', 'attr.frozen'}
+    ALWAYS_MUTABLE = {'attrs.mutable', 'attr.mutable'}
+    CONFIGURABLE = {'attrs.define', 'attr.define', 'attrs.s', 'attr.s', 'attrs.attrs', 'attr.attrs'}
+
+    for decorator in node.decorator_list:
+        # Resolve decorator to qualified name
+        decorator_node = decorator.func if isinstance(decorator, ast.Call) else decorator
+        resolved = resolve_qualified_name(decorator_node, import_map)
+
+        # Check against known attrs patterns
+        if resolved in ALWAYS_FROZEN:
+            return True
+        if resolved in ALWAYS_MUTABLE:
+            return False
+        if resolved in CONFIGURABLE:
+            # For Call decorators with frozen= keyword
+            if isinstance(decorator, ast.Call):
+                for kw in decorator.keywords:
+                    if kw.arg == 'frozen' and isinstance(kw.value, ast.Constant):
+                        return kw.value.value is True
+            # Default for configurable decorators without frozen=True
+            return False
+
+    return None
+
+
+def is_variable_length_tuple(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> bool:
+    """Check if an AST node is a variable-length tuple annotation: tuple[X, ...].
+
+    Only matches the homogeneous form with Ellipsis. Does NOT match:
+    - tuple (bare, no subscript)
+    - tuple[int, str] (fixed-length)
+    - tuple[()] (empty tuple)
+    """
+    if not isinstance(node, ast.Subscript):
+        return False
+
+    # Check the container resolves to tuple
+    resolved = resolve_qualified_name(node.value, import_map)
+    if isinstance(node.value, ast.Name):
+        if node.value.id != 'tuple' and resolved not in ('builtins.tuple', 'typing.Tuple'):
+            return False
+    elif isinstance(node.value, ast.Attribute):
+        if resolved not in ('builtins.tuple', 'typing.Tuple'):
+            return False
+    else:
+        return False
+
+    # Check slice is (Type, Ellipsis)
+    if not isinstance(node.slice, ast.Tuple):
+        return False
+    if len(node.slice.elts) != 2:
+        return False
+    return isinstance(node.slice.elts[1], ast.Constant) and node.slice.elts[1].value is Ellipsis
+
+
+def is_strict_var(name: str) -> bool:
+    """Check if a name matches any recognized strict variable prefix."""
+    return any(name.startswith(prefix) for prefix in STRICT_VAR_PREFIXES) and name.endswith('__')
+
+
+def validate_strict_var_in_class(name: str, class_name: str, lineno: int) -> None:
+    """Validate a __strict_*__ variable found in a class body.
+
+    Raises:
+        ValueError: If unrecognized or misplaced
+    """
+    if name not in RECOGNIZED_STRICT_VARS:
+        raise ValueError(
+            f'{class_name}:{lineno}: Unrecognized strict variable '
+            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?"
+        )
+    if name in MODULE_LEVEL_STRICT_VARS:
+        raise ValueError(
+            f"{class_name}:{lineno}: '{name}' is a module-level variable. Place it in __init__.py, not inside a class."
+        )
+
+
+def get_strict_hashable_fields(node: ast.ClassDef) -> bool:
+    """Check if class body declares __strict_typing_linter__hashable_fields__ = True.
+
+    Also validates unrecognized __strict_*__ variables at the class level (fail-fast on typos).
+
+    Raises:
+        ValueError: If unrecognized or misplaced __strict_*__ variable found
+    """
+    for item in node.body:
+        if isinstance(item, ast.Assign):
+            for target in item.targets:
+                if isinstance(target, ast.Name) and is_strict_var(target.id):
+                    validate_strict_var_in_class(target.id, node.name, item.lineno)
+                    if target.id == '__strict_typing_linter__hashable_fields__':
+                        if isinstance(item.value, ast.Constant):
+                            return item.value.value is True
+        # Also handle annotated assignment: ClassVar[bool] = True
+        elif isinstance(item, ast.AnnAssign):
+            if isinstance(item.target, ast.Name) and is_strict_var(item.target.id):
+                validate_strict_var_in_class(item.target.id, node.name, item.lineno)
+                if item.target.id == '__strict_typing_linter__hashable_fields__' and item.value is not None:
+                    if isinstance(item.value, ast.Constant):
+                        return item.value.value is True
+    return False
+
+
+# -- Module Ordering Checks (opt-in via __strict_module_ordering__) -----------
 
 
 # Recognized __strict_* variables (fail-fast on typos)
@@ -1169,7 +1429,7 @@ STRICT_VAR_PREFIXES: Sequence[str] = (
 )
 
 
-def _get_strict_module_ordering(init_path: Path) -> bool:
+def get_strict_module_ordering(init_path: Path) -> bool:
     """Check if __init__.py opts into strict module ordering.
 
     Raises:
@@ -1186,7 +1446,7 @@ def _get_strict_module_ordering(init_path: Path) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and _is_strict_var(target.id):
+                if isinstance(target, ast.Name) and is_strict_var(target.id):
                     name = target.id
                     # Fail-fast on unrecognized __strict_*__ variables
                     if name not in RECOGNIZED_STRICT_VARS:
@@ -1205,7 +1465,7 @@ def _get_strict_module_ordering(init_path: Path) -> bool:
     return False
 
 
-def _extract_all_names(tree: ast.Module) -> Set[str] | None:
+def extract_all_names(tree: ast.Module) -> Set[str] | None:
     """Extract names from __all__ if defined."""
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -1221,7 +1481,7 @@ def _extract_all_names(tree: ast.Module) -> Set[str] | None:
 
 
 @dataclass(frozen=True)
-class _Definition:
+class Definition:
     """A top-level definition in a module."""
 
     name: str
@@ -1239,7 +1499,7 @@ class _Definition:
         return (all_group, private_group, type_group)
 
 
-def _extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequence[_Definition]:
+def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequence[Definition]:
     """Extract top-level class and function definitions."""
     definitions = []
     all_names = all_names or set()
@@ -1247,7 +1507,7 @@ def _extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequen
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
             definitions.append(
-                _Definition(
+                Definition(
                     name=node.name,
                     line=node.lineno,
                     is_class=True,
@@ -1257,7 +1517,7 @@ def _extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequen
             )
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             definitions.append(
-                _Definition(
+                Definition(
                     name=node.name,
                     line=node.lineno,
                     is_class=False,
@@ -1269,7 +1529,7 @@ def _extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequen
     return definitions
 
 
-def _has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
+def has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
     """Check if line has ordering suppression directive."""
     if 0 < lineno <= len(source_lines):
         line = source_lines[lineno - 1].lower()
@@ -1285,17 +1545,17 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
     """Check module ordering: __all__ items first, public before private, classes before functions."""
     violations: list[OrderingViolation] = []
 
-    all_names = _extract_all_names(tree)
-    definitions = _extract_definitions(tree, all_names)
+    all_names = extract_all_names(tree)
+    definitions = extract_definitions(tree, all_names)
 
     if not definitions:
         return violations
 
     expected_order = sorted(definitions, key=lambda d: d.sort_key)
 
-    for actual, expected in zip(definitions, expected_order):
+    for actual, expected in zip(definitions, expected_order, strict=True):
         if actual.name != expected.name:
-            if _has_ordering_directive(source_lines, actual.line):
+            if has_ordering_directive(source_lines, actual.line):
                 continue
 
             # Describe what's wrong
@@ -1325,7 +1585,7 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
 
 def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[str]) -> Sequence[OrderingViolation]:
     """Check that __all__ is defined."""
-    all_names = _extract_all_names(tree)
+    all_names = extract_all_names(tree)
     if all_names is None:
         line = 1
         for node in tree.body:
@@ -1346,7 +1606,7 @@ def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[s
     return []
 
 
-def _has_trailing_comma(source_lines: Sequence[str], list_node: ast.List) -> bool:
+def has_trailing_comma(source_lines: Sequence[str], list_node: ast.List) -> bool:
     """Check if list has trailing comma. Uses tokenize to handle comments correctly."""
     if not list_node.elts:
         return True  # Empty list - no check needed
@@ -1394,9 +1654,9 @@ def check_all_trailing_comma(
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == '__all__':
                     if isinstance(node.value, ast.List) and node.value.elts:
-                        if _has_ordering_directive(source_lines, node.lineno):
+                        if has_ordering_directive(source_lines, node.lineno):
                             continue
-                        if not _has_trailing_comma(source_lines, node.value):
+                        if not has_trailing_comma(source_lines, node.value):
                             violations.append(
                                 OrderingViolation(
                                     filepath=filepath,
@@ -1441,7 +1701,7 @@ def check_class_method_ordering(
                 seen_private = True
             elif seen_private:
                 # Public method after private method - violation
-                if _has_ordering_directive(source_lines, line):
+                if has_ordering_directive(source_lines, line):
                     continue
 
                 violations.append(
@@ -1459,61 +1719,201 @@ def check_class_method_ordering(
     return violations
 
 
-# =============================================================================
-# File Processing
-# =============================================================================
+# -- Unused Directive Detection -----------------------------------------------
 
 
-def check_file(
+def collect_directives(source_lines: Sequence[str]) -> Sequence[DirectiveInstance]:
+    """Scan source for suppression directives, returning structured instances.
+
+    Skips skip-file directives (handled separately in check_file).
+    Only matches directives in actual comments (not in strings or code).
+    """
+    prefix_lower = DIRECTIVE_PREFIX.lower()
+    directives: list[DirectiveInstance] = []
+    in_multiline_string = False
+
+    for i, line in enumerate(source_lines):
+        lineno = i + 1
+        stripped = line.strip()
+
+        # Track triple-quoted string boundaries (skip directives inside docstrings)
+        for quote in ('"""', "'''"):
+            count = stripped.count(quote)
+            if count % 2 != 0:
+                in_multiline_string = not in_multiline_string
+
+        if in_multiline_string:
+            continue
+
+        line_lower = line.lower()
+        if prefix_lower not in line_lower:
+            continue
+        if 'skip-file' in line_lower:
+            continue
+
+        idx = line_lower.find(prefix_lower)
+
+        # Skip if the # is inside a string literal (heuristic: count unmatched quotes before idx)
+        before = line[:idx]
+        if before.count("'") % 2 != 0 or before.count('"') % 2 != 0:
+            continue
+
+        codes_part = line_lower[idx + len(DIRECTIVE_PREFIX) :]
+
+        # Strip rationale after separator (—, --, //, #)
+        for sep in (' — ', ' -- ', ' // ', ' #'):
+            if sep in codes_part:
+                codes_part = codes_part.split(sep)[0]
+                break
+
+        codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
+        if codes:
+            directives.append(DirectiveInstance(line=lineno, codes=codes, raw_text=line.strip()))
+
+    return directives
+
+
+def find_unused_directives(
+    directives: Sequence[DirectiveInstance],
+    raw_violations: Sequence[tuple[int, str]],
     filepath: Path,
-    strict_ordering_packages: Set[Path],
-    inspector: HashabilityInspector | None = None,
-    *,
-    respect_skip_file: bool = True,
+    source_lines: Sequence[str],
+    matched_directive_lines: Set[tuple[int, str]] | None = None,
 ) -> Sequence[Violation]:
-    """Check a single file for all violations."""
-    source = filepath.read_text(encoding='utf-8')
+    """Compare directive inventory against raw violations to find stale directives.
 
-    # File-level skip directive (check first 10 lines)
-    if respect_skip_file:
-        prefix_lower = DIRECTIVE_PREFIX.lower()
-        for line in source.splitlines()[:10]:
-            if prefix_lower in line.lower() and 'skip-file' in line.lower():
-                return []
+    Uses two matching strategies:
+    1. Exact match: directive was recorded as matched during scope-aware checking
+       (handles multi-line signatures where directive and violation are far apart).
+    2. Proximity match: directive on line D suppresses violations on [D-4, D]
+       (handles non-scoped annotations where _has_directive uses the 4-line window).
+    """
+    unused: list[Violation] = []
+    matched = matched_directive_lines or set()
 
-    tree = ast.parse(source, filename=str(filepath))
-    source_lines = source.splitlines()
-    violations: list[Violation] = []
+    for directive in directives:
+        for code in directive.codes:
+            # Strategy 1: scope-aware match recorded during checking
+            found = (directive.line, code) in matched
+            # Strategy 2: proximity match (inverse of the 4-line forward window)
+            if not found:
+                found = any(
+                    kind == code and (directive.line - 4) <= lineno <= directive.line for lineno, kind in raw_violations
+                )
+            if not found:
+                unused.append(
+                    OrderingViolation(
+                        filepath=filepath,
+                        line=directive.line,
+                        kind='unused-directive',
+                        message=f"Suppression directive '{code}' does not match any violation",
+                        source_line=source_lines[directive.line - 1].strip()
+                        if directive.line <= len(source_lines)
+                        else '',
+                        suggestion='Remove the stale suppression directive',
+                    )
+                )
+                break  # One unused code per directive is enough
 
-    # Build import map for resolving type names
-    import_map = _build_import_map(tree)
-
-    # Type checking
-    type_checker = AnnotationChecker(filepath, source_lines, import_map, inspector=inspector)
-    type_checker.visit(tree)
-    violations.extend(type_checker.violations)
-
-    # Module ordering (if package or any parent opted in - recursive inheritance)
-    if not _is_under_strict_package(filepath, strict_ordering_packages):
-        return violations
-
-    # Skip __main__.py (entry point, never exports)
-    if filepath.name == '__main__.py':
-        return violations
-
-    # Skip __init__.py only if it has no definitions (just boilerplate)
-    if filepath.name == '__init__.py' and not _extract_definitions(tree, _extract_all_names(tree)):
-        return violations
-
-    violations.extend(check_all_defined(filepath, tree, source_lines))
-    violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
-    violations.extend(check_module_ordering(filepath, tree, source_lines))
-    violations.extend(check_class_method_ordering(filepath, tree, source_lines))
-
-    return violations
+    return unused
 
 
-def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Path]:
+# -- Utility Functions --------------------------------------------------------
+
+
+def build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
+    """Build a mapping from local names to fully qualified names from imports.
+
+    Examples:
+        import typing -> {'typing': 'typing'}
+        import typing as t -> {'t': 'typing'}
+        from typing import Generator -> {'Generator': 'typing.Generator'}
+        from typing import Generator as Gen -> {'Gen': 'typing.Generator'}
+    """
+    import_map: dict[LocalName, QualifiedName] = {}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local_name = alias.asname or alias.name
+                import_map[local_name] = alias.name
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                for alias in node.names:
+                    local_name = alias.asname or alias.name
+                    import_map[local_name] = f'{node.module}.{alias.name}'
+
+    return import_map
+
+
+def compute_module_path(filepath: Path) -> str:
+    """Compute importable module path by walking the package hierarchy.
+
+    Resolves to absolute path first to prevent infinite loops when
+    Path('.').parent returns Path('.') on relative paths.
+
+    Walks up from filepath through __init__.py chain to find the top-level package.
+    Example: mcp/document-search/document_search/schemas/vectors.py
+             -> 'document_search.schemas.vectors'
+    """
+    filepath = filepath.resolve()
+    # __init__.py represents the package itself, not a submodule named '__init__'
+    if filepath.name == '__init__.py':
+        parts: list[str] = []
+        parent = filepath.parent
+    else:
+        parts = [filepath.stem]
+        parent = filepath.parent
+    while (parent / '__init__.py').exists():
+        parts.append(parent.name)
+        parent = parent.parent
+    return '.'.join(reversed(parts))
+
+
+def find_source_root(path: Path) -> Path:
+    """Find the source root for a path (directory above the top-level package).
+
+    For directories, returns the directory itself (resolved to absolute).
+    For files, walks up past __init__.py chain to find the package root.
+    Resolves to absolute first to prevent infinite loops on relative paths.
+    """
+    if path.is_dir():
+        return path.resolve()
+    path = path.resolve()
+    parent = path.parent
+    while (parent / '__init__.py').exists():
+        parent = parent.parent
+    return parent
+
+
+def resolve_qualified_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> QualifiedName:
+    """Resolve a type node to its fully qualified canonical name.
+
+    Uses the import map to resolve local names to their fully qualified origins.
+    For attribute access (e.g., typing.Generator), resolves the base module.
+    """
+    if isinstance(node, ast.Name):
+        # Simple name - look up in import map
+        return import_map.get(node.id, node.id)
+
+    elif isinstance(node, ast.Attribute):
+        # Qualified name like typing.Generator or t.Generator
+        # Get the base (could be a module alias)
+        base_node = node.value
+        if isinstance(base_node, ast.Name):
+            # Resolve the base module name
+            resolved_base = import_map.get(base_node.id, base_node.id)
+            return f'{resolved_base}.{node.attr}'
+        else:
+            # Nested attributes - recursively resolve
+            resolved_base = resolve_qualified_name(base_node, import_map)
+            return f'{resolved_base}.{node.attr}'
+
+    return ''
+
+
+def get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Path]:
     """Use git check-ignore to identify ignored files.
 
     Returns set of ignored paths, or empty set if not a git repo or git unavailable.
@@ -1529,6 +1929,7 @@ def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[P
             text=True,
             cwd=directory,
             timeout=30,
+            check=False,
         )
         # Exit codes: 0 = some ignored, 1 = none ignored, 128 = not a git repo
         if result.returncode == 128:
@@ -1538,75 +1939,20 @@ def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[P
         return set()
 
 
-def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: bool = True) -> Sequence[Path]:
-    """Find all .py files recursively under root, skipping excluded directories."""
-    all_files = sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
-
-    if respect_gitignore:
-        ignored = _get_git_ignored_files(all_files, root)
-        all_files = [f for f in all_files if f not in ignored]
-
-    return all_files
-
-
-def _discover_strict_ordering_packages(files: Sequence[Path]) -> Set[Path]:
-    """Find packages that have opted into strict module ordering.
-
-    Two discovery methods:
-    1. Scan __init__.py files in the input list
-    2. Walk up from each input file to find parent __init__.py files
-
-    This ensures single-file invocations still respect package-level settings.
-    Raises ValueError on unrecognized __strict_* variables (fail-fast on typos).
-
-    Strictness is inherited: if a parent package has the flag, all child packages
-    are also considered strict.
-    """
-    packages: set[Path] = set()
-    checked_init_files: set[Path] = set()
-
-    # Method 1: Check __init__.py files in input list
-    for f in files:
-        if f.name == '__init__.py':
-            checked_init_files.add(f)
-            if _get_strict_module_ordering(f):
-                packages.add(f.parent)
-
-    # Method 2: Walk up from each file to find parent __init__.py files
-    for f in files:
-        for parent in f.parents:
-            init_path = parent / '__init__.py'
-            if init_path in checked_init_files:
-                continue
-            checked_init_files.add(init_path)
-            if init_path.exists():
-                if _get_strict_module_ordering(init_path):
-                    packages.add(parent)
-
-    return packages
-
-
-def _is_under_strict_package(filepath: Path, strict_packages: Set[Path]) -> bool:
-    """Check if filepath is under any strict ordering package (recursive inheritance)."""
-    return any(parent in strict_packages for parent in filepath.parents)
-
-
-# =============================================================================
-# Output Formatting
-# =============================================================================
+# -- Output Formatting --------------------------------------------------------
 
 
 def format_violation(v: Violation) -> str:
     """Format a violation for display."""
     if isinstance(v, TypeViolation):
         # Map violation kind to human-readable description and directive code
-        _KIND_INFO: Mapping[TypeViolationKind, tuple[str, DirectiveCode]] = {
+        KIND_INFO: Mapping[TypeViolationKind, tuple[str, DirectiveCode]] = {
             'mutable': ('Mutable type', 'mutable-type'),
             'loose': ('Loose type', 'loose-typing'),
             'tuple-field': ('Variable-length tuple', 'tuple-field'),
             'hashable-field': ('Unhashable type', 'hashable-field'),
         }
-        type_desc, directive_code = _KIND_INFO.get(v.kind, ('Type error', v.kind))
+        type_desc, directive_code = KIND_INFO.get(v.kind, ('Type error', v.kind))
         return (
             f'{v.filepath}:{v.line}:{v.column}: error: '
             f"{type_desc} '{v.bad_type}' in {v.context} annotation\n"
@@ -1622,132 +1968,6 @@ def format_violation(v: Violation) -> str:
             f'    Suggestion: {v.suggestion}\n'
             f'    Silence with: {DIRECTIVE_PREFIX} {directive_code}'
         )
-
-
-# =============================================================================
-# Main Entry Point
-# =============================================================================
-
-
-# Map from directive codes to violation kinds for --ignore flag
-# 'ordering' maps to both 'ordering' and 'missing-all' since they're both ordering-related
-_CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
-    'mutable-type': {'mutable'},
-    'loose-typing': {'loose'},
-    'tuple-field': {'tuple-field'},
-    'hashable-field': {'hashable-field'},
-    'ordering': {'ordering', 'missing-all', 'trailing-comma'},
-}
-
-
-def main() -> int:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description='Check for mutable and loose types in annotations.',
-        epilog='Example: %(prog)s . --exclude .venv .git',
-    )
-    parser.add_argument(
-        'paths',
-        nargs='+',
-        help='Files or directories to check (use . for current directory)',
-    )
-    parser.add_argument(
-        '--exclude',
-        nargs='*',
-        default=[],
-        metavar='DIR',
-        help='Directories to exclude when searching recursively',
-    )
-    parser.add_argument(
-        '--ignore',
-        nargs='*',
-        default=[],
-        metavar='CODE',
-        choices=['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering'],
-        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, hashable-field, ordering)',
-    )
-    parser.add_argument(
-        '--no-gitignore',
-        action='store_true',
-        help='Do not respect .gitignore when scanning directories',
-    )
-    parser.add_argument(
-        '--no-skip-file',
-        action='store_true',
-        help='Ignore skip-file directives (used by validation harnesses)',
-    )
-
-    args = parser.parse_args()
-    exclude_dirs = set(args.exclude)
-    ignored_kinds: set[ViolationKind] = set()
-    for code in args.ignore:
-        ignored_kinds.update(_CODE_TO_KINDS[code])
-    respect_gitignore = not args.no_gitignore
-
-    # Collect files to check
-    files: list[Path] = []
-    for arg in args.paths:
-        path = Path(arg)
-        if arg == '.' or path.is_dir():
-            # Directory: find all .py files recursively
-            files.extend(find_python_files(path, exclude_dirs, respect_gitignore))
-        elif path.suffix == '.py' and path.is_file():
-            files.append(path)
-        # Silently skip non-.py files (allows pre-commit to pass mixed file lists)
-
-    if not files:
-        return 0
-
-    # Discover packages with strict module ordering enabled
-    # Raises ValueError on unrecognized __strict_* variables (fail-fast on typos)
-    strict_ordering_packages = _discover_strict_ordering_packages(files)
-
-    # Compute source roots from expanded files so the inspector can import project types.
-    # Uses files (not args.paths) to handle nested projects when scanning from repo root.
-    source_roots = tuple(sorted({_find_source_root(f) for f in files}))
-
-    # Shared inspector for runtime hashability checking across all files
-    inspector = HashabilityInspector(source_roots=source_roots)
-
-    # Check all files
-    all_violations: list[Violation] = []
-    for filepath in files:
-        violations = check_file(
-            filepath, strict_ordering_packages, inspector=inspector, respect_skip_file=not args.no_skip_file
-        )
-        all_violations.extend(violations)
-
-    # Filter out ignored violation kinds
-    if ignored_kinds:
-        all_violations = [v for v in all_violations if v.kind not in ignored_kinds]
-
-    # Report violations
-    if all_violations:
-        for v in sorted(all_violations, key=lambda x: (x.filepath, x.line)):
-            print(format_violation(v))
-            print()
-
-        file_count = len({v.filepath for v in all_violations})
-        mutable_count = sum(1 for v in all_violations if v.kind == 'mutable')
-        loose_count = sum(1 for v in all_violations if v.kind == 'loose')
-        tuple_count = sum(1 for v in all_violations if v.kind == 'tuple-field')
-        hashable_count = sum(1 for v in all_violations if v.kind == 'hashable-field')
-        ordering_count = sum(1 for v in all_violations if v.kind in ('ordering', 'missing-all', 'trailing-comma'))
-        summary_parts = []
-        if mutable_count:
-            summary_parts.append(f'{mutable_count} mutable')
-        if loose_count:
-            summary_parts.append(f'{loose_count} loose')
-        if tuple_count:
-            summary_parts.append(f'{tuple_count} tuple-field')
-        if hashable_count:
-            summary_parts.append(f'{hashable_count} hashable-field')
-        if ordering_count:
-            summary_parts.append(f'{ordering_count} ordering')
-        print(f'Found {len(all_violations)} violation(s) ({", ".join(summary_parts)}) in {file_count} file(s).')
-        return 1
-
-    return 0
 
 
 if __name__ == '__main__':

@@ -30,9 +30,9 @@ Design Philosophy:
     - Instructive: Points to test cases file for correct patterns
 
 Usage:
-    ./scripts/exception_safety_linter.py           # Check current directory
-    ./scripts/exception_safety_linter.py <files>   # Check specific files
-    ./scripts/exception_safety_linter.py src/      # Check specific directory
+    ./linters/exception_safety_linter.py           # Check current directory
+    ./linters/exception_safety_linter.py <files>   # Check specific files
+    ./linters/exception_safety_linter.py src/      # Check specific directory
 
 Exit codes:
     0 - No violations found
@@ -68,15 +68,13 @@ type LocalName = str  # Local identifier as it appears in source (e.g., 'Excepti
 # Error code identifier
 type ErrorCode = str  # Violation code like 'EXC001', 'EXC002', etc.
 
-# =============================================================================
-# Configuration
-# =============================================================================
+# -- Configuration ------------------------------------------------------------
 
 # Directive prefix - uses script filename for discoverability
 DIRECTIVE_PREFIX = '# exception_safety_linter.py:'
 
 # Test cases file for reference
-TEST_CASES_FILE = 'exception_safety_test_cases.py'
+TEST_CASES_FILE = 'tests/linters/edge_cases/exception_safety_test_cases.py'
 
 # Broad exception types (fully qualified only - like strict_typing_linter.py pattern)
 # These are the canonical names after import resolution
@@ -143,9 +141,7 @@ LOGGER_ERROR_METHODS: Set[str] = {
     'warn',
 }
 
-# =============================================================================
-# Data Types
-# =============================================================================
+# -- Data Types ---------------------------------------------------------------
 
 # Violation kind - used as directive codes and internal identifiers
 type ViolationKind = Literal[
@@ -157,6 +153,7 @@ type ViolationKind = Literal[
     'logger-no-exc-info',
     'cancelled-not-raised',
     'generator-exit-not-raised',
+    'unused-directive',
 ]
 
 # Maps kind to error code for display
@@ -169,6 +166,7 @@ ERROR_CODES: Mapping[ViolationKind, ErrorCode] = {
     'logger-no-exc-info': 'EXC006',
     'cancelled-not-raised': 'EXC007',
     'generator-exit-not-raised': 'EXC008',
+    'unused-directive': 'EXC009',
 }
 
 # Short descriptions for each violation
@@ -181,6 +179,7 @@ VIOLATION_MESSAGES: Mapping[ViolationKind, str] = {
     'logger-no-exc-info': 'Logger call without exc_info loses traceback',
     'cancelled-not-raised': 'CancelledError swallowed (task.cancelled() returns False, breaking orchestrator logic)',
     'generator-exit-not-raised': 'GeneratorExit swallowed (generator.close() cannot complete, resources leak)',
+    'unused-directive': 'Suppression directive does not match any violation',
 }
 
 # Fix suggestions for each violation
@@ -193,6 +192,7 @@ FIX_SUGGESTIONS: Mapping[ViolationKind, str] = {
     'logger-no-exc-info': 'Use logger.exception() or add exc_info=True',
     'cancelled-not-raised': "Add 'raise' after cleanup, or remove the try/except entirely if no cleanup needed",
     'generator-exit-not-raised': "Add 'raise' after cleanup, or use 'finally' block instead (preferred)",
+    'unused-directive': 'Remove the stale suppression directive',
 }
 
 
@@ -216,9 +216,207 @@ class TestReference:
     line: int
 
 
-# =============================================================================
-# AST Visitor
-# =============================================================================
+@dataclass(frozen=True)
+class DirectiveInstance:
+    """A suppression directive found in source code."""
+
+    line: int
+    codes: Sequence[str]
+    raw_text: str
+
+
+# -- Main Entry Point ---------------------------------------------------------
+
+
+def main() -> int:
+    """CLI entry point: parse args, collect files, check, report."""
+    args = parse_args()
+    exclude_dirs = set(args.exclude) | {'.venv', 'venv', '__pycache__', '.git'}
+    ignored_kinds: set[ViolationKind] = set(args.ignore)
+    respect_gitignore = not args.no_gitignore
+
+    # Collect files to check
+    files: list[Path] = []
+    for arg in args.paths:
+        path = Path(arg)
+        if arg == '.' or path.is_dir():
+            files.extend(find_python_files(path, exclude_dirs, respect_gitignore))
+        elif path.suffix == '.py' and path.is_file():
+            files.append(path)
+
+    if not files:
+        return 0
+
+    # Check all files
+    all_violations: list[Violation] = []
+    for filepath in files:
+        try:
+            violations = check_file(
+                filepath,
+                respect_skip_file=not args.no_skip_file,
+                report_unused_directives=args.report_unused_directives,
+            )
+            all_violations.extend(violations)
+        except (SyntaxError, UnicodeDecodeError) as e:
+            print(f'{filepath}: {e}', file=sys.stderr)
+
+    # Filter ignored kinds
+    if ignored_kinds:
+        all_violations = [v for v in all_violations if v.kind not in ignored_kinds]
+
+    # Report violations
+    if all_violations:
+        for v in sorted(all_violations, key=lambda x: (x.filepath, x.line)):
+            print(format_violation(v))
+            print()
+
+        # Summary
+        file_count = len({v.filepath for v in all_violations})
+        print(f'Found {len(all_violations)} violation(s) in {file_count} file(s).')
+
+        # Find test file references for violated rules
+        test_file = Path(__file__).parent.parent / TEST_CASES_FILE
+        test_refs = find_test_references(test_file)
+
+        # Show references for the specific violations found
+        found_kinds = {v.kind for v in all_violations}
+        relevant_refs = {k: v for k, v in test_refs.items() if k in found_kinds}
+
+        if relevant_refs:
+            print('For correct patterns, see:')
+            for kind in sorted(relevant_refs.keys(), key=lambda k: ERROR_CODES[k]):
+                ref = relevant_refs[kind]
+                code = ERROR_CODES[kind]
+                print(f'  {code} {kind}: {TEST_CASES_FILE}:{ref.line} ({ref.function_name})')
+        else:
+            print(f'For correct patterns, see: {TEST_CASES_FILE}')
+
+        return 1
+
+    return 0
+
+
+def parse_args() -> argparse.Namespace:
+    """Build and parse CLI arguments."""
+    parser = argparse.ArgumentParser(
+        description='Check for exception safety violations.',
+        epilog=f'For correct patterns and examples, see: {TEST_CASES_FILE}',
+    )
+    parser.add_argument(
+        'paths',
+        nargs='*',
+        default=['.'],
+        help='Files or directories to check (default: current directory)',
+    )
+    parser.add_argument(
+        '--exclude',
+        nargs='*',
+        default=[],
+        metavar='DIR',
+        help='Directories to exclude when searching recursively',
+    )
+    parser.add_argument(
+        '--ignore',
+        nargs='*',
+        default=[],
+        metavar='CODE',
+        choices=list(ERROR_CODES.keys()),
+        help='Violation codes to ignore globally',
+    )
+    parser.add_argument(
+        '--no-gitignore',
+        action='store_true',
+        help='Do not respect .gitignore when scanning directories',
+    )
+    parser.add_argument(
+        '--no-skip-file',
+        action='store_true',
+        help='Ignore skip-file directives (used by validation harnesses)',
+    )
+    parser.add_argument(
+        '--report-unused-directives',
+        action='store_true',
+        help='Report suppression directives that do not match any violation',
+    )
+    return parser.parse_args()
+
+
+# -- File Processing ----------------------------------------------------------
+
+
+def check_file(
+    filepath: Path,
+    *,
+    respect_skip_file: bool = True,
+    report_unused_directives: bool = False,
+) -> Sequence[Violation]:
+    """Check a single file for exception safety violations."""
+    source = filepath.read_text(encoding='utf-8')
+    source_lines = source.splitlines()
+
+    # File-level skip directive (check first 10 lines)
+    has_skip_file = False
+    prefix_lower = DIRECTIVE_PREFIX.lower()
+    for line in source_lines[:10]:
+        if prefix_lower in line.lower() and 'skip-file' in line.lower():
+            has_skip_file = True
+            break
+
+    if has_skip_file and respect_skip_file and not report_unused_directives:
+        return []
+
+    tree = ast.parse(source, filename=str(filepath))
+    import_map = build_import_map(tree)
+
+    checker = ExceptionSafetyChecker(filepath, source_lines, import_map)
+    checker.visit(tree)
+
+    # If skip-file is present and valid, suppress normal violations
+    if has_skip_file and respect_skip_file:
+        if report_unused_directives and not checker.raw_violations:
+            # skip-file is stale — no violations to suppress
+            skip_line = next(
+                i + 1
+                for i, line in enumerate(source_lines[:10])
+                if prefix_lower in line.lower() and 'skip-file' in line.lower()
+            )
+            return [
+                Violation(
+                    filepath=filepath,
+                    line=skip_line,
+                    column=0,
+                    kind='unused-directive',
+                    source_line=source_lines[skip_line - 1].strip(),
+                )
+            ]
+        return []
+
+    violations = list(checker.violations)
+
+    if report_unused_directives:
+        directives = collect_directives(source_lines)
+        unused = find_unused_directives(directives, checker.raw_violations, filepath, source_lines)
+        violations.extend(unused)
+
+    return violations
+
+
+def find_python_files(
+    root: Path,
+    exclude_dirs: Set[str],
+    respect_gitignore: bool = True,
+) -> Sequence[Path]:
+    """Find all .py files recursively under root."""
+    all_files = sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
+
+    if respect_gitignore:
+        ignored = get_git_ignored_files(all_files, root)
+        all_files = [f for f in all_files if f not in ignored]
+
+    return all_files
+
+
+# -- AST Visitor --------------------------------------------------------------
 
 
 class ExceptionSafetyChecker(ast.NodeVisitor):
@@ -234,6 +432,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         self.source_lines = source_lines
         self.import_map = import_map
         self.violations: list[Violation] = []
+        self.raw_violations: list[tuple[int, ViolationKind]] = []
 
         # Context tracking
         self._in_async_function = False
@@ -242,9 +441,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         self._in_finally_block = False
         self._handler_stack: list[ast.ExceptHandler] = []
 
-    # -------------------------------------------------------------------------
-    # Visitor Methods
-    # -------------------------------------------------------------------------
+    # -- Visitor Methods ------------------------------------------------------
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Track async function context and generator status."""
@@ -407,9 +604,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
             self._check_logger_call(node)
         self.generic_visit(node)
 
-    # -------------------------------------------------------------------------
-    # Private Helper Methods
-    # -------------------------------------------------------------------------
+    # -- Private Helper Methods -----------------------------------------------
 
     def _get_source_line(self, lineno: int) -> str:
         """Get source line, stripped."""
@@ -418,13 +613,26 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         return ''
 
     def _has_directive(self, lineno: int, kind: ViolationKind) -> bool:
-        """Check if line has suppression directive for this kind."""
-        if 0 < lineno <= len(self.source_lines):
-            line = self.source_lines[lineno - 1].lower()
-            prefix_lower = DIRECTIVE_PREFIX.lower()
+        """Check if line (or nearby continuation lines) has suppression directive.
+
+        Scans up to 4 lines forward from the violation to handle cases where
+        ruff-format wraps statements across lines (e.g., ``except (\\n Exception\\n):``),
+        placing the directive on a subsequent line.
+        """
+        # unused-directive violations cannot be suppressed (like RUF100)
+        if kind == 'unused-directive':
+            return False
+
+        prefix_lower = DIRECTIVE_PREFIX.lower()
+        end = min(lineno + 4, len(self.source_lines))
+
+        for check_lineno in range(lineno, end + 1):
+            if check_lineno < 1:
+                continue
+            line = self.source_lines[check_lineno - 1].lower()
 
             if prefix_lower not in line:
-                return False
+                continue
 
             idx = line.find(prefix_lower)
             codes_part = line[idx + len(DIRECTIVE_PREFIX) :]
@@ -434,13 +642,15 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
                 codes_part = codes_part.split(' #')[0]
 
             codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
-            return kind in codes
+            if kind in codes:
+                return True
 
         return False
 
     def _add_violation(self, node: ast.AST, kind: ViolationKind) -> None:
-        """Add a violation if not suppressed."""
+        """Add a violation if not suppressed. Always records raw violations."""
         lineno = getattr(node, 'lineno', 0)
+        self.raw_violations.append((lineno, kind))
 
         if self._has_directive(lineno, kind):
             return
@@ -468,7 +678,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
             return any(self._is_broad_exception_type(elt) for elt in node.elts)
 
         # Resolve using import map
-        resolved = _resolve_name(node, self.import_map)
+        resolved = resolve_name(node, self.import_map)
         if resolved in QUALIFIED_BROAD_EXCEPTIONS:
             return True
 
@@ -484,7 +694,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
             return any(self._is_cancelled_error_type(elt) for elt in node.elts)
 
         # Resolve using import map
-        resolved = _resolve_name(node, self.import_map)
+        resolved = resolve_name(node, self.import_map)
 
         # Only BaseException catches CancelledError (not Exception!)
         if resolved in QUALIFIED_CATCHES_CANCELLED:
@@ -506,7 +716,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
             return any(self._is_generator_exit_type(elt) for elt in node.elts)
 
         # Resolve using import map
-        resolved = _resolve_name(node, self.import_map)
+        resolved = resolve_name(node, self.import_map)
 
         # Only BaseException catches GeneratorExit (not Exception!)
         if resolved in QUALIFIED_CATCHES_GENERATOR_EXIT:
@@ -579,10 +789,8 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         has_exc_info = False
         for keyword in node.keywords:
             if keyword.arg == 'exc_info':
-                if (
-                    isinstance(keyword.value, ast.Constant)
-                    and keyword.value.value
-                    or not isinstance(keyword.value, ast.Constant)
+                if (isinstance(keyword.value, ast.Constant) and keyword.value.value) or not isinstance(
+                    keyword.value, ast.Constant
                 ):
                     has_exc_info = True
 
@@ -668,53 +876,96 @@ class _YieldFinder(ast.NodeVisitor):
         pass  # Don't recurse - genexp doesn't make containing function a generator
 
 
-# =============================================================================
-# File Processing
-# =============================================================================
+# -- Utility Functions --------------------------------------------------------
 
 
-def check_file(filepath: Path, *, respect_skip_file: bool = True) -> Sequence[Violation]:
-    """Check a single file for exception safety violations."""
-    source = filepath.read_text(encoding='utf-8')
+def collect_directives(source_lines: Sequence[str]) -> Sequence[DirectiveInstance]:
+    """Scan source for suppression directives, returning structured instances.
 
-    # File-level skip directive (check first 10 lines)
-    if respect_skip_file:
-        prefix_lower = DIRECTIVE_PREFIX.lower()
-        for line in source.splitlines()[:10]:
-            if prefix_lower in line.lower() and 'skip-file' in line.lower():
-                return []
+    Skips skip-file directives (handled separately in check_file).
+    Only matches directives in actual comments (not in strings or code).
+    """
+    prefix_lower = DIRECTIVE_PREFIX.lower()
+    directives: list[DirectiveInstance] = []
+    in_multiline_string = False
 
-    tree = ast.parse(source, filename=str(filepath))
-    source_lines = source.splitlines()
-    import_map = _build_import_map(tree)
+    for i, line in enumerate(source_lines):
+        lineno = i + 1
+        stripped = line.strip()
 
-    checker = ExceptionSafetyChecker(filepath, source_lines, import_map)
-    checker.visit(tree)
+        # Track triple-quoted string boundaries (skip directives inside docstrings)
+        for quote in ('"""', "'''"):
+            count = stripped.count(quote)
+            if count % 2 != 0:
+                in_multiline_string = not in_multiline_string
 
-    return checker.violations
+        if in_multiline_string:
+            continue
+
+        line_lower = line.lower()
+        if prefix_lower not in line_lower:
+            continue
+        if 'skip-file' in line_lower:
+            continue
+
+        idx = line_lower.find(prefix_lower)
+
+        # Skip if the # is inside a string literal (heuristic: count unmatched quotes before idx)
+        before = line[:idx]
+        if before.count("'") % 2 != 0 or before.count('"') % 2 != 0:
+            continue
+
+        codes_part = line_lower[idx + len(DIRECTIVE_PREFIX) :]
+
+        # Strip rationale after separator (—, --, //, #)
+        for sep in (' — ', ' -- ', ' // ', ' #'):
+            if sep in codes_part:
+                codes_part = codes_part.split(sep)[0]
+                break
+
+        codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
+        if codes:
+            directives.append(DirectiveInstance(line=lineno, codes=codes, raw_text=line.strip()))
+
+    return directives
 
 
-def find_python_files(
-    root: Path,
-    exclude_dirs: Set[str],
-    respect_gitignore: bool = True,
-) -> Sequence[Path]:
-    """Find all .py files recursively under root."""
-    all_files = sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
+def find_unused_directives(
+    directives: Sequence[DirectiveInstance],
+    raw_violations: Sequence[tuple[int, ViolationKind]],
+    filepath: Path,
+    source_lines: Sequence[str],
+) -> Sequence[Violation]:
+    """Compare directive inventory against raw violations to find stale directives.
 
-    if respect_gitignore:
-        ignored = _get_git_ignored_files(all_files, root)
-        all_files = [f for f in all_files if f not in ignored]
+    A directive on line D suppresses violations on lines [D-4, D] (matching the
+    forward scan window in _has_directive: violation V finds directives on V..V+4).
+    """
+    unused: list[Violation] = []
 
-    return all_files
+    for directive in directives:
+        for code in directive.codes:
+            matched = any(
+                kind == code and (directive.line - 4) <= lineno <= directive.line for lineno, kind in raw_violations
+            )
+            if not matched:
+                unused.append(
+                    Violation(
+                        filepath=filepath,
+                        line=directive.line,
+                        column=0,
+                        kind='unused-directive',
+                        source_line=source_lines[directive.line - 1].strip()
+                        if directive.line <= len(source_lines)
+                        else '',
+                    )
+                )
+                break  # One unused code per directive is enough
+
+    return unused
 
 
-# =============================================================================
-# Private Utility Functions
-# =============================================================================
-
-
-def _build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
+def build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
     """Build mapping from local names to fully qualified names.
 
     Examples:
@@ -741,7 +992,7 @@ def _build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
     return import_map
 
 
-def _resolve_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> QualifiedName:
+def resolve_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) -> QualifiedName:
     """Resolve exception type to fully qualified name."""
     if isinstance(node, ast.Name):
         name = node.id
@@ -758,13 +1009,13 @@ def _resolve_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName])
             base = import_map.get(node.value.id, node.value.id)
             return f'{base}.{node.attr}'
         # Nested attributes
-        base = _resolve_name(node.value, import_map)
+        base = resolve_name(node.value, import_map)
         return f'{base}.{node.attr}'
 
     return ''
 
 
-def _find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestReference]:
+def find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestReference]:
     """Parse test file to find correct pattern examples.
 
     Looks for functions named like:
@@ -806,7 +1057,7 @@ def _find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestRe
     return references
 
 
-def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Path]:
+def get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Path]:
     """Use git check-ignore to identify ignored files."""
     if not file_paths:
         return set()
@@ -819,6 +1070,7 @@ def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[P
             text=True,
             cwd=directory,
             timeout=30,
+            check=False,
         )
         if result.returncode == 128:
             return set()
@@ -827,9 +1079,7 @@ def _get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[P
         return set()
 
 
-# =============================================================================
-# Output Formatting
-# =============================================================================
+# -- Output Formatting --------------------------------------------------------
 
 
 def format_violation(v: Violation) -> str:
@@ -844,111 +1094,6 @@ def format_violation(v: Violation) -> str:
         f'    Fix: {fix}\n'
         f'    Silence: {DIRECTIVE_PREFIX} {v.kind}'
     )
-
-
-# =============================================================================
-# Main Entry Point
-# =============================================================================
-
-
-def main() -> int:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description='Check for exception safety violations.',
-        epilog=f'For correct patterns and examples, see: {TEST_CASES_FILE}',
-    )
-    parser.add_argument(
-        'paths',
-        nargs='*',
-        default=['.'],
-        help='Files or directories to check (default: current directory)',
-    )
-    parser.add_argument(
-        '--exclude',
-        nargs='*',
-        default=[],
-        metavar='DIR',
-        help='Directories to exclude when searching recursively',
-    )
-    parser.add_argument(
-        '--ignore',
-        nargs='*',
-        default=[],
-        metavar='CODE',
-        choices=list(ERROR_CODES.keys()),
-        help='Violation codes to ignore globally',
-    )
-    parser.add_argument(
-        '--no-gitignore',
-        action='store_true',
-        help='Do not respect .gitignore when scanning directories',
-    )
-    parser.add_argument(
-        '--no-skip-file',
-        action='store_true',
-        help='Ignore skip-file directives (used by validation harnesses)',
-    )
-
-    args = parser.parse_args()
-    exclude_dirs = set(args.exclude) | {'.venv', 'venv', '__pycache__', '.git'}
-    ignored_kinds: set[ViolationKind] = set(args.ignore)
-    respect_gitignore = not args.no_gitignore
-
-    # Collect files to check
-    files: list[Path] = []
-    for arg in args.paths:
-        path = Path(arg)
-        if arg == '.' or path.is_dir():
-            files.extend(find_python_files(path, exclude_dirs, respect_gitignore))
-        elif path.suffix == '.py' and path.is_file():
-            files.append(path)
-
-    if not files:
-        return 0
-
-    # Check all files
-    all_violations: list[Violation] = []
-    for filepath in files:
-        try:
-            violations = check_file(filepath, respect_skip_file=not args.no_skip_file)
-            all_violations.extend(violations)
-        except (SyntaxError, UnicodeDecodeError) as e:
-            print(f'{filepath}: {e}', file=sys.stderr)
-
-    # Filter ignored kinds
-    if ignored_kinds:
-        all_violations = [v for v in all_violations if v.kind not in ignored_kinds]
-
-    # Report violations
-    if all_violations:
-        for v in sorted(all_violations, key=lambda x: (x.filepath, x.line)):
-            print(format_violation(v))
-            print()
-
-        # Summary
-        file_count = len({v.filepath for v in all_violations})
-        print(f'Found {len(all_violations)} violation(s) in {file_count} file(s).')
-
-        # Find test file references for violated rules
-        test_file = Path(__file__).parent / TEST_CASES_FILE
-        test_refs = _find_test_references(test_file)
-
-        # Show references for the specific violations found
-        found_kinds = {v.kind for v in all_violations}
-        relevant_refs = {k: v for k, v in test_refs.items() if k in found_kinds}
-
-        if relevant_refs:
-            print('For correct patterns, see:')
-            for kind in sorted(relevant_refs.keys(), key=lambda k: ERROR_CODES[k]):
-                ref = relevant_refs[kind]
-                code = ERROR_CODES[kind]
-                print(f'  {code} {kind}: {TEST_CASES_FILE}:{ref.line} ({ref.function_name})')
-        else:
-            print(f'For correct patterns, see: {TEST_CASES_FILE}')
-
-        return 1
-
-    return 0
 
 
 if __name__ == '__main__':

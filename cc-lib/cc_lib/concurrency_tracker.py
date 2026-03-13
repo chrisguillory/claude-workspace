@@ -9,9 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from typing import Any
 
 __all__ = ['ConcurrencyTracker']
 
@@ -90,7 +89,7 @@ class ConcurrencyTracker:
             self._in_flight -= 1
 
     @property
-    def stats(self) -> dict[str, Any]:
+    def stats(self) -> Mapping[str, int | float]:
         """Current statistics."""
         return {
             'total_calls': self._total_calls,

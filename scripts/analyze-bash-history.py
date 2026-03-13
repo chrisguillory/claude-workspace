@@ -130,7 +130,9 @@ class ContentBlock(SessionModel):
     type: str  # "tool_use", "text", "thinking"
     name: str | None = None  # "Bash", "Read", "Write" (only on tool_use)
     # Tool input payload (only on tool_use)
-    input: Mapping[str, Any] | None = None  # strict_typing_linter.py: loose-typing
+    input: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — tool_use input payload is arbitrary JSON with no fixed schema
+    )
 
 
 class AssistantMessage(SessionModel):
@@ -367,7 +369,7 @@ class HookModule:
             raise HookModule.LoadError(str(e)) from e
 
 
-hook: HookModule.Interface = lazy_object_proxy.Proxy(HookModule.load)  # type: ignore[assignment]
+hook: HookModule.Interface = lazy_object_proxy.Proxy(HookModule.load)  # type: ignore[assignment]  # Proxy[Interface] not assignable but behaves identically at runtime
 
 
 # Boundary handlers — registered after main, dispatched when main raises

@@ -31,7 +31,7 @@ import typer.completion
 from cc_lib.utils.atomic_write import atomic_write
 
 
-def create_app(*, help: str) -> typer.Typer:
+def create_app(*, help: str) -> typer.Typer:  # noqa: A002 — standard CLI parameter name, passed to typer.Typer(help=)
     """Create a Typer app with standard conventions.
 
     - ``add_completion=False`` (disables typer's broken ``--install-completion``)
@@ -195,7 +195,7 @@ exec uv run --no-project --script '{script_path}' "$@"
         try:
             target.relative_to(cls.BIN_DIR.resolve())
         except ValueError:
-            raise SystemExit(f'Error: Path traversal: {name!r} resolves outside {cls.BIN_DIR}')
+            raise SystemExit(f'Error: Path traversal: {name!r} resolves outside {cls.BIN_DIR}') from None
         return target
 
     @staticmethod

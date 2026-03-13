@@ -29,9 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-# ---------------------------------------------------------------------------
-# Data Types
-# ---------------------------------------------------------------------------
+# -- Data Types ---------------------------------------------------------------
 
 
 class LineRange(NamedTuple):
@@ -45,20 +43,18 @@ class LineRange(NamedTuple):
 type ViolationMap = dict[str, set[str]]
 
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+# -- Configuration ------------------------------------------------------------
 
-SCRIPT_DIR = Path(__file__).parent
-LINTER = SCRIPT_DIR / 'exception_safety_linter.py'
+TEST_DIR = Path(__file__).parent
+CC_DIR = TEST_DIR.parent.parent
+LINTER = CC_DIR / 'linters' / 'exception_safety_linter.py'
 
 # Test file definitions
-TEST_FILE = SCRIPT_DIR / 'exception_safety_test_cases.py'
-EDGE_CASE_FILE = SCRIPT_DIR / 'exception_safety_edge_cases.py'
+EDGE_CASES_DIR = TEST_DIR / 'edge_cases'
+TEST_FILE = EDGE_CASES_DIR / 'exception_safety_test_cases.py'
+EDGE_CASE_FILE = EDGE_CASES_DIR / 'exception_safety_edge_cases.py'
 
-# ---------------------------------------------------------------------------
-# Expected Violations: Instructive Test File
-# ---------------------------------------------------------------------------
+# -- Expected Violations: Instructive Test File -------------------------------
 
 # Each violation function triggers exactly one rule (no pollution)
 EXPECTED_VIOLATIONS: ViolationMap = {
@@ -92,9 +88,7 @@ SUPPRESSED_FUNCTIONS: Set[str] = {
     'exc006_correct_when_suppressing',  # Has EXC002 suppression
 }
 
-# ---------------------------------------------------------------------------
-# Expected Violations: Edge Case File
-# ---------------------------------------------------------------------------
+# -- Expected Violations: Edge Case File --------------------------------------
 
 # Edge cases for comprehensive testing. May have multiple rules or test
 # false positive prevention (set() means expect NO violations).
@@ -152,9 +146,7 @@ EDGE_CASE_SUPPRESSED: Set[str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# AST Parsing
-# ---------------------------------------------------------------------------
+# -- AST Parsing --------------------------------------------------------------
 
 
 def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
@@ -175,9 +167,7 @@ def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
     return ranges
 
 
-# ---------------------------------------------------------------------------
-# Linter Output Parsing
-# ---------------------------------------------------------------------------
+# -- Linter Output Parsing ----------------------------------------------------
 
 
 def run_linter(test_file: Path, linter: Path) -> str:
@@ -187,6 +177,7 @@ def run_linter(test_file: Path, linter: Path) -> str:
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     return result.stdout + result.stderr
 
@@ -227,9 +218,7 @@ def map_violations_to_functions(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
+# -- Validation ---------------------------------------------------------------
 
 
 @dataclass
@@ -315,9 +304,7 @@ def validate_file(
     )
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# -- Main ---------------------------------------------------------------------
 
 
 def main() -> int:

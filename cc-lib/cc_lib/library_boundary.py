@@ -168,7 +168,9 @@ class LibraryBoundary:
             return  # System or control-flow exception — pass through
         try:
             original_message = str(exc_value)  # type preserved in __cause__, not here
-        except Exception:
+        except (
+            Exception
+        ):  # exception_safety_linter.py: swallowed-exception — fallback message when str(exc) itself fails
             original_message = f'<{type(exc_value).__name__}>'
         raise self._target(original_message).with_traceback(exc_tb) from exc_value
 

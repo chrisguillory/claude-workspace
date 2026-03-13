@@ -1,4 +1,6 @@
 # exception_safety_linter.py: skip-file
+# strict_typing_linter.py: skip-file
+# suppression_rationale_linter.py: skip-file
 # ruff: noqa: SIM105
 # SIM105: try-except-pass patterns required for testing; except* incompatible with contextlib.suppress
 """Exception safety edge cases - regression testing and false positive prevention.
@@ -26,9 +28,7 @@ from collections.abc import AsyncGenerator, Generator
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# EXC002: Tuple Exception Edge Cases
-# =============================================================================
+# -- EXC002: Tuple Exception Edge Cases ---------------------------------------
 
 
 def edge_tuple_with_broad_exception() -> None:
@@ -44,9 +44,7 @@ def edge_tuple_with_broad_exception() -> None:
         pass
 
 
-# =============================================================================
-# EXC002: Non-Canonical Anti-Patterns (without pass)
-# =============================================================================
+# -- EXC002: Non-Canonical Anti-Patterns (without pass) -----------------------
 # These verify the linter catches swallowed exceptions regardless of body content
 
 
@@ -72,9 +70,7 @@ def edge_swallowed_with_action() -> None:
         cleanup()
 
 
-# =============================================================================
-# EXC003: Finally Block Edge Cases
-# =============================================================================
+# -- EXC003: Finally Block Edge Cases -----------------------------------------
 
 
 def edge_finally_with_raise() -> None:
@@ -89,9 +85,7 @@ def edge_finally_with_raise() -> None:
         raise RuntimeError('Cleanup failed')  # NOT EXC003
 
 
-# =============================================================================
-# EXC004: False Positive Prevention
-# =============================================================================
+# -- EXC004: False Positive Prevention ----------------------------------------
 
 
 def edge_raise_caught_variable() -> None:
@@ -142,9 +136,7 @@ def edge_raise_outer_scope_variable() -> None:
             raise outer  # EXC004: unclear intent, use 'from' to clarify
 
 
-# =============================================================================
-# EXC006: All Logger Method Coverage
-# =============================================================================
+# -- EXC006: All Logger Method Coverage ---------------------------------------
 
 
 def edge_logger_fatal() -> None:
@@ -217,9 +209,7 @@ def edge_logger_suppressed() -> None:
         raise
 
 
-# =============================================================================
-# EXC007: BaseException in Async
-# =============================================================================
+# -- EXC007: BaseException in Async -------------------------------------------
 
 
 async def edge_async_base_exception_no_raise() -> None:
@@ -317,9 +307,7 @@ async def edge_sync_nested_in_async() -> None:
     sync_handler()
 
 
-# =============================================================================
-# EXC008: GeneratorExit in Generators
-# =============================================================================
+# -- EXC008: GeneratorExit in Generators --------------------------------------
 
 
 def edge_generator_base_exception_no_raise() -> Generator[int]:
@@ -457,9 +445,7 @@ def edge_yield_from_is_generator() -> Generator[int]:
         cleanup()
 
 
-# =============================================================================
-# TryStar (Python 3.11+ Exception Groups)
-# =============================================================================
+# -- TryStar (Python 3.11+ Exception Groups) ----------------------------------
 
 
 def edge_trystar_no_raise() -> None:
@@ -491,9 +477,7 @@ def edge_trystar_specific() -> None:
         pass  # OK: specific exception
 
 
-# =============================================================================
-# EXC002: Entry-Point Error Boundary Edge Cases
-# =============================================================================
+# -- EXC002: Entry-Point Error Boundary Edge Cases ----------------------------
 
 
 def edge_sys_exit_in_main() -> None:
@@ -519,9 +503,7 @@ def edge_sys_exit_in_main() -> None:
         sys.exit(1)
 
 
-# =============================================================================
-# Suppression Directive Edge Cases
-# =============================================================================
+# -- Suppression Directive Edge Cases -----------------------------------------
 
 
 async def edge_multi_code_suppression() -> None:
@@ -536,9 +518,7 @@ async def edge_multi_code_suppression() -> None:
         pass
 
 
-# =============================================================================
-# Stub Functions
-# =============================================================================
+# -- Stub Functions -----------------------------------------------------------
 
 
 async def async_op() -> None:

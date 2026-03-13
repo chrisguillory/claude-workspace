@@ -1390,7 +1390,7 @@ def _get_session_title(transcript_path: str) -> str | None:
             line_end = mm.find(b'\n', pos)
             if line_end == -1:
                 line_end = len(mm)
-            return json.loads(mm[line_start:line_end]).get('customTitle')  # type: ignore[no-any-return]
+            return json.loads(mm[line_start:line_end]).get('customTitle')  # type: ignore[no-any-return]  # .get() returns Any from untyped JSON, value is always str | None
     except (OSError, json.JSONDecodeError, ValueError):
         return None
 

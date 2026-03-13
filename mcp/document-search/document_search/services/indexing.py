@@ -810,7 +810,9 @@ class IndexingService:
         self,
         file_queue: asyncio.Queue[Path],
         embed_queue: asyncio.Queue[_ChunkedFile],
-        results: dict[str, int | FileProcessingError],  # strict_typing_linter.py: mutable-type
+        results: dict[
+            str, int | FileProcessingError
+        ],  # strict_typing_linter.py: mutable-type — shared across pipeline workers, guarded by results_lock
         results_lock: asyncio.Lock,
         counters: PipelineCounters,
         tracer: PipelineTracer,
@@ -1216,7 +1218,9 @@ class IndexingService:
     async def _pipeline_upsert_worker(
         self,
         upsert_queue: asyncio.Queue[_EmbeddedFile],
-        results: dict[str, int | FileProcessingError],  # strict_typing_linter.py: mutable-type
+        results: dict[
+            str, int | FileProcessingError
+        ],  # strict_typing_linter.py: mutable-type — shared across pipeline workers, guarded by results_lock
         results_lock: asyncio.Lock,
         counters: PipelineCounters,
         tracer: PipelineTracer,
@@ -1281,7 +1285,9 @@ class IndexingService:
         queue: asyncio.Queue[_ChunkedFile] | asyncio.Queue[_EmbeddedFile],
         counters: PipelineCounters,
         counter_attr: str,
-        results: dict[str, int | FileProcessingError],  # strict_typing_linter.py: mutable-type
+        results: dict[
+            str, int | FileProcessingError
+        ],  # strict_typing_linter.py: mutable-type — shared across pipeline workers, guarded by results_lock
         results_lock: asyncio.Lock,
     ) -> None:
         """Drain a queue, counting chunks without processing.

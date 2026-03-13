@@ -25,9 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-# ---------------------------------------------------------------------------
-# Data Types
-# ---------------------------------------------------------------------------
+# -- Data Types ---------------------------------------------------------------
 
 
 class LineRange(NamedTuple):
@@ -41,20 +39,18 @@ class LineRange(NamedTuple):
 type ViolationMap = dict[str, set[str]]
 
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+# -- Configuration ------------------------------------------------------------
 
-SCRIPT_DIR = Path(__file__).parent
-LINTER = SCRIPT_DIR / 'strict_typing_linter.py'
+TEST_DIR = Path(__file__).parent
+CC_DIR = TEST_DIR.parent.parent
+LINTER = CC_DIR / 'linters' / 'strict_typing_linter.py'
 
 # Test file definitions
-TEST_FILE = SCRIPT_DIR / 'strict_typing_linter_test_cases.py'
-EDGE_CASE_FILE = SCRIPT_DIR / 'strict_typing_linter_edge_cases.py'
+EDGE_CASES_DIR = TEST_DIR / 'edge_cases'
+TEST_FILE = EDGE_CASES_DIR / 'strict_typing_linter_test_cases.py'
+EDGE_CASE_FILE = EDGE_CASES_DIR / 'strict_typing_linter_edge_cases.py'
 
-# ---------------------------------------------------------------------------
-# Expected Violations: Instructive Test File
-# ---------------------------------------------------------------------------
+# -- Expected Violations: Instructive Test File -------------------------------
 
 # Maps class/function name to expected violation codes
 # Each test class should trigger exactly one violation type
@@ -82,9 +78,7 @@ SUPPRESSED_NAMES: Set[str] = {
     'HashableFieldSuppressed',
 }
 
-# ---------------------------------------------------------------------------
-# Expected Violations: Edge Case File
-# ---------------------------------------------------------------------------
+# -- Expected Violations: Edge Case File --------------------------------------
 
 EXPECTED_EDGE_CASES: ViolationMap = {
     # Nested tuple edge cases
@@ -191,9 +185,7 @@ EDGE_CASE_SUPPRESSED: Set[str] = {
     'EdgeMultipleSuppressionCodes',
 }
 
-# ---------------------------------------------------------------------------
-# AST Parsing
-# ---------------------------------------------------------------------------
+# -- AST Parsing --------------------------------------------------------------
 
 
 def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
@@ -217,9 +209,7 @@ def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
     return ranges
 
 
-# ---------------------------------------------------------------------------
-# Linter Output Parsing
-# ---------------------------------------------------------------------------
+# -- Linter Output Parsing ----------------------------------------------------
 
 
 def run_linter(test_file: Path, linter: Path) -> tuple[str, int]:
@@ -229,6 +219,7 @@ def run_linter(test_file: Path, linter: Path) -> tuple[str, int]:
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     return result.stdout + result.stderr, result.returncode
 
@@ -286,9 +277,7 @@ def map_violations_to_classes(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
+# -- Validation ---------------------------------------------------------------
 
 
 @dataclass
@@ -376,9 +365,7 @@ def validate_file(
     )
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# -- Main ---------------------------------------------------------------------
 
 
 def main() -> int:

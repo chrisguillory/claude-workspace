@@ -183,7 +183,11 @@ class ErrorBoundary:
             self._dispatch.register(Exception, handler)
         self._exit_code = exit_code
 
-    def handler(self, exc_type: type[Exception]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def handler(
+        self, exc_type: type[Exception]
+    ) -> Callable[  # strict_typing_linter.py: loose-typing — generic decorator factory, return type must accept arbitrary callables
+        [Callable[..., Any]], Callable[..., Any]
+    ]:
         """Register a handler for a specific exception type.
 
         Uses ``functools.singledispatch`` for MRO-based matching — registering
@@ -219,7 +223,7 @@ class ErrorBoundary:
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 try:
                     return await func(*args, **kwargs)
-                except Exception as exc:
+                except Exception as exc:  # exception_safety_linter.py: swallowed-exception — ErrorBoundary delegates to handler which decides action
                     return self._handle(exc)
 
             return cast(_F, async_wrapper)
@@ -228,7 +232,7 @@ class ErrorBoundary:
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
                 return func(*args, **kwargs)
-            except Exception as exc:
+            except Exception as exc:  # exception_safety_linter.py: swallowed-exception — ErrorBoundary delegates to handler which decides action
                 return self._handle(exc)
 
         return cast(_F, sync_wrapper)
@@ -278,10 +282,10 @@ class ErrorBoundary:
         result = None
         try:
             result = self._dispatch(exc)
-        except Exception:
-            try:  # noqa: SIM105 — explicit try/except/pass preserves comment explaining why
+        except Exception:  # exception_safety_linter.py: swallowed-exception — fallback to default handler
+            try:  # noqa: SIM105 — intentional try/except/pass; contextlib.suppress hides the error-handler-of-last-resort intent
                 _default_handler(exc)
-            except Exception:
+            except Exception:  # exception_safety_linter.py: swallowed-exception — both handlers failed  # noqa: S110 — last resort error handler
                 pass  # Both handlers failed (e.g. stderr broken); proceed with exit/suppress
 
         if self._exit_code is not None:

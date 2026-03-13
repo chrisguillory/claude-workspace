@@ -18,7 +18,7 @@ Framework support: attrs classes, dataclasses, Pydantic BaseModel.
 Generic classes without framework metadata return None (unverifiable).
 
 Standalone usage (requires --project for project-specific types):
-    uv run --project mcp/document-search python scripts/hashability_inspector.py \
+    uv run --project mcp/document-search python linters/hashability_inspector.py \
         document_search.schemas.vectors.VectorPoint
 
 When imported by strict_typing_linter.py, the linter passes source_roots (scan directories)
@@ -58,9 +58,7 @@ type QualifiedName = str
 type TypeAnnotation = Any
 
 
-# =============================================================================
-# Known type classifications (avoids importing external packages)
-# =============================================================================
+# -- Known type classifications (avoids importing external packages) ----------
 
 HASHABLE_PRIMITIVES: frozenset[type] = frozenset(
     {
@@ -128,9 +126,7 @@ KNOWN_UNHASHABLE: frozenset[QualifiedName] = frozenset(
 )
 
 
-# =============================================================================
-# Result types
-# =============================================================================
+# -- Result types -------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -151,9 +147,7 @@ class InspectionResult:
     unhashable_fields: Sequence[UnhashableField]
 
 
-# =============================================================================
-# Inspector
-# =============================================================================
+# -- Inspector ----------------------------------------------------------------
 
 
 class HashabilityInspector:
@@ -299,7 +293,7 @@ class HashabilityInspector:
 
     def _check_attrs(self, cls: type, type_name: str, qualified_name: QualifiedName) -> InspectionResult:
         """Verify attrs class hashability via field inspection."""
-        import attrs
+        import attrs  # noqa: PLC0415 — optional dependency, only imported when inspecting attrs classes
 
         # Non-frozen attrs classes have __hash__ set to None
         if getattr(cls, '__hash__', None) is None:
@@ -511,9 +505,7 @@ class HashabilityInspector:
         return True
 
 
-# =============================================================================
-# Framework detection (duck typing, no imports)
-# =============================================================================
+# -- Framework detection (duck typing, no imports) ----------------------------
 
 
 def _has_attrs(cls: type) -> bool:
@@ -531,9 +523,7 @@ def _is_pydantic_model(cls: type) -> bool:
     return hasattr(cls, 'model_fields') and hasattr(cls, 'model_config')
 
 
-# =============================================================================
-# Utilities
-# =============================================================================
+# -- Utilities ----------------------------------------------------------------
 
 
 def _annotation_repr(annotation: TypeAnnotation) -> str:
@@ -548,9 +538,7 @@ def _annotation_repr(annotation: TypeAnnotation) -> str:
     return repr(annotation)
 
 
-# =============================================================================
-# Standalone CLI
-# =============================================================================
+# -- Standalone CLI -----------------------------------------------------------
 
 
 if __name__ == '__main__':
@@ -559,8 +547,8 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
     if len(sys.argv) < 2:
-        print('Usage: uv run scripts/hashability_inspector.py <qualified_name> [...]')
-        print('Example: uv run scripts/hashability_inspector.py document_search.schemas.vectors.VectorPoint')
+        print('Usage: uv run linters/hashability_inspector.py <qualified_name> [...]')
+        print('Example: uv run linters/hashability_inspector.py document_search.schemas.vectors.VectorPoint')
         sys.exit(2)
 
     inspector = HashabilityInspector()

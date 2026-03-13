@@ -70,11 +70,11 @@ quote-style = "single"
 python_version = "3.13"
 plugins = ["plugins/pydantic_replace.py"]
 strict = true
-explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR:$MYPY_CONFIG_FILE_DIR/stubs:$MYPY_CONFIG_FILE_DIR/scripts"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/stubs"
 exclude = [
     ".venv",
     "scratch",
+    "tests/linters/edge_cases",  # intentionally bad code — linter test inputs
 ]
 
 [[tool.mypy.overrides]]

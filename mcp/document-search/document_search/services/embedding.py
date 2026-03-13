@@ -385,7 +385,7 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
                 f'tasks={task_count}'
             )
 
-        return results  # type: ignore[return-value]
+        return results  # type: ignore[return-value]  # list[EmbedResponse | None] but all None slots filled after miss resolution
 
     async def _bulk_cache_write(self, items: Sequence[tuple[str, bytes, int]]) -> Sequence[None]:
         """Pipeline cache SET operations."""

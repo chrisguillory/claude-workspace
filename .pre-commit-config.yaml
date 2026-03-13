@@ -36,10 +36,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      # TODO: Expand custom linters to . (entire repo). Requires fixing ~200
+      # violations across hooks/, mcp/python-interpreter/,
+      # mcp/selenium-browser-automation/.
       - id: strict-typing-linter
         name: strict-typing-linter
         description: Check for mutable/loose types in annotations
-        entry: ./scripts/strict_typing_linter.py mcp/document-search/ scripts/
+        entry: ./linters/strict_typing_linter.py --report-unused-directives mcp/document-search/ scripts/ linters/ cc-lib/
         language: system
         pass_filenames: false
         always_run: true
@@ -47,7 +50,15 @@ repos:
       - id: exception-safety-linter
         name: exception-safety-linter
         description: Check for exception handling anti-patterns
-        entry: ./scripts/exception_safety_linter.py mcp/document-search/ scripts/
+        entry: ./linters/exception_safety_linter.py --report-unused-directives mcp/document-search/ scripts/ linters/ cc-lib/
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: suppression-rationale-linter
+        name: suppression-rationale-linter
+        description: Check that lint suppression directives include rationale
+        entry: ./linters/suppression_rationale_linter.py mcp/document-search/ scripts/ linters/ cc-lib/
         language: system
         pass_filenames: false
         always_run: true

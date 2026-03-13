@@ -1,4 +1,6 @@
 # strict_typing_linter.py: skip-file
+# exception_safety_linter.py: skip-file
+# suppression_rationale_linter.py: skip-file
 # ruff: noqa: F841
 # mypy: disable-error-code="type-arg"
 """Strict typing linter edge cases - regression testing and comprehensive coverage.
@@ -21,9 +23,7 @@ from typing import Annotated, ClassVar
 import attrs
 import pydantic
 
-# =============================================================================
-# tuple-field: Nested Type Edge Cases
-# =============================================================================
+# -- tuple-field: Nested Type Edge Cases --------------------------------------
 
 
 class EdgeNestedTupleInMapping:
@@ -50,9 +50,7 @@ class EdgeTupleInAnnotatedWithMetadata:
     value: Annotated[tuple[int, ...], pydantic.Field(ge=0), 'extra']  # tuple-field
 
 
-# =============================================================================
-# tuple-field: Union Type Edge Cases
-# =============================================================================
+# -- tuple-field: Union Type Edge Cases ---------------------------------------
 
 
 class EdgeTupleUnionWithNone:
@@ -73,9 +71,7 @@ class EdgeTupleInComplexUnion:
     values: str | tuple[int, ...] | None  # tuple-field
 
 
-# =============================================================================
-# tuple-field: False Positive Prevention
-# =============================================================================
+# -- tuple-field: False Positive Prevention -----------------------------------
 
 
 class EdgeFixedTupleMultiType:
@@ -104,9 +100,7 @@ class EdgeTupleInFunctionOnly:
         return tuple(str(x) for x in items)
 
 
-# =============================================================================
-# hashable-field: Nested Unhashable Edge Cases
-# =============================================================================
+# -- hashable-field: Nested Unhashable Edge Cases -----------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,9 +131,7 @@ class EdgeHashableSequenceInAnnotated:
     items: Annotated[Sequence[int], pydantic.Field()]  # hashable-field
 
 
-# =============================================================================
-# hashable-field: Union Edge Cases
-# =============================================================================
+# -- hashable-field: Union Edge Cases -----------------------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -160,9 +152,7 @@ class EdgeHashableMappingUnion:
     data: Mapping[str, int] | None  # hashable-field
 
 
-# =============================================================================
-# hashable-field: list → tuple suggestion
-# =============================================================================
+# -- hashable-field: list → tuple suggestion ----------------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -186,9 +176,7 @@ class EdgeHashableDictSuggestion:
     data: dict[str, int]  # mutable-type: suggests frozendict in hashable context
 
 
-# =============================================================================
-# hashable-field: ClassVar is NOT an instance field
-# =============================================================================
+# -- hashable-field: ClassVar is NOT an instance field ------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -218,9 +206,7 @@ class EdgeHashableClassVarTuple:
     CLASS_VALUES: ClassVar[tuple[int, ...]] = ()  # OK: ClassVar
 
 
-# =============================================================================
-# Context: Nested class independence
-# =============================================================================
+# -- Context: Nested class independence ---------------------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -252,9 +238,7 @@ class EdgeOuterHashableWithInnerDataclass:
         items: tuple[int, ...]  # tuple-field: nested class independent
 
 
-# =============================================================================
-# Multiple Violations in One Field
-# =============================================================================
+# -- Multiple Violations in One Field -----------------------------------------
 
 
 class EdgeMultipleViolationsTupleAndMutable:
@@ -275,9 +259,7 @@ class EdgeHashableMultipleViolations:
     data: Mapping[str, list[int]]  # hashable-field: Mapping unhashable
 
 
-# =============================================================================
-# String Annotations (PEP 563)
-# =============================================================================
+# -- String Annotations (PEP 563) ---------------------------------------------
 
 
 class EdgeStringAnnotationTuple:
@@ -292,9 +274,7 @@ class EdgeStringAnnotationNested:
     data: Mapping[str, tuple[int, ...]]  # tuple-field: nested in string
 
 
-# =============================================================================
-# Non-frozen Dataclass - Fields Not Checked
-# =============================================================================
+# -- Non-frozen Dataclass - Fields Not Checked --------------------------------
 
 
 @dataclasses.dataclass  # NOT frozen
@@ -317,9 +297,7 @@ class EdgeExplicitlyNotFrozen:
 # would raise ValueError during linting (tested separately in error validation).
 
 
-# =============================================================================
-# Frozen Dataclass Without Hashable Flag
-# =============================================================================
+# -- Frozen Dataclass Without Hashable Flag -----------------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -330,9 +308,7 @@ class EdgeFrozenNoHashableFlag:
     values: tuple[int, ...]  # tuple-field: not in hashable context
 
 
-# =============================================================================
-# Regular Class (Not Dataclass) with Hashable Flag
-# =============================================================================
+# -- Regular Class (Not Dataclass) with Hashable Flag -------------------------
 
 
 class EdgeRegularClassHashable:
@@ -352,9 +328,7 @@ class EdgeRegularClassHashableSequence:
     items: Sequence[int]  # hashable-field: Sequence in hashable class
 
 
-# =============================================================================
-# Suppression Directive Edge Cases
-# =============================================================================
+# -- Suppression Directive Edge Cases -----------------------------------------
 
 
 class EdgeSuppressedTupleField:
@@ -379,9 +353,7 @@ class EdgeMultipleSuppressionCodes:
     values: tuple[int, ...]  # strict_typing_linter.py: tuple-field, mutable-type
 
 
-# =============================================================================
-# Pydantic Model Examples
-# =============================================================================
+# -- Pydantic Model Examples --------------------------------------------------
 
 
 class EdgePydanticStrictModel(pydantic.BaseModel):
@@ -410,9 +382,7 @@ class EdgePydanticHashableSequence(pydantic.BaseModel):
     items: Sequence[int]  # hashable-field
 
 
-# =============================================================================
-# attrs: Frozen Detection
-# =============================================================================
+# -- attrs: Frozen Detection --------------------------------------------------
 
 
 @attrs.frozen
@@ -455,9 +425,7 @@ class EdgeAttrsFrozenHashableSequence:
     items: Sequence[int]  # hashable-field
 
 
-# =============================================================================
-# Nested Class Inside Non-Frozen Dataclass (regression: _skip_class_fields leak)
-# =============================================================================
+# -- Nested Class Inside Non-Frozen Dataclass (regression: _skip_class_fields leak)
 
 
 @dataclasses.dataclass
@@ -483,9 +451,7 @@ class EdgeDeeplyNested4Levels:
                 values: tuple[int, ...]  # tuple-field: deepest level checked
 
 
-# =============================================================================
-# Cross-type hashability: Runtime inspector checks user-defined types
-# =============================================================================
+# -- Cross-type hashability: Runtime inspector checks user-defined types ------
 
 # --- attrs: unhashable field types ---
 
@@ -785,9 +751,7 @@ class _HashablePydanticModel(pydantic.BaseModel):
     count: int
 
 
-# =============================================================================
-# Stub Helpers
-# =============================================================================
+# -- Stub Helpers -------------------------------------------------------------
 
 
 def edge_function_params_ok(
