@@ -2563,6 +2563,242 @@ def register_tools(service: BrowserService) -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
+            title='Scroll Page',
+            destructiveHint=False,
+            idempotentHint=False,
+        )
+    )
+    async def scroll(
+        ctx: Context[Any, Any, Any],
+        direction: Literal['up', 'down', 'left', 'right'] | None = None,
+        scroll_amount: int = 3,
+        css_selector: str | None = None,
+    ) -> dict[str, Any]:
+        """Scroll the page, a container, or an element into view.
+
+        Three modes of operation:
+
+        **Mode 1 - Directional viewport scroll** (direction only):
+        Scrolls the viewport by the given amount.
+
+        **Mode 2 - Container scroll** (direction + css_selector):
+        Scrolls within a specific scrollable container (e.g., chat log, sidebar).
+
+        **Mode 3 - Scroll element into view** (css_selector only, no direction):
+        Scrolls until the target element is centered in the viewport.
+
+        Args:
+            direction: Scroll direction: 'up', 'down', 'left', 'right'.
+                Required for directional scrolling. Omit to scroll element into view.
+            scroll_amount: Number of ticks to scroll (1-20, default 3).
+                Each tick produces 100 CSS pixels of scroll delta. Only used with direction.
+            css_selector: CSS selector for either:
+                - Target element to scroll into view (when no direction)
+                - Scrollable container to scroll within (when direction provided)
+
+        Returns:
+            Dict with scroll results including mode, scroll position, page dimensions,
+            and a 'scrolled' boolean indicating whether the scroll position changed.
+
+        Examples:
+            - scroll(direction='down') - Scroll viewport down ~300px
+            - scroll(direction='down', scroll_amount=10) - Scroll down ~1000px
+            - scroll(css_selector='#footer') - Scroll #footer into view (centered)
+            - scroll(direction='down', css_selector='.chat-log') - Scroll within .chat-log
+
+        Notes:
+            - CSS scroll-snap may cause actual scroll position to differ from requested amount.
+            - Use the returned scroll position and 'scrolled' boolean to detect boundaries.
+            - For iframe content, switch to the iframe context first.
+
+        Workflow:
+            1. get_aria_snapshot('body') - understand page structure
+            2. scroll(direction='down') - scroll to see more content
+            3. get_aria_snapshot('body') - see updated content
+        """
+        driver = await service.get_browser()
+
+        # Validate parameters
+        if direction is None and css_selector is None:
+            raise fastmcp.exceptions.ToolError(
+                'Either direction or css_selector (or both) must be provided.\n'
+                "Use direction='down' for viewport scrolling, "
+                "or css_selector='#element' to scroll into view."
+            )
+
+        if scroll_amount < 1 or scroll_amount > 20:
+            raise ValueError('scroll_amount must be between 1 and 20')
+
+        PIXELS_PER_TICK = 100
+
+        # ── Mode 3: Scroll element into view (css_selector only, no direction) ──
+
+        if css_selector is not None and direction is None:
+            _validate_css_selector(css_selector)
+            logger.info(f'Scrolling element into view: {css_selector}')
+
+            try:
+                element = await asyncio.to_thread(
+                    WebDriverWait(driver, 10).until,
+                    EC.presence_of_element_located((By.CSS_SELECTOR, css_selector)),
+                )
+            except WebDriverException as e:
+                raise fastmcp.exceptions.ToolError(
+                    f"Failed to find element '{css_selector}': {e}\n"
+                    f"Use get_aria_snapshot('body') to discover valid selectors."
+                ) from None
+
+            # Capture before position
+            before_y = await asyncio.to_thread(driver.execute_script, 'return Math.round(window.scrollY);')
+
+            # Override scroll-behavior and scrollIntoView with block:'center'
+            # Belt-and-suspenders: behavior:'instant' should suffice on Chrome 115+,
+            # but CSS override handles older versions where the bug wasn't fixed.
+            await asyncio.to_thread(
+                driver.execute_script,
+                """
+                var orig = document.documentElement.style.scrollBehavior;
+                document.documentElement.style.scrollBehavior = 'auto';
+                arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                document.documentElement.style.scrollBehavior = orig || '';
+                """,
+                element,
+            )
+
+            after_info = await asyncio.to_thread(
+                driver.execute_script,
+                """
+                return {
+                    scrollX: Math.round(window.scrollX),
+                    scrollY: Math.round(window.scrollY),
+                    pageHeight: Math.max(
+                        document.body.scrollHeight, document.documentElement.scrollHeight,
+                        document.body.offsetHeight, document.documentElement.offsetHeight
+                    ),
+                    viewportHeight: window.innerHeight
+                };
+                """,
+            )
+
+            scrolled = after_info['scrollY'] != before_y
+            logger.info(
+                f'Scrolled element into view: {css_selector} (scrollY={after_info["scrollY"]}, scrolled={scrolled})'
+            )
+            return {
+                'mode': 'scroll_to_element',
+                'selector': css_selector,
+                'scroll_x': after_info['scrollX'],
+                'scroll_y': after_info['scrollY'],
+                'page_height': after_info['pageHeight'],
+                'viewport_height': after_info['viewportHeight'],
+                'scrolled': scrolled,
+            }
+
+        # Calculate pixel deltas for directional scroll
+        delta_map = {
+            'up': (0, -PIXELS_PER_TICK * scroll_amount),
+            'down': (0, PIXELS_PER_TICK * scroll_amount),
+            'left': (-PIXELS_PER_TICK * scroll_amount, 0),
+            'right': (PIXELS_PER_TICK * scroll_amount, 0),
+        }
+        delta_x, delta_y = delta_map[direction]  # type: ignore[index]
+
+        # ── Mode 2: Container scroll (direction + css_selector) ──
+
+        if css_selector is not None:
+            _validate_css_selector(css_selector)
+            logger.info(f'Scrolling {direction} by {scroll_amount} ticks within {css_selector}')
+
+            try:
+                element = await asyncio.to_thread(
+                    WebDriverWait(driver, 10).until,
+                    EC.presence_of_element_located((By.CSS_SELECTOR, css_selector)),
+                )
+            except WebDriverException as e:
+                raise fastmcp.exceptions.ToolError(
+                    f"Failed to find scrollable container '{css_selector}': {e}\n"
+                    f"Use get_aria_snapshot('body') to discover valid selectors."
+                ) from None
+
+            # Measure before, scroll with behavior:'instant', measure after
+            result = await asyncio.to_thread(
+                driver.execute_script,
+                """
+                var el = arguments[0], dy = arguments[1], dx = arguments[2];
+                var beforeTop = el.scrollTop, beforeLeft = el.scrollLeft;
+                el.scrollBy({top: dy, left: dx, behavior: 'instant'});
+                return {
+                    scrollTop: Math.round(el.scrollTop),
+                    scrollLeft: Math.round(el.scrollLeft),
+                    scrollHeight: el.scrollHeight,
+                    clientHeight: el.clientHeight,
+                    scrolled: (Math.round(el.scrollTop) !== Math.round(beforeTop)
+                            || Math.round(el.scrollLeft) !== Math.round(beforeLeft))
+                };
+                """,
+                element,
+                delta_y,
+                delta_x,
+            )
+
+            logger.info(
+                f'Scrolled {direction} within {css_selector} '
+                f'(scrollTop={result["scrollTop"]}, scrolled={result["scrolled"]})'
+            )
+            return {
+                'mode': 'container_scroll',
+                'direction': direction,
+                'pixels': abs(delta_x) + abs(delta_y),
+                'selector': css_selector,
+                'container_scroll_top': result['scrollTop'],
+                'container_scroll_left': result['scrollLeft'],
+                'container_scroll_height': result['scrollHeight'],
+                'container_client_height': result['clientHeight'],
+                'scrolled': result['scrolled'],
+            }
+
+        # ── Mode 1: Viewport scroll (direction only) ──
+
+        logger.info(f'Scrolling viewport {direction} by {scroll_amount} ticks')
+
+        # Use JS window.scrollBy with behavior:'instant'.
+        # ActionChains scroll_by_amount does NOT work in headless Chrome.
+        result = await asyncio.to_thread(
+            driver.execute_script,
+            """
+            var dy = arguments[0], dx = arguments[1];
+            var beforeX = window.scrollX, beforeY = window.scrollY;
+            window.scrollBy({top: dy, left: dx, behavior: 'instant'});
+            return {
+                scrollX: Math.round(window.scrollX),
+                scrollY: Math.round(window.scrollY),
+                pageHeight: Math.max(
+                    document.body.scrollHeight, document.documentElement.scrollHeight,
+                    document.body.offsetHeight, document.documentElement.offsetHeight
+                ),
+                viewportHeight: window.innerHeight,
+                scrolled: (Math.round(window.scrollX) !== Math.round(beforeX)
+                        || Math.round(window.scrollY) !== Math.round(beforeY))
+            };
+            """,
+            delta_y,
+            delta_x,
+        )
+
+        logger.info(f'Scrolled viewport {direction} (scrollY={result["scrollY"]}, scrolled={result["scrolled"]})')
+        return {
+            'mode': 'viewport_scroll',
+            'direction': direction,
+            'pixels': abs(delta_x) + abs(delta_y),
+            'scroll_x': result['scrollX'],
+            'scroll_y': result['scrollY'],
+            'page_height': result['pageHeight'],
+            'viewport_height': result['viewportHeight'],
+            'scrolled': result['scrolled'],
+        }
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
             title='Sleep',
             readOnlyHint=True,
             idempotentHint=True,
