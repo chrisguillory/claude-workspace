@@ -20,3 +20,6 @@ def pytest_configure() -> None:
     """
     repo_root = str(Path(__file__).resolve().parent)
     os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, [repo_root, os.environ.get('PYTHONPATH', '')]))
+
+    # Ensure StrictModel defaults to extra='allow' regardless of parent env
+    os.environ.pop('CC_SCHEMA_EXTRA_FORBID', None)

@@ -3,7 +3,6 @@
 # requires-python = ">=3.13"
 # dependencies = ["pydantic>=2.0"]
 # ///
-# exception_safety_linter.py: skip-file
 # strict_typing_linter.py: skip-file
 
 """

@@ -7,20 +7,20 @@ See: https://code.claude.com/docs/en/hooks#sessionend
 # /// script
 # dependencies = [
 #   "pydantic>=2.0.0",
-#   "local_lib",
+#   "cc_lib",
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from local_lib.schemas.hooks import SessionEndHookInput
-from local_lib.session_tracker import SessionManager
-from local_lib.utils import Timer
+from cc_lib.schemas.hooks import SessionEndHookInput
+from cc_lib.session_tracker import SessionManager
+from cc_lib.utils import Timer
 
 # Start timing
 timer = Timer()

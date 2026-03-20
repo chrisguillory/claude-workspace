@@ -8,7 +8,7 @@ dependencies = [
     "fastmcp>=2.12.5",
     "filelock",
     "httpx>=0.28.1",
-    "local-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=local-lib",
+    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
     "pandas",
     "pydantic",
     "uvicorn",
@@ -21,7 +21,7 @@ mcp-py-client = "python_interpreter.client:main"
 [tool.uv.sources]
 # Local development override: workspace reference takes precedence over git URL in dependencies.
 # Remote uvx installations use the git URL; local development uses workspace (faster, sees live changes).
-local-lib = { workspace = true }
+cc-lib = { workspace = true }
 
 [tool.hatch.build]
 # Package directory to include in distribution

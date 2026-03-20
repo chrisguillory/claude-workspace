@@ -262,7 +262,7 @@ class PipelineTracer:
             total_elapsed_seconds=round(total_elapsed, 3),
             sparse_threads=self._sparse_threads,
             completion_series=completion_series,
-            **partial_kwargs,  # type: ignore[arg-type]
+            **partial_kwargs,  # type: ignore[arg-type]  # partial_kwargs values typed as object, PipelineTimingReport expects specific types
         )
 
     # ── Private: queue monitoring ────────────────────────────────

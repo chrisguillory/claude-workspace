@@ -15,7 +15,7 @@ from pathlib import Path
 from uuid import UUID
 
 import attrs
-from local_lib.batch_loader import GenericBatchLoader
+from cc_lib.batch_loader import GenericBatchLoader
 
 from document_search.clients.qdrant import QdrantClient
 from document_search.repositories.index_state import IndexStateStore

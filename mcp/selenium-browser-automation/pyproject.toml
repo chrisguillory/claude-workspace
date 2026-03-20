@@ -8,7 +8,7 @@ dependencies = [
     "dfindexeddb>=20251109",
     "fastmcp>=2.12.5",
     "httpx",
-    "local-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=local-lib",
+    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
     "pycryptodome>=3.23.0",
     "pydantic>=2.0.0",
     "pyyaml",
@@ -27,7 +27,7 @@ allow-direct-references = true
 
 [tool.uv.sources]
 ccl-chromium-reader = { git = "https://github.com/cclgroupltd/ccl_chromium_reader.git" }
-local-lib = { workspace = true }
+cc-lib = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

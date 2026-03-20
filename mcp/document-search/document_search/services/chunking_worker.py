@@ -332,16 +332,18 @@ def _filter_base64(obj: object) -> object:
     return obj
 
 
-def _update_group(  # strict_typing_linter.py: mutable-type (returns buffer for reuse)
+def _update_group(  # strict_typing_linter.py: mutable-type — returns buffer for reuse by caller to accumulate records
     line_num: int,
     obj: object,
     size: int,
     path: Path,
     schema_hint: str | None,
-    group_buffer: list[tuple[int, object]],  # strict_typing_linter.py: mutable-type (mutates)
+    group_buffer: list[
+        tuple[int, object]
+    ],  # strict_typing_linter.py: mutable-type — caller passes buffer to be mutated in-place
     group_size_chars: int,
     chunk_size: int,
-    chunks: list[Chunk],  # strict_typing_linter.py: mutable-type (appends)
+    chunks: list[Chunk],  # strict_typing_linter.py: mutable-type — accumulator appended to by flush
 ) -> tuple[list[tuple[int, object]], int]:
     """Update group buffer, flushing when full."""
     if group_buffer and (group_size_chars + size > chunk_size or len(group_buffer) >= JSONL_MAX_GROUP_SIZE):
@@ -357,7 +359,7 @@ def _flush_group(
     group_buffer: Sequence[tuple[int, object]],
     path: Path,
     schema_hint: str | None,
-    chunks: list[Chunk],  # strict_typing_linter.py: mutable-type (appends)
+    chunks: list[Chunk],  # strict_typing_linter.py: mutable-type — accumulator appended to by caller
 ) -> None:
     """Create chunk from grouped records."""
     if not group_buffer:
@@ -392,7 +394,7 @@ def _add_single_record(
     obj: object,
     path: Path,
     schema_hint: str | None,
-    chunks: list[Chunk],  # strict_typing_linter.py: mutable-type (appends)
+    chunks: list[Chunk],  # strict_typing_linter.py: mutable-type — accumulator for oversized record sub-chunks
     chunk_size: int,
     text_splitter: RecursiveCharacterTextSplitter,
 ) -> None:

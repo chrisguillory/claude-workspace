@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Annotated, Literal
 
 import pydantic
-from local_lib.types import JsonDatetime, JsonUuid
+from cc_lib.types import JsonDatetime, JsonUuid
 
 from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import FileType

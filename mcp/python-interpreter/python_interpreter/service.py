@@ -16,7 +16,7 @@ import tempfile
 import typing
 from collections.abc import Sequence
 
-from local_lib.utils import encode_project_path, humanize_seconds
+from cc_lib.utils import encode_project_path, humanize_seconds
 
 from python_interpreter.discovery import discover_session_id, find_claude_context
 from python_interpreter.manager import ExternalInterpreterManager, InterpreterConfig
