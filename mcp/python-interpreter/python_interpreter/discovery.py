@@ -14,7 +14,7 @@ import pathlib
 import subprocess
 import time
 
-from local_lib.session_tracker import SESSIONS_PATH, SessionDatabase
+from cc_lib.session_tracker import SESSIONS_PATH, SessionDatabase
 
 __all__ = [
     'ClaudeContext',

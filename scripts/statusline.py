@@ -4,11 +4,11 @@
 # dependencies = [
 #     "psutil>=5.9",
 #     "pydantic>=2.0",
-#     "local_lib",
+#     "cc_lib",
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 
 """Claude Code status line script.
@@ -115,9 +115,9 @@ from typing import Literal
 import psutil
 import pydantic
 import pydantic.alias_generators
-from local_lib.error_boundary import ErrorBoundary
-from local_lib.schemas import StrictModel
-from local_lib.session_tracker import find_claude_pid
+from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.schemas import StrictModel
+from cc_lib.session_tracker import find_claude_pid
 
 # =============================================================================
 # Pydantic Models — strict, fail-fast on schema drift
@@ -1390,7 +1390,7 @@ def _get_session_title(transcript_path: str) -> str | None:
             line_end = mm.find(b'\n', pos)
             if line_end == -1:
                 line_end = len(mm)
-            return json.loads(mm[line_start:line_end]).get('customTitle')  # type: ignore[no-any-return]
+            return json.loads(mm[line_start:line_end]).get('customTitle')  # type: ignore[no-any-return]  # .get() returns Any from untyped JSON, value is always str | None
     except (OSError, json.JSONDecodeError, ValueError):
         return None
 

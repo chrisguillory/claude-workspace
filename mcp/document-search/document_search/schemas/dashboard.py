@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
-from local_lib.types import JsonDatetime
+from cc_lib.types import JsonDatetime
 
 from document_search.clients.redis import ConnectionStats
 

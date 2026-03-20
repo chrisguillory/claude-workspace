@@ -16,7 +16,7 @@ import time
 from collections.abc import Sequence
 
 import numpy as np
-from local_lib.batch_loader import GenericBatchLoader
+from cc_lib.batch_loader import GenericBatchLoader
 
 from document_search.clients.protocols import EmbeddingClient
 from document_search.clients.redis import RedisClient
@@ -385,7 +385,7 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
                 f'tasks={task_count}'
             )
 
-        return results  # type: ignore[return-value]
+        return results  # type: ignore[return-value]  # list[EmbedResponse | None] but all None slots filled after miss resolution
 
     async def _bulk_cache_write(self, items: Sequence[tuple[str, bytes, int]]) -> Sequence[None]:
         """Pipeline cache SET operations."""

@@ -37,7 +37,7 @@ from urllib.parse import parse_qs, urlparse
 # Third-Party Libraries
 import fastmcp.exceptions
 import httpx
-from local_lib.utils import Timer
+from cc_lib.utils import Timer
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel

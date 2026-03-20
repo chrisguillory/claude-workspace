@@ -17,9 +17,9 @@ from typing import Literal
 import httpx
 import pyrate_limiter
 import tenacity
+from cc_lib import ConcurrencyTracker
 from google import genai
 from google.genai.types import EmbedContentConfig, HttpOptions
-from local_lib import ConcurrencyTracker
 from vertexai.preview import tokenization
 
 from document_search.clients import _retry

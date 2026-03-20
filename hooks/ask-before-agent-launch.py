@@ -10,11 +10,11 @@ See: https://code.claude.com/docs/en/hooks#pretooluse
 # /// script
 # dependencies = [
 #   "pydantic>=2.0.0",
-#   "local_lib",
+#   "cc_lib",
 # ]
 #
 # [tool.uv.sources]
-# local_lib = { path = "../local-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 from __future__ import annotations
 
@@ -44,12 +44,12 @@ def ask_stdlib(reason: str) -> None:
 
 try:
     import pydantic
-    from local_lib.schemas.hooks import (
+    from cc_lib.schemas.hooks import (
         PreToolUseDecision,
         PreToolUseHookInput,
         PreToolUseHookOutput,
     )
-except Exception as e:
+except Exception as e:  # exception_safety_linter.py: swallowed-exception — fail closed: import error triggers manual approval, not silent pass
     # Fail CLOSED: if deps can't be imported, require manual approval
     print(f'hook import error: {e}', file=sys.stderr)
     ask_stdlib('hook import error — requesting manual approval')
@@ -63,7 +63,7 @@ def ask(reason: str) -> None:
             permission_decision_reason=reason,
         )
     )
-    print(output.model_dump_json(by_alias=True, exclude_none=True))
+    print(output.model_dump_json())
     sys.exit(0)
 
 

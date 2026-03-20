@@ -27,6 +27,8 @@ try:
         f.write(f'\n--- {hook_input.get("hook_event_name", "Hook")} ---\n')
         for key, value in hook_input.items():
             f.write(f'{key}: {value}\n')
-except Exception as e:
+except (
+    Exception
+) as e:  # exception_safety_linter.py: swallowed-exception — hook must not crash; logs error and exits cleanly
     # Print exception but don't fail the hook
     print(f'Error writing to debug.txt: {e}', file=sys.stderr)
