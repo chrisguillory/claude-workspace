@@ -14,7 +14,7 @@ from selenium.webdriver.common.by import By
 
 from .scripts import HOVER_OCCLUSION_SCRIPT
 
-__all__ = ['check_hover_actionability']
+__all__ = ['check_hover_actionability', 'validate_hover_duration']
 
 
 def check_hover_actionability(
@@ -54,3 +54,11 @@ def check_hover_actionability(
         return {'success': False, 'error': 'obscured'}
 
     return {'success': True}
+
+
+def validate_hover_duration(duration_ms: int) -> None:
+    """Validate hover duration_ms parameter. Raises ValueError if out of range."""
+    if duration_ms < 0:
+        raise ValueError('duration_ms cannot be negative')
+    if duration_ms > 30000:
+        raise ValueError('duration_ms exceeds maximum of 30000ms (30 seconds)')
