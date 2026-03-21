@@ -260,6 +260,7 @@ parameter_validation:
       direction: down
       expect:
         success: true
+        scrolled: true
 
 # =============================================================================
 # SMOOTH SCROLL TESTS
@@ -372,10 +373,11 @@ position_scroll:
         success: true
 
     - name: position_left_viewport
-      description: Scroll viewport to left edge
+      description: Scroll viewport to left edge — already at left, scrolled false
       position: left
       expect:
         success: true
+        scrolled: false
 
     - name: position_bottom_container
       description: Scroll container to absolute bottom
@@ -409,11 +411,12 @@ position_scroll:
         container_scrollLeft_gt: 100
 
     - name: position_left_container
-      description: Scroll container to left edge
+      description: Scroll container to left edge — already at left, scrolled false
       position: left
       css_selector: "#scroll-container"
       expect:
         success: true
+        scrolled: false
 
     - name: position_and_direction_error
       description: Cannot specify both position and direction
