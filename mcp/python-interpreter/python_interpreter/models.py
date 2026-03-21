@@ -65,7 +65,7 @@ class SavedInterpreterConfig(StrictModel, frozen=False):
 
     python_path: str
     cwd: str | None
-    env: dict[str, str] | None
+    env: Mapping[str, str] | None
     startup_script: str | None
     description: str | None
 

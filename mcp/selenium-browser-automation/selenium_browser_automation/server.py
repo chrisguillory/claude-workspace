@@ -28,8 +28,9 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import typing
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar
@@ -155,7 +156,7 @@ _VISUAL_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
 ]
 
 
-def _count_tree_nodes(node: dict[str, Any] | None) -> int:
+def _count_tree_nodes(node: Mapping[str, Any] | None) -> int:
     """Count nodes in a tree for compaction stats."""
     if node is None:
         return 0
@@ -166,7 +167,7 @@ def _count_tree_nodes(node: dict[str, Any] | None) -> int:
 
 
 def _build_page_metadata(
-    page_stats: dict[str, Any],
+    page_stats: Mapping[str, Any],
     include_page_info: bool,
     include_urls: bool,
     compact_tree: bool,
@@ -284,7 +285,7 @@ async def _cdp_get_storage(
     driver: webdriver.Chrome,
     origin: str,
     is_local: bool = True,
-) -> Sequence[dict[str, str]]:
+) -> Sequence[Mapping[str, str]]:
     """Get storage items for a specific origin via CDP.
 
     Args:
@@ -372,11 +373,11 @@ async def _capture_current_origin_storage(
     # Capture localStorage - always update cache (even if empty) to avoid stale data
     # if user clears storage and then navigates away
     local_storage_items = await _cdp_get_storage(driver, current_origin, is_local=True)
-    service.state.local_storage_cache[current_origin] = list(local_storage_items)
+    service.state.local_storage_cache[current_origin] = [dict(item) for item in local_storage_items]
 
     # Capture sessionStorage - always update cache (even if empty)
     session_storage_items = await _cdp_get_storage(driver, current_origin, is_local=False)
-    service.state.session_storage_cache[current_origin] = list(session_storage_items)
+    service.state.session_storage_cache[current_origin] = [dict(item) for item in session_storage_items]
 
     # Capture IndexedDB - requires JavaScript (CDP has no write API, so we use JS for both)
     # This may add ~100ms for sites with IndexedDB; most sites have none so this is fast.
@@ -548,8 +549,8 @@ def _build_storage_init_script(profile_state: ProfileState) -> str | None:
 
         if has_local or has_session:
             storage_data[origin_url] = {
-                'localStorage': origin_data.local_storage or {},
-                'sessionStorage': origin_data.session_storage or {},
+                'localStorage': dict(origin_data.local_storage) if origin_data.local_storage else {},
+                'sessionStorage': dict(origin_data.session_storage) if origin_data.session_storage else {},
             }
 
     if not storage_data:
@@ -741,7 +742,7 @@ class OriginTracker:
         self._origins.add(origin)
         return origin
 
-    def get_origins(self) -> list[str]:
+    def get_origins(self) -> Sequence[str]:
         """Get sorted list of all tracked origins."""
         return sorted(self._origins)
 
@@ -1430,7 +1431,7 @@ def register_tools(service: BrowserService) -> None:
         try:
             result = await asyncio.to_thread(driver.execute_script, TEXT_EXTRACTION_SCRIPT, selector)
         except WebDriverException as e:
-            raise fastmcp.exceptions.ToolError(f'Failed to execute extraction script: {e}')
+            raise fastmcp.exceptions.ToolError(f'Failed to execute extraction script: {e}') from e
 
         # Handle selector not found
         if result.get('error'):
@@ -1544,7 +1545,7 @@ def register_tools(service: BrowserService) -> None:
             try:
                 elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, selector)
             except WebDriverException as e:
-                raise fastmcp.exceptions.ToolError(f"Invalid CSS selector '{selector}': {e}")
+                raise fastmcp.exceptions.ToolError(f"Invalid CSS selector '{selector}': {e}") from e
 
             count = len(elements)
 
@@ -1587,7 +1588,7 @@ def register_tools(service: BrowserService) -> None:
             try:
                 page_html: str = await asyncio.to_thread(lambda: driver.page_source)
             except WebDriverException as e:
-                raise fastmcp.exceptions.ToolError(f'Failed to get page source: {e}')
+                raise fastmcp.exceptions.ToolError(f'Failed to get page source: {e}') from e
 
             logger.info(f'Extracted {len(page_html):,} characters of HTML')
 
@@ -1697,7 +1698,7 @@ def register_tools(service: BrowserService) -> None:
         return response.content, response.status_code, content_type
 
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-    async def download_resource(url: str, output_filename: str) -> dict[str, Any]:
+    async def download_resource(url: str, output_filename: str) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies by download result
         """Download specific resource using current browser session's cookies and headers.
 
         Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
@@ -1944,10 +1945,10 @@ def register_tools(service: BrowserService) -> None:
     async def get_interactive_elements(
         selector_scope: str,
         text_contains: str | None,
-        tag_filter: list[str] | None,
+        tag_filter: Sequence[str] | None,
         limit: int | None,
         ctx: Context[Any, Any, Any],
-    ) -> list[InteractiveElement]:
+    ) -> Sequence[InteractiveElement]:
         """Find clickable elements by text or other filters. Returns CSS selectors for click().
 
         This is the tool for finding elements by text content.
@@ -2065,7 +2066,7 @@ def register_tools(service: BrowserService) -> None:
         return [InteractiveElement(**el) for el in elements]
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
-    async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> list[FocusableElement]:
+    async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> Sequence[FocusableElement]:
         """Get keyboard-navigable elements sorted by tab order.
 
         Args:
@@ -2560,7 +2561,7 @@ def register_tools(service: BrowserService) -> None:
         duration_ms: int,
         ctx: Context[Any, Any, Any],
         reason: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies
         """Pause execution for a fixed duration. Use sparingly.
 
         This is a simple time-based delay. For most automation scenarios,
@@ -2620,7 +2621,7 @@ def register_tools(service: BrowserService) -> None:
         ctx: Context[Any, Any, Any],
         state: Literal['visible', 'hidden', 'attached', 'detached'] = 'visible',
         timeout: int = 30000,
-    ) -> dict[str, Any]:
+    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies by state outcome
         """Wait for an element matching the selector to reach a desired state.
 
         More reliable than wait_for_network_idle() for modern SPAs because it waits
@@ -2749,8 +2750,7 @@ def register_tools(service: BrowserService) -> None:
                             'element_count': len(elements),
                         }
 
-            except Exception:
-                # Selector might be invalid or stale element - keep polling
+            except Exception:  # exception_safety_linter.py: swallowed-exception — polling resilience; selector evaluation may hit stale element
                 pass
 
             await asyncio.sleep(polling_interval)
@@ -2767,7 +2767,9 @@ def register_tools(service: BrowserService) -> None:
                 current_state = 'visible' if first_displayed else 'in DOM but hidden'
             else:
                 current_state = 'not in DOM'
-        except Exception:
+        except (
+            Exception
+        ):  # exception_safety_linter.py: swallowed-exception — best-effort diagnostics for timeout error message
             element_count = 0
             current_state = 'unknown (selector may be invalid)'
 
@@ -2819,7 +2821,7 @@ def register_tools(service: BrowserService) -> None:
         width: int,
         height: int,
         ctx: Context[Any, Any, Any],
-    ) -> dict[str, Any]:
+    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
@@ -2919,10 +2921,12 @@ def register_tools(service: BrowserService) -> None:
         # Parse results into Pydantic models
         T = TypeVar('T', bound=BaseModel)
 
-        def parse_metric(data: dict[str, Any] | None, model_cls: type[T]) -> T | None:
+        def parse_metric(
+            data: Mapping[str, Any] | None, model_cls: type[T]
+        ) -> T | None:  # strict_typing_linter.py: loose-typing — web vitals JS returns arbitrary metric shapes
             if not data:
                 return None
-            if isinstance(data, dict) and 'error' in data:
+            if 'error' in data:
                 errors.append(f'{data.get("name", "Unknown")}: {data["error"]}')
                 return None
             return model_cls(**data)
@@ -3084,7 +3088,9 @@ Note:
         url: str,
         method: str,
         cdp_timestamp: float | None,
-    ) -> dict[str, Any] | None:
+    ) -> (
+        Mapping[str, Any] | None
+    ):  # strict_typing_linter.py: loose-typing — JS interceptor capture returns arbitrary shape
         """Look up response body from JavaScript interceptor capture.
 
         Matches by URL + method + timestamp (within 5s window).
@@ -3267,19 +3273,27 @@ Workflow:
                 started_datetime = datetime.now(UTC).isoformat().replace('+00:00', 'Z')
 
             # Convert headers dict to HAR array format
-            def headers_to_har(headers_dict: dict[str, Any] | None) -> list[dict[str, str]]:
+            def headers_to_har(
+                headers_dict: Mapping[str, Any] | None,
+            ) -> Sequence[
+                Mapping[str, str]
+            ]:  # strict_typing_linter.py: loose-typing — CDP returns arbitrary header dicts
                 if not headers_dict:
                     return []
                 return [{'name': k, 'value': str(v)} for k, v in headers_dict.items()]
 
             # Parse query string from URL
-            def parse_query_string(url: str) -> list[dict[str, str]]:
+            def parse_query_string(url: str) -> Sequence[Mapping[str, str]]:
                 parsed = urlparse(url)
                 query_params = parse_qs(parsed.query)
                 return [{'name': name, 'value': value} for name, values in query_params.items() for value in values]
 
             # Convert CDP timing to HAR timing (duration in ms)
-            def convert_timing(timing_obj: dict[str, Any]) -> dict[str, float | int]:
+            def convert_timing(
+                timing_obj: Mapping[str, Any],
+            ) -> Mapping[
+                str, float | int
+            ]:  # strict_typing_linter.py: loose-typing — CDP timing object has variable numeric fields
                 def safe_duration(start_key: str, end_key: str) -> float | int:
                     start = timing_obj.get(start_key)
                     end = timing_obj.get(end_key)
@@ -3563,7 +3577,7 @@ Workflow:
         username: str,
         password: str,
         ctx: Context[Any, Any, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies
         """Configure authenticated HTTP proxy for bypassing IP-based rate limiting.
 
         Starts a local mitmproxy instance that handles authentication with the
@@ -3666,13 +3680,13 @@ Workflow:
 
         except FileNotFoundError:
             service.state.proxy_config = None
-            raise fastmcp.exceptions.ToolError('mitmproxy not found. Install with: pip install mitmproxy')
+            raise fastmcp.exceptions.ToolError('mitmproxy not found. Install with: pip install mitmproxy') from None
         except Exception as e:
             service.state.proxy_config = None
             if service.state.mitmproxy_process:
                 service.state.mitmproxy_process.kill()
                 service.state.mitmproxy_process = None
-            raise fastmcp.exceptions.ToolError(f'Failed to start mitmproxy: {e}')
+            raise fastmcp.exceptions.ToolError(f'Failed to start mitmproxy: {e}') from e
 
         return {
             'status': 'proxy_configured',
@@ -3688,7 +3702,9 @@ Workflow:
             idempotentHint=True,
         )
     )
-    async def clear_proxy(ctx: Context[Any, Any, Any] | None = None) -> dict[str, Any]:
+    async def clear_proxy(
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies
         """Clear proxy configuration and return to direct connection.
 
         Stops the mitmproxy subprocess and clears proxy settings.
@@ -3837,8 +3853,8 @@ Workflow:
                 error=str(e),
                 error_type='execution',
             )
-        except Exception as e:
-            logger.error(f'JS execution unexpected error: {e}')
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception — error captured in JavaScriptResult
+            logger.info(f'JS execution unexpected error: {e}')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -3999,7 +4015,7 @@ Workflow:
                     """
                     indexeddb_result = await asyncio.to_thread(driver.execute_async_script, async_wrapper)
                     # Raw JavaScript results - type: ignore until we add proper validation
-                    indexeddb_databases = indexeddb_result if indexeddb_result else []  # type: ignore[assignment]
+                    indexeddb_databases = indexeddb_result if indexeddb_result else []  # type: ignore[assignment]  # JS execute_async_script returns untyped Any
                 elif origin in service.state.indexed_db_cache:
                     indexeddb_databases = service.state.indexed_db_cache[origin]
 
@@ -4015,7 +4031,7 @@ Workflow:
                     local_storage=local_storage_dict,
                     session_storage=session_storage_dict,
                     # Raw JavaScript dicts - type: ignore until we add ProfileStateIndexedDB validation
-                    indexed_db=indexeddb_databases if indexeddb_databases else None,  # type: ignore[arg-type]
+                    indexed_db=indexeddb_databases if indexeddb_databases else None,  # type: ignore[arg-type]  # raw JS dicts pending ProfileStateIndexedDB validation
                 )
 
                 total_localstorage_items += len(local_storage_items)
@@ -4206,7 +4222,7 @@ def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:
                 print(f'✗ Browser close timed out after {timeout}s, abandoning', file=sys.stderr)
             else:
                 print('✓ Browser closed', file=sys.stderr)
-        except Exception as e:
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception — signal cleanup must not raise
             print(f'✗ Browser close error: {e}', file=sys.stderr)
     if state.mitmproxy_process:
         state.mitmproxy_process.terminate()
@@ -4217,7 +4233,7 @@ def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:
     try:
         state.temp_dir.cleanup()
         state.capture_temp_dir.cleanup()
-    except Exception:
+    except Exception:  # exception_safety_linter.py: swallowed-exception — signal cleanup must not raise
         pass
     print('✓ Signal cleanup complete, exiting', file=sys.stderr)
 
@@ -4238,7 +4254,7 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
 
     # Register signal handlers to ensure cleanup on SIGTERM/SIGINT
     # This is critical for `claude mcp reconnect` which sends SIGTERM
-    def signal_handler(signum: int, frame: typing.Any) -> None:
+    def signal_handler(signum: int, frame: types.FrameType | None) -> None:
         _sync_cleanup(state)
         sys.stderr.flush()
         os._exit(0)

@@ -1547,7 +1547,8 @@ def _get_git_files(
     # Run both commands
     included = subprocess.run(
         ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
         text=True,
         cwd=directory,
         timeout=30,
@@ -1557,7 +1558,8 @@ def _get_git_files(
 
     ignored = subprocess.run(
         ['git', 'ls-files', '--others', '--ignored', '--exclude-standard'],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
         text=True,
         cwd=directory,
         timeout=60,

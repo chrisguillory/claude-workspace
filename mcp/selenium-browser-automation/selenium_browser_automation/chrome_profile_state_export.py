@@ -286,7 +286,8 @@ def _get_chrome_encryption_key() -> bytes:
             '-s',
             'Chrome Safe Storage',
         ],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
         text=True,
     )
     if result.returncode != 0:
@@ -783,7 +784,7 @@ def export_chrome_profile_state(
             warnings.append(ss_result.warning)
 
     # Export IndexedDB with full schema (optional, default off - can be huge)
-    indexeddb: dict[str, list[dict[str, Any]]] = {}
+    indexeddb: Mapping[str, Sequence[Mapping[str, Any]]] = {}
     if include_indexeddb:
         indexeddb = export_indexeddb_with_schema(profile_path, filter_list)
 

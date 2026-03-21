@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import dfindexeddb.leveldb.errors
+import dfindexeddb.errors
 from dfindexeddb.indexeddb.chromium.definitions import (
     DatabaseMetaDataKeyType,
     IndexMetaDataKeyType,
@@ -169,7 +169,9 @@ def _origin_dir_to_url(origin_dir: str) -> str:
 def export_indexeddb_with_schema(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> Mapping[str, Sequence[Mapping[str, Any]]]:  # strict_typing_linter.py: loose-typing — IndexedDB records have arbitrary structure
+) -> Mapping[
+    str, Sequence[Mapping[str, Any]]
+]:  # strict_typing_linter.py: loose-typing — IndexedDB records have arbitrary structure
     """Export IndexedDB with full schema using dfindexeddb.
 
     This function extracts complete IndexedDB data including:
@@ -223,7 +225,7 @@ def export_indexeddb_with_schema(
     if not indexeddb_path.exists():
         return {}
 
-    result: dict[str, list[dict[str, Any]]] = {}
+    result: dict[str, Sequence[Mapping[str, Any]]] = {}
 
     for db_dir in indexeddb_path.glob('*.indexeddb.leveldb'):
         origin_dir = db_dir.name.replace('.indexeddb.leveldb', '')
@@ -240,7 +242,13 @@ def export_indexeddb_with_schema(
             databases = _parse_indexeddb_folder(db_dir)
             if databases:
                 result[origin_url] = databases
-        except (OSError, ValueError, KeyError, dfindexeddb.leveldb.errors.ParserError, dfindexeddb.leveldb.errors.DecoderError) as e:
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            dfindexeddb.errors.ParserError,
+            dfindexeddb.errors.DecoderError,
+        ) as e:
             # Log but continue with other origins
             logger.warning(f'Failed to parse {origin_dir}: {e}')
 

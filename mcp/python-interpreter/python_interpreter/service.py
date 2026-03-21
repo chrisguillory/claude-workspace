@@ -535,7 +535,8 @@ def _install_package(import_name: str) -> str:
     try:
         result = subprocess.run(
             ['uv', 'pip', 'install', '--python', sys.executable, package_name],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=60,
         )

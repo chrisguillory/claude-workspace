@@ -129,7 +129,11 @@ def load_local_state(base_path: Path) -> ChromeLocalState:
         raise MetadataParseError(f'Failed to validate Local State: {e}') from e
 
 
-def load_profile_preferences(profile_path: Path) -> Mapping[str, Any] | None:  # strict_typing_linter.py: loose-typing — Chrome Preferences JSON has no published schema
+def load_profile_preferences(
+    profile_path: Path,
+) -> (
+    Mapping[str, Any] | None
+):  # strict_typing_linter.py: loose-typing — Chrome Preferences JSON has no published schema
     """Load and parse profile's Preferences JSON (may not exist).
 
     Args:

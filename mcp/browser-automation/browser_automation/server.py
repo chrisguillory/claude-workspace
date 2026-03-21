@@ -26,12 +26,11 @@ from urllib.parse import urlparse
 
 # Third-Party Libraries
 import fastmcp.exceptions
+import playwright.async_api
+import playwright_stealth.stealth
 import yaml
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-
-import playwright.async_api
-import playwright_stealth.stealth
 from pydantic import BaseModel
 
 """
@@ -196,7 +195,9 @@ async def _close_browser() -> None:
     _playwright = None
 
 
-async def get_browser() -> tuple[playwright.async_api.Browser, playwright.async_api.BrowserContext, playwright.async_api.Page]:
+async def get_browser() -> tuple[
+    playwright.async_api.Browser, playwright.async_api.BrowserContext, playwright.async_api.Page
+]:
     """Initialize and return browser session (lazy singleton pattern)."""
     global _playwright, _browser, _context, _page
 
@@ -285,7 +286,9 @@ async def navigate(
         capture_dir.mkdir(parents=True, exist_ok=True)
 
         # Response event monitoring - doesn't block network stack
-        async def capture_response(response: Any) -> None:  # strict_typing_linter.py: loose-typing — Playwright event callback; typed as Any by page.on()
+        async def capture_response(
+            response: Any,
+        ) -> None:  # strict_typing_linter.py: loose-typing — Playwright event callback; typed as Any by page.on()
             try:
                 req_type = response.request.resource_type
 
@@ -447,7 +450,9 @@ async def screenshot(filename: str, ctx: Context[Any, Any, Any]) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-async def download_resource(url: str, output_filename: str) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — response shape varies by content type
+async def download_resource(
+    url: str, output_filename: str
+) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — response shape varies by content type
     """Download specific resource using current browser context and session.
 
     Uses page.request.get() to maintain cookies/session from prior navigation.

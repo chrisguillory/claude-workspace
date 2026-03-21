@@ -887,7 +887,8 @@ def _read_static_data() -> ResolvedCredentials:
     try:
         result = subprocess.run(
             ['security', 'find-generic-password', '-w', '-s', 'Claude Code-credentials'],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=5,
         )
@@ -939,7 +940,8 @@ def _git_branch() -> str:
     try:
         result = subprocess.run(
             ['git', 'branch', '--show-current'],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=3,
         )
@@ -955,7 +957,8 @@ def _git_remote_url() -> str:
     try:
         result = subprocess.run(
             ['git', 'remote', 'get-url', 'origin'],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=3,
         )

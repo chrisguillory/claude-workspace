@@ -53,7 +53,8 @@ def get_socket_path() -> pathlib.Path:
     for _ in range(20):  # Depth limit
         result = subprocess.run(
             ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
         )
 
@@ -106,8 +107,8 @@ def main() -> None:
                     print(error_data['detail'], file=sys.stderr)
                 if 'traceback' in error_data:
                     print(error_data['traceback'], file=sys.stderr)
-            except Exception:
-                # Fallback if response isn't JSON
+            except (ValueError, KeyError):
+                # Fallback if response isn't JSON or missing expected keys
                 print(f'Error: {response.text}', file=sys.stderr)
 
             response.raise_for_status()

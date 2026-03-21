@@ -102,7 +102,8 @@ def find_claude_context() -> ClaudeContext:
     for _ in range(20):  # Depth limit
         result = subprocess.run(
             ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
         )
 
@@ -117,7 +118,8 @@ def find_claude_context() -> ClaudeContext:
             # Get Claude's CWD using lsof -F n (machine-parseable, handles paths with spaces)
             result = subprocess.run(
                 ['lsof', '-p', str(current), '-a', '-d', 'cwd', '-F', 'n'],
-                check=False, capture_output=True,
+                check=False,
+                capture_output=True,
                 text=True,
             )
 
@@ -133,7 +135,8 @@ def find_claude_context() -> ClaudeContext:
             # Verify by checking if Claude has .claude/ files open
             result = subprocess.run(
                 ['lsof', '-p', str(current), '-F', 'n'],
-                check=False, capture_output=True,
+                check=False,
+                capture_output=True,
                 text=True,
             )
 

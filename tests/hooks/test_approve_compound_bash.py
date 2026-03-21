@@ -889,7 +889,7 @@ class TestMainIntegration:
 
         StrictModel defaults to extra='allow' so upstream schema evolution
         (Claude Code adding new fields) doesn't break consumers.
-        Set CC_SCHEMA_EXTRA_FORBID=1 for strict mode (see sibling test).
+        Set CC_STRICT_MODEL_EXTRA_FORBID=1 for strict mode (see sibling test).
         """
         payload = json.dumps(
             {
@@ -923,7 +923,7 @@ class TestMainIntegration:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """extra='forbid' (CC_SCHEMA_EXTRA_FORBID=1): unknown fields trigger safe passthrough.
+        """extra='forbid' (CC_STRICT_MODEL_EXTRA_FORBID=1): unknown fields trigger safe passthrough.
 
         StrictModel(extra='forbid') rejects payloads with unknown fields. The hook
         fails safely (ErrorBoundary catches ValidationError, exits 0, passes
@@ -937,7 +937,7 @@ class TestMainIntegration:
             # Use os.environ directly (not monkeypatch.setenv) because the finally
             # block must remove the var BEFORE reloading modules. monkeypatch doesn't
             # tear down until after the function returns, which would be too late.
-            os.environ['CC_SCHEMA_EXTRA_FORBID'] = '1'
+            os.environ['CC_STRICT_MODEL_EXTRA_FORBID'] = '1'
 
             importlib.reload(cc_lib.schemas.base)
             importlib.reload(cc_lib.schemas.hooks)
@@ -974,7 +974,7 @@ class TestMainIntegration:
             )
 
         finally:
-            os.environ.pop('CC_SCHEMA_EXTRA_FORBID', None)
+            os.environ.pop('CC_STRICT_MODEL_EXTRA_FORBID', None)
             importlib.reload(cc_lib.schemas.base)
             importlib.reload(cc_lib.schemas.hooks)
             importlib.reload(cc_lib.schemas)

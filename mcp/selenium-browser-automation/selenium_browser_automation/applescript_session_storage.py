@@ -80,7 +80,8 @@ def is_chrome_running() -> bool:
 
     result = subprocess.run(
         ['pgrep', '-x', 'Google Chrome'],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
     )
     return result.returncode == 0
 
@@ -100,7 +101,8 @@ def is_selenium_chrome_running() -> bool:
     # Get all Chrome main processes with full command lines
     result = subprocess.run(
         ['ps', 'auxww'],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
         text=True,
         timeout=5,
     )
@@ -236,7 +238,7 @@ def extract_live_session_storage(
                 # Merge with existing (multiple tabs same origin)
                 session_storage[normalized_origin].update(storage)
             else:
-                session_storage[normalized_origin] = storage
+                session_storage[normalized_origin] = dict(storage)
             tabs_extracted += 1
 
     return AppleScriptExtractionResult(
@@ -276,7 +278,8 @@ end tell
 """
     result = subprocess.run(
         ['osascript', '-e', script],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
         text=True,
         timeout=5,
     )
@@ -308,7 +311,8 @@ return output
 """
     result = subprocess.run(
         ['osascript', '-e', script],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
         text=True,
         timeout=10,
     )
@@ -343,7 +347,8 @@ end tell
 '''
     result = subprocess.run(
         ['osascript', '-e', script],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
         text=True,
         timeout=10,
     )

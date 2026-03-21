@@ -287,7 +287,8 @@ def discover_redis_port(compose_dir: Path) -> int:
     """
     result = subprocess.run(
         ['docker', 'compose', 'port', 'redis', '6379'],
-        check=False, capture_output=True,
+        check=False,
+        capture_output=True,
         text=True,
         cwd=compose_dir,
         timeout=5,

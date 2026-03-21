@@ -44,17 +44,39 @@ class DriverRequest(TypedDict):
     code: NotRequired[str]
 
 
-class DriverResponse(TypedDict):
-    """Length-prefixed JSON response to MCP server."""
+class ExecuteResponse(TypedDict):
+    """Response from execute action. Validated by DriverExecuteResponse on consumer side."""
 
     stdout: str
     stderr: str
     result: str
     error: str | None
-    error_type: NotRequired[str | None]
-    module_name: NotRequired[str | None]
-    status: NotRequired[str]
-    traceback: NotRequired[str | None]
+    error_type: str | None
+    module_name: str | None
+
+
+class ReadyResponse(TypedDict):
+    """Startup signal. Validated by DriverReadyResponse on consumer side."""
+
+    status: str
+    python_version: str
+    python_executable: str
+
+
+class ShutdownResponse(TypedDict):
+    """Clean shutdown acknowledgment."""
+
+    status: str
+
+
+class ErrorResponse(TypedDict):
+    """Protocol or unknown-action error."""
+
+    error: str
+    traceback: None
+
+
+type DriverMessage = ExecuteResponse | ReadyResponse | ShutdownResponse | ErrorResponse
 
 
 # Persistent scope for this interpreter - survives across requests
@@ -83,11 +105,20 @@ def read_request() -> DriverRequest | None:
         return cast(DriverRequest, json.loads(json_data))
 
     except (ValueError, json.JSONDecodeError) as e:
-        send_response(DriverResponse(stdout='', stderr='', result='', error=f'ProtocolError: {e}', traceback=None))
+        send_response(
+            ExecuteResponse(
+                stdout='',
+                stderr='',
+                result='',
+                error=f'ProtocolError: {e}',
+                error_type=None,
+                module_name=None,
+            )
+        )
         return None
 
 
-def send_response(response: DriverResponse) -> None:
+def send_response(response: DriverMessage) -> None:
     """Send a length-prefixed JSON response to stdout."""
     json_data = json.dumps(response)
     sys.stdout.write(f'{len(json_data)}\n{json_data}')
@@ -124,7 +155,7 @@ def _split_last_expression(code: str) -> tuple[str, str] | None:
         return None
 
 
-def execute_code(code: str) -> DriverResponse:
+def execute_code(code: str) -> ExecuteResponse:
     """Execute code in persistent scope.
 
     Returns response dict with stdout, stderr, result, error fields.
@@ -174,7 +205,7 @@ def execute_code(code: str) -> DriverResponse:
             'error_type': 'ModuleNotFoundError',
             'module_name': e.name,
         }
-    except Exception:  # exception_safety_linter.py: swallowed-exception — catch-all for user code; error captured in DriverResponse  # exception_safety_linter.py: swallowed-exception — catch-all for arbitrary user code execution; error captured in response
+    except Exception:  # exception_safety_linter.py: swallowed-exception — catch-all for arbitrary user code execution; error captured in ExecuteResponse
         return {
             'stdout': stdout_capture.getvalue(),
             'stderr': stderr_capture.getvalue(),
@@ -189,11 +220,11 @@ def main() -> None:
     """Main driver loop - read requests, execute, send responses."""
     # Signal ready with Python version info
     send_response(
-        {
-            'status': 'ready',
-            'python_version': sys.version,
-            'python_executable': sys.executable,
-        }
+        ReadyResponse(
+            status='ready',
+            python_version=sys.version,
+            python_executable=sys.executable,
+        )
     )
 
     while True:
@@ -211,15 +242,15 @@ def main() -> None:
             send_response(response)
 
         elif action == 'shutdown':
-            send_response({'status': 'shutdown'})
+            send_response(ShutdownResponse(status='shutdown'))
             break
 
         else:
             send_response(
-                {
-                    'error': f'UnknownAction: {action}',
-                    'traceback': None,
-                }
+                ErrorResponse(
+                    error=f'UnknownAction: {action}',
+                    traceback=None,
+                )
             )
 
 

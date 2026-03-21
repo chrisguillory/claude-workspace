@@ -19,7 +19,7 @@ __all__ = [
 import os
 import pathlib
 import xml.etree.ElementTree as ET
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 
 from python_interpreter.models import JetBrainsRunConfig, JetBrainsSDKEntry
 
@@ -119,7 +119,7 @@ def _find_jetbrains_config_dirs() -> Sequence[pathlib.Path]:
 def _parse_jdk_table(jdk_table_path: pathlib.Path) -> Sequence[JetBrainsSDKEntry]:
     """Parse jdk.table.xml into JetBrainsSDKEntry list."""
     try:
-        tree = ET.parse(jdk_table_path)  # noqa: S314
+        tree = ET.parse(jdk_table_path)  # noqa: S314 — parsing trusted JetBrains IDE config files from local filesystem
     except ET.ParseError:
         return []
 
@@ -197,11 +197,11 @@ def _scan_run_xml_files(project_dir: pathlib.Path) -> Iterator[pathlib.Path]:
 
 def _parse_run_xml(
     xml_path: pathlib.Path,
-    sdk_lookup: dict[str, JetBrainsSDKEntry],
+    sdk_lookup: Mapping[str, JetBrainsSDKEntry],
 ) -> JetBrainsRunConfig | None:
     """Parse a single run configuration XML. Returns None if not a Python console config."""
     try:
-        tree = ET.parse(xml_path)  # noqa: S314
+        tree = ET.parse(xml_path)  # noqa: S314 — parsing trusted JetBrains IDE config files from local filesystem
     except ET.ParseError:
         return None
 
@@ -263,7 +263,7 @@ def _parse_run_xml(
 
 def _resolve_sdk_via_misc_xml(
     idea_dir: pathlib.Path | None,
-    sdk_lookup: dict[str, JetBrainsSDKEntry],
+    sdk_lookup: Mapping[str, JetBrainsSDKEntry],
 ) -> str | None:
     """Resolve Python path via .idea/misc.xml → project-jdk-name → jdk.table.xml."""
     if idea_dir is None:
@@ -284,7 +284,7 @@ def _get_jdk_name_from_misc_xml(idea_dir: pathlib.Path) -> str | None:
         return None
 
     try:
-        tree = ET.parse(misc_xml)  # noqa: S314
+        tree = ET.parse(misc_xml)  # noqa: S314 — parsing trusted JetBrains IDE config files from local filesystem
     except ET.ParseError:
         return None
 
@@ -328,7 +328,7 @@ def _get_option_bool(element: ET.Element, name: str) -> bool:
     return value is not None and value.lower() == 'true'
 
 
-def _extract_env_vars(config_element: ET.Element) -> dict[str, str] | None:
+def _extract_env_vars(config_element: ET.Element) -> Mapping[str, str] | None:
     """Extract environment variables from <envs> element."""
     envs_el = config_element.find('envs')
     if envs_el is None:
