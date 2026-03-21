@@ -196,6 +196,15 @@ scroll_to_element:
         success: false
         error_contains: "Failed to find"
 
+    - name: scroll_to_element_twice_scrolled_false
+      description: Scroll to element already centered — scrolled should be false
+      css_selector: "#below-fold"
+      setup_scroll_into_view: "#below-fold"
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: false
+
     - name: return_value_structure
       description: Verify return value contains all expected keys
       css_selector: "#below-fold"
@@ -217,10 +226,10 @@ parameter_validation:
 
   tests:
     - name: no_params
-      description: Neither direction nor css_selector — should error
+      description: Neither direction, css_selector, nor position — should error
       expect:
         success: false
-        error_contains: "Either direction or css_selector"
+        error_contains: "Either direction, css_selector, or position"
 
     - name: scroll_amount_zero
       description: scroll_amount of 0 is invalid
@@ -251,3 +260,232 @@ parameter_validation:
       direction: down
       expect:
         success: true
+
+# =============================================================================
+# SMOOTH SCROLL TESTS
+# =============================================================================
+
+smooth_scroll:
+  description: Smooth scroll behavior tests across all three modes
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: smooth_viewport_down
+      description: Smooth scroll viewport down — animates then returns final position
+      direction: down
+      scroll_amount: 3
+      behavior: smooth
+      expect:
+        success: true
+        viewport_scrollY_gt: 200
+        scrolled: true
+
+    - name: smooth_viewport_up_at_top
+      description: Smooth scroll up at top — no-op, resolves quickly via double-rAF
+      direction: up
+      behavior: smooth
+      expect:
+        success: true
+        viewport_scrollY_eq: 0
+        scrolled: false
+
+    - name: smooth_container_down
+      description: Smooth scroll down within container
+      direction: down
+      scroll_amount: 3
+      css_selector: "#scroll-container"
+      behavior: smooth
+      expect:
+        success: true
+        container_scrollTop_gt: 200
+        scrolled: true
+
+    - name: smooth_container_left_at_edge
+      description: Smooth scroll left in container at left edge — no-op
+      direction: left
+      scroll_amount: 1
+      css_selector: "#scroll-container"
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: false
+
+    - name: smooth_scroll_to_element
+      description: Smooth scroll element into view with animation
+      css_selector: "#below-fold"
+      behavior: smooth
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: true
+
+    - name: smooth_scroll_to_element_twice_scrolled_false
+      description: Smooth scroll to element already centered — scrolled should be false
+      css_selector: "#below-fold"
+      setup_scroll_into_view: "#below-fold"
+      behavior: smooth
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: false
+
+    - name: smooth_scroll_to_already_visible
+      description: Smooth scroll already-visible element — minimal/no scroll
+      css_selector: "#top-marker"
+      behavior: smooth
+      expect:
+        success: true
+        element_in_viewport: true
+
+# =============================================================================
+# POSITION SCROLL TESTS (absolute scrollTo)
+# =============================================================================
+
+position_scroll:
+  description: Absolute position scrolling (scrollTo) for viewport and containers
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: position_bottom_viewport
+      description: Scroll viewport to absolute bottom
+      position: bottom
+      expect:
+        success: true
+        scrolled: true
+        viewport_scrollY_gt: 2000
+
+    - name: position_top_viewport
+      description: Scroll viewport to absolute top
+      position: top
+      setup_scroll:
+        direction: down
+        scroll_amount: 5
+      expect:
+        success: true
+        viewport_scrollY_eq: 0
+        scrolled: true
+
+    - name: position_right_viewport
+      description: Scroll viewport to right edge (page may not be wider than viewport)
+      position: right
+      expect:
+        success: true
+
+    - name: position_left_viewport
+      description: Scroll viewport to left edge
+      position: left
+      expect:
+        success: true
+
+    - name: position_bottom_container
+      description: Scroll container to absolute bottom
+      position: bottom
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: true
+        container_scrollTop_gt: 200
+
+    - name: position_top_container
+      description: Scroll container to absolute top (after scrolling down first)
+      position: top
+      css_selector: "#scroll-container"
+      setup_container_scroll:
+        direction: down
+        scroll_amount: 5
+        css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: true
+        container_scrollTop_eq: 0
+
+    - name: position_right_container
+      description: Scroll container to right edge (horizontal)
+      position: right
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: true
+        container_scrollLeft_gt: 100
+
+    - name: position_left_container
+      description: Scroll container to left edge
+      position: left
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+
+    - name: position_and_direction_error
+      description: Cannot specify both position and direction
+      position: bottom
+      direction: down
+      expect:
+        success: false
+        error_contains: "Cannot specify both"
+
+    - name: position_bottom_smooth
+      description: Smooth animated scroll to bottom of page
+      position: bottom
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: true
+        viewport_scrollY_gt: 2000
+
+    - name: position_bottom_already_there
+      description: Already at bottom — scrolled should be false
+      position: bottom
+      setup_position: bottom
+      expect:
+        success: true
+        scrolled: false
+
+    - name: position_top_already_there
+      description: Already at top — scrolled should be false
+      position: top
+      expect:
+        success: true
+        scrolled: false
+
+    - name: position_container_already_top
+      description: Container already at top — scrolled should be false
+      position: top
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: false
+
+    - name: smooth_position_bottom_container
+      description: Smooth scroll container to absolute bottom
+      position: bottom
+      css_selector: "#scroll-container"
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: true
+        container_scrollTop_gt: 200
+
+    - name: smooth_position_container_already_top
+      description: Container already at top, smooth scroll to top — scrolled false
+      position: top
+      css_selector: "#scroll-container"
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: false
+
+    - name: smooth_position_top_already_there
+      description: Already at top of page, smooth scroll to top — scrolled false
+      position: top
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: false
+
+    - name: position_nonexistent_container
+      description: Nonexistent container with position — error
+      position: bottom
+      css_selector: "#does-not-exist"
+      expect:
+        success: false
+        error_contains: "Failed to find"

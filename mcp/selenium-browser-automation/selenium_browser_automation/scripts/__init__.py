@@ -23,6 +23,7 @@ __all__ = [
     'INDEXEDDB_CAPTURE_SCRIPT',
     'INDEXEDDB_RESTORE_SCRIPT',
     'RESPONSE_BODY_CAPTURE_SCRIPT',
+    'SMOOTH_SCROLL_SCRIPT',
     'build_execute_javascript_async_script',
 ]
 
@@ -47,6 +48,7 @@ SAFE_SERIALIZE_SCRIPT: str = _load_script('safe_serialize.js')
 INDEXEDDB_CAPTURE_SCRIPT: str = _load_script('indexeddb_capture.js')
 INDEXEDDB_RESTORE_SCRIPT: str = _load_script('indexeddb_restore.js')
 RESPONSE_BODY_CAPTURE_SCRIPT: str = _load_script('response_body_capture.js')
+SMOOTH_SCROLL_SCRIPT: str = _load_script('smooth_scroll.js')
 
 
 def build_execute_javascript_async_script(escaped_code: str) -> str:

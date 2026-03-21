@@ -105,6 +105,7 @@ from .scripts import (
     NETWORK_MONITOR_SETUP_SCRIPT,
     RESOURCE_TIMING_SCRIPT,
     RESPONSE_BODY_CAPTURE_SCRIPT,
+    SMOOTH_SCROLL_SCRIPT,
     TEXT_EXTRACTION_SCRIPT,
     VISUAL_TREE_SCRIPT,
     WEB_VITALS_SCRIPT,
@@ -2573,28 +2574,36 @@ def register_tools(service: BrowserService) -> None:
         direction: Literal['up', 'down', 'left', 'right'] | None = None,
         scroll_amount: int = 3,
         css_selector: str | None = None,
+        behavior: Literal['instant', 'smooth'] = 'instant',
+        position: Literal['top', 'bottom', 'left', 'right'] | None = None,
     ) -> dict[str, Any]:
         """Scroll the page, a container, or an element into view.
 
-        Three modes of operation:
+        **Relative scrolling** (direction parameter — scrollBy):
+        - direction only: Scroll viewport by amount
+        - direction + css_selector: Scroll within a container by amount
 
-        **Mode 1 - Directional viewport scroll** (direction only):
-        Scrolls the viewport by the given amount.
+        **Absolute scrolling** (position parameter — scrollTo):
+        - position only: Scroll viewport to an edge (top/bottom/left/right)
+        - position + css_selector: Scroll container to an edge
 
-        **Mode 2 - Container scroll** (direction + css_selector):
-        Scrolls within a specific scrollable container (e.g., chat log, sidebar).
-
-        **Mode 3 - Scroll element into view** (css_selector only, no direction):
-        Scrolls until the target element is centered in the viewport.
+        **Scroll into view** (css_selector only):
+        - Scrolls until the target element is centered in the viewport
 
         Args:
             direction: Scroll direction: 'up', 'down', 'left', 'right'.
-                Required for directional scrolling. Omit to scroll element into view.
+                Required for relative scrolling. Mutually exclusive with position.
             scroll_amount: Number of ticks to scroll (1-20, default 3).
                 Each tick produces 100 CSS pixels of scroll delta. Only used with direction.
             css_selector: CSS selector for either:
-                - Target element to scroll into view (when no direction)
-                - Scrollable container to scroll within (when direction provided)
+                - Target element to scroll into view (when alone)
+                - Container to scroll within (when combined with direction or position)
+            behavior: Scroll animation: 'instant' (default) or 'smooth'.
+                'instant' scrolls immediately with no animation.
+                'smooth' animates using the browser's native smooth scroll (~300-500ms)
+                and waits for the animation to complete before returning position data.
+            position: Absolute scroll target: 'top', 'bottom', 'left', 'right'.
+                Scrolls to the edge of the page or container. Mutually exclusive with direction.
 
         Returns:
             Dict with scroll results including mode, scroll position, page dimensions,
@@ -2605,6 +2614,12 @@ def register_tools(service: BrowserService) -> None:
             - scroll(direction='down', scroll_amount=10) - Scroll down ~1000px
             - scroll(css_selector='#footer') - Scroll #footer into view (centered)
             - scroll(direction='down', css_selector='.chat-log') - Scroll within .chat-log
+            - scroll(direction='down', behavior='smooth') - Smooth animated scroll
+            - scroll(position='bottom') - Scroll to bottom of page
+            - scroll(position='top') - Scroll to top of page
+            - scroll(position='right', css_selector='#data-table') - Scroll to rightmost column
+            - scroll(position='bottom', css_selector='.chat-log') - Scroll chat to end
+            - scroll(position='bottom', behavior='smooth') - Smooth scroll to bottom
 
         Notes:
             - CSS scroll-snap may cause actual scroll position to differ from requested amount.
@@ -2619,17 +2634,192 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
 
         # Validate parameters
-        if direction is None and css_selector is None:
+        if position is not None and direction is not None:
             raise fastmcp.exceptions.ToolError(
-                'Either direction or css_selector (or both) must be provided.\n'
-                "Use direction='down' for viewport scrolling, "
-                "or css_selector='#element' to scroll into view."
+                "Cannot specify both 'position' and 'direction'.\n"
+                "Use position='top'/'bottom'/'left'/'right' to scroll to an edge, "
+                "or direction='up'/'down'/'left'/'right' to scroll by an amount."
             )
 
-        if scroll_amount < 1 or scroll_amount > 20:
+        if direction is None and css_selector is None and position is None:
+            raise fastmcp.exceptions.ToolError(
+                'Either direction, css_selector, or position must be provided.\n'
+                "Use direction='down' for viewport scrolling, "
+                "css_selector='#element' to scroll into view, "
+                "or position='bottom' to jump to an edge."
+            )
+
+        if direction is not None and (scroll_amount < 1 or scroll_amount > 20):
             raise ValueError('scroll_amount must be between 1 and 20')
 
         PIXELS_PER_TICK = 100
+
+        # ── Mode 4/5: Absolute position scroll (position parameter) ──
+
+        if position is not None:
+            # Build scrollTo target based on position value
+            pos_map_viewport = {
+                'top': 'top: 0, left: 0',
+                'bottom': (
+                    'top: Math.max(document.body.scrollHeight, '
+                    'document.documentElement.scrollHeight, '
+                    'document.body.offsetHeight, document.documentElement.offsetHeight), left: 0'
+                ),
+                'left': 'top: window.scrollY, left: 0',
+                'right': (
+                    'top: window.scrollY, left: Math.max(document.body.scrollWidth, '
+                    'document.documentElement.scrollWidth)'
+                ),
+            }
+            pos_map_container = {
+                'top': 'top: 0, left: el.scrollLeft',
+                'bottom': 'top: el.scrollHeight, left: el.scrollLeft',
+                'left': 'top: el.scrollTop, left: 0',
+                'right': 'top: el.scrollTop, left: el.scrollWidth',
+            }
+
+            if css_selector is not None:
+                # Mode 5: Container scrollTo
+                _validate_css_selector(css_selector)
+                logger.info(f'Scrolling container {css_selector} to position: {position}')
+
+                try:
+                    element = await asyncio.to_thread(
+                        WebDriverWait(driver, 10).until,
+                        EC.presence_of_element_located((By.CSS_SELECTOR, css_selector)),
+                    )
+                except WebDriverException as e:
+                    raise fastmcp.exceptions.ToolError(
+                        f"Failed to find container '{css_selector}': {e}\n"
+                        f"Use get_aria_snapshot('body') to discover valid selectors."
+                    ) from None
+
+                scroll_target = pos_map_container[position]
+                if behavior == 'smooth':
+                    result = await asyncio.to_thread(
+                        driver.execute_script,
+                        SMOOTH_SCROLL_SCRIPT
+                        + f"""
+                        var el = arguments[0];
+                        var beforeTop = Math.round(el.scrollTop), beforeLeft = Math.round(el.scrollLeft);
+                        return smoothScroll({{
+                            eventTarget: el,
+                            scrollAction: function() {{ el.scrollTo({{{scroll_target}, behavior: 'smooth'}}); }},
+                            hasMoved: function() {{
+                                return Math.round(el.scrollTop) !== beforeTop
+                                    || Math.round(el.scrollLeft) !== beforeLeft;
+                            }},
+                            measure: function() {{
+                                return {{
+                                    scrollTop: Math.round(el.scrollTop),
+                                    scrollLeft: Math.round(el.scrollLeft),
+                                    scrollHeight: el.scrollHeight,
+                                    clientHeight: el.clientHeight,
+                                    scrolled: (Math.round(el.scrollTop) !== beforeTop
+                                            || Math.round(el.scrollLeft) !== beforeLeft)
+                                }};
+                            }}
+                        }});
+                        """,
+                        element,
+                    )
+                else:
+                    result = await asyncio.to_thread(
+                        driver.execute_script,
+                        f"""
+                        var el = arguments[0];
+                        var beforeTop = Math.round(el.scrollTop), beforeLeft = Math.round(el.scrollLeft);
+                        el.scrollTo({{{scroll_target}, behavior: 'instant'}});
+                        return {{
+                            scrollTop: Math.round(el.scrollTop),
+                            scrollLeft: Math.round(el.scrollLeft),
+                            scrollHeight: el.scrollHeight,
+                            clientHeight: el.clientHeight,
+                            scrolled: (Math.round(el.scrollTop) !== beforeTop
+                                    || Math.round(el.scrollLeft) !== beforeLeft)
+                        }};
+                        """,
+                        element,
+                    )
+
+                logger.info(f'Scrolled container {css_selector} to {position} (scrolled={result["scrolled"]})')
+                return {
+                    'mode': 'container_scroll_to',
+                    'position': position,
+                    'selector': css_selector,
+                    'container_scroll_top': result['scrollTop'],
+                    'container_scroll_left': result['scrollLeft'],
+                    'container_scroll_height': result['scrollHeight'],
+                    'container_client_height': result['clientHeight'],
+                    'scrolled': result['scrolled'],
+                }
+
+            else:
+                # Mode 4: Viewport scrollTo
+                logger.info(f'Scrolling viewport to position: {position}')
+
+                scroll_target = pos_map_viewport[position]
+                if behavior == 'smooth':
+                    result = await asyncio.to_thread(
+                        driver.execute_script,
+                        SMOOTH_SCROLL_SCRIPT
+                        + f"""
+                        var beforeX = Math.round(window.scrollX), beforeY = Math.round(window.scrollY);
+                        return smoothScroll({{
+                            eventTarget: window,
+                            scrollAction: function() {{ window.scrollTo({{{scroll_target}, behavior: 'smooth'}}); }},
+                            hasMoved: function() {{
+                                return Math.round(window.scrollX) !== beforeX
+                                    || Math.round(window.scrollY) !== beforeY;
+                            }},
+                            measure: function() {{
+                                return {{
+                                    scrollX: Math.round(window.scrollX),
+                                    scrollY: Math.round(window.scrollY),
+                                    pageHeight: Math.max(
+                                        document.body.scrollHeight, document.documentElement.scrollHeight,
+                                        document.body.offsetHeight, document.documentElement.offsetHeight
+                                    ),
+                                    viewportHeight: window.innerHeight,
+                                    scrolled: (Math.round(window.scrollX) !== beforeX
+                                            || Math.round(window.scrollY) !== beforeY)
+                                }};
+                            }}
+                        }});
+                        """,
+                    )
+                else:
+                    result = await asyncio.to_thread(
+                        driver.execute_script,
+                        f"""
+                        var beforeX = Math.round(window.scrollX), beforeY = Math.round(window.scrollY);
+                        window.scrollTo({{{scroll_target}, behavior: 'instant'}});
+                        return {{
+                            scrollX: Math.round(window.scrollX),
+                            scrollY: Math.round(window.scrollY),
+                            pageHeight: Math.max(
+                                document.body.scrollHeight, document.documentElement.scrollHeight,
+                                document.body.offsetHeight, document.documentElement.offsetHeight
+                            ),
+                            viewportHeight: window.innerHeight,
+                            scrolled: (Math.round(window.scrollX) !== beforeX
+                                    || Math.round(window.scrollY) !== beforeY)
+                        }};
+                        """,
+                    )
+
+                logger.info(
+                    f'Scrolled viewport to {position} (scrollY={result["scrollY"]}, scrolled={result["scrolled"]})'
+                )
+                return {
+                    'mode': 'viewport_scroll_to',
+                    'position': position,
+                    'scroll_x': result['scrollX'],
+                    'scroll_y': result['scrollY'],
+                    'page_height': result['pageHeight'],
+                    'viewport_height': result['viewportHeight'],
+                    'scrolled': result['scrolled'],
+                }
 
         # ── Mode 3: Scroll element into view (css_selector only, no direction) ──
 
@@ -2648,39 +2838,70 @@ def register_tools(service: BrowserService) -> None:
                     f"Use get_aria_snapshot('body') to discover valid selectors."
                 ) from None
 
-            # Capture before position
-            before_y = await asyncio.to_thread(driver.execute_script, 'return Math.round(window.scrollY);')
-
-            # Override scroll-behavior and scrollIntoView with block:'center'
-            # Belt-and-suspenders: behavior:'instant' should suffice on Chrome 115+,
-            # but CSS override handles older versions where the bug wasn't fixed.
-            await asyncio.to_thread(
-                driver.execute_script,
-                """
-                var orig = document.documentElement.style.scrollBehavior;
-                document.documentElement.style.scrollBehavior = 'auto';
-                arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});
-                document.documentElement.style.scrollBehavior = orig || '';
-                """,
-                element,
-            )
-
-            after_info = await asyncio.to_thread(
-                driver.execute_script,
-                """
-                return {
-                    scrollX: Math.round(window.scrollX),
-                    scrollY: Math.round(window.scrollY),
-                    pageHeight: Math.max(
-                        document.body.scrollHeight, document.documentElement.scrollHeight,
-                        document.body.offsetHeight, document.documentElement.offsetHeight
-                    ),
-                    viewportHeight: window.innerHeight
-                };
-                """,
-            )
-
-            scrolled = after_info['scrollY'] != before_y
+            if behavior == 'smooth':
+                # Smooth scroll-into-view: no CSS override (we want smooth animation).
+                # Uses smoothScroll() helper for scrollend + rAF + timeout waiting.
+                after_info = await asyncio.to_thread(
+                    driver.execute_script,
+                    SMOOTH_SCROLL_SCRIPT
+                    + """
+                    var target = arguments[0];
+                    var beforeY = Math.round(window.scrollY);
+                    return smoothScroll({
+                        eventTarget: window,
+                        scrollAction: function() {
+                            target.scrollIntoView({block: 'center', behavior: 'smooth'});
+                        },
+                        hasMoved: function() {
+                            return Math.round(window.scrollY) !== beforeY;
+                        },
+                        measure: function() {
+                            return {
+                                scrollX: Math.round(window.scrollX),
+                                scrollY: Math.round(window.scrollY),
+                                pageHeight: Math.max(
+                                    document.body.scrollHeight, document.documentElement.scrollHeight,
+                                    document.body.offsetHeight, document.documentElement.offsetHeight
+                                ),
+                                viewportHeight: window.innerHeight,
+                                scrolled: Math.round(window.scrollY) !== beforeY
+                            };
+                        }
+                    });
+                    """,
+                    element,
+                )
+                scrolled = after_info['scrolled']
+            else:
+                # Instant scroll-into-view with CSS override belt-and-suspenders.
+                # behavior:'instant' should suffice on Chrome 115+, but CSS override
+                # handles older versions where the Chromium bug wasn't fixed.
+                before_y = await asyncio.to_thread(driver.execute_script, 'return Math.round(window.scrollY);')
+                await asyncio.to_thread(
+                    driver.execute_script,
+                    """
+                    var orig = document.documentElement.style.scrollBehavior;
+                    document.documentElement.style.scrollBehavior = 'auto';
+                    arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});
+                    document.documentElement.style.scrollBehavior = orig || '';
+                    """,
+                    element,
+                )
+                after_info = await asyncio.to_thread(
+                    driver.execute_script,
+                    """
+                    return {
+                        scrollX: Math.round(window.scrollX),
+                        scrollY: Math.round(window.scrollY),
+                        pageHeight: Math.max(
+                            document.body.scrollHeight, document.documentElement.scrollHeight,
+                            document.body.offsetHeight, document.documentElement.offsetHeight
+                        ),
+                        viewportHeight: window.innerHeight
+                    };
+                    """,
+                )
+                scrolled = after_info['scrollY'] != before_y
             logger.info(
                 f'Scrolled element into view: {css_selector} (scrollY={after_info["scrollY"]}, scrolled={scrolled})'
             )
@@ -2720,26 +2941,58 @@ def register_tools(service: BrowserService) -> None:
                     f"Use get_aria_snapshot('body') to discover valid selectors."
                 ) from None
 
-            # Measure before, scroll with behavior:'instant', measure after
-            result = await asyncio.to_thread(
-                driver.execute_script,
-                """
-                var el = arguments[0], dy = arguments[1], dx = arguments[2];
-                var beforeTop = el.scrollTop, beforeLeft = el.scrollLeft;
-                el.scrollBy({top: dy, left: dx, behavior: 'instant'});
-                return {
-                    scrollTop: Math.round(el.scrollTop),
-                    scrollLeft: Math.round(el.scrollLeft),
-                    scrollHeight: el.scrollHeight,
-                    clientHeight: el.clientHeight,
-                    scrolled: (Math.round(el.scrollTop) !== Math.round(beforeTop)
-                            || Math.round(el.scrollLeft) !== Math.round(beforeLeft))
-                };
-                """,
-                element,
-                delta_y,
-                delta_x,
-            )
+            if behavior == 'smooth':
+                result = await asyncio.to_thread(
+                    driver.execute_script,
+                    SMOOTH_SCROLL_SCRIPT
+                    + """
+                    var el = arguments[0], dy = arguments[1], dx = arguments[2];
+                    var beforeTop = Math.round(el.scrollTop), beforeLeft = Math.round(el.scrollLeft);
+                    return smoothScroll({
+                        eventTarget: el,
+                        scrollAction: function() {
+                            el.scrollBy({top: dy, left: dx, behavior: 'smooth'});
+                        },
+                        hasMoved: function() {
+                            return Math.round(el.scrollTop) !== beforeTop
+                                || Math.round(el.scrollLeft) !== beforeLeft;
+                        },
+                        measure: function() {
+                            return {
+                                scrollTop: Math.round(el.scrollTop),
+                                scrollLeft: Math.round(el.scrollLeft),
+                                scrollHeight: el.scrollHeight,
+                                clientHeight: el.clientHeight,
+                                scrolled: (Math.round(el.scrollTop) !== beforeTop
+                                        || Math.round(el.scrollLeft) !== beforeLeft)
+                            };
+                        }
+                    });
+                    """,
+                    element,
+                    delta_y,
+                    delta_x,
+                )
+            else:
+                result = await asyncio.to_thread(
+                    driver.execute_script,
+                    """
+                    var el = arguments[0], dy = arguments[1], dx = arguments[2];
+                    var beforeTop = el.scrollTop, beforeLeft = el.scrollLeft;
+                    el.scrollBy({top: dy, left: dx, behavior: 'instant'});
+                    return {
+                        scrollTop: Math.round(el.scrollTop),
+                        scrollLeft: Math.round(el.scrollLeft),
+                        scrollHeight: el.scrollHeight,
+                        clientHeight: el.clientHeight,
+                        scrolled: (Math.round(el.scrollTop) !== Math.round(beforeTop)
+                                || Math.round(el.scrollLeft) !== Math.round(beforeLeft))
+                    };
+                    """,
+                    element,
+                    delta_y,
+                    delta_x,
+                )
 
             logger.info(
                 f'Scrolled {direction} within {css_selector} '
@@ -2761,29 +3014,63 @@ def register_tools(service: BrowserService) -> None:
 
         logger.info(f'Scrolling viewport {direction} by {scroll_amount} ticks')
 
-        # Use JS window.scrollBy with behavior:'instant'.
-        # ActionChains scroll_by_amount does NOT work in headless Chrome.
-        result = await asyncio.to_thread(
-            driver.execute_script,
-            """
-            var dy = arguments[0], dx = arguments[1];
-            var beforeX = window.scrollX, beforeY = window.scrollY;
-            window.scrollBy({top: dy, left: dx, behavior: 'instant'});
-            return {
-                scrollX: Math.round(window.scrollX),
-                scrollY: Math.round(window.scrollY),
-                pageHeight: Math.max(
-                    document.body.scrollHeight, document.documentElement.scrollHeight,
-                    document.body.offsetHeight, document.documentElement.offsetHeight
-                ),
-                viewportHeight: window.innerHeight,
-                scrolled: (Math.round(window.scrollX) !== Math.round(beforeX)
-                        || Math.round(window.scrollY) !== Math.round(beforeY))
-            };
-            """,
-            delta_y,
-            delta_x,
-        )
+        # Use JS window.scrollBy — ActionChains scroll_by_amount does NOT work in headless Chrome.
+        if behavior == 'smooth':
+            result = await asyncio.to_thread(
+                driver.execute_script,
+                SMOOTH_SCROLL_SCRIPT
+                + """
+                var dy = arguments[0], dx = arguments[1];
+                var beforeX = Math.round(window.scrollX), beforeY = Math.round(window.scrollY);
+                return smoothScroll({
+                    eventTarget: window,
+                    scrollAction: function() {
+                        window.scrollBy({top: dy, left: dx, behavior: 'smooth'});
+                    },
+                    hasMoved: function() {
+                        return Math.round(window.scrollX) !== beforeX
+                            || Math.round(window.scrollY) !== beforeY;
+                    },
+                    measure: function() {
+                        return {
+                            scrollX: Math.round(window.scrollX),
+                            scrollY: Math.round(window.scrollY),
+                            pageHeight: Math.max(
+                                document.body.scrollHeight, document.documentElement.scrollHeight,
+                                document.body.offsetHeight, document.documentElement.offsetHeight
+                            ),
+                            viewportHeight: window.innerHeight,
+                            scrolled: (Math.round(window.scrollX) !== beforeX
+                                    || Math.round(window.scrollY) !== beforeY)
+                        };
+                    }
+                });
+                """,
+                delta_y,
+                delta_x,
+            )
+        else:
+            result = await asyncio.to_thread(
+                driver.execute_script,
+                """
+                var dy = arguments[0], dx = arguments[1];
+                var beforeX = window.scrollX, beforeY = window.scrollY;
+                window.scrollBy({top: dy, left: dx, behavior: 'instant'});
+                return {
+                    scrollX: Math.round(window.scrollX),
+                    scrollY: Math.round(window.scrollY),
+                    pageHeight: Math.max(
+                        document.body.scrollHeight, document.documentElement.scrollHeight,
+                        document.body.offsetHeight, document.documentElement.offsetHeight
+                    ),
+                    viewportHeight: window.innerHeight,
+                    scrolled: (Math.round(window.scrollX) !== Math.round(beforeX)
+                            || Math.round(window.scrollY) !== Math.round(beforeY))
+                };
+                """,
+                delta_y,
+                delta_x,
+            )
 
         logger.info(f'Scrolled viewport {direction} (scrollY={result["scrollY"]}, scrolled={result["scrolled"]})')
         return {
