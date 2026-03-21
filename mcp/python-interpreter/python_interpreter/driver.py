@@ -32,17 +32,40 @@ import io
 import json
 import sys
 import traceback
-from typing import Any
+from typing import Any, NotRequired, TypedDict, cast
+
+# -- Protocol types (self-contained — driver runs in external interpreter env) -
+
+
+class DriverRequest(TypedDict):
+    """Length-prefixed JSON request from MCP server."""
+
+    action: str
+    code: NotRequired[str]
+
+
+class DriverResponse(TypedDict):
+    """Length-prefixed JSON response to MCP server."""
+
+    stdout: str
+    stderr: str
+    result: str
+    error: str | None
+    error_type: NotRequired[str | None]
+    module_name: NotRequired[str | None]
+    status: NotRequired[str]
+    traceback: NotRequired[str | None]
+
 
 # Persistent scope for this interpreter - survives across requests
-_scope_globals: dict[str, Any] = {}
+_scope_globals: dict[str, Any] = {}  # strict_typing_linter.py: mutable-type — exec/eval scope mutated by Python runtime
 
 
-def read_request() -> dict[str, Any] | None:
+def read_request() -> DriverRequest | None:
     """Read a length-prefixed JSON request from stdin.
 
     Returns:
-        Parsed JSON dict, or None if stdin is closed/EOF.
+        Parsed request, or None if stdin is closed/EOF.
     """
     try:
         length_line = sys.stdin.readline()
@@ -57,15 +80,14 @@ def read_request() -> dict[str, Any] | None:
         if len(json_data) < length:
             return None  # Incomplete read
 
-        parsed: dict[str, Any] = json.loads(json_data)
-        return parsed
+        return cast(DriverRequest, json.loads(json_data))
 
     except (ValueError, json.JSONDecodeError) as e:
-        send_response({'error': f'ProtocolError: {e}', 'traceback': None})
-        return {}  # Empty dict signals protocol error, continue loop
+        send_response(DriverResponse(stdout='', stderr='', result='', error=f'ProtocolError: {e}', traceback=None))
+        return None
 
 
-def send_response(response: dict[str, Any]) -> None:
+def send_response(response: DriverResponse) -> None:
     """Send a length-prefixed JSON response to stdout."""
     json_data = json.dumps(response)
     sys.stdout.write(f'{len(json_data)}\n{json_data}')
@@ -102,7 +124,7 @@ def _split_last_expression(code: str) -> tuple[str, str] | None:
         return None
 
 
-def execute_code(code: str) -> dict[str, Any]:
+def execute_code(code: str) -> DriverResponse:
     """Execute code in persistent scope.
 
     Returns response dict with stdout, stderr, result, error fields.
@@ -152,7 +174,7 @@ def execute_code(code: str) -> dict[str, Any]:
             'error_type': 'ModuleNotFoundError',
             'module_name': e.name,
         }
-    except Exception:
+    except Exception:  # exception_safety_linter.py: swallowed-exception — catch-all for user code; error captured in DriverResponse  # exception_safety_linter.py: swallowed-exception — catch-all for arbitrary user code execution; error captured in response
         return {
             'stdout': stdout_capture.getvalue(),
             'stderr': stderr_capture.getvalue(),
@@ -178,12 +200,8 @@ def main() -> None:
         request = read_request()
 
         if request is None:
-            # EOF - clean shutdown
+            # EOF or protocol error - clean shutdown
             break
-
-        if not request:
-            # Empty dict from protocol error - already sent error response
-            continue
 
         action = request.get('action')
 

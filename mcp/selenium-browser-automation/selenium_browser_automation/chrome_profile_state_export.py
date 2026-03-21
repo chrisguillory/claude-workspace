@@ -286,7 +286,7 @@ def _get_chrome_encryption_key() -> bytes:
             '-s',
             'Chrome Safe Storage',
         ],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
     )
     if result.returncode != 0:

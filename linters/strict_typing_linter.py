@@ -1061,12 +1061,11 @@ class AnnotationChecker(ast.NodeVisitor):
                 if violation:
                     return violation
             return None
+        # Single type arg at position 0
+        elif 0 in allowed_positions:
+            return self._find_forbidden_type_no_any(node)
         else:
-            # Single type arg at position 0
-            if 0 in allowed_positions:
-                return self._find_forbidden_type_no_any(node)
-            else:
-                return self._find_forbidden_type(node)
+            return self._find_forbidden_type(node)
 
     def _find_forbidden_type_no_any(self, node: ast.expr) -> str | None:
         """Like _find_forbidden_type but only checks mutable types, not Any.

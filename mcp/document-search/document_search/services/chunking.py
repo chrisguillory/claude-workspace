@@ -15,6 +15,7 @@ CPU-bound operations (4x speedup for JSONL, significant gains for PDF).
 from __future__ import annotations
 
 import asyncio
+import email
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
+from email.policy import default as email_default_policy
 from pathlib import Path
 
 import pandas as pd
@@ -608,10 +610,7 @@ class ChunkingService:
         - Plain text body (preferred) or HTML body (fallback)
         - Skips: MIME boundaries, base64 attachments, Content-Type headers
         """
-        import email
-        from email.policy import default
-
-        msg = email.message_from_string(content, policy=default)
+        msg = email.message_from_string(content, policy=email_default_policy)
 
         # Extract headers worth indexing
         parts: list[str] = []

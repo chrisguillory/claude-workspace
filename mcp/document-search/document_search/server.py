@@ -345,7 +345,7 @@ Returns:
                 if snapshot:
                     errors_429_delta = embedding_client.errors_429 - errors_429_start
 
-                    # Build partial timing report every 5s (10 ticks × 500ms)
+                    # Build partial timing report every 5s (10 ticks x 500ms)
                     tick += 1
                     if tick % 10 == 0:
                         partial_timing = indexing_service.get_partial_timing()

@@ -44,6 +44,8 @@ select = [
     "FLY",  # flynt (f-string conversion)
     "I",    # isort
     "PERF", # perflint (performance)
+    "PL",   # pylint
+    "RUF",  # ruff-specific
     "SIM",  # flake8-simplify
     "UP",   # pyupgrade
     "W",    # pycodestyle warnings
@@ -51,6 +53,10 @@ select = [
 ignore = [
     "DTZ011",  # date.today() without timezone is fine for date-only ops
     "E501",    # line length handled by formatter
+    "PLR09",   # too-many-branches/arguments/statements/returns
+    "PLR2004", # magic-value-comparison
+    "PLW2901", # redefined-loop-name — line = line.strip() is idiomatic
+    "RUF100",  # unused-noqa — pre-emptive noqa for custom linters / future rules
     "SIM102",  # allow nested if statements
     "SIM103",  # allow explicit if-return-false for clarity
     "SIM108",  # allow if-else over ternary

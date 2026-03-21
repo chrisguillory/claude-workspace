@@ -302,7 +302,7 @@ class _BatchRecord[TRequest: Hashable, TResponse]:
     One object per load_many() call instead of N per-item objects.
     """
 
-    __slots__ = ('results', 'future', '_position_map', '_remaining')
+    __slots__ = ('_position_map', '_remaining', 'future', 'results')
 
     def __init__(
         self,

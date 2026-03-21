@@ -149,5 +149,5 @@ def test_parallel_deterministic(rust_model: bm25_rs.BM25Model) -> None:
         assert sorted(r1[i][0]) == sorted(r2[i][0])
         d1 = dict(zip(r1[i][0], r1[i][1]))
         d2 = dict(zip(r2[i][0], r2[i][1]))
-        for k in d1:
-            assert d1[k] == d2[k]
+        for k, v in d1.items():
+            assert v == d2[k]

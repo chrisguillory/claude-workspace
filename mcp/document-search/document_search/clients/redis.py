@@ -249,19 +249,15 @@ class RedisClient:
         self._active_single += delta
         if delta > 0:
             total = self._active_single + self._active_pipeline
-            if self._active_single > self._hwm_single:
-                self._hwm_single = self._active_single
-            if total > self._hwm_total:
-                self._hwm_total = total
+            self._hwm_single = max(self._hwm_single, self._active_single)
+            self._hwm_total = max(self._hwm_total, total)
 
     def _track_pipeline(self, delta: int) -> None:
         self._active_pipeline += delta
         if delta > 0:
             total = self._active_single + self._active_pipeline
-            if self._active_pipeline > self._hwm_pipeline:
-                self._hwm_pipeline = self._active_pipeline
-            if total > self._hwm_total:
-                self._hwm_total = total
+            self._hwm_pipeline = max(self._hwm_pipeline, self._active_pipeline)
+            self._hwm_total = max(self._hwm_total, total)
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -291,7 +287,7 @@ def discover_redis_port(compose_dir: Path) -> int:
     """
     result = subprocess.run(
         ['docker', 'compose', 'port', 'redis', '6379'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         cwd=compose_dir,
         timeout=5,

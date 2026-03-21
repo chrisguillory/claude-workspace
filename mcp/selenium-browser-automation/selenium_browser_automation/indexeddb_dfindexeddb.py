@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import dfindexeddb.leveldb.errors
 from dfindexeddb.indexeddb.chromium.definitions import (
     DatabaseMetaDataKeyType,
     IndexMetaDataKeyType,
@@ -118,7 +119,7 @@ def _make_json_serializable(value: Any) -> Any:
     return str(value)
 
 
-def _keypath_to_value(keypath: IDBKeyPath | None) -> str | list[str] | None:
+def _keypath_to_value(keypath: IDBKeyPath | None) -> str | Sequence[str] | None:
     """Convert IDBKeyPath to JSON-serializable value.
 
     Args:
@@ -168,7 +169,7 @@ def _origin_dir_to_url(origin_dir: str) -> str:
 def export_indexeddb_with_schema(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> dict[str, list[dict[str, Any]]]:
+) -> Mapping[str, Sequence[Mapping[str, Any]]]:  # strict_typing_linter.py: loose-typing — IndexedDB records have arbitrary structure
     """Export IndexedDB with full schema using dfindexeddb.
 
     This function extracts complete IndexedDB data including:
@@ -239,14 +240,14 @@ def export_indexeddb_with_schema(
             databases = _parse_indexeddb_folder(db_dir)
             if databases:
                 result[origin_url] = databases
-        except Exception as e:
+        except (OSError, ValueError, KeyError, dfindexeddb.leveldb.errors.ParserError, dfindexeddb.leveldb.errors.DecoderError) as e:
             # Log but continue with other origins
             logger.warning(f'Failed to parse {origin_dir}: {e}')
 
     return result
 
 
-def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
+def _parse_indexeddb_folder(db_dir: Path) -> Sequence[Mapping[str, Any]]:
     """Parse a single IndexedDB LevelDB folder.
 
     Args:

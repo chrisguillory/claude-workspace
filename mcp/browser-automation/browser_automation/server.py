@@ -12,12 +12,13 @@ Architecture: Runs locally (not Docker) for visible browser monitoring.
 
 from __future__ import annotations
 
+# ruff: noqa: PLW0603, PLW0602 — module globals manage browser singleton lifecycle
 # Standard Library
 import asyncio
 import logging
 import sys
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -28,7 +29,9 @@ import fastmcp.exceptions
 import yaml
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+
+import playwright.async_api
+import playwright_stealth.stealth
 from pydantic import BaseModel
 
 """
@@ -48,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+async def lifespan(server: FastMCP) -> AsyncIterator[None]:
     """Manage browser lifecycle - cleanup on shutdown."""
     # Configure logging
     logging.basicConfig(
@@ -59,7 +62,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 
     # Browser is lazy-initialized on first use
     try:
-        yield {}
+        yield
     finally:
         # Cleanup: browser.close() closes all contexts/pages automatically
         global _playwright, _browser
@@ -86,10 +89,10 @@ class CapturedResource(BaseModel):
 class ResourceCapture(BaseModel):
     output_dir: str
     html_path: str
-    captured: list[CapturedResource]
+    captured: Sequence[CapturedResource]
     total_size_mb: float
     resource_count: int
-    errors: list[dict[str, str]]
+    errors: Sequence[Mapping[str, str]]
 
 
 class NavigationResult(BaseModel):
@@ -118,9 +121,9 @@ class FocusableElement(BaseModel):
 
 # Browser session state (lazy initialized)
 _playwright = None
-_browser: Browser | None = None
-_context: BrowserContext | None = None
-_page: Page | None = None
+_browser: playwright.async_api.Browser | None = None
+_context: playwright.async_api.BrowserContext | None = None
+_page: playwright.async_api.Page | None = None
 
 # Temporary directory for screenshots (auto-cleanup on process exit)
 _temp_dir = tempfile.TemporaryDirectory()
@@ -132,7 +135,7 @@ _capture_dir = Path(_capture_temp_dir.name)
 _capture_counter = 0  # Zero-padded 3-digit counter for capture directories
 
 
-def _save_captured_resource(capture_dir: Path, url: str, data: dict[str, Any]) -> CapturedResource | None:
+def _save_captured_resource(capture_dir: Path, url: str, data: Mapping[str, Any]) -> CapturedResource | None:
     """Save single captured resource to hierarchical path. Returns metadata or None on error."""
     # Create hierarchical path from URL
     parsed = urlparse(url)
@@ -193,17 +196,13 @@ async def _close_browser() -> None:
     _playwright = None
 
 
-async def get_browser() -> tuple[Browser, BrowserContext, Page]:
+async def get_browser() -> tuple[playwright.async_api.Browser, playwright.async_api.BrowserContext, playwright.async_api.Page]:
     """Initialize and return browser session (lazy singleton pattern)."""
     global _playwright, _browser, _context, _page
 
     if _page is not None and _browser is not None and _context is not None:
         return _browser, _context, _page
-
-    # Third-Party Libraries
-    from playwright_stealth.stealth import Stealth  # type: ignore[import-untyped]
-
-    _playwright = await async_playwright().start()
+    _playwright = await playwright.async_api.async_playwright().start()
 
     _browser = await _playwright.chromium.launch(
         headless=False,
@@ -221,7 +220,7 @@ async def get_browser() -> tuple[Browser, BrowserContext, Page]:
     )
 
     _page = await _context.new_page()
-    stealth_config = Stealth()
+    stealth_config = playwright_stealth.stealth.Stealth()
     await stealth_config.apply_stealth_async(_page)
 
     return _browser, _context, _page
@@ -238,7 +237,7 @@ async def get_browser() -> tuple[Browser, BrowserContext, Page]:
 async def navigate(
     url: str,
     capture_resources: bool = False,
-    resource_types: list[str] | None = None,
+    resource_types: Sequence[str] | None = None,
     max_size_mb: float = 50.0,
     fresh_browser: bool = False,
 ) -> NavigationResult:
@@ -286,7 +285,7 @@ async def navigate(
         capture_dir.mkdir(parents=True, exist_ok=True)
 
         # Response event monitoring - doesn't block network stack
-        async def capture_response(response: Any) -> None:
+        async def capture_response(response: Any) -> None:  # strict_typing_linter.py: loose-typing — Playwright event callback; typed as Any by page.on()
             try:
                 req_type = response.request.resource_type
 
@@ -315,7 +314,7 @@ async def navigate(
                     'status': response.status,
                     'size': len(body),
                 }
-            except Exception as e:
+            except playwright.async_api.Error as e:
                 captured_resources[response.url] = {'error': str(e)}
 
         page.on('response', lambda r: asyncio.create_task(capture_response(r)))
@@ -448,7 +447,7 @@ async def screenshot(filename: str, ctx: Context[Any, Any, Any]) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-async def download_resource(url: str, output_filename: str) -> dict[str, Any]:
+async def download_resource(url: str, output_filename: str) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — response shape varies by content type
     """Download specific resource using current browser context and session.
 
     Uses page.request.get() to maintain cookies/session from prior navigation.
@@ -539,10 +538,10 @@ async def get_aria_snapshot(selector: str, include_urls: bool = False, timeout: 
 async def get_interactive_elements(
     selector_scope: str,
     text_contains: str | None,
-    tag_filter: list[str] | None,
+    tag_filter: Sequence[str] | None,
     limit: int | None,
     ctx: Context[Any, Any, Any],
-) -> list[InteractiveElement]:
+) -> Sequence[InteractiveElement]:
     """Get clickable elements with optional filters for targeted extraction.
 
     Workflow: Use get_aria_snapshot() first for structure, then filter here for selectors.
@@ -630,7 +629,7 @@ async def get_interactive_elements(
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
-async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> list[FocusableElement]:
+async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> Sequence[FocusableElement]:
     """Get keyboard-navigable elements sorted by tab order.
 
     Args:

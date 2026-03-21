@@ -268,7 +268,7 @@ def read_keychain_raw() -> (
     """Read full keychain JSON. Returns None if entry doesn't exist."""
     result = subprocess.run(
         ['security', 'find-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS, '-w'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -294,7 +294,7 @@ def write_keychain_raw(
     for i in range(1, 5):
         del_result = subprocess.run(
             ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS],
-            capture_output=True,
+            check=False, capture_output=True,
             timeout=5,
         )
         if del_result.returncode != 0:
@@ -312,7 +312,7 @@ def write_keychain_raw(
             '-w',
             json.dumps(data),
         ],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -326,7 +326,7 @@ def delete_keychain() -> None:
     for _ in range(5):
         result = subprocess.run(
             ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS],
-            capture_output=True,
+            check=False, capture_output=True,
             timeout=5,
         )
         if result.returncode != 0:
@@ -337,7 +337,7 @@ def read_api_key_keychain() -> str | None:
     """Read raw API key from 'Claude Code' keychain entry."""
     result = subprocess.run(
         ['security', 'find-generic-password', '-s', KEYCHAIN_SERVICE_API_KEY, '-w'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -355,14 +355,14 @@ def write_api_key_keychain(api_key: str) -> None:
     # Delete existing
     subprocess.run(
         ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_API_KEY],
-        capture_output=True,
+        check=False, capture_output=True,
         timeout=5,
     )
     # Hex encoding matches Claude Code's W49: Buffer.from(key, "utf-8").toString("hex")
     hex_key = api_key.encode('utf-8').hex()
     result = subprocess.run(
         ['security', 'add-generic-password', '-U', '-a', user, '-s', KEYCHAIN_SERVICE_API_KEY, '-X', hex_key],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -375,7 +375,7 @@ def delete_api_key_keychain() -> None:
     """Delete 'Claude Code' keychain entry (API key)."""
     subprocess.run(
         ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_API_KEY],
-        capture_output=True,
+        check=False, capture_output=True,
         timeout=5,
     )
 

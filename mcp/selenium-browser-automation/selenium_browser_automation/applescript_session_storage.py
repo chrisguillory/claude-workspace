@@ -80,7 +80,7 @@ def is_chrome_running() -> bool:
 
     result = subprocess.run(
         ['pgrep', '-x', 'Google Chrome'],
-        capture_output=True,
+        check=False, capture_output=True,
     )
     return result.returncode == 0
 
@@ -100,7 +100,7 @@ def is_selenium_chrome_running() -> bool:
     # Get all Chrome main processes with full command lines
     result = subprocess.run(
         ['ps', 'auxww'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -276,7 +276,7 @@ end tell
 """
     result = subprocess.run(
         ['osascript', '-e', script],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -288,7 +288,7 @@ end tell
     return result.returncode == 0
 
 
-def _get_all_tab_urls() -> list[tuple[int, int, str]]:
+def _get_all_tab_urls() -> Sequence[tuple[int, int, str]]:
     """Get URLs of all Chrome tabs: [(window_index, tab_index, url), ...]
 
     Uses AppleScript to enumerate tabs without executing JavaScript.
@@ -308,7 +308,7 @@ return output
 """
     result = subprocess.run(
         ['osascript', '-e', script],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=10,
     )
@@ -327,7 +327,7 @@ return output
     return tabs
 
 
-def _extract_session_storage_from_tab(window: int, tab: int) -> dict[str, str] | None:
+def _extract_session_storage_from_tab(window: int, tab: int) -> Mapping[str, str] | None:
     """Extract sessionStorage from a single tab.
 
     Returns dict of {key: value} or None if extraction failed.
@@ -343,7 +343,7 @@ end tell
 '''
     result = subprocess.run(
         ['osascript', '-e', script],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=10,
     )

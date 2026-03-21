@@ -246,7 +246,7 @@ class PipelineTracer:
 
         partial_kwargs: dict[str, object] = {}
         if partial:
-            chunk_done, embed_done, store_done = self.get_completion_counts()
+            _chunk_done, _embed_done, store_done = self.get_completion_counts()
             chunk_in, embed_in, store_in = self.get_in_flight_counts()
             partial_kwargs = {
                 'is_partial': True,

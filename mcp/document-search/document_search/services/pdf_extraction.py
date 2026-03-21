@@ -25,8 +25,8 @@ import fitz  # PyMuPDF
 import pdfplumber
 
 __all__ = [
-    'PDFPageData',
     'PDFExtractionResult',
+    'PDFPageData',
     'extract_pdf',
 ]
 

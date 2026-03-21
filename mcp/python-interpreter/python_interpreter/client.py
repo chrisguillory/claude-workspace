@@ -40,6 +40,7 @@ __all__ = ['main']
 import argparse
 import os
 import pathlib
+import subprocess
 import sys
 
 import httpx
@@ -47,14 +48,12 @@ import httpx
 
 def get_socket_path() -> pathlib.Path:
     """Get Unix socket path by finding Claude PID in process tree."""
-    import subprocess
-
     current = os.getppid()
 
     for _ in range(20):  # Depth limit
         result = subprocess.run(
             ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
         )
 

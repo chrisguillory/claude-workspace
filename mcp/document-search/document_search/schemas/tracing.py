@@ -95,7 +95,7 @@ class StageCompletionData(StrictModel):
     Parallel arrays sorted by completion time. completions[i] and
     durations[i] describe the same item. Client computes windows dynamically.
 
-    Size impact: ~90 bytes per item per stage. For 358 files × 5 stages,
+    Size impact: ~90 bytes per item per stage. For 358 files x 5 stages,
     adds ~22KB to operation JSON (27% overhead vs aggregate-only report).
     """
 

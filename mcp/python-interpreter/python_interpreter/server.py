@@ -24,6 +24,7 @@ import pathlib
 import sys
 import traceback
 import typing
+from collections.abc import Mapping, Sequence
 
 import fastapi
 import mcp.server.fastmcp
@@ -34,8 +35,8 @@ from python_interpreter.models import ExecuteRequest, InterpreterInfo
 from python_interpreter.service import PythonInterpreterService, ServerState
 
 __all__ = [
-    'server',
     'main',
+    'server',
 ]
 
 
@@ -177,7 +178,7 @@ def register_tools(service: PythonInterpreterService) -> None:
         python_path: str,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         cwd: str | None = None,
-        env: dict[str, str] | None = None,
+        env: Mapping[str, str] | None = None,
         startup_script: str | None = None,
         description: str | None = None,
     ) -> InterpreterInfo:
@@ -242,7 +243,7 @@ def register_tools(service: PythonInterpreterService) -> None:
     )
     async def list_interpreters(
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
-    ) -> list[InterpreterInfo]:
+    ) -> Sequence[InterpreterInfo]:
         return await service.list_interpreters()
 
 
@@ -302,7 +303,7 @@ async def global_exception_handler(request: fastapi.Request, exc: Exception) -> 
     return fastapi.responses.JSONResponse(
         status_code=500,
         content={
-            'detail': f'{type(exc).__name__}: {str(exc)}',
+            'detail': f'{type(exc).__name__}: {exc!s}',
             'traceback': tb_str,
         },
     )
@@ -319,7 +320,7 @@ def get_interpreter_service(request: fastapi.Request) -> PythonInterpreterServic
 async def http_execute(
     request: ExecuteRequest,
     service: PythonInterpreterService = fastapi.Depends(get_interpreter_service),
-) -> dict[str, str]:
+) -> Mapping[str, str]:
     """HTTP endpoint for executing Python code.
 
     This allows heredoc syntax via mcp-py-client:

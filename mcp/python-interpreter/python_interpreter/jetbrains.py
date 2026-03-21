@@ -12,8 +12,8 @@ SDK resolution chain for run configs with empty SDK_HOME:
 from __future__ import annotations
 
 __all__ = [
-    'discover_sdk_entries',
     'discover_run_configs',
+    'discover_sdk_entries',
 ]
 
 import os

@@ -26,6 +26,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import typing
 from collections.abc import Sequence
@@ -4193,8 +4194,6 @@ def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:
 
     Uses a thread with timeout to prevent hanging on unresponsive ChromeDriver.
     """
-    import threading
-
     print('\n⚠ Signal received, cleaning up browser...', file=sys.stderr)
     if state.driver:
         try:

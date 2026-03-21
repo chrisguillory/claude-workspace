@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +81,7 @@ def get_chrome_base_path() -> Path:
     return path
 
 
-def list_profile_directories(base_path: Path) -> list[str]:
+def list_profile_directories(base_path: Path) -> Sequence[str]:
     """Find all profile directories (Default, Profile 1, etc.).
 
     Args:
@@ -128,7 +129,7 @@ def load_local_state(base_path: Path) -> ChromeLocalState:
         raise MetadataParseError(f'Failed to validate Local State: {e}') from e
 
 
-def load_profile_preferences(profile_path: Path) -> dict[str, Any] | None:
+def load_profile_preferences(profile_path: Path) -> Mapping[str, Any] | None:  # strict_typing_linter.py: loose-typing — Chrome Preferences JSON has no published schema
     """Load and parse profile's Preferences JSON (may not exist).
 
     Args:

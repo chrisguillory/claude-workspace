@@ -157,10 +157,9 @@ class IndexingService:
             elif result == 0:
                 if ft is not None:
                     no_content_by_type[ft] = no_content_by_type.get(ft, 0) + 1
-            else:
-                if ft is not None:
-                    indexed_by_type[ft] = indexed_by_type.get(ft, 0) + 1
-                    chunks_by_type[ft] = chunks_by_type.get(ft, 0) + result
+            elif ft is not None:
+                indexed_by_type[ft] = indexed_by_type.get(ft, 0) + 1
+                chunks_by_type[ft] = chunks_by_type.get(ft, 0) + result
 
         for ft in op.scanned_by_type:
             stats = FileTypeStats(
@@ -1548,7 +1547,7 @@ def _get_git_files(
     # Run both commands
     included = subprocess.run(
         ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         cwd=directory,
         timeout=30,
@@ -1558,7 +1557,7 @@ def _get_git_files(
 
     ignored = subprocess.run(
         ['git', 'ls-files', '--others', '--ignored', '--exclude-standard'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         cwd=directory,
         timeout=60,

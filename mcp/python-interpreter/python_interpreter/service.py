@@ -10,15 +10,17 @@ import asyncio
 import datetime
 import logging
 import pathlib
+import shlex
 import subprocess
 import sys
 import tempfile
 import typing
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from cc_lib.utils import encode_project_path, humanize_seconds
 
 from python_interpreter.discovery import discover_session_id, find_claude_context
+from python_interpreter.jetbrains import discover_run_configs, discover_sdk_entries
 from python_interpreter.manager import ExternalInterpreterManager, InterpreterConfig
 from python_interpreter.models import (
     InterpreterInfo,
@@ -32,10 +34,10 @@ from python_interpreter.registry import InterpreterRegistryManager
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    'ServerState',
-    'PythonInterpreterService',
-    'PackageInstallationError',
     'CHARACTER_LIMIT',
+    'PackageInstallationError',
+    'PythonInterpreterService',
+    'ServerState',
 ]
 
 
@@ -116,8 +118,6 @@ class ServerState:
         jetbrains_runs: Sequence[JetBrainsRunConfig] = ()
         registry = interpreter_registry.load()
         if registry.discover_jetbrains:
-            from python_interpreter.jetbrains import discover_run_configs, discover_sdk_entries
-
             jetbrains_sdks = tuple(discover_sdk_entries(claude_context.project_dir))
             jetbrains_runs = tuple(discover_run_configs(claude_context.project_dir, sdk_entries=jetbrains_sdks))
             if jetbrains_sdks or jetbrains_runs:
@@ -318,7 +318,7 @@ class PythonInterpreterService:
         name: str,
         python_path: pathlib.Path,
         cwd: pathlib.Path | None = None,
-        env: dict[str, str] | None = None,
+        env: Mapping[str, str] | None = None,
         startup_script: str | None = None,
         description: str | None = None,
     ) -> InterpreterInfo:
@@ -392,7 +392,7 @@ class PythonInterpreterService:
 
         return f"Interpreter '{name}' stopped (will auto-restart on next execute)"
 
-    async def list_interpreters(self) -> list[InterpreterInfo]:
+    async def list_interpreters(self) -> Sequence[InterpreterInfo]:
         """List all interpreters (running, saved, and discovered)."""
         logger.info('Listing interpreters')
 
@@ -509,8 +509,6 @@ def _build_jetbrains_startup_script(config: JetBrainsRunConfig) -> str | None:
     # Set sys.argv to match what JetBrains would provide
     argv_items = [repr(str(script_path))]
     if config.parameters:
-        import shlex
-
         argv_items.extend(repr(param) for param in shlex.split(config.parameters))
     parts.append(f'sys.argv = [{", ".join(argv_items)}]')
 
@@ -537,12 +535,12 @@ def _install_package(import_name: str) -> str:
     try:
         result = subprocess.run(
             ['uv', 'pip', 'install', '--python', sys.executable, package_name],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=60,
         )
-    except subprocess.TimeoutExpired:
-        raise PackageInstallationError(f'Timeout (>60s) while installing {package_name}')
+    except subprocess.TimeoutExpired as e:
+        raise PackageInstallationError(f'Timeout (>60s) while installing {package_name}') from e
 
     if result.returncode == 0:
         details = result.stdout.strip() if result.stdout.strip() else 'No output'

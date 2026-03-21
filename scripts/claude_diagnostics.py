@@ -612,7 +612,7 @@ def read_keychain_credentials() -> KeychainCredentials:
             '-s',
             KEYCHAIN_SERVICE,
         ],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=10,
     )
@@ -695,7 +695,7 @@ def read_binary_info() -> BinaryInfo:
     # Find binary
     result = subprocess.run(
         ['which', 'claude'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -716,7 +716,7 @@ def read_binary_info() -> BinaryInfo:
     # Get version from CLI
     result = subprocess.run(
         ['claude', '--version'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=10,
     )
@@ -730,7 +730,7 @@ def read_running_processes() -> Sequence[ProcessInfo]:
     """Find running Claude Code processes (top-level only, not MCP subprocesses)."""
     result = subprocess.run(
         ['pgrep', '-lf', 'claude'],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -887,7 +887,7 @@ def check_credential_security() -> tuple[str, str]:
             '-s',
             KEYCHAIN_SERVICE,
         ],
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=5,
     )
@@ -1945,7 +1945,7 @@ def main() -> int:
         if has_errors:
             print(f'{C.RED}⚠ Schema drift detected — update models to accommodate{C.RESET}')
         elif all_warnings:
-            print(f'{C.YELLOW}ℹ {len(all_warnings)} drift warning(s) — see above{C.RESET}')
+            print(f'{C.YELLOW}ℹ {len(all_warnings)} drift warning(s) — see above{C.RESET}')  # noqa: RUF001 — intentional unicode info icon for terminal UI
         else:
             print(f'{C.GREEN}✓ All sections validated cleanly{C.RESET}')
         print()

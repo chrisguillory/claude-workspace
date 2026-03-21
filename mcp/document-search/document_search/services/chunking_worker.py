@@ -23,9 +23,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from document_search.schemas.chunking import Chunk, ChunkMetadata, FileType
 
 __all__ = [
-    'chunk_jsonl',
     'ChunkData',
     'ChunkMetadataDict',
+    'chunk_jsonl',
 ]
 
 # Default chunking parameters (used if caller doesn't specify)
