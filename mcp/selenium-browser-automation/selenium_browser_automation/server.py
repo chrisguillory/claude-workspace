@@ -32,7 +32,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 # Third-Party Libraries
 import fastmcp.exceptions
@@ -1680,77 +1680,112 @@ def register_tools(service: BrowserService) -> None:
         logger.info(f'Screenshot saved to {screenshot_path}')
         return str(screenshot_path)
 
+    async def _download_with_browser_context(driver: webdriver.Chrome, url: str) -> tuple[bytes, int, str]:
+        """Download a URL using httpx with headers and cookies extracted from the browser session.
+
+        Builds browser-realistic request headers (User-Agent, Referer, Sec-Fetch-*) and
+        forwards domain-scoped cookies so CDNs see the request as coming from the same
+        browser. Routes through mitmproxy when proxy is configured.
+        """
+        user_agent = await asyncio.to_thread(driver.execute_script, 'return navigator.userAgent')
+        current_url = await asyncio.to_thread(lambda: driver.current_url)
+
+        headers = {
+            'User-Agent': user_agent,
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': current_url,
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'no-cors',
+            'Sec-Fetch-Site': 'cross-site',
+        }
+
+        selenium_cookies = await asyncio.to_thread(driver.get_cookies)
+        jar = httpx.Cookies()
+        for cookie in selenium_cookies:
+            jar.set(cookie['name'], cookie['value'], domain=cookie.get('domain', ''))
+
+        proxy = 'http://127.0.0.1:8080' if service.state.proxy_config else None
+
+        try:
+            async with httpx.AsyncClient(
+                cookies=jar,
+                headers=headers,
+                follow_redirects=True,
+                timeout=60.0,
+                proxy=proxy,
+                verify=proxy is None,  # mitmproxy uses self-signed certs
+            ) as client:
+                response = await client.get(url)
+        except httpx.TimeoutException as exc:
+            raise fastmcp.exceptions.ToolError(f'Download timed out after 60s: {url}') from exc
+        except httpx.HTTPError as exc:
+            raise fastmcp.exceptions.ToolError(f'Network error downloading {url}: {exc}') from exc
+
+        content_type = response.headers.get('content-type', 'unknown')
+        return response.content, response.status_code, content_type
+
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
     async def download_resource(url: str, output_filename: str) -> dict[str, Any]:
-        """Download specific resource using httpx with cookies from current browser session.
+        """Download specific resource using current browser session's cookies and headers.
 
-        Uses driver.get_cookies() to maintain session from prior navigation.
-        Critical for sites with bot detection - site sees this as same browser session.
+        Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
+        session to build browser-realistic requests. Critical for sites with bot detection
+        or CDN hotlink protection — the CDN sees the request as coming from the same browser.
 
         PREREQUISITE: Call navigate() first to establish browser session.
         Without prior navigation, still works but may encounter bot detection.
 
         Args:
-            url: Full URL to resource (http:// or https://)
+            url: Full URL to resource (http:// or https://) or file:// for local files.
             output_filename: Filename to save as (no path). Saved to screenshot temp dir.
 
         Returns:
             {'path': '/tmp/.../file.js', 'size_bytes': 26703, 'content_type': '...', 'status': 200, 'url': '...'}
 
-        Errors: Raises ToolError if browser not initialized, response status >= 400, or network failure.
+        Errors: Raises ToolError if response status >= 400, network failure, or local file not found.
         """
         if not url.startswith(('http://', 'https://', 'file://')):
             raise fastmcp.exceptions.ValidationError('URL must start with http://, https://, or file://')
 
-        driver = await service.get_browser()
-
-        if driver is None:
-            raise fastmcp.exceptions.ToolError(
-                'Browser not initialized. Call navigate() first to establish browser session.'
-            )
-
-        print(f'[download_resource] Downloading: {url}', file=sys.stderr)
-
-        # Get cookies from driver to maintain session
-        selenium_cookies = await asyncio.to_thread(driver.get_cookies)
-
-        # Convert Selenium cookies to httpx format
-        cookies = {cookie['name']: cookie['value'] for cookie in selenium_cookies}
-
-        # Download using httpx with session cookies
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, cookies=cookies, follow_redirects=True)
-
-        # Check response status
-        if response.status_code >= 400:
-            raise fastmcp.exceptions.ToolError(f'Download failed with status {response.status_code}: {url}')
-
-        # Get response body
-        body = response.content
-
-        # Sanitize filename (prevent path traversal, handle special chars)
         safe_filename = ''.join(c if c.isalnum() or c in '.-_' else '_' for c in output_filename)
         if not safe_filename or safe_filename.startswith('.'):
             safe_filename = 'resource_' + safe_filename
-
-        # Save to screenshot temp directory
         save_path = service.state.screenshot_dir / safe_filename
-        save_path.write_bytes(body)
 
-        result = {
+        if url.startswith('file://'):
+            local_path = Path(unquote(urlparse(url).path))
+            if not local_path.is_file():
+                raise fastmcp.exceptions.ToolError(f'Local file not found: {local_path}')
+            body = local_path.read_bytes()
+            save_path.write_bytes(body)
+            return {
+                'path': str(save_path),
+                'size_bytes': len(body),
+                'content_type': 'application/octet-stream',
+                'status': 200,
+                'url': url,
+            }
+
+        driver = await service.get_browser()
+        logger.info('Downloading: %s', url)
+
+        body, status, content_type = await _download_with_browser_context(driver, url)
+
+        if status >= 400:
+            raise fastmcp.exceptions.ToolError(f'Download failed with status {status}: {url}')
+
+        save_path.write_bytes(body)
+        logger.info('Downloaded %d bytes to %s', len(body), save_path)
+
+        return {
             'path': str(save_path),
             'size_bytes': len(body),
-            'content_type': response.headers.get('content-type', 'unknown'),
-            'status': response.status_code,
+            'content_type': content_type,
+            'status': status,
             'url': url,
         }
-
-        print(
-            f'[download_resource] Downloaded {len(body)} bytes to {save_path}',
-            file=sys.stderr,
-        )
-
-        return result
 
     @mcp.tool(annotations=ToolAnnotations(title='Get ARIA Snapshot', readOnlyHint=True))
     async def get_aria_snapshot(

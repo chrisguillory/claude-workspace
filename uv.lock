@@ -2906,7 +2906,7 @@ wheels = [
 
 [[package]]
 name = "selenium-browser-automation-mcp"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "mcp/selenium-browser-automation" }
 dependencies = [
     { name = "cc-lib" },
