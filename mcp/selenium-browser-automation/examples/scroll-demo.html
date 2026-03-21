@@ -301,7 +301,7 @@
     /* ── Scenario 11: Non-Scrollable ── */
     #non-scrollable {
       height: 120px;
-      overflow: hidden;
+      overflow: clip;
       background: #0f172a;
       border: 2px solid #dc2626;
       border-radius: 8px;
@@ -309,7 +309,7 @@
       position: relative;
     }
     #non-scrollable::after {
-      content: 'overflow: hidden';
+      content: 'overflow: clip';
       position: absolute;
       top: 8px;
       right: 12px;
@@ -652,19 +652,21 @@
   <section data-scenario="11" id="scenario-11">
     <h2><span class="num">#11</span> Non-Scrollable Container</h2>
     <div class="desc">
-      <p>A container with <code>overflow: hidden</code> containing content that overflows its
-      bounds. Attempting to scroll this container returns <code>scrolled: false</code> &mdash;
-      the agent immediately knows it cannot scroll this element.</p>
+      <p>A container with <code>overflow: clip</code> containing content that overflows its
+      bounds. Unlike <code>overflow: hidden</code> (which is still programmatically scrollable
+      per W3C spec), <code>overflow: clip</code> truly prevents all scrolling. The tool returns
+      <code>scrolled: false</code> and <code>overflow: "clip"</code> &mdash; the agent immediately
+      knows this container cannot be scrolled.</p>
     </div>
     <div id="non-scrollable">
       <p style="color:#f87171; font-weight:600; margin-bottom:8px;">This content overflows but cannot be scrolled.</p>
-      <p style="color:#94a3b8; font-size:13px;">Line 1: The container has overflow: hidden, so scrollBy() has no effect.</p>
-      <p style="color:#94a3b8; font-size:13px;">Line 2: The scroll tool detects this and returns scrolled: false.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 1: The container has overflow: clip, so scrollBy() has no effect.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 2: The scroll tool returns scrolled: false and overflow: "clip".</p>
       <p style="color:#94a3b8; font-size:13px;">Line 3: This prevents the agent from wasting attempts.</p>
       <p style="color:#94a3b8; font-size:13px;">Line 4: You should not be able to see this line.</p>
-      <p style="color:#94a3b8; font-size:13px;">Line 5: Or this one. Both are clipped by overflow: hidden.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 5: Or this one. overflow: clip blocks all scrolling.</p>
       <p style="color:#94a3b8; font-size:13px;">Line 6: Completely invisible content below the fold.</p>
-      <p style="color:#94a3b8; font-size:13px;">Line 7: Still invisible. overflow: hidden is absolute.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 7: Still invisible. overflow: clip is absolute.</p>
     </div>
   </section>
 

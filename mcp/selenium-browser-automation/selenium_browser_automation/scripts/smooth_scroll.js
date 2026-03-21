@@ -4,7 +4,7 @@
  * Waits for a smooth scroll animation to complete using three signals:
  * 1. scrollend event (primary — fired by browser after animation completes)
  * 2. Double-rAF no-movement check (early exit if already at target position, ~32ms)
- * 3. setTimeout fallback (safety net if scrollend never fires, 1000ms)
+ * 3. setTimeout fallback (safety net if scrollend never fires, 3000ms)
  *
  * @param {Object} opts
  * @param {EventTarget} opts.eventTarget - Where to listen for scrollend (window or element)
@@ -33,10 +33,12 @@ function smoothScroll(opts) {
                 }
             });
         });
-        // Hard fallback in case scrollend never fires
+        // Hard fallback in case scrollend never fires.
+        // 3s covers long-distance smooth scrolls (Chrome's animation for 7500+ px
+        // can exceed 1s). Normal scrolls resolve via scrollend well before this.
         setTimeout(function() {
             opts.eventTarget.removeEventListener('scrollend', finish);
             finish();
-        }, 1000);
+        }, 3000);
     });
 }

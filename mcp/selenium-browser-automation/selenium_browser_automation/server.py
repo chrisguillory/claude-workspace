@@ -2695,6 +2695,7 @@ def register_tools(service: BrowserService) -> None:
                     ) from None
 
                 scroll_target = pos_map_container[position]
+                overflow_axis = 'overflowY' if position in ('top', 'bottom') else 'overflowX'
                 if behavior == 'smooth':
                     result = await asyncio.to_thread(
                         driver.execute_script,
@@ -2702,6 +2703,7 @@ def register_tools(service: BrowserService) -> None:
                         + f"""
                         var el = arguments[0];
                         var beforeTop = Math.round(el.scrollTop), beforeLeft = Math.round(el.scrollLeft);
+                        var overflow = window.getComputedStyle(el).{overflow_axis};
                         return smoothScroll({{
                             eventTarget: el,
                             scrollAction: function() {{ el.scrollTo({{{scroll_target}, behavior: 'smooth'}}); }},
@@ -2716,7 +2718,8 @@ def register_tools(service: BrowserService) -> None:
                                     scrollHeight: el.scrollHeight,
                                     clientHeight: el.clientHeight,
                                     scrolled: (Math.round(el.scrollTop) !== beforeTop
-                                            || Math.round(el.scrollLeft) !== beforeLeft)
+                                            || Math.round(el.scrollLeft) !== beforeLeft),
+                                    overflow: overflow
                                 }};
                             }}
                         }});
@@ -2736,7 +2739,8 @@ def register_tools(service: BrowserService) -> None:
                             scrollHeight: el.scrollHeight,
                             clientHeight: el.clientHeight,
                             scrolled: (Math.round(el.scrollTop) !== beforeTop
-                                    || Math.round(el.scrollLeft) !== beforeLeft)
+                                    || Math.round(el.scrollLeft) !== beforeLeft),
+                            overflow: window.getComputedStyle(el).{overflow_axis}
                         }};
                         """,
                         element,
@@ -2752,6 +2756,7 @@ def register_tools(service: BrowserService) -> None:
                     'container_scroll_height': result['scrollHeight'],
                     'container_client_height': result['clientHeight'],
                     'scrolled': result['scrolled'],
+                    'overflow': result['overflow'],
                 }
 
             else:
@@ -2948,6 +2953,7 @@ def register_tools(service: BrowserService) -> None:
                     + """
                     var el = arguments[0], dy = arguments[1], dx = arguments[2];
                     var beforeTop = Math.round(el.scrollTop), beforeLeft = Math.round(el.scrollLeft);
+                    var overflow = window.getComputedStyle(el)[dy !== 0 ? 'overflowY' : 'overflowX'];
                     return smoothScroll({
                         eventTarget: el,
                         scrollAction: function() {
@@ -2964,7 +2970,8 @@ def register_tools(service: BrowserService) -> None:
                                 scrollHeight: el.scrollHeight,
                                 clientHeight: el.clientHeight,
                                 scrolled: (Math.round(el.scrollTop) !== beforeTop
-                                        || Math.round(el.scrollLeft) !== beforeLeft)
+                                        || Math.round(el.scrollLeft) !== beforeLeft),
+                                overflow: overflow
                             };
                         }
                     });
@@ -2986,7 +2993,8 @@ def register_tools(service: BrowserService) -> None:
                         scrollHeight: el.scrollHeight,
                         clientHeight: el.clientHeight,
                         scrolled: (Math.round(el.scrollTop) !== Math.round(beforeTop)
-                                || Math.round(el.scrollLeft) !== Math.round(beforeLeft))
+                                || Math.round(el.scrollLeft) !== Math.round(beforeLeft)),
+                        overflow: window.getComputedStyle(el)[dy !== 0 ? 'overflowY' : 'overflowX']
                     };
                     """,
                     element,
@@ -3008,6 +3016,7 @@ def register_tools(service: BrowserService) -> None:
                 'container_scroll_height': result['scrollHeight'],
                 'container_client_height': result['clientHeight'],
                 'scrolled': result['scrolled'],
+                'overflow': result['overflow'],
             }
 
         # ── Mode 1: Viewport scroll (direction only) ──
