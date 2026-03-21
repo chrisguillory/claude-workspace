@@ -183,11 +183,12 @@ scroll_to_element:
         scrolled: true
 
     - name: scroll_to_already_visible
-      description: Element already in viewport — scroll is minimal/no-op
+      description: Element already in viewport near top — can't scroll up to center, scrolled false
       css_selector: "#top-marker"
       expect:
         success: true
         element_in_viewport: true
+        scrolled: false
 
     - name: scroll_to_nonexistent
       description: Nonexistent element should error
@@ -331,12 +332,13 @@ smooth_scroll:
         scrolled: false
 
     - name: smooth_scroll_to_already_visible
-      description: Smooth scroll already-visible element — minimal/no scroll
+      description: Smooth scroll already-visible element near top — can't scroll up to center, scrolled false
       css_selector: "#top-marker"
       behavior: smooth
       expect:
         success: true
         element_in_viewport: true
+        scrolled: false
 
 # =============================================================================
 # POSITION SCROLL TESTS (absolute scrollTo)
