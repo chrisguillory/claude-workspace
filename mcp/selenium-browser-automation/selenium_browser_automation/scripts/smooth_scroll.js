@@ -19,16 +19,16 @@ function smoothScroll(opts) {
         function finish() {
             if (resolved) return;
             resolved = true;
+            opts.eventTarget.removeEventListener('scrollend', finish);
             resolve(opts.measure());
         }
         opts.eventTarget.addEventListener('scrollend', finish, {once: true});
         opts.scrollAction();
         // Early exit: if no scroll occurred (already at boundary), scrollend won't fire.
-        // Double-rAF detects this in ~32ms instead of waiting for the 1s timeout.
+        // Double-rAF detects this in ~32ms instead of waiting for the 3s timeout.
         requestAnimationFrame(function() {
             requestAnimationFrame(function() {
                 if (!opts.hasMoved()) {
-                    opts.eventTarget.removeEventListener('scrollend', finish);
                     finish();
                 }
             });
@@ -37,7 +37,6 @@ function smoothScroll(opts) {
         // 3s covers long-distance smooth scrolls (Chrome's animation for 7500+ px
         // can exceed 1s). Normal scrolls resolve via scrollend well before this.
         setTimeout(function() {
-            opts.eventTarget.removeEventListener('scrollend', finish);
             finish();
         }, 3000);
     });
