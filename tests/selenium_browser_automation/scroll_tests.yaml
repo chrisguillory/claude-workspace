@@ -1,0 +1,532 @@
+# Scroll Tool Test Suite
+#
+# Structure: Each top-level key is a test category
+# - "viewport_scroll": Directional viewport scrolling
+# - "container_scroll": Scrolling within a container element
+# - "scroll_to_element": Scroll-into-view behavior
+# - "parameter_validation": Parameter bounds checking
+#
+# Test format:
+#   name: Unique identifier
+#   direction: up/down/left/right (optional)
+#   scroll_amount: ticks (optional, default 3)
+#   css_selector: CSS selector (optional)
+#   expect: Expected result
+#     - success: true/false
+#     - viewport_scrollY_gt/lt/eq: Viewport scroll position assertions
+#     - container_scrollTop_gt: Container scroll position assertions
+#     - element_in_viewport: true/false for scroll-into-view
+#     - scrolled: true/false for boundary detection
+#     - error_contains: Substring match on error message
+#
+# =============================================================================
+# IMPLEMENTATION NOTES
+# =============================================================================
+#
+# Three scroll modes:
+#   1. Viewport scroll: direction only → ActionChains.scroll_by_amount()
+#   2. Container scroll: direction + css_selector → JS element.scrollBy()
+#   3. Scroll into view: css_selector only → JS scrollIntoView({block:'center'})
+#
+# 1 tick = 100 CSS pixels of scroll delta.
+# Container scrolling uses JS element.scrollBy({behavior:'instant'}) to bypass
+# CSS scroll-behavior:smooth on the container element.
+
+metadata:
+  description: Test suite for scroll tool behavior
+  version: "1.0"
+  fixtures:
+    - examples/scroll-test.html
+
+# =============================================================================
+# VIEWPORT SCROLL TESTS
+# =============================================================================
+
+viewport_scroll:
+  description: Directional viewport scrolling tests
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: scroll_down_default
+      description: Scroll down with default amount (3 ticks = 300px)
+      direction: down
+      expect:
+        success: true
+        viewport_scrollY_gt: 200
+        scrolled: true
+
+    - name: scroll_down_5_ticks
+      description: Scroll down 5 ticks (500px)
+      direction: down
+      scroll_amount: 5
+      expect:
+        success: true
+        viewport_scrollY_gt: 400
+        scrolled: true
+
+    - name: scroll_up_after_down
+      description: Scroll up after scrolling down — net position should decrease
+      setup_scroll:
+        direction: down
+        scroll_amount: 5
+      direction: up
+      scroll_amount: 3
+      expect:
+        success: true
+        viewport_scrollY_gt: 100
+        viewport_scrollY_lt: 400
+        scrolled: true
+
+    - name: scroll_up_at_top
+      description: Scroll up when already at top — no-op, scrolled should be false
+      direction: up
+      expect:
+        success: true
+        viewport_scrollY_eq: 0
+        scrolled: false
+
+    - name: scroll_down_max_ticks
+      description: Scroll down with maximum ticks (20 = 2000px)
+      direction: down
+      scroll_amount: 20
+      expect:
+        success: true
+        viewport_scrollY_gt: 1500
+        scrolled: true
+
+    - name: scroll_right_viewport
+      description: Horizontal scroll right on viewport (page is wide enough for body)
+      direction: right
+      scroll_amount: 2
+      expect:
+        success: true
+        # Viewport may or may not scroll depending on page width
+        # Just verify no error
+
+    - name: scrolled_false_at_top
+      description: Verify scrolled boolean is false when already at boundary
+      direction: up
+      scroll_amount: 1
+      expect:
+        success: true
+        scrolled: false
+
+# =============================================================================
+# CONTAINER SCROLL TESTS
+# =============================================================================
+
+container_scroll:
+  description: Scrolling within a scrollable container element
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: container_scroll_down
+      description: Scroll down within the overflow container
+      direction: down
+      scroll_amount: 3
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        container_scrollTop_gt: 200
+        scrolled: true
+
+    - name: container_scroll_right
+      description: Scroll right within the overflow container (horizontal)
+      direction: right
+      scroll_amount: 2
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        container_scrollLeft_gt: 100
+        scrolled: true
+
+    - name: container_scroll_left
+      description: Scroll left in container when already at left edge — no-op
+      direction: left
+      scroll_amount: 1
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: false
+
+    - name: container_nonexistent
+      description: Scroll within nonexistent container element
+      direction: down
+      css_selector: "#does-not-exist"
+      expect:
+        success: false
+        error_contains: "Failed to find"
+
+# =============================================================================
+# SCROLL TO ELEMENT TESTS
+# =============================================================================
+
+scroll_to_element:
+  description: Scroll element into view tests
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: scroll_to_below_fold
+      description: Scroll below-fold element into view
+      css_selector: "#below-fold"
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: true
+
+    - name: scroll_to_bottom
+      description: Scroll bottom marker into view
+      css_selector: "#bottom-marker"
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: true
+
+    - name: scroll_to_already_visible
+      description: Element already in viewport near top — can't scroll up to center, scrolled false
+      css_selector: "#top-marker"
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: false
+
+    - name: scroll_to_nonexistent
+      description: Nonexistent element should error
+      css_selector: "#does-not-exist"
+      expect:
+        success: false
+        error_contains: "Failed to find"
+
+    - name: scroll_to_element_twice_scrolled_false
+      description: Scroll to element already centered — scrolled should be false
+      css_selector: "#below-fold"
+      setup_scroll_into_view: "#below-fold"
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: false
+
+    - name: return_value_structure
+      description: Verify return value contains all expected keys
+      css_selector: "#below-fold"
+      expect:
+        success: true
+        has_keys:
+          - scroll_x
+          - scroll_y
+          - page_height
+          - viewport_height
+          - scrolled
+
+# =============================================================================
+# PARAMETER VALIDATION TESTS
+# =============================================================================
+
+parameter_validation:
+  description: Parameter validation tests (no browser needed)
+
+  tests:
+    - name: no_params
+      description: Neither direction, css_selector, nor position — should error
+      expect:
+        success: false
+        error_contains: "Either direction, css_selector, or position"
+
+    - name: scroll_amount_zero
+      description: scroll_amount of 0 is invalid
+      direction: down
+      scroll_amount: 0
+      expect:
+        success: false
+        error_contains: "between 1 and 20"
+
+    - name: scroll_amount_exceeds_max
+      description: scroll_amount of 21 exceeds max
+      direction: down
+      scroll_amount: 21
+      expect:
+        success: false
+        error_contains: "between 1 and 20"
+
+    - name: scroll_amount_negative
+      description: Negative scroll_amount
+      direction: down
+      scroll_amount: -1
+      expect:
+        success: false
+        error_contains: "between 1 and 20"
+
+    - name: direction_only_valid
+      description: Direction alone with default scroll_amount is valid
+      direction: down
+      expect:
+        success: true
+        scrolled: true
+
+# =============================================================================
+# SMOOTH SCROLL TESTS
+# =============================================================================
+
+smooth_scroll:
+  description: Smooth scroll behavior tests across all three modes
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: smooth_viewport_down
+      description: Smooth scroll viewport down — animates then returns final position
+      direction: down
+      scroll_amount: 3
+      behavior: smooth
+      expect:
+        success: true
+        viewport_scrollY_gt: 200
+        scrolled: true
+
+    - name: smooth_viewport_up_at_top
+      description: Smooth scroll up at top — no-op, resolves quickly via double-rAF
+      direction: up
+      behavior: smooth
+      expect:
+        success: true
+        viewport_scrollY_eq: 0
+        scrolled: false
+
+    - name: smooth_container_down
+      description: Smooth scroll down within container
+      direction: down
+      scroll_amount: 3
+      css_selector: "#scroll-container"
+      behavior: smooth
+      expect:
+        success: true
+        container_scrollTop_gt: 200
+        scrolled: true
+
+    - name: smooth_container_left_at_edge
+      description: Smooth scroll left in container at left edge — no-op
+      direction: left
+      scroll_amount: 1
+      css_selector: "#scroll-container"
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: false
+
+    - name: smooth_scroll_to_element
+      description: Smooth scroll element into view with animation
+      css_selector: "#below-fold"
+      behavior: smooth
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: true
+
+    - name: smooth_scroll_to_element_twice_scrolled_false
+      description: Smooth scroll to element already centered — scrolled should be false
+      css_selector: "#below-fold"
+      setup_scroll_into_view: "#below-fold"
+      behavior: smooth
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: false
+
+    - name: smooth_scroll_to_already_visible
+      description: Smooth scroll already-visible element near top — can't scroll up to center, scrolled false
+      css_selector: "#top-marker"
+      behavior: smooth
+      expect:
+        success: true
+        element_in_viewport: true
+        scrolled: false
+
+# =============================================================================
+# POSITION SCROLL TESTS (absolute scrollTo)
+# =============================================================================
+
+position_scroll:
+  description: Absolute position scrolling (scrollTo) for viewport and containers
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: position_bottom_viewport
+      description: Scroll viewport to absolute bottom
+      position: bottom
+      expect:
+        success: true
+        scrolled: true
+        viewport_scrollY_gt: 2000
+
+    - name: position_top_viewport
+      description: Scroll viewport to absolute top
+      position: top
+      setup_scroll:
+        direction: down
+        scroll_amount: 5
+      expect:
+        success: true
+        viewport_scrollY_eq: 0
+        scrolled: true
+
+    - name: position_right_viewport
+      description: Scroll viewport to right edge (page may not be wider than viewport)
+      position: right
+      expect:
+        success: true
+
+    - name: position_left_viewport
+      description: Scroll viewport to left edge — already at left, scrolled false
+      position: left
+      expect:
+        success: true
+        scrolled: false
+
+    - name: position_bottom_container
+      description: Scroll container to absolute bottom
+      position: bottom
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: true
+        container_scrollTop_gt: 200
+
+    - name: position_top_container
+      description: Scroll container to absolute top (after scrolling down first)
+      position: top
+      css_selector: "#scroll-container"
+      setup_container_scroll:
+        direction: down
+        scroll_amount: 5
+        css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: true
+        container_scrollTop_eq: 0
+
+    - name: position_right_container
+      description: Scroll container to right edge (horizontal)
+      position: right
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: true
+        container_scrollLeft_gt: 100
+
+    - name: position_left_container
+      description: Scroll container to left edge — already at left, scrolled false
+      position: left
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: false
+
+    - name: position_and_direction_error
+      description: Cannot specify both position and direction
+      position: bottom
+      direction: down
+      expect:
+        success: false
+        error_contains: "Cannot specify both"
+
+    - name: position_bottom_smooth
+      description: Smooth animated scroll to bottom of page
+      position: bottom
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: true
+        viewport_scrollY_gt: 2000
+
+    - name: position_bottom_already_there
+      description: Already at bottom — scrolled should be false
+      position: bottom
+      setup_position: bottom
+      expect:
+        success: true
+        scrolled: false
+
+    - name: position_top_already_there
+      description: Already at top — scrolled should be false
+      position: top
+      expect:
+        success: true
+        scrolled: false
+
+    - name: position_container_already_top
+      description: Container already at top — scrolled should be false
+      position: top
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: false
+
+    - name: smooth_position_bottom_container
+      description: Smooth scroll container to absolute bottom
+      position: bottom
+      css_selector: "#scroll-container"
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: true
+        container_scrollTop_gt: 200
+
+    - name: smooth_position_container_already_top
+      description: Container already at top, smooth scroll to top — scrolled false
+      position: top
+      css_selector: "#scroll-container"
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: false
+
+    - name: smooth_position_top_already_there
+      description: Already at top of page, smooth scroll to top — scrolled false
+      position: top
+      behavior: smooth
+      expect:
+        success: true
+        scrolled: false
+
+    - name: position_nonexistent_container
+      description: Nonexistent container with position — error
+      position: bottom
+      css_selector: "#does-not-exist"
+      expect:
+        success: false
+        error_contains: "Failed to find"
+
+# =============================================================================
+# OVERFLOW METADATA TESTS
+# =============================================================================
+
+overflow_metadata:
+  description: Verify overflow CSS metadata in container scroll responses
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: overflow_auto_reports_auto
+      description: Scrollable container reports overflow auto
+      direction: down
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: true
+        overflow: "auto"
+
+    - name: overflow_clip_not_scrolled
+      description: overflow:clip container cannot be scrolled programmatically
+      direction: down
+      css_selector: "#non-scrollable"
+      expect:
+        success: true
+        scrolled: false
+        overflow: "clip"
+
+    - name: overflow_hidden_is_scrollable
+      description: overflow:hidden IS programmatically scrollable per W3C spec
+      direction: down
+      css_selector: "#overflow-hidden"
+      expect:
+        success: true
+        scrolled: true
+        overflow: "hidden"

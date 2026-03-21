@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Scroll Capabilities Demo</title>
+  <style>
+    html { scroll-behavior: smooth; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding-top: 60px; /* space for fixed header */
+    }
+
+    /* ── Fixed Header ── */
+    header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-bottom: 1px solid #334155;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 40px;
+      z-index: 1000;
+    }
+    header .title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+    #scroll-indicator {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    #scroll-indicator span {
+      color: #60a5fa;
+      font-weight: 600;
+    }
+
+    /* ── Main Layout ── */
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 32px 40px 120px;
+    }
+
+    /* ── Section Cards ── */
+    section {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 40px;
+    }
+    section h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 6px;
+    }
+    section h2 .num {
+      color: #60a5fa;
+      margin-right: 8px;
+    }
+    section .desc {
+      color: #94a3b8;
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+    section .desc code {
+      background: #0f172a;
+      color: #7dd3fc;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    /* ── Scenario 3: Instant vs Smooth ── */
+    .scroll-band {
+      height: 150px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    /* ── Scenario 4: Chat Log ── */
+    #chat-log {
+      height: 200px;
+      overflow: auto;
+      scroll-behavior: smooth; /* intentional: tests our behavior:'instant' override */
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .chat-msg {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .chat-msg.user {
+      align-self: flex-end;
+      background: #1d4ed8;
+      color: #e0e7ff;
+      border-bottom-right-radius: 4px;
+    }
+    .chat-msg.bot {
+      align-self: flex-start;
+      background: #334155;
+      color: #e2e8f0;
+      border-bottom-left-radius: 4px;
+    }
+    .chat-msg .sender {
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      opacity: 0.7;
+    }
+    .chat-msg .time {
+      font-size: 10px;
+      opacity: 0.5;
+      margin-top: 4px;
+      text-align: right;
+    }
+
+    /* ── Scenario 5: Code Block ── */
+    #code-block {
+      width: 300px;
+      overflow-x: auto;
+      scroll-behavior: smooth; /* intentional: tests override */
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      color: #e2e8f0;
+    }
+    #code-block pre {
+      white-space: pre;
+    }
+    .code-line {
+      display: block;
+    }
+    .code-line .ln {
+      color: #475569;
+      display: inline-block;
+      width: 30px;
+      text-align: right;
+      margin-right: 16px;
+      user-select: none;
+    }
+    .code-kw { color: #c084fc; }
+    .code-fn { color: #60a5fa; }
+    .code-str { color: #34d399; }
+    .code-cm { color: #64748b; font-style: italic; }
+    .code-num { color: #f59e0b; }
+    .code-op { color: #94a3b8; }
+
+    /* ── Scenario 6: Data Table ── */
+    #data-table-container {
+      width: 100%;
+      max-height: 280px;
+      overflow: auto;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+    }
+    #data-table {
+      border-collapse: collapse;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+    #data-table th {
+      background: #1e293b;
+      color: #94a3b8;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      padding: 10px 16px;
+      border-bottom: 1px solid #334155;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    #data-table td {
+      padding: 8px 16px;
+      border-bottom: 1px solid #1e293b;
+      color: #cbd5e1;
+    }
+    #data-table tr:hover td {
+      background: #1e293b;
+    }
+    .cell-id { color: #60a5fa; font-weight: 600; }
+    .cell-status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .status-active { background: #064e3b; color: #34d399; }
+    .status-pending { background: #451a03; color: #fbbf24; }
+    .status-inactive { background: #450a0a; color: #f87171; }
+
+    /* ── Scenario 7: Scroll Target ── */
+    #scroll-target-center {
+      background: #1e3a5f;
+      border: 2px solid #3b82f6;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      color: #93c5fd;
+      font-weight: 600;
+    }
+
+    /* ── Scenario 8: Sticky Sub-header ── */
+    .sticky-subheader {
+      position: sticky;
+      top: 60px; /* below the main fixed header */
+      background: #312e81;
+      border: 1px solid #4338ca;
+      border-radius: 8px 8px 0 0;
+      padding: 14px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #c7d2fe;
+      z-index: 50;
+      margin-bottom: 0;
+    }
+    #sticky-test-target {
+      background: #1e1b4b;
+      border: 2px dashed #6366f1;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      color: #a5b4fc;
+      font-weight: 600;
+    }
+
+    /* ── Scenario 9: Scroll-Snap ── */
+    #snap-container {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      gap: 16px;
+      padding: 16px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+    }
+    .snap-card {
+      flex: 0 0 85%;
+      scroll-snap-align: start;
+      border-radius: 12px;
+      padding: 40px;
+      text-align: center;
+      font-size: 48px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.9);
+      min-height: 160px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .snap-card:nth-child(1) { background: linear-gradient(135deg, #1d4ed8, #3b82f6); }
+    .snap-card:nth-child(2) { background: linear-gradient(135deg, #059669, #34d399); }
+    .snap-card:nth-child(3) { background: linear-gradient(135deg, #d97706, #fbbf24); }
+    .snap-card:nth-child(4) { background: linear-gradient(135deg, #dc2626, #f87171); }
+    .snap-card:nth-child(5) { background: linear-gradient(135deg, #7c3aed, #a78bfa); }
+
+    /* ── Scenario 10: Lazy Loading ── */
+    .lazy-box {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 12px;
+      text-align: center;
+      font-size: 14px;
+      color: #94a3b8;
+      transition: background 0.3s, border-color 0.3s, color 0.3s;
+    }
+    .lazy-box.loaded {
+      background: #064e3b;
+      border-color: #059669;
+      color: #34d399;
+      font-weight: 600;
+    }
+
+    /* ── Scenario 11: Non-Scrollable ── */
+    #non-scrollable {
+      height: 120px;
+      overflow: clip;
+      background: #0f172a;
+      border: 2px solid #dc2626;
+      border-radius: 8px;
+      padding: 16px;
+      position: relative;
+    }
+    #non-scrollable::after {
+      content: 'overflow: clip';
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 10px;
+      color: #f87171;
+      font-family: monospace;
+    }
+
+    /* ── Scenario 12: Overscroll Contain ── */
+    #overscroll-container {
+      height: 160px;
+      overflow: auto;
+      overscroll-behavior: contain;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .overscroll-item {
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      background: #1e293b;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+
+    /* ── Bottom Section ── */
+    .pattern-card {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 12px;
+    }
+    .pattern-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #60a5fa;
+      margin-bottom: 6px;
+    }
+    .pattern-card p {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .pattern-card code {
+      background: #1e293b;
+      color: #7dd3fc;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    #bottom-marker {
+      background: #1e3a5f;
+      border: 2px solid #3b82f6;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+      color: #93c5fd;
+      font-weight: 600;
+      margin-top: 20px;
+    }
+
+    /* ── Spacers between sections ── */
+    .spacer {
+      height: 60px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ Fixed Header ═══════════════ -->
+<header>
+  <div class="title">Scroll Capabilities Demo</div>
+  <div id="scroll-indicator">
+    scrollY: <span id="pos-y">0</span> / <span id="page-h">0</span>
+    (<span id="pct">0</span>%) | viewport: <span id="vp-h">0</span>px
+  </div>
+</header>
+
+<main>
+
+  <!-- ═══════════════ Scenario 1 ═══════════════ -->
+  <section data-scenario="1" id="scenario-1">
+    <h2><span class="num">#1</span> Viewport Scroll Basics</h2>
+    <div class="desc">
+      <p>Scrolling through this page demonstrates viewport scrolling. The fixed header above
+      tracks your live position: <code>scrollY</code>, total <code>pageHeight</code>,
+      percentage progress, and <code>viewport height</code>.</p>
+      <p style="margin-top:10px">Use <code>scroll(direction='down')</code> to move through this page.
+      Each call scrolls by roughly one viewport height. The return value includes the new
+      <code>scroll_y</code>, <code>page_height</code>, <code>viewport_height</code>, and a boolean
+      <code>scrolled</code> indicating whether position actually changed.</p>
+      <p style="margin-top:10px">When no <code>css_selector</code> is given, the tool scrolls the
+      entire page (viewport). When a selector is provided, it scrolls that specific container.</p>
+      <p style="margin-top:10px">The <code>behavior</code> parameter controls whether scrolling is
+      instant (default) or animated. This page has CSS <code>scroll-behavior: smooth</code> set
+      &mdash; the default <code>behavior='instant'</code> overrides it for predictable automation.
+      Use <code>behavior='smooth'</code> for visible animation in demos.</p>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 2 ═══════════════ -->
+  <section data-scenario="2" id="scenario-2">
+    <h2><span class="num">#2</span> Boundary Detection</h2>
+    <div class="desc">
+      <p>When a scroll operation hits the top or bottom boundary, the tool returns
+      <code>scrolled: false</code>. This tells the agent there is no more content in that
+      direction &mdash; no need to keep scrolling.</p>
+      <p style="margin-top:10px">Try scrolling up from the very top of this page. The tool returns
+      <code>{"scrolled": false, "scroll_y": 0, ...}</code> because the viewport is already at
+      position zero.</p>
+      <p style="margin-top:10px">The same applies at the bottom: once <code>scrollY + viewportHeight
+      &ge; pageHeight</code>, scrolling down returns <code>scrolled: false</code>.</p>
+      <p style="margin-top:10px">This boundary detection works identically for container scrolls.
+      A container at its bottom edge returns <code>scrolled: false</code> for
+      <code>direction='down'</code>.</p>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 3 ═══════════════ -->
+  <section data-scenario="3" id="scenario-3">
+    <h2><span class="num">#3</span> Instant vs Smooth Scroll Comparison</h2>
+    <div class="desc">
+      <p>The <code>behavior</code> parameter controls scroll animation.
+      <code>'instant'</code> (default) teleports immediately.
+      <code>'smooth'</code> uses the browser's native animation (~300&ndash;500ms) and waits
+      for the <code>scrollend</code> event before returning position data. Both return the same
+      final position &mdash; only the visual experience differs.</p>
+      <p style="margin-top:10px">This page has <code>scroll-behavior: smooth</code> set in CSS.
+      The default <code>behavior='instant'</code> overrides it.
+      <code>behavior='smooth'</code> respects it.</p>
+      <p style="margin-top:10px">Under the hood, smooth scrolling uses a three-signal waiting
+      strategy: <code>scrollend</code> event (primary), double-rAF no-movement check (~32ms
+      early exit for boundaries), and a 3-second timeout fallback.</p>
+    </div>
+    <div style="border-radius: 8px; overflow: hidden; border: 1px solid #334155;">
+      <div class="scroll-band" style="background: #1e3a5f; color: #93c5fd;">Band 1</div>
+      <div class="scroll-band" style="background: #1a3c2e; color: #6ee7b7;">Band 2</div>
+      <div class="scroll-band" style="background: #3c2f1a; color: #fcd34d;">Band 3</div>
+      <div class="scroll-band" style="background: #3c1a1a; color: #fca5a5;">Band 4</div>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 4 ═══════════════ -->
+  <section data-scenario="4" id="scenario-4">
+    <h2><span class="num">#4</span> Container Scroll &mdash; Chat Log</h2>
+    <div class="desc">
+      <p>A realistic chat interface inside a 200px-tall scrollable container. The container has
+      <code>scroll-behavior: smooth</code> set in CSS. By default (<code>behavior='instant'</code>),
+      our scroll tool overrides this for predictable position updates. With
+      <code>behavior='smooth'</code>, the container animates naturally and the tool waits for the
+      <code>scrollend</code> event before returning the final position.</p>
+      <p style="margin-top:8px">Use <code>scroll(direction='down', css_selector='#chat-log')</code>
+      to scroll within this container without moving the page viewport.</p>
+    </div>
+    <div id="chat-log">
+      <!-- Messages generated by JS below -->
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 5 ═══════════════ -->
+  <section data-scenario="5" id="scenario-5">
+    <h2><span class="num">#5</span> Container Scroll &mdash; Code Block</h2>
+    <div class="desc">
+      <p>A code editor container (300px wide) with lines that extend well beyond its bounds.
+      Demonstrates horizontal scrolling with
+      <code>scroll(direction='right', css_selector='#code-block')</code>.</p>
+      <p style="margin-top:8px">This container also has <code>scroll-behavior: smooth</code> set
+      in CSS. By default (<code>behavior='instant'</code>), the tool overrides this for predictable
+      horizontal position updates. With <code>behavior='smooth'</code>, the container animates
+      naturally and the tool waits for the <code>scrollend</code> event before returning.</p>
+    </div>
+    <div id="code-block">
+      <pre><span class="code-line"><span class="ln"> 1</span><span class="code-cm">// Configuration for the data processing pipeline with extended options and feature flags for production environments</span></span>
+<span class="code-line"><span class="ln"> 2</span><span class="code-kw">const</span> <span class="code-fn">config</span> <span class="code-op">=</span> {</span>
+<span class="code-line"><span class="ln"> 3</span>  apiEndpoint: <span class="code-str">"https://api.example.com/v3/data-processing/batch-operations/async-handler"</span>,</span>
+<span class="code-line"><span class="ln"> 4</span>  maxRetries: <span class="code-num">5</span>,</span>
+<span class="code-line"><span class="ln"> 5</span>  timeout: <span class="code-num">30000</span>,</span>
+<span class="code-line"><span class="ln"> 6</span>  headers: { <span class="code-str">"Authorization"</span>: <span class="code-str">`Bearer ${process.env.API_TOKEN_FOR_PRODUCTION_DATA_PIPELINE_SERVICE}`</span>, <span class="code-str">"Content-Type"</span>: <span class="code-str">"application/json"</span>, <span class="code-str">"X-Request-ID"</span>: <span class="code-fn">generateUUID</span>() },</span>
+<span class="code-line"><span class="ln"> 7</span>  features: { enableBatchProcessing: <span class="code-kw">true</span>, enableAsyncCallbacks: <span class="code-kw">true</span>, enableDetailedLogging: <span class="code-kw">false</span>, maxConcurrentWorkers: <span class="code-num">16</span>, queuePriority: <span class="code-str">"high"</span> },</span>
+<span class="code-line"><span class="ln"> 8</span>};</span>
+<span class="code-line"><span class="ln"> 9</span></span>
+<span class="code-line"><span class="ln">10</span><span class="code-kw">async function</span> <span class="code-fn">processDataBatchWithRetryAndExponentialBackoffStrategy</span>(records, options <span class="code-op">=</span> {}) {</span>
+<span class="code-line"><span class="ln">11</span>  <span class="code-kw">const</span> { maxRetries <span class="code-op">=</span> config.maxRetries, baseDelay <span class="code-op">=</span> <span class="code-num">1000</span>, onProgress <span class="code-op">=</span> () <span class="code-op">=></span> {} } <span class="code-op">=</span> options;</span>
+<span class="code-line"><span class="ln">12</span>  <span class="code-kw">for</span> (<span class="code-kw">let</span> attempt <span class="code-op">=</span> <span class="code-num">0</span>; attempt <span class="code-op"><</span> maxRetries; attempt<span class="code-op">++</span>) {</span>
+<span class="code-line"><span class="ln">13</span>    <span class="code-kw">try</span> {</span>
+<span class="code-line"><span class="ln">14</span>      <span class="code-kw">const</span> response <span class="code-op">=</span> <span class="code-kw">await</span> <span class="code-fn">fetch</span>(config.apiEndpoint, { method: <span class="code-str">"POST"</span>, headers: config.headers, body: <span class="code-fn">JSON.stringify</span>({ records, timestamp: <span class="code-fn">Date.now</span>(), attempt }) });</span>
+<span class="code-line"><span class="ln">15</span>      <span class="code-kw">if</span> (<span class="code-op">!</span>response.ok) <span class="code-kw">throw new</span> <span class="code-fn">Error</span>(<span class="code-str">`HTTP ${response.status}: ${response.statusText} - ${await response.text()}`</span>);</span>
+<span class="code-line"><span class="ln">16</span>      <span class="code-kw">return await</span> response.<span class="code-fn">json</span>();</span>
+<span class="code-line"><span class="ln">17</span>    } <span class="code-kw">catch</span> (err) {</span>
+<span class="code-line"><span class="ln">18</span>      <span class="code-kw">if</span> (attempt <span class="code-op">===</span> maxRetries <span class="code-op">-</span> <span class="code-num">1</span>) <span class="code-kw">throw</span> err;</span>
+<span class="code-line"><span class="ln">19</span>      <span class="code-kw">await new</span> <span class="code-fn">Promise</span>(r <span class="code-op">=></span> <span class="code-fn">setTimeout</span>(r, baseDelay <span class="code-op">*</span> <span class="code-fn">Math.pow</span>(<span class="code-num">2</span>, attempt)));  <span class="code-cm">// exponential backoff with jitter for distributed systems resilience</span></span>
+<span class="code-line"><span class="ln">20</span>    }</span>
+<span class="code-line"><span class="ln">21</span>  }</span>
+<span class="code-line"><span class="ln">22</span>}</span></pre>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 6 ═══════════════ -->
+  <section data-scenario="6" id="scenario-6">
+    <h2><span class="num">#6</span> Container Scroll &mdash; Data Table</h2>
+    <div class="desc">
+      <p>A data dashboard table with 8 columns and 20 rows inside a container scrollable in both
+      directions (<code>overflow: auto</code>). The table is wider than the container and taller
+      than its max-height.</p>
+      <p style="margin-top:8px">Scroll vertically with <code>scroll(direction='down',
+      css_selector='#data-table-container')</code> or horizontally with
+      <code>direction='right'</code>.</p>
+    </div>
+    <div id="data-table-container">
+      <table id="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Region</th>
+            <th>CPU Usage</th>
+            <th>Memory (GB)</th>
+            <th>Requests/sec</th>
+            <th>Last Deployed</th>
+          </tr>
+        </thead>
+        <tbody id="table-body">
+          <!-- Rows generated by JS below -->
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 7 ═══════════════ -->
+  <section data-scenario="7" id="scenario-7">
+    <h2><span class="num">#7</span> Scroll Into View &mdash; Centering</h2>
+    <div class="desc">
+      <p>The target element below will be CENTERED in the viewport when scrolled into view, not
+      pushed to the bottom edge.</p>
+      <p style="margin-top:8px">Selenium's native <code>scroll_to_element()</code> aligns the
+      element's bottom to the viewport's bottom, which often leaves the element barely visible.
+      We use <code>scrollIntoView({block: 'center'})</code> instead, placing the element in the
+      middle of the visible area.</p>
+      <p style="margin-top:8px">With <code>behavior='smooth'</code>, scroll-into-view produces a
+      visible animation as the page glides to center the element &mdash; ideal for product demos.</p>
+    </div>
+    <!-- spacer to push target further down within the section -->
+    <div style="height: 100px;"></div>
+    <div id="scroll-target-center">
+      Target Element: scroll_into_view('#scroll-target-center') centers me in the viewport
+    </div>
+    <div style="height: 60px;"></div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 8 ═══════════════ -->
+  <section data-scenario="8" id="scenario-8" style="padding: 0; overflow: hidden;">
+    <div style="padding: 28px 28px 12px;">
+      <h2><span class="num">#8</span> Sticky Header Test</h2>
+      <div class="desc">
+        <p>This section has its own sticky sub-header (60px tall, positioned below the main fixed
+        header). With <code>block: 'start'</code>, a target element would be hidden behind the
+        sticky header. Using <code>block: 'center'</code> avoids this problem entirely.</p>
+      </div>
+    </div>
+    <div class="sticky-subheader">
+      Sticky Sub-Header (top: 60px &mdash; stacks below the main header)
+    </div>
+    <div style="padding: 20px 28px;">
+      <p style="color:#94a3b8; font-size:14px; margin-bottom:16px;">
+        Content before the target. Scroll this section so the sticky sub-header is active,
+        then use scroll_into_view on the target below.
+      </p>
+      <div style="height: 80px;"></div>
+      <div id="sticky-test-target">
+        Target: I should be visible in the viewport center, not hidden behind the sticky sub-header
+      </div>
+      <div style="height: 120px;"></div>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 9 ═══════════════ -->
+  <section data-scenario="9" id="scenario-9">
+    <h2><span class="num">#9</span> CSS Scroll-Snap</h2>
+    <div class="desc">
+      <p>A horizontal snap container with 5 cards. Each card has
+      <code>scroll-snap-align: start</code> and the container uses
+      <code>scroll-snap-type: x mandatory</code>.</p>
+      <p style="margin-top:8px">Scroll-snap causes the actual resting position to differ from the
+      raw <code>scrollBy</code> amount. The return value always reflects the real post-snap
+      position, not the requested offset.</p>
+    </div>
+    <div id="snap-container">
+      <div class="snap-card">1</div>
+      <div class="snap-card">2</div>
+      <div class="snap-card">3</div>
+      <div class="snap-card">4</div>
+      <div class="snap-card">5</div>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 10 ═══════════════ -->
+  <section data-scenario="10" id="scenario-10">
+    <h2><span class="num">#10</span> Lazy Loading (IntersectionObserver)</h2>
+    <div class="desc">
+      <p>Five placeholder boxes that load content when scrolled into view via
+      <code>IntersectionObserver</code>. Each box starts as "Loading..." and transitions to
+      "Loaded!" with a green background when at least 50% visible.</p>
+      <p style="margin-top:8px">Our <code>scrollBy()</code> triggers IntersectionObserver
+      callbacks naturally &mdash; content loads as the agent scrolls, just like a real user.</p>
+    </div>
+    <div id="lazy-items">
+      <div class="lazy-box" data-lazy="1">Loading... (Item 1)</div>
+      <div class="lazy-box" data-lazy="2">Loading... (Item 2)</div>
+      <div class="lazy-box" data-lazy="3">Loading... (Item 3)</div>
+      <div class="lazy-box" data-lazy="4">Loading... (Item 4)</div>
+      <div class="lazy-box" data-lazy="5">Loading... (Item 5)</div>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 11 ═══════════════ -->
+  <section data-scenario="11" id="scenario-11">
+    <h2><span class="num">#11</span> Non-Scrollable Container</h2>
+    <div class="desc">
+      <p>A container with <code>overflow: clip</code> containing content that overflows its
+      bounds. Unlike <code>overflow: hidden</code> (which is still programmatically scrollable
+      per W3C spec), <code>overflow: clip</code> truly prevents all scrolling. The tool returns
+      <code>scrolled: false</code> and <code>overflow: "clip"</code> &mdash; the agent immediately
+      knows this container cannot be scrolled.</p>
+    </div>
+    <div id="non-scrollable">
+      <p style="color:#f87171; font-weight:600; margin-bottom:8px;">This content overflows but cannot be scrolled.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 1: The container has overflow: clip, so scrollBy() has no effect.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 2: The scroll tool returns scrolled: false and overflow: "clip".</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 3: This prevents the agent from wasting attempts.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 4: You should not be able to see this line.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 5: Or this one. overflow: clip blocks all scrolling.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 6: Completely invisible content below the fold.</p>
+      <p style="color:#94a3b8; font-size:13px;">Line 7: Still invisible. overflow: clip is absolute.</p>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Scenario 12 ═══════════════ -->
+  <section data-scenario="12" id="scenario-12">
+    <h2><span class="num">#12</span> Overscroll-Behavior: Contain</h2>
+    <div class="desc">
+      <p>A scrollable container with <code>overscroll-behavior: contain</code>. When this
+      container reaches its scroll boundary, the viewport does NOT scroll. This prevents
+      accidental page scrolling when interacting with embedded components.</p>
+      <p style="margin-top:8px">Scroll down inside this container until it hits the bottom. The
+      page will stay in place even if momentum would normally carry through.</p>
+    </div>
+    <div id="overscroll-container">
+      <div class="overscroll-item">Item 1 &mdash; Start scrolling here</div>
+      <div class="overscroll-item">Item 2 &mdash; Keep going</div>
+      <div class="overscroll-item">Item 3 &mdash; The container stops at its boundary</div>
+      <div class="overscroll-item">Item 4 &mdash; The page does not scroll</div>
+      <div class="overscroll-item">Item 5 &mdash; overscroll-behavior: contain</div>
+      <div class="overscroll-item">Item 6 &mdash; Prevents scroll chaining</div>
+      <div class="overscroll-item">Item 7 &mdash; Common in modals and sidebars</div>
+      <div class="overscroll-item">Item 8 &mdash; Supported in all modern browsers</div>
+      <div class="overscroll-item">Item 9 &mdash; Essential for embedded scroll regions</div>
+      <div class="overscroll-item">Item 10 &mdash; Last item in the container</div>
+    </div>
+  </section>
+
+  <div class="spacer"></div>
+
+  <!-- ═══════════════ Bottom: Composable Patterns ═══════════════ -->
+  <section data-scenario="patterns" id="composable-patterns">
+    <h2><span class="num">&bull;</span> Composable Patterns</h2>
+    <div class="desc">
+      <p>These are not scrollable scenarios &mdash; they document how agents combine the scroll
+      tool's return values to accomplish common tasks.</p>
+    </div>
+
+    <div class="pattern-card">
+      <h3>Scroll-to-Bottom</h3>
+      <p>Use the returned <code>page_height</code> and <code>viewport_height</code> to calculate
+      remaining distance. Keep calling <code>scroll(direction='down')</code> until
+      <code>scrolled: false</code>.</p>
+    </div>
+
+    <div class="pattern-card">
+      <h3>Percentage Scrolling</h3>
+      <p><code>scroll_y / page_height</code> gives current progress as a fraction.
+      The fixed header above shows this as a live percentage.</p>
+    </div>
+
+    <div class="pattern-card">
+      <h3>Infinite Scroll Scraping</h3>
+      <p>Call <code>scroll(direction='down')</code> followed by
+      <code>wait_for_network_idle()</code> in a loop. New content loads on each scroll. Stop when
+      <code>scrolled: false</code> &mdash; the page has no more content to load.</p>
+    </div>
+
+    <div class="pattern-card">
+      <h3>Container Content Discovery</h3>
+      <p>Scroll a container to its bottom with repeated <code>scroll(direction='down',
+      css_selector='...')</code> calls. Read content at each step with
+      <code>get_page_text(selector='...')</code>. The return value's
+      <code>scroll_height</code> tells you the total scrollable content size.</p>
+    </div>
+
+    <div class="pattern-card">
+      <h3>Instant vs Smooth</h3>
+      <p>Use <code>behavior='instant'</code> (default) for automation speed and predictable timing.
+      Use <code>behavior='smooth'</code> for user-visible demos, recordings, and when matching
+      the site's expected scroll experience.</p>
+    </div>
+
+    <div id="bottom-marker">
+      Bottom Marker &mdash; scroll_into_view('#bottom-marker') targets this element
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // ── Header scroll tracking ──
+  const posY = document.getElementById('pos-y');
+  const pageH = document.getElementById('page-h');
+  const pctEl = document.getElementById('pct');
+  const vpH = document.getElementById('vp-h');
+
+  function updateScrollIndicator() {
+    const sy = Math.round(window.scrollY);
+    const ph = document.documentElement.scrollHeight;
+    const vh = window.innerHeight;
+    const maxScroll = ph - vh;
+    const pct = maxScroll > 0 ? Math.round((sy / maxScroll) * 100) : 0;
+
+    posY.textContent = sy;
+    pageH.textContent = ph;
+    pctEl.textContent = pct;
+    vpH.textContent = vh;
+  }
+
+  window.addEventListener('scroll', updateScrollIndicator, { passive: true });
+  window.addEventListener('resize', updateScrollIndicator, { passive: true });
+  updateScrollIndicator();
+
+  // ── Scenario 4: Chat messages ──
+  (function buildChat() {
+    const log = document.getElementById('chat-log');
+    const conversation = [
+      { role: 'user', text: 'Hey, can you help me debug this scroll issue?' },
+      { role: 'bot', text: 'Sure! What behavior are you seeing?' },
+      { role: 'user', text: 'The page scrolls when I reach the bottom of a modal.' },
+      { role: 'bot', text: 'That sounds like scroll chaining. You can fix it with overscroll-behavior: contain on the modal container.' },
+      { role: 'user', text: 'Oh interesting, I have not heard of that property.' },
+      { role: 'bot', text: 'It prevents scroll events from propagating to the parent when a scrollable container hits its boundary. Supported in all modern browsers.' },
+      { role: 'user', text: 'Does it work for horizontal scrolling too?' },
+      { role: 'bot', text: 'Yes! You can use overscroll-behavior-x: contain for horizontal-only, or overscroll-behavior: contain for both axes.' },
+      { role: 'user', text: 'What about iOS Safari?' },
+      { role: 'bot', text: 'Safari added support in version 16. For older versions you might need -webkit-overflow-scrolling: touch combined with JavaScript prevention.' },
+      { role: 'user', text: 'Makes sense. What about smooth scrolling interfering with tests?' },
+      { role: 'bot', text: 'Good question. If you have scroll-behavior: smooth in CSS, programmatic scrollBy() respects it by default. Override with behavior: "instant" for predictable positions.' },
+      { role: 'user', text: 'That is exactly the problem I am having! Scroll positions are unpredictable.' },
+      { role: 'bot', text: 'The fix is straightforward: always pass { behavior: "instant" } to scrollBy() and scrollTo() calls in automation.' },
+      { role: 'user', text: 'Should I also worry about scroll-snap?' },
+      { role: 'bot', text: 'Yes. With scroll-snap-type: mandatory, the browser snaps to alignment points after scrolling. The final position might not match the requested delta.' },
+      { role: 'user', text: 'So I need to read the actual position after scrolling?' },
+      { role: 'bot', text: 'Exactly. Always read scrollTop/scrollLeft AFTER the scroll completes, not before. The return value should reflect reality, not intent.' },
+      { role: 'user', text: 'This is really helpful. One more question about IntersectionObserver.' },
+      { role: 'bot', text: 'Go ahead!' },
+      { role: 'user', text: 'Does programmatic scrolling trigger IntersectionObserver callbacks?' },
+      { role: 'bot', text: 'Yes, it does. IntersectionObserver watches for visibility changes regardless of what caused the scroll. Programmatic scrollBy() works just like user scrolling.' },
+      { role: 'user', text: 'Thanks! This answered all my questions.' },
+      { role: 'bot', text: 'Happy to help! Let me know if you run into anything else.' },
+    ];
+
+    const baseHour = 14;
+    const baseMin = 5;
+
+    conversation.forEach((msg, i) => {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + msg.role;
+
+      const senderDiv = document.createElement('div');
+      senderDiv.className = 'sender';
+      senderDiv.textContent = msg.role === 'user' ? 'You' : 'Assistant';
+
+      const textDiv = document.createElement('div');
+      textDiv.className = 'text';
+      textDiv.textContent = msg.text;
+
+      const timeDiv = document.createElement('div');
+      timeDiv.className = 'time';
+      const m = baseMin + i * 2;
+      const h = baseHour + Math.floor(m / 60);
+      timeDiv.textContent = `${h}:${String(m % 60).padStart(2, '0')}`;
+
+      div.appendChild(senderDiv);
+      div.appendChild(textDiv);
+      div.appendChild(timeDiv);
+      log.appendChild(div);
+    });
+  })();
+
+  // ── Scenario 6: Table rows ──
+  (function buildTable() {
+    const tbody = document.getElementById('table-body');
+    const names = [
+      'api-gateway-prod', 'auth-service-us', 'payment-processor', 'user-profile-svc',
+      'notification-hub', 'analytics-engine', 'search-indexer', 'cdn-edge-node',
+      'db-replica-west', 'cache-cluster-01', 'log-aggregator', 'rate-limiter',
+      'webhook-dispatch', 'file-storage-api', 'ml-inference-gpu', 'queue-worker-pool',
+      'config-service', 'health-monitor', 'cert-manager', 'dns-resolver'
+    ];
+    const regions = ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-southeast-1', 'us-central-1'];
+    const statuses = ['active', 'pending', 'inactive'];
+    const dates = [
+      '2025-03-12', '2025-03-10', '2025-03-08', '2025-02-28', '2025-03-14',
+      '2025-03-01', '2025-02-15', '2025-03-13', '2025-03-05', '2025-03-11'
+    ];
+
+    for (let i = 0; i < 20; i++) {
+      const tr = document.createElement('tr');
+      const status = statuses[i % 3];
+      tr.innerHTML = `
+        <td class="cell-id">${String(i + 1).padStart(3, '0')}</td>
+        <td>${names[i]}</td>
+        <td><span class="cell-status status-${status}">${status}</span></td>
+        <td>${regions[i % regions.length]}</td>
+        <td>${(Math.random() * 95 + 5).toFixed(1)}%</td>
+        <td>${(Math.random() * 30 + 2).toFixed(1)}</td>
+        <td>${Math.floor(Math.random() * 50000)}</td>
+        <td>${dates[i % dates.length]}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  })();
+
+  // ── Scenario 10: IntersectionObserver lazy loading ──
+  (function setupLazyLoading() {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && !entry.target.classList.contains('loaded')) {
+          const item = entry.target;
+          const num = item.getAttribute('data-lazy');
+          item.classList.add('loaded');
+          item.textContent = `Loaded! (Item ${num})`;
+        }
+      });
+    }, { threshold: 0.5 });
+
+    document.querySelectorAll('.lazy-box').forEach(box => observer.observe(box));
+  })();
+</script>
+
+</body>
+</html>

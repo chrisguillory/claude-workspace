@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test: Scroll Behavior</title>
+  <style>
+    /* Enable smooth scrolling on body to test override */
+    html { scroll-behavior: smooth; }
+    body { margin: 0; padding: 20px; font-family: sans-serif; }
+
+    .spacer {
+      height: 200vh;
+      background: linear-gradient(to bottom, #e8f5e9, #c8e6c9);
+    }
+
+    .marker {
+      padding: 10px;
+      background: #fff3e0;
+      border-left: 4px solid #ff9800;
+      margin: 20px 0;
+    }
+
+    /* Scrollable container with nested children */
+    #scroll-container {
+      width: 400px;
+      height: 200px;
+      overflow: auto;
+      border: 2px solid #2196f3;
+      margin: 20px 0;
+      scroll-behavior: smooth; /* Test that container override works too */
+    }
+    #scroll-container .inner {
+      width: 800px;
+      padding: 10px;
+    }
+    #scroll-container .item {
+      padding: 8px 12px;
+      margin: 4px 0;
+      background: #e3f2fd;
+      border-radius: 4px;
+    }
+
+    /* Below-fold elements */
+    #below-fold {
+      padding: 20px;
+      background: #fce4ec;
+      border: 2px solid #e91e63;
+    }
+  </style>
+</head>
+<body>
+  <h1>Scroll Test Fixture</h1>
+
+  <div id="top-marker" class="marker">Top of page (scrollTop = 0)</div>
+
+  <!-- Scrollable container with realistic nested children -->
+  <div id="scroll-container">
+    <div class="inner">
+      <div id="container-top" class="item">Container item 1 (top)</div>
+      <div class="item">Container item 2</div>
+      <div class="item">Container item 3</div>
+      <div class="item">Container item 4</div>
+      <div class="item">Container item 5</div>
+      <div class="item">Container item 6</div>
+      <div class="item">Container item 7</div>
+      <div class="item">Container item 8</div>
+      <div class="item">Container item 9</div>
+      <div class="item">Container item 10</div>
+      <div class="item">Container item 11</div>
+      <div class="item">Container item 12</div>
+      <div class="item">Container item 13</div>
+      <div class="item">Container item 14</div>
+      <div class="item">Container item 15</div>
+      <div class="item">Container item 16</div>
+      <div class="item">Container item 17</div>
+      <div class="item">Container item 18</div>
+      <div class="item">Container item 19</div>
+      <div id="container-bottom" class="item">Container item 20 (bottom)</div>
+    </div>
+  </div>
+
+  <!-- First spacer pushes content below fold -->
+  <div class="spacer">
+    <div style="padding-top: 50vh;">
+      <div id="mid-marker" class="marker">Middle of page</div>
+    </div>
+  </div>
+
+  <!-- Non-scrollable container (overflow: clip) -->
+  <div id="non-scrollable" style="height: 100px; overflow: clip; border: 2px solid #dc2626; padding: 10px; margin: 20px 0;">
+    <div style="height: 500px; background: linear-gradient(to bottom, #fecaca, #991b1b);">
+      Tall content inside overflow:clip container (truly non-scrollable)
+    </div>
+  </div>
+
+  <!-- Programmatically scrollable container (overflow: hidden) -->
+  <div id="overflow-hidden" style="height: 100px; overflow: hidden; border: 2px solid #f59e0b; padding: 10px; margin: 20px 0;">
+    <div style="height: 500px; background: linear-gradient(to bottom, #fef3c7, #92400e);">
+      Tall content inside overflow:hidden container (programmatically scrollable per W3C spec)
+    </div>
+  </div>
+
+  <div id="below-fold" class="marker">Below the fold element</div>
+
+  <!-- Second spacer pushes bottom marker way down -->
+  <div class="spacer"></div>
+
+  <div id="bottom-marker" class="marker">Bottom of page</div>
+
+  <script>
+    // Validation helpers for tests
+    window.getViewportScrollY = () => Math.round(window.scrollY);
+    window.getViewportScrollX = () => Math.round(window.scrollX);
+
+    window.getContainerScroll = (selector) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      return {
+        scrollTop: Math.round(el.scrollTop),
+        scrollLeft: Math.round(el.scrollLeft),
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight
+      };
+    };
+
+    window.isInViewport = (selector) => {
+      const el = document.querySelector(selector);
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.top >= 0 && rect.bottom <= window.innerHeight;
+    };
+
+    window.resetScrollPosition = () => {
+      // Force instant scroll reset (bypass CSS smooth)
+      document.documentElement.style.scrollBehavior = 'auto';
+      window.scrollTo(0, 0);
+      document.documentElement.style.scrollBehavior = '';
+      const container = document.querySelector('#scroll-container');
+      if (container) {
+        container.scrollTop = 0;
+        container.scrollLeft = 0;
+      }
+    };
+  </script>
+</body>
+</html>

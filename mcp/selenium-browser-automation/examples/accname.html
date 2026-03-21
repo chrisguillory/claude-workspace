@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test: Accessible Name Computation (AccName 1.2)</title>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
+    section { border: 1px solid #ddd; border-radius: 6px; margin: 20px 0; padding: 16px; }
+    h2 { margin-top: 0; }
+    .demo { background: #fafafa; border: 1px dashed #ccc; padding: 12px; border-radius: 4px; }
+    .hidden-ref { display: none; }
+  </style>
+</head>
+<body>
+
+  <h1>Accessible Name Computation Tests</h1>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 1: Priority Order                                                -->
+  <!-- ===================================================================== -->
+
+  <section id="test-priority">
+    <h2>Test 1: Priority Order (aria-labelledby before aria-label)</h2>
+
+    <div class="demo">
+      <!-- 1.1: aria-labelledby wins over aria-label -->
+      <span id="ref-labelledby">From Labelledby</span>
+      <button aria-labelledby="ref-labelledby" aria-label="Ignored">Button text</button>
+
+      <!-- 1.2: aria-labelledby with nonexistent ID falls through to aria-label -->
+      <button aria-labelledby="nonexistent-id" aria-label="Fallback Label">Button text</button>
+
+      <!-- 1.3: aria-label only -->
+      <button aria-label="Only AriaLabel">Button text</button>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 2: Form Control Label Association                                -->
+  <!-- ===================================================================== -->
+
+  <section id="test-labels">
+    <h2>Test 2: Label Association via element.labels API</h2>
+
+    <div class="demo">
+      <!-- 2.1: Explicit label[for] -->
+      <label for="inp1">Explicit Label</label>
+      <input type="text" id="inp1">
+
+      <!-- 2.2: Wrapping label -->
+      <label>Wrapping Label <input type="text" id="inp2"></label>
+
+      <!-- 2.3: Multiple labels -->
+      <label for="inp3">First Label</label>
+      <label for="inp3">Second Label</label>
+      <input type="text" id="inp3">
+
+      <!-- 2.4: Select with label -->
+      <label for="sel1">Pick One</label>
+      <select id="sel1"><option>A</option><option>B</option></select>
+
+      <!-- 2.5: Textarea with label -->
+      <label for="ta1">Comments</label>
+      <textarea id="ta1"></textarea>
+
+      <!-- 2.6: aria-label overrides label -->
+      <label for="inp4">Ignored Label</label>
+      <input type="text" id="inp4" aria-label="Override">
+
+      <!-- 2.7: Non-form element should NOT get label text -->
+      <label for="not-a-control">Should Not Apply</label>
+      <div id="not-a-control">Just a div</div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 3: Fieldset + Legend                                             -->
+  <!-- ===================================================================== -->
+
+  <section id="test-fieldset">
+    <h2>Test 3: Fieldset Name from Legend</h2>
+
+    <div class="demo">
+      <!-- 3.1: Basic fieldset with legend -->
+      <fieldset id="fs1">
+        <legend>Contact Info</legend>
+        <input type="text" placeholder="Name">
+      </fieldset>
+
+      <!-- 3.2: Legend not first child (still found by iteration) -->
+      <fieldset id="fs2">
+        <p>Intro paragraph</p>
+        <legend>After Other Content</legend>
+        <input type="text" placeholder="Email">
+      </fieldset>
+
+      <!-- 3.3: Multiple legends (first wins) -->
+      <fieldset id="fs3">
+        <legend>First Legend</legend>
+        <legend>Second Legend</legend>
+        <input type="text">
+      </fieldset>
+
+      <!-- 3.4: aria-label overrides legend -->
+      <fieldset id="fs4" aria-label="Override Name">
+        <legend>Ignored Legend</legend>
+        <input type="text">
+      </fieldset>
+
+      <!-- 3.5: No legend at all -->
+      <fieldset id="fs5">
+        <input type="text" placeholder="No legend here">
+      </fieldset>
+
+      <!-- 3.6: Rich content in legend -->
+      <fieldset id="fs6">
+        <legend><strong>Bold</strong> and <em>italic</em> legend</legend>
+        <input type="text">
+      </fieldset>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 4: Figure + Figcaption                                           -->
+  <!-- ===================================================================== -->
+
+  <section id="test-figure">
+    <h2>Test 4: Figure Name from Figcaption</h2>
+
+    <div class="demo">
+      <!-- 4.1: Basic figure with figcaption -->
+      <figure id="fig1">
+        <div style="background:#e0e0e0;height:40px;"></div>
+        <figcaption>Chart Description</figcaption>
+      </figure>
+
+      <!-- 4.2: Figcaption before content -->
+      <figure id="fig2">
+        <figcaption>Caption First</figcaption>
+        <div style="background:#e0e0e0;height:40px;"></div>
+      </figure>
+
+      <!-- 4.3: aria-label overrides figcaption -->
+      <figure id="fig3" aria-label="Override Figure">
+        <figcaption>Ignored Caption</figcaption>
+        <div style="background:#e0e0e0;height:40px;"></div>
+      </figure>
+
+      <!-- 4.4: No figcaption -->
+      <figure id="fig4">
+        <div style="background:#e0e0e0;height:40px;"></div>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 5: Table + Caption                                               -->
+  <!-- ===================================================================== -->
+
+  <section id="test-table">
+    <h2>Test 5: Table Name from Caption</h2>
+
+    <div class="demo">
+      <!-- 5.1: Basic table with caption -->
+      <table id="tbl1">
+        <caption>Sales Data</caption>
+        <tr><th>Month</th><th>Amount</th></tr>
+        <tr><td>Jan</td><td>100</td></tr>
+      </table>
+
+      <!-- 5.2: aria-label overrides caption -->
+      <table id="tbl2" aria-label="Override Table">
+        <caption>Ignored Caption</caption>
+        <tr><th>X</th></tr>
+        <tr><td>Y</td></tr>
+      </table>
+
+      <!-- 5.3: No caption -->
+      <table id="tbl3">
+        <tr><th>A</th></tr>
+        <tr><td>B</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- TEST 6: Title Attribute (last resort)                                 -->
+  <!-- ===================================================================== -->
+
+  <section id="test-title">
+    <h2>Test 6: Title as Last Resort</h2>
+
+    <div class="demo">
+      <!-- 6.1: Button text content wins over title -->
+      <button title="Button Tooltip">Click Me</button>
+
+      <!-- 6.2: Title as last resort on generic element -->
+      <span role="note" title="Tooltip Only"></span>
+
+      <!-- 6.3: Label wins over title on input -->
+      <label for="inp-title">Real Label</label>
+      <input type="text" id="inp-title" title="Title Fallback">
+
+      <!-- 6.4: Alt wins over title on image -->
+      <img alt="Alt Text" title="Img Tooltip" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==">
+    </div>
+  </section>
+
+</body>
+</html>

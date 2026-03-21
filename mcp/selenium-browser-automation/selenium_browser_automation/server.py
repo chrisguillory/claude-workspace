@@ -99,6 +99,8 @@ from .models import (
 )
 from .scripts import (
     ARIA_SNAPSHOT_SCRIPT,
+    HOVER_OCCLUSION_SCRIPT,
+    HOVER_STABILITY_SCRIPT,
     INDEXEDDB_CAPTURE_SCRIPT,
     INDEXEDDB_RESTORE_SCRIPT,
     NETWORK_MONITOR_CHECK_SCRIPT,
@@ -110,27 +112,20 @@ from .scripts import (
     WEB_VITALS_SCRIPT,
     build_execute_javascript_async_script,
 )
-
-# Common non-CSS selector patterns (Playwright, XPath, etc.) for actionable error messages.
-_NON_CSS_SELECTOR_RE = re.compile(
-    r':(?:has-text|text|nth-match)\s*\('
-    r'|:(?:visible|hidden)\b'
-    r'|\b(?:text|role|data-testid)\s*='
-    r'|>>'
-)
+from .scroll import execute_scroll
+from .validators import validate_css_selector as _validate_css_selector_impl
 
 
 def _validate_css_selector(selector: str) -> None:
-    """Detect non-CSS selector syntax and raise actionable ToolError."""
-    match = _NON_CSS_SELECTOR_RE.search(selector)
-    if match:
-        raise fastmcp.exceptions.ToolError(
-            f"Selector '{selector}' contains non-CSS syntax ('{match.group()}'). "
-            f'Only standard CSS selectors are supported.\n'
-            f"To find elements by text: get_interactive_elements(text_contains='...')\n"
-            f"To discover selectors: get_aria_snapshot('body', include_urls=True)"
-        )
+    """Validate CSS selector, converting ValueError to ToolError for MCP layer."""
+    try:
+        _validate_css_selector_impl(selector)
+    except ValueError as e:
+        raise fastmcp.exceptions.ToolError(str(e)) from None
 
+
+# Valid URL prefixes for navigation (navigate, navigate_with_profile_state).
+VALID_URL_PREFIXES = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
 
 # Large output threshold for file saving.
 # When tool output exceeds this, save to file to preserve line structure.
@@ -1035,8 +1030,7 @@ def register_tools(service: BrowserService) -> None:
         if browser is None:
             browser = service.state.current_browser or 'chromium'
 
-        valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
-        if not url.startswith(valid_prefixes):
+        if not url.startswith(VALID_URL_PREFIXES):
             raise fastmcp.exceptions.ValidationError(
                 'URL must start with http://, https://, file://, about:, data:, or blob:'
             )
@@ -1182,8 +1176,7 @@ def register_tools(service: BrowserService) -> None:
         timer = Timer()
 
         # Validate URL
-        valid_prefixes = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
-        if not url.startswith(valid_prefixes):
+        if not url.startswith(VALID_URL_PREFIXES):
             raise fastmcp.exceptions.ValidationError(
                 'URL must start with http://, https://, file://, about:, data:, or blob:'
             )
@@ -2419,93 +2412,7 @@ def register_tools(service: BrowserService) -> None:
         # Uses: requestAnimationFrame timing, getAnimations() API, distance threshold
         stability_result = await asyncio.to_thread(
             driver.execute_script,
-            """
-            const el = arguments[0];
-            const DISTANCE_THRESHOLD = 5;  // Pixels - matches Cypress default
-            const MAX_CHECKS = 10;  // ~160ms at 60fps
-
-            return new Promise((resolve) => {
-                // Check for running animations using Web Animations API
-                let animations = [];
-                let hasInfiniteAnimation = false;
-                try {
-                    animations = el.getAnimations();
-                    hasInfiniteAnimation = animations.some(a => {
-                        const effect = a.effect;
-                        if (effect && effect.getTiming) {
-                            const timing = effect.getTiming();
-                            return timing.iterations === Infinity;
-                        }
-                        return false;
-                    });
-                } catch (e) {
-                    // getAnimations not supported, proceed without
-                }
-
-                const runningAnimations = animations.filter(a => a.playState === 'running');
-
-                // Two-frame stability check using requestAnimationFrame
-                let prevRect = el.getBoundingClientRect();
-                let checkCount = 0;
-                let consecutiveStable = 0;
-
-                function checkStability() {
-                    checkCount++;
-                    const currRect = el.getBoundingClientRect();
-
-                    // Calculate distance moved
-                    const dx = currRect.x - prevRect.x;
-                    const dy = currRect.y - prevRect.y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
-
-                    // Check size stability
-                    const sizeStable = (
-                        Math.abs(currRect.width - prevRect.width) < 1 &&
-                        Math.abs(currRect.height - prevRect.height) < 1
-                    );
-
-                    // Element is stable if moved less than threshold and size unchanged
-                    const isStable = distance < DISTANCE_THRESHOLD && sizeStable;
-
-                    if (isStable) {
-                        consecutiveStable++;
-                        // Require 2 consecutive stable frames (like Playwright)
-                        if (consecutiveStable >= 2) {
-                            resolve({
-                                stable: true,
-                                framesChecked: checkCount,
-                                runningAnimations: runningAnimations.length,
-                                hasInfiniteAnimation: hasInfiniteAnimation,
-                                finalDistance: distance
-                            });
-                            return;
-                        }
-                    } else {
-                        consecutiveStable = 0;
-                    }
-
-                    prevRect = currRect;
-
-                    // Max checks reached - report as unstable or proceed with warning
-                    if (checkCount >= MAX_CHECKS) {
-                        resolve({
-                            stable: false,
-                            framesChecked: checkCount,
-                            runningAnimations: runningAnimations.length,
-                            hasInfiniteAnimation: hasInfiniteAnimation,
-                            finalDistance: distance,
-                            reason: 'timeout'
-                        });
-                        return;
-                    }
-
-                    requestAnimationFrame(checkStability);
-                }
-
-                // Start checking on next frame
-                requestAnimationFrame(checkStability);
-            });
-            """,
+            HOVER_STABILITY_SCRIPT,
             element,
         )
 
@@ -2526,22 +2433,9 @@ def register_tools(service: BrowserService) -> None:
                 )
 
         # Verify element receives pointer events (not obscured by overlay/modal)
-        rect = await asyncio.to_thread(lambda: element.rect)
-        center_x = rect['x'] + rect['width'] / 2
-        center_y = rect['y'] + rect['height'] / 2
-
         pointer_check = await asyncio.to_thread(
             driver.execute_script,
-            """
-            const x = arguments[0], y = arguments[1], target = arguments[2];
-            const atPoint = document.elementFromPoint(x, y);
-            if (!atPoint) return 'no_element';
-            if (atPoint === target) return 'ok';
-            if (target.contains(atPoint)) return 'ok';  // Clicked descendant is fine
-            return 'obscured';
-            """,
-            center_x,
-            center_y,
+            HOVER_OCCLUSION_SCRIPT,
             element,
         )
         if pointer_check == 'obscured':
@@ -2560,6 +2454,95 @@ def register_tools(service: BrowserService) -> None:
             await asyncio.sleep(duration_ms / 1000)
 
         logger.info('Hover successful')
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title='Scroll Page',
+            destructiveHint=False,
+            idempotentHint=False,
+        )
+    )
+    async def scroll(
+        ctx: Context[Any, Any, Any],
+        direction: Literal['up', 'down', 'left', 'right'] | None = None,
+        scroll_amount: int = 3,
+        css_selector: str | None = None,
+        behavior: Literal['instant', 'smooth'] = 'instant',
+        position: Literal['top', 'bottom', 'left', 'right'] | None = None,
+    ) -> dict[str, Any]:
+        """Scroll the page, a container, or an element into view.
+
+        **Relative scrolling** (direction parameter — scrollBy):
+        - direction only: Scroll viewport by amount
+        - direction + css_selector: Scroll within a container by amount
+
+        **Absolute scrolling** (position parameter — scrollTo):
+        - position only: Scroll viewport to an edge (top/bottom/left/right)
+        - position + css_selector: Scroll container to an edge
+
+        **Scroll into view** (css_selector only):
+        - Scrolls until the target element is centered in the viewport
+
+        Args:
+            direction: Scroll direction: 'up', 'down', 'left', 'right'.
+                Required for relative scrolling. Mutually exclusive with position.
+            scroll_amount: Number of ticks to scroll (1-20, default 3).
+                Each tick produces 100 CSS pixels of scroll delta. Only used with direction.
+            css_selector: CSS selector for either:
+                - Target element to scroll into view (when alone)
+                - Container to scroll within (when combined with direction or position)
+            behavior: Scroll animation: 'instant' (default) or 'smooth'.
+                'instant' scrolls immediately with no animation.
+                'smooth' animates using the browser's native smooth scroll (~300-500ms)
+                and waits for the animation to complete before returning position data.
+            position: Absolute scroll target: 'top', 'bottom', 'left', 'right'.
+                Scrolls to the edge of the page or container. Mutually exclusive with direction.
+
+        Returns:
+            Dict with scroll results including mode, scroll position, page dimensions,
+            and a 'scrolled' boolean indicating whether the scroll position changed.
+
+        Examples:
+            - scroll(direction='down') - Scroll viewport down ~300px
+            - scroll(direction='down', scroll_amount=10) - Scroll down ~1000px
+            - scroll(css_selector='#footer') - Scroll #footer into view (centered)
+            - scroll(direction='down', css_selector='.chat-log') - Scroll within .chat-log
+            - scroll(direction='down', behavior='smooth') - Smooth animated scroll
+            - scroll(position='bottom') - Scroll to bottom of page
+            - scroll(position='top') - Scroll to top of page
+            - scroll(position='right', css_selector='#data-table') - Scroll to rightmost column
+            - scroll(position='bottom', css_selector='.chat-log') - Scroll chat to end
+            - scroll(position='bottom', behavior='smooth') - Smooth scroll to bottom
+
+        Notes:
+            - CSS scroll-snap may cause actual scroll position to differ from requested amount.
+            - Use the returned scroll position and 'scrolled' boolean to detect boundaries.
+            - For iframe content, switch to the iframe context first.
+
+        Workflow:
+            1. get_aria_snapshot('body') - understand page structure
+            2. scroll(direction='down') - scroll to see more content
+            3. get_aria_snapshot('body') - see updated content
+        """
+        driver = await service.get_browser()
+        logger.info(
+            f'Scroll: direction={direction}, position={position}, '
+            f'selector={css_selector}, amount={scroll_amount}, behavior={behavior}'
+        )
+        try:
+            result = await asyncio.to_thread(
+                execute_scroll,
+                driver,
+                direction=direction,
+                scroll_amount=scroll_amount,
+                css_selector=css_selector,
+                behavior=behavior,
+                position=position,
+            )
+        except ValueError as e:
+            raise fastmcp.exceptions.ToolError(str(e)) from None
+        logger.info(f'Scroll complete: {result.get("mode")}, scrolled={result.get("scrolled")}')
+        return result
 
     @mcp.tool(
         annotations=ToolAnnotations(
