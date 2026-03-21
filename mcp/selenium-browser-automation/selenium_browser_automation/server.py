@@ -2650,7 +2650,7 @@ def register_tools(service: BrowserService) -> None:
             )
 
         if direction is not None and (scroll_amount < 1 or scroll_amount > 20):
-            raise ValueError('scroll_amount must be between 1 and 20')
+            raise fastmcp.exceptions.ToolError('scroll_amount must be between 1 and 20')
 
         PIXELS_PER_TICK = 100
 
@@ -2851,14 +2851,15 @@ def register_tools(service: BrowserService) -> None:
                     SMOOTH_SCROLL_SCRIPT
                     + """
                     var target = arguments[0];
-                    var beforeY = Math.round(window.scrollY);
+                    var beforeX = Math.round(window.scrollX), beforeY = Math.round(window.scrollY);
                     return smoothScroll({
                         eventTarget: window,
                         scrollAction: function() {
                             target.scrollIntoView({block: 'center', behavior: 'smooth'});
                         },
                         hasMoved: function() {
-                            return Math.round(window.scrollY) !== beforeY;
+                            return Math.round(window.scrollX) !== beforeX
+                                || Math.round(window.scrollY) !== beforeY;
                         },
                         measure: function() {
                             return {
@@ -2869,7 +2870,8 @@ def register_tools(service: BrowserService) -> None:
                                     document.body.offsetHeight, document.documentElement.offsetHeight
                                 ),
                                 viewportHeight: window.innerHeight,
-                                scrolled: Math.round(window.scrollY) !== beforeY
+                                scrolled: (Math.round(window.scrollX) !== beforeX
+                                        || Math.round(window.scrollY) !== beforeY)
                             };
                         }
                     });

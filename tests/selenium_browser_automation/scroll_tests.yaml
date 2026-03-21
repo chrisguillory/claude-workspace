@@ -516,3 +516,12 @@ overflow_metadata:
         success: true
         scrolled: false
         overflow: "clip"
+
+    - name: overflow_hidden_is_scrollable
+      description: overflow:hidden IS programmatically scrollable per W3C spec
+      direction: down
+      css_selector: "#overflow-hidden"
+      expect:
+        success: true
+        scrolled: true
+        overflow: "hidden"
