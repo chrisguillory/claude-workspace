@@ -31,6 +31,7 @@ _scroll_to_specs = [s for s in _all_specs if s['section'] == 'scroll_to_element'
 _validation_specs = [s for s in _all_specs if s['section'] == 'parameter_validation']
 _smooth_specs = [s for s in _all_specs if s['section'] == 'smooth_scroll']
 _position_specs = [s for s in _all_specs if s['section'] == 'position_scroll']
+_overflow_specs = [s for s in _all_specs if s['section'] == 'overflow_metadata']
 
 PIXELS_PER_TICK = 100
 
@@ -391,6 +392,41 @@ def test_position_scroll(
 
 
 # ============================================================================
+# OVERFLOW METADATA TESTS
+# ============================================================================
+
+
+@pytest.mark.parametrize('test_case', _overflow_specs, ids=lambda tc: tc['id'])
+def test_overflow_metadata(
+    headless_driver: webdriver.Chrome,
+    examples_server: str,
+    test_case: dict[str, Any],
+) -> None:
+    """Test overflow CSS metadata in container scroll responses."""
+    spec = test_case['spec']
+    headless_driver.get(f'{examples_server}/{spec["fixture"]}')
+    headless_driver.execute_script('window.resetScrollPosition()')
+
+    expect = spec['expect']
+
+    result = _execute_scroll(
+        headless_driver,
+        direction=spec.get('direction'),
+        scroll_amount=spec.get('scroll_amount', 3),
+        css_selector=spec.get('css_selector'),
+    )
+
+    if 'scrolled' in expect:
+        assert result['scrolled'] == expect['scrolled'], (
+            f'Expected scrolled={expect["scrolled"]}, got {result["scrolled"]}'
+        )
+    if 'overflow' in expect:
+        assert result.get('overflow') == expect['overflow'], (
+            f'Expected overflow={expect["overflow"]!r}, got {result.get("overflow")!r}'
+        )
+
+
+# ============================================================================
 # SCROLL EXECUTION HELPER
 # ============================================================================
 
@@ -691,10 +727,12 @@ def _execute_scroll(
                     scrollTop: Math.round(arguments[0].scrollTop),
                     scrollLeft: Math.round(arguments[0].scrollLeft),
                     scrollHeight: arguments[0].scrollHeight,
-                    clientHeight: arguments[0].clientHeight
+                    clientHeight: arguments[0].clientHeight,
+                    overflow: window.getComputedStyle(arguments[0])[arguments[1] !== 0 ? 'overflowY' : 'overflowX']
                 };
             """,
                 element,
+                delta_y,
             )
             result = {
                 **after,
@@ -711,6 +749,7 @@ def _execute_scroll(
             'container_scroll_height': result['scrollHeight'],
             'container_client_height': result['clientHeight'],
             'scrolled': result['scrolled'],
+            'overflow': result.get('overflow'),
         }
 
     # Mode 2: Viewport scroll

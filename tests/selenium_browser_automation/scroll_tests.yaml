@@ -489,3 +489,30 @@ position_scroll:
       expect:
         success: false
         error_contains: "Failed to find"
+
+# =============================================================================
+# OVERFLOW METADATA TESTS
+# =============================================================================
+
+overflow_metadata:
+  description: Verify overflow CSS metadata in container scroll responses
+  fixture: examples/scroll-test.html
+
+  tests:
+    - name: overflow_auto_reports_auto
+      description: Scrollable container reports overflow auto
+      direction: down
+      css_selector: "#scroll-container"
+      expect:
+        success: true
+        scrolled: true
+        overflow: "auto"
+
+    - name: overflow_clip_not_scrolled
+      description: overflow:clip container cannot be scrolled programmatically
+      direction: down
+      css_selector: "#non-scrollable"
+      expect:
+        success: true
+        scrolled: false
+        overflow: "clip"
