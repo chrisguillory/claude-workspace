@@ -79,7 +79,7 @@ Upstream context
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from mypy.nodes import TypeInfo
@@ -100,7 +100,7 @@ _PLUGIN_VERSION = 1  # Increment when synthesis logic changes to invalidate mypy
 class PydanticReplacePlugin(PydanticPlugin):
     """Extends PydanticPlugin with ``__replace__()`` synthesis on model classes."""
 
-    def report_config_data(self, ctx: ReportConfigContext) -> dict[str, Any]:
+    def report_config_data(self, ctx: ReportConfigContext) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — mypy Plugin API requires dict return
         """Include plugin version so mypy invalidates cache on logic changes."""
         data = dict(super().report_config_data(ctx))
         data['pydantic_replace_version'] = _PLUGIN_VERSION
@@ -119,7 +119,7 @@ class PydanticReplacePlugin(PydanticPlugin):
         return chained_hook
 
 
-def _collect_parent_fields(info: TypeInfo) -> dict[str, tuple[TypeInfo, Any]]:
+def _collect_parent_fields(info: TypeInfo) -> Mapping[str, tuple[TypeInfo, Any]]:
     """Collect the widest parent type for each inherited field.
 
     For inherited fields, ``__replace__`` should use the parent's (wider) type

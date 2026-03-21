@@ -12,13 +12,14 @@ API Reference: https://openrouter.ai/docs/api/api-reference/embeddings/create-em
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import httpx
 import tenacity
 from cc_lib import ConcurrencyTracker
+from cc_lib.types import JsonObject
 
 from document_search.clients import _retry
 from document_search.schemas.embeddings import TaskIntent
@@ -167,9 +168,9 @@ class OpenRouterClient:
             embeddings = sorted(data['data'], key=lambda x: x['index'])
             return [e['embedding'] for e in embeddings]
 
-    async def list_models(  # strict_typing_linter.py: loose-typing — API returns arbitrary model metadata dicts with no stable schema
+    async def list_models(
         self,
-    ) -> Sequence[Mapping[str, Any]]:
+    ) -> Sequence[JsonObject]:
         """List all available embedding models.
 
         Returns model metadata including id, name, pricing, context_length, etc.
@@ -185,7 +186,7 @@ class OpenRouterClient:
         """
         response = await self._client.get('/embeddings/models')
         response.raise_for_status()
-        data: dict[str, list[Mapping[str, Any]]] = response.json()
+        data: dict[str, list[JsonObject]] = response.json()
         return data['data']
 
     async def close(self) -> None:

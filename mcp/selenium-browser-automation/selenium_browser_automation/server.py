@@ -39,6 +39,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 # Third-Party Libraries
 import fastmcp.exceptions
 import httpx
+from cc_lib.types import JsonObject
 from cc_lib.utils import Timer
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
@@ -96,6 +97,7 @@ from .models import (
     ProfileStateOriginStorage,
     RequestTiming,
     SaveProfileStateResult,
+    SlowestRequestSummary,
     SmartExtractionInfo,
     TTFBMetric,
 )
@@ -2561,7 +2563,7 @@ def register_tools(service: BrowserService) -> None:
         duration_ms: int,
         ctx: Context[Any, Any, Any],
         reason: str | None = None,
-    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies
+    ) -> JsonObject:
         """Pause execution for a fixed duration. Use sparingly.
 
         This is a simple time-based delay. For most automation scenarios,
@@ -2621,7 +2623,7 @@ def register_tools(service: BrowserService) -> None:
         ctx: Context[Any, Any, Any],
         state: Literal['visible', 'hidden', 'attached', 'detached'] = 'visible',
         timeout: int = 30000,
-    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies by state outcome
+    ) -> JsonObject:
         """Wait for an element matching the selector to reach a desired state.
 
         More reliable than wait_for_network_idle() for modern SPAs because it waits
@@ -2821,7 +2823,7 @@ def register_tools(service: BrowserService) -> None:
         width: int,
         height: int,
         ctx: Context[Any, Any, Any],
-    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies
+    ) -> JsonObject:
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
@@ -2921,9 +2923,7 @@ def register_tools(service: BrowserService) -> None:
         # Parse results into Pydantic models
         T = TypeVar('T', bound=BaseModel)
 
-        def parse_metric(
-            data: Mapping[str, Any] | None, model_cls: type[T]
-        ) -> T | None:  # strict_typing_linter.py: loose-typing — web vitals JS returns arbitrary metric shapes
+        def parse_metric(data: JsonObject | None, model_cls: type[T]) -> T | None:
             if not data:
                 return None
             if 'error' in data:
@@ -3035,7 +3035,8 @@ Note:
         # Sort by duration (slowest first) for summary
         sorted_by_duration = sorted(requests, key=lambda r: r.duration_ms or 0, reverse=True)
         slowest = [
-            {'url': r.url, 'duration_ms': r.duration_ms, 'type': r.resource_type} for r in sorted_by_duration[:10]
+            SlowestRequestSummary(url=r.url, duration_ms=r.duration_ms, type=r.resource_type)
+            for r in sorted_by_duration[:10]
         ]
 
         # Count by resource type
@@ -3070,13 +3071,13 @@ Note:
 
         # Log summary
         if slowest:
-            slowest_url = str(slowest[0]['url'])
+            slowest_url = slowest[0].url
             # Truncate URL for logging
             if len(slowest_url) > 60:
                 slowest_url = slowest_url[:57] + '...'
             logger.info(
                 f'Captured {len(requests)} requests in {collection_duration:.0f}ms, '
-                f'slowest: {slowest[0]["duration_ms"]:.0f}ms ({slowest_url})'
+                f'slowest: {slowest[0].duration_ms:.0f}ms ({slowest_url})'
             )
         else:
             logger.info(f'Captured {len(requests)} requests in {collection_duration:.0f}ms')
@@ -3088,9 +3089,7 @@ Note:
         url: str,
         method: str,
         cdp_timestamp: float | None,
-    ) -> (
-        Mapping[str, Any] | None
-    ):  # strict_typing_linter.py: loose-typing — JS interceptor capture returns arbitrary shape
+    ) -> JsonObject | None:
         """Look up response body from JavaScript interceptor capture.
 
         Matches by URL + method + timestamp (within 5s window).
@@ -3274,10 +3273,8 @@ Workflow:
 
             # Convert headers dict to HAR array format
             def headers_to_har(
-                headers_dict: Mapping[str, Any] | None,
-            ) -> Sequence[
-                Mapping[str, str]
-            ]:  # strict_typing_linter.py: loose-typing — CDP returns arbitrary header dicts
+                headers_dict: JsonObject | None,
+            ) -> Sequence[Mapping[str, str]]:
                 if not headers_dict:
                     return []
                 return [{'name': k, 'value': str(v)} for k, v in headers_dict.items()]
@@ -3290,10 +3287,8 @@ Workflow:
 
             # Convert CDP timing to HAR timing (duration in ms)
             def convert_timing(
-                timing_obj: Mapping[str, Any],
-            ) -> Mapping[
-                str, float | int
-            ]:  # strict_typing_linter.py: loose-typing — CDP timing object has variable numeric fields
+                timing_obj: JsonObject,
+            ) -> Mapping[str, float | int]:
                 def safe_duration(start_key: str, end_key: str) -> float | int:
                     start = timing_obj.get(start_key)
                     end = timing_obj.get(end_key)
@@ -3577,7 +3572,7 @@ Workflow:
         username: str,
         password: str,
         ctx: Context[Any, Any, Any] | None = None,
-    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies
+    ) -> JsonObject:
         """Configure authenticated HTTP proxy for bypassing IP-based rate limiting.
 
         Starts a local mitmproxy instance that handles authentication with the
@@ -3704,7 +3699,7 @@ Workflow:
     )
     async def clear_proxy(
         ctx: Context[Any, Any, Any] | None = None,
-    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies
+    ) -> JsonObject:
         """Clear proxy configuration and return to direct connection.
 
         Stops the mitmproxy subprocess and clears proxy settings.

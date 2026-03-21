@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import os
 import platform
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+
+from cc_lib.types import JsonObject
 
 from .models import (
     ChromeInfoCacheEntry,
@@ -131,9 +132,7 @@ def load_local_state(base_path: Path) -> ChromeLocalState:
 
 def load_profile_preferences(
     profile_path: Path,
-) -> (
-    Mapping[str, Any] | None
-):  # strict_typing_linter.py: loose-typing — Chrome Preferences JSON has no published schema
+) -> JsonObject | None:
     """Load and parse profile's Preferences JSON (may not exist).
 
     Args:
@@ -148,7 +147,7 @@ def load_profile_preferences(
         return None
 
     with open(prefs_path) as f:
-        result: dict[str, Any] = json.load(f)
+        result: JsonObject = json.load(f)
         return result
 
 

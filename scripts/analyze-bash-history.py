@@ -29,16 +29,16 @@ import argparse
 import json
 import sys
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence, Set
+from collections.abc import Iterator, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import Literal, Protocol, cast
 
 import lazy_object_proxy
 import pydantic
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.hooks import BashToolInput
-from cc_lib.types import JsonDatetime
+from cc_lib.types import JsonDatetime, JsonObject
 from cc_lib.utils import load_module_from_path
 
 
@@ -130,9 +130,7 @@ class ContentBlock(SessionModel):
     type: str  # "tool_use", "text", "thinking"
     name: str | None = None  # "Bash", "Read", "Write" (only on tool_use)
     # Tool input payload (only on tool_use)
-    input: Mapping[str, Any] | None = (
-        None  # strict_typing_linter.py: loose-typing — tool_use input payload is arbitrary JSON with no fixed schema
-    )
+    input: JsonObject | None = None
 
 
 class AssistantMessage(SessionModel):

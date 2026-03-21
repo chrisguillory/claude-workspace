@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import dfindexeddb.errors
+from cc_lib.types import JsonObject
 from dfindexeddb.indexeddb.chromium.definitions import (
     DatabaseMetaDataKeyType,
     IndexMetaDataKeyType,
@@ -169,9 +170,7 @@ def _origin_dir_to_url(origin_dir: str) -> str:
 def export_indexeddb_with_schema(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> Mapping[
-    str, Sequence[Mapping[str, Any]]
-]:  # strict_typing_linter.py: loose-typing — IndexedDB records have arbitrary structure
+) -> Mapping[str, Sequence[JsonObject]]:
     """Export IndexedDB with full schema using dfindexeddb.
 
     This function extracts complete IndexedDB data including:
@@ -225,7 +224,7 @@ def export_indexeddb_with_schema(
     if not indexeddb_path.exists():
         return {}
 
-    result: dict[str, Sequence[Mapping[str, Any]]] = {}
+    result: dict[str, Sequence[JsonObject]] = {}
 
     for db_dir in indexeddb_path.glob('*.indexeddb.leveldb'):
         origin_dir = db_dir.name.replace('.indexeddb.leveldb', '')
@@ -255,7 +254,7 @@ def export_indexeddb_with_schema(
     return result
 
 
-def _parse_indexeddb_folder(db_dir: Path) -> Sequence[Mapping[str, Any]]:
+def _parse_indexeddb_folder(db_dir: Path) -> Sequence[JsonObject]:
     """Parse a single IndexedDB LevelDB folder.
 
     Args:

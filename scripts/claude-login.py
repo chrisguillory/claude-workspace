@@ -123,6 +123,7 @@ import rich.panel
 import typer
 from cc_lib.schemas import StrictModel
 from cc_lib.session_tracker import find_claude_pid, resolve_session_id
+from cc_lib.types import JsonObject
 
 # =============================================================================
 # Pydantic Models
@@ -262,9 +263,7 @@ def _spawn_kill_and_copy_resume(claude_pid: int, session_id: str, model: str | N
 # =============================================================================
 
 
-def read_keychain_raw() -> (
-    Mapping[str, Any] | None
-):  # strict_typing_linter.py: loose-typing — keychain JSON blob has no fixed schema, varies by stored credential type
+def read_keychain_raw() -> JsonObject | None:
     """Read full keychain JSON. Returns None if entry doesn't exist."""
     result = subprocess.run(
         ['security', 'find-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS, '-w'],
@@ -280,10 +279,8 @@ def read_keychain_raw() -> (
 
 
 def write_keychain_raw(
-    data: Mapping[str, Any],
-) -> (
-    None
-):  # strict_typing_linter.py: loose-typing — keychain JSON blob has no fixed schema, varies by stored credential type
+    data: JsonObject,
+) -> None:
     """Write full keychain JSON atomically using -U (update-or-insert).
 
     Cleans up duplicate entries first (may exist from manual keychain edits),
@@ -609,9 +606,9 @@ def load_mcp_auths() -> Mapping[str, McpOAuthEntry]:
     return {k: McpOAuthEntry.model_validate(v) for k, v in raw.items()}
 
 
-def mcp_auths_to_keychain(  # strict_typing_linter.py: loose-typing — keychain format is arbitrary JSON keyed by provider with no fixed schema
+def mcp_auths_to_keychain(
     auths: Mapping[str, McpOAuthEntry],
-) -> Mapping[str, Any]:
+) -> JsonObject:
     """Convert MCP auths to keychain format."""
     result = {}
     for entry in auths.values():

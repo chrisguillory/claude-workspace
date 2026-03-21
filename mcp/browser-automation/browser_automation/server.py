@@ -29,6 +29,7 @@ import fastmcp.exceptions
 import playwright.async_api
 import playwright_stealth.stealth
 import yaml
+from cc_lib.types import JsonObject
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel
@@ -287,8 +288,8 @@ async def navigate(
 
         # Response event monitoring - doesn't block network stack
         async def capture_response(
-            response: Any,
-        ) -> None:  # strict_typing_linter.py: loose-typing — Playwright event callback; typed as Any by page.on()
+            response: Any,  # strict_typing_linter.py: loose-typing — Playwright event callback typed as Any by page.on()
+        ) -> None:
             try:
                 req_type = response.request.resource_type
 
@@ -450,9 +451,7 @@ async def screenshot(filename: str, ctx: Context[Any, Any, Any]) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-async def download_resource(
-    url: str, output_filename: str
-) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — response shape varies by content type
+async def download_resource(url: str, output_filename: str) -> JsonObject:
     """Download specific resource using current browser context and session.
 
     Uses page.request.get() to maintain cookies/session from prior navigation.

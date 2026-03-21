@@ -5,12 +5,13 @@ See: https://code.claude.com/docs/en/hooks
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Literal
 
 import pydantic
+from pydantic import JsonValue
 
 from cc_lib.schemas.base import CamelModel, StrictModel
+from cc_lib.types import JsonObject
 
 # -- Hook inputs --------------------------------------------------------------
 
@@ -56,7 +57,7 @@ class PreToolUseHookInput(StrictModel):
     transcript_path: str
     hook_event_name: Literal['PreToolUse']
     tool_name: str
-    tool_input: Mapping[str, Any]  # strict_typing_linter.py: loose-typing — Claude Code sends arbitrary JSON per tool
+    tool_input: JsonObject
     tool_use_id: str
     permission_mode: str | None = None
 
@@ -72,8 +73,8 @@ class PostToolUseHookInput(StrictModel):
     transcript_path: str
     hook_event_name: Literal['PostToolUse']
     tool_name: str
-    tool_input: Mapping[str, Any]  # strict_typing_linter.py: loose-typing — Claude Code sends arbitrary JSON per tool
-    tool_response: Any = None  # strict_typing_linter.py: loose-typing — response format varies by tool type
+    tool_input: JsonObject
+    tool_response: JsonValue | None = None
     tool_use_id: str
     permission_mode: str | None = None
 

@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import pydantic
+from pydantic import JsonValue
 
 type SessionState = Literal['active', 'exited', 'completed', 'crashed']
 type SessionSource = Literal['startup', 'resume', 'compact', 'clear']
@@ -16,6 +17,14 @@ type SessionSource = Literal['startup', 'resume', 'compact', 'clear']
 JsonDatetime = Annotated[datetime, pydantic.Field(strict=False)]
 JsonUuid = Annotated[UUID, pydantic.Field(strict=False)]
 
-# External JSON object with no published schema — intentional Any, not lazy typing.
+# JSON object types — use when the structure has no published schema.
 # Prefer specific Pydantic models when the structure is known.
+#
+# JsonObject: opaque — skips value validation. Use for data already parsed
+# from JSON (Chrome Local State, CDP responses) where re-validation is redundant.
+#
+# StrictJsonObject: validated — rejects non-JSON values (set, bytes, datetime)
+# via pydantic.JsonValue. Use when constructing JSON to send or when data
+# provenance is uncertain.
 type JsonObject = Mapping[str, Any]
+type StrictJsonObject = Mapping[str, JsonValue]

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Literal
 
 import pydantic
 import pydantic.alias_generators
 from cc_lib.schemas.base import ClosedModel, OpenModel
 from cc_lib.types import JsonObject
+from pydantic import JsonValue
 
 # Browser selection for Selenium automation (default: chromium)
 # Use "chromium" to avoid AppleScript targeting conflicts when personal Chrome is running
@@ -355,6 +356,14 @@ class NetworkRequest(pydantic.BaseModel):
     error: str | None = None
 
 
+class SlowestRequestSummary(ClosedModel):
+    """Summary of a slow network request for reporting."""
+
+    url: str
+    duration_ms: float | None = None
+    type: str | None = None
+
+
 class NetworkCapture(pydantic.BaseModel):
     """Complete network capture result."""
 
@@ -368,9 +377,7 @@ class NetworkCapture(pydantic.BaseModel):
     total_time_ms: float
 
     # Summary statistics
-    slowest_requests: Sequence[
-        Mapping[str, Any]
-    ] = []  # [{url, duration_ms, status}]  # strict_typing_linter.py: loose-typing — heterogeneous summary dicts with str/int/float values
+    slowest_requests: Sequence[SlowestRequestSummary] = []
     requests_by_type: Mapping[str, int] = {}  # {document: 1, xhr: 5, ...}
 
     errors: Sequence[str] = []
@@ -408,9 +415,7 @@ class JavaScriptResult(ClosedModel):
     """
 
     success: bool
-    result: str | int | float | bool | Mapping[str, Any] | Sequence[Any] | None = (
-        None  # strict_typing_linter.py: loose-typing — arbitrary JavaScript return values
-    )
+    result: JsonValue | None = None
     result_type: JavaScriptResultType
     error: str | None = None
     error_type: JavaScriptErrorType | None = None
@@ -443,7 +448,7 @@ class ResourceCapture(ClosedModel):
     captured: Sequence[CapturedResource]
     total_size_mb: float
     resource_count: int
-    errors: Sequence[Mapping[str, Any]]  # strict_typing_linter.py: loose-typing — heterogeneous error detail dicts
+    errors: Sequence[JsonObject]
 
 
 class HARExportResult(ClosedModel):
@@ -555,12 +560,8 @@ class ProfileStateIndexedDBRecord(ClosedModel):
 
     model_config = pydantic.ConfigDict(extra='forbid', strict=False)  # Allow flexible JSON values
 
-    key: (
-        str | int | float | Sequence[Any] | None
-    )  # strict_typing_linter.py: loose-typing — IndexedDB compound keys can be arrays of mixed types
-    value: (
-        str | int | float | bool | Mapping[str, Any] | Sequence[Any] | None
-    )  # strict_typing_linter.py: loose-typing — IndexedDB values are arbitrary JSON-serializable objects
+    key: str | int | float | Sequence[str | int | float] | None
+    value: JsonValue | None = None
 
 
 class ProfileStateIndexedDBIndex(ClosedModel):
@@ -666,15 +667,9 @@ class ProfileState(ClosedModel):
     origins: Mapping[str, ProfileStateOriginStorage]
 
     # Future expansion slots (not yet implemented)
-    extensions: Mapping[str, Any] | None = (
-        None  # strict_typing_linter.py: loose-typing — future expansion slot for arbitrary browser extension state
-    )
-    permissions: Mapping[str, Any] | None = (
-        None  # strict_typing_linter.py: loose-typing — future expansion slot for arbitrary permission grants
-    )
-    preferences: Mapping[str, Any] | None = (
-        None  # strict_typing_linter.py: loose-typing — future expansion slot for arbitrary browser preferences
-    )
+    extensions: JsonObject | None = None
+    permissions: JsonObject | None = None
+    preferences: JsonObject | None = None
 
 
 class SaveProfileStateResult(ClosedModel):

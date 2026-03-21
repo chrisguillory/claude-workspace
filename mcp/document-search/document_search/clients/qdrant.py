@@ -12,12 +12,13 @@ import asyncio
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from typing import Any, TypedDict
+from typing import TypedDict
 from uuid import UUID
 
 import httpx
 import tenacity
 from cc_lib import ConcurrencyTracker
+from cc_lib.types import JsonObject
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import (
     Distance,
@@ -196,9 +197,7 @@ class QdrantClient:
     async def upsert(
         self,
         collection_name: str,
-        points: Sequence[  # strict_typing_linter.py: loose-typing # Qdrant payload
-            tuple[UUID, Sequence[float], Sequence[int], Sequence[float], Mapping[str, Any]]
-        ],
+        points: Sequence[tuple[UUID, Sequence[float], Sequence[int], Sequence[float], JsonObject]],
     ) -> int:
         """Insert or update points with hybrid vectors.
 
@@ -347,9 +346,7 @@ class QdrantClient:
             if hit.payload is not None
         ]
 
-    async def get(  # strict_typing_linter.py: loose-typing # Qdrant payload
-        self, collection_name: str, point_ids: Sequence[UUID]
-    ) -> Sequence[Mapping[str, Any]]:
+    async def get(self, collection_name: str, point_ids: Sequence[UUID]) -> Sequence[JsonObject]:
         """Retrieve points by ID.
 
         Args:
