@@ -136,11 +136,12 @@ role_mapping:
           - "- tabpanel"
 
     - name: figure_role
-      description: Native figure element maps to figure role
+      description: Native figure element maps to figure role with figcaption name
       selector: "#test-3"
       expect:
         includes:
           - "- figure"
+          - 'figure "Role Mapping Test 3a passed: Figure with caption"'
 
     - name: progress_meter_roles
       description: Progress maps to progressbar, meter maps to meter
@@ -193,13 +194,14 @@ context_roles:
           - "Meaningful image"
 
     - name: fieldset_legend
-      description: Fieldset maps to group role with legend text
+      description: Fieldset maps to group role with legend as accessible name
       selector: "#test-15"
       expect:
         includes:
           - "- group"
           - "Personal Information"
           - "Disabled fieldset"
+          - 'group "Context Roles Test 15a passed: Personal Information"'
 
     - name: named_section_is_region
       description: Section with aria-label gets region role
@@ -310,11 +312,12 @@ tables:
 
   tests:
     - name: table_structure
-      description: Table elements map to table/row/cell roles
+      description: Table elements map to table/row/cell roles with caption name
       expect:
         includes:
           - "- table"
           - "- row"
+          - 'table "Tables Test 1 Caption: Monthly Sales Data"'
 
 # =============================================================================
 # IFRAMES
