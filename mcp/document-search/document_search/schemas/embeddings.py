@@ -9,8 +9,7 @@ from collections.abc import Sequence
 from typing import Annotated, Literal
 
 import pydantic
-
-from document_search.schemas.base import StrictModel
+from cc_lib.schemas import StrictModel
 
 __all__ = [
     'MAX_TEXT_CHARS',

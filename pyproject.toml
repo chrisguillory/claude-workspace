@@ -98,6 +98,15 @@ asyncio_mode = "auto"
 # pythonpath: repo root on sys.path so unit tests can `from plugins... import`
 pythonpath = ["."]
 testpaths = ["tests"]
+# Default-deny: all warnings are errors. Third-party noise gets targeted ignores.
+# Fix root cause; never blindly suppress with filters.
+filterwarnings = [
+    "error",
+    # SWIG C extension types (SwigPyPacked, SwigPyObject, swigvarlink) lack __module__
+    # on Python 3.13+. Upstream SWIG issue — fastembed/onnxruntime transitive dependency.
+    "ignore:builtin type Swig.*:DeprecationWarning",
+    "ignore:builtin type swigvarlink.*:DeprecationWarning",
+]
 
 # -- Custom Linter Configuration ----------------------------------------------
 
