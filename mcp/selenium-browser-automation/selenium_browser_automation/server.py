@@ -1700,9 +1700,7 @@ def register_tools(service: BrowserService) -> None:
         return response.content, response.status_code, content_type
 
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-    async def download_resource(
-        url: str, output_filename: str
-    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies by download result
+    async def download_resource(url: str, output_filename: str) -> JsonObject:
         """Download specific resource using current browser session's cookies and headers.
 
         Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
@@ -3079,7 +3077,7 @@ Note:
                 slowest_url = slowest_url[:57] + '...'
             logger.info(
                 f'Captured {len(requests)} requests in {collection_duration:.0f}ms, '
-                f'slowest: {slowest[0].duration_ms:.0f}ms ({slowest_url})'
+                f'slowest: {slowest[0].duration_ms or 0:.0f}ms ({slowest_url})'
             )
         else:
             logger.info(f'Captured {len(requests)} requests in {collection_duration:.0f}ms')
@@ -3853,7 +3851,7 @@ Workflow:
                 error_type='execution',
             )
         except Exception as e:  # exception_safety_linter.py: swallowed-exception — error captured in JavaScriptResult
-            logger.info(f'JS execution unexpected error: {e}')
+            logger.warning(f'JS execution unexpected error: {e}', exc_info=True)
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',

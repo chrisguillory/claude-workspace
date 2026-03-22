@@ -38,7 +38,6 @@ def find_config(filepath: Path, tool_name: str) -> tuple[Path, Path] | None:
     return None
 
 
-@lru_cache(maxsize=32)
 def load_per_file_ignores(
     tool_name: str,
     config_path: Path,
@@ -49,9 +48,22 @@ def load_per_file_ignores(
         Mapping from glob pattern to list of violation codes to ignore.
         Empty mapping if no per-file-ignores section.
     """
+    return _load_per_file_ignores_cached(tool_name, config_path.resolve())
+
+
+@lru_cache(maxsize=32)
+def _load_per_file_ignores_cached(
+    tool_name: str,
+    config_path: Path,
+) -> Mapping[str, Sequence[str]]:
     with config_path.open('rb') as f:
         data = tomllib.load(f)
-    result: Mapping[str, Sequence[str]] = data.get('tool', {}).get(tool_name, {}).get('per-file-ignores', {})
+    raw = data.get('tool', {}).get(tool_name, {}).get('per-file-ignores', {})
+    for pattern, codes in raw.items():
+        if not isinstance(codes, list):
+            msg = f'per-file-ignores value for {pattern!r} must be a list, got {type(codes).__name__}: use ["{codes}"] instead of "{codes}"'
+            raise TypeError(msg)
+    result: Mapping[str, Sequence[str]] = raw
     return result
 
 

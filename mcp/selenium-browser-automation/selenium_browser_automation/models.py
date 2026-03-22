@@ -67,10 +67,7 @@ class ChromeProfilesResult(ClosedModel):
 
 
 class ChromeInfoCacheEntry(OpenModel):
-    """Profile entry from Local State -> profile.info_cache[profile_dir].
-
-    Strict validation - will fail if Chrome adds unknown fields.
-    """
+    """Profile entry from Local State -> profile.info_cache[profile_dir]."""
 
     # Essential fields
     name: str
@@ -108,7 +105,7 @@ class ChromeInfoCacheEntry(OpenModel):
 
 
 class ChromeLocalStateProfile(OpenModel):
-    """Profile section from Local State JSON. Strict validation."""
+    """Profile section from Local State JSON."""
 
     info_cache: Mapping[str, ChromeInfoCacheEntry]
     last_active_profiles: Sequence[str] | None = None
@@ -121,7 +118,11 @@ class ChromeLocalStateProfile(OpenModel):
 
 
 class ChromeLocalState(OpenModel):
-    """Chrome Local State JSON structure. Strict validation - includes ALL fields."""
+    """Chrome Local State JSON structure.
+
+    Typed fields cover known Chrome settings. Unknown fields from
+    Chrome updates are preserved in model_extra.
+    """
 
     profile: ChromeLocalStateProfile
 

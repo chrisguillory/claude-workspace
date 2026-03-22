@@ -32,7 +32,7 @@ import io
 import json
 import sys
 import traceback
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 
 # -- Protocol types (self-contained — driver runs in external interpreter env) -
 
@@ -58,7 +58,7 @@ class ExecuteResponse(TypedDict):
 class ReadyResponse(TypedDict):
     """Startup signal. Validated by DriverReadyResponse on consumer side."""
 
-    status: str
+    status: Literal['ready']
     python_version: str
     python_executable: str
 
@@ -102,7 +102,7 @@ def read_request() -> DriverRequest | None:
         if len(json_data) < length:
             return None  # Incomplete read
 
-        return cast(DriverRequest, json.loads(json_data))
+        return cast(DriverRequest, json.loads(json_data))  # static-only; no runtime validation
 
     except (ValueError, json.JSONDecodeError) as e:
         send_response(

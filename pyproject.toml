@@ -99,7 +99,7 @@ asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
 
-# -- Custom Linter Configuration -----------------------------------------------
+# -- Custom Linter Configuration ----------------------------------------------
 
 [tool.strict-typing-linter.per-file-ignores]
 "tests/**" = ["mutable-type", "loose-typing"]
