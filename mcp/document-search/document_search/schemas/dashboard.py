@@ -17,7 +17,8 @@ from document_search.clients.redis import ConnectionStats
 if TYPE_CHECKING:
     from document_search.services.indexing import PipelineSnapshot
 
-from document_search.schemas.base import StrictModel
+from cc_lib.schemas import StrictModel
+
 from document_search.schemas.chunking import FileType
 from document_search.schemas.indexing import FileProcessingError, IndexingResult
 from document_search.schemas.tracing import QueueDepthSample, StageTimingReport

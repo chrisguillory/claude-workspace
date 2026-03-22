@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from cc_lib.schemas import StrictModel
 from cc_lib.types import JsonDatetime
 
-from document_search.schemas.base import StrictModel
 from document_search.schemas.config import EmbeddingProvider
 
 __all__ = [

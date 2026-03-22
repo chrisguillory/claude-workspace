@@ -12,6 +12,7 @@ import httpx
 import tenacity
 
 from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
+from document_search.clients.openrouter_errors import OpenRouterAPIError
 
 __all__ = [
     'is_retryable_openrouter_error',
@@ -40,13 +41,21 @@ def is_retryable_openrouter_error(exc: BaseException) -> bool:
     Retries on:
     - httpx transport errors (timeout, network issues)
     - HTTP 429 (rate limit)
-    - HTTP 500/502/503 (server/provider errors)
+    - HTTP 500/502/503/504 (server/provider errors)
+    - OpenRouterAPIError with transient code (HTTP 200 with error body)
+
+    Does NOT retry:
+    - OpenRouterUnexpectedResponse (unknown format won't change on retry)
     """
     if is_retryable_httpx_error(exc):
         return True
 
     # HTTP status errors with transient codes
     if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in RETRYABLE_STATUS_CODES:
+        return True
+
+    # HTTP 200 with known error body — retry if transient code
+    if isinstance(exc, OpenRouterAPIError) and exc.code in RETRYABLE_STATUS_CODES:
         return True
 
     return False
@@ -74,10 +83,14 @@ def log_openrouter_retry(retry_state: tenacity.RetryCallState) -> None:
 
 
 def _is_429_error(exc: BaseException | None) -> bool:
-    """Check if exception is a 429 rate limit error."""
+    """Check if exception is a 429 rate limit error (HTTP or API body)."""
     if exc is None:
         return False
-    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+        return True
+    if isinstance(exc, OpenRouterAPIError) and exc.code == 429:
+        return True
+    return False
 
 
 def _openrouter_circuit_filter(thrown_type: type, thrown_value: BaseException) -> bool:
