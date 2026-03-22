@@ -63,9 +63,17 @@ class StrictModel(pydantic.BaseModel):
 class CamelModel(StrictModel):
     """Protocol model with automatic camelCase alias generation.
 
-    For Claude Code's JSON protocol, which uses camelCase keys
-    while Python convention is snake_case. Accepts both forms on input;
-    serializes to camelCase with None fields excluded by default.
+    For Claude Code's JSON protocol (``hookSpecificOutput``,
+    ``permissionDecision``) while Python uses snake_case
+    (``hook_specific_output``, ``permission_decision``).
+
+    Serialization defaults to camelCase with None fields excluded::
+
+        class Decision(CamelModel):
+            permission_decision: str = 'allow'
+
+        Decision().model_dump_json()
+        # → {"permissionDecision": "allow"}
     """
 
     model_config = pydantic.ConfigDict(
