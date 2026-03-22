@@ -10,7 +10,7 @@ database reconstruction in Selenium sessions.
 
 from __future__ import annotations
 
-import sys
+import logging
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
@@ -30,6 +30,8 @@ from dfindexeddb.indexeddb.chromium.record import (
     ObjectStoreDataKey,
     ObjectStoreMetaDataKey,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_domain_from_origin(origin: str) -> str:
@@ -239,10 +241,7 @@ def export_indexeddb_with_schema(
                 result[origin_url] = databases
         except Exception as e:
             # Log but continue with other origins
-            print(
-                f'[indexeddb] Warning: Failed to parse {origin_dir}: {e}',
-                file=sys.stderr,
-            )
+            logger.warning(f'Failed to parse {origin_dir}: {e}')
 
     return result
 

@@ -408,7 +408,7 @@ async def _capture_current_origin_storage(
             parts.append(f'{len(session_storage_items)} sessionStorage')
         if indexeddb_count > 0:
             parts.append(f'{indexeddb_count} IndexedDB databases')
-        print(f'[storage] Cached {" + ".join(parts)} for {current_origin}', file=sys.stderr)
+        logger.info(f'Cached {" + ".join(parts)} for {current_origin}')
 
 
 async def _restore_pending_profile_state_for_current_origin(
@@ -485,7 +485,7 @@ async def _restore_pending_profile_state_for_current_origin(
     service.state.restored_origins.add(current_origin)
 
     if indexeddb_count > 0:
-        print(f'[storage] Restored {indexeddb_count} IndexedDB databases for {current_origin}', file=sys.stderr)
+        logger.info(f'Restored {indexeddb_count} IndexedDB databases for {current_origin}')
 
 
 # =============================================================================
@@ -709,7 +709,7 @@ async def _install_response_body_capture_if_needed(
             {'source': RESPONSE_BODY_CAPTURE_SCRIPT},
         )
         service.state.response_body_capture_enabled = True
-        print(f'[{log_prefix}] Response body capture interceptor installed', file=sys.stderr)
+        logger.info('Response body capture interceptor installed')
 
 
 class OriginTracker:
@@ -781,9 +781,7 @@ class BrowserState:
         capture_temp_dir = tempfile.TemporaryDirectory()
         capture_dir = Path(capture_temp_dir.name)
 
-        print('[BrowserState] Temp directories initialized', file=sys.stderr)
-        print(f'  Screenshots: {screenshot_dir}', file=sys.stderr)
-        print(f'  Captures: {capture_dir}', file=sys.stderr)
+        logger.info(f'Temp directories initialized (screenshots: {screenshot_dir}, captures: {capture_dir})')
 
         return cls(
             driver=None,
@@ -891,7 +889,7 @@ class BrowserService:
                     f'Chromium not found at {chromium_path}. Install with: brew install --cask chromium'
                 )
             opts.binary_location = chromium_path
-            print(f'[browser] Using Chromium: {chromium_path}', file=sys.stderr)
+            logger.info(f'Using Chromium: {chromium_path}')
 
         opts.add_argument('--disable-blink-features=AutomationControlled')
         opts.add_argument('--window-size=1920,1080')
@@ -922,10 +920,7 @@ class BrowserService:
         if self.state.proxy_config and self.state.mitmproxy_process:
             opts.add_argument('--proxy-server=http://127.0.0.1:8080')
             opts.add_argument('--ignore-certificate-errors')  # mitmproxy uses self-signed certs
-            print(
-                f'[browser] Using local mitmproxy -> {self.state.proxy_config["host"]}:{self.state.proxy_config["port"]}',
-                file=sys.stderr,
-            )
+            logger.info(f'Using local mitmproxy -> {self.state.proxy_config["host"]}:{self.state.proxy_config["port"]}')
 
         # Initialize driver in thread pool (blocking operation)
         self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
@@ -1051,12 +1046,11 @@ def register_tools(service: BrowserService) -> None:
                 'init_scripts requires fresh_browser=True (scripts must be registered before first navigation)'
             )
 
-        print(
-            f'[navigate] Navigating to {url}'
+        logger.info(
+            f'Navigating to {url}'
             + (' (fresh browser)' if fresh_browser else '')
             + (' (HAR capture enabled)' if enable_har_capture else '')
             + (f' ({len(init_scripts)} init scripts)' if init_scripts else ''),
-            file=sys.stderr,
         )
 
         if fresh_browser:
@@ -1089,10 +1083,7 @@ def register_tools(service: BrowserService) -> None:
         final_url = driver.current_url
         service.state.origin_tracker.add_origin(final_url)
 
-        print(
-            f'[navigate] Successfully navigated to {final_url} (tracked origins: {len(service.state.origin_tracker)})',
-            file=sys.stderr,
-        )
+        logger.info(f'Successfully navigated to {final_url} (tracked origins: {len(service.state.origin_tracker)})')
 
         # Lazy restore: if navigate_with_profile_state() was called previously, restore
         # storage for current origin. This handles multi-origin sessions where the user
@@ -1198,22 +1189,18 @@ def register_tools(service: BrowserService) -> None:
 
         # Log what we're doing
         if has_chrome:
-            print(
-                f"[navigate_with_profile_state] Importing profile state from Chrome profile '{chrome_profile}' "
-                f'and navigating to {url}'
+            logger.info(
+                f"Importing profile state from Chrome profile '{chrome_profile}' and navigating to {url}"
                 + (f' (filtering: {origins_filter})' if origins_filter else '')
                 + (' (HAR capture enabled)' if enable_har_capture else '')
                 + (f' ({len(init_scripts)} init scripts)' if init_scripts else ''),
-                file=sys.stderr,
             )
         else:
-            print(
-                f'[navigate_with_profile_state] Loading profile state from {profile_state_file} '
-                f'and navigating to {url}'
+            logger.info(
+                f'Loading profile state from {profile_state_file} and navigating to {url}'
                 + (f' (filtering: {origins_filter})' if origins_filter else '')
                 + (' (HAR capture enabled)' if enable_har_capture else '')
                 + (f' ({len(init_scripts)} init scripts)' if init_scripts else ''),
-                file=sys.stderr,
             )
 
         # Load profile state from the appropriate source
@@ -1242,20 +1229,13 @@ def register_tools(service: BrowserService) -> None:
                 await asyncio.to_thread(_export_with_stdout_captured)
                 profile_state = await _load_profile_state_from_file(str(temp_file_path))
 
-            print(
-                f'[navigate_with_profile_state] Exported {len(profile_state.cookies)} cookies '
-                f"from Chrome profile '{chrome_profile}'",
-                file=sys.stderr,
-            )
+            logger.info(f"Exported {len(profile_state.cookies)} cookies from Chrome profile '{chrome_profile}'")
 
         elif profile_state_file:
             # Load from file directly
             profile_state = await _load_profile_state_from_file(profile_state_file)
 
-            print(
-                f'[navigate_with_profile_state] Loaded {len(profile_state.cookies)} cookies from {profile_state_file}',
-                file=sys.stderr,
-            )
+            logger.info(f'Loaded {len(profile_state.cookies)} cookies from {profile_state_file}')
 
         else:
             # This should not happen due to earlier validation
@@ -1295,10 +1275,8 @@ def register_tools(service: BrowserService) -> None:
                 origins=filtered_origins,
             )
 
-            print(
-                f'[navigate_with_profile_state] Filtered to {len(filtered_cookies)} cookies '
-                f'and {len(filtered_origins)} origins matching {origins_filter}',
-                file=sys.stderr,
+            logger.info(
+                f'Filtered to {len(filtered_cookies)} cookies and {len(filtered_origins)} origins matching {origins_filter}'
             )
 
         # Resolve browser before close_browser() clears current_browser
@@ -1325,10 +1303,8 @@ def register_tools(service: BrowserService) -> None:
                 len(origin_data.local_storage or {}) + len(origin_data.session_storage or {})
                 for origin_data in profile_state.origins.values()
             )
-            print(
-                f'[navigate_with_profile_state] Registered storage init script '
-                f'({storage_entry_count} entries across {len(profile_state.origins)} origins)',
-                file=sys.stderr,
+            logger.info(
+                f'Registered storage init script ({storage_entry_count} entries across {len(profile_state.origins)} origins)'
             )
 
         # Install user init scripts (after storage script, before navigation)
@@ -1349,10 +1325,7 @@ def register_tools(service: BrowserService) -> None:
         # Inject cookies via CDP BEFORE navigation
         cookies_injected = await _inject_cookies_via_cdp(driver, profile_state.cookies)
 
-        print(
-            f'[navigate_with_profile_state] Injected {cookies_injected} cookies via CDP',
-            file=sys.stderr,
-        )
+        logger.info(f'Injected {cookies_injected} cookies via CDP')
 
         # PRE-ACTION: Capture localStorage before navigating away
         await _capture_current_origin_storage(service, driver)
@@ -1364,11 +1337,7 @@ def register_tools(service: BrowserService) -> None:
         final_url = driver.current_url
         service.state.origin_tracker.add_origin(final_url)
 
-        print(
-            f'[navigate_with_profile_state] Successfully navigated to {final_url} '
-            f'(tracked origins: {len(service.state.origin_tracker)})',
-            file=sys.stderr,
-        )
+        logger.info(f'Successfully navigated to {final_url} (tracked origins: {len(service.state.origin_tracker)})')
 
         # Setup lazy restore for localStorage/sessionStorage/IndexedDB
         await _setup_pending_profile_state(service, profile_state)
@@ -2453,7 +2422,7 @@ def register_tools(service: BrowserService) -> None:
 
         # Log stability check results
         if stability_result.get('hasInfiniteAnimation'):
-            logger.info('Warning: Element has infinite animation - hover may be inconsistent')
+            logger.warning('Element has infinite animation - hover may be inconsistent')
 
         if not stability_result.get('stable'):
             if stability_result.get('runningAnimations', 0) > 0:
@@ -3512,7 +3481,7 @@ Workflow:
         try:
             raw_logs = await asyncio.to_thread(driver.get_log, 'browser')
         except WebDriverException as e:
-            logger.info(f'Failed to get console logs: {e}')
+            logger.error(f'Failed to get console logs: {e}')
             return ConsoleLogsResult(
                 logs=[],
                 total_count=0,
@@ -3847,12 +3816,12 @@ Workflow:
                 logger.info(f'JS execution successful: {result_type}')
             else:
                 error = result.get('error', 'Unknown error') if isinstance(result, dict) else 'Unknown error'
-                logger.info(f'JS execution failed: {error}')
+                logger.warning(f'JS execution failed: {error}')
 
             return JavaScriptResult(**result)
 
         except TimeoutError:
-            logger.info(f'JS execution timed out after {timeout_ms}ms')
+            logger.warning(f'JS execution timed out after {timeout_ms}ms')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -3860,7 +3829,7 @@ Workflow:
                 error_type='timeout',
             )
         except WebDriverException as e:
-            logger.info(f'JS execution WebDriver error: {e}')
+            logger.error(f'JS execution WebDriver error: {e}')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -3868,7 +3837,7 @@ Workflow:
                 error_type='execution',
             )
         except Exception as e:
-            logger.info(f'JS execution unexpected error: {e}')
+            logger.error(f'JS execution unexpected error: {e}')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -4205,7 +4174,7 @@ Workflow:
 
         if result.warnings:
             for warning in result.warnings:
-                logger.info(f'Warning: {warning}')
+                logger.warning(warning)
 
         return ChromeProfileStateExportResult(
             path=result.path,
@@ -4278,9 +4247,7 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    print('✓ Browser service initialized', file=sys.stderr)
-    print(f'  Screenshot directory: {state.screenshot_dir}', file=sys.stderr)
-    print(f'  Capture directory: {state.capture_dir}', file=sys.stderr)
+    logger.info(f'Browser service initialized (screenshots: {state.screenshot_dir}, captures: {state.capture_dir})')
 
     yield
 
@@ -4295,7 +4262,7 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
             state.mitmproxy_process.kill()
     state.temp_dir.cleanup()
     state.capture_temp_dir.cleanup()
-    print('✓ Server cleanup complete', file=sys.stderr)
+    logger.info('Server cleanup complete')
 
 
 mcp = FastMCP('selenium-browser-automation', lifespan=lifespan)
@@ -4303,11 +4270,7 @@ mcp = FastMCP('selenium-browser-automation', lifespan=lifespan)
 
 def main() -> None:
     """Entry point for uvx installation."""
-    print('Starting Selenium Browser Automation MCP server', file=sys.stderr)
-    print(
-        'Note: This server uses CDP stealth injection to bypass bot detection',
-        file=sys.stderr,
-    )
+    logger.info('Starting Selenium Browser Automation MCP server (CDP stealth injection for bot detection bypass)')
     mcp.run()
 
 
