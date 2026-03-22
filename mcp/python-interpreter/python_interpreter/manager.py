@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 __all__ = [
+    'ExternalInterpreterError',
     'ExternalInterpreterManager',
     'InterpreterConfig',
-    'ExternalInterpreterError',
 ]
 
 import contextlib
@@ -17,6 +17,7 @@ import os
 import pathlib
 import select
 import subprocess
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from python_interpreter.models import (
@@ -32,7 +33,7 @@ class InterpreterConfig:
     name: str
     python_path: pathlib.Path
     cwd: pathlib.Path | None = None
-    env: dict[str, str] | None = None
+    env: Mapping[str, str] | None = None
     startup_script: str | None = None
 
 
@@ -108,7 +109,7 @@ class ExternalInterpreterManager:
         _, proc, _ = self._interpreters.pop(name)
         self._kill_subprocess(proc)
 
-    def get_interpreters(self) -> list[tuple[str, InterpreterConfig, int, datetime.datetime]]:
+    def get_interpreters(self) -> Sequence[tuple[str, InterpreterConfig, int, datetime.datetime]]:
         """Get all running interpreters.
 
         Returns:
@@ -158,7 +159,12 @@ class ExternalInterpreterManager:
             self._kill_subprocess(proc)
         self._interpreters.clear()
 
-    def _send_request(self, proc: subprocess.Popen[str], request: dict[str, Any], timeout: float) -> dict[str, Any]:
+    def _send_request(
+        self,
+        proc: subprocess.Popen[str],
+        request: Mapping[str, Any],
+        timeout: float,
+    ) -> Mapping[str, Any]:
         """Send request and read response."""
         if not proc.stdin or not proc.stdout:
             raise ExternalInterpreterError('Subprocess stdin/stdout not available')
@@ -169,7 +175,7 @@ class ExternalInterpreterManager:
 
         return self._read_response(proc, timeout)
 
-    def _read_response(self, proc: subprocess.Popen[str], timeout: float) -> dict[str, Any]:
+    def _read_response(self, proc: subprocess.Popen[str], timeout: float) -> Mapping[str, Any]:
         """Read length-prefixed JSON response with timeout.
 
         Uses select.select to guard the initial readline() which blocks until

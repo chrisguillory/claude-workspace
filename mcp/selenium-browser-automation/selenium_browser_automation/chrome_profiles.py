@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import platform
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+
+from cc_lib.types import JsonObject
 
 from .models import (
     ChromeInfoCacheEntry,
@@ -80,7 +82,7 @@ def get_chrome_base_path() -> Path:
     return path
 
 
-def list_profile_directories(base_path: Path) -> list[str]:
+def list_profile_directories(base_path: Path) -> Sequence[str]:
     """Find all profile directories (Default, Profile 1, etc.).
 
     Args:
@@ -128,7 +130,9 @@ def load_local_state(base_path: Path) -> ChromeLocalState:
         raise MetadataParseError(f'Failed to validate Local State: {e}') from e
 
 
-def load_profile_preferences(profile_path: Path) -> dict[str, Any] | None:
+def load_profile_preferences(
+    profile_path: Path,
+) -> JsonObject | None:
     """Load and parse profile's Preferences JSON (may not exist).
 
     Args:
@@ -143,7 +147,7 @@ def load_profile_preferences(profile_path: Path) -> dict[str, Any] | None:
         return None
 
     with open(prefs_path) as f:
-        result: dict[str, Any] = json.load(f)
+        result: JsonObject = json.load(f)
         return result
 
 

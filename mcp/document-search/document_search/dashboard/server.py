@@ -437,7 +437,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         <div class="op-title">
                             <span class="status-badge status-${status}">${status}</span>
                             <span>${escapeHtml(op.collection_name)}</span>
-                            ${status !== 'running' ? `<button class="btn-delete" onclick="deleteOp('${op.operation_id}')" title="Delete">×</button>` : ''}
+                            ${status !== 'running' ? `<button class="btn-delete" onclick="deleteOp('${op.operation_id}')" title="Delete">&times;</button>` : ''}
                         </div>
                         ${!isComplete ? `<div class="op-meta" id="meta-${op.operation_id}">${formatOperationMeta(op)}</div>` : ''}
                     </div>

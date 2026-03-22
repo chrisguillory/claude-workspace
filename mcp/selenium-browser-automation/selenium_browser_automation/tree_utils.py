@@ -7,7 +7,8 @@ Extracted from server.py to enable unit testing and reuse.
 from __future__ import annotations
 
 import unicodedata
-from typing import Any
+
+from cc_lib.types import JsonObject
 
 __all__ = [
     'compact_aria_tree',
@@ -17,7 +18,7 @@ __all__ = [
 ]
 
 
-def compact_aria_tree(node: dict[str, Any] | None) -> dict[str, Any] | None:
+def compact_aria_tree(node: JsonObject | None) -> JsonObject | None:
     """Recursively compact tree by removing structural noise.
 
     Bottom-up recursion ensures children are compacted before parent decisions.
@@ -87,7 +88,7 @@ def compact_aria_tree(node: dict[str, Any] | None) -> dict[str, Any] | None:
     return result
 
 
-def compact_visual_tree(node: dict[str, Any]) -> dict[str, Any] | None:
+def compact_visual_tree(node: JsonObject) -> JsonObject | None:
     """Recursively compact visual tree by removing structural noise.
 
     Same compaction rules as compact_aria_tree but for visual tree format.
@@ -138,7 +139,7 @@ def compact_visual_tree(node: dict[str, Any]) -> dict[str, Any] | None:
     return result
 
 
-def serialize_aria_snapshot(node: dict[str, Any] | None, indent: int = 0) -> str:
+def serialize_aria_snapshot(node: JsonObject | None, indent: int = 0) -> str:
     """Custom serializer matching Playwright's ARIA snapshot YAML format."""
     if node is None:
         return ''
@@ -235,7 +236,7 @@ def serialize_aria_snapshot(node: dict[str, Any] | None, indent: int = 0) -> str
     return '\n'.join(lines)
 
 
-def serialize_visual_tree(node: dict[str, Any] | None, indent: int = 0) -> str:
+def serialize_visual_tree(node: JsonObject | None, indent: int = 0) -> str:
     """Serialize visual tree to YAML format (same structure as ARIA snapshot)."""
     if node is None:
         return ''

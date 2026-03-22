@@ -382,7 +382,7 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
                 f'mget={(t_mget - t_keys) * 1000:.1f}ms '
                 f'deser={(t_deser - t_mget) * 1000:.1f}ms '
                 f'total={(t_end - t0) * 1000:.1f}ms '
-                f'tasks={task_count}'
+                f'tasks={task_count}',
             )
 
         return results  # type: ignore[return-value]  # list[EmbedResponse | None] but all None slots filled after miss resolution

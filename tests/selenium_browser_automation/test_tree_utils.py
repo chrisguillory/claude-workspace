@@ -7,6 +7,8 @@ and the interaction between compaction rules.
 
 from __future__ import annotations
 
+import copy
+
 from selenium_browser_automation.tree_utils import (
     compact_aria_tree,
     compact_visual_tree,
@@ -93,9 +95,9 @@ class TestCompactAriaTreeRule2SingleChildCollapse:
                         {
                             'role': 'generic',
                             'children': [{'role': 'button', 'name': 'Deep'}],
-                        }
+                        },
                     ],
-                }
+                },
             ],
         }
         result = compact_aria_tree(node)
@@ -215,8 +217,6 @@ class TestCompactAriaTreeDoesNotMutate:
                 {'role': 'button', 'name': 'Keep'},
             ],
         }
-        import copy
-
         frozen = copy.deepcopy(original)
         compact_aria_tree(original)
         assert original == frozen
@@ -377,7 +377,7 @@ class TestSerializeAriaSnapshot:
                     'children': [
                         {'role': 'listitem', 'name': 'Home'},
                     ],
-                }
+                },
             ],
         }
         output = serialize_aria_snapshot(node)

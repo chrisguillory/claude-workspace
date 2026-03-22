@@ -173,7 +173,7 @@ def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
 def run_linter(test_file: Path, linter: Path) -> str:
     """Run the linter and return combined stdout+stderr."""
     result = subprocess.run(
-        [sys.executable, str(linter), '--no-skip-file', str(test_file)],
+        [sys.executable, str(linter), '--no-skip-file', '--no-config', str(test_file)],
         capture_output=True,
         text=True,
         timeout=60,
@@ -249,7 +249,7 @@ def validate(
         actual_rules = actual.get(func, set())
         if actual_rules != expected_rules:
             errors.append(
-                f'{func}: expected {sorted(expected_rules)}, got {sorted(actual_rules) if actual_rules else "nothing"}'
+                f'{func}: expected {sorted(expected_rules)}, got {sorted(actual_rules) if actual_rules else "nothing"}',
             )
 
     # Check for unexpected violations in correct/suppressed functions

@@ -53,7 +53,7 @@ class InterpreterRegistryManager:
                 InterpreterRegistry(
                     discover_jetbrains=registry.discover_jetbrains,
                     interpreters=new_interpreters,
-                )
+                ),
             )
 
     def remove_interpreter(self, name: str) -> bool:
@@ -67,7 +67,7 @@ class InterpreterRegistryManager:
                 InterpreterRegistry(
                     discover_jetbrains=registry.discover_jetbrains,
                     interpreters=new_interpreters,
-                )
+                ),
             )
             return True
 

@@ -155,7 +155,7 @@ def handle_hook() -> None:
             hook_specific_output=PreToolUseDecision(
                 permission_decision='allow',
                 permission_decision_reason=f'all {len(subcommands)} subcommands match allowed Bash prefixes',
-            )
+            ),
         )
         print(output.model_dump_json())
 

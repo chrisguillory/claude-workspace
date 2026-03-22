@@ -184,9 +184,11 @@ class ErrorBoundary:
         self._exit_code = exit_code
 
     def handler(
-        self, exc_type: type[Exception]
+        self,
+        exc_type: type[Exception],
     ) -> Callable[  # strict_typing_linter.py: loose-typing — generic decorator factory, return type must accept arbitrary callables
-        [Callable[..., Any]], Callable[..., Any]
+        [Callable[..., Any]],
+        Callable[..., Any],
     ]:
         """Register a handler for a specific exception type.
 

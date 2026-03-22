@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from cc_lib.types import JsonObject
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
@@ -32,7 +33,7 @@ def execute_scroll(
     behavior: Literal['instant', 'smooth'] = 'instant',
     position: Literal['top', 'bottom', 'left', 'right'] | None = None,
     _find_timeout: int = 10,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Execute a scroll operation synchronously.
 
     Five modes:
@@ -50,7 +51,7 @@ def execute_scroll(
         raise ValueError(
             "Cannot specify both 'position' and 'direction'.\n"
             "Use position='top'/'bottom'/'left'/'right' to scroll to an edge, "
-            "or direction='up'/'down'/'left'/'right' to scroll by an amount."
+            "or direction='up'/'down'/'left'/'right' to scroll by an amount.",
         )
 
     if direction is None and css_selector is None and position is None:
@@ -58,7 +59,7 @@ def execute_scroll(
             'Either direction, css_selector, or position must be provided.\n'
             "Use direction='down' for viewport scrolling, "
             "css_selector='#element' to scroll into view, "
-            "or position='bottom' to jump to an edge."
+            "or position='bottom' to jump to an edge.",
         )
 
     if direction is not None and (scroll_amount < 1 or scroll_amount > 20):
@@ -68,7 +69,11 @@ def execute_scroll(
 
     if position is not None:
         return _scroll_to_position(
-            driver, position=position, css_selector=css_selector, behavior=behavior, timeout=_find_timeout
+            driver,
+            position=position,
+            css_selector=css_selector,
+            behavior=behavior,
+            timeout=_find_timeout,
         )
 
     # ── Mode 3: Scroll element into view (css_selector only, no direction) ──
@@ -84,7 +89,7 @@ def execute_scroll(
         'left': (-PIXELS_PER_TICK * scroll_amount, 0),
         'right': (PIXELS_PER_TICK * scroll_amount, 0),
     }
-    delta_x, delta_y = delta_map[direction]  # type: ignore[index]
+    delta_x, delta_y = delta_map[direction]  # type: ignore[index]  # direction is validated by caller but mypy sees str | None
 
     if css_selector is not None:
         return _scroll_container(
@@ -118,7 +123,7 @@ def _find_element(driver: webdriver.Chrome, css_selector: str, context: str, *, 
         )
     except TimeoutException:
         raise ValueError(
-            f"Failed to find {context} '{css_selector}'.\nUse get_aria_snapshot('body') to discover valid selectors."
+            f"Failed to find {context} '{css_selector}'.\nUse get_aria_snapshot('body') to discover valid selectors.",
         ) from None
 
 
@@ -129,7 +134,7 @@ def _scroll_to_position(
     css_selector: str | None,
     behavior: str,
     timeout: int = 10,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Mode 4/5: Absolute position scroll (scrollTo)."""
     pos_map_viewport = {
         'top': 'top: 0, left: 0',
@@ -283,7 +288,7 @@ def _scroll_into_view(
     css_selector: str,
     behavior: str,
     timeout: int = 10,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Mode 3: Scroll element into view."""
     element = _find_element(driver, css_selector, 'element', timeout=timeout)
 
@@ -366,7 +371,7 @@ def _scroll_container(
     delta_y: int,
     behavior: str,
     timeout: int = 10,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Mode 2: Container scroll (direction + css_selector)."""
     element = _find_element(driver, css_selector, 'scrollable container', timeout=timeout)
 
@@ -445,7 +450,7 @@ def _scroll_viewport(
     delta_x: int,
     delta_y: int,
     behavior: str,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Mode 1: Viewport scroll (direction only)."""
     if behavior == 'smooth':
         result = driver.execute_script(

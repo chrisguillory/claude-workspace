@@ -9,17 +9,17 @@ from collections.abc import Mapping
 import pydantic
 
 __all__ = [
-    'StrictModel',
-    'InterpreterInfo',
-    'InterpreterState',
-    'InterpreterSource',
-    'SavedInterpreterConfig',
-    'InterpreterRegistry',
-    'JetBrainsSDKEntry',
-    'JetBrainsRunConfig',
-    'ExecuteRequest',
     'DriverExecuteResponse',
     'DriverReadyResponse',
+    'ExecuteRequest',
+    'InterpreterInfo',
+    'InterpreterRegistry',
+    'InterpreterSource',
+    'InterpreterState',
+    'JetBrainsRunConfig',
+    'JetBrainsSDKEntry',
+    'SavedInterpreterConfig',
+    'StrictModel',
 ]
 
 type InterpreterState = typing.Literal['running', 'stopped']
@@ -65,7 +65,7 @@ class SavedInterpreterConfig(StrictModel, frozen=False):
 
     python_path: str
     cwd: str | None
-    env: dict[str, str] | None
+    env: Mapping[str, str] | None
     startup_script: str | None
     description: str | None
 

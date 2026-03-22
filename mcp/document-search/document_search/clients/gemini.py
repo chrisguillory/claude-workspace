@@ -184,7 +184,8 @@ class GeminiClient:
                 model=self._model,
                 contents=list(texts),
                 config=EmbedContentConfig(
-                    task_type=gemini_task_type, output_dimensionality=self._output_dimensionality
+                    task_type=gemini_task_type,
+                    output_dimensionality=self._output_dimensionality,
                 ),
             )
             return [list(e.values) for e in result.embeddings]
@@ -225,7 +226,7 @@ class GeminiClient:
         """
         if self._model not in self.EMBEDDING_TO_TOKENIZER:
             raise ValueError(
-                f"No verified tokenizer for '{self._model}'. Supported: {list(self.EMBEDDING_TO_TOKENIZER.keys())}"
+                f"No verified tokenizer for '{self._model}'. Supported: {list(self.EMBEDDING_TO_TOKENIZER.keys())}",
             )
 
         tokenizer = tokenization.get_tokenizer_for_model(self.EMBEDDING_TO_TOKENIZER[self._model])

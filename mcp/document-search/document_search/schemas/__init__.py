@@ -42,7 +42,7 @@ from document_search.schemas.vectors import (
     VectorPoint,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022 — grouped by schema module, not alphabetical
     # Base
     'StrictModel',
     # Config

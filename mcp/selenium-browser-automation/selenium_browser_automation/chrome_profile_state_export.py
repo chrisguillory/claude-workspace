@@ -286,13 +286,14 @@ def _get_chrome_encryption_key() -> bytes:
             '-s',
             'Chrome Safe Storage',
         ],
+        check=False,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         raise RuntimeError(
             f'Failed to retrieve Chrome Safe Storage from Keychain: {result.stderr}\n'
-            "First run may require clicking 'Always Allow' when prompted."
+            "First run may require clicking 'Always Allow' when prompted.",
         )
     return result.stdout.strip().encode('utf-8')
 
@@ -483,7 +484,7 @@ def export_cookies(
                     http_only=bool(httponly),
                     secure=bool(secure),
                     same_site=_SAMESITE_MAP.get(samesite, 'Lax'),
-                )
+                ),
             )
     finally:
         conn.close()
@@ -700,7 +701,7 @@ def export_session_storage(
             '  2. Go to: View > Developer > Allow JavaScript from Apple Events\n'
             '  3. Check the box\n'
             '  4. RESTART Chrome (required for setting to take effect)\n\n'
-            'Or set live_session_storage_via_applescript=False to use disk-based extraction (may be stale).'
+            'Or set live_session_storage_via_applescript=False to use disk-based extraction (may be stale).',
         )
 
     # Other AppleScript failure
@@ -783,7 +784,7 @@ def export_chrome_profile_state(
             warnings.append(ss_result.warning)
 
     # Export IndexedDB with full schema (optional, default off - can be huge)
-    indexeddb: dict[str, list[dict[str, Any]]] = {}
+    indexeddb: Mapping[str, Sequence[Mapping[str, Any]]] = {}
     if include_indexeddb:
         indexeddb = export_indexeddb_with_schema(profile_path, filter_list)
 
@@ -828,14 +829,14 @@ def export_chrome_profile_state(
                             auto_increment=store_dict['auto_increment'],
                             indexes=indexes,
                             records=records,
-                        )
+                        ),
                     )
                 idb_models.append(
                     ProfileStateIndexedDB(
                         database_name=db_dict['database_name'],
                         version=db_dict['version'],
                         object_stores=object_stores,
-                    )
+                    ),
                 )
 
         origins_data[origin] = ProfileStateOriginStorage(

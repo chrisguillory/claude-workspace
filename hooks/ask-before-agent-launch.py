@@ -35,7 +35,7 @@ def ask_stdlib(reason: str) -> None:
                 'hookEventName': 'PreToolUse',
                 'permissionDecision': 'ask',
                 'permissionDecisionReason': reason,
-            }
+            },
         },
         sys.stdout,
     )
@@ -61,7 +61,7 @@ def ask(reason: str) -> None:
         hook_specific_output=PreToolUseDecision(
             permission_decision='ask',
             permission_decision_reason=reason,
-        )
+        ),
     )
     print(output.model_dump_json())
     sys.exit(0)
