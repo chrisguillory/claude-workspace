@@ -197,7 +197,9 @@ async def _close_browser() -> None:
 
 
 async def get_browser() -> tuple[
-    playwright.async_api.Browser, playwright.async_api.BrowserContext, playwright.async_api.Page
+    playwright.async_api.Browser,
+    playwright.async_api.BrowserContext,
+    playwright.async_api.Page,
 ]:
     """Initialize and return browser session (lazy singleton pattern)."""
     global _playwright, _browser, _context, _page
@@ -234,7 +236,7 @@ async def get_browser() -> tuple[
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=True,
-    )
+    ),
 )
 async def navigate(
     url: str,
@@ -269,7 +271,7 @@ async def navigate(
     logger.info(
         f'Navigating to {url}'
         + (' with resource capture' if capture_resources else '')
-        + (' (fresh browser)' if fresh_browser else '')
+        + (' (fresh browser)' if fresh_browser else ''),
     )
 
     if fresh_browser:
@@ -476,7 +478,7 @@ async def download_resource(url: str, output_filename: str) -> JsonObject:
 
     if page is None:
         raise fastmcp.exceptions.ToolError(
-            'Browser not initialized. Call navigate() first to establish browser session.'
+            'Browser not initialized. Call navigate() first to establish browser session.',
         )
 
     logger.info(f'Downloading: {url}')

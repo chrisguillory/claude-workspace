@@ -568,7 +568,7 @@ def read_claude_config() -> tuple[dict[str, Any], Sequence[ValidationWarning]]:
                 section='config',
                 message=f'New top-level keys in ~/.claude.json ({len(new_keys)})',
                 details=', '.join(sorted(new_keys)),
-            )
+            ),
         )
 
     removed_keys = KNOWN_TOP_LEVEL_KEYS - actual_keys
@@ -578,7 +578,7 @@ def read_claude_config() -> tuple[dict[str, Any], Sequence[ValidationWarning]]:
                 section='config',
                 message=f'Missing top-level keys from ~/.claude.json ({len(removed_keys)})',
                 details=', '.join(sorted(removed_keys)),
-            )
+            ),
         )
 
     return raw, warnings
@@ -1050,7 +1050,7 @@ def render_identity(
             fmt_row(
                 'Extra Usage',
                 f'{C.GREEN}Enabled{C.RESET}' if account.hasExtraUsageEnabled else f'{C.DIM}Disabled{C.RESET}',
-            )
+            ),
         )
 
         if account.subscriptionCreatedAt:
@@ -1087,7 +1087,7 @@ def render_identity(
             fmt_row(
                 'Token Expires',
                 f'{expiry_color}{expires_dt:%Y-%m-%d %H:%M:%S UTC}{C.RESET} ({fmt_relative_future(expires_dt)})',
-            )
+            ),
         )
 
         if redact:
@@ -1588,8 +1588,9 @@ def render_effective_model(config: dict[str, Any], keychain: KeychainCredentials
 
     print(
         fmt_row(
-            'Opus plan default', f'{C.GREEN}Yes{C.RESET}' if config.get('hasOpusPlanDefault') else f'{C.DIM}No{C.RESET}'
-        )
+            'Opus plan default',
+            f'{C.GREEN}Yes{C.RESET}' if config.get('hasOpusPlanDefault') else f'{C.DIM}No{C.RESET}',
+        ),
     )
 
     # Subagent model

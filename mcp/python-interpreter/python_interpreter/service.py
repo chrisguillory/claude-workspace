@@ -227,7 +227,7 @@ class PythonInterpreterService:
                     if run_match.python_path is None:
                         raise ValueError(
                             f"JetBrains config '{name}' has unresolved SDK. "
-                            f'Register it with an explicit python_path via register_interpreter.'
+                            f'Register it with an explicit python_path via register_interpreter.',
                         )
                     startup_script = _build_jetbrains_startup_script(run_match)
                     config = InterpreterConfig(
@@ -251,7 +251,7 @@ class PythonInterpreterService:
                         raise ValueError(
                             f"Interpreter '{name}' not found. "
                             f'Use register_interpreter to create one, '
-                            f'or list_interpreters to see available options.'
+                            f'or list_interpreters to see available options.',
                         )
 
         logger.info(f"Auto-starting '{name}' ({source}, {config.python_path})")
@@ -429,7 +429,7 @@ class PythonInterpreterService:
                     pid=pid,
                     started_at=started_at,
                     uptime=humanize_seconds(uptime_seconds),
-                )
+                ),
             )
 
         # Saved-but-stopped interpreters
@@ -448,7 +448,7 @@ class PythonInterpreterService:
                     pid=None,
                     started_at=None,
                     uptime=None,
-                )
+                ),
             )
 
         # JetBrains discovered SDK entries
@@ -469,7 +469,7 @@ class PythonInterpreterService:
                     pid=None,
                     started_at=None,
                     uptime=None,
-                )
+                ),
             )
 
         # JetBrains discovered run configs (console only)
@@ -489,7 +489,7 @@ class PythonInterpreterService:
                     pid=None,
                     started_at=None,
                     uptime=None,
-                )
+                ),
             )
 
         return result

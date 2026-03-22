@@ -160,7 +160,10 @@ class ExternalInterpreterManager:
         self._interpreters.clear()
 
     def _send_request(
-        self, proc: subprocess.Popen[str], request: Mapping[str, Any], timeout: float
+        self,
+        proc: subprocess.Popen[str],
+        request: Mapping[str, Any],
+        timeout: float,
     ) -> Mapping[str, Any]:
         """Send request and read response."""
         if not proc.stdin or not proc.stdout:

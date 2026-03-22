@@ -773,7 +773,7 @@ def cmd_save_login(force: bool, inject_mcp: bool) -> None:
                 'scopes': oauth_raw.get('scopes', []),
                 'subscription_type': oauth_raw.get('subscriptionType'),
                 'rate_limit_tier': oauth_raw.get('rateLimitTier'),
-            }
+            },
         )
 
     # Capture API key for Console accounts
@@ -1096,7 +1096,7 @@ def cmd_save_mcp_login(server_query: str) -> None:
             'refresh_token': entry_raw['refreshToken'],
             'scope': entry_raw['scope'],
             'keychain_key': kc_key,
-        }
+        },
     )
 
     # Load, update, save
@@ -1336,7 +1336,7 @@ def cli_switch_login(
             console.print(rich.panel.Panel('\n'.join(lines), border_style='red', title='Error', title_align='left'))
         else:
             console.print(
-                rich.panel.Panel(f'{msg} No saved logins.', border_style='red', title='Error', title_align='left')
+                rich.panel.Panel(f'{msg} No saved logins.', border_style='red', title='Error', title_align='left'),
             )
         raise SystemExit(1)
     cmd_switch_login(login_id, use_keychain, restart, model)

@@ -65,7 +65,7 @@ def log_qdrant_retry(retry_state: tenacity.RetryCallState) -> None:
         source_info = f' (source: {type(exc.source).__name__}: {exc.source})'
 
     logger.warning(
-        f'[RETRY] Qdrant upsert attempt {retry_state.attempt_number} failed: {exc_name}: {exc_msg}{source_info}'
+        f'[RETRY] Qdrant upsert attempt {retry_state.attempt_number} failed: {exc_name}: {exc_msg}{source_info}',
     )
 
 

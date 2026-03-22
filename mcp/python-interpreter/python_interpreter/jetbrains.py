@@ -158,7 +158,7 @@ def _parse_jdk_table(jdk_table_path: pathlib.Path) -> Sequence[JetBrainsSDKEntry
                 version=version,
                 flavor=flavor,
                 associated_project=associated_project,
-            )
+            ),
         )
 
     return entries

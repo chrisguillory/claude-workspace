@@ -309,7 +309,7 @@ def validate(
         if actual_kinds != expected_kinds:
             errors.append(
                 f'{class_name}: expected {sorted(expected_kinds)}, '
-                f'got {sorted(actual_kinds) if actual_kinds else "nothing"}'
+                f'got {sorted(actual_kinds) if actual_kinds else "nothing"}',
             )
 
     # Check for unexpected violations in correct/suppressed classes

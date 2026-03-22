@@ -74,7 +74,7 @@ def throw_converter() -> Iterator[str]:
             yield 'waiting'
         except RuntimeError:
             raise ValueError(
-                'converted from RuntimeError'
+                'converted from RuntimeError',
             )  # exception_safety_linter.py: raise-without-from — simulates real library implicit chaining
 
 
@@ -174,7 +174,7 @@ async def async_throw_converter() -> AsyncIterator[str]:
             yield 'waiting'
         except RuntimeError:
             raise ValueError(
-                'async converted from RuntimeError'
+                'async converted from RuntimeError',
             )  # exception_safety_linter.py: raise-without-from — simulates real library implicit chaining
 
 

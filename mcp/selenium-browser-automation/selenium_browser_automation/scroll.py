@@ -51,7 +51,7 @@ def execute_scroll(
         raise ValueError(
             "Cannot specify both 'position' and 'direction'.\n"
             "Use position='top'/'bottom'/'left'/'right' to scroll to an edge, "
-            "or direction='up'/'down'/'left'/'right' to scroll by an amount."
+            "or direction='up'/'down'/'left'/'right' to scroll by an amount.",
         )
 
     if direction is None and css_selector is None and position is None:
@@ -59,7 +59,7 @@ def execute_scroll(
             'Either direction, css_selector, or position must be provided.\n'
             "Use direction='down' for viewport scrolling, "
             "css_selector='#element' to scroll into view, "
-            "or position='bottom' to jump to an edge."
+            "or position='bottom' to jump to an edge.",
         )
 
     if direction is not None and (scroll_amount < 1 or scroll_amount > 20):
@@ -69,7 +69,11 @@ def execute_scroll(
 
     if position is not None:
         return _scroll_to_position(
-            driver, position=position, css_selector=css_selector, behavior=behavior, timeout=_find_timeout
+            driver,
+            position=position,
+            css_selector=css_selector,
+            behavior=behavior,
+            timeout=_find_timeout,
         )
 
     # ── Mode 3: Scroll element into view (css_selector only, no direction) ──
@@ -119,7 +123,7 @@ def _find_element(driver: webdriver.Chrome, css_selector: str, context: str, *, 
         )
     except TimeoutException:
         raise ValueError(
-            f"Failed to find {context} '{css_selector}'.\nUse get_aria_snapshot('body') to discover valid selectors."
+            f"Failed to find {context} '{css_selector}'.\nUse get_aria_snapshot('body') to discover valid selectors.",
         ) from None
 
 

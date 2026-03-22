@@ -41,7 +41,7 @@ class AppleScriptTabTimeoutError(Exception):
         self.url = url
         super().__init__(
             f'AppleScript timed out on window {window}, tab {tab} ({url}). '
-            f'Tab may be suspended/background. Try switching to this tab in Chrome first.'
+            f'Tab may be suspended/background. Try switching to this tab in Chrome first.',
         )
 
 
@@ -171,7 +171,7 @@ def extract_live_session_storage(
             'Options:\n'
             '  1. Use browser="chromium" for Selenium to avoid conflicts\n'
             '  2. Close the Selenium browser before extracting from personal Chrome\n'
-            '  3. Set live_session_storage_via_applescript=False to skip live extraction (uses disk, may be stale)'
+            '  3. Set live_session_storage_via_applescript=False to skip live extraction (uses disk, may be stale)',
         )
 
     # Test if JavaScript execution is enabled

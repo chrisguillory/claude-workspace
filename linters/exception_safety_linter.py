@@ -432,7 +432,7 @@ def check_file(
                     column=0,
                     kind='unused-directive',
                     source_line=source_lines[skip_line - 1].strip(),
-                )
+                ),
             ]
         return []
 
@@ -707,7 +707,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
                 column=getattr(node, 'col_offset', 0),
                 kind=kind,
                 source_line=self._get_source_line(lineno),
-            )
+            ),
         )
 
     def _is_broad_exception_type(self, node: ast.expr) -> bool:
@@ -835,7 +835,8 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         for keyword in node.keywords:
             if keyword.arg == 'exc_info':
                 if (isinstance(keyword.value, ast.Constant) and keyword.value.value) or not isinstance(
-                    keyword.value, ast.Constant
+                    keyword.value,
+                    ast.Constant,
                 ):
                     has_exc_info = True
 
@@ -1003,7 +1004,7 @@ def find_unused_directives(
                         source_line=source_lines[directive.line - 1].strip()
                         if directive.line <= len(source_lines)
                         else '',
-                    )
+                    ),
                 )
                 break  # One unused code per directive is enough
 

@@ -291,7 +291,10 @@ class IndexingService:
         points = [
             VectorPoint.from_chunk(chunk, dense_emb, sparse_indices, sparse_values, chunk_id)
             for chunk, dense_emb, (sparse_indices, sparse_values), chunk_id in zip(
-                chunks, dense, sparse_results, chunk_ids
+                chunks,
+                dense,
+                sparse_results,
+                chunk_ids,
             )
         ]
 
@@ -468,7 +471,7 @@ class IndexingService:
         files_cached_count = sum(cached_by_type.values())
         logger.info(
             f'[PIPELINE] Scan complete in {timer.elapsed():.1f}s: '
-            f'{len(files_to_index)} to index, {files_cached_count} cached'
+            f'{len(files_to_index)} to index, {files_cached_count} cached',
         )
 
         if stop_after == 'scan':
@@ -539,7 +542,7 @@ class IndexingService:
         logger.debug(
             f'[PIPELINE] Starting workers: {NUM_CHUNK_WORKERS} chunk, '
             f'{NUM_EMBED_WORKERS} embed, {NUM_UPSERT_WORKERS} upsert '
-            f'for {len(files_to_index)} files'
+            f'for {len(files_to_index)} files',
         )
 
         # Disable HNSW indexing during bulk upsert to free CPU for embedding workers.
@@ -554,7 +557,7 @@ class IndexingService:
         counters = self._operation.counters
         chunk_tasks = [
             asyncio.create_task(
-                self._pipeline_chunk_worker(file_queue, embed_queue, results, results_lock, counters, tracer)
+                self._pipeline_chunk_worker(file_queue, embed_queue, results, results_lock, counters, tracer),
             )
             for _ in range(min(NUM_CHUNK_WORKERS, len(files_to_index)))
         ]
@@ -573,14 +576,14 @@ class IndexingService:
             if stop_after == 'embed':
                 upsert_tasks = [
                     asyncio.create_task(
-                        self._drain_worker(upsert_queue, counters, 'chunks_stored', results, results_lock)
+                        self._drain_worker(upsert_queue, counters, 'chunks_stored', results, results_lock),
                     )
                     for _ in range(NUM_UPSERT_WORKERS)
                 ]
             else:
                 upsert_tasks = [
                     asyncio.create_task(
-                        self._pipeline_upsert_worker(upsert_queue, results, results_lock, counters, tracer)
+                        self._pipeline_upsert_worker(upsert_queue, results, results_lock, counters, tracer),
                     )
                     for _ in range(NUM_UPSERT_WORKERS)
                 ]
@@ -687,7 +690,7 @@ class IndexingService:
             await self._repo.delete(orphan_chunk_ids)
             chunks_deleted += len(orphan_chunk_ids)
             logger.debug(
-                f'[SWEEP] Deleted {len(orphan_chunk_ids)} orphan chunks from {len(orphan_paths)} removed files'
+                f'[SWEEP] Deleted {len(orphan_chunk_ids)} orphan chunks from {len(orphan_paths)} removed files',
             )
         for p in orphan_paths:
             await self._state_store.delete_file_state(p)
@@ -810,7 +813,8 @@ class IndexingService:
         file_queue: asyncio.Queue[Path],
         embed_queue: asyncio.Queue[_ChunkedFile],
         results: dict[
-            str, int | FileProcessingError
+            str,
+            int | FileProcessingError,
         ],  # strict_typing_linter.py: mutable-type — shared across pipeline workers, guarded by results_lock
         results_lock: asyncio.Lock,
         counters: PipelineCounters,
@@ -831,7 +835,7 @@ class IndexingService:
                     await asyncio.wait_for(
                         self._chunking.chunk_file(file_path),
                         timeout=FILE_CHUNK_TIMEOUT_SECONDS,
-                    )
+                    ),
                 )
 
                 file_hash = self._cached_hashes.pop(file_key, None) or _file_hash(file_path)
@@ -865,7 +869,7 @@ class IndexingService:
                                 all_chunk_texts=[],
                                 deleted_chunk_ids=deleted_ids,
                                 chunks_skipped=0,
-                            )
+                            ),
                         )
                         counters.files_chunked += 1
                     else:
@@ -932,14 +936,14 @@ class IndexingService:
                             all_chunk_texts=[c.text for c in chunks],
                             deleted_chunk_ids=deleted_ids,
                             chunks_skipped=chunks_skipped,
-                        )
+                        ),
                     )
                     counters.chunks_ingested += len(changed_chunks)
                     counters.chunks_skipped += chunks_skipped
                     counters.files_chunked += 1
                     logger.debug(
                         f'[CHUNK] {file_path.name}: {len(changed_chunks)} changed, '
-                        f'{chunks_skipped} skipped, {len(deleted_ids)} deleted'
+                        f'{chunks_skipped} skipped, {len(deleted_ids)} deleted',
                     )
 
             except (TimeoutError, OSError, UnicodeDecodeError) as e:
@@ -997,7 +1001,7 @@ class IndexingService:
             batch_size = len(accumulated_files)
             flush_t0 = time.perf_counter()
             logger.debug(
-                f'[EMBED-FLUSH] {batch_size} files, {len(accumulated_texts)} texts, t={flush_t0 - tracer.start_time:.3f}s'
+                f'[EMBED-FLUSH] {batch_size} files, {len(accumulated_texts)} texts, t={flush_t0 - tracer.start_time:.3f}s',
             )
 
             # Record batch start for all files in batch
@@ -1024,7 +1028,7 @@ class IndexingService:
                 parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
                 logger.debug(
                     f'[EMBED-SPARSE] {len(accumulated_texts)} texts in {wall_secs:.3f}s wall, '
-                    f'{cpu_secs:.3f}s cpu ({parallel:.1f}x), t={time.perf_counter() - tracer.start_time:.3f}s'
+                    f'{cpu_secs:.3f}s cpu ({parallel:.1f}x), t={time.perf_counter() - tracer.start_time:.3f}s',
                 )
                 return results, cpu_secs
 
@@ -1038,7 +1042,7 @@ class IndexingService:
 
                 logger.debug(
                     f'[EMBED-DENSE] {len(accumulated_texts)} texts done in {elapsed:.3f}s, '
-                    f't={time.perf_counter() - tracer.start_time:.3f}s'
+                    f't={time.perf_counter() - tracer.start_time:.3f}s',
                 )
                 return results
 
@@ -1150,14 +1154,14 @@ class IndexingService:
                     get_elapsed = time.perf_counter() - get_t0
                     if get_elapsed > 0.1:  # log slow gets (>100ms)
                         logger.debug(
-                            f'[EMBED-W{_worker_id}] get() took {get_elapsed:.3f}s, accum={len(accumulated_texts)} texts'
+                            f'[EMBED-W{_worker_id}] get() took {get_elapsed:.3f}s, accum={len(accumulated_texts)} texts',
                         )
                 except TimeoutError:
                     # No items available, flush what we have
                     if accumulated_texts:
                         logger.debug(
                             f'[EMBED-W{_worker_id}] timeout flush: {len(accumulated_texts)} texts, '
-                            f'{len(accumulated_files)} files, t={time.perf_counter() - tracer.start_time:.3f}s'
+                            f'{len(accumulated_files)} files, t={time.perf_counter() - tracer.start_time:.3f}s',
                         )
                     await flush_batch()
                     continue
@@ -1218,7 +1222,8 @@ class IndexingService:
         self,
         upsert_queue: asyncio.Queue[_EmbeddedFile],
         results: dict[
-            str, int | FileProcessingError
+            str,
+            int | FileProcessingError,
         ],  # strict_typing_linter.py: mutable-type — shared across pipeline workers, guarded by results_lock
         results_lock: asyncio.Lock,
         counters: PipelineCounters,
@@ -1285,7 +1290,8 @@ class IndexingService:
         counters: PipelineCounters,
         counter_attr: str,
         results: dict[
-            str, int | FileProcessingError
+            str,
+            int | FileProcessingError,
         ],  # strict_typing_linter.py: mutable-type — shared across pipeline workers, guarded by results_lock
         results_lock: asyncio.Lock,
     ) -> None:

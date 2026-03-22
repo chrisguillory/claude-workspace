@@ -213,7 +213,7 @@ def _build_page_metadata(
         if img_total > 0:
             lines.append(
                 f'# images: {img_total} '
-                f'(with_alt: {images.get("withAlt", 0)}, without_alt: {images.get("withoutAlt", 0)})'
+                f'(with_alt: {images.get("withAlt", 0)}, without_alt: {images.get("withoutAlt", 0)})',
             )
 
         link_count = page_stats.get('links', 0)
@@ -885,12 +885,12 @@ class BrowserService:
         if browser == 'chromium':
             if sys.platform != 'darwin':
                 raise fastmcp.exceptions.ToolError(
-                    f'browser="chromium" is currently only supported on macOS (got {sys.platform})'
+                    f'browser="chromium" is currently only supported on macOS (got {sys.platform})',
                 )
             chromium_path = '/Applications/Chromium.app/Contents/MacOS/Chromium'
             if not Path(chromium_path).exists():
                 raise fastmcp.exceptions.ToolError(
-                    f'Chromium not found at {chromium_path}. Install with: brew install --cask chromium'
+                    f'Chromium not found at {chromium_path}. Install with: brew install --cask chromium',
                 )
             opts.binary_location = chromium_path
             logger.info(f'Using Chromium: {chromium_path}')
@@ -941,7 +941,7 @@ class BrowserService:
                     window.navigator.chrome = { runtime: {} };
                     Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
                     Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
-                """
+                """,
             },
         )
 
@@ -957,7 +957,7 @@ def register_tools(service: BrowserService) -> None:
             destructiveHint=False,
             idempotentHint=True,
             openWorldHint=True,
-        )
+        ),
     )
     async def navigate(
         url: str,
@@ -1031,23 +1031,23 @@ def register_tools(service: BrowserService) -> None:
 
         if not url.startswith(VALID_URL_PREFIXES):
             raise fastmcp.exceptions.ValidationError(
-                'URL must start with http://, https://, file://, about:, data:, or blob:'
+                'URL must start with http://, https://, file://, about:, data:, or blob:',
             )
 
         if service.state.current_browser is not None and browser != service.state.current_browser and not fresh_browser:
             raise fastmcp.exceptions.ValidationError(
                 f"Browser changed from '{service.state.current_browser}' to '{browser}'. "
-                'Pass fresh_browser=True to restart with the new browser.'
+                'Pass fresh_browser=True to restart with the new browser.',
             )
 
         if enable_har_capture and not fresh_browser:
             raise fastmcp.exceptions.ValidationError(
-                'enable_har_capture requires fresh_browser=True (performance logging must be set at browser init)'
+                'enable_har_capture requires fresh_browser=True (performance logging must be set at browser init)',
             )
 
         if init_scripts and not fresh_browser:
             raise fastmcp.exceptions.ValidationError(
-                'init_scripts requires fresh_browser=True (scripts must be registered before first navigation)'
+                'init_scripts requires fresh_browser=True (scripts must be registered before first navigation)',
             )
 
         logger.info(
@@ -1103,7 +1103,7 @@ def register_tools(service: BrowserService) -> None:
             destructiveHint=False,
             idempotentHint=False,
             openWorldHint=True,
-        )
+        ),
     )
     async def navigate_with_profile_state(
         url: str,
@@ -1173,7 +1173,7 @@ def register_tools(service: BrowserService) -> None:
         # Validate URL
         if not url.startswith(VALID_URL_PREFIXES):
             raise fastmcp.exceptions.ValidationError(
-                'URL must start with http://, https://, file://, about:, data:, or blob:'
+                'URL must start with http://, https://, file://, about:, data:, or blob:',
             )
 
         # Validate profile state source - exactly one required
@@ -1183,12 +1183,12 @@ def register_tools(service: BrowserService) -> None:
         if not has_file and not has_chrome:
             raise fastmcp.exceptions.ValidationError(
                 'Exactly one of profile_state_file or chrome_profile is required. '
-                'Provide a profile state source to import.'
+                'Provide a profile state source to import.',
             )
 
         if has_file and has_chrome:
             raise fastmcp.exceptions.ValidationError(
-                'Cannot specify both profile_state_file and chrome_profile. Choose one profile state source.'
+                'Cannot specify both profile_state_file and chrome_profile. Choose one profile state source.',
             )
 
         # Log what we're doing
@@ -1280,7 +1280,7 @@ def register_tools(service: BrowserService) -> None:
             )
 
             logger.info(
-                f'Filtered to {len(filtered_cookies)} cookies and {len(filtered_origins)} origins matching {origins_filter}'
+                f'Filtered to {len(filtered_cookies)} cookies and {len(filtered_origins)} origins matching {origins_filter}',
             )
 
         # Resolve browser before close_browser() clears current_browser
@@ -1308,7 +1308,7 @@ def register_tools(service: BrowserService) -> None:
                 for origin_data in profile_state.origins.values()
             )
             logger.info(
-                f'Registered storage init script ({storage_entry_count} entries across {len(profile_state.origins)} origins)'
+                f'Registered storage init script ({storage_entry_count} entries across {len(profile_state.origins)} origins)',
             )
 
         # Install user init scripts (after storage script, before navigation)
@@ -1323,7 +1323,10 @@ def register_tools(service: BrowserService) -> None:
         # Install response body capture interceptor for HAR export
         # Must run BEFORE first navigation to capture all fetch/XHR responses
         await _install_response_body_capture_if_needed(
-            driver, service, enable_har_capture, 'navigate_with_profile_state'
+            driver,
+            service,
+            enable_har_capture,
+            'navigate_with_profile_state',
         )
 
         # Inject cookies via CDP BEFORE navigation
@@ -1360,7 +1363,7 @@ def register_tools(service: BrowserService) -> None:
             title='Get Page Text',
             readOnlyHint=True,
             openWorldHint=True,
-        )
+        ),
     )
     async def get_page_text(
         ctx: Context[Any, Any, Any],
@@ -1440,7 +1443,7 @@ def register_tools(service: BrowserService) -> None:
             raise fastmcp.exceptions.ToolError(
                 f"Selector '{selector}' not found on page. "
                 "Use get_aria_snapshot(selector='body') to discover valid selectors, "
-                'or use get_page_html() to inspect the page structure.'
+                'or use get_page_html() to inspect the page structure.',
             )
 
         # Extract result components
@@ -1505,7 +1508,7 @@ def register_tools(service: BrowserService) -> None:
             title='Get Page HTML',
             readOnlyHint=True,
             openWorldHint=True,
-        )
+        ),
     )
     async def get_page_html(
         ctx: Context[Any, Any, Any],
@@ -1554,7 +1557,7 @@ def register_tools(service: BrowserService) -> None:
             if count == 0:
                 raise fastmcp.exceptions.ToolError(
                     f"No elements found matching selector '{selector}'. "
-                    "Use get_aria_snapshot(selector='body') to discover valid selectors."
+                    "Use get_aria_snapshot(selector='body') to discover valid selectors.",
                 )
 
             actual_limit = min(count, limit) if limit is not None else count
@@ -1569,7 +1572,7 @@ def register_tools(service: BrowserService) -> None:
 
             logger.info(
                 f'Extracted {len(html_parts)} of {count} elements'
-                + (f' (limited to {limit})' if limit and count > limit else '')
+                + (f' (limited to {limit})' if limit and count > limit else ''),
             )
 
             html_output = '\n'.join(html_parts)
@@ -1639,7 +1642,7 @@ def register_tools(service: BrowserService) -> None:
 
             if 'data' not in result:
                 raise fastmcp.exceptions.ToolError(
-                    'CDP full-page capture returned no data. Use full_page=False for viewport screenshot.'
+                    'CDP full-page capture returned no data. Use full_page=False for viewport screenshot.',
                 )
 
             screenshot_data = base64.b64decode(result['data'])
@@ -1807,7 +1810,11 @@ def register_tools(service: BrowserService) -> None:
 
         # Execute ARIA snapshot script (loaded from scripts/)
         result = await asyncio.to_thread(
-            driver.execute_script, ARIA_SNAPSHOT_SCRIPT, selector, include_urls, include_hidden
+            driver.execute_script,
+            ARIA_SNAPSHOT_SCRIPT,
+            selector,
+            include_urls,
+            include_hidden,
         )
 
         # Destructure: JS returns {tree, stats} or null (selector not found)
@@ -1897,7 +1904,11 @@ def register_tools(service: BrowserService) -> None:
 
         # Execute visual tree script
         result = await asyncio.to_thread(
-            driver.execute_script, VISUAL_TREE_SCRIPT, selector, include_urls, include_hidden
+            driver.execute_script,
+            VISUAL_TREE_SCRIPT,
+            selector,
+            include_urls,
+            include_hidden,
         )
 
         # Destructure: JS returns {tree, stats} or null (selector not found)
@@ -2173,7 +2184,7 @@ def register_tools(service: BrowserService) -> None:
         except WebDriverException as e:
             raise fastmcp.exceptions.ToolError(
                 f"Failed to find clickable element '{css_selector}': {e}\n"
-                f"Use get_interactive_elements(text_contains='...') to discover valid selectors."
+                f"Use get_interactive_elements(text_contains='...') to discover valid selectors.",
             ) from None
 
         # Click element
@@ -2185,7 +2196,7 @@ def register_tools(service: BrowserService) -> None:
                 raise fastmcp.exceptions.ToolError(
                     f"Element '{css_selector}' is obscured by another element. "
                     f'Try: close overlays/modals, scroll into view, or use '
-                    f'execute_javascript("document.querySelector(\'{css_selector}\').click()")'
+                    f'execute_javascript("document.querySelector(\'{css_selector}\').click()")',
                 ) from None
             raise fastmcp.exceptions.ToolError(f"Click failed on '{css_selector}': {e}") from None
 
@@ -2354,7 +2365,7 @@ def register_tools(service: BrowserService) -> None:
             title='Hover Over Element',
             destructiveHint=False,
             idempotentHint=True,
-        )
+        ),
     )
     async def hover(
         css_selector: str,
@@ -2401,7 +2412,7 @@ def register_tools(service: BrowserService) -> None:
         except WebDriverException as e:
             raise fastmcp.exceptions.ToolError(
                 f"Failed to find element for hover '{css_selector}': {e}\n"
-                f"Use get_interactive_elements(text_contains='...') to discover valid selectors."
+                f"Use get_interactive_elements(text_contains='...') to discover valid selectors.",
             ) from None
 
         # Scroll element into view (Playwright does this automatically)
@@ -2432,12 +2443,12 @@ def register_tools(service: BrowserService) -> None:
             if stability_result.get('runningAnimations', 0) > 0:
                 logger.info(
                     f'Element has {stability_result["runningAnimations"]} running animation(s), '
-                    f'proceeding after {stability_result["framesChecked"]} frame checks'
+                    f'proceeding after {stability_result["framesChecked"]} frame checks',
                 )
             else:
                 logger.info(
                     f'Element did not stabilize after {stability_result["framesChecked"]} frames '
-                    f'(final distance: {stability_result.get("finalDistance", 0):.1f}px)'
+                    f'(final distance: {stability_result.get("finalDistance", 0):.1f}px)',
                 )
 
         # Verify element receives pointer events (not obscured by overlay/modal)
@@ -2449,7 +2460,7 @@ def register_tools(service: BrowserService) -> None:
         if pointer_check == 'obscured':
             raise ValueError(
                 f"Element '{css_selector}' is obscured by another element at its center. "
-                'A modal, overlay, or other element may be blocking it.'
+                'A modal, overlay, or other element may be blocking it.',
             )
 
         # Move mouse to element center
@@ -2468,7 +2479,7 @@ def register_tools(service: BrowserService) -> None:
             title='Scroll Page',
             destructiveHint=False,
             idempotentHint=False,
-        )
+        ),
     )
     async def scroll(
         ctx: Context[Any, Any, Any],
@@ -2535,7 +2546,7 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
         logger.info(
             f'Scroll: direction={direction}, position={position}, '
-            f'selector={css_selector}, amount={scroll_amount}, behavior={behavior}'
+            f'selector={css_selector}, amount={scroll_amount}, behavior={behavior}',
         )
         try:
             result = await asyncio.to_thread(
@@ -2557,7 +2568,7 @@ def register_tools(service: BrowserService) -> None:
             title='Sleep',
             readOnlyHint=True,
             idempotentHint=True,
-        )
+        ),
     )
     async def sleep(
         duration_ms: int,
@@ -2592,14 +2603,14 @@ def register_tools(service: BrowserService) -> None:
             raise ValueError(
                 'duration_ms exceeds maximum of 300000ms (5 minutes). '
                 'Such long delays usually indicate missing condition-based waiting logic. '
-                'Consider using wait_for_selector() or wait_for_network_idle() instead.'
+                'Consider using wait_for_selector() or wait_for_network_idle() instead.',
             )
 
         # Graduated warnings for AI agents
         if duration_ms > 10000:
             logger.info(
                 f'Warning: Long sleep({duration_ms}ms) requested. '
-                'Consider wait_for_selector() or wait_for_network_idle() for dynamic content.'
+                'Consider wait_for_selector() or wait_for_network_idle() for dynamic content.',
             )
 
         if reason:
@@ -2616,7 +2627,7 @@ def register_tools(service: BrowserService) -> None:
             title='Wait for Selector',
             readOnlyHint=True,
             idempotentHint=False,  # State can change between calls
-        )
+        ),
     )
     async def wait_for_selector(
         css_selector: str,
@@ -2675,7 +2686,7 @@ def register_tools(service: BrowserService) -> None:
             raise fastmcp.exceptions.ToolError(
                 f"Invalid CSS selector '{css_selector}': {e}\n"
                 f'Use get_aria_snapshot() to discover valid selectors, or '
-                f'get_interactive_elements() to find elements by text.'
+                f'get_interactive_elements() to find elements by text.',
             ) from None
 
         start_time = time.time()
@@ -2780,12 +2791,13 @@ def register_tools(service: BrowserService) -> None:
             f'Current state: {current_state} (found {element_count} element(s)). '
             f'Possible causes: (1) Selector is incorrect, (2) Element is in iframe, '
             f"(3) Element requires user action to appear, (4) Page didn't finish loading. "
-            f'Try: verify selector with get_page_html(), check for iframes, or increase timeout.'
+            f'Try: verify selector with get_page_html(), check for iframes, or increase timeout.',
         )
 
     @mcp.tool(annotations=ToolAnnotations(title='List Chrome Profiles', readOnlyHint=True, idempotentHint=True))
     async def list_chrome_profiles(
-        verbose: bool = False, ctx: Context[Any, Any, Any] | None = None
+        verbose: bool = False,
+        ctx: Context[Any, Any, Any] | None = None,
     ) -> ChromeProfilesResult:
         """List all Chrome profiles with metadata.
 
@@ -2817,7 +2829,7 @@ def register_tools(service: BrowserService) -> None:
             title='Resize Browser Window',
             destructiveHint=False,
             idempotentHint=True,
-        )
+        ),
     )
     async def resize_window(
         width: int,
@@ -2872,7 +2884,7 @@ def register_tools(service: BrowserService) -> None:
             title='Capture Core Web Vitals',
             readOnlyHint=True,
             idempotentHint=True,
-        )
+        ),
     )
     async def capture_web_vitals(
         ctx: Context[Any, Any, Any],
@@ -2979,7 +2991,7 @@ Returns:
 
 Note:
     Browsers maintain a buffer of 150-250 entries. For long sessions or pages
-    with many resources, use clear_resource_timing_buffer=True to prevent data loss."""
+    with many resources, use clear_resource_timing_buffer=True to prevent data loss.""",
     )
     async def get_resource_timings(
         ctx: Context[Any, Any, Any],
@@ -3077,7 +3089,7 @@ Note:
                 slowest_url = slowest_url[:57] + '...'
             logger.info(
                 f'Captured {len(requests)} requests in {collection_duration:.0f}ms, '
-                f'slowest: {slowest[0].duration_ms or 0:.0f}ms ({slowest_url})'
+                f'slowest: {slowest[0].duration_ms or 0:.0f}ms ({slowest_url})',
             )
         else:
             logger.info(f'Captured {len(requests)} requests in {collection_duration:.0f}ms')
@@ -3174,7 +3186,7 @@ Workflow:
     1. navigate(url, fresh_browser=True, enable_har_capture=True) - enable HAR capture
     2. [interact with page]
     3. export_har("capture.har") - export network data
-    4. Read the HAR file or import into Chrome DevTools"""
+    4. Read the HAR file or import into Chrome DevTools""",
     )
     async def export_har(
         ctx: Context[Any, Any, Any],
@@ -3202,7 +3214,7 @@ Workflow:
                     'version': '1.2',
                     'creator': {'name': 'selenium-browser-automation', 'version': '1.0'},
                     'entries': [],
-                }
+                },
             }
             har_path.write_text(json.dumps(empty_har, indent=2))
             return HARExportResult(
@@ -3421,7 +3433,7 @@ Workflow:
                 'version': '1.2',
                 'creator': {'name': 'selenium-browser-automation', 'version': '1.0'},
                 'entries': har_entries,
-            }
+            },
         }
 
         # Save to file
@@ -3444,7 +3456,7 @@ Workflow:
             title='Get Console Logs',
             readOnlyHint=True,
             idempotentHint=False,  # Clears buffer after retrieval
-        )
+        ),
     )
     async def get_console_logs(
         ctx: Context[Any, Any, Any],
@@ -3536,7 +3548,7 @@ Workflow:
                     message=message,
                     source=source,
                     timestamp=timestamp,
-                )
+                ),
             )
 
         result = ConsoleLogsResult(
@@ -3552,7 +3564,7 @@ Workflow:
             logger.info(
                 f'Console logs: {result.severe_count} errors, '
                 f'{result.warning_count} warnings, {result.info_count} info '
-                f'({len(entries)} returned after filtering)'
+                f'({len(entries)} returned after filtering)',
             )
         else:
             logger.info('No console logs captured')
@@ -3564,7 +3576,7 @@ Workflow:
             title='Configure Proxy',
             destructiveHint=False,
             idempotentHint=False,
-        )
+        ),
     )
     async def configure_proxy(
         host: str,
@@ -3695,7 +3707,7 @@ Workflow:
             title='Clear Proxy',
             destructiveHint=False,
             idempotentHint=True,
-        )
+        ),
     )
     async def clear_proxy(
         ctx: Context[Any, Any, Any] | None = None,
@@ -3731,7 +3743,7 @@ Workflow:
             title='Execute JavaScript',
             readOnlyHint=False,
             idempotentHint=False,
-        )
+        ),
     )
     async def execute_javascript(
         code: str,
@@ -3815,7 +3827,8 @@ Workflow:
             # timeout_ms=0 means no timeout (wait indefinitely)
             if timeout_ms > 0:
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(driver.execute_async_script, async_script), timeout=timeout_ms / 1000
+                    asyncio.to_thread(driver.execute_async_script, async_script),
+                    timeout=timeout_ms / 1000,
                 )
             else:
                 result = await asyncio.to_thread(driver.execute_async_script, async_script)
@@ -3834,7 +3847,7 @@ Workflow:
 
         except TimeoutError:
             logger.warning(
-                f'JS execution timed out after {timeout_ms}ms'
+                f'JS execution timed out after {timeout_ms}ms',
             )  # exception_safety_linter.py: logger-no-exc-info — TimeoutError has no useful traceback
             return JavaScriptResult(
                 success=False,
@@ -3864,7 +3877,7 @@ Workflow:
             title='Save Profile State',
             readOnlyHint=False,
             idempotentHint=False,
-        )
+        ),
     )
     async def save_profile_state(
         filename: str,
@@ -3956,7 +3969,7 @@ Workflow:
                     http_only=cookie.get('httpOnly', False),
                     secure=cookie.get('secure', False),
                     same_site=same_site,
-                )
+                ),
             )
 
         # Get current origin (for result metadata)
@@ -4051,7 +4064,7 @@ Workflow:
 
         logger.info(
             f'Captured storage: {" + ".join(log_storage_parts)} '
-            f'across {len(origins_data)} origins (of {len(tracked_origins)} tracked)'
+            f'across {len(origins_data)} origins (of {len(tracked_origins)} tracked)',
         )
 
         # Build ProfileState with typed models
@@ -4098,7 +4111,7 @@ Workflow:
             title='Export Chrome Profile State',
             readOnlyHint=True,
             idempotentHint=True,
-        )
+        ),
     )
     async def export_chrome_profile_state(
         output_file: str,

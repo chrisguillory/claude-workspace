@@ -593,29 +593,38 @@ class TestLoadBashPrefixes:
     """Verify settings hierarchy reading with filesystem isolation."""
 
     def test_extracts_bash_prefixes(
-        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: tmp_path / 'home'))
         cwd = tmp_path / 'project'
         (cwd / '.claude').mkdir(parents=True)
         (cwd / '.claude' / 'settings.json').write_text(
-            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}})
+            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}}),
         )
         assert hook_module.load_bash_prefixes(str(cwd)) == {'git log', 'echo'}
 
     def test_ignores_non_bash_entries(
-        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: tmp_path / 'home'))
         cwd = tmp_path / 'project'
         (cwd / '.claude').mkdir(parents=True)
         (cwd / '.claude' / 'settings.json').write_text(
-            json.dumps({'permissions': {'allow': ['WebSearch', 'mcp__foo__bar']}})
+            json.dumps({'permissions': {'allow': ['WebSearch', 'mcp__foo__bar']}}),
         )
         assert hook_module.load_bash_prefixes(str(cwd)) == set()
 
     def test_merges_home_and_project(
-        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         home = tmp_path / 'home'
         (home / '.claude').mkdir(parents=True)
@@ -628,13 +637,19 @@ class TestLoadBashPrefixes:
         assert hook_module.load_bash_prefixes(str(cwd)) == {'git log', 'echo'}
 
     def test_skips_missing_files(
-        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: tmp_path / 'home'))
         assert hook_module.load_bash_prefixes(str(tmp_path / 'nonexistent')) == set()
 
     def test_malformed_json_raises(
-        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Malformed JSON bubbles up — ErrorBoundary handles in production."""
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: tmp_path / 'home'))
@@ -645,7 +660,10 @@ class TestLoadBashPrefixes:
             hook_module.load_bash_prefixes(str(cwd))
 
     def test_malformed_second_file_discards_all_prefixes(
-        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """One corrupted settings file discards all prefixes, not just its own.
 
@@ -665,7 +683,10 @@ class TestLoadBashPrefixes:
             hook_module.load_bash_prefixes(str(cwd))
 
     def test_non_string_entry_raises(
-        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Non-string entries bubble up TypeError — ErrorBoundary handles in production."""
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: tmp_path / 'home'))
@@ -690,7 +711,7 @@ class TestMainIntegration:
                 'tool_name': tool_name,
                 'tool_input': {'command': command},
                 'tool_use_id': 'tu_test',
-            }
+            },
         )
 
     def test_approves_compound(
@@ -703,7 +724,7 @@ class TestMainIntegration:
         home = tmp_path / 'home'
         (home / '.claude').mkdir(parents=True)
         (home / '.claude' / 'settings.json').write_text(
-            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}})
+            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}}),
         )
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo "---" && git log')))
@@ -746,7 +767,7 @@ class TestMainIntegration:
         home = tmp_path / 'home'
         (home / '.claude').mkdir(parents=True)
         (home / '.claude' / 'settings.json').write_text(
-            json.dumps({'permissions': {'allow': ['Bash(echo:*)', 'Bash(git log:*)']}})
+            json.dumps({'permissions': {'allow': ['Bash(echo:*)', 'Bash(git log:*)']}}),
         )
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         monkeypatch.setattr('sys.stdin', io.StringIO(self._hook_input('echo $(whoami) && git log')))
@@ -781,7 +802,7 @@ class TestMainIntegration:
                 'tool_name': 'Bash',
                 'tool_input': {},
                 'tool_use_id': 'tu_test',
-            }
+            },
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
@@ -803,7 +824,7 @@ class TestMainIntegration:
                 'tool_name': 'Bash',
                 'tool_input': {'command': 12345},
                 'tool_use_id': 'tu_test',
-            }
+            },
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
@@ -828,7 +849,7 @@ class TestMainIntegration:
                 self._hook_input(
                     'echo "---" && git log',
                     cwd=str(tmp_path / 'noproject'),
-                )
+                ),
             ),
         )
 
@@ -901,7 +922,7 @@ class TestMainIntegration:
                 'tool_input': {'command': 'echo a && echo b'},
                 'tool_use_id': 'tu_test',
                 'new_future_field': 'surprise',
-            }
+            },
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
@@ -914,7 +935,7 @@ class TestMainIntegration:
                 'hookEventName': 'PreToolUse',
                 'permissionDecision': 'allow',
                 'permissionDecisionReason': 'all 2 subcommands match allowed Bash prefixes',
-            }
+            },
         }
         assert captured.err == ''
 
@@ -955,7 +976,7 @@ class TestMainIntegration:
                     'tool_input': {'command': 'echo a && echo b'},
                     'tool_use_id': 'tu_test',
                     'new_future_field': 'surprise',
-                }
+                },
             )
             monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
@@ -991,7 +1012,7 @@ class TestRealWorldCommands:
 
     def test_three_part_with_redirects(self, hook_module: ModuleType) -> None:
         assert list(
-            hook_module.analyze_command('git diff --cached --stat 2>&1 && echo "---" && git log --oneline -5 2>&1')
+            hook_module.analyze_command('git diff --cached --stat 2>&1 && echo "---" && git log --oneline -5 2>&1'),
         ) == [
             'git diff --cached --stat',
             'echo ---',
@@ -1061,7 +1082,7 @@ class TestBashlexExceptions:
                 'tool_name': 'Bash',
                 'tool_input': {'command': 'echo $((1+2)) && git log'},
                 'tool_use_id': 'tu_test',
-            }
+            },
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
@@ -1092,7 +1113,7 @@ class TestBashlexExceptions:
                 'tool_name': 'Bash',
                 'tool_input': {'command': 'time git log && echo done'},
                 'tool_use_id': 'tu_test',
-            }
+            },
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
@@ -1155,7 +1176,7 @@ class TestSurvivingMutations:
                 'tool_name': 'Bash',
                 'tool_input': {'command': 'echo hello'},
                 'tool_use_id': 'tu_test',
-            }
+            },
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
         hook_module.handle_hook.__wrapped__()
@@ -1168,7 +1189,10 @@ class TestSurvivingMutations:
         assert exc_info.value.args == ('unsafe expansion in: ${x@a}',)
 
     def test_empty_prefix_regex_rejected(
-        self, hook_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Bash(:*) must not produce empty prefix."""
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: tmp_path / 'home'))
@@ -1293,7 +1317,7 @@ class TestCheckBatch:
         home = tmp_path / 'home'
         (home / '.claude').mkdir(parents=True)
         (home / '.claude' / 'settings.json').write_text(
-            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}})
+            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}}),
         )
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         return str(tmp_path)

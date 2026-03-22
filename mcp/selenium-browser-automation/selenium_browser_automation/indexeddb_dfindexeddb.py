@@ -279,13 +279,13 @@ def _parse_indexeddb_folder(db_dir: Path) -> Sequence[JsonObject]:
                 'autoIncrement': False,
                 'indexes': {},
                 'records': [],
-            }
-        )
+            },
+        ),
     )
 
     # Index metadata: {db_id: {store_id: {index_id: {...}}}}
     indexes: dict[int, dict[int, dict[int, dict[str, Any]]]] = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(dict))
+        lambda: defaultdict(lambda: defaultdict(dict)),
     )
 
     # Process all records
@@ -381,7 +381,7 @@ def _parse_indexeddb_folder(db_dir: Path) -> Sequence[JsonObject]:
                                 'key_path': idx_data.get('keyPath'),
                                 'unique': idx_data.get('unique', False),
                                 'multi_entry': idx_data.get('multiEntry', False),
-                            }
+                            },
                         )
 
             # Matching ProfileStateIndexedDBObjectStore

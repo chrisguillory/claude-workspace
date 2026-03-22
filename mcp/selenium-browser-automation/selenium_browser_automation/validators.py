@@ -14,7 +14,7 @@ NON_CSS_SELECTOR_RE = re.compile(
     r':(?:has-text|text|nth-match)\s*\('
     r'|:(?:visible|hidden)\b'
     r'|\b(?:text|role|data-testid)\s*='
-    r'|>>'
+    r'|>>',
 )
 
 
@@ -26,5 +26,5 @@ def validate_css_selector(selector: str) -> None:
             f"Selector '{selector}' contains non-CSS syntax ('{match.group()}'). "
             f'Only standard CSS selectors are supported.\n'
             f"To find elements by text: get_interactive_elements(text_contains='...')\n"
-            f"To discover selectors: get_aria_snapshot('body', include_urls=True)"
+            f"To discover selectors: get_aria_snapshot('body', include_urls=True)",
         )

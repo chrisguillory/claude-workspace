@@ -239,7 +239,7 @@ class PipelineTracer:
                     wall=_percentiles(wall_times) if wall_times else None,
                     throughput_per_sec=round(throughput, 2),
                     avg_batch_size=round(avg_batch, 1) if avg_batch is not None else None,
-                )
+                ),
             )
 
         completion_series = self._build_completion_series()
@@ -285,7 +285,7 @@ class PipelineTracer:
                     files_chunk_done=chunk_done,
                     files_embed_done=embed_done,
                     files_store_done=store_done,
-                )
+                ),
             )
 
     # ── Private: completion series ─────────────────────────────
@@ -314,7 +314,7 @@ class PipelineTracer:
                     stage=stage,
                     completions=tuple(round(p[0], 3) for p in pairs),
                     durations=tuple(round(p[1], 3) for p in pairs),
-                )
+                ),
             )
         return tuple(series)
 

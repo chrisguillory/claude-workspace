@@ -149,7 +149,9 @@ class ServerState:
         if collection_name not in self._repositories:
             state_store = IndexStateStore(self.redis_client, collection_name)
             self._repositories[collection_name] = DocumentVectorRepository(
-                self.qdrant_client, collection_name, state_store
+                self.qdrant_client,
+                collection_name,
+                state_store,
             )
         return self._repositories[collection_name]
 
@@ -334,7 +336,7 @@ Returns:
                 resolved_path,
                 respect_gitignore=respect_gitignore,
                 stop_after=stop_after,
-            )
+            ),
         )
 
         # Monitoring coroutine
@@ -370,7 +372,7 @@ Returns:
             logger.info(
                 f'Indexing complete: {result.files_indexed} indexed, '
                 f'{result.files_cached} cached, {result.chunks_created} chunks, '
-                f'{len(result.errors)} errors'
+                f'{len(result.errors)} errors',
             )
             logger.info(f'Redis connections: {conn_stats}')
             progress_writer.complete_with_success(result, redis_conn_stats=conn_stats)
@@ -449,7 +451,7 @@ Returns:
         logger.info(
             f'Searching {collection_name} ({search_type}): "{query[:50]}..."'
             if len(query) > 50
-            else f'Searching {collection_name} ({search_type}): "{query}"'
+            else f'Searching {collection_name} ({search_type}): "{query}"',
         )
 
         # Compute embeddings based on search type

@@ -63,7 +63,7 @@ def load_yaml_test_specs(yaml_path: Path) -> list[dict[str, Any]]:
                     'name': section_key,
                     'section': section_key,
                     'spec': {**global_defaults, **section},
-                }
+                },
             )
         else:
             section_defaults = {k: v for k, v in section.items() if k not in ['tests', 'description']}

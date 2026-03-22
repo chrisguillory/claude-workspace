@@ -95,9 +95,9 @@ class TestCompactAriaTreeRule2SingleChildCollapse:
                         {
                             'role': 'generic',
                             'children': [{'role': 'button', 'name': 'Deep'}],
-                        }
+                        },
                     ],
-                }
+                },
             ],
         }
         result = compact_aria_tree(node)
@@ -377,7 +377,7 @@ class TestSerializeAriaSnapshot:
                     'children': [
                         {'role': 'listitem', 'name': 'Home'},
                     ],
-                }
+                },
             ],
         }
         output = serialize_aria_snapshot(node)

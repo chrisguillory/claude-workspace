@@ -249,7 +249,7 @@ def validate(
         actual_rules = actual.get(func, set())
         if actual_rules != expected_rules:
             errors.append(
-                f'{func}: expected {sorted(expected_rules)}, got {sorted(actual_rules) if actual_rules else "nothing"}'
+                f'{func}: expected {sorted(expected_rules)}, got {sorted(actual_rules) if actual_rules else "nothing"}',
             )
 
     # Check for unexpected violations in correct/suppressed functions

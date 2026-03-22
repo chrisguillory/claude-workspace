@@ -629,7 +629,7 @@ class SuppressionScanner:
                                 kind=code,  # type: ignore[arg-type]  # code is validated against ERROR_CODES keys
                                 source_line=line.rstrip().strip(),
                                 directive_text=comment.strip(),
-                            )
+                            ),
                         )
 
     def _check_custom_prefixes(self, lineno: int, line: str, comment: str) -> None:
@@ -703,7 +703,7 @@ class SuppressionScanner:
                 kind=kind,
                 source_line=stripped.strip(),
                 directive_text=directive_text.strip() if directive_text else '',
-            )
+            ),
         )
 
 

@@ -270,7 +270,7 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
             if submitted and self._first_error is None:
                 self._first_error = e
                 logger.error(
-                    f'{self!r}: bulk_load failed: {e}'
+                    f'{self!r}: bulk_load failed: {e}',
                 )  # exception_safety_linter.py: logger-no-exc-info — traceback delivered via future, log is summary only
 
             # Schedule next batch if more requests arrived
@@ -309,7 +309,8 @@ class _BatchRecord[TRequest: Hashable, TResponse]:
         results: list[TResponse | None],  # strict_typing_linter.py: mutable-type — deliver() mutates via __setitem__
         future: asyncio.Future[None],
         position_map: dict[
-            TRequest, tuple[int, ...]
+            TRequest,
+            tuple[int, ...],
         ],  # strict_typing_linter.py: mutable-type — deliver() mutates via .pop()
         remaining: int,
     ) -> None:

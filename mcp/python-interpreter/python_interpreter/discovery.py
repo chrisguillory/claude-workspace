@@ -80,7 +80,7 @@ def discover_session_id(claude_pid: int) -> str:
 
     raise RuntimeError(
         f'Could not find active session for Claude PID {claude_pid} in {SESSIONS_PATH} '
-        f'after {max_retries} attempts. Ensure claude-workspace SessionStart hook is configured.'
+        f'after {max_retries} attempts. Ensure claude-workspace SessionStart hook is configured.',
     )
 
 
@@ -149,7 +149,7 @@ def find_claude_context() -> ClaudeContext:
             if not claude_files:
                 raise RuntimeError(
                     f'Found Claude process (PID {current}) with CWD {cwd}, '
-                    f'but no .claude/ files are open - may not be a Claude project'
+                    f'but no .claude/ files are open - may not be a Claude project',
                 )
 
             # Verify at least one .claude file is in ~/.claude/ directory
@@ -161,7 +161,7 @@ def find_claude_context() -> ClaudeContext:
                     f'Found Claude process (PID {current}) with CWD {cwd}, '
                     f'but .claude/ files open are not in ~/.claude/ directory:\n'
                     f'  Open files: {claude_files}\n'
-                    f'  Expected to find files in: {claude_dir}'
+                    f'  Expected to find files in: {claude_dir}',
                 )
 
             socket_path = pathlib.Path(f'/tmp/python-interpreter-{current}.sock')

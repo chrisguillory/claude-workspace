@@ -385,7 +385,7 @@ def _flush_group(
                 jsonl_record_count=len(group_buffer),
                 jsonl_schema_hint=schema_hint,
             ),
-        )
+        ),
     )
 
 
@@ -417,7 +417,7 @@ def _add_single_record(
                     jsonl_record_count=1,
                     jsonl_schema_hint=schema_hint,
                 ),
-            )
+            ),
         )
     else:
         sub_texts = text_splitter.split_text(text)
@@ -437,5 +437,5 @@ def _add_single_record(
                         jsonl_schema_hint=schema_hint,
                         json_path=f'#{i}',
                     ),
-                )
+                ),
             )

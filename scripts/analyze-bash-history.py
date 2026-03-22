@@ -285,19 +285,19 @@ class ReportPrinter:
             print('=' * 60)
             print(
                 f'  Would auto-approve (all match): {result.compound_approved:>6,}'
-                f'  ({self._pct(result.compound_approved, compound_total)})'
+                f'  ({self._pct(result.compound_approved, compound_total)})',
             )
             print(
                 f'  Would defer (prefix mismatch):  {result.compound_no_match:>6,}'
-                f'  ({self._pct(result.compound_no_match, compound_total)})'
+                f'  ({self._pct(result.compound_no_match, compound_total)})',
             )
             print(
                 f'  Would defer (dangerous):        {result.compound_dangerous:>6,}'
-                f'  ({self._pct(result.compound_dangerous, compound_total)})'
+                f'  ({self._pct(result.compound_dangerous, compound_total)})',
             )
             print(
                 f'  Would defer (parse error):      {result.compound_parse_error:>6,}'
-                f'  ({self._pct(result.compound_parse_error, compound_total)})'
+                f'  ({self._pct(result.compound_parse_error, compound_total)})',
             )
             print()
 

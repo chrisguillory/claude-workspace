@@ -288,7 +288,7 @@ class ChunkingService:
                         chunk_index=len(chunks),
                         file_type='pdf',
                         metadata=metadata,
-                    )
+                    ),
                 )
 
         return chunks
@@ -391,7 +391,7 @@ class ChunkingService:
                             chunk_index=len(chunks),
                             file_type='csv',
                             metadata=metadata,
-                        )
+                        ),
                     )
             else:
                 metadata = ChunkMetadata(
@@ -407,7 +407,7 @@ class ChunkingService:
                         chunk_index=len(chunks),
                         file_type='csv',
                         metadata=metadata,
-                    )
+                    ),
                 )
 
         return chunks
@@ -471,7 +471,7 @@ class ChunkingService:
                                 end_char=char_offset + len(sub_text),
                                 heading_context=heading_context,
                             ),
-                        )
+                        ),
                     )
                     char_offset += len(sub_text)
             else:
@@ -486,7 +486,7 @@ class ChunkingService:
                             end_char=char_offset + len(text),
                             heading_context=heading_context,
                         ),
-                    )
+                    ),
                 )
                 char_offset += len(text)
 
@@ -510,7 +510,7 @@ class ChunkingService:
                         start_char=char_offset,
                         end_char=char_offset + len(text),
                     ),
-                )
+                ),
             )
             char_offset += len(text)
 
@@ -549,7 +549,7 @@ class ChunkingService:
                                     end_char=len(sub_chunk.text),
                                     json_path=f'[{i}]',
                                 ),
-                            )
+                            ),
                         )
                 else:
                     chunks.append(
@@ -563,7 +563,7 @@ class ChunkingService:
                                 end_char=len(text),
                                 json_path=f'[{i}]',
                             ),
-                        )
+                        ),
                     )
         else:
             # Object: stringify and chunk as text
@@ -581,7 +581,7 @@ class ChunkingService:
                             end_char=sub_chunk.metadata.end_char,
                             json_path='$',
                         ),
-                    )
+                    ),
                 )
 
         return chunks
@@ -599,7 +599,7 @@ class ChunkingService:
                 chunk_index=0,
                 file_type='image',
                 metadata=ChunkMetadata(start_char=0, end_char=0),
-            )
+            ),
         ]
 
     def _chunk_email(self, content: str, source_path: str) -> Sequence[Chunk]:
@@ -662,7 +662,11 @@ class ChunkingService:
         """
         loop = asyncio.get_running_loop()
         chunk_data = await loop.run_in_executor(
-            self._pool, chunk_jsonl, str(path), self._chunk_size, self._chunk_overlap
+            self._pool,
+            chunk_jsonl,
+            str(path),
+            self._chunk_size,
+            self._chunk_overlap,
         )
 
         # Convert ChunkData back to Chunk objects

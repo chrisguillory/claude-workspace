@@ -101,7 +101,8 @@ class PydanticReplacePlugin(PydanticPlugin):
     """Extends PydanticPlugin with ``__replace__()`` synthesis on model classes."""
 
     def report_config_data(
-        self, ctx: ReportConfigContext
+        self,
+        ctx: ReportConfigContext,
     ) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — mypy Plugin API requires dict return
         """Include plugin version so mypy invalidates cache on logic changes."""
         data = dict(super().report_config_data(ctx))

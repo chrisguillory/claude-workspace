@@ -113,7 +113,7 @@ def read_request() -> DriverRequest | None:
                 error=f'ProtocolError: {e}',
                 error_type=None,
                 module_name=None,
-            )
+            ),
         )
         return None
 
@@ -224,7 +224,7 @@ def main() -> None:
             status='ready',
             python_version=sys.version,
             python_executable=sys.executable,
-        )
+        ),
     )
 
     while True:
@@ -250,7 +250,7 @@ def main() -> None:
                 ErrorResponse(
                     error=f'UnknownAction: {action}',
                     traceback=None,
-                )
+                ),
             )
 
 
