@@ -70,6 +70,8 @@ def get_config() -> dict:
     return load_config()  # Caller decides how to handle errors
 ```
 
+**Actionable errors at boundaries** - At system boundaries (external APIs, file I/O, user input), errors carry enough context to diagnose without reproduction. Include: raw response/input preview, expected format, received format, and relevant request parameters. A `KeyError: 'data'` is fail-fast but not actionable; an error showing the response body, status code, and expected schema is both.
+
 **Trust event authority** - When receiving events, trust they represent what they claim. Fix incorrect events at their source, not with defensive validation in handlers:
 
 ```python

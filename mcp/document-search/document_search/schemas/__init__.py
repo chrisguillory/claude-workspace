@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from document_search.schemas.base import StrictModel
+from cc_lib.schemas import StrictModel
+
 from document_search.schemas.chunking import (
     EXTENSION_MAP,
     Chunk,

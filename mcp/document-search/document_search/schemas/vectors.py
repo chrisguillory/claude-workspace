@@ -11,9 +11,9 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import pydantic
+from cc_lib.schemas import StrictModel
 from cc_lib.types import JsonDatetime
 
-from document_search.schemas.base import StrictModel
 from document_search.schemas.chunking import Chunk, FileType
 from document_search.schemas.collections import Collection
 from document_search.schemas.config import EmbeddingProvider, default_config

@@ -12,21 +12,29 @@ API Reference: https://openrouter.ai/docs/api/api-reference/embeddings/create-em
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+import base64
+import json
+import logging
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
+import numpy as np
+import pydantic
 import tenacity
 from cc_lib import ConcurrencyTracker
 from cc_lib.types import JsonObject
 
 from document_search.clients import _retry
+from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterUnexpectedResponse
 from document_search.schemas.embeddings import TaskIntent
 
 __all__ = [
     'OpenRouterClient',
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class OpenRouterClient:
@@ -69,7 +77,7 @@ class OpenRouterClient:
         max_connections: int = DEFAULT_MAX_CONNECTIONS,
         max_keepalive: int = DEFAULT_MAX_KEEPALIVE,
         keepalive_expiry: float = DEFAULT_KEEPALIVE_EXPIRY,
-        encoding_format: Literal['float', 'base64'] = 'float',
+        encoding_format: Literal['float', 'base64'] = 'base64',
     ) -> None:
         """Initialize client.
 
@@ -77,18 +85,19 @@ class OpenRouterClient:
             model: Model identifier (e.g., 'qwen/qwen3-embedding-8b').
             dimensions: Output vector dimensions. If None, uses model's native dimensions.
                 Note: Not all models support dimension reduction.
-            requests_per_minute: Not supported at the moment.
+            requests_per_minute: Not implemented yet. Accepted but ignored.
             api_key: OpenRouter API key. If None, loads from standard location.
             max_concurrent: Max concurrent API requests (semaphore limit).
             timeout_ms: Request timeout in milliseconds.
             max_connections: Max simultaneous HTTP connections.
             max_keepalive: Max connections kept alive for reuse.
             keepalive_expiry: Seconds before idle connections close.
-            encoding_format: Response format ('float' or 'base64').
+            encoding_format: Response format. 'base64' (default) is ~47%% smaller on the wire.
         """
         if requests_per_minute is not None:
-            raise ValueError('OpenRouterClient does not support rate limiting')
+            logger.info(f'requests_per_minute={requests_per_minute} accepted but not yet enforced')
         self._model = model
+        self._total_tokens = 0
         self._dimensions = dimensions
         self._api_key = api_key or _load_api_key()
         self._encoding_format = encoding_format
@@ -161,12 +170,26 @@ class OpenRouterClient:
 
         async with self._semaphore, self._tracker.track():
             response = await self._client.post('/embeddings', json=body)
+
             response.raise_for_status()
             data = response.json()
 
-            # Sort by index to ensure order matches input
-            embeddings = sorted(data['data'], key=lambda x: x['index'])
-            return [e['embedding'] for e in embeddings]
+            result = _parse_embedding_response(
+                data,
+                status_code=response.status_code,
+                model=self._model,
+                batch_size=len(texts),
+            )
+
+            self._total_tokens += result.usage.total_tokens
+
+            sorted_data = sorted(result.data, key=lambda x: x.index)
+            return [_decode_embedding(e.embedding) for e in sorted_data]
+
+    @property
+    def total_tokens_used(self) -> int:
+        """Cumulative tokens consumed across all embed() calls."""
+        return self._total_tokens
 
     async def list_models(
         self,
@@ -182,12 +205,17 @@ class OpenRouterClient:
             architecture, etc.
 
         Raises:
-            httpx.HTTPStatusError: On API errors.
+            httpx.HTTPStatusError: On non-retryable API errors.
+            OpenRouterAPIError: On error response body.
         """
         response = await self._client.get('/embeddings/models')
         response.raise_for_status()
-        data: dict[str, list[JsonObject]] = response.json()
-        return data['data']
+        result = _parse_models_response(
+            response.json(),
+            status_code=response.status_code,
+            model=self._model,
+        )
+        return result.data
 
     async def close(self) -> None:
         """Close HTTP client and release resources."""
@@ -202,9 +230,126 @@ class OpenRouterClient:
         await self.close()
 
 
+# ── OpenRouter API response models ───────────────────────────────────
+
+
+class _Embedding(pydantic.BaseModel):
+    embedding: Sequence[float] | str
+    index: int
+
+
+class _Usage(pydantic.BaseModel):
+    prompt_tokens: int
+    total_tokens: int
+
+
+class _EmbeddingResponse(pydantic.BaseModel):
+    data: Sequence[_Embedding]
+    model: str
+    usage: _Usage
+
+
+class _ErrorDetail(pydantic.BaseModel):
+    message: str
+    code: int | None = None
+    type: str | None = None
+    metadata: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — provider-specific metadata with no stable schema
+    )
+
+
+class _ErrorResponse(pydantic.BaseModel):
+    error: _ErrorDetail
+
+
+class _ModelsListResponse(pydantic.BaseModel):
+    data: Sequence[JsonObject]
+
+
+type _ApiResponse = _ErrorResponse | _EmbeddingResponse
+type _ModelsApiResponse = _ErrorResponse | _ModelsListResponse
+
+_api_response_adapter: pydantic.TypeAdapter[_ApiResponse] = pydantic.TypeAdapter(_ApiResponse)
+_models_response_adapter: pydantic.TypeAdapter[_ModelsApiResponse] = pydantic.TypeAdapter(_ModelsApiResponse)
+
+
+# ── Private helpers ──────────────────────────────────────────────────
+
+
 def _load_api_key() -> str:
     """Load API key from standard location."""
     key_path = Path.home() / '.claude-workspace' / 'secrets' / 'openrouter_api_key'
     if not key_path.exists():
         raise FileNotFoundError(f'OpenRouter API key not found at {key_path}')
     return key_path.read_text().strip()
+
+
+def _parse_embedding_response(
+    body: Mapping[str, Any],
+    *,
+    status_code: int,
+    model: str,
+    batch_size: int,
+) -> _EmbeddingResponse:
+    """Validate and discriminate API response via Pydantic union."""
+    try:
+        result = _api_response_adapter.validate_python(body)
+    except pydantic.ValidationError as e:
+        raise OpenRouterUnexpectedResponse(
+            message=f'Response validation failed: {e.error_count()} errors',
+            body_preview=json.dumps(body, default=str)[:500],
+            body_keys=list(body.keys()),
+            status_code=status_code,
+            model=model,
+            batch_size=batch_size,
+        ) from e
+
+    if isinstance(result, _ErrorResponse):
+        raise OpenRouterAPIError(
+            message=result.error.message,
+            code=result.error.code,
+            error_type=result.error.type,
+            status_code=status_code,
+            model=model,
+        )
+
+    return result
+
+
+def _parse_models_response(
+    body: Mapping[str, Any],
+    *,
+    status_code: int,
+    model: str,
+) -> _ModelsListResponse:
+    """Validate and discriminate models list API response via Pydantic union."""
+    try:
+        result = _models_response_adapter.validate_python(body)
+    except pydantic.ValidationError as e:
+        raise OpenRouterUnexpectedResponse(
+            message=f'list_models validation failed: {e.error_count()} errors',
+            body_preview=json.dumps(body, default=str)[:500],
+            body_keys=list(body.keys()),
+            status_code=status_code,
+            model=model,
+            batch_size=0,
+        ) from e
+
+    if isinstance(result, _ErrorResponse):
+        raise OpenRouterAPIError(
+            message=result.error.message,
+            code=result.error.code,
+            error_type=result.error.type,
+            status_code=status_code,
+            model=model,
+        )
+
+    return result
+
+
+def _decode_embedding(embedding: Sequence[float] | str) -> Sequence[float]:
+    """Decode from float array or base64 string."""
+    if isinstance(embedding, str):
+        values: Sequence[float] = np.frombuffer(base64.b64decode(embedding), dtype=np.float32).tolist()
+        return values
+    return list(embedding)

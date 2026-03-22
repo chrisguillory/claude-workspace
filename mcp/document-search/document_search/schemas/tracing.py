@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal
 
-from document_search.schemas.base import StrictModel
+from cc_lib.schemas import StrictModel
 
 __all__ = [
     'EmbedSubStage',
