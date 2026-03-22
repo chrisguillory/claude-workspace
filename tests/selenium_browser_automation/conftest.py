@@ -42,7 +42,11 @@ def headless_driver() -> Any:
 def examples_server() -> Any:
     """Session-scoped HTTP server serving from the selenium project root.
 
-    Serves files under mcp/selenium-browser-automation/ (e.g. 'examples/compact-tree.html').
+    Uses ThreadingHTTPServer so each connection is handled in its own thread.
+    This prevents server.shutdown() from blocking on keep-alive connections:
+    with single-threaded HTTPServer, serve_forever blocks in readline() waiting
+    for the next request on an idle keep-alive socket, unable to check the
+    shutdown flag until the socket times out (~60s).
     """
 
     class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -52,7 +56,8 @@ def examples_server() -> Any:
         def log_message(self, format: str, *args: Any) -> None:
             pass
 
-    server = http.server.HTTPServer(('127.0.0.1', 0), QuietHandler)
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), QuietHandler)
+    server.daemon_threads = True
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
