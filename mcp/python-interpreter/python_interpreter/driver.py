@@ -32,17 +32,62 @@ import io
 import json
 import sys
 import traceback
-from typing import Any
+from typing import Any, Literal, NotRequired, TypedDict, cast
+
+# -- Protocol types (self-contained — driver runs in external interpreter env) -
+
+
+class DriverRequest(TypedDict):
+    """Length-prefixed JSON request from MCP server."""
+
+    action: str
+    code: NotRequired[str]
+
+
+class ExecuteResponse(TypedDict):
+    """Response from execute action. Validated by DriverExecuteResponse on consumer side."""
+
+    stdout: str
+    stderr: str
+    result: str
+    error: str | None
+    error_type: str | None
+    module_name: str | None
+
+
+class ReadyResponse(TypedDict):
+    """Startup signal. Validated by DriverReadyResponse on consumer side."""
+
+    status: Literal['ready']
+    python_version: str
+    python_executable: str
+
+
+class ShutdownResponse(TypedDict):
+    """Clean shutdown acknowledgment."""
+
+    status: str
+
+
+class ErrorResponse(TypedDict):
+    """Protocol or unknown-action error."""
+
+    error: str
+    traceback: None
+
+
+type DriverMessage = ExecuteResponse | ReadyResponse | ShutdownResponse | ErrorResponse
+
 
 # Persistent scope for this interpreter - survives across requests
-_scope_globals: dict[str, Any] = {}
+_scope_globals: dict[str, Any] = {}  # strict_typing_linter.py: mutable-type — exec/eval scope mutated by Python runtime
 
 
-def read_request() -> dict[str, Any] | None:
+def read_request() -> DriverRequest | None:
     """Read a length-prefixed JSON request from stdin.
 
     Returns:
-        Parsed JSON dict, or None if stdin is closed/EOF.
+        Parsed request, or None if stdin is closed/EOF.
     """
     try:
         length_line = sys.stdin.readline()
@@ -57,15 +102,23 @@ def read_request() -> dict[str, Any] | None:
         if len(json_data) < length:
             return None  # Incomplete read
 
-        parsed: dict[str, Any] = json.loads(json_data)
-        return parsed
+        return cast(DriverRequest, json.loads(json_data))  # static-only; no runtime validation
 
     except (ValueError, json.JSONDecodeError) as e:
-        send_response({'error': f'ProtocolError: {e}', 'traceback': None})
-        return {}  # Empty dict signals protocol error, continue loop
+        send_response(
+            ExecuteResponse(
+                stdout='',
+                stderr='',
+                result='',
+                error=f'ProtocolError: {e}',
+                error_type=None,
+                module_name=None,
+            ),
+        )
+        return None
 
 
-def send_response(response: dict[str, Any]) -> None:
+def send_response(response: DriverMessage) -> None:
     """Send a length-prefixed JSON response to stdout."""
     json_data = json.dumps(response)
     sys.stdout.write(f'{len(json_data)}\n{json_data}')
@@ -102,7 +155,7 @@ def _split_last_expression(code: str) -> tuple[str, str] | None:
         return None
 
 
-def execute_code(code: str) -> dict[str, Any]:
+def execute_code(code: str) -> ExecuteResponse:
     """Execute code in persistent scope.
 
     Returns response dict with stdout, stderr, result, error fields.
@@ -152,7 +205,7 @@ def execute_code(code: str) -> dict[str, Any]:
             'error_type': 'ModuleNotFoundError',
             'module_name': e.name,
         }
-    except Exception:
+    except Exception:  # exception_safety_linter.py: swallowed-exception — catch-all for arbitrary user code execution; error captured in ExecuteResponse
         return {
             'stdout': stdout_capture.getvalue(),
             'stderr': stderr_capture.getvalue(),
@@ -167,23 +220,19 @@ def main() -> None:
     """Main driver loop - read requests, execute, send responses."""
     # Signal ready with Python version info
     send_response(
-        {
-            'status': 'ready',
-            'python_version': sys.version,
-            'python_executable': sys.executable,
-        }
+        ReadyResponse(
+            status='ready',
+            python_version=sys.version,
+            python_executable=sys.executable,
+        ),
     )
 
     while True:
         request = read_request()
 
         if request is None:
-            # EOF - clean shutdown
+            # EOF or protocol error - clean shutdown
             break
-
-        if not request:
-            # Empty dict from protocol error - already sent error response
-            continue
 
         action = request.get('action')
 
@@ -193,15 +242,15 @@ def main() -> None:
             send_response(response)
 
         elif action == 'shutdown':
-            send_response({'status': 'shutdown'})
+            send_response(ShutdownResponse(status='shutdown'))
             break
 
         else:
             send_response(
-                {
-                    'error': f'UnknownAction: {action}',
-                    'traceback': None,
-                }
+                ErrorResponse(
+                    error=f'UnknownAction: {action}',
+                    traceback=None,
+                ),
             )
 
 

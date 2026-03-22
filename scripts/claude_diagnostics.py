@@ -568,7 +568,7 @@ def read_claude_config() -> tuple[dict[str, Any], Sequence[ValidationWarning]]:
                 section='config',
                 message=f'New top-level keys in ~/.claude.json ({len(new_keys)})',
                 details=', '.join(sorted(new_keys)),
-            )
+            ),
         )
 
     removed_keys = KNOWN_TOP_LEVEL_KEYS - actual_keys
@@ -578,7 +578,7 @@ def read_claude_config() -> tuple[dict[str, Any], Sequence[ValidationWarning]]:
                 section='config',
                 message=f'Missing top-level keys from ~/.claude.json ({len(removed_keys)})',
                 details=', '.join(sorted(removed_keys)),
-            )
+            ),
         )
 
     return raw, warnings
@@ -612,6 +612,7 @@ def read_keychain_credentials() -> KeychainCredentials:
             '-s',
             KEYCHAIN_SERVICE,
         ],
+        check=False,
         capture_output=True,
         text=True,
         timeout=10,
@@ -695,6 +696,7 @@ def read_binary_info() -> BinaryInfo:
     # Find binary
     result = subprocess.run(
         ['which', 'claude'],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -716,6 +718,7 @@ def read_binary_info() -> BinaryInfo:
     # Get version from CLI
     result = subprocess.run(
         ['claude', '--version'],
+        check=False,
         capture_output=True,
         text=True,
         timeout=10,
@@ -730,6 +733,7 @@ def read_running_processes() -> Sequence[ProcessInfo]:
     """Find running Claude Code processes (top-level only, not MCP subprocesses)."""
     result = subprocess.run(
         ['pgrep', '-lf', 'claude'],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -887,6 +891,7 @@ def check_credential_security() -> tuple[str, str]:
             '-s',
             KEYCHAIN_SERVICE,
         ],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -1045,7 +1050,7 @@ def render_identity(
             fmt_row(
                 'Extra Usage',
                 f'{C.GREEN}Enabled{C.RESET}' if account.hasExtraUsageEnabled else f'{C.DIM}Disabled{C.RESET}',
-            )
+            ),
         )
 
         if account.subscriptionCreatedAt:
@@ -1082,7 +1087,7 @@ def render_identity(
             fmt_row(
                 'Token Expires',
                 f'{expiry_color}{expires_dt:%Y-%m-%d %H:%M:%S UTC}{C.RESET} ({fmt_relative_future(expires_dt)})',
-            )
+            ),
         )
 
         if redact:
@@ -1583,8 +1588,9 @@ def render_effective_model(config: dict[str, Any], keychain: KeychainCredentials
 
     print(
         fmt_row(
-            'Opus plan default', f'{C.GREEN}Yes{C.RESET}' if config.get('hasOpusPlanDefault') else f'{C.DIM}No{C.RESET}'
-        )
+            'Opus plan default',
+            f'{C.GREEN}Yes{C.RESET}' if config.get('hasOpusPlanDefault') else f'{C.DIM}No{C.RESET}',
+        ),
     )
 
     # Subagent model
@@ -1945,7 +1951,7 @@ def main() -> int:
         if has_errors:
             print(f'{C.RED}⚠ Schema drift detected — update models to accommodate{C.RESET}')
         elif all_warnings:
-            print(f'{C.YELLOW}ℹ {len(all_warnings)} drift warning(s) — see above{C.RESET}')
+            print(f'{C.YELLOW}ℹ {len(all_warnings)} drift warning(s) — see above{C.RESET}')  # noqa: RUF001 — intentional unicode info icon for terminal UI
         else:
             print(f'{C.GREEN}✓ All sections validated cleanly{C.RESET}')
         print()

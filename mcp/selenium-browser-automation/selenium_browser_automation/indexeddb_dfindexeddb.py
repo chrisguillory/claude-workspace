@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import dfindexeddb.errors
+from cc_lib.types import JsonObject
 from dfindexeddb.indexeddb.chromium.definitions import (
     DatabaseMetaDataKeyType,
     IndexMetaDataKeyType,
@@ -118,7 +120,7 @@ def _make_json_serializable(value: Any) -> Any:
     return str(value)
 
 
-def _keypath_to_value(keypath: IDBKeyPath | None) -> str | list[str] | None:
+def _keypath_to_value(keypath: IDBKeyPath | None) -> str | Sequence[str] | None:
     """Convert IDBKeyPath to JSON-serializable value.
 
     Args:
@@ -168,7 +170,7 @@ def _origin_dir_to_url(origin_dir: str) -> str:
 def export_indexeddb_with_schema(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
-) -> dict[str, list[dict[str, Any]]]:
+) -> Mapping[str, Sequence[JsonObject]]:
     """Export IndexedDB with full schema using dfindexeddb.
 
     This function extracts complete IndexedDB data including:
@@ -222,7 +224,7 @@ def export_indexeddb_with_schema(
     if not indexeddb_path.exists():
         return {}
 
-    result: dict[str, list[dict[str, Any]]] = {}
+    result: dict[str, Sequence[JsonObject]] = {}
 
     for db_dir in indexeddb_path.glob('*.indexeddb.leveldb'):
         origin_dir = db_dir.name.replace('.indexeddb.leveldb', '')
@@ -239,14 +241,20 @@ def export_indexeddb_with_schema(
             databases = _parse_indexeddb_folder(db_dir)
             if databases:
                 result[origin_url] = databases
-        except Exception as e:
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            dfindexeddb.errors.ParserError,
+            dfindexeddb.errors.DecoderError,
+        ) as e:
             # Log but continue with other origins
-            logger.warning(f'Failed to parse {origin_dir}: {e}')
+            logger.warning(f'Failed to parse {origin_dir}: {e}', exc_info=True)
 
     return result
 
 
-def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
+def _parse_indexeddb_folder(db_dir: Path) -> Sequence[JsonObject]:
     """Parse a single IndexedDB LevelDB folder.
 
     Args:
@@ -271,13 +279,13 @@ def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
                 'autoIncrement': False,
                 'indexes': {},
                 'records': [],
-            }
-        )
+            },
+        ),
     )
 
     # Index metadata: {db_id: {store_id: {index_id: {...}}}}
     indexes: dict[int, dict[int, dict[int, dict[str, Any]]]] = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(dict))
+        lambda: defaultdict(lambda: defaultdict(dict)),
     )
 
     # Process all records
@@ -373,7 +381,7 @@ def _parse_indexeddb_folder(db_dir: Path) -> list[dict[str, Any]]:
                                 'key_path': idx_data.get('keyPath'),
                                 'unique': idx_data.get('unique', False),
                                 'multi_entry': idx_data.get('multiEntry', False),
-                            }
+                            },
                         )
 
             # Matching ProfileStateIndexedDBObjectStore

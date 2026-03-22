@@ -287,7 +287,8 @@ def test_compact_tree_spec(tree_runner: TreeTestRunner, test_case: dict[str, Any
 
     if 'compact' in spec:
         includes, excludes = extract_assertions(
-            spec['compact'] if isinstance(spec.get('compact'), dict) else spec, 'tree'
+            spec['compact'] if isinstance(spec.get('compact'), dict) else spec,
+            'tree',
         )
         tree_runner.assert_tree(
             fixture_path=fixture_path,

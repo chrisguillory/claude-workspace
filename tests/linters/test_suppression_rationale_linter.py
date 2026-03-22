@@ -49,7 +49,7 @@ EDGE_CASE_FILE = EDGE_CASES_DIR / 'suppression_rationale_linter_edge_cases.py'
 def run_linter(test_file: Path, linter: Path) -> str:
     """Run the linter and return combined stdout+stderr."""
     result = subprocess.run(
-        [sys.executable, str(linter), '--no-skip-file', str(test_file)],
+        [sys.executable, str(linter), '--no-skip-file', '--no-config', str(test_file)],
         capture_output=True,
         text=True,
         timeout=60,

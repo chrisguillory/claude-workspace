@@ -230,7 +230,7 @@ class _TranslatingProxy:
     5. Regular callable → sync wrapper, ``_wrap_result()``
     """
 
-    __slots__ = ('_target', '_boundary')
+    __slots__ = ('_boundary', '_target')
 
     def __init__(self, target: object, boundary: LibraryBoundary) -> None:
         object.__setattr__(self, '_target', target)
@@ -324,7 +324,7 @@ class _TranslatingProxy:
 class _WrappedGenerator:
     """Wraps a sync generator, translating exceptions on every yield boundary."""
 
-    __slots__ = ('_gen', '_boundary')
+    __slots__ = ('_boundary', '_gen')
 
     def __init__(self, gen: types.GeneratorType[Any, Any, Any], boundary: LibraryBoundary) -> None:
         self._gen = gen
@@ -358,7 +358,7 @@ class _WrappedGenerator:
 class _WrappedAsyncGenerator:
     """Wraps an async generator, translating exceptions on every yield boundary."""
 
-    __slots__ = ('_gen', '_boundary')
+    __slots__ = ('_boundary', '_gen')
 
     def __init__(self, gen: types.AsyncGeneratorType[Any, Any], boundary: LibraryBoundary) -> None:
         self._gen = gen
@@ -387,7 +387,7 @@ class _WrappedAsyncGenerator:
 class _WrappedContextManager:
     """Wraps a sync context manager, translating exceptions in __enter__/__exit__."""
 
-    __slots__ = ('_cm', '_boundary')
+    __slots__ = ('_boundary', '_cm')
 
     def __init__(self, cm: Any, boundary: LibraryBoundary) -> None:
         self._cm = cm
@@ -410,7 +410,7 @@ class _WrappedContextManager:
 class _WrappedAsyncContextManager:
     """Wraps an async context manager, translating exceptions in __aenter__/__aexit__."""
 
-    __slots__ = ('_cm', '_boundary')
+    __slots__ = ('_boundary', '_cm')
 
     def __init__(self, cm: Any, boundary: LibraryBoundary) -> None:
         self._cm = cm

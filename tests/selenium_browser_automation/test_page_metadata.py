@@ -46,7 +46,7 @@ class TestCountTreeNodes:
                         {'role': 'listitem', 'children': [{'type': 'text', 'content': 'Home'}]},
                         {'role': 'listitem', 'children': [{'type': 'text', 'content': 'About'}]},
                     ],
-                }
+                },
             ],
         }
         # nav(1) > list(1) > [listitem(1) > text(1), listitem(1) > text(1)] = 6

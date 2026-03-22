@@ -215,7 +215,7 @@ def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
 def run_linter(test_file: Path, linter: Path) -> tuple[str, int]:
     """Run the linter and return (output, return_code)."""
     result = subprocess.run(
-        [sys.executable, str(linter), '--no-skip-file', str(test_file)],
+        [sys.executable, str(linter), '--no-skip-file', '--no-config', str(test_file)],
         capture_output=True,
         text=True,
         timeout=60,
@@ -309,7 +309,7 @@ def validate(
         if actual_kinds != expected_kinds:
             errors.append(
                 f'{class_name}: expected {sorted(expected_kinds)}, '
-                f'got {sorted(actual_kinds) if actual_kinds else "nothing"}'
+                f'got {sorted(actual_kinds) if actual_kinds else "nothing"}',
             )
 
     # Check for unexpected violations in correct/suppressed classes

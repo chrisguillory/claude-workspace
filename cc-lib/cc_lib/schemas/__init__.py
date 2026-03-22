@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cc_lib.schemas.base import CamelModel, StrictModel
+from cc_lib.schemas.base import CamelModel, ClosedModel, OpenModel, StrictModel
 from cc_lib.schemas.hooks import (
     BashToolInput,
     EditToolInput,
@@ -18,7 +18,9 @@ from cc_lib.schemas.hooks import (
 __all__ = [
     'BashToolInput',
     'CamelModel',
+    'ClosedModel',
     'EditToolInput',
+    'OpenModel',
     'PostToolUseHookInput',
     'PreToolUseDecision',
     'PreToolUseHookInput',

@@ -61,6 +61,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from _config import find_config, get_per_file_ignored_codes, load_per_file_ignores
+
 # Name resolution (import map usage)
 type QualifiedName = str  # Fully qualified dotted name (e.g., 'builtins.Exception', 'asyncio.CancelledError')
 type LocalName = str  # Local identifier as it appears in source (e.g., 'Exception', 'CancelledError')
@@ -247,15 +249,47 @@ def main() -> int:
     if not files:
         return 0
 
+    # Resolve config path once if --config was given
+    explicit_config = Path(args.config) if args.config else None
+
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
+        # Per-file-ignores from pyproject.toml
+        per_file_codes: Set[str] = set()
+        skip_file_via_config = False
+        if not args.no_config:
+            if explicit_config is not None:
+                config_path = explicit_config
+                project_root = explicit_config.parent
+            else:
+                result = find_config(filepath, 'exception-safety-linter')
+                if result is not None:
+                    config_path, project_root = result
+                else:
+                    config_path = None
+                    project_root = None
+
+            if config_path is not None and project_root is not None:
+                per_file_ignores = load_per_file_ignores('exception-safety-linter', config_path)
+                per_file_codes = get_per_file_ignored_codes(filepath, per_file_ignores, project_root)
+                if 'skip-file' in per_file_codes:
+                    skip_file_via_config = True
+
+        if skip_file_via_config:
+            continue
+
         try:
             violations = check_file(
                 filepath,
                 respect_skip_file=not args.no_skip_file,
                 report_unused_directives=args.report_unused_directives,
             )
+
+            # Filter by per-file ignored codes (codes are violation kinds directly)
+            if per_file_codes:
+                violations = [v for v in violations if v.kind not in per_file_codes]
+
             all_violations.extend(violations)
         except (SyntaxError, UnicodeDecodeError) as e:
             print(f'{filepath}: {e}', file=sys.stderr)
@@ -338,6 +372,17 @@ def parse_args() -> argparse.Namespace:
         action='store_true',
         help='Report suppression directives that do not match any violation',
     )
+    parser.add_argument(
+        '--config',
+        default=None,
+        metavar='PATH',
+        help='Path to pyproject.toml (default: auto-discover by walking up from each file)',
+    )
+    parser.add_argument(
+        '--no-config',
+        action='store_true',
+        help='Disable reading per-file-ignores from pyproject.toml',
+    )
     return parser.parse_args()
 
 
@@ -387,7 +432,7 @@ def check_file(
                     column=0,
                     kind='unused-directive',
                     source_line=source_lines[skip_line - 1].strip(),
-                )
+                ),
             ]
         return []
 
@@ -662,7 +707,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
                 column=getattr(node, 'col_offset', 0),
                 kind=kind,
                 source_line=self._get_source_line(lineno),
-            )
+            ),
         )
 
     def _is_broad_exception_type(self, node: ast.expr) -> bool:
@@ -790,7 +835,8 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         for keyword in node.keywords:
             if keyword.arg == 'exc_info':
                 if (isinstance(keyword.value, ast.Constant) and keyword.value.value) or not isinstance(
-                    keyword.value, ast.Constant
+                    keyword.value,
+                    ast.Constant,
                 ):
                     has_exc_info = True
 
@@ -958,7 +1004,7 @@ def find_unused_directives(
                         source_line=source_lines[directive.line - 1].strip()
                         if directive.line <= len(source_lines)
                         else '',
-                    )
+                    ),
                 )
                 break  # One unused code per directive is enough
 

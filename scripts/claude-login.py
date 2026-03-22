@@ -123,6 +123,7 @@ import rich.panel
 import typer
 from cc_lib.schemas import StrictModel
 from cc_lib.session_tracker import find_claude_pid, resolve_session_id
+from cc_lib.types import JsonObject
 
 # =============================================================================
 # Pydantic Models
@@ -262,12 +263,11 @@ def _spawn_kill_and_copy_resume(claude_pid: int, session_id: str, model: str | N
 # =============================================================================
 
 
-def read_keychain_raw() -> (
-    Mapping[str, Any] | None
-):  # strict_typing_linter.py: loose-typing — keychain JSON blob has no fixed schema, varies by stored credential type
+def read_keychain_raw() -> JsonObject | None:
     """Read full keychain JSON. Returns None if entry doesn't exist."""
     result = subprocess.run(
         ['security', 'find-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS, '-w'],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -279,10 +279,8 @@ def read_keychain_raw() -> (
 
 
 def write_keychain_raw(
-    data: Mapping[str, Any],
-) -> (
-    None
-):  # strict_typing_linter.py: loose-typing — keychain JSON blob has no fixed schema, varies by stored credential type
+    data: JsonObject,
+) -> None:
     """Write full keychain JSON atomically using -U (update-or-insert).
 
     Cleans up duplicate entries first (may exist from manual keychain edits),
@@ -294,6 +292,7 @@ def write_keychain_raw(
     for i in range(1, 5):
         del_result = subprocess.run(
             ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS],
+            check=False,
             capture_output=True,
             timeout=5,
         )
@@ -312,6 +311,7 @@ def write_keychain_raw(
             '-w',
             json.dumps(data),
         ],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -326,6 +326,7 @@ def delete_keychain() -> None:
     for _ in range(5):
         result = subprocess.run(
             ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS],
+            check=False,
             capture_output=True,
             timeout=5,
         )
@@ -337,6 +338,7 @@ def read_api_key_keychain() -> str | None:
     """Read raw API key from 'Claude Code' keychain entry."""
     result = subprocess.run(
         ['security', 'find-generic-password', '-s', KEYCHAIN_SERVICE_API_KEY, '-w'],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -355,6 +357,7 @@ def write_api_key_keychain(api_key: str) -> None:
     # Delete existing
     subprocess.run(
         ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_API_KEY],
+        check=False,
         capture_output=True,
         timeout=5,
     )
@@ -362,6 +365,7 @@ def write_api_key_keychain(api_key: str) -> None:
     hex_key = api_key.encode('utf-8').hex()
     result = subprocess.run(
         ['security', 'add-generic-password', '-U', '-a', user, '-s', KEYCHAIN_SERVICE_API_KEY, '-X', hex_key],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -375,6 +379,7 @@ def delete_api_key_keychain() -> None:
     """Delete 'Claude Code' keychain entry (API key)."""
     subprocess.run(
         ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_API_KEY],
+        check=False,
         capture_output=True,
         timeout=5,
     )
@@ -601,9 +606,9 @@ def load_mcp_auths() -> Mapping[str, McpOAuthEntry]:
     return {k: McpOAuthEntry.model_validate(v) for k, v in raw.items()}
 
 
-def mcp_auths_to_keychain(  # strict_typing_linter.py: loose-typing — keychain format is arbitrary JSON keyed by provider with no fixed schema
+def mcp_auths_to_keychain(
     auths: Mapping[str, McpOAuthEntry],
-) -> Mapping[str, Any]:
+) -> JsonObject:
     """Convert MCP auths to keychain format."""
     result = {}
     for entry in auths.values():
@@ -768,7 +773,7 @@ def cmd_save_login(force: bool, inject_mcp: bool) -> None:
                 'scopes': oauth_raw.get('scopes', []),
                 'subscription_type': oauth_raw.get('subscriptionType'),
                 'rate_limit_tier': oauth_raw.get('rateLimitTier'),
-            }
+            },
         )
 
     # Capture API key for Console accounts
@@ -1091,7 +1096,7 @@ def cmd_save_mcp_login(server_query: str) -> None:
             'refresh_token': entry_raw['refreshToken'],
             'scope': entry_raw['scope'],
             'keychain_key': kc_key,
-        }
+        },
     )
 
     # Load, update, save
@@ -1331,7 +1336,7 @@ def cli_switch_login(
             console.print(rich.panel.Panel('\n'.join(lines), border_style='red', title='Error', title_align='left'))
         else:
             console.print(
-                rich.panel.Panel(f'{msg} No saved logins.', border_style='red', title='Error', title_align='left')
+                rich.panel.Panel(f'{msg} No saved logins.', border_style='red', title='Error', title_align='left'),
             )
         raise SystemExit(1)
     cmd_switch_login(login_id, use_keychain, restart, model)

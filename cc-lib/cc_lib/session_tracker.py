@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from collections.abc import Sequence, Set
 from datetime import UTC, datetime
@@ -22,9 +23,9 @@ from filelock import FileLock
 from cc_lib.types import JsonDatetime, SessionSource, SessionState
 
 __all__ = [
-    'SessionManager',
-    'SessionDatabase',
     'Session',
+    'SessionDatabase',
+    'SessionManager',
     'SessionMetadata',
     'find_claude_pid',
     'resolve_session_id',
@@ -546,8 +547,6 @@ def find_claude_pid() -> int:
     Uses psutil.Process.exe() because psutil.name() on macOS returns the
     version number (e.g., '2.1.44'), not 'claude'. The exe path is reliable.
     """
-    import os
-
     current = os.getppid()
     for _ in range(20):
         try:

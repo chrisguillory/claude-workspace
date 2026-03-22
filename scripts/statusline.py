@@ -723,7 +723,10 @@ def _resolve_pending_from_config() -> str:
 
 
 def _get_active_credentials(
-    session_id: str, claude_pid: int, claude_pid_created_at: float, transcript_path: str
+    session_id: str,
+    claude_pid: int,
+    claude_pid_created_at: float,
+    transcript_path: str,
 ) -> tuple[ResolvedCredentials, str]:
     """Return (credentials_to_display, pending_login_name).
 
@@ -887,6 +890,7 @@ def _read_static_data() -> ResolvedCredentials:
     try:
         result = subprocess.run(
             ['security', 'find-generic-password', '-w', '-s', 'Claude Code-credentials'],
+            check=False,
             capture_output=True,
             text=True,
             timeout=5,
@@ -939,6 +943,7 @@ def _git_branch() -> str:
     try:
         result = subprocess.run(
             ['git', 'branch', '--show-current'],
+            check=False,
             capture_output=True,
             text=True,
             timeout=3,
@@ -955,6 +960,7 @@ def _git_remote_url() -> str:
     try:
         result = subprocess.run(
             ['git', 'remote', 'get-url', 'origin'],
+            check=False,
             capture_output=True,
             text=True,
             timeout=3,
@@ -1490,7 +1496,10 @@ def main() -> None:
 
     claude_pid_created_at = psutil.Process(claude_pid).create_time()
     static, pending_login = _get_active_credentials(
-        data.session_id, claude_pid, claude_pid_created_at, data.transcript_path
+        data.session_id,
+        claude_pid,
+        claude_pid_created_at,
+        data.transcript_path,
     )
     branch = _git_branch()
     remote_url = _git_remote_url()

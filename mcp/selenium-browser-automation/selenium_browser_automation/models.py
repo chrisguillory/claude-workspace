@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, Literal
+from collections.abc import Mapping, Sequence
+from typing import Literal
 
 import pydantic
 import pydantic.alias_generators
+from cc_lib.schemas.base import ClosedModel, OpenModel
+from cc_lib.types import JsonObject
+from pydantic import JsonValue
 
 # Browser selection for Selenium automation (default: chromium)
 # Use "chromium" to avoid AppleScript targeting conflicts when personal Chrome is running
 type Browser = Literal['chrome', 'chromium']
 
 
-class BaseModel(pydantic.BaseModel):
-    """Base model with strict validation - no extra fields, all fields required unless Optional."""
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
-
-
-class ChromeProfileEssential(BaseModel):
+class ChromeProfileEssential(ClosedModel):
     """Essential profile metadata (default/concise view)."""
 
     profile_dir: str  # "Default", "Profile 1", etc.
@@ -57,10 +54,10 @@ class ChromeProfileFull(ChromeProfileEssential):
     default_avatar_stroke_color: int | None = None
 
 
-class ChromeProfilesResult(BaseModel):
+class ChromeProfilesResult(ClosedModel):
     """Result of list_chrome_profiles tool."""
 
-    profiles: list[ChromeProfileEssential | ChromeProfileFull]
+    profiles: Sequence[ChromeProfileEssential | ChromeProfileFull]
     total_count: int
     default_profile: str | None  # Which profile is default
     chrome_base_path: str  # Base Chrome directory path
@@ -69,11 +66,8 @@ class ChromeProfilesResult(BaseModel):
 # Chrome JSON structure models (for parsing Chrome's Local State and Preferences files)
 
 
-class ChromeInfoCacheEntry(BaseModel):
-    """Profile entry from Local State -> profile.info_cache[profile_dir].
-
-    Strict validation - will fail if Chrome adds unknown fields.
-    """
+class ChromeInfoCacheEntry(OpenModel):
+    """Profile entry from Local State -> profile.info_cache[profile_dir]."""
 
     # Essential fields
     name: str
@@ -110,75 +104,79 @@ class ChromeInfoCacheEntry(BaseModel):
     signin_with_credential_provider: bool | None = pydantic.Field(None, alias='signin.with_credential_provider')
 
 
-class ChromeLocalStateProfile(BaseModel):
-    """Profile section from Local State JSON. Strict validation."""
+class ChromeLocalStateProfile(OpenModel):
+    """Profile section from Local State JSON."""
 
-    info_cache: dict[str, ChromeInfoCacheEntry]
-    last_active_profiles: list[str] | None = None
+    info_cache: Mapping[str, ChromeInfoCacheEntry]
+    last_active_profiles: Sequence[str] | None = None
     last_used: str | None = None
-    metrics: dict[str, Any] | None = None  # e.g., {"next_bucket_index": 6}
+    metrics: JsonObject | None = None  # e.g., {"next_bucket_index": 6}
     picker_shown: bool | None = None
     profile_counts_reported: str | None = None
     profiles_created: int | None = None
-    profiles_order: list[str] | None = None
+    profiles_order: Sequence[str] | None = None
 
 
-class ChromeLocalState(BaseModel):
-    """Chrome Local State JSON structure. Strict validation - includes ALL fields."""
+class ChromeLocalState(OpenModel):
+    """Chrome Local State JSON structure.
+
+    Typed fields cover known Chrome settings. Unknown fields from
+    Chrome updates are preserved in model_extra.
+    """
 
     profile: ChromeLocalStateProfile
 
     # Top-level Chrome settings and state fields (alphabetically sorted)
-    accessibility: dict[str, Any] | None = None
-    app_shims: dict[str, Any] | None = None
+    accessibility: JsonObject | None = None
+    app_shims: JsonObject | None = None
     app_shims_cdhash_hmac_key: str | None = None
-    autofill: dict[str, Any] | None = None
-    background_tracing: dict[str, Any] | None = None
-    breadcrumbs: dict[str, Any] | None = None
-    browser: dict[str, Any] | None = None
-    cloned_install: dict[str, Any] | None = None  # Chrome 120+ install tracking
-    glic: dict[str, Any] | None = None  # Glic multi-instance settings
+    autofill: JsonObject | None = None
+    background_tracing: JsonObject | None = None
+    breadcrumbs: JsonObject | None = None
+    browser: JsonObject | None = None
+    cloned_install: JsonObject | None = None  # Chrome 120+ install tracking
+    glic: JsonObject | None = None  # Glic multi-instance settings
     hardware_acceleration_mode_previous: bool | None = None
-    legacy: dict[str, Any] | None = None
-    local: dict[str, Any] | None = None
-    management: dict[str, Any] | None = None
-    network_time: dict[str, Any] | None = None
-    optimization_guide: dict[str, Any] | None = None
-    origin_trials: dict[str, Any] | None = None
-    password_manager: dict[str, Any] | None = None
-    performance_intervention: dict[str, Any] | None = None
-    performance_tuning: dict[str, Any] | None = None
-    policy: dict[str, Any] | None = None
-    privacy_budget: dict[str, Any] | None = None
-    profile_network_context_service: dict[str, Any] | None = None
-    profiles: dict[str, Any] | None = None  # Note: different from 'profile' section
-    restart: dict[str, Any] | None = None  # Session restart state
-    segmentation_platform: dict[str, Any] | None = None
+    legacy: JsonObject | None = None
+    local: JsonObject | None = None
+    management: JsonObject | None = None
+    network_time: JsonObject | None = None
+    optimization_guide: JsonObject | None = None
+    origin_trials: JsonObject | None = None
+    password_manager: JsonObject | None = None
+    performance_intervention: JsonObject | None = None
+    performance_tuning: JsonObject | None = None
+    policy: JsonObject | None = None
+    privacy_budget: JsonObject | None = None
+    profile_network_context_service: JsonObject | None = None
+    profiles: JsonObject | None = None  # Note: different from 'profile' section
+    restart: JsonObject | None = None  # Session restart state
+    segmentation_platform: JsonObject | None = None
     session_id_generator_last_value: str | None = None
-    signin: dict[str, Any] | None = None
-    sm: dict[str, Any] | None = None  # Chrome sync/management state
-    subresource_filter: dict[str, Any] | None = None
-    tab_stats: dict[str, Any] | None = None
-    task_manager: dict[str, Any] | None = None  # Task manager window state
-    toast: dict[str, Any] | None = None
-    tpcd: dict[str, Any] | None = None
-    tpcd_experiment: dict[str, Any] | None = None
-    ukm: dict[str, Any] | None = None
-    uninstall_metrics: dict[str, Any] | None = None
-    updateclientdata: dict[str, Any] | None = None
+    signin: JsonObject | None = None
+    sm: JsonObject | None = None  # Chrome sync/management state
+    subresource_filter: JsonObject | None = None
+    tab_stats: JsonObject | None = None
+    task_manager: JsonObject | None = None  # Task manager window state
+    toast: JsonObject | None = None
+    tpcd: JsonObject | None = None
+    tpcd_experiment: JsonObject | None = None
+    ukm: JsonObject | None = None
+    uninstall_metrics: JsonObject | None = None
+    updateclientdata: JsonObject | None = None
     updateclientlastupdatecheckerror: int | None = None
     updateclientlastupdatecheckerrorcategory: int | None = None
     updateclientlastupdatecheckerrorextracode1: int | None = None
-    user_experience_metrics: dict[str, Any] | None = None
+    user_experience_metrics: JsonObject | None = None
 
     # Variations framework fields (A/B testing)
     variations_compressed_seed: str | None = None
     variations_country: str | None = None
     variations_crash_streak: int | None = None
     variations_failed_to_fetch_seed_streak: int | None = None
-    variations_google_groups: dict[str, Any] | None = None
+    variations_google_groups: JsonObject | None = None
     variations_last_fetch_time: str | None = None
-    variations_permanent_consistency_country: list[str] | None = None
+    variations_permanent_consistency_country: Sequence[str] | None = None
     variations_safe_compressed_seed: str | None = None
     variations_safe_seed_date: str | None = None
     variations_safe_seed_fetch_time: str | None = None
@@ -194,7 +192,7 @@ class ChromeLocalState(BaseModel):
     variations_sticky_studies: str | None = None
 
     # Additional state
-    was: dict[str, Any] | None = None
+    was: JsonObject | None = None
 
 
 # =============================================================================
@@ -261,14 +259,14 @@ class LayoutShiftEntry(pydantic.BaseModel):
 
     value: float
     time: float
-    sources: list[LayoutShiftSource] = []
+    sources: Sequence[LayoutShiftSource] = []
 
 
 class CLSMetric(WebVitalMetric):
     """Cumulative Layout Shift with session entries."""
 
     name: Literal['CLS'] = 'CLS'
-    entries: list[LayoutShiftEntry] = []
+    entries: Sequence[LayoutShiftEntry] = []
 
 
 class INPDetails(pydantic.BaseModel):
@@ -310,7 +308,7 @@ class CoreWebVitals(pydantic.BaseModel):
 
     # Metadata
     collection_duration_ms: float
-    errors: list[str] = []
+    errors: Sequence[str] = []
 
 
 # =============================================================================
@@ -350,13 +348,21 @@ class NetworkRequest(pydantic.BaseModel):
     status_text: str | None = None
     mime_type: str | None = None
     timing: RequestTiming | None = None
-    request_headers: dict[str, str] = {}
-    response_headers: dict[str, str] = {}
+    request_headers: Mapping[str, str] = {}
+    response_headers: Mapping[str, str] = {}
     encoded_data_length: int = 0
     started_at: float = 0  # Wall time
     finished_at: float | None = None
     duration_ms: float | None = None  # Computed total duration
     error: str | None = None
+
+
+class SlowestRequestSummary(ClosedModel):
+    """Summary of a slow network request for reporting."""
+
+    url: str
+    duration_ms: float | None = None
+    type: str | None = None
 
 
 class NetworkCapture(pydantic.BaseModel):
@@ -366,16 +372,16 @@ class NetworkCapture(pydantic.BaseModel):
 
     url: str
     timestamp: float
-    requests: list[NetworkRequest]
+    requests: Sequence[NetworkRequest]
     total_requests: int
     total_size_bytes: int
     total_time_ms: float
 
     # Summary statistics
-    slowest_requests: list[dict[str, Any]] = []  # [{url, duration_ms, status}]
-    requests_by_type: dict[str, int] = {}  # {document: 1, xhr: 5, ...}
+    slowest_requests: Sequence[SlowestRequestSummary] = []
+    requests_by_type: Mapping[str, int] = {}  # {document: 1, xhr: 5, ...}
 
-    errors: list[str] = []
+    errors: Sequence[str] = []
 
 
 # =============================================================================
@@ -401,7 +407,7 @@ JavaScriptResultType = Literal[
 JavaScriptErrorType = Literal['timeout', 'execution']
 
 
-class JavaScriptResult(BaseModel):
+class JavaScriptResult(ClosedModel):
     """Result of JavaScript execution in browser context.
 
     Contains the execution outcome with typed result and error details.
@@ -410,7 +416,7 @@ class JavaScriptResult(BaseModel):
     """
 
     success: bool
-    result: str | int | float | bool | dict[str, Any] | list[Any] | None = None
+    result: JsonValue | None = None
     result_type: JavaScriptResultType
     error: str | None = None
     error_type: JavaScriptErrorType | None = None
@@ -423,7 +429,7 @@ class JavaScriptResult(BaseModel):
 # =============================================================================
 
 
-class CapturedResource(BaseModel):
+class CapturedResource(ClosedModel):
     """Individual captured resource from page."""
 
     url: str
@@ -435,28 +441,28 @@ class CapturedResource(BaseModel):
     status: int
 
 
-class ResourceCapture(BaseModel):
+class ResourceCapture(ClosedModel):
     """Result of resource capture operation."""
 
     output_dir: str
     html_path: str
-    captured: list[CapturedResource]
+    captured: Sequence[CapturedResource]
     total_size_mb: float
     resource_count: int
-    errors: list[dict[str, Any]]
+    errors: Sequence[JsonObject]
 
 
-class HARExportResult(BaseModel):
+class HARExportResult(ClosedModel):
     """Result of HAR export operation."""
 
     path: str
     entry_count: int
     size_bytes: int
     has_errors: bool = False
-    errors: list[str] = []
+    errors: Sequence[str] = []
 
 
-class NavigationResult(BaseModel):
+class NavigationResult(ClosedModel):
     """Result of navigation operation."""
 
     current_url: str
@@ -465,7 +471,7 @@ class NavigationResult(BaseModel):
     elapsed_seconds: float | None = None  # Time taken for the operation in seconds
 
 
-class InteractiveElement(BaseModel):
+class InteractiveElement(ClosedModel):
     """Clickable element with selector for automation."""
 
     tag: str
@@ -476,7 +482,7 @@ class InteractiveElement(BaseModel):
     classes: str
 
 
-class FocusableElement(BaseModel):
+class FocusableElement(ClosedModel):
     """Keyboard-navigable element with tab order."""
 
     tag: str
@@ -487,14 +493,14 @@ class FocusableElement(BaseModel):
     classes: str
 
 
-class SmartExtractionInfo(BaseModel):
+class SmartExtractionInfo(ClosedModel):
     """Metadata about smart extraction decisions. Only present for selector='auto'."""
 
     fallback_used: bool  # True if no suitable main/article found, fell back to body
     body_character_count: int  # Total body chars for coverage calculation
 
 
-class PageTextResult(BaseModel):
+class PageTextResult(ClosedModel):
     """Result of text extraction operation."""
 
     # Core content (always present)
@@ -519,7 +525,7 @@ class PageTextResult(BaseModel):
 SameSitePolicy = Literal['Strict', 'Lax', 'None']
 
 
-class ProfileStateCookie(BaseModel):
+class ProfileStateCookie(ClosedModel):
     """Cookie in profile state format.
 
     Cookies are stored at the top level of ProfileState (not under origins) because
@@ -540,7 +546,7 @@ class ProfileStateCookie(BaseModel):
     same_site: SameSitePolicy
 
 
-class ProfileStateIndexedDBRecord(BaseModel):
+class ProfileStateIndexedDBRecord(ClosedModel):
     """IndexedDB record - key/value pair.
 
     Keys can be strings, numbers, dates (as ISO strings), or arrays (compound keys).
@@ -555,11 +561,11 @@ class ProfileStateIndexedDBRecord(BaseModel):
 
     model_config = pydantic.ConfigDict(extra='forbid', strict=False)  # Allow flexible JSON values
 
-    key: str | int | float | list[Any] | None
-    value: str | int | float | bool | dict[str, Any] | list[Any] | None
+    key: str | int | float | Sequence[str | int | float] | None
+    value: JsonValue | None = None
 
 
-class ProfileStateIndexedDBIndex(BaseModel):
+class ProfileStateIndexedDBIndex(ClosedModel):
     """IndexedDB object store index metadata.
 
     Serializes to camelCase for JavaScript compatibility:
@@ -577,7 +583,7 @@ class ProfileStateIndexedDBIndex(BaseModel):
     multi_entry: bool
 
 
-class ProfileStateIndexedDBObjectStore(BaseModel):
+class ProfileStateIndexedDBObjectStore(ClosedModel):
     """IndexedDB object store with schema and data.
 
     Captures the complete state of an object store including:
@@ -600,7 +606,7 @@ class ProfileStateIndexedDBObjectStore(BaseModel):
     records: Sequence[ProfileStateIndexedDBRecord]
 
 
-class ProfileStateIndexedDB(BaseModel):
+class ProfileStateIndexedDB(ClosedModel):
     """IndexedDB database with version and object stores.
 
     The version number is critical for schema migrations.
@@ -619,7 +625,7 @@ class ProfileStateIndexedDB(BaseModel):
     object_stores: Sequence[ProfileStateIndexedDBObjectStore]
 
 
-class ProfileStateOriginStorage(BaseModel):
+class ProfileStateOriginStorage(ClosedModel):
     """Storage data for a single origin.
 
     Each origin (scheme://host:port) has isolated storage per the same-origin policy.
@@ -630,12 +636,12 @@ class ProfileStateOriginStorage(BaseModel):
     clears it. For cross-session persistence, use local_storage or cookies.
     """
 
-    local_storage: dict[str, str]
-    session_storage: dict[str, str] | None = None
+    local_storage: Mapping[str, str]
+    session_storage: Mapping[str, str] | None = None
     indexed_db: Sequence[ProfileStateIndexedDB] | None = None
 
 
-class ProfileState(BaseModel):
+class ProfileState(ClosedModel):
     """Browser profile state for session persistence.
 
     Captures browser state that maintains authenticated sessions:
@@ -659,15 +665,15 @@ class ProfileState(BaseModel):
     cookies: Sequence[ProfileStateCookie]
 
     # Storage: origin-scoped, keyed by origin string (e.g., "https://example.com")
-    origins: dict[str, ProfileStateOriginStorage]
+    origins: Mapping[str, ProfileStateOriginStorage]
 
     # Future expansion slots (not yet implemented)
-    extensions: dict[str, Any] | None = None
-    permissions: dict[str, Any] | None = None
-    preferences: dict[str, Any] | None = None
+    extensions: JsonObject | None = None
+    permissions: JsonObject | None = None
+    preferences: JsonObject | None = None
 
 
-class SaveProfileStateResult(BaseModel):
+class SaveProfileStateResult(ClosedModel):
     """Result from save_profile_state operation."""
 
     path: str
@@ -682,7 +688,7 @@ class SaveProfileStateResult(BaseModel):
     tracked_origins: Sequence[str] = []
 
 
-class ConsoleLogEntry(BaseModel):
+class ConsoleLogEntry(ClosedModel):
     """Individual browser console log entry."""
 
     level: str  # SEVERE, WARNING, INFO
@@ -691,7 +697,7 @@ class ConsoleLogEntry(BaseModel):
     timestamp: int  # Epoch milliseconds
 
 
-class ConsoleLogsResult(BaseModel):
+class ConsoleLogsResult(ClosedModel):
     """Result of get_console_logs operation."""
 
     logs: Sequence[ConsoleLogEntry]
@@ -707,7 +713,7 @@ class ConsoleLogsResult(BaseModel):
 # =============================================================================
 
 
-class ChromeProfileStateExportResult(BaseModel):
+class ChromeProfileStateExportResult(ClosedModel):
     """Result of exporting Chrome profile state from profile files.
 
     Returned by export_chrome_profile_state() which reads profile state directly

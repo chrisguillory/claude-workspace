@@ -25,8 +25,8 @@ import fitz  # PyMuPDF
 import pdfplumber
 
 __all__ = [
-    'PDFPageData',
     'PDFExtractionResult',
+    'PDFPageData',
     'extract_pdf',
 ]
 
@@ -126,7 +126,7 @@ def extract_pdf(path: str) -> PDFExtractionResult:
                     text=text,
                     might_have_table=might_have_table,
                     table_markdown=table_data.get(page_num),
-                )
+                ),
             )
 
         return PDFExtractionResult(

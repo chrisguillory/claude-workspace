@@ -9,6 +9,8 @@ import pytest
 from mypy.options import Options
 from mypy.plugin import ReportConfigContext
 
+from plugins.pydantic_replace import PydanticReplacePlugin
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -18,8 +20,6 @@ class TestReportConfigData:
 
     def test_includes_plugin_version(self) -> None:
         """Plugin version in config data ensures mypy cache invalidation."""
-        from plugins.pydantic_replace import PydanticReplacePlugin
-
         plugin = PydanticReplacePlugin(_make_options())
         ctx = ReportConfigContext(id='test', path='test.py', is_check=False)
         data = plugin.report_config_data(ctx)
@@ -29,8 +29,6 @@ class TestReportConfigData:
 
     def test_preserves_pydantic_config_data(self) -> None:
         """Verify we don't clobber parent plugin's config data."""
-        from plugins.pydantic_replace import PydanticReplacePlugin
-
         plugin = PydanticReplacePlugin(_make_options())
         ctx = ReportConfigContext(id='test', path='test.py', is_check=False)
         data = plugin.report_config_data(ctx)
@@ -45,8 +43,6 @@ class TestReportConfigData:
 
     def test_report_config_data_returns_independent_copies(self) -> None:
         """Repeated calls return equal dicts without mutating parent state."""
-        from plugins.pydantic_replace import PydanticReplacePlugin
-
         plugin = PydanticReplacePlugin(_make_options())
         ctx = ReportConfigContext(id='test', path='test.py', is_check=False)
         first = plugin.report_config_data(ctx)

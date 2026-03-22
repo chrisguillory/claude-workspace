@@ -1,3 +1,14 @@
+"""Pydantic base models for three trust levels of extra field handling.
+
+Terminology follows JSON Schema: "closed" rejects additional properties,
+"open" accepts them. Trust level determines the default:
+
+- ClosedModel: internal data we construct. extra='forbid' always.
+- StrictModel: protocol data (Claude Code, MCP). extra='allow' by default.
+- OpenModel: external data (Chrome, CDP). extra='allow' by default.
+- CamelModel: StrictModel with camelCase JSON serialization.
+"""
+
 from __future__ import annotations
 
 import os
@@ -7,21 +18,38 @@ import pydantic
 from pydantic.alias_generators import to_camel
 
 
-class StrictModel(pydantic.BaseModel):
-    """Base model: strict types, immutable, forward-compatible by default.
+class ClosedModel(pydantic.BaseModel):
+    """Closed content model for internal data.
 
-    Unknown fields are preserved (``extra='allow'``) so upstream schema
-    evolution doesn't break consumers. Preserved extras are accessible via
-    ``__pydantic_extra__`` for drift detection.
-
-    Set ``CC_SCHEMA_EXTRA_FORBID=1`` to switch to ``extra='forbid'``.
-
-    Use ``__replace__()`` (Python 3.13+, PEP 681) for type-safe mutations
-    instead of ``model_copy(update={...})`` which is untyped.
+    Use when both producer and consumer are our code. Unknown fields
+    indicate a programming bug and are always rejected.
     """
 
     model_config = pydantic.ConfigDict(
-        extra='forbid' if os.environ.get('CC_SCHEMA_EXTRA_FORBID') == '1' else 'allow',
+        extra='forbid',
+        frozen=True,
+        strict=True,
+        validate_default=True,
+        use_attribute_docstrings=True,
+        validate_by_alias=True,
+        validate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+
+class StrictModel(pydantic.BaseModel):
+    """Protocol data model — forward-compatible with upstream schema evolution.
+
+    Unknown fields are preserved in ``model_extra`` so upstream additions
+    (Claude Code adding new hook fields) don't break consumers.
+
+    Set ``CC_STRICT_MODEL_EXTRA_FORBID=1`` to surface new fields as
+    validation errors — for developers tracking upstream protocol
+    changes who want to keep their schemas current.
+    """
+
+    model_config = pydantic.ConfigDict(
+        extra='forbid' if os.environ.get('CC_STRICT_MODEL_EXTRA_FORBID') == '1' else 'allow',
         frozen=True,
         strict=True,
         validate_default=True,
@@ -33,12 +61,19 @@ class StrictModel(pydantic.BaseModel):
 
 
 class CamelModel(StrictModel):
-    """Strict model with automatic camelCase alias generation.
+    """Protocol model with automatic camelCase alias generation.
 
-    For Claude Code's JSON protocol, which uses camelCase keys
-    (hookSpecificOutput, permissionDecision, etc.) while Python convention
-    is snake_case. Accepts both forms on input; serializes to camelCase
-    with None fields excluded by default.
+    For Claude Code's JSON protocol (``hookSpecificOutput``,
+    ``permissionDecision``) while Python uses snake_case
+    (``hook_specific_output``, ``permission_decision``).
+
+    Serialization defaults to camelCase with None fields excluded::
+
+        class Decision(CamelModel):
+            permission_decision: str = 'allow'
+
+        Decision().model_dump_json()
+        # → {"permissionDecision": "allow"}
     """
 
     model_config = pydantic.ConfigDict(
@@ -60,3 +95,26 @@ class CamelModel(StrictModel):
         **kwargs: Any,  # strict_typing_linter.py: loose-typing — override must match BaseModel.model_dump_json signature
     ) -> str:
         return super().model_dump_json(exclude_none=exclude_none, **kwargs)
+
+
+class OpenModel(pydantic.BaseModel):
+    """Open content model for external data with no stable schema.
+
+    Use for data from systems we don't control (Chrome Local State,
+    CDP, IndexedDB) where the upstream schema evolves independently.
+
+    Set ``CC_OPEN_MODEL_EXTRA_FORBID=1`` to reject unknown fields —
+    useful for gradual typing: discover schema drift, add new fields
+    to the model, then switch back to allow.
+    """
+
+    model_config = pydantic.ConfigDict(
+        extra='forbid' if os.environ.get('CC_OPEN_MODEL_EXTRA_FORBID') == '1' else 'allow',
+        frozen=True,
+        strict=True,
+        validate_default=True,
+        use_attribute_docstrings=True,
+        validate_by_alias=True,
+        validate_by_name=True,
+        serialize_by_alias=True,
+    )

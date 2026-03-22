@@ -726,7 +726,9 @@ class _HashExcludedDataclass:
 
     name: str
     data: list[int] = dataclasses.field(  # strict_typing_linter.py: mutable-type
-        hash=False, default_factory=list, compare=False
+        hash=False,
+        default_factory=list,
+        compare=False,
     )
 
 

@@ -79,7 +79,7 @@ class SparseEmbeddingService:
         results, wall_secs, cpu_secs = await asyncio.to_thread(self._model.embed_batch, list(texts))
         parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
         logger.debug(
-            f'[SPARSE] {len(texts)} texts in {wall_secs:.3f}s wall, {cpu_secs:.3f}s cpu ({parallel:.1f}x parallel)'
+            f'[SPARSE] {len(texts)} texts in {wall_secs:.3f}s wall, {cpu_secs:.3f}s cpu ({parallel:.1f}x parallel)',
         )
         return results, wall_secs, cpu_secs
 

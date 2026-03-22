@@ -13,11 +13,11 @@ import pydantic
 from document_search.schemas.base import StrictModel
 
 __all__ = [
+    'MAX_TEXT_CHARS',
     'EmbedBatchRequest',
     'EmbedBatchResponse',
     'EmbedRequest',
     'EmbedResponse',
-    'MAX_TEXT_CHARS',
     'TaskIntent',
 ]
 

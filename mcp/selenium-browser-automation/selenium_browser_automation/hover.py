@@ -7,8 +7,8 @@ Performs visibility and occlusion checks before hover actions.
 from __future__ import annotations
 
 import time
-from typing import Any
 
+from cc_lib.types import JsonObject
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
@@ -22,7 +22,7 @@ def check_hover_actionability(
     css_selector: str,
     *,
     setup_selector: str | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Check whether an element is actionable for hover.
 
     Performs: optional setup click, find element, scroll into view,

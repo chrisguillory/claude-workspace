@@ -69,7 +69,7 @@ HASHABLE_PRIMITIVES: frozenset[type] = frozenset(
         bytes,
         complex,
         type(None),
-    }
+    },
 )
 
 UNHASHABLE_TYPES: frozenset[type] = frozenset(
@@ -78,7 +78,7 @@ UNHASHABLE_TYPES: frozenset[type] = frozenset(
         dict,
         set,
         bytearray,
-    }
+    },
 )
 
 UNHASHABLE_ORIGINS: frozenset[type] = frozenset(
@@ -92,7 +92,7 @@ UNHASHABLE_ORIGINS: frozenset[type] = frozenset(
         collections.abc.MutableMapping,
         collections.abc.Set,
         collections.abc.MutableSet,
-    }
+    },
 )
 
 # External types we can classify without importing
@@ -113,7 +113,7 @@ KNOWN_HASHABLE: frozenset[QualifiedName] = frozenset(
         'ipaddress.IPv4Address',
         'ipaddress.IPv6Address',
         're.Pattern',
-    }
+    },
 )
 
 KNOWN_UNHASHABLE: frozenset[QualifiedName] = frozenset(
@@ -122,7 +122,7 @@ KNOWN_UNHASHABLE: frozenset[QualifiedName] = frozenset(
         'numpy.matrix',
         'pandas.DataFrame',
         'pandas.Series',
-    }
+    },
 )
 
 
@@ -327,7 +327,7 @@ class HashabilityInspector:
                     UnhashableField(
                         name=field.name,
                         annotation_repr=_annotation_repr(annotation),
-                    )
+                    ),
                 )
                 logger.debug('[HASH]     %s: %s -> unhashable', field.name, annotation)
 
@@ -377,7 +377,7 @@ class HashabilityInspector:
                     UnhashableField(
                         name=field.name,
                         annotation_repr=_annotation_repr(annotation),
-                    )
+                    ),
                 )
                 logger.debug('[HASH]     %s: %s -> unhashable', field.name, annotation)
 
@@ -417,7 +417,7 @@ class HashabilityInspector:
                     UnhashableField(
                         name=field_name,
                         annotation_repr=_annotation_repr(annotation),
-                    )
+                    ),
                 )
                 logger.debug('[HASH]     %s: %s -> unhashable', field_name, annotation)
 

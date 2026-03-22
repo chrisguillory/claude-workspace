@@ -60,6 +60,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from _config import find_config, get_per_file_ignored_codes, load_per_file_ignores
 from hashability_inspector import HashabilityInspector, QualifiedName
 
 # -- Configuration ------------------------------------------------------------
@@ -153,7 +154,12 @@ type TypeClassification = Literal['mutable', 'transparent', 'allowed', 'unknown'
 
 type FieldContext = Literal['field', 'parameter', 'return']
 type DirectiveCode = Literal[
-    'mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering', 'unused-directive'
+    'mutable-type',
+    'loose-typing',
+    'tuple-field',
+    'hashable-field',
+    'ordering',
+    'unused-directive',
 ]
 
 # Violation kind literals - used in discriminated unions
@@ -249,9 +255,40 @@ def main() -> int:
     # Shared inspector for runtime hashability checking across all files
     inspector = HashabilityInspector(source_roots=source_roots)
 
+    # Resolve config path once if --config was given
+    explicit_config = Path(args.config) if args.config else None
+
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
+        # Per-file-ignores from pyproject.toml
+        per_file_ignored_kinds: set[ViolationKind] = set()
+        skip_file_via_config = False
+        if not args.no_config:
+            if explicit_config is not None:
+                config_path = explicit_config
+                project_root = explicit_config.parent
+            else:
+                result = find_config(filepath, 'strict-typing-linter')
+                if result is not None:
+                    config_path, project_root = result
+                else:
+                    config_path = None
+                    project_root = None
+
+            if config_path is not None and project_root is not None:
+                per_file_ignores = load_per_file_ignores('strict-typing-linter', config_path)
+                codes = get_per_file_ignored_codes(filepath, per_file_ignores, project_root)
+                if 'skip-file' in codes:
+                    skip_file_via_config = True
+                for code in codes:
+                    for directive_code, kind_set in CODE_TO_KINDS.items():
+                        if code == directive_code:
+                            per_file_ignored_kinds.update(kind_set)
+
+        if skip_file_via_config:
+            continue
+
         violations = check_file(
             filepath,
             strict_ordering_packages,
@@ -259,9 +296,14 @@ def main() -> int:
             respect_skip_file=not args.no_skip_file,
             report_unused_directives=args.report_unused_directives,
         )
+
+        # Filter by per-file ignored kinds
+        if per_file_ignored_kinds:
+            violations = [v for v in violations if v.kind not in per_file_ignored_kinds]
+
         all_violations.extend(violations)
 
-    # Filter out ignored violation kinds
+    # Filter out globally ignored violation kinds (from --ignore)
     if ignored_kinds:
         all_violations = [v for v in all_violations if v.kind not in ignored_kinds]
 
@@ -335,6 +377,17 @@ def parse_args() -> argparse.Namespace:
         action='store_true',
         help='Report suppression directives that do not match any violation',
     )
+    parser.add_argument(
+        '--config',
+        default=None,
+        metavar='PATH',
+        help='Path to pyproject.toml (default: auto-discover by walking up from each file)',
+    )
+    parser.add_argument(
+        '--no-config',
+        action='store_true',
+        help='Disable reading per-file-ignores from pyproject.toml',
+    )
     return parser.parse_args()
 
 
@@ -394,7 +447,7 @@ def check_file(
                     message='skip-file directive does not suppress any violations',
                     source_line=source_lines[skip_line - 1].strip(),
                     suggestion='Remove the stale skip-file directive',
-                )
+                ),
             ]
         return []
 
@@ -414,7 +467,11 @@ def check_file(
     if report_unused_directives:
         directives = collect_directives(source_lines)
         unused = find_unused_directives(
-            directives, all_raw, filepath, source_lines, type_checker.matched_directive_lines
+            directives,
+            all_raw,
+            filepath,
+            source_lines,
+            type_checker.matched_directive_lines,
         )
         violations.extend(unused)
 
@@ -535,7 +592,7 @@ class AnnotationChecker(ast.NodeVisitor):
             raise ValueError(
                 f"Class '{node.name}' at line {node.lineno}: "
                 f'__strict_typing_linter__hashable_fields__ = True is incompatible with non-frozen class. '
-                f'Non-frozen classes are mutable and cannot be hashable.'
+                f'Non-frozen classes are mutable and cannot be hashable.',
             )
 
         # Set hashable fields mode - each class starts fresh (no inheritance from parent)
@@ -598,7 +655,11 @@ class AnnotationChecker(ast.NodeVisitor):
                 # may be after the annotation and is a natural place for directives.
                 scope_end = node.body[0].lineno - 1 if node.body else node.returns.lineno
                 self._check_annotation(
-                    node.returns, node.returns.lineno, 'return', scope_start=node.lineno, scope_end=scope_end
+                    node.returns,
+                    node.returns.lineno,
+                    'return',
+                    scope_start=node.lineno,
+                    scope_end=scope_end,
                 )
 
         self._skip_any = prev_skip_any
@@ -703,7 +764,7 @@ class AnnotationChecker(ast.NodeVisitor):
                             kind='tuple-field',
                             source_line=source_line,
                             suggestion='Sequence[T]',
-                        )
+                        ),
                     )
 
         # Pass 2: hashable-field check (fields only, inside hashable context)
@@ -723,7 +784,7 @@ class AnnotationChecker(ast.NodeVisitor):
                             kind='hashable-field',
                             source_line=source_line,
                             suggestion=self._hashable_suggestion(unhashable),
-                        )
+                        ),
                     )
 
         # Pass 3: existing mutable/loose check (all contexts)
@@ -757,7 +818,7 @@ class AnnotationChecker(ast.NodeVisitor):
                     kind=kind,
                     source_line=source_line,
                     suggestion=suggestion,
-                )
+                ),
             )
 
     def _is_classvar(self, node: ast.expr) -> bool:
@@ -1027,7 +1088,9 @@ class AnnotationChecker(ast.NodeVisitor):
             return self._find_forbidden_type(node)
 
     def _find_forbidden_in_slice_with_positions(
-        self, node: ast.expr, allowed_positions: Sequence[int] | None
+        self,
+        node: ast.expr,
+        allowed_positions: Sequence[int] | None,
     ) -> str | None:
         """Check for forbidden types in a subscript slice with position-aware Any allowances.
 
@@ -1061,12 +1124,11 @@ class AnnotationChecker(ast.NodeVisitor):
                 if violation:
                     return violation
             return None
+        # Single type arg at position 0
+        elif 0 in allowed_positions:
+            return self._find_forbidden_type_no_any(node)
         else:
-            # Single type arg at position 0
-            if 0 in allowed_positions:
-                return self._find_forbidden_type_no_any(node)
-            else:
-                return self._find_forbidden_type(node)
+            return self._find_forbidden_type(node)
 
     def _find_forbidden_type_no_any(self, node: ast.expr) -> str | None:
         """Like _find_forbidden_type but only checks mutable types, not Any.
@@ -1369,11 +1431,11 @@ def validate_strict_var_in_class(name: str, class_name: str, lineno: int) -> Non
     if name not in RECOGNIZED_STRICT_VARS:
         raise ValueError(
             f'{class_name}:{lineno}: Unrecognized strict variable '
-            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?"
+            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?",
         )
     if name in MODULE_LEVEL_STRICT_VARS:
         raise ValueError(
-            f"{class_name}:{lineno}: '{name}' is a module-level variable. Place it in __init__.py, not inside a class."
+            f"{class_name}:{lineno}: '{name}' is a module-level variable. Place it in __init__.py, not inside a class.",
         )
 
 
@@ -1452,12 +1514,12 @@ def get_strict_module_ordering(init_path: Path) -> bool:
                     if name not in RECOGNIZED_STRICT_VARS:
                         raise ValueError(
                             f'{init_path}:{node.lineno}: Unrecognized strict variable '
-                            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?"
+                            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?",
                         )
                     if name in CLASS_LEVEL_STRICT_VARS:
                         raise ValueError(
                             f'{init_path}:{node.lineno}: '
-                            f"'{name}' is a class-level variable. Place it inside a class body, not in __init__.py."
+                            f"'{name}' is a class-level variable. Place it inside a class body, not in __init__.py.",
                         )
                     if name == '__strict_module_ordering__':
                         if isinstance(node.value, ast.Constant):
@@ -1513,7 +1575,7 @@ def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequenc
                     is_class=True,
                     is_private=node.name.startswith('_'),
                     in_all=node.name in all_names,
-                )
+                ),
             )
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             definitions.append(
@@ -1523,7 +1585,7 @@ def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequenc
                     is_class=False,
                     is_private=node.name.startswith('_'),
                     in_all=node.name in all_names,
-                )
+                ),
             )
 
     return definitions
@@ -1576,7 +1638,7 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
                     message=reason,
                     source_line=source_lines[actual.line - 1].strip() if actual.line <= len(source_lines) else '',
                     suggestion='Reorder: __all__ items (classes→functions) → public (classes→functions) → private (classes→functions)',
-                )
+                ),
             )
             break  # Report first violation only
 
@@ -1601,7 +1663,7 @@ def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[s
                 message='__all__ is not defined',
                 source_line=source_lines[line - 1].strip() if line <= len(source_lines) else '',
                 suggestion='Add __all__ = [...] to explicitly declare public API',
-            )
+            ),
         ]
     return []
 
@@ -1667,7 +1729,7 @@ def check_all_trailing_comma(
                                     if node.lineno <= len(source_lines)
                                     else '',
                                     suggestion='Add trailing comma after last item',
-                                )
+                                ),
                             )
     return violations
 
@@ -1712,7 +1774,7 @@ def check_class_method_ordering(
                         message=f"public method '{name}' should come before private methods in class '{node.name}'",
                         source_line=source_lines[line - 1].strip() if line <= len(source_lines) else '',
                         suggestion='Reorder: dunder methods → public methods → private methods',
-                    )
+                    ),
                 )
                 break  # Report first violation per class only
 
@@ -1811,7 +1873,7 @@ def find_unused_directives(
                         if directive.line <= len(source_lines)
                         else '',
                         suggestion='Remove the stale suppression directive',
-                    )
+                    ),
                 )
                 break  # One unused code per directive is enough
 

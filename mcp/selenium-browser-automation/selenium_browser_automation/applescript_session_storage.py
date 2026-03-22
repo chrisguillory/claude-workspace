@@ -41,7 +41,7 @@ class AppleScriptTabTimeoutError(Exception):
         self.url = url
         super().__init__(
             f'AppleScript timed out on window {window}, tab {tab} ({url}). '
-            f'Tab may be suspended/background. Try switching to this tab in Chrome first.'
+            f'Tab may be suspended/background. Try switching to this tab in Chrome first.',
         )
 
 
@@ -80,6 +80,7 @@ def is_chrome_running() -> bool:
 
     result = subprocess.run(
         ['pgrep', '-x', 'Google Chrome'],
+        check=False,
         capture_output=True,
     )
     return result.returncode == 0
@@ -100,6 +101,7 @@ def is_selenium_chrome_running() -> bool:
     # Get all Chrome main processes with full command lines
     result = subprocess.run(
         ['ps', 'auxww'],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -169,7 +171,7 @@ def extract_live_session_storage(
             'Options:\n'
             '  1. Use browser="chromium" for Selenium to avoid conflicts\n'
             '  2. Close the Selenium browser before extracting from personal Chrome\n'
-            '  3. Set live_session_storage_via_applescript=False to skip live extraction (uses disk, may be stale)'
+            '  3. Set live_session_storage_via_applescript=False to skip live extraction (uses disk, may be stale)',
         )
 
     # Test if JavaScript execution is enabled
@@ -236,7 +238,7 @@ def extract_live_session_storage(
                 # Merge with existing (multiple tabs same origin)
                 session_storage[normalized_origin].update(storage)
             else:
-                session_storage[normalized_origin] = storage
+                session_storage[normalized_origin] = dict(storage)
             tabs_extracted += 1
 
     return AppleScriptExtractionResult(
@@ -276,6 +278,7 @@ end tell
 """
     result = subprocess.run(
         ['osascript', '-e', script],
+        check=False,
         capture_output=True,
         text=True,
         timeout=5,
@@ -288,7 +291,7 @@ end tell
     return result.returncode == 0
 
 
-def _get_all_tab_urls() -> list[tuple[int, int, str]]:
+def _get_all_tab_urls() -> Sequence[tuple[int, int, str]]:
     """Get URLs of all Chrome tabs: [(window_index, tab_index, url), ...]
 
     Uses AppleScript to enumerate tabs without executing JavaScript.
@@ -308,6 +311,7 @@ return output
 """
     result = subprocess.run(
         ['osascript', '-e', script],
+        check=False,
         capture_output=True,
         text=True,
         timeout=10,
@@ -327,7 +331,7 @@ return output
     return tabs
 
 
-def _extract_session_storage_from_tab(window: int, tab: int) -> dict[str, str] | None:
+def _extract_session_storage_from_tab(window: int, tab: int) -> Mapping[str, str] | None:
     """Extract sessionStorage from a single tab.
 
     Returns dict of {key: value} or None if extraction failed.
@@ -343,6 +347,7 @@ end tell
 '''
     result = subprocess.run(
         ['osascript', '-e', script],
+        check=False,
         capture_output=True,
         text=True,
         timeout=10,

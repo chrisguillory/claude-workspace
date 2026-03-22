@@ -9,6 +9,7 @@ the MCP server executes.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,7 @@ _occlusion_specs = [s for s in _all_specs if s['section'] == 'occlusion']
 _duration_specs = [s for s in _all_specs if s['section'] == 'duration_validation']
 
 
-def _assert_hover_result(result: dict[str, Any], expect: dict[str, Any]) -> None:
+def _assert_hover_result(result: Mapping[str, Any], expect: Mapping[str, Any]) -> None:
     """Assert hover check result matches YAML expectation."""
     if expect['success']:
         assert result['success'], f'Expected hover to succeed but got error: {result.get("error")}'
