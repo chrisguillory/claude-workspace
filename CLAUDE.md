@@ -87,16 +87,17 @@ def handle_session_end(session_id: str):
 
 ### Strict Type Safety
 
-**Eliminate ALL untyped dicts** - Use Pydantic models everywhere. Create shared `BaseModel` that enforces strictness:
+**Eliminate ALL untyped dicts** - Use Pydantic models everywhere. Four base models in `cc_lib/schemas/base.py` encode
+trust levels for `extra` field handling (terminology follows JSON Schema closed/open content models):
 
-```python
-import pydantic
+| Base Class    | `extra` Policy                                                     | Use When                                                            |
+|---------------|--------------------------------------------------------------------|---------------------------------------------------------------------|
+| `ClosedModel` | `'forbid'` always                                                  | Internal data we construct — unknown fields = bug                   |
+| `StrictModel` | `'allow'` default, `'forbid'` via `CC_STRICT_MODEL_EXTRA_FORBID=1` | Protocol data (Claude Code hooks, MCP) — forward-compatible         |
+| `CamelModel`  | Inherits from `StrictModel`                                        | Protocol data with camelCase JSON serialization                     |
+| `OpenModel`   | `'allow'` default, `'forbid'` via `CC_OPEN_MODEL_EXTRA_FORBID=1`   | External data (Chrome, CDP) — upstream schema evolves independently |
 
-class BaseModel(pydantic.BaseModel):
-    """Base model with strict validation - no extra fields, all fields required unless Optional."""
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
-```
+All four share: `frozen=True`, `strict=True`, `validate_default=True`, `serialize_by_alias=True`.
 
 **Python 3.13 modern syntax:**
 - Use `| None` instead of `Optional`
