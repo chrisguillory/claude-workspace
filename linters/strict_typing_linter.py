@@ -60,6 +60,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from _config import find_config, get_per_file_ignored_codes, load_per_file_ignores
 from hashability_inspector import HashabilityInspector, QualifiedName
 
 # -- Configuration ------------------------------------------------------------
@@ -249,9 +250,40 @@ def main() -> int:
     # Shared inspector for runtime hashability checking across all files
     inspector = HashabilityInspector(source_roots=source_roots)
 
+    # Resolve config path once if --config was given
+    explicit_config = Path(args.config) if args.config else None
+
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
+        # Per-file-ignores from pyproject.toml
+        per_file_ignored_kinds: set[ViolationKind] = set()
+        skip_file_via_config = False
+        if not args.no_config:
+            if explicit_config is not None:
+                config_path = explicit_config
+                project_root = explicit_config.parent
+            else:
+                result = find_config(filepath, 'strict-typing-linter')
+                if result is not None:
+                    config_path, project_root = result
+                else:
+                    config_path = None
+                    project_root = None
+
+            if config_path is not None and project_root is not None:
+                per_file_ignores = load_per_file_ignores('strict-typing-linter', config_path)
+                codes = get_per_file_ignored_codes(filepath, per_file_ignores, project_root)
+                if 'skip-file' in codes:
+                    skip_file_via_config = True
+                for code in codes:
+                    for directive_code, kind_set in CODE_TO_KINDS.items():
+                        if code == directive_code:
+                            per_file_ignored_kinds.update(kind_set)
+
+        if skip_file_via_config:
+            continue
+
         violations = check_file(
             filepath,
             strict_ordering_packages,
@@ -259,9 +291,14 @@ def main() -> int:
             respect_skip_file=not args.no_skip_file,
             report_unused_directives=args.report_unused_directives,
         )
+
+        # Filter by per-file ignored kinds
+        if per_file_ignored_kinds:
+            violations = [v for v in violations if v.kind not in per_file_ignored_kinds]
+
         all_violations.extend(violations)
 
-    # Filter out ignored violation kinds
+    # Filter out globally ignored violation kinds (from --ignore)
     if ignored_kinds:
         all_violations = [v for v in all_violations if v.kind not in ignored_kinds]
 
@@ -334,6 +371,17 @@ def parse_args() -> argparse.Namespace:
         '--report-unused-directives',
         action='store_true',
         help='Report suppression directives that do not match any violation',
+    )
+    parser.add_argument(
+        '--config',
+        default=None,
+        metavar='PATH',
+        help='Path to pyproject.toml (default: auto-discover by walking up from each file)',
+    )
+    parser.add_argument(
+        '--no-config',
+        action='store_true',
+        help='Disable reading per-file-ignores from pyproject.toml',
     )
     return parser.parse_args()
 

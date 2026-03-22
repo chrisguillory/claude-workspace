@@ -111,6 +111,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from _config import find_config, get_per_file_ignored_codes, load_per_file_ignores
+
 # -- Configuration ------------------------------------------------------------
 
 DIRECTIVE_PREFIX = '# suppression_rationale_linter.py:'
@@ -234,15 +236,47 @@ def main() -> int:
     if not files:
         return 0
 
+    # Resolve config path once if --config was given
+    explicit_config = Path(args.config) if args.config else None
+
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
+        # Per-file-ignores from pyproject.toml
+        per_file_codes: Set[str] = set()
+        skip_file_via_config = False
+        if not args.no_config:
+            if explicit_config is not None:
+                config_path = explicit_config
+                project_root = explicit_config.parent
+            else:
+                result = find_config(filepath, 'suppression-rationale-linter')
+                if result is not None:
+                    config_path, project_root = result
+                else:
+                    config_path = None
+                    project_root = None
+
+            if config_path is not None and project_root is not None:
+                per_file_ignores = load_per_file_ignores('suppression-rationale-linter', config_path)
+                per_file_codes = get_per_file_ignored_codes(filepath, per_file_ignores, project_root)
+                if 'skip-file' in per_file_codes:
+                    skip_file_via_config = True
+
+        if skip_file_via_config:
+            continue
+
         try:
             violations = check_file(
                 filepath,
                 custom_prefixes,
                 respect_skip_file=not args.no_skip_file,
             )
+
+            # Filter by per-file ignored codes (codes are violation kinds directly)
+            if per_file_codes:
+                violations = [v for v in violations if v.kind not in per_file_codes]
+
             all_violations.extend(violations)
         except (SyntaxError, UnicodeDecodeError) as e:
             print(f'{filepath}: {e}', file=sys.stderr)
@@ -315,6 +349,17 @@ def parse_args() -> argparse.Namespace:
         '--no-skip-file',
         action='store_true',
         help='Ignore skip-file directives (used by validation harnesses)',
+    )
+    parser.add_argument(
+        '--config',
+        default=None,
+        metavar='PATH',
+        help='Path to pyproject.toml (default: auto-discover by walking up from each file)',
+    )
+    parser.add_argument(
+        '--no-config',
+        action='store_true',
+        help='Disable reading per-file-ignores from pyproject.toml',
     )
     return parser.parse_args()
 

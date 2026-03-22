@@ -100,7 +100,9 @@ _PLUGIN_VERSION = 1  # Increment when synthesis logic changes to invalidate mypy
 class PydanticReplacePlugin(PydanticPlugin):
     """Extends PydanticPlugin with ``__replace__()`` synthesis on model classes."""
 
-    def report_config_data(self, ctx: ReportConfigContext) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — mypy Plugin API requires dict return
+    def report_config_data(
+        self, ctx: ReportConfigContext
+    ) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — mypy Plugin API requires dict return
         """Include plugin version so mypy invalidates cache on logic changes."""
         data = dict(super().report_config_data(ctx))
         data['pydantic_replace_version'] = _PLUGIN_VERSION

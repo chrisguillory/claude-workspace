@@ -27,9 +27,7 @@ members = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# =============================================================================
-# Ruff Configuration
-# =============================================================================
+# -- Ruff Configuration -------------------------------------------------------
 
 [tool.ruff]
 line-length = 120
@@ -68,9 +66,7 @@ required-imports = ["from __future__ import annotations"]
 [tool.ruff.format]
 quote-style = "single"
 
-# =============================================================================
-# Mypy Configuration
-# =============================================================================
+# -- Mypy Configuration -------------------------------------------------------
 
 [tool.mypy]
 python_version = "3.13"
@@ -91,9 +87,7 @@ no_implicit_reexport = false
 init_forbid_extra = true
 init_typed = true
 
-# =============================================================================
-# Pytest Configuration
-# =============================================================================
+# -- Pytest Configuration -----------------------------------------------------
 
 [tool.pytest.ini_options]
 # --mypy-only-local-stub: silence site-package errors in mypy subprocess.
@@ -105,9 +99,19 @@ asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
 
-# =============================================================================
-# Development Dependencies
-# =============================================================================
+# -- Custom Linter Configuration -----------------------------------------------
+
+[tool.strict-typing-linter.per-file-ignores]
+"tests/**" = ["mutable-type", "loose-typing"]
+"tests/linters/edge_cases/**" = ["skip-file"]
+
+[tool.exception-safety-linter.per-file-ignores]
+"tests/linters/edge_cases/**" = ["skip-file"]
+
+[tool.suppression-rationale-linter.per-file-ignores]
+"tests/linters/edge_cases/**" = ["skip-file"]
+
+# -- Development Dependencies -------------------------------------------------
 
 [dependency-groups]
 dev = [

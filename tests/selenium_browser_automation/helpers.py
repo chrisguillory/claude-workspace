@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +85,7 @@ def load_yaml_test_specs(yaml_path: Path) -> list[dict[str, Any]]:
 # ============================================================================
 
 
-def assert_includes_excludes(output: str, includes: list[str], excludes: list[str]) -> None:
+def assert_includes_excludes(output: str, includes: Sequence[str], excludes: Sequence[str]) -> None:
     """Assert that output contains all includes and none of excludes."""
     for expected in includes:
         assert expected in output, f'MISSING expected string: {expected!r}\n--- Output ---\n{output[:2000]}'
@@ -275,8 +276,8 @@ class TreeTestRunner:
     def assert_tree(
         self,
         fixture_path: str,
-        includes: list[str],
-        excludes: list[str],
+        includes: Sequence[str],
+        excludes: Sequence[str],
         selector: str = 'body',
         tool_name: str = 'aria',
         include_urls: bool = False,
