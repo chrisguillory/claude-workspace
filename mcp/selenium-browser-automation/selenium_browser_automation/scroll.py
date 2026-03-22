@@ -31,6 +31,7 @@ def execute_scroll(
     css_selector: str | None = None,
     behavior: Literal['instant', 'smooth'] = 'instant',
     position: Literal['top', 'bottom', 'left', 'right'] | None = None,
+    _find_timeout: int = 10,
 ) -> dict[str, Any]:
     """Execute a scroll operation synchronously.
 
@@ -66,12 +67,14 @@ def execute_scroll(
     # ── Mode 4/5: Absolute position scroll (position parameter) ──
 
     if position is not None:
-        return _scroll_to_position(driver, position=position, css_selector=css_selector, behavior=behavior)
+        return _scroll_to_position(
+            driver, position=position, css_selector=css_selector, behavior=behavior, timeout=_find_timeout
+        )
 
     # ── Mode 3: Scroll element into view (css_selector only, no direction) ──
 
     if css_selector is not None and direction is None:
-        return _scroll_into_view(driver, css_selector=css_selector, behavior=behavior)
+        return _scroll_into_view(driver, css_selector=css_selector, behavior=behavior, timeout=_find_timeout)
 
     # ── Directional scroll (modes 1 and 2) ──
 
@@ -91,6 +94,7 @@ def execute_scroll(
             delta_x=delta_x,
             delta_y=delta_y,
             behavior=behavior,
+            timeout=_find_timeout,
         )
 
     return _scroll_viewport(
@@ -105,11 +109,11 @@ def execute_scroll(
 # ── Private helpers ──
 
 
-def _find_element(driver: webdriver.Chrome, css_selector: str, context: str) -> Any:
+def _find_element(driver: webdriver.Chrome, css_selector: str, context: str, *, timeout: int = 10) -> Any:
     """Find element by CSS selector with wait. Raises ValueError if not found."""
     validate_css_selector(css_selector)
     try:
-        return WebDriverWait(driver, 10).until(
+        return WebDriverWait(driver, timeout).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, css_selector)),
         )
     except TimeoutException:
@@ -124,6 +128,7 @@ def _scroll_to_position(
     position: str,
     css_selector: str | None,
     behavior: str,
+    timeout: int = 10,
 ) -> dict[str, Any]:
     """Mode 4/5: Absolute position scroll (scrollTo)."""
     pos_map_viewport = {
@@ -147,7 +152,7 @@ def _scroll_to_position(
 
     if css_selector is not None:
         # Mode 5: Container scrollTo
-        element = _find_element(driver, css_selector, 'container')
+        element = _find_element(driver, css_selector, 'container', timeout=timeout)
         scroll_target = pos_map_container[position]
         overflow_axis = 'overflowY' if position in ('top', 'bottom') else 'overflowX'
 
@@ -277,9 +282,10 @@ def _scroll_into_view(
     *,
     css_selector: str,
     behavior: str,
+    timeout: int = 10,
 ) -> dict[str, Any]:
     """Mode 3: Scroll element into view."""
-    element = _find_element(driver, css_selector, 'element')
+    element = _find_element(driver, css_selector, 'element', timeout=timeout)
 
     if behavior == 'smooth':
         after_info = driver.execute_script(
@@ -359,9 +365,10 @@ def _scroll_container(
     delta_x: int,
     delta_y: int,
     behavior: str,
+    timeout: int = 10,
 ) -> dict[str, Any]:
     """Mode 2: Container scroll (direction + css_selector)."""
-    element = _find_element(driver, css_selector, 'scrollable container')
+    element = _find_element(driver, css_selector, 'scrollable container', timeout=timeout)
 
     if behavior == 'smooth':
         result = driver.execute_script(

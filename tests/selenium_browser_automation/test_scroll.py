@@ -109,6 +109,7 @@ def test_container_scroll(
                 direction=spec.get('direction'),
                 scroll_amount=spec.get('scroll_amount', 3),
                 css_selector=spec.get('css_selector'),
+                _find_timeout=1,
             )
         assert expect['error_contains'] in str(exc_info.value)
         return
@@ -158,7 +159,7 @@ def test_scroll_to_element(
 
     if not expect['success']:
         with pytest.raises(ValueError) as exc_info:
-            execute_scroll(headless_driver, css_selector=spec['css_selector'])
+            execute_scroll(headless_driver, css_selector=spec['css_selector'], _find_timeout=1)
         assert expect['error_contains'] in str(exc_info.value)
         return
 
@@ -345,6 +346,7 @@ def test_position_scroll(
                 direction=spec.get('direction'),
                 css_selector=spec.get('css_selector'),
                 behavior=spec.get('behavior', 'instant'),
+                _find_timeout=1,
             )
         assert expect['error_contains'] in str(exc_info.value)
         return
