@@ -1700,7 +1700,9 @@ def register_tools(service: BrowserService) -> None:
         return response.content, response.status_code, content_type
 
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-    async def download_resource(url: str, output_filename: str) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies by download result
+    async def download_resource(
+        url: str, output_filename: str
+    ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — MCP tool response shape varies by download result
         """Download specific resource using current browser session's cookies and headers.
 
         Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
@@ -2477,7 +2479,7 @@ def register_tools(service: BrowserService) -> None:
         css_selector: str | None = None,
         behavior: Literal['instant', 'smooth'] = 'instant',
         position: Literal['top', 'bottom', 'left', 'right'] | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Scroll the page, a container, or an element into view.
 
         **Relative scrolling** (direction parameter — scrollBy):
@@ -3491,7 +3493,7 @@ Workflow:
         try:
             raw_logs = await asyncio.to_thread(driver.get_log, 'browser')
         except WebDriverException as e:
-            logger.error(f'Failed to get console logs: {e}')
+            logger.exception(f'Failed to get console logs: {e}')
             return ConsoleLogsResult(
                 logs=[],
                 total_count=0,
@@ -3833,7 +3835,9 @@ Workflow:
             return JavaScriptResult(**result)
 
         except TimeoutError:
-            logger.warning(f'JS execution timed out after {timeout_ms}ms')
+            logger.warning(
+                f'JS execution timed out after {timeout_ms}ms'
+            )  # exception_safety_linter.py: logger-no-exc-info — TimeoutError has no useful traceback
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -3841,7 +3845,7 @@ Workflow:
                 error_type='timeout',
             )
         except WebDriverException as e:
-            logger.error(f'JS execution WebDriver error: {e}')
+            logger.exception(f'JS execution WebDriver error: {e}')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
