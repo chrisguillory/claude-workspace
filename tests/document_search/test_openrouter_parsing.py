@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from document_search.clients.openrouter import _parse_embedding_response
+from document_search.clients.openrouter import _decode_embedding, _parse_embedding_response
 from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterUnexpectedResponse
 
 
@@ -111,3 +111,16 @@ class TestParseUnknown:
         with pytest.raises(OpenRouterUnexpectedResponse) as exc_info:
             _parse(body)
         assert 'something' in exc_info.value.body_preview
+
+
+class TestDecodeEmbedding:
+    def test_base64_roundtrip(self) -> None:
+        original = [0.1, 0.2, 0.3]
+        encoded = base64.b64encode(np.array(original, dtype=np.float32).tobytes()).decode()
+        decoded = _decode_embedding(encoded)
+        assert decoded == pytest.approx(original)
+
+    def test_float_passthrough(self) -> None:
+        original = [0.1, 0.2, 0.3]
+        decoded = _decode_embedding(original)
+        assert decoded == original

@@ -187,7 +187,7 @@ class OpenRouterClient:
                     batch_size=len(texts),
                 )
 
-            # Parse JSON — JSONDecodeError is retryable (truncated body = transient)
+            # Parse JSON — JSONDecodeError not retried (content-type guard handles non-JSON)
             data = response.json()
 
             # Three-way discrimination via Pydantic
@@ -228,29 +228,13 @@ class OpenRouterClient:
         """
         response = await self._client.get('/embeddings/models')
         response.raise_for_status()
-        data: dict[str, Any] = response.json()
-        if 'error' in data:
-            try:
-                error_resp = _ErrorResponse.model_validate(data)
-            except pydantic.ValidationError as e:
-                raise OpenRouterUnexpectedResponse(
-                    message='list_models: error key with unexpected format',
-                    body_preview=json.dumps(data, default=str)[:500],
-                    body_keys=list(data.keys()),
-                    status_code=response.status_code,
-                    content_type=response.headers.get('content-type', ''),
-                    model=self._model,
-                    batch_size=0,
-                ) from e
-            raise OpenRouterAPIError(
-                message=error_resp.error.message,
-                code=error_resp.error.code,
-                error_type=error_resp.error.type,
-                status_code=response.status_code,
-                model=self._model,
-            )
-        models: Sequence[JsonObject] = data['data']
-        return models
+        result = _parse_models_response(
+            response.json(),
+            status_code=response.status_code,
+            content_type=response.headers.get('content-type', ''),
+            model=self._model,
+        )
+        return result.data
 
     async def close(self) -> None:
         """Close HTTP client and release resources."""
@@ -297,9 +281,15 @@ class _ErrorResponse(pydantic.BaseModel):
     error: _ErrorDetail
 
 
-type _ApiResponse = _EmbeddingResponse | _ErrorResponse
+class _ModelsListResponse(pydantic.BaseModel):
+    data: Sequence[JsonObject]
+
+
+type _ApiResponse = _ErrorResponse | _EmbeddingResponse
+type _ModelsApiResponse = _ErrorResponse | _ModelsListResponse
 
 _api_response_adapter: pydantic.TypeAdapter[_ApiResponse] = pydantic.TypeAdapter(_ApiResponse)
+_models_response_adapter: pydantic.TypeAdapter[_ModelsApiResponse] = pydantic.TypeAdapter(_ModelsApiResponse)
 
 
 # ── Private helpers ──────────────────────────────────────────────────
@@ -333,6 +323,39 @@ def _parse_embedding_response(
             content_type=content_type,
             model=model,
             batch_size=batch_size,
+        ) from e
+
+    if isinstance(result, _ErrorResponse):
+        raise OpenRouterAPIError(
+            message=result.error.message,
+            code=result.error.code,
+            error_type=result.error.type,
+            status_code=status_code,
+            model=model,
+        )
+
+    return result
+
+
+def _parse_models_response(
+    body: Mapping[str, Any],
+    *,
+    status_code: int,
+    content_type: str,
+    model: str,
+) -> _ModelsListResponse:
+    """Validate and discriminate models list API response via Pydantic union."""
+    try:
+        result = _models_response_adapter.validate_python(body)
+    except pydantic.ValidationError as e:
+        raise OpenRouterUnexpectedResponse(
+            message=f'list_models validation failed: {e.error_count()} errors',
+            body_preview=json.dumps(body, default=str)[:500],
+            body_keys=list(body.keys()),
+            status_code=status_code,
+            content_type=content_type,
+            model=model,
+            batch_size=0,
         ) from e
 
     if isinstance(result, _ErrorResponse):
