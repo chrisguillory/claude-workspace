@@ -171,30 +171,12 @@ class OpenRouterClient:
         async with self._semaphore, self._tracker.track():
             response = await self._client.post('/embeddings', json=body)
 
-            # HTTP 4xx/5xx — retry predicate handles via httpx.HTTPStatusError
             response.raise_for_status()
-
-            # Content-type guard — catch non-JSON (Cloudflare pages, etc.)
-            content_type = response.headers.get('content-type', '')
-            if content_type and not content_type.startswith('application/json'):
-                raise OpenRouterUnexpectedResponse(
-                    message=f'Expected application/json, got {content_type}',
-                    body_preview=response.text[:500],
-                    body_keys=[],
-                    status_code=response.status_code,
-                    content_type=content_type,
-                    model=self._model,
-                    batch_size=len(texts),
-                )
-
-            # Parse JSON — JSONDecodeError not retried (content-type guard handles non-JSON)
             data = response.json()
 
-            # Three-way discrimination via Pydantic
             result = _parse_embedding_response(
                 data,
                 status_code=response.status_code,
-                content_type=content_type,
                 model=self._model,
                 batch_size=len(texts),
             )
@@ -231,7 +213,6 @@ class OpenRouterClient:
         result = _parse_models_response(
             response.json(),
             status_code=response.status_code,
-            content_type=response.headers.get('content-type', ''),
             model=self._model,
         )
         return result.data
@@ -307,7 +288,6 @@ def _parse_embedding_response(
     body: Mapping[str, Any],
     *,
     status_code: int,
-    content_type: str,
     model: str,
     batch_size: int,
 ) -> _EmbeddingResponse:
@@ -320,7 +300,6 @@ def _parse_embedding_response(
             body_preview=json.dumps(body, default=str)[:500],
             body_keys=list(body.keys()),
             status_code=status_code,
-            content_type=content_type,
             model=model,
             batch_size=batch_size,
         ) from e
@@ -341,7 +320,6 @@ def _parse_models_response(
     body: Mapping[str, Any],
     *,
     status_code: int,
-    content_type: str,
     model: str,
 ) -> _ModelsListResponse:
     """Validate and discriminate models list API response via Pydantic union."""
@@ -353,7 +331,6 @@ def _parse_models_response(
             body_preview=json.dumps(body, default=str)[:500],
             body_keys=list(body.keys()),
             status_code=status_code,
-            content_type=content_type,
             model=model,
             batch_size=0,
         ) from e

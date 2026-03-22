@@ -51,19 +51,17 @@ class OpenRouterUnexpectedResponse(Exception):
         body_preview: str,
         body_keys: Sequence[str],
         status_code: int,
-        content_type: str,
         model: str,
         batch_size: int,
     ) -> None:
         self.body_preview = body_preview
         self.body_keys = body_keys
         self.status_code = status_code
-        self.content_type = content_type
         self.model = model
         self.batch_size = batch_size
         super().__init__(
             f'{message}\n'
-            f'  Status: {status_code}, Content-Type: {content_type}\n'
+            f'  Status: {status_code}\n'
             f'  Model: {model}, Batch size: {batch_size}\n'
             f'  Response keys: {list(body_keys)}\n'
             f'  Body preview: {body_preview}'

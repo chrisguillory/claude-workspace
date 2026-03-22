@@ -13,9 +13,7 @@ from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRo
 
 
 def _parse(body: Mapping[str, Any]) -> Any:
-    return _parse_embedding_response(
-        body, status_code=200, content_type='application/json', model='test/model', batch_size=1
-    )
+    return _parse_embedding_response(body, status_code=200, model='test/model', batch_size=1)
 
 
 class TestParseSuccess:
