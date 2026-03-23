@@ -18,8 +18,8 @@ import pytest
 
 from claude_session.schemas.session.models import SessionRecordAdapter
 
-# Path to fixtures directory (relative to repo root)
-FIXTURES_DIR = Path(__file__).parent.parent / 'fixtures'
+# Path to fixtures directory (in the mcp/claude-session package)
+FIXTURES_DIR = Path(__file__).resolve().parents[2] / 'mcp' / 'claude-session' / 'fixtures'
 EDGE_CASES_DIR = FIXTURES_DIR / 'edge_cases'
 
 
@@ -63,7 +63,7 @@ def test_edge_case_fixture_validates(fixture_path: Path) -> None:
     for line_num, record in records:
         try:
             SessionRecordAdapter.validate_python(record)
-        except Exception as e:
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception -- intentional: collecting validation errors for batch reporting
             errors.append(f'Line {line_num}: {e}')
 
     if errors:
