@@ -391,6 +391,12 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="stat"><div class="stat-label">Errored</div><div class="stat-value">${p.files_errored}</div></div>
                     <div class="stat"><div class="stat-label">429 Errors</div><div class="stat-value">${p.errors_429}</div></div>
                     <div class="stat"><div class="stat-label">Redis HWM</div><div class="stat-value">${p.redis_hwm_total || 0}</div></div>
+                    <div class="stat"><div class="stat-label">Loop Lag HWM</div><div class="stat-value">${(p.event_loop_lag_hwm_ms || 0).toFixed(1)} ms</div></div>
+                    <div class="stat"><div class="stat-label">RSS HWM</div><div class="stat-value">${(p.rss_hwm_mb || 0).toFixed(0)} MB</div></div>
+                    <div class="stat"><div class="stat-label">HTTP p50</div><div class="stat-value">${(p.http_p50_ms || 0).toFixed(0)} ms</div></div>
+                    <div class="stat"><div class="stat-label">HTTP p99</div><div class="stat-value">${(p.http_p99_ms || 0).toFixed(0)} ms</div></div>
+                    <div class="stat"><div class="stat-label">Task HWM</div><div class="stat-value">${p.asyncio_task_hwm || 0}</div></div>
+                    <div class="stat"><div class="stat-label">GC Gen2</div><div class="stat-value">${p.gc_gen2_total || 0}</div></div>
                 </div>
                 ${p.by_file_type && Object.keys(p.by_file_type).length > 0 ? formatFileTypeChart(p.by_file_type) : ''}
                 ${formatQueueDepthChart(p.queue_depth_series)}
