@@ -43,6 +43,6 @@ class ExpiringDict[K, V]:
         """Return remaining TTL in seconds for key, or None if expired/missing."""
         ...
 
-    def items_with_timestamp(self) -> list[tuple[K, V, float]]:
-        """Return list of (key, value, timestamp) tuples."""
+    def items_with_timestamp(self) -> list[tuple[K, tuple[V, float]]]:
+        """Return list of (key, (value, set_time)) tuples."""
         ...
