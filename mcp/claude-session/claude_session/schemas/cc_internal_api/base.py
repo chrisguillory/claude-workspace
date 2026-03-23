@@ -19,7 +19,7 @@ from typing import Literal
 from claude_session.schemas.types import BaseStrictModel, EmptyDict, EmptySequence
 
 # Re-export for backwards compatibility (other modules import from here)
-__all__ = ['StrictModel', 'EmptyDict', 'EmptySequence', 'EmptyBody', 'FromSession', 'FromSdk', 'ValidationStatus']
+__all__ = ['EmptyBody', 'EmptyDict', 'EmptySequence', 'FromSdk', 'FromSession', 'StrictModel', 'ValidationStatus']
 
 
 # ==============================================================================

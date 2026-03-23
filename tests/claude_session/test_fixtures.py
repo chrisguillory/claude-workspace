@@ -15,7 +15,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from claude_session.schemas.session.models import SessionRecordAdapter
 
 # Path to fixtures directory (in the mcp/claude-session package)

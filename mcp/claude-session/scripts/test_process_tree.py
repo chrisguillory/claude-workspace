@@ -22,6 +22,7 @@ def walk_process_tree() -> None:
         try:
             result = subprocess.run(
                 ['ps', '-p', str(current), '-o', 'pid=,ppid=,comm='],
+                check=False,
                 capture_output=True,
                 text=True,
             )

@@ -274,6 +274,7 @@ class SessionDeleteService:
                 'agent-*.jsonl',
                 str(session_dir),
             ],
+            check=False,
             capture_output=True,
             text=True,
         )

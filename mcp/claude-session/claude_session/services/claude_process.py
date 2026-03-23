@@ -23,6 +23,7 @@ def find_ancestor_claude_pid() -> int | None:
     for _ in range(20):
         result = subprocess.run(
             ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            check=False,
             capture_output=True,
             text=True,
         )

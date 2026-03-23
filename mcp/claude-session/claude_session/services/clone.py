@@ -452,6 +452,7 @@ class SessionCloneService:
                 '**/agent-*.jsonl',  # Recursive glob for subagents/
                 str(session_dir),
             ],
+            check=False,
             capture_output=True,
             text=True,
         )

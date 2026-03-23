@@ -96,6 +96,7 @@ def _get_github_token_cli(gist_token: str | None) -> str | None:
     try:
         result = subprocess.run(
             ['gh', 'auth', 'token'],
+            check=False,
             capture_output=True,
             text=True,
         )

@@ -228,8 +228,7 @@ def _preprocess_capture(data: dict[str, Any], filepath: Path | None = None) -> d
             events = body_wrapper.get('events', [])
             data['events'] = [event.get('parsed_data', {}) for event in events if event.get('parsed_data')]
             # Remove body wrapper since we've extracted events
-            if 'body' in data:
-                del data['body']
+            data.pop('body', None)
 
         elif body_type == 'text':
             # Text body: try to parse as JSON (Statsig sends JSON as text)

@@ -32,7 +32,6 @@ from typing import Any, TypedDict
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pydantic
-
 from claude_session.schemas.captures import (
     UnknownRequestCapture,
     UnknownResponseCapture,
@@ -254,8 +253,7 @@ def extract_value_at_path(data: dict[str, Any], loc: tuple[str | int, ...]) -> A
                     # Key doesn't exist - might be a Pydantic type annotation
                     # Check if it looks like a model/type name (CamelCase or ends with known suffixes)
                     if (
-                        part_str
-                        and part_str[0].isupper()
+                        (part_str and part_str[0].isupper())
                         or part_str.endswith('_request')
                         or part_str.endswith('_response')
                         or part_str.endswith('Schema')

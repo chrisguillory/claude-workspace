@@ -12,13 +12,13 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import PathTranslator, SessionRestoreService
 
 __all__ = [
+    'AmbiguousSessionError',
+    'PathTranslator',
+    'RestoreResult',
     'SessionArchiveService',
     'SessionCloneService',
     'SessionDiscoveryService',
     'SessionInfo',
     'SessionParserService',
     'SessionRestoreService',
-    'PathTranslator',
-    'RestoreResult',
-    'AmbiguousSessionError',
 ]
