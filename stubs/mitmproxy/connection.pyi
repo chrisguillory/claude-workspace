@@ -6,10 +6,14 @@ class Connection:
     sockname: tuple[str, int] | None
     timestamp_start: float | None
     timestamp_end: float | None
+    tls_version: str | None
+    sni: str | None
+    @property
+    def tls_established(self) -> bool: ...
 
 class Client(Connection):
     peername: tuple[str, int]
 
 class Server(Connection):
     address: tuple[str, int] | None
-    tls_established: bool
+    timestamp_tcp_setup: float | None
