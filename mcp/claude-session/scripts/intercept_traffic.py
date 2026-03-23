@@ -98,7 +98,7 @@ from expiringdict import ExpiringDict
 from mitmproxy import addonmanager, connection, http
 from pydantic import TypeAdapter
 
-from src.schemas import claude_workspace
+from claude_session.schemas import claude_workspace
 
 # ==============================================================================
 # Configuration

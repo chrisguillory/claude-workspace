@@ -33,12 +33,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pydantic
 
-from src.schemas.captures import (
+from claude_session.schemas.captures import (
     UnknownRequestCapture,
     UnknownResponseCapture,
     load_capture,
 )
-from src.schemas.types import PermissiveModel
+from claude_session.schemas.types import PermissiveModel
 
 # ==============================================================================
 # Terminal Color Support
