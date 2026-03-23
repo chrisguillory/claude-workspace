@@ -234,8 +234,8 @@ class LineageService:
             return None
 
         # Sort children deterministically: by cloned_at, then session ID
-        for parent_id in children_index:
-            children_index[parent_id].sort(key=lambda cid: (lineage.sessions[cid].cloned_at.isoformat(), cid))
+        for children in children_index.values():
+            children.sort(key=lambda cid: (lineage.sessions[cid].cloned_at.isoformat(), cid))
 
         # Build session file index for title resolution
         session_files = self._find_session_files(
@@ -343,6 +343,7 @@ class LineageService:
         glob_pattern = '{' + ','.join(session_ids) + '}.jsonl'
         result = subprocess.run(
             ['rg', '--files', '--glob', glob_pattern, str(claude_projects)],
+            check=False,
             capture_output=True,
             text=True,
         )

@@ -26,8 +26,6 @@ from typing import Any
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pydantic import TypeAdapter, ValidationError
-
 from claude_session.schemas.cc_internal_api import (
     AccountSettingsResponse,
     ClientDataResponse,
@@ -48,6 +46,7 @@ from claude_session.schemas.cc_internal_api import (
     TelemetryBatchRequest,
 )
 from claude_session.schemas.cc_internal_api.base import StrictModel
+from pydantic import TypeAdapter, ValidationError
 
 
 @dataclass

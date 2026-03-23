@@ -54,6 +54,7 @@ class SessionDiscoveryService:
         # Use wildcard pattern to support prefix matching
         result = subprocess.run(
             ['rg', '--files', '--glob', f'{session_id_or_prefix}*.jsonl', str(search_dir)],
+            check=False,
             capture_output=True,
             text=True,
         )

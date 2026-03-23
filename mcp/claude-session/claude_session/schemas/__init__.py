@@ -15,7 +15,7 @@ from claude_session.schemas.base import StrictModel
 from claude_session.schemas.types import JsonDatetime, ModelId
 
 __all__ = [
-    'StrictModel',
     'JsonDatetime',
     'ModelId',
+    'StrictModel',
 ]

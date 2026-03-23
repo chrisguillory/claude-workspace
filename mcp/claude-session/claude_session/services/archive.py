@@ -101,21 +101,18 @@ class FormatDetector:
                 raise ValueError(
                     f"Format mismatch: extension indicates '{detected_format}' but format parameter is '{format_param}'"
                 )
+        # Format NOT detectable from extension
+        elif format_param:
+            # Case 4: Use specified format
+            if format_param not in cls.SUPPORTED_FORMATS:
+                raise ValueError(f"Unsupported format: '{format_param}'. Supported: {sorted(cls.SUPPORTED_FORMATS)}")
+            return format_param
         else:
-            # Format NOT detectable from extension
-            if format_param:
-                # Case 4: Use specified format
-                if format_param not in cls.SUPPORTED_FORMATS:
-                    raise ValueError(
-                        f"Unsupported format: '{format_param}'. Supported: {sorted(cls.SUPPORTED_FORMATS)}"
-                    )
-                return format_param
-            else:
-                # Case 5: Ambiguous
-                raise ValueError(
-                    f"Cannot detect format from extension '{output_path.suffix}'. "
-                    f'Please specify format parameter. Supported: {sorted(cls.SUPPORTED_FORMATS)}'
-                )
+            # Case 5: Ambiguous
+            raise ValueError(
+                f"Cannot detect format from extension '{output_path.suffix}'. "
+                f'Please specify format parameter. Supported: {sorted(cls.SUPPORTED_FORMATS)}'
+            )
 
     @classmethod
     def _detect_from_extension(cls, output_path: Path) -> Literal['json', 'zst'] | None:
@@ -489,6 +486,7 @@ class SessionArchiveService:
         pattern = f'"sessionId":\\s*"{self.session_id}"'
         result = subprocess.run(
             ['rg', '--files-with-matches', pattern, '--glob', '**/agent-*.jsonl', str(project_folder)],
+            check=False,
             capture_output=True,
             text=True,
         )

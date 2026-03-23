@@ -122,6 +122,7 @@ def extract_custom_title_from_file(session_file: Path) -> str | None:
     # Use rg to find lines containing custom-title records
     result = subprocess.run(
         ['rg', '--no-filename', '"type":"custom-title"', str(session_file)],
+        check=False,
         capture_output=True,
         text=True,
     )

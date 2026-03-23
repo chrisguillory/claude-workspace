@@ -818,6 +818,7 @@ def _find_claude_context() -> ClaudeContext:
     # Get Claude's CWD using lsof
     result = subprocess.run(
         ['lsof', '-p', str(pid), '-a', '-d', 'cwd'],
+        check=False,
         capture_output=True,
         text=True,
     )
@@ -834,7 +835,7 @@ def _find_claude_context() -> ClaudeContext:
         raise RuntimeError(f'Found Claude process (PID {pid}) but could not determine CWD')
 
     # Verify by checking if Claude has .claude/ files open
-    result = subprocess.run(['lsof', '-p', str(pid)], capture_output=True, text=True)
+    result = subprocess.run(['lsof', '-p', str(pid)], check=False, capture_output=True, text=True)
 
     claude_files = []
     for line in result.stdout.split('\n'):
@@ -898,6 +899,7 @@ def _get_github_token() -> str | None:
     # 2. Try gh CLI
     result = subprocess.run(
         ['gh', 'auth', 'token'],
+        check=False,
         capture_output=True,
         text=True,
     )
