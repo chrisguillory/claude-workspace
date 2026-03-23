@@ -16,6 +16,7 @@ package = false
 members = [
     "cc-lib",
     "mcp/browser-automation",
+    "mcp/claude-session",
     "mcp/document-search",
     "mcp/python-interpreter",
     "mcp/selenium-browser-automation",
@@ -124,6 +125,7 @@ filterwarnings = [
 
 [dependency-groups]
 dev = [
+    "anthropic>=0.75.0",
     "bashlex",
     "gitpython>=3.1",
     "lazy-object-proxy>=1.12.0",
