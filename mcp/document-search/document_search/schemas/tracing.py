@@ -88,6 +88,12 @@ class QueueDepthSample(StrictModel):
     files_embed_done: int = 0
     files_store_done: int = 0
 
+    # System health (sampled alongside queue depths)
+    event_loop_lag_ms: float = 0.0
+    rss_memory_mb: float = 0.0
+    asyncio_task_count: int = 0
+    gc_gen2_collections: int = 0
+
 
 class StageCompletionData(StrictModel):
     """Per-item completion data for client-side windowed analysis.

@@ -202,6 +202,10 @@ class IndexingService:
             files_errored=len(file_errors),
             elapsed_seconds=time.monotonic() - op.start_time,
             queue_depth_series=list(op.tracer.get_queue_depths()),
+            event_loop_lag_hwm_ms=op.tracer.event_loop_lag_hwm_ms,
+            rss_hwm_mb=op.tracer.rss_hwm_mb,
+            asyncio_task_hwm=op.tracer.asyncio_task_hwm,
+            gc_gen2_total=op.tracer.gc_gen2_collections_total,
         )
 
     def get_partial_timing(self) -> PipelineTimingReport | None:
@@ -351,6 +355,8 @@ class IndexingService:
         respect_gitignore: bool | None = None,
         on_progress: ProgressCallback | None = None,
         stop_after: StopAfterStage | None = None,
+        embed_workers: int = NUM_EMBED_WORKERS,
+        max_concurrent: int | None = None,
     ) -> IndexingResult:
         """Index files using pipeline architecture with separate worker pools.
 
@@ -541,7 +547,7 @@ class IndexingService:
 
         logger.debug(
             f'[PIPELINE] Starting workers: {NUM_CHUNK_WORKERS} chunk, '
-            f'{NUM_EMBED_WORKERS} embed, {NUM_UPSERT_WORKERS} upsert '
+            f'{embed_workers} embed, {NUM_UPSERT_WORKERS} upsert '
             f'for {len(files_to_index)} files',
         )
 
@@ -565,13 +571,13 @@ class IndexingService:
         if stop_after == 'chunk':
             embed_tasks = [
                 asyncio.create_task(self._drain_worker(embed_queue, counters, 'chunks_embedded', results, results_lock))
-                for _ in range(NUM_EMBED_WORKERS)
+                for _ in range(embed_workers)
             ]
             upsert_tasks = []
         else:
             embed_tasks = [
                 asyncio.create_task(self._pipeline_embed_worker(embed_queue, upsert_queue, counters, tracer))
-                for _ in range(NUM_EMBED_WORKERS)
+                for _ in range(embed_workers)
             ]
             if stop_after == 'embed':
                 upsert_tasks = [
@@ -1367,6 +1373,12 @@ class PipelineSnapshot:
 
     # Queue depth time series (from tracer, 1Hz samples)
     queue_depth_series: Sequence[QueueDepthSample]
+
+    # System health HWMs (from tracer)
+    event_loop_lag_hwm_ms: float
+    rss_hwm_mb: float
+    asyncio_task_hwm: int
+    gc_gen2_total: int
 
 
 async def create_indexing_service(

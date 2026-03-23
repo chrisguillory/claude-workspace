@@ -252,6 +252,7 @@ Returns:
         path: str | None = None,
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
+        embed_workers: int = 64,
         include_timing: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
@@ -336,6 +337,7 @@ Returns:
                 resolved_path,
                 respect_gitignore=respect_gitignore,
                 stop_after=stop_after,
+                embed_workers=embed_workers,
             ),
         )
 
@@ -359,6 +361,8 @@ Returns:
                         status='running',
                         errors_429=errors_429_delta,
                         redis_conn_stats=state.redis_client.connection_stats,
+                        http_p50_ms=getattr(embedding_client, 'http_p50_ms', 0.0),
+                        http_p99_ms=getattr(embedding_client, 'http_p99_ms', 0.0),
                     )
                     progress_writer.update_progress(progress)
                 await asyncio.sleep(0.5)

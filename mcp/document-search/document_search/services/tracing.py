@@ -13,11 +13,14 @@ records before/after run_in_executor.
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import time
 from collections.abc import Sequence, Set
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import psutil
 
 from document_search.schemas.tracing import (
     PercentileStats,
@@ -93,6 +96,12 @@ class PipelineTracer:
         # Monitor task
         self._monitor_task: asyncio.Task[None] | None = None
 
+        # System health HWMs
+        self._event_loop_lag_hwm_ms: float = 0.0
+        self._rss_hwm_mb: float = 0.0
+        self._asyncio_task_hwm: int = 0
+        self._gc_gen2_total: int = 0
+
         # Track item order for warm-up flagging
         self._item_order: list[str] = []
 
@@ -100,6 +109,26 @@ class PipelineTracer:
     def start_time(self) -> float:
         """Pipeline start time (perf_counter)."""
         return self._start
+
+    @property
+    def event_loop_lag_hwm_ms(self) -> float:
+        """Peak event loop lag observed during this operation."""
+        return self._event_loop_lag_hwm_ms
+
+    @property
+    def rss_hwm_mb(self) -> float:
+        """Peak RSS memory observed during this operation."""
+        return self._rss_hwm_mb
+
+    @property
+    def asyncio_task_hwm(self) -> int:
+        """Peak asyncio task count observed during this operation."""
+        return self._asyncio_task_hwm
+
+    @property
+    def gc_gen2_collections_total(self) -> int:
+        """Cumulative gen2 GC collections during this operation."""
+        return self._gc_gen2_total
 
     # ── Per-item timing ─────────────────────────────────────────
 
@@ -268,9 +297,29 @@ class PipelineTracer:
     # ── Private: queue monitoring ────────────────────────────────
 
     async def _monitor_loop(self, interval: float) -> None:
-        """Sample queue depths, in-flight counts, and completion counts periodically."""
+        """Sample queue depths, in-flight counts, system health periodically."""
+        process = psutil.Process()
+        loop = asyncio.get_running_loop()
+
         while True:
             await asyncio.sleep(interval)
+
+            # Event loop lag: measure how long sleep(0) actually takes
+            t0 = loop.time()
+            await asyncio.sleep(0)
+            lag_ms = (loop.time() - t0) * 1000
+
+            # RSS memory + task count + GC
+            rss_mb = process.memory_info().rss / (1024 * 1024)
+            task_count = len(asyncio.all_tasks())
+            gc_gen2 = gc.get_stats()[2]['collections']
+
+            # Track HWMs
+            self._event_loop_lag_hwm_ms = max(self._event_loop_lag_hwm_ms, lag_ms)
+            self._rss_hwm_mb = max(self._rss_hwm_mb, rss_mb)
+            self._asyncio_task_hwm = max(self._asyncio_task_hwm, task_count)
+            self._gc_gen2_total = gc_gen2
+
             chunk_in, embed_in, store_in = self.get_in_flight_counts()
             chunk_done, embed_done, store_done = self.get_completion_counts()
             self._queue_depths.append(
@@ -285,6 +334,10 @@ class PipelineTracer:
                     files_chunk_done=chunk_done,
                     files_embed_done=embed_done,
                     files_store_done=store_done,
+                    event_loop_lag_ms=round(lag_ms, 2),
+                    rss_memory_mb=round(rss_mb, 1),
+                    asyncio_task_count=task_count,
+                    gc_gen2_collections=gc_gen2,
                 ),
             )
 
