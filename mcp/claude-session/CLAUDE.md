@@ -178,7 +178,7 @@ cd ~/.claude/projects && find . -name "<session-id>.jsonl" -exec sed -n "<line>p
 
 ```python
 from pathlib import Path
-from src.schemas.session import validate_session_record, UserRecord, AssistantRecord, CompactBoundarySystemRecord
+from claude_session.schemas.session import validate_session_record, UserRecord, AssistantRecord, CompactBoundarySystemRecord
 import json
 
 # Parse session with Pydantic

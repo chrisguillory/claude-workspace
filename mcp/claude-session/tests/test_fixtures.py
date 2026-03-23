@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from src.schemas.session.models import SessionRecordAdapter
+from claude_session.schemas.session.models import SessionRecordAdapter
 
 # Path to fixtures directory (relative to repo root)
 FIXTURES_DIR = Path(__file__).parent.parent / 'fixtures'

@@ -71,7 +71,7 @@ For schema validation:
 uv run python3 << EOF
 from pydantic import TypeAdapter
 import json
-from src.schemas.session import SessionRecord
+from claude_session.schemas.session import SessionRecord
 adapter = TypeAdapter(SessionRecord)
 for line in open("$SESSION_FILE"):
     if line.strip():
