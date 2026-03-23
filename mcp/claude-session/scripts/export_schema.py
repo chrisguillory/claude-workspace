@@ -45,7 +45,7 @@ def export_schema(output_path: str = 'session-schema.json') -> dict[str, Any]:
 
     # Add metadata
     schema['$schema'] = 'https://json-schema.org/draft/2020-12/schema'
-    schema['$id'] = 'https://github.com/your-org/claude-session-mcp/session-schema.json'
+    schema['$id'] = 'https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json'
     schema['title'] = 'Claude Code Session Record'
     schema['description'] = 'Complete schema for Claude Code session JSONL records'
 

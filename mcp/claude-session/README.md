@@ -46,14 +46,19 @@ Create the file if it doesn't exist.
 
 ```bash
 # Install globally (recommended)
-uv tool install git+https://github.com/chrisguillory/claude-session-mcp
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session
 
 # Run without installing
-uvx --from git+https://github.com/chrisguillory/claude-session-mcp claude-session --help
+uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session claude-session --help
 
-# From local clone
-git clone https://github.com/chrisguillory/claude-session-mcp
-cd claude-session-mcp && uv sync
+# From local workspace clone (editable — changes take effect immediately)
+uv tool install --editable ~/claude-workspace/mcp/claude-session
+```
+
+### MCP Server Setup
+
+```bash
+claude mcp add --scope user claude-session -- mcp-claude-session-server
 ```
 
 ### Upgrading
@@ -347,10 +352,10 @@ Install the MCP server to use archive/restore directly from Claude Code:
 
 ```bash
 # If installed globally (see Installation)
-claude mcp add --scope user claude-session -- claude-session-mcp
+claude mcp add --scope user claude-session -- mcp-claude-session-server
 
-# From GitHub
-claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-session-mcp claude-session-mcp
+# From GitHub (always-latest)
+claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session mcp-claude-session-server
 
 # From local clone
 claude mcp add --scope user claude-session -- uv run --project ~/claude-session-mcp claude-session-mcp

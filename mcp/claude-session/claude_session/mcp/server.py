@@ -4,7 +4,7 @@ Claude Code Session MCP Server.
 Provides tools for archiving and managing Claude Code session files.
 
 Setup:
-    claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-session-mcp mcp-server
+    claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session mcp-claude-session-server
 
 Example:
     # Save current session to temp file
