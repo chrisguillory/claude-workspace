@@ -36,8 +36,6 @@ Known Limitations (static analysis trade-offs):
       (only static list literals are analysed).
     - Star imports: Files containing ``from mod import *`` are skipped entirely
       because the imported names are unknowable at analysis time.
-    - Conditional imports: Imports inside ``if TYPE_CHECKING:`` are excluded, but
-      other conditional imports (``if sys.platform == ...``) are treated as normal.
     - Aliased re-exports: ``from mod import X as Y`` flags Y, not X.
     - Module imports: ``import os`` with ``'os'`` in __all__ is flagged.
 """
@@ -295,7 +293,7 @@ def check_file(
     if not all_names:
         return []
 
-    # Build import map: local_name -> ImportedName (excludes TYPE_CHECKING)
+    # Build import map: local_name -> ImportedName
     import_map = _build_import_map(tree)
 
     # Build local definitions set
@@ -415,26 +413,20 @@ def _extract_names_from_list(node: ast.expr) -> Mapping[str, int]:
 
 
 def _build_import_map(tree: ast.Module) -> Mapping[str, ImportedName]:
-    """Build mapping from local name to import source, excluding TYPE_CHECKING.
+    """Build mapping from local name to import source.
 
     Handles:
         import mod           -> {'mod': ImportedName('mod', line)}
         from mod import X    -> {'X': ImportedName('mod', line)}
         from mod import X as Y -> {'Y': ImportedName('mod', line)}
     """
-    # Find TYPE_CHECKING blocks to exclude
-    type_checking_ranges = _find_type_checking_ranges(tree)
-
     import_map: dict[str, ImportedName] = {}
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Import | ast.ImportFrom):
             continue
 
-        # Skip imports inside TYPE_CHECKING blocks
         lineno = node.lineno
-        if any(start <= lineno <= end for start, end in type_checking_ranges):
-            continue
 
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -447,24 +439,6 @@ def _build_import_map(tree: ast.Module) -> Mapping[str, ImportedName]:
                 import_map[local_name] = ImportedName(source_module=node.module, line=lineno)
 
     return import_map
-
-
-def _find_type_checking_ranges(tree: ast.Module) -> Sequence[tuple[int, int]]:
-    """Find line ranges of ``if TYPE_CHECKING:`` blocks."""
-    ranges: list[tuple[int, int]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.If):
-            # Check for `if TYPE_CHECKING:` or `if typing.TYPE_CHECKING:`
-            test = node.test
-            is_type_checking = False
-            if (isinstance(test, ast.Name) and test.id == 'TYPE_CHECKING') or (
-                isinstance(test, ast.Attribute) and test.attr == 'TYPE_CHECKING'
-            ):
-                is_type_checking = True
-
-            if is_type_checking and node.end_lineno is not None:
-                ranges.append((node.lineno, node.end_lineno))
-    return ranges
 
 
 def _build_local_defs(tree: ast.Module) -> Set[str]:

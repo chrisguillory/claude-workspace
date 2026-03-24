@@ -51,7 +51,7 @@ EXPECTED_TEST_CASES: Mapping[str, bool] = {
 # -- Expected Violations: Edge Case File --------------------------------------
 
 EXPECTED_EDGE_CASES: Mapping[str, bool] = {
-    'Path': False,  # TYPE_CHECKING import — excluded
+    'Path': True,  # TYPE_CHECKING import — still a re-export
     'path_exists': True,  # aliased import — should flag
     'os': True,  # module import — should flag
     'StringAlias': False,  # type alias — local def
