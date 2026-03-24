@@ -10,9 +10,11 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal
 from uuid import UUID
 
+import numpy as np
 import pydantic
 from cc_lib.schemas import StrictModel
 from cc_lib.types import JsonDatetime
+from numpy.typing import NDArray
 
 from document_search.schemas.chunking import Chunk, FileType
 from document_search.schemas.collections import Collection
@@ -82,7 +84,7 @@ class VectorPoint(StrictModel):
     def from_chunk(
         cls,
         chunk: Chunk,
-        dense_vector: Sequence[float],
+        dense_vector: Sequence[float] | NDArray[np.float32],
         sparse_indices: Sequence[int],
         sparse_values: Sequence[float],
         point_id: UUID,

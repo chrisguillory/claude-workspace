@@ -14,6 +14,7 @@ import hashlib
 import logging
 import time
 from collections.abc import Sequence
+from typing import cast
 
 import numpy as np
 from cc_lib.batch_loader import GenericBatchLoader
@@ -128,7 +129,7 @@ class EmbeddingService:
             texts=[request.text],
             intent=request.intent,
         )
-        values = vectors[0]
+        values = cast(Sequence[float], vectors[0])
         return EmbedResponse(values=values, dimensions=len(values))
 
     async def embed_batch(self, request: EmbedBatchRequest) -> EmbedBatchResponse:
@@ -144,7 +145,7 @@ class EmbeddingService:
             texts=request.texts,
             intent=request.intent,
         )
-        embeddings = [EmbedResponse(values=v, dimensions=len(v)) for v in vectors]
+        embeddings = [EmbedResponse(values=cast(Sequence[float], v), dimensions=len(v)) for v in vectors]
         return EmbedBatchResponse(embeddings=embeddings)
 
     # ── Reverse index pass-through ────────────────────────────
@@ -346,9 +347,8 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
 
         for i, raw in enumerate(cached):
             if raw is not None:
-                values = np.frombuffer(raw, dtype=np.float32).tolist()
-                # Skip Pydantic validation on cache hits — data was validated on write
-                results.append(EmbedResponse.model_construct(values=values, dimensions=len(values)))
+                values = np.frombuffer(raw, dtype=np.float32)
+                results.append(EmbedResponse.from_numpy(values))
                 self.hits += 1
             else:
                 results.append(None)

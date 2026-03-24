@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from document_search.schemas.embeddings import TaskIntent
+from document_search.schemas.embeddings import EmbeddingVector, TaskIntent
 
 __all__ = [
     'EmbeddingClient',
@@ -23,7 +23,7 @@ class EmbeddingClient(Protocol):
     Used by EmbeddingService for type-safe client injection.
     """
 
-    async def embed(self, texts: Sequence[str], *, intent: TaskIntent) -> Sequence[Sequence[float]]:
+    async def embed(self, texts: Sequence[str], *, intent: TaskIntent) -> Sequence[EmbeddingVector]:
         """Embed texts into vectors.
 
         Args:

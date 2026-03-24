@@ -27,10 +27,11 @@ import pydantic
 import tenacity
 from cc_lib import ConcurrencyTracker
 from cc_lib.types import JsonObject
+from numpy.typing import NDArray
 
 from document_search.clients import _retry
 from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterUnexpectedResponse
-from document_search.schemas.embeddings import TaskIntent
+from document_search.schemas.embeddings import EmbeddingVector, TaskIntent
 
 __all__ = [
     'OpenRouterClient',
@@ -143,7 +144,7 @@ class OpenRouterClient:
         texts: Sequence[str],
         *,
         intent: TaskIntent,
-    ) -> Sequence[Sequence[float]]:
+    ) -> Sequence[EmbeddingVector]:
         """Embed texts using OpenRouter API.
 
         Uses native async httpx for concurrent requests.
@@ -379,9 +380,8 @@ def _parse_models_response(
     return result
 
 
-def _decode_embedding(embedding: Sequence[float] | str) -> Sequence[float]:
-    """Decode from float array or base64 string."""
+def _decode_embedding(embedding: Sequence[float] | str) -> NDArray[np.float32]:
+    """Decode to numpy float32 array. Stays compact (3KB) instead of list[float] (24KB)."""
     if isinstance(embedding, str):
-        values: Sequence[float] = np.frombuffer(base64.b64decode(embedding), dtype=np.float32).tolist()
-        return values
-    return list(embedding)
+        return np.frombuffer(base64.b64decode(embedding), dtype=np.float32).copy()
+    return np.asarray(embedding, dtype=np.float32)

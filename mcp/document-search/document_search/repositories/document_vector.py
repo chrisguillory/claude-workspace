@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import typing
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import UUID
 
@@ -20,6 +20,7 @@ from cc_lib.batch_loader import GenericBatchLoader
 from document_search.clients.qdrant import QdrantClient
 from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import EXTENSION_MAP, FileType
+from document_search.schemas.embeddings import EmbeddingVector
 from document_search.schemas.vectors import (
     ContentStats,
     FileIndexStatus,
@@ -95,6 +96,23 @@ class DocumentVectorRepository:
         requests = [UpsertLoader.Request(point=point) for point in points]
         results = await self._upsert_loader.load_many(requests)
         return sum(results)
+
+    async def upsert_raw(
+        self,
+        points: Sequence[tuple[UUID, EmbeddingVector, Sequence[int], Sequence[float], Mapping[str, object]]],
+        *,
+        batch_size: int = 100,
+    ) -> int:
+        """Upsert points directly, bypassing VectorPoint/BatchLoader overhead.
+
+        Used by the pipeline upsert worker where points arrive pre-batched
+        per file. Simple loop batching replaces the BatchLoader since there's
+        nothing to coalesce — the worker already has all chunks for the file.
+        """
+        for i in range(0, len(points), batch_size):
+            batch = points[i : i + batch_size]
+            await self._client.upsert(self._collection_name, batch)
+        return len(points)
 
     async def search(self, query: SearchQuery) -> SearchResult:
         """Search documents using configurable strategy.
