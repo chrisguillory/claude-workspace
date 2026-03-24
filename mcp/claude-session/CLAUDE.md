@@ -4,7 +4,7 @@
 
 Session files are JSONL at `~/.claude/projects/<encoded-path>/<session-id>.jsonl`.
 
-> **Implementation Gap**: `_encode_path()` in `src/services/archive.py` only handles `/` and `.` encoding. Claude Code itself encodes all four characters (`/`, `.`, ` `, `~` → `-`). Paths with spaces or tildes may cause session discovery issues.
+> **Implementation Gap**: `_encode_path()` in `claude_session/services/archive.py` only handles `/` and `.` encoding. Claude Code itself encodes all four characters (`/`, `.`, ` `, `~` → `-`). Paths with spaces or tildes may cause session discovery issues.
 
 ### Quick Reference: Record Types
 
@@ -528,7 +528,7 @@ cd ~/.claude/projects && find . -name "<session-id>.jsonl" \
 The research context informs better fixes: knowing a field is from a major feature (model carefully) vs. a one-off patch (optional field) changes the modeling approach.
 
 ### 3. Fix models
-Edit `src/schemas/session/models.py`. Common fixes:
+Edit `claude_session/schemas/session/models.py`. Common fixes:
 - New optional fields: `fieldName: Type | None = None`
 - New record/tool types: add model class + wire into discriminated union + add dispatch branch in `validate_session_record()`
 - Expanded Literals: add new values to existing `Literal[...]` types
@@ -558,7 +558,7 @@ Add a changelog line to the module docstring header.
 ### 6. Commit
 ```bash
 uv run pre-commit run --all-files
-git add src/schemas/session/models.py
+git add claude_session/schemas/session/models.py
 git commit -m "Schema vX.Y.Z: Fix validation for Claude Code X.Y.Z"
 ```
 

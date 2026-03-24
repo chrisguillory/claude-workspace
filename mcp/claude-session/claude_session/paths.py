@@ -10,7 +10,7 @@ Claude Code encodes paths for directory names by replacing:
 
 WARNING: This encoding is LOSSY - decoding is impossible.
 To get the real path, read the `cwd` field from session records
-using `extract_source_project_path()` from `src.services.artifacts`.
+using `extract_source_project_path()` from `claude_session.services.artifacts`.
 """
 
 from __future__ import annotations

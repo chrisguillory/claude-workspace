@@ -83,7 +83,7 @@ EOF
 ### 5. Cleanup
 
 ```bash
-uv run python -m src.cli.main delete "$SESSION_ID" --force --no-backup
+claude-session delete "$SESSION_ID" --force --no-backup
 ```
 
 ## Known changes

@@ -14,7 +14,7 @@ class StrictModel(BaseStrictModel):
     """Operations-layer strict model.
 
     Inherits from BaseStrictModel (extra='forbid', strict=True, frozen=True).
-    Used by src/schemas/operations/ package.
+    Used by claude_session/schemas/operations/ package.
     """
 
     pass

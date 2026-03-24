@@ -3,11 +3,11 @@ Domain models for Claude Code session management.
 
 This module contains enriched models with computed fields, metadata, and application-level
 structures. These are mutable DomainModel instances built on top of the frozen schema
-models in src/schemas/session/.
+models in claude_session/schemas/session/.
 
 Separation of concerns:
-- src/schemas/session/: Pure JSONL schema representations (frozen, for parsing)
-- src/domain/: Application logic, analysis, and enrichment (mutable, this module)
+- claude_session/schemas/session/: Pure JSONL schema representations (frozen, for parsing)
+- claude_session/domain/: Application logic, analysis, and enrichment (mutable, this module)
 
 Architecture (top-down):
 1. CompleteSessionArchive - Complete session with all agent sessions
