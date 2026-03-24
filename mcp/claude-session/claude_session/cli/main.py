@@ -108,20 +108,21 @@ def _get_github_token_cli(gist_token: str | None) -> str | None:
 
 
 def _format_age(dt: datetime | None) -> str:
-    """Format a datetime as a human-readable age (kubectl-style)."""
+    """Format a datetime as a precise human-readable age.
+
+    Uses two-unit precision (e.g., 2h12m, 3d5h) so that descriptions
+    are naturally unique — zsh groups completions with identical text.
+    """
     if dt is None:
         return '?'
-    delta = datetime.now(UTC) - dt
-    minutes = int(delta.total_seconds() / 60)
-    if minutes < 60:
-        return f'{max(minutes, 1)}m'
-    hours = minutes // 60
-    if hours < 48:
-        return f'{hours}h'
-    days = hours // 24
-    if days < 14:
-        return f'{days}d'
-    return f'{days // 7}w'
+    total_minutes = int((datetime.now(UTC) - dt).total_seconds() / 60)
+    if total_minutes < 60:
+        return f'{max(total_minutes, 1)}m'
+    hours, mins = divmod(total_minutes, 60)
+    if hours < 24:
+        return f'{hours}h{mins}m'
+    days, hrs = divmod(hours, 24)
+    return f'{days}d{hrs}h'
 
 
 def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
