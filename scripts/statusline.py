@@ -476,6 +476,34 @@ def _osc8_link(url: str, text: str) -> str:
 type CwdLocation = Literal['project', 'added', 'unknown']
 
 
+def _detect_git_worktree(cwd: str) -> str | None:
+    """Detect if cwd is a git worktree and return 'name (from: branch)' or None.
+
+    In a worktree, .git is a file (not a directory) containing a gitdir pointer
+    to the main repo. We read the main repo's HEAD to find the origin branch.
+    """
+    git_path = Path(cwd) / '.git'
+    if not git_path.is_file():
+        return None
+    try:
+        # .git file contains: "gitdir: /path/to/main-repo/.git/worktrees/<name>"
+        gitdir_line = git_path.read_text().strip()
+        if not gitdir_line.startswith('gitdir:'):
+            return None
+        gitdir = Path(gitdir_line.split(':', 1)[1].strip())
+        # Walk up from .git/worktrees/<name> to .git/ to find the main repo
+        main_git_dir = gitdir.parent.parent  # .git/worktrees/<name> → .git/
+        head_file = main_git_dir / 'HEAD'
+        if head_file.exists():
+            head_content = head_file.read_text().strip()
+            if head_content.startswith('ref: refs/heads/'):
+                branch = head_content.removeprefix('ref: refs/heads/')
+                return f'{Path(cwd).name} (from: {branch})'
+        return Path(cwd).name
+    except OSError:
+        return None
+
+
 def _classify_cwd(cwd: str, project_dir: str, added_dirs: Sequence[str]) -> CwdLocation:
     """Classify cwd relative to configured workspace directories."""
     cwd_n = cwd.rstrip('/')
@@ -1628,10 +1656,14 @@ def main() -> None:
         if not cwd_n.startswith(d.rstrip('/'))
     )
 
-    # Worktree context (v2.1.69+)
+    # Worktree context — CC-managed (v2.1.69+) or detected via git
     if data.worktree:
         from_branch = f' (from: {data.worktree.original_branch})' if data.worktree.original_branch else ''
-        line3.append(f'{CYAN}worktree:{RESET} {data.worktree.name}{from_branch}')
+        line3.append(f'{CYAN}worktree:{RESET} {data.worktree.name}{from_branch} {DIM}cc{RESET}')
+    else:
+        wt_info = _detect_git_worktree(data.cwd)
+        if wt_info:
+            line3.append(f'{CYAN}worktree:{RESET} {wt_info}')
 
     # Transcript path
     line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, _shorten_path(data.transcript_path))}')
