@@ -62,7 +62,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-BACKUP_DIR = Path.home() / '.claude-session-mcp' / 'chain-backups'
+# Must match DATA_DIR in claude_session/config/base.py.
+# Run any claude-session command first to trigger auto-migration from legacy path.
+BACKUP_DIR = Path.home() / '.claude-workspace' / 'claude-session' / 'chain-backups'
 
 EXIT_HEALTHY = 0
 EXIT_FIXABLE = 1
