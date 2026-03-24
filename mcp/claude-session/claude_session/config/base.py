@@ -10,6 +10,7 @@ Data directory: ~/.claude-workspace/claude-session/
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import pathlib
@@ -30,23 +31,19 @@ DATA_DIR = pathlib.Path.home() / '.claude-workspace' / 'claude-session'
 # Legacy data directory (pre-migration)
 _LEGACY_DATA_DIR = pathlib.Path.home() / '.claude-session-mcp'
 
-# Track whether migration has been attempted this process
-_migration_checked = False
 
-
+@functools.lru_cache(maxsize=1)
 def ensure_data_dir() -> pathlib.Path:
-    """Return the data directory, auto-migrating from legacy path if needed.
+    """Return the data directory, creating it and migrating legacy data if needed.
 
     On first call per process, if the legacy directory (~/.claude-session-mcp/)
     exists and the new directory (~/.claude-workspace/claude-session/) does not,
     moves contents to the new location.
+
+    Cached: migration and mkdir run once per process. Call at point of use,
+    not at import time — importing a module should not have filesystem side effects.
     """
-    global _migration_checked  # noqa: PLW0603
-
-    if not _migration_checked:
-        _migration_checked = True
-        _migrate_legacy_data_dir()
-
+    _migrate_legacy_data_dir()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return DATA_DIR
 
@@ -59,6 +56,8 @@ def _migrate_legacy_data_dir() -> None:
     if not _LEGACY_DATA_DIR.exists():
         return
     if DATA_DIR.exists():
+        if _LEGACY_DATA_DIR.exists():
+            logger.warning('Legacy data directory still exists: %s (can be removed)', _LEGACY_DATA_DIR)
         return
 
     logger.warning(
@@ -67,13 +66,23 @@ def _migrate_legacy_data_dir() -> None:
         DATA_DIR,
     )
 
-    # Ensure parent exists
     DATA_DIR.parent.mkdir(parents=True, exist_ok=True)
 
-    # Move the entire directory
-    shutil.move(str(_LEGACY_DATA_DIR), str(DATA_DIR))
-
-    logger.warning('Data directory migration complete')
+    try:
+        shutil.move(_LEGACY_DATA_DIR, DATA_DIR)
+    except FileNotFoundError:
+        # Another process completed the migration first
+        if DATA_DIR.exists():
+            logger.info('Migration completed by another process')
+        else:
+            logger.error('Migration failed: source disappeared but target does not exist')
+    except OSError:
+        # Partial move (e.g., cross-device, disk full) — clean up so next attempt retries
+        if DATA_DIR.exists() and not any(DATA_DIR.iterdir()):
+            DATA_DIR.rmdir()
+        raise
+    else:
+        logger.warning('Data directory migration complete')
 
 
 class BaseSessionSettings(pydantic_settings.BaseSettings):
@@ -87,7 +96,7 @@ class BaseSessionSettings(pydantic_settings.BaseSettings):
     )
 
     # Application metadata
-    APP_NAME: str = 'claude-session'
+    APP_NAME: str = 'claude-session-mcp'
     VERSION: str = '0.1.0'
 
     # Compression settings (not overrideable at call-time)

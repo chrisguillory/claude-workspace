@@ -64,7 +64,7 @@ claude mcp add --scope user claude-session -- mcp-claude-session-server
 ### Upgrading
 
 ```bash
-uv tool upgrade claude-session
+uv tool upgrade claude-session-mcp
 ```
 
 ## Quick Start
