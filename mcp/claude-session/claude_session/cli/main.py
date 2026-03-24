@@ -20,11 +20,11 @@ from typing import Literal, TypeGuard
 
 import httpx
 import typer
+from cc_lib.utils import encode_project_path
 
 from claude_session.cli.logger import CLILogger
 from claude_session.exceptions import ClaudeSessionError
 from claude_session.launcher import launch_claude_with_session
-from claude_session.paths import encode_path
 from claude_session.schemas.operations.lineage import LineageTree
 from claude_session.services.archive import SessionArchiveService
 from claude_session.services.claude_process import auto_detect_session_id
@@ -598,7 +598,7 @@ async def _delete_async(
         info_service = SessionInfoService()
         project_filter: Path | None = None
         if project:
-            project_filter = Path.home() / '.claude' / 'projects' / encode_path(project.resolve())
+            project_filter = Path.home() / '.claude' / 'projects' / encode_project_path(project.resolve())
         session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
         full_session_id = session_info.session_id
 

@@ -94,7 +94,8 @@ from typing import Any
 from urllib.parse import parse_qs
 
 import psutil
-from claude_session.schemas import claude_workspace
+from cc_lib.session_tracker import Session as _Session
+from cc_lib.session_tracker import SessionDatabase as _SessionDatabase
 from expiringdict import ExpiringDict
 from mitmproxy import addonmanager, connection, http
 from pydantic import TypeAdapter
@@ -116,11 +117,11 @@ _SESSIONS_SEEN_LOCK = threading.Lock()
 
 # Store session info per connection, keyed by connection ID (mitmproxy's Client.id)
 # mitmproxy's Client object does NOT have a metadata attribute, so we use our own storage
-_CONNECTION_SESSIONS: dict[str, claude_workspace.Session] = {}
+_CONNECTION_SESSIONS: dict[str, _Session] = {}
 _CONNECTION_SESSIONS_LOCK = threading.Lock()
 
 # TypeAdapter for parsing sessions.json with Pydantic validation
-_SESSION_DB_ADAPTER: TypeAdapter[claude_workspace.SessionDatabase] = TypeAdapter(claude_workspace.SessionDatabase)
+_SESSION_DB_ADAPTER: TypeAdapter[_SessionDatabase] = TypeAdapter(_SessionDatabase)
 
 # Cache for codesign verification results: exe_path -> is_claude_code (expires after 1 hour)
 # We only need to verify each executable once per proxy lifetime
@@ -136,7 +137,7 @@ _RETRY_DELAY_SECONDS = 0.3  # 300ms between attempts = 3s max total
 
 # Session cache: maps PID → Session for active sessions
 # Invalidated when sessions.json mtime changes (handles /clear correctly)
-_SESSION_CACHE: dict[int, claude_workspace.Session] = {}
+_SESSION_CACHE: dict[int, _Session] = {}
 _SESSION_CACHE_MTIME: float = 0.0
 _SESSION_CACHE_LOCK = threading.Lock()
 
@@ -232,7 +233,7 @@ def _should_retry_session_lookup(pid: int) -> tuple[bool, tuple[int, float] | No
     return True, key
 
 
-def _get_session_with_retry(pid: int) -> claude_workspace.Session | None:
+def _get_session_with_retry(pid: int) -> _Session | None:
     """Get session for PID with retry logic for timing race.
 
     If session not found immediately and process is Claude Code,
@@ -326,7 +327,7 @@ def _get_pid_for_port(source_port: int) -> int | None:
     return None
 
 
-def _get_session_for_pid(pid: int) -> claude_workspace.Session | None:
+def _get_session_for_pid(pid: int) -> _Session | None:
     """Find active Claude Code session for a given PID.
 
     Uses mtime-based caching: only re-reads sessions.json when it changes.
@@ -376,7 +377,7 @@ def _get_session_dir(session_id: str | None) -> Path:
     return session_dir
 
 
-def _write_manifest(session_dir: Path, session: claude_workspace.Session | None) -> None:
+def _write_manifest(session_dir: Path, session: _Session | None) -> None:
     """Write session manifest to capture directory."""
     manifest: dict[str, Any] = {
         'capture_version': CAPTURE_VERSION,
@@ -720,7 +721,7 @@ def done() -> None:
 # ==============================================================================
 
 
-def _get_session_for_connection(client_id: str) -> claude_workspace.Session | None:
+def _get_session_for_connection(client_id: str) -> _Session | None:
     """Get session for a connection ID (thread-safe)."""
     with _CONNECTION_SESSIONS_LOCK:
         return _CONNECTION_SESSIONS.get(client_id)
@@ -785,7 +786,7 @@ def request(flow: http.HTTPFlow) -> None:
     body = _parse_body(flow.request.content, content_type)
 
     # Get session from our connection storage (set by client_connected hook)
-    session: claude_workspace.Session | None = None
+    session: _Session | None = None
     if flow.client_conn:
         session = _get_session_for_connection(flow.client_conn.id)
     session_id = session.session_id if session else None
@@ -865,7 +866,7 @@ def response(flow: http.HTTPFlow) -> None:
         duration = flow.response.timestamp_end - flow.request.timestamp_start
 
     # Get session from our connection storage (set by client_connected hook)
-    session: claude_workspace.Session | None = None
+    session: _Session | None = None
     if flow.client_conn:
         session = _get_session_for_connection(flow.client_conn.id)
     session_id = session.session_id if session else None
@@ -937,7 +938,7 @@ def error(flow: http.HTTPFlow) -> None:
     error_msg = flow.error.msg if flow.error else 'unknown'
 
     # Get session from our connection storage (set by client_connected hook)
-    session: claude_workspace.Session | None = None
+    session: _Session | None = None
     if flow.client_conn:
         session = _get_session_for_connection(flow.client_conn.id)
     session_id = session.session_id if session else None
@@ -991,7 +992,7 @@ def websocket_start(flow: http.HTTPFlow) -> None:
     n = COUNTER.increment('ws')
 
     # Get session from our connection storage (set by client_connected hook)
-    session: claude_workspace.Session | None = None
+    session: _Session | None = None
     if flow.client_conn:
         session = _get_session_for_connection(flow.client_conn.id)
     session_id = session.session_id if session else None
@@ -1021,7 +1022,7 @@ def websocket_message(flow: http.HTTPFlow) -> None:
     n = len(flow.websocket.messages)
 
     # Get session from our connection storage (set by client_connected hook)
-    session: claude_workspace.Session | None = None
+    session: _Session | None = None
     if flow.client_conn:
         session = _get_session_for_connection(flow.client_conn.id)
     session_id = session.session_id if session else None
@@ -1051,7 +1052,7 @@ def websocket_end(flow: http.HTTPFlow) -> None:
     message_count = len(flow.websocket.messages) if flow.websocket else 0
 
     # Get session from our connection storage (set by client_connected hook)
-    session: claude_workspace.Session | None = None
+    session: _Session | None = None
     if flow.client_conn:
         session = _get_session_for_connection(flow.client_conn.id)
     session_id = session.session_id if session else None
