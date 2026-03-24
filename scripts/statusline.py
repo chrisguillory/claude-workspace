@@ -321,7 +321,7 @@ class ModelInfo(StrictModel):
 class WorkspaceInfo(StrictModel):
     current_dir: str
     project_dir: str
-    added_dirs: Sequence[str]  # Added in v2.1.47
+    added_dirs: Sequence[str] = ()  # Added in v2.1.47
 
 
 class CostInfo(StrictModel):
