@@ -6,7 +6,7 @@ import datetime
 import typing
 from collections.abc import Mapping
 
-import pydantic
+from cc_lib.schemas.base import ClosedModel
 
 __all__ = [
     'DriverExecuteResponse',
@@ -19,24 +19,13 @@ __all__ = [
     'JetBrainsRunConfig',
     'JetBrainsSDKEntry',
     'SavedInterpreterConfig',
-    'StrictModel',
 ]
 
 type InterpreterState = typing.Literal['running', 'stopped']
 type InterpreterSource = typing.Literal['builtin', 'saved', 'jetbrains-sdk', 'jetbrains-run']
 
 
-class StrictModel(pydantic.BaseModel):
-    """Base model with strict validation - no extra fields, all fields required unless Optional."""
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-    )
-
-
-class InterpreterInfo(StrictModel):
+class InterpreterInfo(ClosedModel):
     """API response model for interpreter information."""
 
     # Identity
@@ -56,7 +45,7 @@ class InterpreterInfo(StrictModel):
     uptime: str | None
 
 
-class SavedInterpreterConfig(StrictModel, frozen=False):
+class SavedInterpreterConfig(ClosedModel, frozen=False):
     """Persisted interpreter configuration (no runtime state).
 
     Stored in ~/.claude-workspace/python_interpreter/interpreters.json.
@@ -70,7 +59,7 @@ class SavedInterpreterConfig(StrictModel, frozen=False):
     description: str | None
 
 
-class InterpreterRegistry(StrictModel, frozen=False):
+class InterpreterRegistry(ClosedModel, frozen=False):
     """Registry of saved interpreter configurations.
 
     Persisted to ~/.claude-workspace/python_interpreter/interpreters.json.
@@ -81,7 +70,7 @@ class InterpreterRegistry(StrictModel, frozen=False):
     interpreters: Mapping[str, SavedInterpreterConfig]
 
 
-class JetBrainsSDKEntry(StrictModel):
+class JetBrainsSDKEntry(ClosedModel):
     """Python interpreter from JetBrains jdk.table.xml."""
 
     name: str
@@ -91,7 +80,7 @@ class JetBrainsSDKEntry(StrictModel):
     associated_project: str | None
 
 
-class JetBrainsRunConfig(StrictModel):
+class JetBrainsRunConfig(ClosedModel):
     """JetBrains 'Run with Python Console' configuration from .run.xml."""
 
     name: str
@@ -103,14 +92,14 @@ class JetBrainsRunConfig(StrictModel):
     parameters: str | None
 
 
-class ExecuteRequest(StrictModel):
+class ExecuteRequest(ClosedModel):
     """Request body for HTTP execute endpoint."""
 
     code: str
     interpreter: str
 
 
-class DriverExecuteResponse(StrictModel):
+class DriverExecuteResponse(ClosedModel):
     """Response from driver execute action."""
 
     stdout: str
@@ -121,7 +110,7 @@ class DriverExecuteResponse(StrictModel):
     module_name: str | None
 
 
-class DriverReadyResponse(StrictModel):
+class DriverReadyResponse(ClosedModel):
     """Response from driver on startup (ready signal)."""
 
     status: typing.Literal['ready']

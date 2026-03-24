@@ -37,15 +37,14 @@ from typing import Literal, Protocol, cast
 import lazy_object_proxy
 import pydantic
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.schemas.base import ClosedModel
 from cc_lib.schemas.hooks import BashToolInput
 from cc_lib.types import JsonDatetime, JsonObject
 from cc_lib.utils import load_module_from_path
 
 
-class CommandRecord(pydantic.BaseModel):
+class CommandRecord(ClosedModel):
     """A single Bash tool call extracted from a session transcript."""
-
-    model_config = pydantic.ConfigDict(frozen=True)
 
     command: str  # "git log --oneline -5 && echo '---'"
     description: str | None  # "Show recent commits and separator"

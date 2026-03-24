@@ -117,6 +117,7 @@ import pydantic
 import pydantic.alias_generators
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import StrictModel
+from cc_lib.schemas.base import ClosedModel
 from cc_lib.session_tracker import find_claude_pid
 
 # =============================================================================
@@ -226,19 +227,15 @@ class SwitchPendingMarker(_ExternalModel):
 # =============================================================================
 
 
-class ResolvedCredentials(pydantic.BaseModel):
+class ResolvedCredentials(ClosedModel):
     """Resolved credential state flowing through the pipeline.
 
-    Replaces Mapping[str, str] with typed fields. Uses camelCase JSON aliases
-    for backward compatibility with existing cache and snapshot files on disk.
+    Uses camelCase JSON aliases for backward compatibility with
+    existing cache and snapshot files on disk.
     """
 
     model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     email_address: str = ''
@@ -257,14 +254,8 @@ class CachedCredentials(StrictModel):
     credentials: ResolvedCredentials
 
 
-class CredentialSnapshot(pydantic.BaseModel):
-    """Per-session credential snapshot, persisted to disk.
-
-    Not strict — existing snapshot files may have numeric claude_pid that
-    needs coercion. credentials sub-object handles its own alias mapping.
-    """
-
-    model_config = pydantic.ConfigDict(extra='forbid', frozen=True)
+class CredentialSnapshot(ClosedModel):
+    """Per-session credential snapshot, persisted to disk."""
 
     session_id: str
     claude_pid: int
@@ -365,18 +356,12 @@ class ContextWindow(StrictModel):
     current_usage: CurrentUsage | None = None
 
 
-class StatusLineInput(pydantic.BaseModel):
+class StatusLineInput(StrictModel):
     """Top-level JSON received on stdin.
 
     Uses extra='allow' at top level since Claude Code may add new fields.
     Sub-objects use extra='forbid' to catch structural changes.
     """
-
-    model_config = pydantic.ConfigDict(
-        extra='allow',
-        strict=True,
-        frozen=True,
-    )
 
     model: ModelInfo
     cwd: str
