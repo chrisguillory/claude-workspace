@@ -6,8 +6,6 @@ This module provides:
 - EmptyBody: Capture-layer empty HTTP body marker
 - Type correspondence markers: Link fields to session schemas and SDK types
 
-Note: EmptyDict and EmptySequence are now in claude_session.schemas.types and re-exported
-here for backwards compatibility.
 """
 
 from __future__ import annotations
@@ -15,11 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-# Import foundation types and re-export for backwards compatibility
-from claude_session.schemas.types import BaseStrictModel, EmptyDict, EmptySequence
+from claude_session.schemas.types import BaseStrictModel
 
-# Re-export for backwards compatibility (other modules import from here)
-__all__ = ['EmptyBody', 'EmptyDict', 'EmptySequence', 'FromSdk', 'FromSession', 'StrictModel', 'ValidationStatus']
+__all__ = ['EmptyBody', 'FromSdk', 'FromSession', 'StrictModel', 'ValidationStatus']
 
 
 # ==============================================================================

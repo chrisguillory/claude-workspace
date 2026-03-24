@@ -19,7 +19,8 @@ from typing import Annotated, Any, Literal
 import pydantic
 
 from claude_session.schemas.captures.base import RequestCapture, ResponseCapture
-from claude_session.schemas.cc_internal_api.base import EmptyDict, StrictModel
+from claude_session.schemas.cc_internal_api.base import StrictModel
+from claude_session.schemas.types import EmptyDict
 
 # ==============================================================================
 # Shared Base (32 fields present in ALL log entry types)

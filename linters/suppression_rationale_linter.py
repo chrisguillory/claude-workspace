@@ -120,6 +120,7 @@ DIRECTIVE_PREFIX = '# suppression_rationale_linter.py:'
 DEFAULT_CUSTOM_PREFIXES: Sequence[str] = (
     '# strict_typing_linter.py:',
     '# exception_safety_linter.py:',
+    '# reexport_linter.py:',
 )
 
 NOQA_RE = re.compile(
