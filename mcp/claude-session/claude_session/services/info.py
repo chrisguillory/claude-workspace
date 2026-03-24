@@ -17,8 +17,8 @@ from pathlib import Path
 
 import psutil
 import pydantic
+from cc_lib.session_tracker import Session, SessionDatabase
 
-from claude_session.schemas.claude_workspace import Session, SessionDatabase
 from claude_session.schemas.operations.context import SessionContext
 from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.services.artifacts import extract_custom_title_from_file
@@ -312,8 +312,7 @@ class SessionInfoService:
         """
         Load session data from claude-workspace sessions.json.
 
-        Uses the Session Pydantic model from claude_session.schemas.claude_workspace
-        which mirrors the authoritative definitions in claude-workspace.
+        Uses the Session Pydantic model from cc_lib.session_tracker.
 
         Returns:
             Session model if found, None otherwise.

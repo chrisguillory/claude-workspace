@@ -335,6 +335,7 @@ version = "0.1.0"
 source = { editable = "mcp/claude-session" }
 dependencies = [
     { name = "attrs" },
+    { name = "cc-lib" },
     { name = "expiringdict" },
     { name = "fastmcp" },
     { name = "filelock" },
@@ -353,6 +354,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "attrs", specifier = ">=25.4.0" },
+    { name = "cc-lib", editable = "cc-lib" },
     { name = "expiringdict", specifier = ">=1.2.2" },
     { name = "fastmcp", specifier = ">=2.13.0.2" },
     { name = "filelock", specifier = ">=3.20.1" },
