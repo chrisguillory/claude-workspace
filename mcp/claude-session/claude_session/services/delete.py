@@ -19,7 +19,7 @@ Safety features:
 - Explicit file enumeration - no directory-level deletion
 - Validation fails fast on unexpected files
 
-Backup location: ~/.claude-session-mcp/deleted/
+Backup location: ~/.claude-workspace/claude-session/deleted/
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from typing import Any, TypedDict
 
 from cc_lib.utils import encode_project_path
 
+from claude_session.config.base import DATA_DIR
 from claude_session.exceptions import NativeSessionDeletionError
 from claude_session.protocols import LoggerProtocol
 from claude_session.schemas.operations.archive import (
@@ -97,7 +98,7 @@ class SessionDeleteService:
     """
 
     # Backup location - separate from ~/.claude/
-    DELETED_SESSIONS_DIR = Path.home() / '.claude-session-mcp' / 'deleted'
+    DELETED_SESSIONS_DIR = DATA_DIR / 'deleted'
 
     # Only permission errors are truly "expected" - environment issue, not a bug
     # Other errors indicate unexpected state and should propagate after rollback:

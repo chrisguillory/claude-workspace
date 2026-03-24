@@ -2,7 +2,7 @@
 Session lineage tracking service.
 
 Records parent-child relationships when sessions are cloned or restored.
-Stores lineage in ~/.claude-session-mcp/lineage.json with thread-safe access.
+Stores lineage in ~/.claude-workspace/claude-session/lineage.json with thread-safe access.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Literal
 
 from filelock import FileLock
 
+from claude_session.config.base import ensure_data_dir
 from claude_session.exceptions import AmbiguousSessionError
 from claude_session.schemas.operations.lineage import (
     LineageEntry,
@@ -48,8 +49,8 @@ class LineageService:
     """
 
     def __init__(self, lineage_dir: Path | None = None) -> None:
-        """Initialize with ~/.claude-session-mcp/ by default."""
-        self.lineage_dir = lineage_dir or (Path.home() / '.claude-session-mcp')
+        """Initialize with ~/.claude-workspace/claude-session/ by default."""
+        self.lineage_dir = lineage_dir or ensure_data_dir()
         self.lineage_file = self.lineage_dir / 'lineage.json'
         self.lock_file = self.lineage_file.with_suffix('.lock')
 

@@ -4,7 +4,7 @@ Session info service - retrieves comprehensive context about sessions.
 Aggregates data from multiple sources:
 - Session discovery (session files in ~/.claude/projects/)
 - Claude-workspace tracking (~/.claude-workspace/sessions.json)
-- Lineage tracking (~/.claude-session-mcp/lineage.json)
+- Lineage tracking (~/.claude-workspace/claude-session/lineage.json)
 - MCP server state (for current session context)
 """
 
@@ -57,7 +57,7 @@ class SessionInfoService:
     Aggregates data from:
     - Session files (~/.claude/projects/)
     - Claude-workspace sessions.json (if available)
-    - Lineage tracking (~/.claude-session-mcp/lineage.json)
+    - Lineage tracking (~/.claude-workspace/claude-session/lineage.json)
     - Current session MCP state (if provided)
     """
 

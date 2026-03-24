@@ -25,7 +25,7 @@ class SessionContext(StrictModel):
     - Session discovery (session files in ~/.claude/projects/)
     - Claude-workspace tracking (~/.claude-workspace/sessions.json)
     - MCP server state (for current session: claude_pid, temp_dir)
-    - Lineage tracking (~/.claude-session-mcp/lineage.json)
+    - Lineage tracking (~/.claude-workspace/claude-session/lineage.json)
 
     Field ordering:
     - Identity (who)
