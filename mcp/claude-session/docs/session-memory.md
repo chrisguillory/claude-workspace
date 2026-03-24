@@ -372,7 +372,7 @@ the `move_session` commit, all session operations handle them:
 | **Delete** | Backed up then deleted |
 | **Move** | Relocated to target project |
 
-The artifact module is at `src/services/artifacts/session_memory.py`.
+The artifact module is at `claude_session/services/artifacts/session_memory.py`.
 
 ### Implications for Session Analysis
 

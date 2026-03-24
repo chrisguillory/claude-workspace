@@ -79,7 +79,7 @@ with typed models for known patterns and a **PermissiveModel subclass** as fallb
 #### The PermissiveModel / StrictModel Symmetry
 
 ```python
-# In src/schemas/types.py - Foundation types
+# In claude_session/schemas/types.py - Foundation types
 class BaseStrictModel(BaseModel):
     model_config = {'extra': 'forbid'}  # Rejects unknown fields
 

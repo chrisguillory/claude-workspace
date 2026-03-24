@@ -7,7 +7,7 @@ session-specific artifacts like tool results, todos, plan files, etc.
 
 from __future__ import annotations
 
-# ToolResultExtension lives in src/schemas/types (avoids circular import)
+# ToolResultExtension lives in claude_session/schemas/types (avoids circular import)
 from claude_session.schemas.types import ToolResultExtension
 
 from .agent_ids import (

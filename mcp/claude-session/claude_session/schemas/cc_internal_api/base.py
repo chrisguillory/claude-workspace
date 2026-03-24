@@ -6,7 +6,7 @@ This module provides:
 - EmptyBody: Capture-layer empty HTTP body marker
 - Type correspondence markers: Link fields to session schemas and SDK types
 
-Note: EmptyDict and EmptySequence are now in src.schemas.types and re-exported
+Note: EmptyDict and EmptySequence are now in claude_session.schemas.types and re-exported
 here for backwards compatibility.
 """
 
@@ -67,7 +67,7 @@ class EmptyBody(StrictModel):
 #
 # These markers are used with typing.Annotated to create typed links between:
 # 1. Our API schemas (this module)
-# 2. Session schemas (src.schemas.session) - what CC persists
+# 2. Session schemas (claude_session.schemas.session) - what CC persists
 # 3. Anthropic SDK types (anthropic.types) - public API reference
 #
 # Example usage:

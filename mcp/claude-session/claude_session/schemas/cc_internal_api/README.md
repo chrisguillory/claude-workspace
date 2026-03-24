@@ -189,7 +189,7 @@ class ApiUsage(PermissiveModel):
     """
     Token usage in API response.
 
-    CORRESPONDING SESSION TYPE: src.schemas.session.TokenUsage
+    CORRESPONDING SESSION TYPE: claude_session.schemas.session.TokenUsage
     KNOWN DIFFERENCES:
     - Field names appear identical
     - Session version validated against 297k+ records
