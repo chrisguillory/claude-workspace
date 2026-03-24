@@ -29,6 +29,7 @@ from claude_session.exceptions import ClaudeSessionError
 from claude_session.launcher import launch_claude_with_session
 from claude_session.schemas.operations.lineage import LineageTree
 from claude_session.services.archive import SessionArchiveService
+from claude_session.services.artifacts.custom_title import extract_custom_title_from_file
 from claude_session.services.claude_process import auto_detect_session_id
 from claude_session.services.clone import SessionCloneService
 from claude_session.services.delete import SessionDeleteService
@@ -124,17 +125,26 @@ def _format_age(dt: datetime | None) -> str:
 
 
 def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
-    """Complete session IDs from tracked sessions, newest first."""
+    """Complete session IDs from tracked sessions. Active first, then newest."""
     try:
         db = load_sessions('.')
     except Exception:
         return []
     matches = [s for s in db.sessions if s.session_id.startswith(incomplete)]
-    matches.sort(key=lambda s: s.metadata.process_created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
-    return [
-        (s.session_id, f'{s.state}, {Path(s.project_dir).name}, {_format_age(s.metadata.process_created_at)}')
-        for s in matches
-    ]
+    matches.sort(
+        key=lambda s: (
+            s.state != 'active',  # active first
+            -(s.metadata.process_created_at or datetime.min.replace(tzinfo=UTC)).timestamp(),
+        ),
+    )
+    results: list[tuple[str, str]] = []
+    for s in matches:
+        title = extract_custom_title_from_file(Path(s.transcript_path))
+        parts = [s.state, Path(s.project_dir).name, _format_age(s.metadata.process_created_at)]
+        if title:
+            parts.append(title)
+        results.append((s.session_id, ', '.join(parts)))
+    return results
 
 
 @app.command()
