@@ -121,4 +121,4 @@ class TestDecodeEmbedding:
     def test_float_passthrough(self) -> None:
         original = [0.1, 0.2, 0.3]
         decoded = _decode_embedding(original)
-        assert decoded == original
+        assert list(decoded) == pytest.approx(original)

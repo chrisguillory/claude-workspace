@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from typing import TypedDict
+from typing import TypedDict, cast
 from uuid import UUID
 
 import httpx
@@ -38,6 +38,7 @@ from qdrant_client.http.models import (
 )
 
 from document_search.clients import _retry
+from document_search.schemas.embeddings import EmbeddingVector
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,7 @@ class QdrantClient:
     async def upsert(
         self,
         collection_name: str,
-        points: Sequence[tuple[UUID, Sequence[float], Sequence[int], Sequence[float], JsonObject]],
+        points: Sequence[tuple[UUID, EmbeddingVector, Sequence[int], Sequence[float], JsonObject]],
     ) -> int:
         """Insert or update points with hybrid vectors.
 
@@ -214,13 +215,13 @@ class QdrantClient:
             PointStruct(
                 id=str(point_id),
                 vector={
-                    'dense': list(dense_vector),
+                    'dense': cast(Sequence[float], dense_vector),  # qdrant-client accepts numpy (tested)
                     'sparse': SparseVector(
-                        indices=list(sparse_indices),
-                        values=list(sparse_values),
+                        indices=sparse_indices,
+                        values=sparse_values,
                     ),
                 },
-                payload=dict(payload),
+                payload=payload,
             )
             for point_id, dense_vector, sparse_indices, sparse_values, payload in points
         ]

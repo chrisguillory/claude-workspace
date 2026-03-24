@@ -6,10 +6,12 @@ Provider-agnostic types for embedding operations.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
+import numpy as np
 import pydantic
 from cc_lib.schemas import StrictModel
+from numpy.typing import NDArray
 
 __all__ = [
     'MAX_TEXT_CHARS',
@@ -17,12 +19,16 @@ __all__ = [
     'EmbedBatchResponse',
     'EmbedRequest',
     'EmbedResponse',
+    'EmbeddingVector',
     'TaskIntent',
 ]
 
 # Embedding intent - document (for indexing) or query (for search)
 # Each provider translates this to their specific format
 type TaskIntent = Literal['document', 'query']
+
+# A single embedding vector: Python list (from API) or numpy array (from cache)
+type EmbeddingVector = Sequence[float] | NDArray[np.float32]
 
 # Max characters before truncation risk with most embedding models
 # Conservative limit that works across providers (~2048 tokens * ~3 chars/token)
@@ -57,6 +63,15 @@ class EmbedResponse(StrictModel):
 
     values: Sequence[float]
     dimensions: int
+
+    @classmethod
+    def from_numpy(cls, values: NDArray[np.float32]) -> EmbedResponse:
+        """Construct from numpy array (cache hot path).
+
+        Bypasses Pydantic validation — numpy arrays satisfy Sequence[float]
+        at runtime but Pydantic can't generate a schema for NDArray.
+        """
+        return cls.model_construct(values=cast(Sequence[float], values), dimensions=len(values))
 
 
 class EmbedBatchResponse(StrictModel):

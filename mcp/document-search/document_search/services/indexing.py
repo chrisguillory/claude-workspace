@@ -34,7 +34,7 @@ from document_search.repositories.document_vector import DocumentVectorRepositor
 from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import EXTENSION_MAP, Chunk, FileType, get_file_type
 from document_search.schemas.config import EmbeddingConfig
-from document_search.schemas.embeddings import EmbedResponse
+from document_search.schemas.embeddings import EmbeddingVector, EmbedResponse
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
     FileIndexState,
@@ -1248,8 +1248,24 @@ class IndexingService:
             # No try/finally - exceptions propagate, triggering fail-fast
             # Upsert changed chunks (may be empty for deletion-only files)
             if embedded.chunks:
-                points = [
-                    VectorPoint.from_chunk(chunk, dense, sparse_indices, sparse_values, chunk_id)
+                raw_points = [
+                    (
+                        chunk_id,
+                        dense,  # numpy array flows through to qdrant-client
+                        sparse_indices,
+                        sparse_values,
+                        {
+                            'source_path': chunk.source_path,
+                            'chunk_index': chunk.chunk_index,
+                            'file_type': chunk.file_type,
+                            'text': chunk.text,
+                            'start_char': chunk.metadata.start_char,
+                            'end_char': chunk.metadata.end_char,
+                            'heading_context': chunk.metadata.heading_context,
+                            'page_number': chunk.metadata.page_number,
+                            'json_path': chunk.metadata.json_path,
+                        },
+                    )
                     for chunk, dense, (sparse_indices, sparse_values), chunk_id in zip(
                         embedded.chunks,
                         embedded.dense_embeddings,
@@ -1257,7 +1273,7 @@ class IndexingService:
                         embedded.chunk_ids,
                     )
                 ]
-                await self._repo.upsert(points)
+                await self._repo.upsert_raw(raw_points)
 
             counters.chunks_stored += len(embedded.chunks)
             counters.files_stored += 1
@@ -1514,7 +1530,7 @@ class _EmbeddedFile:
     all_chunk_ids: Sequence[UUID]  # ALL chunk IDs (for Redis state)
     deleted_chunk_ids: Sequence[UUID]  # Old chunks to delete from Qdrant
     chunks_skipped: int
-    dense_embeddings: Sequence[Sequence[float]]
+    dense_embeddings: Sequence[EmbeddingVector]
     sparse_embeddings: Sequence[tuple[Sequence[int], Sequence[float]]]
 
 
