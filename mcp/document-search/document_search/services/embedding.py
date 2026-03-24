@@ -14,7 +14,6 @@ import hashlib
 import logging
 import time
 from collections.abc import Sequence
-from typing import cast
 
 import numpy as np
 from cc_lib.batch_loader import GenericBatchLoader
@@ -129,8 +128,8 @@ class EmbeddingService:
             texts=[request.text],
             intent=request.intent,
         )
-        values = cast(Sequence[float], vectors[0])
-        return EmbedResponse(values=values, dimensions=len(values))
+        v = vectors[0]
+        return EmbedResponse.from_numpy(v) if isinstance(v, np.ndarray) else EmbedResponse(values=v, dimensions=len(v))
 
     async def embed_batch(self, request: EmbedBatchRequest) -> EmbedBatchResponse:
         """Embed batch of texts.
@@ -145,7 +144,10 @@ class EmbeddingService:
             texts=request.texts,
             intent=request.intent,
         )
-        embeddings = [EmbedResponse(values=cast(Sequence[float], v), dimensions=len(v)) for v in vectors]
+        embeddings = [
+            EmbedResponse.from_numpy(v) if isinstance(v, np.ndarray) else EmbedResponse(values=v, dimensions=len(v))
+            for v in vectors
+        ]
         return EmbedBatchResponse(embeddings=embeddings)
 
     # ── Reverse index pass-through ────────────────────────────
