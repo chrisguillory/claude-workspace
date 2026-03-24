@@ -313,7 +313,7 @@ def _get_pid_for_port(source_port: int) -> int | None:
                 # This is truly unexpected - we should be able to access this
                 raise RuntimeError(
                     f'Unexpected AccessDenied for process with matching effective UID: '
-                    f'PID {proc_pid} ({proc_name}) uids={proc_uids}'
+                    f'PID {proc_pid} ({proc_name}) uids={proc_uids}',
                 )
             # Expected - process has elevated/different effective UID, skip
         except psutil.ZombieProcess:
@@ -348,7 +348,7 @@ def _get_session_for_pid(pid: int) -> Session | None:
         except FileNotFoundError:
             raise FileNotFoundError(
                 f'Sessions file not found: {SESSIONS_PATH}\n'
-                'Ensure claude-workspace hooks are configured in ~/.claude/settings.json'
+                'Ensure claude-workspace hooks are configured in ~/.claude/settings.json',
             ) from None
         if current_mtime != _SESSION_CACHE_MTIME:
             # File changed, rebuild cache

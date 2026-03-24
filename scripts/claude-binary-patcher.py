@@ -157,7 +157,7 @@ def _handle_patch_error(exc: PatchError) -> None:
 
 
 @error_boundary.handler(
-    Exception
+    Exception,
 )  # exception_safety_linter.py: swallowed-exception — process-boundary catch-all for user-facing CLI
 def _handle_crash(exc: Exception) -> None:
     print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
@@ -291,7 +291,7 @@ class BinaryPatcher:
         if 'session-memory' in pending_sites:
             print(
                 '\nNote: session-memory also requires autocompact enabled at runtime.\n'
-                'Ensure DISABLE_AUTO_COMPACT is not set in ~/.claude/settings.json env.'
+                'Ensure DISABLE_AUTO_COMPACT is not set in ~/.claude/settings.json env.',
             )
 
         print('\nDone. Restart Claude Code to pick up the changes.')

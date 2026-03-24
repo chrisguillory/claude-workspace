@@ -240,7 +240,9 @@ def analyze_session(file_path: Path) -> AnalysisResult:
             rec = json.loads(line)
         except json.JSONDecodeError as e:
             return AnalysisResult(
-                file_path=file_path, status='error', error_message=f'JSON parse error line {i + 1}: {e}'
+                file_path=file_path,
+                status='error',
+                error_message=f'JSON parse error line {i + 1}: {e}',
             )
         records.append(rec)
         uuid = rec.get('uuid')
@@ -289,7 +291,7 @@ def analyze_session(file_path: Path) -> AnalysisResult:
                     new_parent=new_parent,
                     new_parent_line=new_parent_line,
                     new_parent_type=new_parent_type,
-                )
+                ),
             )
 
     # Attribute orphans to sidechain files
@@ -517,7 +519,7 @@ def apply_fix(file_path: Path, orphans: list[Orphan]) -> Path:
     if backup_path.exists():
         raise FileExistsError(
             f'Backup already exists: {backup_path}\n'
-            f"Run 'fix_broken_session_resume.py restore {session_id}' first, or manually remove the backup."
+            f"Run 'fix_broken_session_resume.py restore {session_id}' first, or manually remove the backup.",
         )
 
     shutil.copy2(file_path, backup_path)

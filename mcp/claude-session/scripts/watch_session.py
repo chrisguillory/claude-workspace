@@ -405,7 +405,7 @@ def _render_tool_params(tool_input: dict[str, Any]) -> str:
         val_display = html_escape(val_str[:200]) + '...' if len(val_str) > 200 else html_escape(val_str)
         rows.append(
             f"<tr><td class='tool-param-key'>{html_escape(key)}</td>"
-            f"<td class='tool-param-value'>{val_display}</td></tr>"
+            f"<td class='tool-param-value'>{val_display}</td></tr>",
         )
     return f"<table class='tool-params-table'>{''.join(rows)}</table>"
 
@@ -422,7 +422,7 @@ def _render_user(record: dict[str, Any], counter: list[int], ts: str, dt: str) -
     if isinstance(content, str):
         mid = _next_id(counter)
         fragments.append(
-            _wrap_message(mid, f'user{sidechain}', '🤷', 'User', ts, dt, f'<pre>{html_escape(content)}</pre>')
+            _wrap_message(mid, f'user{sidechain}', '🤷', 'User', ts, dt, f'<pre>{html_escape(content)}</pre>'),
         )
     elif isinstance(content, list):
         for block in content:
@@ -440,7 +440,7 @@ def _render_user(record: dict[str, Any], counter: list[int], ts: str, dt: str) -
                         ts,
                         dt,
                         f'<pre>{html_escape(block.get("text", ""))}</pre>',
-                    )
+                    ),
                 )
             elif btype == 'tool_result':
                 mid = _next_id(counter)
@@ -493,7 +493,7 @@ def _render_assistant(record: dict[str, Any], counter: list[int], ts: str, dt: s
                     dt,
                     f'<div class="thinking-content markdown"><pre>{html_escape(text)}</pre></div>',
                     use_usage,
-                )
+                ),
             )
             usage_shown = True
 
@@ -510,7 +510,7 @@ def _render_assistant(record: dict[str, Any], counter: list[int], ts: str, dt: s
                     dt,
                     f'<div class="assistant-text markdown"><pre>{html_escape(text)}</pre></div>',
                     use_usage,
-                )
+                ),
             )
             usage_shown = True
 
@@ -528,7 +528,7 @@ def _render_assistant(record: dict[str, Any], counter: list[int], ts: str, dt: s
                     ts,
                     dt,
                     content_html,
-                )
+                ),
             )
 
     return fragments
@@ -946,7 +946,7 @@ def watch(
     elapsed = regenerate(jsonl_path, html_path)
     size_kb = html_path.stat().st_size / 1024 if html_path.exists() else 0
     print(
-        f'{Colors.DIM}[{ts}]{Colors.RESET} {Colors.GREEN}Generated{Colors.RESET} in {elapsed:.1f}s ({size_kb:.0f} KB)'
+        f'{Colors.DIM}[{ts}]{Colors.RESET} {Colors.GREEN}Generated{Colors.RESET} in {elapsed:.1f}s ({size_kb:.0f} KB)',
     )
 
     if open_browser:
@@ -971,7 +971,7 @@ def watch(
         if daemon is not None and not _is_process_alive(daemon.claude_pid):
             ts = time.strftime('%H:%M:%S')
             print(
-                f'{Colors.DIM}[{ts}]{Colors.RESET} {Colors.YELLOW}Session ended, draining final records...{Colors.RESET}'
+                f'{Colors.DIM}[{ts}]{Colors.RESET} {Colors.YELLOW}Session ended, draining final records...{Colors.RESET}',
             )
             final_records = tail.read_new_records()
             rendered_count = 0
@@ -982,7 +982,7 @@ def watch(
             if rendered_count:
                 print(
                     f'{Colors.DIM}[{ts}]{Colors.RESET} Drained {rendered_count} block(s) '
-                    f'from {len(final_records)} record(s)'
+                    f'from {len(final_records)} record(s)',
                 )
             broadcast_event(server, 'session-ended', 'closed')
             time.sleep(2)  # Let browser receive the event
@@ -1034,7 +1034,7 @@ def watch(
 
         if rendered_count:
             print(
-                f'{Colors.DIM}[{ts}]{Colors.RESET} Streamed {rendered_count} block(s) from {len(new_records)} record(s)'
+                f'{Colors.DIM}[{ts}]{Colors.RESET} Streamed {rendered_count} block(s) from {len(new_records)} record(s)',
             )
 
 
@@ -1050,13 +1050,18 @@ def main() -> None:
         description='Watch a Claude Code session with live SSE updates.',
     )
     parser.add_argument(
-        'session', nargs='?', default=None, help='Session ID or prefix (omit to auto-detect current session)'
+        'session',
+        nargs='?',
+        default=None,
+        help='Session ID or prefix (omit to auto-detect current session)',
     )
     parser.add_argument('--interval', type=float, default=1.0, help='Polling interval in seconds (default: 1.0)')
     parser.add_argument('--open-browser', action='store_true', help='Open HTML in browser after first generation')
     parser.add_argument('--no-browser', action='store_true', help='Suppress auto-browser-open in daemon mode')
     parser.add_argument(
-        '--no-auto-close', action='store_true', help='Disable auto-exit when session ends (daemon mode)'
+        '--no-auto-close',
+        action='store_true',
+        help='Disable auto-exit when session ends (daemon mode)',
     )
 
     args = parser.parse_args()

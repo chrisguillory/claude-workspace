@@ -73,7 +73,7 @@ class ClientConnection(StrictModel):
 
     id: str = pydantic.Field(description='Connection UUID')
     address: NetworkAddress = pydantic.Field(
-        description='Client address: IPv4 (host, port) or IPv6 (host, port, flowinfo, scope_id)'
+        description='Client address: IPv4 (host, port) or IPv6 (host, port, flowinfo, scope_id)',
     )
     tls_version: str = pydantic.Field(description='TLS protocol version')
     timing: ClientConnectionTiming
@@ -84,7 +84,7 @@ class ServerConnection(StrictModel):
 
     id: str = pydantic.Field(description='Connection UUID')
     address: NetworkAddress = pydantic.Field(
-        description='Server address: IPv4 (host, port) or IPv6 (host, port, flowinfo, scope_id)'
+        description='Server address: IPv4 (host, port) or IPv6 (host, port, flowinfo, scope_id)',
     )
     tls_established: bool = pydantic.Field(description='Whether TLS was established')
     tls_version: str = pydantic.Field(description='TLS protocol version')

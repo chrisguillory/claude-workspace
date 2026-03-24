@@ -422,7 +422,7 @@ def group_errors(errors: list[EnrichedFieldError]) -> list[ErrorGroup]:
                 'value_shape': value_shape,
                 'count': len(group_errors_list),
                 'errors': group_errors_list,
-            }
+            },
         )
 
     # Sort by count descending
@@ -490,7 +490,7 @@ def find_fallbacks(
                 type(obj).__name__,
                 tool_name,
                 {k: type(v).__name__ for k, v in extra.items()},
-            )
+            ),
         )
 
     if isinstance(obj, pydantic.BaseModel):
@@ -647,7 +647,7 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                                     'fallback_type': fb_type,
                                     'tool_name': tool_name,
                                     'extra_fields': extra_fields,
-                                }
+                                },
                             )
 
             except ValidationError as e:
@@ -680,7 +680,7 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                                 if isinstance(value, dict) and '__missing__' not in value
                                 else None,
                                 'value_type': type(value).__name__ if value is not None else 'null',
-                            }
+                            },
                         )
 
             except Exception as e:
@@ -752,7 +752,7 @@ def format_error_group(group: ErrorGroup, full: bool = False) -> str:
     lines.append(
         f'{Colors.BOLD}{group["count"]} error(s):{Colors.RESET} '
         f'{color}{error_type}{Colors.RESET} at '
-        f'{Colors.CYAN}{group["generalized_path"]}{Colors.RESET}'
+        f'{Colors.CYAN}{group["generalized_path"]}{Colors.RESET}',
     )
 
     # Value shape
@@ -875,7 +875,7 @@ def print_summary_mode(
         for result in files_with_errors[:10]:  # Show first 10 files with errors
             print(f'\nFile: {Path(result["file"]).name}')
             print(
-                f'  Total: {result["total_records"]}, Valid: {result["valid_records"]}, Invalid: {result["invalid_records"]}'
+                f'  Total: {result["total_records"]}, Valid: {result["valid_records"]}, Invalid: {result["invalid_records"]}',
             )
             print(f'  Record types: {dict(result["record_types"])}')
 

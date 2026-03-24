@@ -28,7 +28,10 @@ class SessionDiscoveryService:
         self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
 
     async def find_session_by_id(
-        self, session_id_or_prefix: str, *, project_filter: Path | None = None
+        self,
+        session_id_or_prefix: str,
+        *,
+        project_filter: Path | None = None,
     ) -> SessionInfo | None:
         """
         Find a session by ID or prefix across all projects using rg.
@@ -81,7 +84,7 @@ class SessionDiscoveryService:
                 line_count = sum(1 for _ in f.open())
                 project_path = _extract_project_path(f)
                 match_details.append(
-                    f'{f.stem}  ({size_mb:.1f} MB, {line_count} lines, modified {mtime})  project: {project_path}'
+                    f'{f.stem}  ({size_mb:.1f} MB, {line_count} lines, modified {mtime})  project: {project_path}',
                 )
             raise AmbiguousSessionError(session_id_or_prefix, match_details)
 

@@ -416,7 +416,7 @@ def group_errors(errors: list[EnrichedFieldError]) -> list[ErrorGroup]:
                 'value_shape': value_shape,
                 'count': len(group_errors_list),
                 'errors': group_errors_list,
-            }
+            },
         )
 
     # Sort by count descending
@@ -454,7 +454,7 @@ def find_fallbacks(obj: Any, path: str = '') -> list[FallbackUsage]:
                 'path': path or '(root)',
                 'fallback_type': type(obj).__name__,
                 'extra_fields': {k: type(v).__name__ for k, v in extra.items()},
-            }
+            },
         )
 
     if isinstance(obj, pydantic.BaseModel):
@@ -530,7 +530,7 @@ def validate_capture_with_values(
                     if isinstance(value, dict) and '__missing__' not in value
                     else None,
                     'value_type': type(value).__name__ if value is not None else 'null',
-                }
+                },
             )
 
         return ('error', None, enriched_errors)
@@ -620,7 +620,7 @@ def format_error_group(group: ErrorGroup, full: bool = False) -> str:
     lines.append(
         f'{Colors.BOLD}{group["count"]} error(s):{Colors.RESET} '
         f'{color}{error_type}{Colors.RESET} at '
-        f'{Colors.CYAN}{group["generalized_path"]}{Colors.RESET}'
+        f'{Colors.CYAN}{group["generalized_path"]}{Colors.RESET}',
     )
 
     # Value shape
@@ -751,7 +751,7 @@ def print_summary_mode(
                 f'  Total: {result["total_captures"]}, '
                 f'Typed: {result["typed_captures"]}, '
                 f'Unknown: {result["unknown_captures"]}, '
-                f'Errors: {result["error_captures"]}'
+                f'Errors: {result["error_captures"]}',
             )
             if result['errors']:
                 print('  First 3 errors:')
@@ -896,7 +896,7 @@ def main() -> None:
     elif total_stats['error_captures'] == 0:
         print()
         print(
-            f'{Colors.YELLOW}⚠ All captures valid, but {total_stats["unknown_captures"]} use fallback types{Colors.RESET}'
+            f'{Colors.YELLOW}⚠ All captures valid, but {total_stats["unknown_captures"]} use fallback types{Colors.RESET}',
         )
         sys.exit(0)
     else:

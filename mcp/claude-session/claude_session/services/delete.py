@@ -263,7 +263,7 @@ class SessionDeleteService:
                 path=str(main_file),
                 size_bytes=main_size,
                 artifact_type='session_main',
-            )
+            ),
         )
 
         # 2. Find agent files
@@ -291,7 +291,7 @@ class SessionDeleteService:
                             path=str(agent_path),
                             size_bytes=size,
                             artifact_type='session_agent',
-                        )
+                        ),
                     )
                     agent_file_paths.append(str(agent_path))
 
@@ -327,7 +327,7 @@ class SessionDeleteService:
                         path=str(plan_path),
                         size_bytes=size,
                         artifact_type='plan_file',
-                    )
+                    ),
                 )
                 plan_file_paths.append(str(plan_path))
 
@@ -377,7 +377,7 @@ class SessionDeleteService:
                         path=str(path),
                         size_bytes=size,
                         artifact_type='todo_file',
-                    )
+                    ),
                 )
                 todo_file_paths.append(str(path))
 
@@ -395,7 +395,7 @@ class SessionDeleteService:
                         path=str(path),
                         size_bytes=size,
                         artifact_type='task_file',
-                    )
+                    ),
                 )
                 task_file_paths.append(str(path))
 
@@ -407,7 +407,7 @@ class SessionDeleteService:
                         path=str(path),
                         size_bytes=size,
                         artifact_type='task_metadata' if path.name != '.lock' else 'task_lock',
-                    )
+                    ),
                 )
 
             # Unknown files - fail fast
@@ -542,7 +542,7 @@ class SessionDeleteService:
                 await logger.info(
                     f'Would delete {len(manifest.files)} files, '
                     f'{len(manifest.directories_to_cleanup)} directories '
-                    f'({manifest.total_size_bytes:,} bytes)'
+                    f'({manifest.total_size_bytes:,} bytes)',
                 )
 
             # Compute artifact counts for dry run
@@ -672,7 +672,7 @@ class SessionDeleteService:
 
         if logger:
             await logger.info(
-                f'Deleted {len(deleted_files)} files, {len(directories_removed)} directories ({size_freed:,} bytes)'
+                f'Deleted {len(deleted_files)} files, {len(directories_removed)} directories ({size_freed:,} bytes)',
             )
 
         # Compute per-artifact-type counts

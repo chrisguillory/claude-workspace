@@ -28,6 +28,21 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: add-trailing-comma
+        name: add-trailing-comma
+        description: Add trailing commas to multi-line constructs
+        entry: add-trailing-comma --exit-zero-even-if-changed
+        language: system
+        types: [python]
+
+      - id: ruff-format-post-comma
+        name: ruff-format-post-comma
+        description: Re-format after trailing comma additions
+        entry: uv run ruff format .
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: mypy
         name: mypy
         description: Run mypy type checker

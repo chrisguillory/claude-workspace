@@ -27,7 +27,9 @@ class SessionParserService:
     """
 
     async def load_session_files(
-        self, session_files: Sequence[Path], logger: LoggerProtocol | None = None
+        self,
+        session_files: Sequence[Path],
+        logger: LoggerProtocol | None = None,
     ) -> dict[str, list[SessionRecord]]:
         """
         Load and parse session JSONL files.

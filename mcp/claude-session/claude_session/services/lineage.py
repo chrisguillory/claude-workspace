@@ -238,7 +238,7 @@ class LineageService:
 
         # Build session file index for title resolution
         session_files = self._find_session_files(
-            [root, *children_index.get(root, [])] + [cid for kids in children_index.values() for cid in kids]
+            [root, *children_index.get(root, [])] + [cid for kids in children_index.values() for cid in kids],
         )
 
         # BFS from root to build all nodes

@@ -78,7 +78,7 @@ class GistStorage:
             raise ValueError(
                 f'File too large for Gist: {size_mb:.2f}MB. '
                 f'GitHub Gist files are limited to {self.MAX_FILE_SIZE_MB}MB. '
-                f'Consider splitting the archive or using local storage.'
+                f'Consider splitting the archive or using local storage.',
             )
 
         # Gists are text-based. Try UTF-8 first, fall back to base64 for binary.
@@ -211,7 +211,7 @@ class GistStorage:
                 if not raw_url:
                     raise ValueError(
                         f"File '{filename}' is truncated but no raw_url available. "
-                        f'File size: {file_data.get("size", "unknown")} bytes'
+                        f'File size: {file_data.get("size", "unknown")} bytes',
                     )
                 raw_response = await client.get(raw_url)
                 raw_response.raise_for_status()

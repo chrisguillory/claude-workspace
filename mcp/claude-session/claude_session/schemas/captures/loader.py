@@ -281,7 +281,8 @@ def load_capture(filepath: Path) -> CapturedTraffic:
 
 
 def load_captures_batch(
-    directory: Path, pattern: str = '*.json'
+    directory: Path,
+    pattern: str = '*.json',
 ) -> tuple[list[CapturedTraffic], dict[Path, Exception]]:
     """
     Load and validate multiple captures.

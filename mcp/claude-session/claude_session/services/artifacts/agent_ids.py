@@ -48,7 +48,7 @@ AGENT_FILENAME_PATTERN = re.compile(
     r'[a-f0-9]+'  # Required hex ID
     r'(?:-clone-[a-f0-9]+)?'  # Optional clone suffix
     r')'
-    r'\.jsonl$'
+    r'\.jsonl$',
 )
 
 
@@ -95,7 +95,7 @@ def collect_agent_file_info(
                     filename=filename,
                     agent_id=match.group(1),
                     nested=agent_structure.get(filename, False),
-                )
+                ),
             )
     return result
 
@@ -308,5 +308,5 @@ def detect_agent_structure(
     # Unexpected structure - fail fast
     raise ValueError(
         f'Unexpected agent file structure: {rel_path}\n'
-        f'Expected flat (agent-*.jsonl) or nested (<session-id>/subagents/agent-*.jsonl)'
+        f'Expected flat (agent-*.jsonl) or nested (<session-id>/subagents/agent-*.jsonl)',
     )

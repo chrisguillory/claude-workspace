@@ -64,5 +64,5 @@ class OpenRouterUnexpectedResponse(Exception):
             f'  Status: {status_code}\n'
             f'  Model: {model}, Batch size: {batch_size}\n'
             f'  Response keys: {list(body_keys)}\n'
-            f'  Body preview: {body_preview}'
+            f'  Body preview: {body_preview}',
         )

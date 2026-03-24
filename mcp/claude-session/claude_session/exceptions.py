@@ -38,7 +38,7 @@ class AmbiguousSessionError(SessionResolutionError):
             matches_str += f'\n  ... and {len(matches) - 10} more'
         super().__init__(
             f"Session ID prefix '{prefix}' is ambiguous. Matches {len(matches)} sessions:\n  {matches_str}\n\n"
-            f'Provide a more specific session ID prefix, or use --project to target a specific project.'
+            f'Provide a more specific session ID prefix, or use --project to target a specific project.',
         )
 
 
@@ -52,7 +52,7 @@ class NativeSessionDeletionError(SessionDeletionError):
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(
-            f'Session {session_id} is a native Claude session (UUIDv4). Use --force to delete native sessions.'
+            f'Session {session_id} is a native Claude session (UUIDv4). Use --force to delete native sessions.',
         )
 
 
@@ -84,7 +84,7 @@ class NativeSessionMoveError(SessionMoveError):
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(
-            f'Session {session_id} is a native Claude session (UUIDv4). Use --force to move native sessions.'
+            f'Session {session_id} is a native Claude session (UUIDv4). Use --force to move native sessions.',
         )
 
 

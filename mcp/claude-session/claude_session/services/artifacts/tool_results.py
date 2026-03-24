@@ -172,7 +172,7 @@ def discover_tool_results(
                         path=path,
                         tool_use_id=path.stem,
                         extension=cast(ToolResultExtension, path.suffix),
-                    )
+                    ),
                 )
             else:
                 unknown_files.append(path)
@@ -201,7 +201,7 @@ def discover_tool_results(
                         name=path.name,
                         file_paths=dir_file_paths,
                         file_extensions=dir_file_extensions,
-                    )
+                    ),
                 )
 
     return DiscoveryResult(files=files, directories=directories, unknown_files=unknown_files)
@@ -214,7 +214,7 @@ def _raise_on_unknown(discovery: DiscoveryResult) -> None:
         raise FileNotFoundError(
             f'Found {len(discovery.unknown_files)} tool result file(s) with unknown extensions:\n  {file_list}\n\n'
             f'Known extensions: {sorted(TOOL_RESULT_EXTENSIONS)}\n'
-            f'Claude Code may have changed. Update TOOL_RESULT_EXTENSIONS to handle new file types.'
+            f'Claude Code may have changed. Update TOOL_RESULT_EXTENSIONS to handle new file types.',
         )
 
 
@@ -310,7 +310,7 @@ def write_tool_results(
         file_path = tool_results_dir / tr.filename
         if not exist_ok and file_path.exists():
             raise FileExistsError(
-                f'Tool result file already exists: {file_path}\nThis indicates cloning into an existing session.'
+                f'Tool result file already exists: {file_path}\nThis indicates cloning into an existing session.',
             )
         file_path.write_bytes(tr.content)
 
@@ -321,7 +321,7 @@ def write_tool_results(
             file_path = subdir / f.filename
             if not exist_ok and file_path.exists():
                 raise FileExistsError(
-                    f'Tool result file already exists: {file_path}\nThis indicates cloning into an existing session.'
+                    f'Tool result file already exists: {file_path}\nThis indicates cloning into an existing session.',
                 )
             file_path.write_bytes(f.content)
 

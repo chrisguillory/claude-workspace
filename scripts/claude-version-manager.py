@@ -205,7 +205,9 @@ def cli_clean(
 @error_boundary
 def cli_info(
     version: str = typer.Argument(
-        None, help='Version (default: active)', autocompletion=lambda incomplete: _complete_local_version(incomplete)
+        None,
+        help='Version (default: active)',
+        autocompletion=lambda incomplete: _complete_local_version(incomplete),
     ),
 ) -> None:
     """Show detailed version info (local + remote)."""
@@ -271,10 +273,13 @@ def cli_info(
 @app.command('run')
 def cli_run(
     version: str = typer.Argument(
-        ..., help='Version to run', autocompletion=lambda incomplete: _complete_local_version(incomplete)
+        ...,
+        help='Version to run',
+        autocompletion=lambda incomplete: _complete_local_version(incomplete),
     ),
     args: list[str] = typer.Argument(
-        None, help='Arguments to pass to claude'
+        None,
+        help='Arguments to pass to claude',
     ),  # strict_typing_linter.py: mutable-type — typer requires list
 ) -> None:
     """Run a specific Claude Code version (fetches if needed).
@@ -570,7 +575,7 @@ def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
 
 
 @error_boundary.handler(
-    Exception
+    Exception,
 )  # exception_safety_linter.py: swallowed-exception — process-boundary catch-all for user-facing CLI
 def _handle_unexpected(exc: Exception) -> None:
     print(f'ERROR: {exc!r}', file=sys.stderr)

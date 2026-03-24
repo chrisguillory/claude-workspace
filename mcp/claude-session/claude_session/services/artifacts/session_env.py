@@ -51,7 +51,7 @@ def validate_session_env_empty(session_id: str) -> None:
         raise NotImplementedError(
             f'Session-env directory contains {file_count} files: {session_env_path}\n'
             'Claude Code has started using session-env. This feature needs '
-            'implementation for collection and restoration.'
+            'implementation for collection and restoration.',
         )
 
 

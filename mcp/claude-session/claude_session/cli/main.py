@@ -112,13 +112,21 @@ def archive(
     session_id: str | None = typer.Argument(None, help='Session ID to archive (auto-detected inside Claude Code)'),
     output: str | None = typer.Argument(None, help='Output path or gist:// (default: gist://)'),
     format: ArchiveFormat | None = typer.Option(
-        None, '--format', '-f', help='Archive format: json or zst', callback=_validate_archive_format
+        None,
+        '--format',
+        '-f',
+        help='Archive format: json or zst',
+        callback=_validate_archive_format,
     ),
     gist_token: str | None = typer.Option(
-        None, '--gist-token', help='GitHub token (or use GITHUB_TOKEN env or gh CLI)'
+        None,
+        '--gist-token',
+        help='GitHub token (or use GITHUB_TOKEN env or gh CLI)',
     ),
     gist_visibility: Literal['public', 'secret'] = typer.Option(
-        'secret', '--gist-visibility', help='Gist visibility (public or secret)'
+        'secret',
+        '--gist-visibility',
+        help='Gist visibility (public or secret)',
     ),
     gist_description: str = typer.Option('Claude Code Session Archive', '--gist-description', help='Gist description'),
     verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
@@ -149,7 +157,7 @@ def archive(
         output = 'gist://'
 
     asyncio.run(
-        _archive_async(resolved_session_id, output, format, gist_token, gist_visibility, gist_description, verbose)
+        _archive_async(resolved_session_id, output, format, gist_token, gist_visibility, gist_description, verbose),
     )
 
 
@@ -265,7 +273,10 @@ async def _archive_async(
 
             # Create archive
             metadata = await archive_service.create_archive(
-                storage=storage, output_path=output_path, format_param=format, logger=logger
+                storage=storage,
+                output_path=output_path,
+                format_param=format,
+                logger=logger,
             )
 
             # Print success
@@ -556,7 +567,8 @@ async def _clone_async(
 @app.command()
 def delete(
     session_id: str | None = typer.Argument(
-        None, help='Session ID (full or prefix). Auto-detected inside Claude Code.'
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
     ),
     force: bool = typer.Option(False, '--force', '-f', help='Required to delete native (UUIDv4) sessions'),
     terminate: bool = typer.Option(False, '--terminate', '-t', help='Terminate running Claude process before deletion'),
@@ -704,7 +716,8 @@ async def _delete_async(
 def move(
     ctx: typer.Context,
     session_id: str | None = typer.Argument(
-        None, help='Session ID (full or prefix). Auto-detected inside Claude Code.'
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
     ),
     project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
     force: bool = typer.Option(False, '--force', '-f', help='Required to move native (UUIDv4) sessions'),
@@ -748,8 +761,16 @@ def move(
 
     asyncio.run(
         _move_async(
-            _resolve_session_id(session_id), project, force, terminate, no_backup, dry_run, launch, verbose, ctx.args
-        )
+            _resolve_session_id(session_id),
+            project,
+            force,
+            terminate,
+            no_backup,
+            dry_run,
+            launch,
+            verbose,
+            ctx.args,
+        ),
     )
 
 
@@ -889,10 +910,14 @@ def _render_lineage_tree(tree: LineageTree) -> None:
 @app.command()
 def lineage(
     session_id: str | None = typer.Argument(
-        None, help='Session ID (full or prefix). Auto-detected inside Claude Code.'
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
     ),
     format: Literal['text', 'tree', 'json'] = typer.Option(
-        'text', '--format', '-f', help='Output format: text, tree, or json'
+        'text',
+        '--format',
+        '-f',
+        help='Output format: text, tree, or json',
     ),
 ) -> None:
     """Show the lineage (parent-child relationships) for a session.
@@ -959,7 +984,8 @@ def lineage(
 @app.command()
 def info(
     session_id: str | None = typer.Argument(
-        None, help='Session ID (full or prefix). Auto-detected inside Claude Code.'
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
     ),
     format: Literal['text', 'json'] = typer.Option('text', '--format', '-f', help='Output format: text or json'),
 ) -> None:

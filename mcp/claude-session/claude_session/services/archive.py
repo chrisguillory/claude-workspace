@@ -99,7 +99,7 @@ class FormatDetector:
             else:
                 # Case 2: Mismatch
                 raise ValueError(
-                    f"Format mismatch: extension indicates '{detected_format}' but format parameter is '{format_param}'"
+                    f"Format mismatch: extension indicates '{detected_format}' but format parameter is '{format_param}'",
                 )
         # Format NOT detectable from extension
         elif format_param:
@@ -111,7 +111,7 @@ class FormatDetector:
             # Case 5: Ambiguous
             raise ValueError(
                 f"Cannot detect format from extension '{output_path.suffix}'. "
-                f'Please specify format parameter. Supported: {sorted(cls.SUPPORTED_FORMATS)}'
+                f'Please specify format parameter. Supported: {sorted(cls.SUPPORTED_FORMATS)}',
             )
 
     @classmethod
@@ -214,7 +214,7 @@ class SessionArchiveService:
                 return folder
 
         raise FileNotFoundError(
-            f'Could not find session folder for project {self.project_path} in {self.claude_sessions_dir}'
+            f'Could not find session folder for project {self.project_path} in {self.claude_sessions_dir}',
         )
 
     async def create_archive(
@@ -250,7 +250,7 @@ class SessionArchiveService:
             # Check if file already exists
             if output_file.exists():
                 raise FileExistsError(
-                    f'File already exists: {output_file}\nUse a different filename or delete the existing file first.'
+                    f'File already exists: {output_file}\nUse a different filename or delete the existing file first.',
                 )
 
             # Fail fast: validate directory exists
@@ -350,7 +350,7 @@ class SessionArchiveService:
                     nested=nested,
                     record_count=len(records),
                     records=records,
-                )
+                ),
             )
 
         # Convert artifacts to v2 entry models
@@ -502,7 +502,9 @@ class SessionArchiveService:
         return session_files
 
     async def _load_session_files(
-        self, session_files: Sequence[Path], logger: LoggerProtocol
+        self,
+        session_files: Sequence[Path],
+        logger: LoggerProtocol,
     ) -> tuple[dict[str, list[SessionRecord]], int]:
         """
         Load and parse all session files using parser service.
@@ -527,7 +529,9 @@ class SessionArchiveService:
         return files_data, total_records
 
     async def _extract_claude_code_version(
-        self, files_data: dict[str, list[SessionRecord]], logger: LoggerProtocol
+        self,
+        files_data: dict[str, list[SessionRecord]],
+        logger: LoggerProtocol,
     ) -> str | None:
         """
         Extract Claude Code version using best available method.

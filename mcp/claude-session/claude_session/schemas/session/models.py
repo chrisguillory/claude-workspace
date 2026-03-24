@@ -900,7 +900,7 @@ class ToolUseContent(StrictModel):
                 f"Claude Code tool '{tool_name}' fell through to MCPToolInput. "
                 f'This means either: (1) no typed model exists for this tool, or '
                 f'(2) the typed model has missing/incorrect fields. '
-                f'Extra fields captured: {list(v.get_extra_fields().keys())}'
+                f'Extra fields captured: {list(v.get_extra_fields().keys())}',
             )
 
         return v
@@ -918,7 +918,8 @@ class ToolReferenceContent(StrictModel):
 
 # ToolResultContentBlock - for content inside tool_result
 ToolResultContentBlock = Annotated[
-    TextContent | ImageContent | ToolReferenceContent, pydantic.Field(discriminator='type')
+    TextContent | ImageContent | ToolReferenceContent,
+    pydantic.Field(discriminator='type'),
 ]
 
 
@@ -975,10 +976,12 @@ class Message(StrictModel):
     content: Sequence[MessageContent] | str
     # Additional fields that may appear in assistant messages (nested API response)
     type: Literal['message'] | None = pydantic.Field(
-        None, description='Message type indicator (present in agent/subprocess responses)'
+        None,
+        description='Message type indicator (present in agent/subprocess responses)',
     )
     model: ModelId | None = pydantic.Field(
-        None, description='Claude model identifier (e.g., claude-sonnet-4-5-20250929)'
+        None,
+        description='Claude model identifier (e.g., claude-sonnet-4-5-20250929)',
     )
     id: str | None = pydantic.Field(None, description='Message ID from Claude API')
     stop_reason: (
@@ -986,16 +989,21 @@ class Message(StrictModel):
         | None
     ) = pydantic.Field(None, description='Reason why the model stopped generating')
     stop_sequence: str | None = pydantic.Field(
-        None, description='The actual stop sequence string that triggered stopping'
+        None,
+        description='The actual stop sequence string that triggered stopping',
     )
     usage: TokenUsage | None = pydantic.Field(
-        None, description='Token usage information (present in nested API responses)'
+        None,
+        description='Token usage information (present in nested API responses)',
     )
     container: None = pydantic.Field(
-        None, description='Reserved for future use', json_schema_extra={'status': 'reserved'}
+        None,
+        description='Reserved for future use',
+        json_schema_extra={'status': 'reserved'},
     )
     context_management: ContextManagement | None = pydantic.Field(
-        None, description='Context management metadata (Claude Code 2.0.51+)'
+        None,
+        description='Context management metadata (Claude Code 2.0.51+)',
     )
 
 
@@ -1052,7 +1060,8 @@ class ThinkingTrigger(StrictModel):
     start: int
     end: int
     text: Annotated[
-        Literal['ultrathink'], pydantic.BeforeValidator(_normalize_ultrathink)
+        Literal['ultrathink'],
+        pydantic.BeforeValidator(_normalize_ultrathink),
     ]  # Any casing normalized to lowercase
 
 
@@ -1956,13 +1965,15 @@ class UserRecord(BaseRecord):
     gitBranch: str
     message: Message
     projectPaths: PathListField | None = pydantic.Field(
-        None, description='Additional project paths beyond cwd (each path will be translated)'
+        None,
+        description='Additional project paths beyond cwd (each path will be translated)',
     )
     budgetTokens: int | None = pydantic.Field(None, description='Token budget limit for this request')
     skills: None = pydantic.Field(None, description='Reserved for future use', json_schema_extra={'status': 'reserved'})
     mcp: None = pydantic.Field(None, description='Reserved for future use', json_schema_extra={'status': 'reserved'})
     agentId: str | None = pydantic.Field(
-        None, description='Agent ID for subprocess/agent records (references agent-{agentId}.jsonl)'
+        None,
+        description='Agent ID for subprocess/agent records (references agent-{agentId}.jsonl)',
     )
     # --- Message visibility tiers ---
     # Two flags control where a message appears:
@@ -1977,7 +1988,8 @@ class UserRecord(BaseRecord):
         'Absent/false = visible in terminal.',
     )
     thinkingMetadata: ThinkingMetadata | SimpleThinkingMetadata | None = pydantic.Field(
-        None, description='Extended thinking configuration (Claude 3.7+, simplified format in 2.1.19+)'
+        None,
+        description='Extended thinking configuration (Claude 3.7+, simplified format in 2.1.19+)',
     )
     isVisibleInTranscriptOnly: bool | None = pydantic.Field(
         None,
@@ -2012,11 +2024,13 @@ class UserRecord(BaseRecord):
         description='UUID of the assistant message that created the tool use this record responds to',
     )
     permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions'] | None = pydantic.Field(
-        None, description='Permission mode for the request (Claude Code 2.1.15+)'
+        None,
+        description='Permission mode for the request (Claude Code 2.1.15+)',
     )
     planContent: str | None = pydantic.Field(None, description='Plan content for plan mode submissions')
     mcpMeta: McpMeta | None = pydantic.Field(
-        None, description='MCP tool structured content metadata (Claude Code 2.1.19+)'
+        None,
+        description='MCP tool structured content metadata (Claude Code 2.1.19+)',
     )
     promptId: str | None = pydantic.Field(None, description='Prompt identifier (Claude Code 2.1.74+)')
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
@@ -2038,31 +2052,39 @@ class AssistantRecord(BaseRecord):
     message: Message
     # Note: usage/stopReason are optional for agent records (nested in message instead)
     usage: TokenUsage | None = pydantic.Field(
-        None, description='Token usage for this request (null for agent records - usage in message instead)'
+        None,
+        description='Token usage for this request (null for agent records - usage in message instead)',
     )
     stopReason: None = pydantic.Field(
-        None, description='Reserved for future use', json_schema_extra={'status': 'reserved'}
+        None,
+        description='Reserved for future use',
+        json_schema_extra={'status': 'reserved'},
     )
     model: ModelId | None = pydantic.Field(
-        None, description='Claude model identifier (null for agent records - model in message instead)'
+        None,
+        description='Claude model identifier (null for agent records - model in message instead)',
     )
     requestDuration: int | None = pydantic.Field(None, description='Request duration in milliseconds')
     requestId: str | None = pydantic.Field(None, description='Claude API request ID')
     agentId: str | None = pydantic.Field(
-        None, description='Agent ID for subprocess/agent records (references agent-{agentId}.jsonl)'
+        None,
+        description='Agent ID for subprocess/agent records (references agent-{agentId}.jsonl)',
     )
     isSidechain: bool | None = pydantic.Field(
-        None, description='Indicates sidechain/subprocess execution (present in agent records)'
+        None,
+        description='Indicates sidechain/subprocess execution (present in agent records)',
     )
     userType: str | None = pydantic.Field(None, description='User type (present in agent records)')
     version: str | None = pydantic.Field(None, description='Claude Code version (present in agent records)')
     gitBranch: str | None = pydantic.Field(None, description='Git branch (present in agent records)')
     isApiErrorMessage: bool | None = pydantic.Field(None, description='Indicates this message represents an API error')
     apiError: Literal['max_output_tokens'] | None = pydantic.Field(
-        None, description='API error code (Claude Code 2.1.15+)'
+        None,
+        description='API error code (Claude Code 2.1.15+)',
     )
     error: Literal['rate_limit', 'unknown', 'invalid_request', 'authentication_failed'] | None = pydantic.Field(
-        None, description='Error type for API error messages'
+        None,
+        description='Error type for API error messages',
     )
     slug: str | None = pydantic.Field(None, description='Human-readable session slug (Claude Code 2.0.51+)')
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
@@ -2347,7 +2369,8 @@ class QueueOperationRecord(StrictModel):
     timestamp: str
     sessionId: str
     content: str | Sequence[MessageContent] | None = pydantic.Field(
-        None, description='User input content for the queued operation (string or structured message)'
+        None,
+        description='User input content for the queued operation (string or structured message)',
     )
     data: None = pydantic.Field(None, description='Reserved for future use', json_schema_extra={'status': 'reserved'})
 

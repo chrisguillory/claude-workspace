@@ -268,7 +268,7 @@ class SchemaTypeChecker(ast.NodeVisitor):
                 violation_kind='default',
                 source_line=source_line,
                 suggestion=self.SUGGESTIONS['default'],
-            )
+            ),
         )
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -330,7 +330,7 @@ class SchemaTypeChecker(ast.NodeVisitor):
                     violation_kind=kind,
                     source_line=source_line,
                     suggestion=self.SUGGESTIONS.get(bad_type, 'a more specific type'),
-                )
+                ),
             )
 
     def _find_forbidden_type(self, node: ast.expr) -> str | None:

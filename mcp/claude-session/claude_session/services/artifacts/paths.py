@@ -58,5 +58,5 @@ def extract_source_project_path(
 
     raise MissingCwdError(
         'No cwd field found in session records. '
-        'Session data may be corrupted or from an incompatible Claude Code version.'
+        'Session data may be corrupted or from an incompatible Claude Code version.',
     )

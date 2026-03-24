@@ -125,7 +125,7 @@ class PatchDef:
         if len(self.old) != len(self.new):
             raise ValueError(
                 f'Patch {self.name!r}: old ({len(self.old)}B) and new ({len(self.new)}B) '
-                f'must be the same length for binary replacement'
+                f'must be the same length for binary replacement',
             )
 
 

@@ -48,7 +48,7 @@ class UnknownRequestCapture(RequestCapture):
     # Body can be dict OR list (Datadog sends list of log entries).
     # Fallback for unmodeled endpoints; should shrink as coverage increases.
     body: Mapping[str, Any] | Sequence[Any] = pydantic.Field(
-        default_factory=dict
+        default_factory=dict,
     )  # check_schema_typing.py: loose-typing
 
 
@@ -62,7 +62,7 @@ class UnknownResponseCapture(ResponseCapture):
     # Body can be dict OR list.
     # Fallback for unmodeled endpoints; should shrink as coverage increases.
     body: Mapping[str, Any] | Sequence[Any] = pydantic.Field(
-        default_factory=dict
+        default_factory=dict,
     )  # check_schema_typing.py: loose-typing
     # Fallback for unmodeled SSE events.
     events: Sequence[Mapping[str, Any]] = pydantic.Field(default_factory=list)  # check_schema_typing.py: loose-typing

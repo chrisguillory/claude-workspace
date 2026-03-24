@@ -119,7 +119,7 @@ class SessionArchiveV2(StrictModel):
     todos: Sequence[TodoFileEntry] = ()
     tasks: Sequence[Task] = ()  # Canonical Task model from session/models.py
     task_metadata: Mapping[str, str] = pydantic.Field(
-        default_factory=dict
+        default_factory=dict,
     )  # filename -> content (.highwatermark, etc.)
 
     # Statistics (for quick inspection without iterating records)
@@ -317,7 +317,7 @@ def migrate_v1_to_v2(v1: SessionArchiveV1) -> SessionArchiveV2:
                 nested=False,  # v1 loses nested info - assume flat
                 record_count=len(record_list),
                 records=record_list,
-            )
+            ),
         )
         agent_total_records += len(record_list)
 

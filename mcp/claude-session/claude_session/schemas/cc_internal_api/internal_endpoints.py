@@ -109,7 +109,8 @@ class ResourceAttributes(StrictModel):
     aggregation_temporality: str = pydantic.Field(alias='aggregation.temporality')
     user_customer_type: str = pydantic.Field(alias='user.customer_type')
     user_subscription_type: str | None = pydantic.Field(
-        default=None, alias='user.subscription_type'
+        default=None,
+        alias='user.subscription_type',
     )  # Missing during OAuth init
 
 

@@ -134,7 +134,7 @@ def apply_migration(record_data: dict[str, Any], from_version: str, to_version: 
 
     if migration_key not in MIGRATIONS:
         raise KeyError(
-            f'No migration found from {from_version} to {to_version}. Available migrations: {list(MIGRATIONS.keys())}'
+            f'No migration found from {from_version} to {to_version}. Available migrations: {list(MIGRATIONS.keys())}',
         )
 
     migration_func = MIGRATIONS[migration_key]

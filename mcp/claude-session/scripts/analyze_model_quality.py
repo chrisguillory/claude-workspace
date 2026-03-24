@@ -308,7 +308,7 @@ def main() -> None:
     # Model field
     if len(analysis['message_models']) <= 20:
         improvements.append(
-            f'  4. Message.model: Found {len(analysis["message_models"])} unique models - consider Literal'
+            f'  4. Message.model: Found {len(analysis["message_models"])} unique models - consider Literal',
         )
     else:
         improvements.append(f'  4. Message.model: Found {len(analysis["message_models"])} unique models - keep as str')

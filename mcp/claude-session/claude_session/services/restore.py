@@ -331,7 +331,7 @@ class SessionRestoreService:
             more = f'\n  ... and {len(existing_files) - 5} more' if len(existing_files) > 5 else ''
             raise FileExistsError(
                 f'Cannot restore: {len(existing_files)} file(s) already exist:\n  {existing_list}{more}\n'
-                'Use a different project or delete the existing session first.'
+                'Use a different project or delete the existing session first.',
             )
 
         # =========================================================================
@@ -423,7 +423,7 @@ class SessionRestoreService:
                 new_session_id,
                 translator,
                 in_place,
-            )
+            ),
         )
         write_jsonl(target_dir / f'{new_session_id}.jsonl', main_records, slug_mapping, agent_id_mapping)
         if logger:
@@ -458,7 +458,7 @@ class SessionRestoreService:
                     new_session_id,
                     translator,
                     in_place,
-                )
+                ),
             )
             write_jsonl(output_path, updated_records, slug_mapping, agent_id_mapping)
 
@@ -509,7 +509,10 @@ class SessionRestoreService:
         )
 
     async def _load_json_archive(
-        self, archive_file: Path, is_base64: bool, logger: LoggerProtocol | None
+        self,
+        archive_file: Path,
+        is_base64: bool,
+        logger: LoggerProtocol | None,
     ) -> SessionArchiveV2:
         """Load archive from JSON file (optionally base64-encoded).
 
@@ -529,7 +532,10 @@ class SessionRestoreService:
         return self._parse_archive_data(data)
 
     async def _load_zst_archive(
-        self, archive_file: Path, is_base64: bool, logger: LoggerProtocol | None
+        self,
+        archive_file: Path,
+        is_base64: bool,
+        logger: LoggerProtocol | None,
     ) -> SessionArchiveV2:
         """Load archive from Zstandard compressed file (optionally base64-encoded).
 

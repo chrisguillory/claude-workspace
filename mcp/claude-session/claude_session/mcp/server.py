@@ -217,7 +217,10 @@ def register_tools(state: ServerState) -> None:
 
         # Create archive
         metadata = await state.archive_service.create_archive(
-            storage=storage, output_path=output_path, format_param=format, logger=logger
+            storage=storage,
+            output_path=output_path,
+            format_param=format,
+            logger=logger,
         )
 
         return metadata
@@ -445,12 +448,12 @@ def register_tools(state: ServerState) -> None:
             if dry_run:
                 await logger.info(
                     f'Dry run: would delete {result.files_deleted} files, '
-                    f'{len(result.directories_removed)} directories ({result.size_freed_bytes:,} bytes)'
+                    f'{len(result.directories_removed)} directories ({result.size_freed_bytes:,} bytes)',
                 )
             else:
                 await logger.info(
                     f'Deleted {result.files_deleted} files, '
-                    f'{len(result.directories_removed)} directories ({result.size_freed_bytes:,} bytes)'
+                    f'{len(result.directories_removed)} directories ({result.size_freed_bytes:,} bytes)',
                 )
                 if result.backup_path:
                     await logger.info(f'Backup: {result.backup_path}')
@@ -561,7 +564,7 @@ def register_tools(state: ServerState) -> None:
         if dry_run:
             await logger.info(
                 f'Dry run: would move {result.files_moved} files '
-                f'from {result.source_project} to {result.target_project}'
+                f'from {result.source_project} to {result.target_project}',
             )
         else:
             await logger.info(f'Moved {result.files_moved} files, deleted {result.files_deleted} from source')
@@ -736,7 +739,7 @@ def register_tools(state: ServerState) -> None:
                 '  1. Go to https://github.com/settings/tokens\n'
                 '  2. Generate new token (classic)\n'
                 "  3. Select 'gist' scope\n"
-                '  4. Set as GITHUB_TOKEN in your environment'
+                '  4. Set as GITHUB_TOKEN in your environment',
             )
 
         # Determine target session (resolve prefix if needed)
@@ -858,7 +861,7 @@ def _find_claude_context() -> ClaudeContext:
     if not claude_files:
         raise RuntimeError(
             f'Found Claude process (PID {pid}) with CWD {cwd}, '
-            f'but no .claude/ files are open - may not be a Claude project'
+            f'but no .claude/ files are open - may not be a Claude project',
         )
 
     return ClaudeContext(claude_pid=pid, project_dir=cwd)
@@ -885,7 +888,7 @@ def _discover_session_id(claude_pid: int) -> str:
         sessions_file = pathlib.Path.home() / '.claude-workspace' / 'sessions.json'
         raise RuntimeError(
             f'Could not find active session for Claude PID {claude_pid} in {sessions_file} '
-            f'after 10 attempts. Ensure claude-workspace SessionStart hook is configured.'
+            f'after 10 attempts. Ensure claude-workspace SessionStart hook is configured.',
         )
     return session_id
 

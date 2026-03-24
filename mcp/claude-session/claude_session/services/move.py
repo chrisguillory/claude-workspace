@@ -198,7 +198,7 @@ class SessionMoveService:
             existing_list = '\n  '.join(str(p) for p in existing_files[:5])
             more = f'\n  ... and {len(existing_files) - 5} more' if len(existing_files) > 5 else ''
             raise FileExistsError(
-                f'Cannot move: {len(existing_files)} file(s) already exist at target:\n  {existing_list}{more}'
+                f'Cannot move: {len(existing_files)} file(s) already exist at target:\n  {existing_list}{more}',
             )
 
         if log:

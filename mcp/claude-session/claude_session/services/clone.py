@@ -251,7 +251,7 @@ class SessionCloneService:
             more = f'\n  ... and {len(existing_files) - 5} more' if len(existing_files) > 5 else ''
             raise FileExistsError(
                 f'Cannot clone: {len(existing_files)} file(s) already exist:\n  {existing_list}{more}\n'
-                'This may indicate cloning into an existing session or a previous failed clone.'
+                'This may indicate cloning into an existing session or a previous failed clone.',
             )
 
         if logger:
