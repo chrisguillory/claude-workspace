@@ -106,16 +106,34 @@ def _get_github_token_cli(gist_token: str | None) -> str | None:
     return None
 
 
+def _format_age(dt: datetime | None) -> str:
+    """Format a datetime as a human-readable age (kubectl-style)."""
+    if dt is None:
+        return '?'
+    delta = datetime.now(UTC) - dt
+    minutes = int(delta.total_seconds() / 60)
+    if minutes < 60:
+        return f'{max(minutes, 1)}m'
+    hours = minutes // 60
+    if hours < 48:
+        return f'{hours}h'
+    days = hours // 24
+    if days < 14:
+        return f'{days}d'
+    return f'{days // 7}w'
+
+
 def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
-    """Complete session IDs from tracked sessions."""
+    """Complete session IDs from tracked sessions, newest first."""
     try:
         db = load_sessions('.')
     except Exception:
         return []
+    matches = [s for s in db.sessions if s.session_id.startswith(incomplete)]
+    matches.sort(key=lambda s: s.metadata.process_created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
     return [
-        (s.session_id, f'{s.state}, {Path(s.project_dir).name}')
-        for s in db.sessions
-        if s.session_id.startswith(incomplete)
+        (s.session_id, f'{s.state}, {Path(s.project_dir).name}, {_format_age(s.metadata.process_created_at)}')
+        for s in matches
     ]
 
 
