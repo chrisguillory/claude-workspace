@@ -68,6 +68,12 @@ NUM_CHUNK_WORKERS = 16  # CPU-bound, limited by disk I/O
 NUM_EMBED_WORKERS = 64  # I/O-bound, feeds embedding API
 NUM_UPSERT_WORKERS = 16  # I/O-bound, feeds Qdrant API
 
+# Dense embedding sub-batch size for large files.
+# Files with 350+ chunks would otherwise go as a single API call (~54s).
+# Sub-batching at 100 chunks creates multiple concurrent API calls,
+# reducing wall time to max(sub_batch_latency) instead of sum(all_chunks_latency).
+DENSE_SUB_BATCH_SIZE = 100
+
 # Queue size limits for backpressure between stages
 EMBED_QUEUE_SIZE = 500
 UPSERT_QUEUE_SIZE = 500
@@ -791,6 +797,36 @@ class IndexingService:
 
         return ClearResult(files_removed=files_removed, chunks_removed=len(all_chunk_ids_str), path=path)
 
+    async def _embed_dense_sub_batched(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
+        """Embed texts with sub-batching to avoid single-call stalls.
+
+        For large text lists (350+ chunks from a single file), sending everything
+        in one API call creates a 30-54s stall. Sub-batching splits into concurrent
+        API calls of DENSE_SUB_BATCH_SIZE, reducing wall time to the latency of
+        the slowest sub-batch rather than one monolithic call.
+
+        Small lists (<= DENSE_SUB_BATCH_SIZE) pass through to embed_texts() directly.
+        """
+        if len(texts) <= DENSE_SUB_BATCH_SIZE:
+            return await self._embedding.embed_texts(texts)
+
+        # Split into sub-batches and embed concurrently
+        sub_batches = [texts[i : i + DENSE_SUB_BATCH_SIZE] for i in range(0, len(texts), DENSE_SUB_BATCH_SIZE)]
+        logger.debug(
+            f'[EMBED-DENSE] sub-batching {len(texts)} texts into {len(sub_batches)} '
+            f'batches of <={DENSE_SUB_BATCH_SIZE}',
+        )
+
+        sub_results = await asyncio.gather(
+            *(self._embedding.embed_texts(batch) for batch in sub_batches),
+        )
+
+        # Flatten sub-batch results back into a single ordered sequence
+        result: list[EmbedResponse] = []
+        for sub in sub_results:
+            result.extend(sub)
+        return result
+
     def _needs_indexing(self, path: Path) -> str | None:
         """Check if file needs (re)indexing based on pre-loaded state from Redis.
 
@@ -1044,7 +1080,7 @@ class IndexingService:
 
             async def dense_with_tracing() -> Sequence[EmbedResponse]:
                 t0 = time.perf_counter()
-                results = await self._embedding.embed_texts(accumulated_texts)
+                results = await self._embed_dense_sub_batched(accumulated_texts)
                 elapsed = time.perf_counter() - t0
 
                 for chunked in accumulated_files:
@@ -1118,7 +1154,7 @@ class IndexingService:
                 return results, cpu_secs
 
             async def dense_single() -> Sequence[EmbedResponse]:
-                results = await self._embedding.embed_texts(texts)
+                results = await self._embed_dense_sub_batched(texts)
                 tracer.record(fk, 'embed_dense', 'completed')
                 return results
 
