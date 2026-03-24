@@ -365,9 +365,36 @@ class StatusLineInput(StrictModel):
     version: str
     exceeds_200k_tokens: bool
     # Conditional fields
+    session_name: str | None = None  # Added in v2.1.41
+    rate_limits: RateLimits | None = None  # Added in v2.1.80
+    worktree: WorktreeInfo | None = None  # Added in v2.1.69
     vim: Mapping[str, str] | None = None
     agent: Mapping[str, str] | None = None
     output_style: Mapping[str, str] | None = None
+
+
+class RateLimits(StrictModel):
+    """Claude.ai rate limit usage. Only present for subscribers."""
+
+    five_hour: RateLimitWindow | None = None
+    seven_day: RateLimitWindow | None = None
+
+
+class RateLimitWindow(StrictModel):
+    """A single rate limit window (5-hour or 7-day)."""
+
+    used_percentage: float
+    resets_at: float  # Unix epoch seconds
+
+
+class WorktreeInfo(StrictModel):
+    """Worktree session context. Only present in --worktree sessions."""
+
+    name: str
+    path: str
+    branch: str | None = None
+    original_cwd: str
+    original_branch: str | None = None
 
 
 # =============================================================================
@@ -1479,8 +1506,8 @@ def main() -> None:
     # ── Line 1: Identity + Model ─────────────────────────────────────────
     parts: list[str] = []
 
-    # Session title (user-set via /rename)
-    session_title = _get_session_title(data.transcript_path)
+    # Session title — prefer native field (v2.1.41+), fall back to transcript scan
+    session_title = data.session_name or _get_session_title(data.transcript_path)
     if session_title:
         parts.append(f'{MAGENTA_BOLD}{session_title}{RESET}')
 
@@ -1567,6 +1594,17 @@ def main() -> None:
     if added or removed:
         metrics.append(f'{DIM}lines:{GREEN}+{added}{RESET}\u2009{RED}-{removed}{RESET}')
 
+    # Rate limits (v2.1.80+) — color by severity
+    if data.rate_limits:
+        rl_parts: list[str] = []
+        for label, window in [('5h', data.rate_limits.five_hour), ('7d', data.rate_limits.seven_day)]:
+            if window is not None:
+                pct_val = window.used_percentage
+                color = DIM if pct_val < 70 else YELLOW if pct_val < 90 else RED  # noqa: PLR2004 — threshold
+                rl_parts.append(f'{color}{label}:{pct_val:.0f}%{RESET}')
+        if rl_parts:
+            metrics.append(' '.join(rl_parts))
+
     print(' │ '.join(metrics))
 
     # ── Line 3: Workspace ──────────────────────────────────────────────
@@ -1589,6 +1627,11 @@ def main() -> None:
         for d in data.workspace.added_dirs
         if not cwd_n.startswith(d.rstrip('/'))
     )
+
+    # Worktree context (v2.1.69+)
+    if data.worktree:
+        from_branch = f' (from: {data.worktree.original_branch})' if data.worktree.original_branch else ''
+        line3.append(f'{CYAN}worktree:{RESET} {data.worktree.name}{from_branch}')
 
     # Transcript path
     line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, _shorten_path(data.transcript_path))}')
