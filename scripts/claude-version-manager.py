@@ -538,7 +538,8 @@ class NpmRegistry:
             text=True,
             check=True,
         )
-        return json.loads(result.stdout)
+        versions: Sequence[str] = json.loads(result.stdout)
+        return versions
 
     def timestamps(self) -> Mapping[str, str]:
         """Publish timestamps from npm registry."""
@@ -548,7 +549,8 @@ class NpmRegistry:
             text=True,
             check=True,
         )
-        return json.loads(result.stdout)
+        timestamps: Mapping[str, str] = json.loads(result.stdout)
+        return timestamps
 
 
 @error_boundary.handler(httpx.HTTPStatusError)
@@ -569,9 +571,7 @@ def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
     print(f'ERROR: npm failed (exit {exc.returncode}): {exc.stderr or ""}', file=sys.stderr)
 
 
-@error_boundary.handler(
-    Exception
-)  # exception_safety_linter.py: swallowed-exception — process-boundary catch-all for user-facing CLI
+@error_boundary.handler(Exception)
 def _handle_unexpected(exc: Exception) -> None:
     print(f'ERROR: {exc!r}', file=sys.stderr)
 
