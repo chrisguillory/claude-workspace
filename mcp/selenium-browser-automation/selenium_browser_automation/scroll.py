@@ -19,7 +19,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from .scripts import SMOOTH_SCROLL_SCRIPT
 from .validators import validate_css_selector
 
-__all__ = ['PIXELS_PER_TICK', 'execute_scroll', 'validate_css_selector']
+__all__ = ['PIXELS_PER_TICK', 'execute_scroll']
 
 PIXELS_PER_TICK = 100
 

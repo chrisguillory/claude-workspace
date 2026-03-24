@@ -2,12 +2,17 @@
 .claude/settings.local.json
 .venv/
 __pycache__/
+*.pyc
 scratch/
 target/
 *.so
 
 # IDE
 .idea/
+.cursor/
+.cursorrules
+.vscode/
+.specstory/
 
 # Auth/session files (sensitive)
 *_auth.json

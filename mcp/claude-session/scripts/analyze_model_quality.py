@@ -100,7 +100,7 @@ def analyze_actual_values(
                     if record_type in ['user', 'assistant'] and 'message' in record_data:
                         msg = record_data['message']
                         if isinstance(msg, dict):
-                            if 'model' in msg and msg['model']:
+                            if msg.get('model'):
                                 analysis['message_models'][msg['model']] += 1
 
                             # Tool names
@@ -123,9 +123,9 @@ def analyze_actual_values(
                         result = record_data['toolUseResult']
                         if isinstance(result, dict):
                             # Bash status
-                            if 'status' in result and result['status']:
+                            if result.get('status'):
                                 analysis['bash_status'][result['status']] += 1
-                            if 'returnCodeInterpretation' in result and result['returnCodeInterpretation']:
+                            if result.get('returnCodeInterpretation'):
                                 analysis['bash_return_code_interpretation'][result['returnCodeInterpretation']] += 1
 
                             # Grep mode
@@ -168,7 +168,7 @@ def analyze_actual_values(
                     # Service tier
                     if 'usage' in record_data and isinstance(record_data['usage'], dict):
                         usage = record_data['usage']
-                        if 'service_tier' in usage and usage['service_tier']:
+                        if usage.get('service_tier'):
                             analysis['service_tiers'][usage['service_tier']] += 1
 
                     # Image media types
