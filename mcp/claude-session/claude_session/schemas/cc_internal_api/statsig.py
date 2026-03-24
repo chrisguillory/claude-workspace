@@ -23,8 +23,8 @@ from typing import Annotated, Any, Literal
 
 import pydantic
 
-from claude_session.schemas.cc_internal_api.base import EmptyBody, EmptyDict, StrictModel
-from claude_session.schemas.types import PermissiveModel
+from claude_session.schemas.cc_internal_api.base import EmptyBody, StrictModel
+from claude_session.schemas.types import EmptyDict, PermissiveModel
 
 # ==============================================================================
 # Common Types

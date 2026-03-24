@@ -134,6 +134,9 @@ filterwarnings = [
 "tests/linters/edge_cases/**" = ["skip-file"]
 "mcp/claude-session/**" = ["swallowed-exception", "raise-without-from", "logger-no-exc-info"]  # TODO: tighten after migration
 
+[tool.reexport-linter.per-file-ignores]
+"tests/linters/edge_cases/**" = ["skip-file"]
+
 [tool.suppression-rationale-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
 "mcp/claude-session/**" = ["type-ignore-without-rationale", "noqa-without-rationale"]  # TODO: tighten after migration
