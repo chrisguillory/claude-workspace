@@ -20,6 +20,8 @@ from typing import Literal, TypeGuard
 
 import httpx
 import typer
+from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.session_tracker import load_sessions
 from cc_lib.utils import encode_project_path
 
 from claude_session.cli.logger import CLILogger
@@ -27,6 +29,7 @@ from claude_session.exceptions import ClaudeSessionError
 from claude_session.launcher import launch_claude_with_session
 from claude_session.schemas.operations.lineage import LineageTree
 from claude_session.services.archive import SessionArchiveService
+from claude_session.services.artifacts.custom_title import extract_custom_title_from_file
 from claude_session.services.claude_process import auto_detect_session_id
 from claude_session.services.clone import SessionCloneService
 from claude_session.services.delete import SessionDeleteService
@@ -39,11 +42,8 @@ from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
 
-app = typer.Typer(
-    name='claude-session',
-    help='Archive and restore Claude Code sessions',
-    add_completion=False,
-)
+app = create_app(help='Archive and restore Claude Code sessions.')
+add_completion_command(app)
 
 # Type aliases and validators
 ArchiveFormat = Literal['json', 'zst']
@@ -107,9 +107,58 @@ def _get_github_token_cli(gist_token: str | None) -> str | None:
     return None
 
 
+def _format_age(dt: datetime | None) -> str:
+    """Format a datetime as a precise human-readable age.
+
+    Uses two-unit precision (e.g., 2h12m, 3d5h) so that descriptions
+    are naturally unique — zsh groups completions with identical text.
+    """
+    if dt is None:
+        return '?'
+    total_minutes = int((datetime.now(UTC) - dt).total_seconds() / 60)
+    if total_minutes < 60:
+        return f'{max(total_minutes, 1)}m'
+    hours, mins = divmod(total_minutes, 60)
+    if hours < 24:
+        return f'{hours}h{mins}m'
+    days, hrs = divmod(hours, 24)
+    return f'{days}d{hrs}h'
+
+
+def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
+    """Complete session IDs from tracked sessions. Active first, then newest."""
+    db = load_sessions('.')
+    matches = [s for s in db.sessions if s.session_id.startswith(incomplete)]
+    matches.sort(
+        key=lambda s: (
+            s.state != 'active',  # active first
+            -(s.metadata.process_created_at or datetime.min.replace(tzinfo=UTC)).timestamp(),
+        ),
+    )
+    results: list[tuple[str, str]] = []
+    for s in matches:
+        title = extract_custom_title_from_file(Path(s.transcript_path))
+        parts = [s.state, Path(s.project_dir).name, _format_age(s.metadata.process_created_at)]
+        if title:
+            parts.append(title)
+        results.append((s.session_id, ', '.join(parts)))
+    # zsh groups completions with identical descriptions onto one line.
+    # Deduplicate by appending the 8-char session prefix to collisions.
+    seen: dict[str, int] = {}
+    for sid, desc in results:
+        seen.setdefault(desc, 0)
+        seen[desc] += 1
+    duped = {desc for desc, count in seen.items() if count > 1}
+    if duped:
+        results = [(sid, f'{desc} ({sid[:8]})') if desc in duped else (sid, desc) for sid, desc in results]
+    return results
+
+
 @app.command()
 def archive(
-    session_id: str | None = typer.Argument(None, help='Session ID to archive (auto-detected inside Claude Code)'),
+    session_id: str | None = typer.Argument(
+        None, help='Session ID to archive (auto-detected inside Claude Code)', autocompletion=_complete_session_id
+    ),
     output: str | None = typer.Argument(None, help='Output path or gist:// (default: gist://)'),
     format: ArchiveFormat | None = typer.Option(
         None, '--format', '-f', help='Archive format: json or zst', callback=_validate_archive_format
@@ -453,7 +502,9 @@ async def _restore_async(
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
 def clone(
     ctx: typer.Context,
-    session_id: str | None = typer.Argument(None, help='Session ID to clone (auto-detected inside Claude Code)'),
+    session_id: str | None = typer.Argument(
+        None, help='Session ID to clone (auto-detected inside Claude Code)', autocompletion=_complete_session_id
+    ),
     project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
     no_translate: bool = typer.Option(False, '--no-translate', help="Don't translate file paths"),
     launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after clone'),
@@ -556,7 +607,9 @@ async def _clone_async(
 @app.command()
 def delete(
     session_id: str | None = typer.Argument(
-        None, help='Session ID (full or prefix). Auto-detected inside Claude Code.'
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+        autocompletion=_complete_session_id,
     ),
     force: bool = typer.Option(False, '--force', '-f', help='Required to delete native (UUIDv4) sessions'),
     terminate: bool = typer.Option(False, '--terminate', '-t', help='Terminate running Claude process before deletion'),
@@ -704,7 +757,9 @@ async def _delete_async(
 def move(
     ctx: typer.Context,
     session_id: str | None = typer.Argument(
-        None, help='Session ID (full or prefix). Auto-detected inside Claude Code.'
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+        autocompletion=_complete_session_id,
     ),
     project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
     force: bool = typer.Option(False, '--force', '-f', help='Required to move native (UUIDv4) sessions'),
@@ -889,7 +944,9 @@ def _render_lineage_tree(tree: LineageTree) -> None:
 @app.command()
 def lineage(
     session_id: str | None = typer.Argument(
-        None, help='Session ID (full or prefix). Auto-detected inside Claude Code.'
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+        autocompletion=_complete_session_id,
     ),
     format: Literal['text', 'tree', 'json'] = typer.Option(
         'text', '--format', '-f', help='Output format: text, tree, or json'
@@ -959,7 +1016,9 @@ def lineage(
 @app.command()
 def info(
     session_id: str | None = typer.Argument(
-        None, help='Session ID (full or prefix). Auto-detected inside Claude Code.'
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+        autocompletion=_complete_session_id,
     ),
     format: Literal['text', 'json'] = typer.Option('text', '--format', '-f', help='Output format: text or json'),
 ) -> None:
@@ -1050,7 +1109,7 @@ async def _info_async(
 
 def main() -> None:
     """Entry point for CLI."""
-    app()
+    run_app(app)
 
 
 if __name__ == '__main__':
