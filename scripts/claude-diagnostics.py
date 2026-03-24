@@ -59,7 +59,7 @@ from typing import Any, Literal, TypedDict
 
 import pydantic
 from cc_lib.schemas.base import ClosedModel
-from cc_lib.types import JsonDatetime, JsonObject
+from cc_lib.types import JsonDatetime, JsonObject, StrictJsonObject
 
 # Diagnostic sections produce heterogeneous data (TypedDict, Pydantic model, dict, None).
 # No common base type exists — this alias encapsulates the suppression in one place.
@@ -1718,7 +1718,7 @@ def build_json_report(
     warnings: Sequence[ValidationWarning],
     *,
     redact: bool,
-) -> JsonObject:
+) -> StrictJsonObject:
     """Build machine-readable JSON report."""
     report: dict[str, Any] = {
         'timestamp': datetime.now(UTC).isoformat(),

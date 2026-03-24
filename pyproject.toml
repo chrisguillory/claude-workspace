@@ -81,6 +81,8 @@ quote-style = "single"
 python_version = "3.13"
 plugins = ["plugins/pydantic_replace.py"]
 strict = true
+enable_error_code = ["ignore-without-code"]
+disallow_any_generics = true
 mypy_path = "$MYPY_CONFIG_FILE_DIR/stubs"
 exclude = [
     ".venv",
