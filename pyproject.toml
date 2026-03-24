@@ -136,7 +136,7 @@ filterwarnings = [
 
 [tool.reexport-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
-# Existing __init__.py re-export patterns — intentional public API surfaces
+# TODO: fix re-exports — update consumers to import from defining modules
 "cc-lib/cc_lib/__init__.py" = ["reexported-symbol"]
 "cc-lib/cc_lib/schemas/__init__.py" = ["reexported-symbol"]
 "mcp/claude-session/claude_session/cli/__init__.py" = ["reexported-symbol"]
