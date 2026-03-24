@@ -45,7 +45,7 @@ class InterpreterInfo(ClosedModel):
     uptime: str | None
 
 
-class SavedInterpreterConfig(ClosedModel, frozen=False):
+class SavedInterpreterConfig(ClosedModel):
     """Persisted interpreter configuration (no runtime state).
 
     Stored in ~/.claude-workspace/python_interpreter/interpreters.json.
@@ -59,11 +59,10 @@ class SavedInterpreterConfig(ClosedModel, frozen=False):
     description: str | None
 
 
-class InterpreterRegistry(ClosedModel, frozen=False):
+class InterpreterRegistry(ClosedModel):
     """Registry of saved interpreter configurations.
 
     Persisted to ~/.claude-workspace/python_interpreter/interpreters.json.
-    frozen=False allows mutation for add/remove operations.
     """
 
     discover_jetbrains: bool

@@ -228,15 +228,7 @@ class SwitchPendingMarker(_ExternalModel):
 
 
 class ResolvedCredentials(ClosedModel):
-    """Resolved credential state flowing through the pipeline.
-
-    Uses camelCase JSON aliases for backward compatibility with
-    existing cache and snapshot files on disk.
-    """
-
-    model_config = pydantic.ConfigDict(
-        alias_generator=pydantic.alias_generators.to_camel,
-    )
+    """Resolved credential state flowing through the pipeline."""
 
     email_address: str = ''
     organization_uuid: str = ''
@@ -525,12 +517,7 @@ def _read_cached_static() -> CachedCredentials | None:
 
 
 def _write_cache(creds: ResolvedCredentials) -> None:
-    """Write credentials to cache with current timestamp.
-
-    Uses default snake_case serialization (no by_alias). Snapshot files use
-    by_alias=True for camelCase backward compatibility. Both parse correctly
-    due to populate_by_name=True on ResolvedCredentials.
-    """
+    """Write credentials to cache with current timestamp."""
     cached = CachedCredentials(
         timestamp=datetime.now(UTC).timestamp(),
         credentials=creds,
@@ -740,7 +727,7 @@ def _get_active_credentials(
             created_at=datetime.now(UTC).isoformat(),
             credentials=creds,
         )
-        _atomic_write_json(snap_file, new.model_dump_json(by_alias=True, indent=2))
+        _atomic_write_json(snap_file, new.model_dump_json(indent=2))
         return new
 
     same_process = (

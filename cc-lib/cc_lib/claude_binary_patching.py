@@ -208,6 +208,9 @@ def _find_sites(data: bytes, patch: PatchDef, target: bytes) -> Sequence[int]:
 
     Bidirectional search from each anchor occurrence. The anchor may be
     embedded inside the target bytes. Results are deduplicated.
+
+    Note: window is measured from anchor START, not end. Effective forward
+    reach past the anchor's last byte is ``window - len(anchor)``.
     """
     sites: dict[int, None] = {}
     pos = 0

@@ -402,7 +402,7 @@ class VersionStore:
                 if adhoc:
                     data = entry.read_bytes()
                     results = scan_binary(data)
-                    patches = [name for name, r in results.items() if r.status == 'applied']
+                    patches = [patch_name for patch_name, r in results.items() if r.status == 'applied']
 
             versions.append(
                 LocalVersion(

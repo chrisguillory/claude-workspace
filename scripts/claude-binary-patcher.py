@@ -31,7 +31,6 @@ References:
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import traceback
@@ -216,9 +215,7 @@ class BinaryPatcher:
         else:
             raise PatchError(f'No original found at {original} or {legacy_bak}')
 
-        tmp = path.with_name(path.name + '.tmp')
-        shutil.copy2(backup_source, tmp)
-        tmp.replace(path)
+        atomic_write(path, backup_source.read_bytes(), reference=backup_source)
         print(f'Restored {path.name} from {backup_source}.')
 
     @property
