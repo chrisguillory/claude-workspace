@@ -17,11 +17,8 @@ This script analyzes the models.py file to identify:
 from __future__ import annotations
 
 import json
-import sys
 from collections import Counter
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def analyze_actual_values(
