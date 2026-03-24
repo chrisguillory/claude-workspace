@@ -48,16 +48,15 @@ import orjson
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pydantic
-from pydantic import ValidationError
-
-from src.schemas.session.models import (
+from claude_session.schemas.session.models import (
     AssistantRecord,
     ToolResultContent,
     ToolUseContent,
     UserRecord,
     validate_session_record,
 )
-from src.schemas.types import PermissiveModel
+from claude_session.schemas.types import PermissiveModel
+from pydantic import ValidationError
 
 # ==============================================================================
 # Terminal Color Support

@@ -94,11 +94,10 @@ from typing import Any
 from urllib.parse import parse_qs
 
 import psutil
+from claude_session.schemas import claude_workspace
 from expiringdict import ExpiringDict
 from mitmproxy import addonmanager, connection, http
 from pydantic import TypeAdapter
-
-from src.schemas import claude_workspace
 
 # ==============================================================================
 # Configuration
@@ -180,6 +179,7 @@ def _is_claude_code_process(pid: int) -> bool:
     try:
         result = subprocess.run(
             ['codesign', '-dv', exe_path],
+            check=False,
             capture_output=True,
             text=True,
             timeout=5,
@@ -446,7 +446,7 @@ def _safe_filename(host: str, path: str) -> str:
 def _headers_to_dict(headers: http.Headers) -> dict[str, str]:
     """Convert mitmproxy headers to dict, preserving all headers."""
     result: dict[str, str] = {}
-    for key, value in headers.items():  # type: ignore[no-untyped-call]
+    for key, value in headers.items():
         if key in result:
             result[key] = f'{result[key]}, {value}'  # HTTP standard for multiple
         else:

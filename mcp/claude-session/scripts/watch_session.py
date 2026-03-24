@@ -140,6 +140,7 @@ def find_session(session_id_or_prefix: str) -> Path:
 
     result = subprocess.run(
         ['rg', '--files', '--glob', f'{session_id_or_prefix}*.jsonl', str(claude_dir)],
+        check=False,
         capture_output=True,
         text=True,
     )
@@ -183,6 +184,7 @@ def _find_ancestor_claude_pid() -> int | None:
     for _ in range(20):
         result = subprocess.run(
             ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            check=False,
             capture_output=True,
             text=True,
         )
@@ -885,6 +887,7 @@ def regenerate(jsonl_path: Path, html_path: Path) -> float:
         start = time.monotonic()
         result = subprocess.run(
             ['uvx', 'claude-code-log@latest', str(tmp_jsonl)],
+            check=False,
             capture_output=True,
             text=True,
         )

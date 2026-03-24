@@ -854,7 +854,7 @@ ping               - Keep-alive
 
 ### Location
 
-Schemas go in: `src/schemas/cc_internal_api/`
+Schemas go in: `claude_session/schemas/cc_internal_api/`
 
 ### Files Already Created
 
@@ -910,7 +910,7 @@ class MessagesResponse(PermissiveModel):
 │   ├── req_*.json
 │   ├── resp_*.json
 │   └── traffic.log
-├── src/schemas/
+├── claude_session/schemas/
 │   ├── cc_internal_api/         # API schemas
 │   │   ├── __init__.py
 │   │   ├── base.py              # PermissiveModel, markers
@@ -955,8 +955,8 @@ class MessagesResponse(PermissiveModel):
 
 5. **Run validation and commit**
    ```bash
-   uv run mypy src/ scripts/
-   uv run ruff check src/ scripts/
+   uv run mypy claude_session/ scripts/
+   uv run ruff check claude_session/ scripts/
    uv run pre-commit run --all-files
    git add -A
    git commit -m "Add observation-based API schemas for Claude Code internal API"
@@ -990,8 +990,8 @@ class MessagesResponse(PermissiveModel):
 ## Related Documentation
 
 - `CLAUDE.md` - Full development guide with traffic capture section
-- `src/schemas/cc_internal_api/README.md` - API schema documentation
-- `src/schemas/session/README.md` - Session schema documentation
+- `claude_session/schemas/cc_internal_api/README.md` - API schema documentation
+- `claude_session/schemas/session/README.md` - Session schema documentation
 - Plan file: `/Users/chris/.claude/plans/imperative-beaming-lecun.md`
 
 ---
