@@ -9,8 +9,7 @@ import time
 from pathlib import Path
 
 import pydantic
-
-from claude_session.schemas.claude_workspace import SessionDatabase
+from cc_lib.session_tracker import SessionDatabase
 
 
 def find_ancestor_claude_pid() -> int | None:

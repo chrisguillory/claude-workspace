@@ -38,8 +38,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
+from cc_lib.utils import encode_project_path
+
 from claude_session.exceptions import NativeSessionDeletionError
-from claude_session.paths import encode_path
 from claude_session.protocols import LoggerProtocol
 from claude_session.schemas.operations.archive import (
     SessionArchiveV1,
@@ -141,7 +142,7 @@ class SessionDeleteService:
             return self._session_folder
 
         assert self.project_path is not None  # Ensured by __init__ validation
-        encoded_path = encode_path(self.project_path)
+        encoded_path = encode_project_path(self.project_path)
         return self.claude_sessions_dir / encoded_path
 
     @asynccontextmanager
@@ -772,7 +773,7 @@ class SessionDeleteService:
         archive = self._parse_backup_data(backup_data)
 
         # Get target directory from archive metadata
-        encoded_path = encode_path(Path(archive.original_project_path))
+        encoded_path = encode_project_path(Path(archive.original_project_path))
         target_dir = self.claude_sessions_dir / encoded_path
         target_dir.mkdir(parents=True, exist_ok=True)
 
