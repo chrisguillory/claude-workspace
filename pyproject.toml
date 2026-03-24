@@ -134,6 +134,29 @@ filterwarnings = [
 "tests/linters/edge_cases/**" = ["skip-file"]
 "mcp/claude-session/**" = ["swallowed-exception", "raise-without-from", "logger-no-exc-info"]  # TODO: tighten after migration
 
+[tool.reexport-linter.per-file-ignores]
+"tests/linters/edge_cases/**" = ["skip-file"]
+# Existing __init__.py re-export patterns — intentional public API surfaces
+"cc-lib/cc_lib/__init__.py" = ["reexported-symbol"]
+"cc-lib/cc_lib/schemas/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/cli/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/domain/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/mcp/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/schemas/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/schemas/captures/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/schemas/cc_internal_api/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/schemas/operations/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/schemas/session/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/services/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/services/artifacts/__init__.py" = ["reexported-symbol"]
+"mcp/claude-session/claude_session/storage/__init__.py" = ["reexported-symbol"]
+"mcp/document-search/bm25-rs/python/bm25_rs/__init__.py" = ["reexported-symbol"]
+"mcp/document-search/document_search/clients/__init__.py" = ["reexported-symbol"]
+"mcp/document-search/document_search/clients/_retry/__init__.py" = ["reexported-symbol"]
+"mcp/document-search/document_search/repositories/__init__.py" = ["reexported-symbol"]
+"mcp/document-search/document_search/schemas/__init__.py" = ["reexported-symbol"]
+"mcp/document-search/document_search/services/__init__.py" = ["reexported-symbol"]
+
 [tool.suppression-rationale-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
 "mcp/claude-session/**" = ["type-ignore-without-rationale", "noqa-without-rationale"]  # TODO: tighten after migration
