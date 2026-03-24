@@ -11,13 +11,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 # ---------------------------------------------------------------------------
-# Edge: TYPE_CHECKING import (should NOT be flagged)
-# Imports inside TYPE_CHECKING blocks are for static analysis only,
-# not runtime re-exports.
+# Edge: TYPE_CHECKING import (SHOULD flag — re-export is re-export)
 # ---------------------------------------------------------------------------
 
 if TYPE_CHECKING:
-    from pathlib import Path  # TYPE_CHECKING — excluded from import map
+    from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +51,7 @@ SOME_VALUE: int = 99
 # ---------------------------------------------------------------------------
 
 __all__ = [
-    # TYPE_CHECKING import — should NOT flag (excluded from import map)
+    # TYPE_CHECKING import — SHOULD flag REX001 (re-export is re-export)
     'Path',
     # Aliased import — SHOULD flag REX001 (Z is the re-exported name)
     'path_exists',
