@@ -459,16 +459,22 @@ Returns:
         )
 
         # Compute embeddings based on search type
+        sparse_indices: Sequence[int] | None
+        sparse_values: Sequence[float] | None
         if search_type == 'hybrid':
             # Both dense and sparse embeddings
             embed_request = EmbedRequest(text=query, intent='query')
             embed_response = await embedding_service.embed(embed_request)
             dense_vector: Sequence[float] | None = embed_response.values
-            sparse_indices, sparse_values = await state.sparse_embedding_service.embed(query)
+            np_indices, np_values = await state.sparse_embedding_service.embed(query)
+            sparse_indices = typing.cast(Sequence[int], np_indices)  # numpy → Pydantic boundary
+            sparse_values = typing.cast(Sequence[float], np_values)
         elif search_type == 'lexical':
             # Sparse only (BM25 keyword matching)
             dense_vector = None
-            sparse_indices, sparse_values = await state.sparse_embedding_service.embed(query)
+            np_indices, np_values = await state.sparse_embedding_service.embed(query)
+            sparse_indices = typing.cast(Sequence[int], np_indices)
+            sparse_values = typing.cast(Sequence[float], np_values)
         elif search_type == 'embedding':
             # Dense only (semantic similarity)
             embed_request = EmbedRequest(text=query, intent='query')

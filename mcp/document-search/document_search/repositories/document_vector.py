@@ -20,7 +20,7 @@ from cc_lib.batch_loader import GenericBatchLoader
 from document_search.clients.qdrant import QdrantClient
 from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import EXTENSION_MAP, FileType
-from document_search.schemas.embeddings import EmbeddingVector
+from document_search.schemas.embeddings import EmbeddingVector, SparseIndices, SparseValues
 from document_search.schemas.vectors import (
     ContentStats,
     FileIndexStatus,
@@ -99,7 +99,7 @@ class DocumentVectorRepository:
 
     async def upsert_raw(
         self,
-        points: Sequence[tuple[UUID, EmbeddingVector, Sequence[int], Sequence[float], Mapping[str, object]]],
+        points: Sequence[tuple[UUID, EmbeddingVector, SparseIndices, SparseValues, Mapping[str, object]]],
         *,
         batch_size: int = 100,
     ) -> int:

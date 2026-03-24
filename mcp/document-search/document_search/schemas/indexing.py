@@ -21,6 +21,7 @@ __all__ = [
     'DirectoryIndexState',
     'ErrorCategory',
     'FileIndexState',
+    'FileIndexSummary',
     'FileProcessingError',
     'FileTypeStats',
     'IndexingProgress',
@@ -33,6 +34,24 @@ __all__ = [
 # v2: Added PDF and CSV chunking support with parallel processing
 # v3: Hybrid search (BM25 sparse vectors), email MIME parsing, min chunk filter
 CHUNK_STRATEGY_VERSION = 3
+
+
+class FileIndexSummary(StrictModel):
+    """Lightweight file state for scan-phase classification.
+
+    Contains only the fields needed to determine if a file needs re-indexing:
+    file_hash, file_size, and chunk_strategy_version. Excludes chunk_ids
+    to avoid deserializing ~2M UUID objects (~240 MB) during scan.
+
+    The chunk worker loads full FileIndexState on demand for files that
+    actually need re-indexing.
+    """
+
+    file_path: str  # Absolute path
+    file_hash: str  # SHA256 of file contents
+    file_size: int  # Bytes, for quick change detection
+    chunk_count: int
+    chunk_strategy_version: int = CHUNK_STRATEGY_VERSION
 
 
 class FileIndexState(StrictModel):
