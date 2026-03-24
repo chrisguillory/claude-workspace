@@ -27,8 +27,6 @@ from claude_session.schemas.operations.lineage import (
 )
 
 __all__ = [
-    'LineageEntry',
-    'LineageFile',
     'LineageService',
     'get_machine_id',
 ]
