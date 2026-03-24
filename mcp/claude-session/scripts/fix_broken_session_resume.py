@@ -62,7 +62,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-BACKUP_DIR = Path.home() / '.claude-session-mcp' / 'chain-backups'
+BACKUP_DIR = Path.home() / '.claude-workspace' / 'claude-session' / 'chain-backups'
 
 EXIT_HEALTHY = 0
 EXIT_FIXABLE = 1

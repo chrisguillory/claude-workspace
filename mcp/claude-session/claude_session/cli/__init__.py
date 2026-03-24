@@ -1,4 +1,4 @@
-"""CLI entry point for claude-session-mcp."""
+"""CLI entry point for claude-session."""
 
 from __future__ import annotations
 

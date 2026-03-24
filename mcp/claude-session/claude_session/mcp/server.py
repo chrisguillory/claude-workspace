@@ -377,7 +377,7 @@ def register_tools(state: ServerState) -> None:
         Examples:
             # Delete a cloned session (auto-backup created)
             result = await delete_session('019b5232-1234-7abc-...')
-            # Returns: DeleteResult(backup_path='~/.claude-session-mcp/deleted/...', ...)
+            # Returns: DeleteResult(backup_path='~/.claude-workspace/claude-session/deleted/...', ...)
 
             # Preview what would be deleted
             result = await delete_session('019b5232-...', dry_run=True)
@@ -638,7 +638,7 @@ def register_tools(state: ServerState) -> None:
         Data sources:
         - Session files (~/.claude/projects/)
         - Claude-workspace tracking (~/.claude-workspace/sessions.json)
-        - Lineage tracking (~/.claude-session-mcp/lineage.json)
+        - Lineage tracking (~/.claude-workspace/claude-session/lineage.json)
 
         For other sessions on this machine (tracked in sessions.json), claude_pid
         and machine_id are available from historical data. temp_dir is only

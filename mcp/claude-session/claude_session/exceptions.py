@@ -1,5 +1,5 @@
 """
-Shared exceptions for claude-session-mcp.
+Shared exceptions for claude-session.
 
 Domain-specific exceptions used across services.
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 
 class ClaudeSessionError(Exception):
-    """Base exception for all claude-session-mcp errors."""
+    """Base exception for all claude-session errors."""
 
 
 class SessionResolutionError(ClaudeSessionError):
