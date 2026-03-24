@@ -117,6 +117,7 @@ import pydantic
 import pydantic.alias_generators
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import StrictModel
+from cc_lib.schemas.base import ClosedModel
 from cc_lib.session_tracker import find_claude_pid
 
 # =============================================================================
@@ -226,20 +227,8 @@ class SwitchPendingMarker(_ExternalModel):
 # =============================================================================
 
 
-class ResolvedCredentials(pydantic.BaseModel):
-    """Resolved credential state flowing through the pipeline.
-
-    Replaces Mapping[str, str] with typed fields. Uses camelCase JSON aliases
-    for backward compatibility with existing cache and snapshot files on disk.
-    """
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-        alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
-    )
+class ResolvedCredentials(ClosedModel):
+    """Resolved credential state flowing through the pipeline."""
 
     email_address: str = ''
     organization_uuid: str = ''
@@ -257,14 +246,8 @@ class CachedCredentials(StrictModel):
     credentials: ResolvedCredentials
 
 
-class CredentialSnapshot(pydantic.BaseModel):
-    """Per-session credential snapshot, persisted to disk.
-
-    Not strict — existing snapshot files may have numeric claude_pid that
-    needs coercion. credentials sub-object handles its own alias mapping.
-    """
-
-    model_config = pydantic.ConfigDict(extra='forbid', frozen=True)
+class CredentialSnapshot(ClosedModel):
+    """Per-session credential snapshot, persisted to disk."""
 
     session_id: str
     claude_pid: int
@@ -365,18 +348,12 @@ class ContextWindow(StrictModel):
     current_usage: CurrentUsage | None = None
 
 
-class StatusLineInput(pydantic.BaseModel):
+class StatusLineInput(StrictModel):
     """Top-level JSON received on stdin.
 
     Uses extra='allow' at top level since Claude Code may add new fields.
     Sub-objects use extra='forbid' to catch structural changes.
     """
-
-    model_config = pydantic.ConfigDict(
-        extra='allow',
-        strict=True,
-        frozen=True,
-    )
 
     model: ModelInfo
     cwd: str
@@ -540,12 +517,7 @@ def _read_cached_static() -> CachedCredentials | None:
 
 
 def _write_cache(creds: ResolvedCredentials) -> None:
-    """Write credentials to cache with current timestamp.
-
-    Uses default snake_case serialization (no by_alias). Snapshot files use
-    by_alias=True for camelCase backward compatibility. Both parse correctly
-    due to populate_by_name=True on ResolvedCredentials.
-    """
+    """Write credentials to cache with current timestamp."""
     cached = CachedCredentials(
         timestamp=datetime.now(UTC).timestamp(),
         credentials=creds,
@@ -755,7 +727,7 @@ def _get_active_credentials(
             created_at=datetime.now(UTC).isoformat(),
             credentials=creds,
         )
-        _atomic_write_json(snap_file, new.model_dump_json(by_alias=True, indent=2))
+        _atomic_write_json(snap_file, new.model_dump_json(indent=2))
         return new
 
     same_process = (

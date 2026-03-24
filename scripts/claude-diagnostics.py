@@ -1,9 +1,11 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["pydantic>=2.0"]
+# dependencies = ["pydantic>=2.0", "cc_lib"]
+#
+# [tool.uv.sources]
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
-# strict_typing_linter.py: skip-file
 
 """
 Claude Code installation diagnostics and introspection.
@@ -53,14 +55,15 @@ from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 import pydantic
+from cc_lib.schemas.base import ClosedModel
+from cc_lib.types import JsonDatetime, JsonObject
 
-# JSON-serializable datetime: allows string→datetime coercion in strict models.
-# Pydantic's strict=True rejects str→datetime by default; this override is the
-# standard pattern from claude-session-mcp (JsonDatetime).
-type JsonDatetime = Annotated[datetime, pydantic.Field(strict=False)]
+# Diagnostic sections produce heterogeneous data (TypedDict, Pydantic model, dict, None).
+# No common base type exists — this alias encapsulates the suppression in one place.
+type DiagnosticData = Any  # heterogeneous diagnostic payload with no common base type
 
 # =============================================================================
 # Configuration
@@ -337,16 +340,6 @@ if not sys.stdout.isatty():
 # =============================================================================
 
 
-class BaseStrictModel(pydantic.BaseModel):
-    """Foundation strict model — rejects unknown fields (fail-fast)."""
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-    )
-
-
 # -------------------------------------------------------------------------
 # OAuth Account (from ~/.claude.json → oauthAccount)
 # -------------------------------------------------------------------------
@@ -359,7 +352,7 @@ type OrganizationRole = Literal['owner', 'admin', 'member', 'developer']
 type WorkspaceRole = str | None
 
 
-class OAuthAccount(BaseStrictModel):
+class OAuthAccount(ClosedModel):
     """OAuth account profile from ~/.claude.json.
 
     Strict model — unknown fields cause immediate validation failure.
@@ -395,7 +388,7 @@ type OAuthScope = Literal[
 ]
 
 
-class KeychainOAuth(BaseStrictModel):
+class KeychainOAuth(ClosedModel):
     """OAuth token data from macOS Keychain.
 
     Strict model — unknown fields cause immediate validation failure.
@@ -410,7 +403,7 @@ class KeychainOAuth(BaseStrictModel):
     rateLimitTier: str  # Too many variants to enumerate as Literal
 
 
-class KeychainCredentials(BaseStrictModel):
+class KeychainCredentials(ClosedModel):
     """Top-level keychain credentials structure."""
 
     claudeAiOauth: KeychainOAuth
@@ -421,7 +414,7 @@ class KeychainCredentials(BaseStrictModel):
 # -------------------------------------------------------------------------
 
 
-class StatsigSession(BaseStrictModel):
+class StatsigSession(ClosedModel):
     """Statsig session tracking data."""
 
     sessionID: str
@@ -437,11 +430,7 @@ type SessionState = Literal['active', 'exited', 'completed', 'crashed']
 type SessionSource = Literal['startup', 'resume', 'compact', 'clear']
 
 
-class SessionMetadata(pydantic.BaseModel):
-    """Session metadata from claude-workspace hooks."""
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
-
+class SessionMetadata(ClosedModel):
     claude_pid: int
     process_created_at: JsonDatetime | None = None
     session_ended_at: JsonDatetime | None = None
@@ -452,11 +441,7 @@ class SessionMetadata(pydantic.BaseModel):
     claude_version: str | None = None
 
 
-class TrackedSession(pydantic.BaseModel):
-    """A session tracked by claude-workspace hooks."""
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
-
+class TrackedSession(ClosedModel):
     session_id: str
     state: SessionState
     project_dir: str
@@ -465,11 +450,7 @@ class TrackedSession(pydantic.BaseModel):
     metadata: SessionMetadata
 
 
-class SessionDatabase(pydantic.BaseModel):
-    """Container for hook-tracked sessions."""
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
-
+class SessionDatabase(ClosedModel):
     sessions: Sequence[TrackedSession] = ()
 
 
@@ -503,7 +484,7 @@ class StatsigData(TypedDict, total=False):
     session: StatsigSession
     cache_last_modified_ms: int
     cache_age: timedelta
-    evaluation_top_level_keys: list[str]
+    evaluation_top_level_keys: Sequence[str]
 
 
 class ProcessInfo(TypedDict):
@@ -527,7 +508,7 @@ class SectionResult:
     """Result of reading one diagnostic section."""
 
     name: str
-    data: Any = None
+    data: DiagnosticData = None
     error: str | None = None
     warnings: Sequence[ValidationWarning] = ()
 
@@ -550,7 +531,7 @@ class DiagnosticReport:
 # =============================================================================
 
 
-def read_claude_config() -> tuple[dict[str, Any], Sequence[ValidationWarning]]:
+def read_claude_config() -> tuple[JsonObject, Sequence[ValidationWarning]]:
     """Read ~/.claude.json and detect top-level key drift.
 
     Returns the raw config dict and any drift warnings.
@@ -584,7 +565,7 @@ def read_claude_config() -> tuple[dict[str, Any], Sequence[ValidationWarning]]:
     return raw, warnings
 
 
-def read_oauth_account(config: dict[str, Any]) -> OAuthAccount:
+def read_oauth_account(config: JsonObject) -> OAuthAccount:
     """Parse oauthAccount from config with strict validation."""
     raw = config.get('oauthAccount')
     if raw is None:
@@ -683,7 +664,7 @@ def read_tracked_sessions() -> SessionDatabase | None:
     return SessionDatabase.model_validate(raw)
 
 
-def read_mcp_servers(config: dict[str, Any]) -> dict[str, Any]:
+def read_mcp_servers(config: JsonObject) -> JsonObject:
     """Extract MCP server configurations from ~/.claude.json."""
     servers: dict[str, Any] = config.get('mcpServers', {})
     return servers
@@ -786,7 +767,7 @@ def read_settings_files(cwd: Path) -> Sequence[tuple[str, Path, bool, int]]:
     return results
 
 
-def read_env_vars(config: dict[str, Any]) -> Sequence[tuple[str, str, str, str]]:
+def read_env_vars(config: JsonObject) -> Sequence[tuple[str, str, str, str]]:
     """Read environment variables from settings.json env block and os.environ.
 
     Returns list of (var_name, value, source, category) for non-default vars only.
@@ -1010,7 +991,7 @@ def redact_token(token: str) -> str:
 def render_identity(
     account: OAuthAccount | None,
     keychain: KeychainCredentials | None,
-    config: dict[str, Any],
+    config: JsonObject,
     *,
     redact: bool,
 ) -> None:
@@ -1149,7 +1130,7 @@ def render_identity(
 
 def render_installation(
     binary_info: BinaryInfo,
-    config: dict[str, Any],
+    config: JsonObject,
 ) -> None:
     """Render the Installation section."""
     print(fmt_header('Installation'))
@@ -1195,7 +1176,7 @@ def render_installation(
         print(fmt_row('Onboarding Version', onboarding_ver))
 
 
-def render_configuration(config: dict[str, Any]) -> None:
+def render_configuration(config: JsonObject) -> None:
     """Render the Configuration section (boolean/scalar settings)."""
     print(fmt_header('Configuration'))
 
@@ -1310,7 +1291,7 @@ def render_sessions(
         print(fmt_row('By Source', ' · '.join(source_parts)))
 
 
-def render_mcp_servers(servers: Mapping[str, Any]) -> None:
+def render_mcp_servers(servers: JsonObject) -> None:
     """Render the MCP Servers section."""
     print(fmt_header('MCP Servers'))
 
@@ -1342,7 +1323,7 @@ def render_mcp_servers(servers: Mapping[str, Any]) -> None:
         print(f'  {C.WHITE}{name:<32}{C.RESET} [{type_badge}] {C.DIM}{cmd_display}{C.RESET}')
 
 
-def _build_org_names(config: dict[str, Any]) -> dict[str, str]:
+def _build_org_names(config: JsonObject) -> Mapping[str, str]:
     """Build a mapping of org UUID → display name from all available sources."""
     names: dict[str, str] = {}
 
@@ -1356,7 +1337,7 @@ def _build_org_names(config: dict[str, Any]) -> dict[str, str]:
     return names
 
 
-def _fmt_org(uuid: str, names: dict[str, str], current_uuid: str) -> str:
+def _fmt_org(uuid: str, names: Mapping[str, str], current_uuid: str) -> str:
     """Format an org UUID with name resolution and current-org marker."""
     name = names.get(uuid)
     short = f'{uuid[:12]}…'
@@ -1366,7 +1347,7 @@ def _fmt_org(uuid: str, names: dict[str, str], current_uuid: str) -> str:
     return f'{C.DIM}{short}{C.RESET}{marker}'
 
 
-def render_access_caches(config: dict[str, Any]) -> None:
+def render_access_caches(config: JsonObject) -> None:
     """Render the Access Caches section."""
     print(fmt_header('Access & Caches'))
 
@@ -1461,7 +1442,7 @@ def render_settings_files(cwd: Path) -> None:
             print(f'  {C.DIM}✗ {label}{C.RESET}')
 
 
-def render_env_vars(config: dict[str, Any]) -> None:
+def render_env_vars(config: JsonObject) -> None:
     """Render the Environment Variables section (non-defaults only)."""
     print(fmt_header('Environment Variables'))
 
@@ -1499,7 +1480,7 @@ def render_env_vars(config: dict[str, Any]) -> None:
     print(fmt_row('Total overrides', f'{len(env_vars)}'))
 
 
-def render_session_cleanup(config: dict[str, Any]) -> None:
+def render_session_cleanup(config: JsonObject) -> None:
     """Render session cleanup policy (cleanupPeriodDays)."""
     # Read from settings files (not ~/.claude.json — it's in settings.json)
     cleanup_days: int | None = None
@@ -1540,7 +1521,7 @@ def render_session_cleanup(config: dict[str, Any]) -> None:
         print(fmt_row('Deletion threshold', f'{threshold:%Y-%m-%d} (sessions before this date are deleted on startup)'))
 
 
-def render_effective_model(config: dict[str, Any], keychain: KeychainCredentials | None) -> None:
+def render_effective_model(config: JsonObject, keychain: KeychainCredentials | None) -> None:
     """Render effective model resolution from precedence chain."""
     print(fmt_header('Model Selection'))
 
@@ -1694,7 +1675,7 @@ def render_drift_warnings(warnings: Sequence[ValidationWarning]) -> None:
             print(f'    {C.DIM}{w.details}{C.RESET}')
 
 
-def render_validation_error(section: str, error: pydantic.ValidationError, raw: Any) -> None:
+def render_validation_error(section: str, error: pydantic.ValidationError, raw: DiagnosticData) -> None:
     """Render a Pydantic validation error with the raw data for debugging."""
     print(fmt_error(f'{section}: Pydantic validation failed (schema drift detected)'))
     print()
@@ -1727,7 +1708,7 @@ def render_validation_error(section: str, error: pydantic.ValidationError, raw: 
 
 
 def build_json_report(
-    config: dict[str, Any],
+    config: JsonObject,
     account: OAuthAccount | None,
     keychain: KeychainCredentials | None,
     binary_info: BinaryInfo,
@@ -1737,7 +1718,7 @@ def build_json_report(
     warnings: Sequence[ValidationWarning],
     *,
     redact: bool,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Build machine-readable JSON report."""
     report: dict[str, Any] = {
         'timestamp': datetime.now(UTC).isoformat(),

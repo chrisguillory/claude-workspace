@@ -29,10 +29,10 @@ import fastmcp.exceptions
 import playwright.async_api
 import playwright_stealth.stealth
 import yaml
+from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import JsonObject
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel
 
 """
 Architecture: All tools operate on singleton _page (shared browser tab state).
@@ -76,7 +76,7 @@ mcp = FastMCP('browser-automation', lifespan=lifespan)
 
 
 # Pydantic models for structured output
-class CapturedResource(BaseModel):
+class CapturedResource(ClosedModel):
     url: str
     path: str
     absolute_path: str
@@ -86,7 +86,7 @@ class CapturedResource(BaseModel):
     status: int
 
 
-class ResourceCapture(BaseModel):
+class ResourceCapture(ClosedModel):
     output_dir: str
     html_path: str
     captured: Sequence[CapturedResource]
@@ -95,13 +95,13 @@ class ResourceCapture(BaseModel):
     errors: Sequence[Mapping[str, str]]
 
 
-class NavigationResult(BaseModel):
+class NavigationResult(ClosedModel):
     current_url: str
     title: str
     resources: ResourceCapture | None = None
 
 
-class InteractiveElement(BaseModel):
+class InteractiveElement(ClosedModel):
     tag: str
     text: str
     selector: str
@@ -110,7 +110,7 @@ class InteractiveElement(BaseModel):
     classes: str
 
 
-class FocusableElement(BaseModel):
+class FocusableElement(ClosedModel):
     tag: str
     text: str
     selector: str
@@ -337,7 +337,7 @@ async def navigate(
 
     logger.info(f'Successfully navigated to {page.url}')
 
-    result = NavigationResult(current_url=page.url, title=await page.title())
+    resources: ResourceCapture | None = None
 
     if capture_resources and capture_dir is not None:
         # Save main HTML
@@ -345,8 +345,8 @@ async def navigate(
         html_path.write_text(await page.content(), encoding='utf-8')
 
         # Process and save resources
-        captured_list = []
-        errors = []
+        captured_list: list[CapturedResource] = []
+        errors: list[Mapping[str, str]] = []
         total_size = 0
 
         for res_url, res_data in captured_resources.items():
@@ -361,7 +361,7 @@ async def navigate(
             else:
                 errors.append({'url': res_url, 'error': 'failed to save'})
 
-        result.resources = ResourceCapture(
+        resources = ResourceCapture(
             output_dir=str(capture_dir),
             html_path=str(html_path),
             captured=captured_list,
@@ -370,9 +370,9 @@ async def navigate(
             errors=errors,
         )
 
-        logger.info(f'[navigate] Captured {len(captured_list)} resources ({result.resources.total_size_mb}MB)')
+        logger.info(f'[navigate] Captured {len(captured_list)} resources ({resources.total_size_mb}MB)')
 
-    return result
+    return NavigationResult(current_url=page.url, title=await page.title(), resources=resources)
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Get Page Content', readOnlyHint=True, openWorldHint=True))
