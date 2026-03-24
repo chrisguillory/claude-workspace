@@ -17,9 +17,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import psutil
-import pydantic
 from filelock import FileLock
 
+from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import JsonDatetime, SessionSource, SessionState
 
 __all__ = [
@@ -37,19 +37,13 @@ SESSIONS_PATH = Path('~/.claude-workspace/sessions.json').expanduser()
 LOCK_PATH = Path('~/.claude-workspace/.sessions.json.lock').expanduser()
 
 
-class BaseModel(pydantic.BaseModel):
-    """Base model with strict validation - no extra fields, all fields required unless Optional."""
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=True)
-
-
-class SessionDatabase(BaseModel):
+class SessionDatabase(ClosedModel):
     """Container for all tracked sessions."""
 
     sessions: Sequence[Session] = []
 
 
-class Session(BaseModel):
+class Session(ClosedModel):
     """Claude Code session."""
 
     # Identity
@@ -69,7 +63,7 @@ class Session(BaseModel):
     metadata: SessionMetadata
 
 
-class SessionMetadata(BaseModel):
+class SessionMetadata(ClosedModel):
     """Derived session information."""
 
     claude_pid: int  # Found via process tree walking
@@ -170,7 +164,9 @@ class SessionManager:
                     ),
                 )
                 # Replace in sessions list
-                self._db.sessions = [restarted_session if s.session_id == session_id else s for s in self._db.sessions]
+                self._db = SessionDatabase(
+                    sessions=[restarted_session if s.session_id == session_id else s for s in self._db.sessions],
+                )
                 return
 
         # Create new session if doesn't exist
@@ -190,7 +186,7 @@ class SessionManager:
         )
 
         # Append to sessions
-        self._db.sessions = [*self._db.sessions, new_session]
+        self._db = SessionDatabase(sessions=[*self._db.sessions, new_session])
 
     def remove_empty_session(self, session_id: str, transcript_path: str) -> bool:
         """Remove a session that has no transcript file.
@@ -214,7 +210,7 @@ class SessionManager:
             raise ValueError(f'Cannot remove session with existing transcript: {transcript_path}')
 
         original_count = len(self._db.sessions)
-        self._db.sessions = [s for s in self._db.sessions if s.session_id != session_id]
+        self._db = SessionDatabase(sessions=[s for s in self._db.sessions if s.session_id != session_id])
         return len(self._db.sessions) < original_count
 
     def end_session(self, session_id: str, reason: str | None = None) -> None:
@@ -249,7 +245,9 @@ class SessionManager:
                     ),
                 )
                 # Replace in sessions list
-                self._db.sessions = [exited_session if s.session_id == session_id else s for s in self._db.sessions]
+                self._db = SessionDatabase(
+                    sessions=[exited_session if s.session_id == session_id else s for s in self._db.sessions],
+                )
                 return
 
     def detect_crashed_sessions(self) -> Sequence[str]:
@@ -293,7 +291,7 @@ class SessionManager:
             else:
                 updated_sessions.append(session)
 
-        self._db.sessions = updated_sessions
+        self._db = SessionDatabase(sessions=updated_sessions)
         return crashed_ids
 
     def prune_orphaned_sessions(self) -> Sequence[str]:
@@ -316,7 +314,7 @@ class SessionManager:
             else:
                 removed_ids.append(session.session_id)
 
-        self._db.sessions = kept_sessions
+        self._db = SessionDatabase(sessions=kept_sessions)
         return removed_ids
 
     def get_active_sessions_for_pid(self, pid: int) -> Sequence[Session]:
@@ -354,140 +352,8 @@ class SessionManager:
             else:
                 kept.append(session)
 
-        self._db.sessions = kept
+        self._db = SessionDatabase(sessions=kept)
         return removed
-
-
-# Deprecated: Old functional API - use SessionManager instead
-def add_session(
-    cwd: str,
-    session_id: str,
-    transcript_path: str,
-    source: SessionSource,
-    claude_pid: int,
-    parent_id: str | None,
-) -> None:
-    """Add a new session to tracking.
-
-    Args:
-        cwd: Current working directory path (project root)
-        session_id: Session UUID
-        transcript_path: Path to session JSONL file
-        source: Session source
-        claude_pid: Claude process PID
-        parent_id: Parent conversation UUID if available
-    """
-    db = load_sessions(cwd)
-
-    # Check if session already exists
-    for session in db.sessions:
-        if session.session_id == session_id:
-            return
-
-    # Create new session with metadata
-    new_session = Session(
-        session_id=session_id,
-        project_dir=cwd,
-        transcript_path=transcript_path,
-        source=source,
-        state='active',
-        metadata=SessionMetadata(
-            claude_pid=claude_pid,
-            parent_id=parent_id,
-        ),
-    )
-
-    db.sessions = [*db.sessions, new_session]
-    save_sessions(cwd, db)
-
-
-def end_session(cwd: str, session_id: str) -> None:
-    """Mark a session as exited.
-
-    Args:
-        cwd: Current working directory path
-        session_id: Session UUID to end
-    """
-    db = load_sessions(cwd)
-
-    # Find and update session
-    for session in db.sessions:
-        if session.session_id == session_id:
-            session.state = 'exited'
-            session.metadata.session_ended_at = datetime.now(UTC).astimezone()
-            break
-
-    save_sessions(cwd, db)
-
-
-def get_active_sessions(cwd: str) -> Sequence[Session]:
-    """Get all active sessions.
-
-    Args:
-        cwd: Current working directory path
-
-    Returns:
-        Sequence of active Session objects
-    """
-    db = load_sessions(cwd)
-    return [s for s in db.sessions if s.state == 'active']
-
-
-def get_exited_sessions(cwd: str) -> Sequence[Session]:
-    """Get all exited sessions.
-
-    Args:
-        cwd: Current working directory path
-
-    Returns:
-        Sequence of exited Session objects
-    """
-    db = load_sessions(cwd)
-    return [s for s in db.sessions if s.state == 'exited']
-
-
-def get_crashed_sessions(cwd: str) -> Sequence[Session]:
-    """Get all crashed sessions.
-
-    Args:
-        cwd: Current working directory path
-
-    Returns:
-        Sequence of crashed Session objects
-    """
-    db = load_sessions(cwd)
-    return [s for s in db.sessions if s.state == 'crashed']
-
-
-def detect_crashed_sessions(cwd: str) -> Sequence[str]:
-    """Check all active sessions and mark crashed if PID is dead.
-
-    Uses psutil.pid_exists() which is O(1) per check (microseconds to low milliseconds).
-    Efficient enough to check hundreds of PIDs without noticeably blocking execution.
-
-    Args:
-        cwd: Current working directory path
-
-    Returns:
-        Sequence of crashed session IDs
-    """
-    db = load_sessions(cwd)
-    crashed_ids: list[str] = []
-
-    for session in db.sessions:
-        if session.state != 'active':
-            continue
-
-        # psutil.pid_exists() is fast - O(1) syscall, not scanning all processes
-        if not psutil.pid_exists(session.metadata.claude_pid):
-            session.state = 'crashed'
-            session.metadata.crash_detected_at = datetime.now(UTC).astimezone()
-            crashed_ids.append(session.session_id)
-
-    if crashed_ids:
-        save_sessions(cwd, db)
-
-    return crashed_ids
 
 
 # Private helper functions (not in __all__)
