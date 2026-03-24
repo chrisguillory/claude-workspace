@@ -22,7 +22,7 @@ from typing import Any
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.schemas.session import (
+from claude_session.schemas.session import (
     CLAUDE_CODE_MAX_VERSION,
     CLAUDE_CODE_MIN_VERSION,
     LAST_VALIDATED,
@@ -45,7 +45,7 @@ def export_schema(output_path: str = 'session-schema.json') -> dict[str, Any]:
 
     # Add metadata
     schema['$schema'] = 'https://json-schema.org/draft/2020-12/schema'
-    schema['$id'] = 'https://github.com/your-org/claude-session-mcp/session-schema.json'
+    schema['$id'] = 'https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json'
     schema['title'] = 'Claude Code Session Record'
     schema['description'] = 'Complete schema for Claude Code session JSONL records'
 

@@ -175,7 +175,7 @@ Instead of network interception, you can also analyze token usage from session f
 
 ```python
 from pydantic import TypeAdapter
-from src.models import SessionRecord, AssistantRecord
+from claude_session.models import SessionRecord, AssistantRecord
 import json
 
 adapter = TypeAdapter(SessionRecord)

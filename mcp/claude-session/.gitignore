@@ -1,13 +1,3 @@
-*.pyc
-.claude/settings.local.json
-.cursor/
-.cursorrules
-.idea/
-.specstory/
-.venv/
-.vscode/
-/scratch/
+# Project-specific directories not covered by root .gitignore
 /captures/
-__pycache__/
-snapshots/
-.DS_Store
+/snapshots/

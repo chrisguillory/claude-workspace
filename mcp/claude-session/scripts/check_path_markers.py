@@ -10,6 +10,7 @@ Check that all path fields are marked with # PATH TO TRANSLATE comments.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 
@@ -128,4 +129,4 @@ if __name__ == '__main__':
     find_potential_path_fields()
 
     if not all_marked:
-        exit(1)
+        sys.exit(1)

@@ -46,14 +46,19 @@ Create the file if it doesn't exist.
 
 ```bash
 # Install globally (recommended)
-uv tool install git+https://github.com/chrisguillory/claude-session-mcp
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session
 
 # Run without installing
-uvx --from git+https://github.com/chrisguillory/claude-session-mcp claude-session --help
+uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session claude-session --help
 
-# From local clone
-git clone https://github.com/chrisguillory/claude-session-mcp
-cd claude-session-mcp && uv sync
+# From local workspace clone (editable — changes take effect immediately)
+uv tool install --editable ~/claude-workspace/mcp/claude-session
+```
+
+### MCP Server Setup
+
+```bash
+claude mcp add --scope user claude-session -- mcp-claude-session-server
 ```
 
 ### Upgrading
@@ -110,7 +115,7 @@ claude-session restore --in-place ~/.claude-session-mcp/deleted/<backup>.json
 
 ## Understanding Claude Code Sessions
 
-Claude Code session files (`~/.claude/projects/.../*.jsonl`) capture complete conversation history, but their format is **not officially documented** by Anthropic. This project provides typed Pydantic models derived from empirical analysis of real session records. See `src/schemas/session/models.py` for current schema version and validation coverage.
+Claude Code session files (`~/.claude/projects/.../*.jsonl`) capture complete conversation history, but their format is **not officially documented** by Anthropic. This project provides typed Pydantic models derived from empirical analysis of real session records. See `claude_session/schemas/session/models.py` for current schema version and validation coverage.
 
 ### What You Should Know
 
@@ -347,13 +352,13 @@ Install the MCP server to use archive/restore directly from Claude Code:
 
 ```bash
 # If installed globally (see Installation)
-claude mcp add --scope user claude-session -- claude-session-mcp
+claude mcp add --scope user claude-session -- mcp-claude-session-server
 
-# From GitHub
-claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-session-mcp claude-session-mcp
+# From GitHub (always-latest)
+claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session mcp-claude-session-server
 
 # From local clone
-claude mcp add --scope user claude-session -- uv run --project ~/claude-session-mcp claude-session-mcp
+claude mcp add --scope user claude-session -- uv run --project ~/claude-workspace/mcp/claude-session mcp-claude-session-server
 ```
 
 **Tools:**
@@ -441,7 +446,7 @@ When cloning, artifacts get new IDs to preserve parent immutability:
 
 ### Pydantic Models
 
-Strict typed models for all session record types, message content blocks, and tool inputs/results. See `src/schemas/session/models.py` header for current class count and validation coverage.
+Strict typed models for all session record types, message content blocks, and tool inputs/results. See `claude_session/schemas/session/models.py` header for current class count and validation coverage.
 
 ### Tool Use/Result Pairing
 
@@ -463,7 +468,7 @@ This pattern follows the [Claude API tool use specification](https://docs.anthro
 
 ### Compatibility
 
-See `CLAUDE_CODE_MIN_VERSION` and `CLAUDE_CODE_MAX_VERSION` in `src/schemas/session/models.py` for current supported range.
+See `CLAUDE_CODE_MIN_VERSION` and `CLAUDE_CODE_MAX_VERSION` in `claude_session/schemas/session/models.py` for current supported range.
 
 ### Claude Code Architecture Reference
 
@@ -841,8 +846,8 @@ When a new Claude Code version is released:
 
 1. **Detect** - Run `uv run scripts/validate_models.py` to find schema gaps
 2. **Analyze** - Run `uv run scripts/analyze_model_quality.py` to study new fields
-3. **Update** - Add new Pydantic models/fields in `src/models.py` with version annotations
-4. **Bump** - Update `SCHEMA_VERSION` and `CLAUDE_CODE_MAX_VERSION` in `src/models.py`
+3. **Update** - Add new Pydantic models/fields in `claude_session/schemas/session/models.py` with version annotations
+4. **Bump** - Update `SCHEMA_VERSION` and `CLAUDE_CODE_MAX_VERSION` in `claude_session/schemas/session/models.py`
 5. **Validate** - Re-run validation for 100% success rate
 6. **Export** - Run `uv run scripts/export_schema.py` to regenerate `session-schema.json`
 7. **Commit** - Format: `Update models for Claude Code X.X.X compatibility (schema vX.X.X)`
@@ -961,7 +966,7 @@ For empirical version comparison, use predictable session IDs. See `.claude/skil
 
 4. **Clean up test sessions**:
    ```bash
-   uv run python -m src.cli.main delete "MMPP0000..." --force --no-backup
+   claude-session delete "MMPP0000..." --force --no-backup
    ```
 
 ### Binary Search for Version Changes
