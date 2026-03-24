@@ -38,6 +38,7 @@ from document_search.schemas.embeddings import EmbeddingVector, EmbedResponse
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
     FileIndexState,
+    FileIndexSummary,
     FileProcessingError,
     FileTypeStats,
     IndexingResult,
@@ -48,7 +49,7 @@ from document_search.schemas.tracing import PipelineTimingReport, QueueDepthSamp
 from document_search.schemas.vectors import ClearResult, VectorPoint
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
-from document_search.services.sparse_embedding import SparseEmbeddingService
+from document_search.services.sparse_embedding import SparseEmbeddingService, SparseVector
 from document_search.services.tracing import PipelineTracer
 
 __all__ = [
@@ -102,7 +103,7 @@ class IndexingService:
         self._sparse_embedding = sparse_embedding_service
         self._repo = repository
         self._state_store = state_store
-        self._pre_loaded: Mapping[str, FileIndexState] = {}
+        self._pre_loaded: Mapping[str, FileIndexSummary] = {}
         self._cached_hashes: dict[str, str] = {}
         self._operation: _OperationState | None = None
 
@@ -446,8 +447,9 @@ class IndexingService:
         ignored_text = f' ({files_ignored:,} ignored)' if files_ignored else ''
         logger.info(f'[SCAN] Discovered {files_total:,} files{ignored_text}')
 
-        # Pre-load all file states from Redis in one pipeline round-trip
-        self._pre_loaded = await self._state_store.get_all_states([str(p) for p in all_files])
+        # Pre-load lightweight summaries (no chunk_ids) for scan-phase classification.
+        # Saves ~240 MB by skipping UUID deserialization for ~2M chunk IDs.
+        self._pre_loaded = await self._state_store.get_all_summaries([str(p) for p in all_files])
 
         # Classify files: determine which need indexing vs cached (single pass).
         # Yields to event loop periodically so the monitor can capture scan progress.
@@ -850,8 +852,10 @@ class IndexingService:
                 # Compute all chunk IDs and diff against old state (Gate 2)
                 all_chunk_ids = [_deterministic_chunk_id(file_key, c.chunk_index, c.text) for c in chunks]
 
-                old_state = self._pre_loaded.get(file_key)
-                old_ids = set(old_state.chunk_ids) if old_state else set()
+                # Load full state from Redis to get chunk_ids for diffing.
+                # Only called for files that need re-indexing (minority of total).
+                old_full_state = await self._state_store.get_file_state(file_key)
+                old_ids = set(old_full_state.chunk_ids) if old_full_state else set()
                 new_ids = set(all_chunk_ids)
 
                 unchanged_ids = old_ids & new_ids
@@ -1019,7 +1023,7 @@ class IndexingService:
                 tracer.record_batch_size(fk, batch_size)
 
             # Run sparse and dense embeddings in parallel with independent timing
-            async def sparse_with_tracing() -> tuple[Sequence[tuple[Sequence[int], Sequence[float]]], float]:
+            async def sparse_with_tracing() -> tuple[Sequence[SparseVector], float]:
                 results, wall_secs, cpu_secs = await self._sparse_embedding.embed_batch(accumulated_texts)
 
                 # Amortize batch totals across files
@@ -1106,7 +1110,7 @@ class IndexingService:
             tracer.record(fk, 'embed_dense', 'started')
 
             # Run sparse and dense embeddings in parallel with independent completion tracking
-            async def sparse_single() -> tuple[Sequence[tuple[Sequence[int], Sequence[float]]], float]:
+            async def sparse_single() -> tuple[Sequence[SparseVector], float]:
                 results, wall_secs, cpu_secs = await self._sparse_embedding.embed_batch(texts)
                 tracer.record(fk, 'embed_sparse', 'completed')
                 tracer.record_cpu(fk, 'embed_sparse', cpu_secs)
@@ -1531,7 +1535,7 @@ class _EmbeddedFile:
     deleted_chunk_ids: Sequence[UUID]  # Old chunks to delete from Qdrant
     chunks_skipped: int
     dense_embeddings: Sequence[EmbeddingVector]
-    sparse_embeddings: Sequence[tuple[Sequence[int], Sequence[float]]]
+    sparse_embeddings: Sequence[SparseVector]
 
 
 def _walk_files(directory: Path, extensions: Set[str]) -> Iterator[Path]:

@@ -20,6 +20,8 @@ __all__ = [
     'EmbedRequest',
     'EmbedResponse',
     'EmbeddingVector',
+    'SparseIndices',
+    'SparseValues',
     'TaskIntent',
 ]
 
@@ -29,6 +31,10 @@ type TaskIntent = Literal['document', 'query']
 
 # A single embedding vector: Python list (from API) or numpy array (from cache)
 type EmbeddingVector = Sequence[float] | NDArray[np.float32]
+
+# Sparse vector components: Python list (from cold path) or numpy array (from pipeline)
+type SparseIndices = Sequence[int] | NDArray[np.int32]
+type SparseValues = Sequence[float] | NDArray[np.float32]
 
 # Max characters before truncation risk with most embedding models
 # Conservative limit that works across providers (~2048 tokens * ~3 chars/token)

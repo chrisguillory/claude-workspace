@@ -19,6 +19,7 @@ from numpy.typing import NDArray
 from document_search.schemas.chunking import Chunk, FileType
 from document_search.schemas.collections import Collection
 from document_search.schemas.config import EmbeddingProvider, default_config
+from document_search.schemas.embeddings import SparseIndices, SparseValues
 
 __all__ = [
     'ClearResult',
@@ -85,8 +86,8 @@ class VectorPoint(StrictModel):
         cls,
         chunk: Chunk,
         dense_vector: Sequence[float] | NDArray[np.float32],
-        sparse_indices: Sequence[int],
-        sparse_values: Sequence[float],
+        sparse_indices: SparseIndices,
+        sparse_values: SparseValues,
         point_id: UUID,
     ) -> VectorPoint:
         """Create VectorPoint from Chunk and embeddings."""
