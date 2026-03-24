@@ -19,9 +19,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from claude_session.schemas.session import (
     CLAUDE_CODE_MAX_VERSION,
     CLAUDE_CODE_MIN_VERSION,

@@ -23,9 +23,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from claude_session.schemas.cc_internal_api import (
     AccountSettingsResponse,
     ClientDataResponse,

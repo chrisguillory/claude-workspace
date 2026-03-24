@@ -73,14 +73,12 @@ def get_settings[T: 'BaseSessionSettings'](settings_class: type[T], env_file: st
 
 
 def lazy_settings[T: 'BaseSessionSettings'](settings_class: type[T]) -> T:
-    """
-    Lazy settings - defers instantiation until first access.
+    """Defer settings instantiation until first attribute access.
 
-    Args:
-        settings_class: Settings class to instantiate
-
-    Returns:
-        Proxy that instantiates settings on first access
+    Decouples import from validation: modules can import ``settings`` without
+    triggering pydantic-settings validation.  Prevents import-time failures
+    when environment variables or .env files are missing — validation only
+    fires when settings are actually used.
     """
     # Proxy[T] acts as T at runtime - cast to satisfy mypy
     return cast(T, lazy_object_proxy.Proxy(lambda: get_settings(settings_class)))

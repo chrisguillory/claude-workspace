@@ -28,9 +28,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, TypedDict
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pydantic
 from claude_session.schemas.captures import (
     UnknownRequestCapture,

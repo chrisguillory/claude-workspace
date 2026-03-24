@@ -43,10 +43,6 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import orjson
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pydantic
 from claude_session.schemas.session.models import (
     AssistantRecord,
