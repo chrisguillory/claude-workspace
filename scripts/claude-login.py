@@ -111,7 +111,7 @@ import os
 import shlex
 import subprocess
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -120,6 +120,7 @@ import click
 import rich.console
 import rich.panel
 import typer
+from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.schemas import StrictModel
 from cc_lib.session_tracker import find_claude_pid, resolve_session_id
 from cc_lib.types import JsonObject
@@ -1274,13 +1275,7 @@ def _complete_setup_token_login_id(incomplete: str) -> Sequence[tuple[str, str]]
 # CLI
 # =============================================================================
 
-# Typer's built-in --install-completion/--show-completion are disabled:
-# - --show-completion uses shellingham process-tree detection (fails outside interactive
-#   shells, including Claude Code's Bash tool, CI runners, and editor terminals)
-# - --install-completion hardcodes ~/.zfunc/~/.zshrc (ignores ZDOTDIR)
-# The `completion` command replaces both with explicit shell argument and ZDOTDIR support.
-app = typer.Typer(help='Claude Code login and MCP auth manager.', add_completion=False)
-typer.completion.completion_init()  # Patch click for runtime tab completion (skipped by add_completion=False)
+app = create_app(help='Claude Code login and MCP auth manager.')
 
 
 @app.callback(invoke_without_command=True)
@@ -1418,61 +1413,8 @@ def cli_nuke_claude_auth() -> None:
     cmd_nuke_claude_auth()
 
 
-# -- Shell completion ---------------------------------------------------------
-
-# Custom install-path overrides. Shells listed here bypass typer's built-in
-# install(), which handles path resolution but may hardcode paths or mutate
-# rc files. Add entries here to fix broken defaults for specific shells.
-# Unlisted shells delegate to typer.completion.install() as-is.
-COMPLETION_INSTALL_OVERRIDES: Mapping[str, Callable[[str], Path]] = {
-    # typer hardcodes ~/.zfunc and appends to ~/.zshrc — override to respect ZDOTDIR.
-    'zsh': lambda prog: Path(os.environ.get('ZDOTDIR') or Path.home() / '.zsh') / 'completions' / f'_{prog}',
-    # typer appends a source line to ~/.bashrc — use XDG path that bash-completion auto-loads.
-    'bash': lambda prog: Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share')
-    / 'bash-completion'
-    / 'completions'
-    / prog,
-}
-
-
-@app.command('completion')
-def cli_completion(
-    shell: typer.completion.Shells = typer.Argument(..., help='Shell type'),
-    install: bool = typer.Option(False, '--install', help='Write to shell-standard location'),
-) -> None:
-    """Print or install shell tab completions.
-
-    Prints the completion script to stdout. With --install, writes to the
-    standard completions directory for the specified shell.
-
-    Zsh: $ZDOTDIR/completions/ (falls back to ~/.zsh/completions/)
-    """
-    ctx = click.get_current_context()
-    prog_name = ctx.find_root().info_name or 'claude-login'
-    complete_var = f'_{prog_name.replace("-", "_").upper()}_COMPLETE'
-    script = typer.completion.get_completion_script(
-        prog_name=prog_name,
-        complete_var=complete_var,
-        shell=shell.value,
-    )
-    if not install:
-        click.echo(script)
-        return
-    resolver = COMPLETION_INSTALL_OVERRIDES.get(shell.value)
-    if resolver is not None:
-        dest = resolver(prog_name)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(script)
-    else:
-        _, dest = typer.completion.install(
-            shell=shell.value,
-            prog_name=prog_name,
-            complete_var=complete_var,
-        )
-    rich.console.Console(stderr=True).print(f'Installed to [bold]{dest}[/bold]\nRestart shell to activate.')
+add_install_command(app, script_path=__file__)
 
 
 if __name__ == '__main__':
-    # Derive clean command name for consistent help text and tab completion,
-    # regardless of invocation method (direct .py, symlink, or launcher).
-    app(prog_name=os.path.basename(sys.argv[0]).removesuffix('.py'))
+    run_app(app)
