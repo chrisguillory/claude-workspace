@@ -118,9 +118,9 @@ from _config import find_config, get_per_file_ignored_codes, load_per_file_ignor
 DIRECTIVE_PREFIX = '# suppression_rationale_linter.py:'
 
 DEFAULT_CUSTOM_PREFIXES: Sequence[str] = (
-    '# strict_typing_linter.py:',
     '# exception_safety_linter.py:',
     '# reexport_linter.py:',
+    '# strict_typing_linter.py:',
 )
 
 NOQA_RE = re.compile(
