@@ -5,13 +5,13 @@
 # ///
 """Re-export linter for Python modules.
 
-Detects symbols in ``__all__`` that are imported from other modules rather than
-defined locally.  These re-exports create an indirection layer that hides
-the true source of a symbol, complicates IDE navigation, and inflates import
-graphs.  Consumers should import directly from the defining module.
+Flags re-exports: symbols imported from other modules and presented via
+``__all__`` as if they belong to this module.  Re-exports hide where symbols
+are defined, complicate IDE navigation, and inflate import graphs. Consumers
+should import directly from the defining module.
 
 Rules:
-    REX001 reexported-symbol  Symbol imported from another module and re-exported via __all__
+    REX001 reexported-symbol  Symbol re-exported via __all__
 
 Escape hatches (inline suppression):
     # reexport_linter.py: skip-file
@@ -25,7 +25,7 @@ Design Philosophy:
 Usage:
     ./linters/reexport_linter.py                       # Check current directory
     ./linters/reexport_linter.py <files>               # Check specific files
-    ./linters/reexport_linter.py src/                   # Check specific directory
+    ./linters/reexport_linter.py src/                  # Check specific directory
 
 Exit codes:
     0 - No violations found
