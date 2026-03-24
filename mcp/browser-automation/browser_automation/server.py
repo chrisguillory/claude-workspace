@@ -30,7 +30,6 @@ import playwright.async_api
 import playwright_stealth.stealth
 import yaml
 from cc_lib.schemas.base import ClosedModel
-from cc_lib.types import JsonObject
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
@@ -76,6 +75,18 @@ mcp = FastMCP('browser-automation', lifespan=lifespan)
 
 
 # Pydantic models for structured output
+
+
+class DownloadResourceResult(ClosedModel):
+    """Result of download_resource tool."""
+
+    path: str
+    size_bytes: int
+    content_type: str
+    status: int
+    url: str
+
+
 class CapturedResource(ClosedModel):
     url: str
     path: str
@@ -453,7 +464,7 @@ async def screenshot(filename: str, ctx: Context[Any, Any, Any]) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-async def download_resource(url: str, output_filename: str) -> JsonObject:
+async def download_resource(url: str, output_filename: str) -> DownloadResourceResult:
     """Download specific resource using current browser context and session.
 
     Uses page.request.get() to maintain cookies/session from prior navigation.
@@ -502,17 +513,15 @@ async def download_resource(url: str, output_filename: str) -> JsonObject:
     save_path = _screenshot_dir / safe_filename
     save_path.write_bytes(body)
 
-    result = {
-        'path': str(save_path),
-        'size_bytes': len(body),
-        'content_type': response.headers.get('content-type', 'unknown'),
-        'status': response.status,
-        'url': url,
-    }
-
     logger.info(f'Downloaded {len(body)} bytes to {save_path}')
 
-    return result
+    return DownloadResourceResult(
+        path=str(save_path),
+        size_bytes=len(body),
+        content_type=response.headers.get('content-type', 'unknown'),
+        status=response.status,
+        url=url,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Get ARIA Snapshot', readOnlyHint=True))
