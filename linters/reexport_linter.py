@@ -5,10 +5,12 @@
 # ///
 """Re-export linter for Python modules.
 
-Flags re-exports: symbols imported from other modules and presented via
-``__all__`` as if they belong to this module.  Re-exports hide where symbols
-are defined, complicate IDE navigation, and inflate import graphs. Consumers
-should import directly from the defining module.
+Flags re-exports in regular ``.py`` files: symbols imported from other modules
+and presented via ``__all__`` as if they belong to this module.
+
+``__init__.py`` files are exempt by default — re-exporting via ``__init__.py``
+is standard Python packaging practice (PEP 484/561, used by pydantic, httpx,
+SQLAlchemy, attrs, etc.).  Use ``--check-init`` to opt in to checking them.
 
 Rules:
     REX001 reexported-symbol  Symbol re-exported via __all__
@@ -24,8 +26,8 @@ Design Philosophy:
 
 Usage:
     ./linters/reexport_linter.py                       # Check current directory
+    ./linters/reexport_linter.py --check-init          # Also check __init__.py files
     ./linters/reexport_linter.py <files>               # Check specific files
-    ./linters/reexport_linter.py src/                  # Check specific directory
 
 Exit codes:
     0 - No violations found
@@ -166,6 +168,11 @@ def main() -> int:
         if skip_file_via_config:
             continue
 
+        # __init__.py re-exports are standard Python packaging practice.
+        # Skip unless --check-init is explicitly requested.
+        if filepath.name == '__init__.py' and not args.check_init:
+            continue
+
         try:
             violations = check_file(
                 filepath,
@@ -227,6 +234,11 @@ def parse_args() -> argparse.Namespace:
         metavar='CODE',
         choices=list(ERROR_CODES.keys()),
         help='Violation codes to ignore globally',
+    )
+    parser.add_argument(
+        '--check-init',
+        action='store_true',
+        help='Also check __init__.py files (exempt by default)',
     )
     parser.add_argument(
         '--no-gitignore',
