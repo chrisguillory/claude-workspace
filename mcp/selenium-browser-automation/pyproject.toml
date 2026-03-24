@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-selenium-browser = "selenium_browser_automation.server:main"
+mcp-selenium-browser-automation-server = "selenium_browser_automation.server:main"
 
 [tool.hatch.build]
 # Package directory to include in distribution

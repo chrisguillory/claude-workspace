@@ -13,8 +13,8 @@ uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdir
 ```
 
 This installs two commands to `~/.local/bin/`:
-- `mcp-py-server` - The MCP server (used by Claude Code)
-- `mcp-py-client` - The CLI client (for readable code execution)
+- `mcp-python-interpreter-server` - The MCP server (used by Claude Code)
+- `mcp-python-interpreter-client` - The CLI client (for readable code execution)
 
 > **Note:** Ensure `~/.local/bin` is in your PATH. Add to `~/.zshrc` or `~/.bashrc`:
 > ```bash
@@ -24,7 +24,7 @@ This installs two commands to `~/.local/bin/`:
 ### Configure Claude Code
 
 ```bash
-claude mcp add --scope user python-interpreter -- mcp-py-server
+claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
 ```
 
 This adds the following to `~/.claude.json`:
@@ -32,7 +32,7 @@ This adds the following to `~/.claude.json`:
 ```json
 "python-interpreter": {
   "type": "stdio",
-  "command": "mcp-py-server",
+  "command": "mcp-python-interpreter-server",
   "args": []
 }
 ```
@@ -45,7 +45,7 @@ Add to `.claude/settings.local.json` to skip permission prompts for the client:
 {
   "permissions": {
     "allow": [
-      "Bash(mcp-py-client:*)"
+      "Bash(mcp-python-interpreter-client:*)"
     ]
   }
 }
@@ -56,8 +56,8 @@ Add to `.claude/settings.local.json` to skip permission prompts for the client:
 ```bash
 uv tool list | grep python-interpreter
 # python-interpreter-mcp v0.2.0
-# - mcp-py-server
-# - mcp-py-client
+# - mcp-python-interpreter-server
+# - mcp-python-interpreter-client
 ```
 
 ### Upgrade
@@ -72,11 +72,11 @@ uv tool upgrade python-interpreter-mcp
 
 ```bash
 uv tool install --editable /path/to/claude-workspace/mcp/python-interpreter
-claude mcp add --scope user python-interpreter -- mcp-py-server
+claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
 ```
 
 This gives you:
-- Commands in PATH (permission patterns like `Bash(mcp-py-client:*)` work)
+- Commands in PATH (permission patterns like `Bash(mcp-python-interpreter-client:*)` work)
 - Changes to source files take effect immediately (no reinstall needed)
 
 **Script mode** (alternative, commands not in PATH):
@@ -94,7 +94,7 @@ Or run the server directly for testing (from repo root):
 uv run --directory mcp/python-interpreter --script python_interpreter/server.py
 
 # Entry point mode (uses pyproject.toml dependencies)
-uv run --project mcp/python-interpreter mcp-py-server
+uv run --project mcp/python-interpreter mcp-python-interpreter-server
 ```
 
 ## Tools
@@ -173,10 +173,10 @@ Code does **not** have access to MCP server internals — each interpreter runs 
 
 ## Client Usage
 
-The `mcp-py-client` command lets you execute Python with readable heredoc syntax:
+The `mcp-python-interpreter-client` command lets you execute Python with readable heredoc syntax:
 
 ```bash
-mcp-py-client <<'PY'
+mcp-python-interpreter-client <<'PY'
 import tiktoken
 tokens = tiktoken.get_encoding("cl100k_base").encode("Strawberry")
 print(f"Token count: {len(tokens)}")
@@ -201,15 +201,15 @@ code: "import tiktoken\ntokens = tiktoken.get_encoding(\"cl100k_base\").encode(\
 All those `\n` and `\"` escapes make it **hard to review what code is about to run**. You're approving code you can
 barely read.
 
-### The Solution: Heredoc Syntax via mcp-py-client
+### The Solution: Heredoc Syntax via mcp-python-interpreter-client
 
-The server provides an HTTP bridge that lets Claude use Bash heredoc syntax instead. When Claude uses `mcp-py-client`,
+The server provides an HTTP bridge that lets Claude use Bash heredoc syntax instead. When Claude uses `mcp-python-interpreter-client`,
 your approval prompt shows clean, readable Python:
 
 ```
 ❯ Bash
 
-mcp-py-client <<'PY'
+mcp-python-interpreter-client <<'PY'
 import tiktoken
 tokens = tiktoken.get_encoding("cl100k_base").encode("Strawberry")
 print(f"Token count: {len(tokens)}")
@@ -218,7 +218,7 @@ PY
 
 **Same code, same execution, but you can actually read it before approving.**
 
-Claude automatically chooses `mcp-py-client` for multi-line code to give you readable approval prompts. You don't need
+Claude automatically chooses `mcp-python-interpreter-client` for multi-line code to give you readable approval prompts. You don't need
 to do anything - the server handles this via the HTTP bridge and Unix socket.
 
 ## How This Works
@@ -226,13 +226,13 @@ to do anything - the server handles this via the HTTP bridge and Unix socket.
 ### Architecture
 
 ```
-Claude Code ──[stdio/JSON-RPC]──> mcp-py-server
+Claude Code ──[stdio/JSON-RPC]──> mcp-python-interpreter-server
                                    ├── FastMCP (main, stdio)
                                    └── FastAPI (background, Unix socket)
                                             ▲
                                             │ HTTP POST /execute
                                             │
-Bash heredoc ──[stdin]──> mcp-py-client ───┘
+Bash heredoc ──[stdin]──> mcp-python-interpreter-client ───┘
                           (auto-discovers socket via process tree)
 ```
 
@@ -248,4 +248,4 @@ The server discovers its Claude Code session by:
 The HTTP bridge listens on a session-scoped Unix socket:
 - **Path**: `/tmp/python-interpreter-{claude_pid}.sock`
 - **Purpose**: Allows Bash heredoc scripts to execute Python code without spawning new interpreters
-- **Discovery**: `mcp-py-client` walks the process tree to find the socket path
+- **Discovery**: `mcp-python-interpreter-client` walks the process tree to find the socket path

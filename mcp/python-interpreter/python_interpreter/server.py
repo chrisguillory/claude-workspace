@@ -5,14 +5,14 @@ Exposes tools via FastMCP (stdio) and an HTTP bridge (Unix socket) for heredoc u
 
 Architecture:
     Claude Code ─[stdio]─> FastMCP server
-    mcp-py-client ─[HTTP]─> FastAPI on /tmp/python-interpreter-{pid}.sock
+    mcp-python-interpreter-client ─[HTTP]─> FastAPI on /tmp/python-interpreter-{pid}.sock
     External interpreters ─[subprocess]─> driver.py (length-prefixed JSON)
 
 Tools: execute, register_interpreter, stop_interpreter, list_interpreters
 
 Setup:
     uv tool install --editable mcp/python-interpreter
-    claude mcp add --scope user python-interpreter -- mcp-py-server
+    claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ def register_tools(service: PythonInterpreterService) -> None:
         Tip: To list defined variables: execute("print([x for x in dir() if not x.startswith('_')])")
 
         IMPORTANT: For better readability in approval prompts, prefer the Bash client:
-            mcp-py-client <<'PY'
+            mcp-python-interpreter-client <<'PY'
             print("Hello")
             PY
 
@@ -323,8 +323,8 @@ async def http_execute(
 ) -> Mapping[str, str]:
     """HTTP endpoint for executing Python code.
 
-    This allows heredoc syntax via mcp-py-client:
-        mcp-py-client <<'PY'
+    This allows heredoc syntax via mcp-python-interpreter-client:
+        mcp-python-interpreter-client <<'PY'
         import pandas as pd
         print(pd.__version__)
         PY
