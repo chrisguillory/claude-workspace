@@ -178,17 +178,18 @@ def main() -> int:
         print(f'WARNING: Edge case file not found: {EDGE_CASE_FILE}')
         all_passed = False
 
-    # Validate structural edge cases (zero-violation and skip scenarios)
+    # Validate structural edge cases (per-file __all__ patterns)
+    structural_dir = EDGE_CASES_DIR / 'reexport'
     structural_cases = [
-        ('reexport_empty_all.py', 0),
-        ('reexport_all_local_only.py', 0),
-        ('reexport_star_import.py', 0),
-        ('reexport_dynamic_all.py', 0),
-        ('reexport_annotated_all.py', 2),
-        ('reexport_tuple_all.py', 2),
+        ('empty_all.py', 0),
+        ('all_local_only.py', 0),
+        ('star_import.py', 0),
+        ('dynamic_all.py', 0),
+        ('annotated_all.py', 2),
+        ('tuple_all.py', 2),
     ]
     for filename, expected_count in structural_cases:
-        fixture = EDGE_CASES_DIR / filename
+        fixture = structural_dir / filename
         if not fixture.exists():
             print(f'WARNING: Structural fixture not found: {fixture}')
             all_passed = False
