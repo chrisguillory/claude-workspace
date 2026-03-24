@@ -373,5 +373,3 @@ def test_validation(capsys: object) -> None:
     assert exit_code == 0, f'Validation failed with exit code {exit_code}'
 
 
-if __name__ == '__main__':
-    sys.exit(main())
