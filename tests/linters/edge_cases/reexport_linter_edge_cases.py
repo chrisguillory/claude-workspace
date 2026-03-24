@@ -47,6 +47,13 @@ SOME_VALUE: int = 99
 
 
 # ---------------------------------------------------------------------------
+# Edge: Relative import (from . import X — SHOULD flag)
+# ---------------------------------------------------------------------------
+
+from . import some_submodule
+
+
+# ---------------------------------------------------------------------------
 # __all__ for edge case testing
 # ---------------------------------------------------------------------------
 
@@ -61,4 +68,6 @@ __all__ = [
     'StringAlias',
     # Annotated assignment — should NOT flag (local definition)
     'SOME_VALUE',
+    # Relative import — SHOULD flag REX001
+    'some_submodule',
 ]

@@ -56,6 +56,7 @@ EXPECTED_EDGE_CASES: Mapping[str, bool] = {
     'os': True,  # module import — should flag
     'StringAlias': False,  # type alias — local def
     'SOME_VALUE': False,  # annotated assignment — local def
+    'some_submodule': True,  # relative import (from . import X)
 }
 
 

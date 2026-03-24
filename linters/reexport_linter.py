@@ -93,7 +93,7 @@ class Violation:
     column: int
     kind: ViolationKind
     source_line: str
-    # Dynamic fix message (includes source module name)
+    symbol_name: str
     fix_suggestion: str
 
 
@@ -131,7 +131,6 @@ def main() -> int:
         if arg == '.' or path.is_dir():
             files.extend(find_python_files(path, exclude_dirs, respect_gitignore))
         elif path.is_file() and path.suffix == '.py':
-            # Explicitly given files are checked even if not __init__.py
             files.append(path)
 
     if not files:
@@ -318,6 +317,7 @@ def check_file(
                         column=0,
                         kind='reexported-symbol',
                         source_line=_get_source_line(source_lines, all_line),
+                        symbol_name=name,
                         fix_suggestion=fix,
                     ),
                 )
@@ -337,6 +337,7 @@ def check_file(
                     column=0,
                     kind='unused-directive',
                     source_line=source_lines[skip_line - 1].strip(),
+                    symbol_name='',
                     fix_suggestion='Remove the stale suppression directive',
                 ),
             ]
@@ -385,6 +386,11 @@ def _extract_all_names(tree: ast.Module) -> Mapping[str, int]:
     Returns mapping from name to the line number of that name in __all__.
     Skips dynamic __all__ (augmented assignments, non-list values, etc.).
     """
+    # Bail if __all__ is mutated (+=) — can't determine full contents statically
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) and node.target.id == '__all__':
+            return {}
+
     for node in ast.iter_child_nodes(tree):
         # __all__ = [...]
         if isinstance(node, ast.Assign):
@@ -433,10 +439,12 @@ def _build_import_map(tree: ast.Module) -> Mapping[str, ImportedName]:
                 local_name = alias.asname or alias.name
                 import_map[local_name] = ImportedName(source_module=alias.name, line=lineno)
 
-        elif isinstance(node, ast.ImportFrom) and node.module:
+        elif isinstance(node, ast.ImportFrom):
+            prefix = '.' * node.level
+            source = f'{prefix}{node.module}' if node.module else prefix
             for alias in node.names:
                 local_name = alias.asname or alias.name
-                import_map[local_name] = ImportedName(source_module=node.module, line=lineno)
+                import_map[local_name] = ImportedName(source_module=source, line=lineno)
 
     return import_map
 
@@ -595,6 +603,7 @@ def find_unused_directives(
                         source_line=source_lines[directive.line - 1].strip()
                         if directive.line <= len(source_lines)
                         else '',
+                        symbol_name='',
                         fix_suggestion='Remove the stale suppression directive',
                     ),
                 )
@@ -634,7 +643,10 @@ def get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Pa
 def format_violation(v: Violation) -> str:
     """Format a violation for display."""
     code = ERROR_CODES[v.kind]
+
     message = VIOLATION_MESSAGES[v.kind]
+    if v.symbol_name:
+        message = f"'{v.symbol_name}' re-exported via __all__"
 
     return (
         f'{v.filepath}:{v.line}:{v.column}: error: {code} {message}\n'
