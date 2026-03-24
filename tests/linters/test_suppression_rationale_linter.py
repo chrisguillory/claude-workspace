@@ -226,5 +226,11 @@ def main() -> int:
     return 0
 
 
+def test_validation(capsys: object) -> None:
+    """Run validation suite via pytest."""
+    exit_code = main()
+    assert exit_code == 0, f'Validation failed with exit code {exit_code}'
+
+
 if __name__ == '__main__':
     sys.exit(main())

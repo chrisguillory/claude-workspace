@@ -713,9 +713,6 @@ class ConsoleLogsResult(ClosedModel):
 # =============================================================================
 
 
-
-
-
 class ChromeProfileStateExportResult(ClosedModel):
     """Result of exporting Chrome profile state from profile files.
 
