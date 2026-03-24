@@ -1,5 +1,5 @@
 """
-Schema definitions for claude-session-mcp.
+Schema definitions for claude-session.
 
 This package contains Pydantic models for various data schemas:
 - session: Claude Code session JSONL record types

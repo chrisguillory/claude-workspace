@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Command-line interface for claude-session-mcp.
+Command-line interface for claude-session.
 
 Provides commands to archive and restore Claude Code sessions.
 """
@@ -574,7 +574,7 @@ def delete(
     process before deletion. This prevents the session file from being
     recreated when the process exits.
 
-    A backup is saved to ~/.claude-session-mcp/deleted/ for undo capability.
+    A backup is saved to ~/.claude-workspace/claude-session/deleted/ for undo capability.
     Use 'restore --in-place' on the backup to undo.
     """
     asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project, verbose))

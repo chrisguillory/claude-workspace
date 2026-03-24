@@ -30,6 +30,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from claude_session.config.base import ensure_data_dir
 from claude_session.exceptions import NativeSessionMoveError, SameProjectMoveError
 from claude_session.paths import encode_path
 from claude_session.protocols import LoggerProtocol
@@ -58,7 +59,7 @@ from claude_session.storage.local import LocalFileSystemStorage
 logger = logging.getLogger(__name__)
 
 # Backup location (same as delete service)
-DELETED_SESSIONS_DIR = Path.home() / '.claude-session-mcp' / 'deleted'
+DELETED_SESSIONS_DIR = ensure_data_dir() / 'deleted'
 
 
 class SessionMoveService:

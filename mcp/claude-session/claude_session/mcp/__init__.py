@@ -1,4 +1,4 @@
-"""MCP server entry point for claude-session-mcp."""
+"""MCP server entry point for claude-session."""
 
 from __future__ import annotations
 

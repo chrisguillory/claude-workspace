@@ -1,4 +1,4 @@
-# claude-session-mcp
+# claude-session
 
 Archive and restore Claude Code sessions across machines with full conversation history preserved.
 
@@ -64,7 +64,7 @@ claude mcp add --scope user claude-session -- mcp-claude-session-server
 ### Upgrading
 
 ```bash
-uv tool upgrade claude-session-mcp
+uv tool upgrade claude-session
 ```
 
 ## Quick Start
@@ -96,7 +96,7 @@ claude-session move <session-id> --launch
 claude-session delete <session-id>
 
 # Undo a delete
-claude-session restore --in-place ~/.claude-session-mcp/deleted/<backup>.json
+claude-session restore --in-place ~/.claude-workspace/claude-session/deleted/<backup>.json
 ```
 
 ## Features
@@ -235,7 +235,7 @@ claude-session delete <session-id>
 **Safety features:**
 - By default, only cloned/restored sessions (UUIDv7) can be deleted
 - Native Claude sessions (UUIDv4) require `--force` to prevent accidental deletion
-- Auto-backup created at `~/.claude-session-mcp/deleted/` before deletion (unless `--no-backup`)
+- Auto-backup created at `~/.claude-workspace/claude-session/deleted/` before deletion (unless `--no-backup`)
 - Use `restore --in-place <backup>` to undo a delete
 
 ### Move
@@ -274,7 +274,7 @@ claude-session move 019b5232 --launch -- --chrome
 **Safety features:**
 - By default, only cloned/restored sessions (UUIDv7) can be moved
 - Native Claude sessions (UUIDv4) require `--force`
-- Auto-backup at `~/.claude-session-mcp/deleted/` before source deletion (unless `--no-backup`)
+- Auto-backup at `~/.claude-workspace/claude-session/deleted/` before source deletion (unless `--no-backup`)
 - Two-phase: write to target first, then delete source
 - Running sessions require `--terminate`
 - Use `restore --in-place <backup>` to undo a move
@@ -341,7 +341,7 @@ claude-session lineage 019b53ff --format json
 ```
 
 **Lineage tracking:**
-- Lineage is stored in `~/.claude-session-mcp/lineage.json`
+- Lineage is stored in `~/.claude-workspace/claude-session/lineage.json`
 - Tracks: parent/child session IDs, timestamps, project paths, machine IDs
 - Cross-machine restores are detected and highlighted
 - Native (UUIDv4) sessions have no lineage entry

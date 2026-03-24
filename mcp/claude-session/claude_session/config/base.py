@@ -2,12 +2,18 @@
 Base configuration for Claude Session services.
 
 Shared settings and helper functions for all service types (MCP, HTTP).
+
+Data directory: ~/.claude-workspace/claude-session/
+  Stores lineage.json, chain-backups/, and deleted/ session backups.
+  Auto-migrated from legacy ~/.claude-session-mcp/ on first access.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import pathlib
+import shutil
 from typing import TypeVar, cast
 
 import lazy_object_proxy
@@ -15,6 +21,59 @@ import pydantic
 import pydantic_settings
 
 T = TypeVar('T', bound='BaseSessionSettings')
+
+logger = logging.getLogger(__name__)
+
+# Canonical data directory for claude-session
+DATA_DIR = pathlib.Path.home() / '.claude-workspace' / 'claude-session'
+
+# Legacy data directory (pre-migration)
+_LEGACY_DATA_DIR = pathlib.Path.home() / '.claude-session-mcp'
+
+# Track whether migration has been attempted this process
+_migration_checked = False
+
+
+def ensure_data_dir() -> pathlib.Path:
+    """Return the data directory, auto-migrating from legacy path if needed.
+
+    On first call per process, if the legacy directory (~/.claude-session-mcp/)
+    exists and the new directory (~/.claude-workspace/claude-session/) does not,
+    moves contents to the new location.
+    """
+    global _migration_checked  # noqa: PLW0603
+
+    if not _migration_checked:
+        _migration_checked = True
+        _migrate_legacy_data_dir()
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return DATA_DIR
+
+
+def _migrate_legacy_data_dir() -> None:
+    """Move data from ~/.claude-session-mcp/ to ~/.claude-workspace/claude-session/.
+
+    Only runs if the old directory exists and the new one does not.
+    """
+    if not _LEGACY_DATA_DIR.exists():
+        return
+    if DATA_DIR.exists():
+        return
+
+    logger.warning(
+        'Migrating data directory: %s -> %s',
+        _LEGACY_DATA_DIR,
+        DATA_DIR,
+    )
+
+    # Ensure parent exists
+    DATA_DIR.parent.mkdir(parents=True, exist_ok=True)
+
+    # Move the entire directory
+    shutil.move(str(_LEGACY_DATA_DIR), str(DATA_DIR))
+
+    logger.warning('Data directory migration complete')
 
 
 class BaseSessionSettings(pydantic_settings.BaseSettings):
@@ -28,7 +87,7 @@ class BaseSessionSettings(pydantic_settings.BaseSettings):
     )
 
     # Application metadata
-    APP_NAME: str = 'claude-session-mcp'
+    APP_NAME: str = 'claude-session'
     VERSION: str = '0.1.0'
 
     # Compression settings (not overrideable at call-time)
