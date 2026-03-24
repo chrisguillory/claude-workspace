@@ -94,8 +94,8 @@ class VectorPoint(StrictModel):
         return cls(
             id=point_id,
             dense_vector=tuple(dense_vector),
-            sparse_indices=tuple(sparse_indices),
-            sparse_values=tuple(sparse_values),
+            sparse_indices=tuple(int(x) for x in sparse_indices),
+            sparse_values=tuple(float(x) for x in sparse_values),
             source_path=chunk.source_path,
             chunk_index=chunk.chunk_index,
             file_type=chunk.file_type,

@@ -1,10 +1,10 @@
-"""Cross-encoder reranking service."""
+"""Cross-encoder reranking service using fastembed ONNX backend."""
 
 from __future__ import annotations
 
 import asyncio
 
-from rerankers import Reranker
+from fastembed.rerank.cross_encoder import TextCrossEncoder
 
 from document_search.schemas import SearchHit, SearchResult
 
@@ -14,13 +14,13 @@ __all__ = [
 
 
 class RerankerService:
-    """Cross-encoder reranker using ms-marco model."""
+    """Cross-encoder reranker using ms-marco model via ONNX Runtime."""
 
-    MODEL_NAME = 'cross-encoder/ms-marco-MiniLM-L-6-v2'
+    MODEL_NAME = 'Xenova/ms-marco-MiniLM-L-6-v2'
 
     def __init__(self) -> None:
         """Initialize the reranker model."""
-        self._reranker = Reranker(self.MODEL_NAME, verbose=0)
+        self._encoder = TextCrossEncoder(model_name=self.MODEL_NAME)
 
     async def rerank(
         self,
@@ -41,21 +41,22 @@ class RerankerService:
         if not result.hits:
             return result
 
-        # Prepare documents for reranking
         documents = [hit.text for hit in result.hits]
 
-        # Run blocking ML inference in thread pool to avoid blocking event loop
-        ranked = await asyncio.to_thread(self._reranker.rank, query=query, docs=documents)
+        # fastembed rerank returns scores in document order (Iterable[float])
+        scores = await asyncio.to_thread(
+            lambda: list(self._encoder.rerank(query, documents)),
+        )
 
-        # Reorder hits by reranker scores
-        # ranked.results contains Result objects with doc_id (index) and score
-        reranked_hits: list[SearchHit] = []
-        for ranked_result in ranked.results:
-            original_hit = result.hits[ranked_result.doc_id]
-            # Update score while preserving all other fields
-            reranked_hits.append(original_hit.model_copy(update={'score': ranked_result.score}))
+        # Pair each hit with its reranker score, sort descending
+        scored_hits = sorted(
+            zip(scores, result.hits, strict=True),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
 
-        # Apply top_k limit if specified
+        reranked_hits: list[SearchHit] = [hit.model_copy(update={'score': score}) for score, hit in scored_hits]
+
         if top_k is not None:
             reranked_hits = reranked_hits[:top_k]
 
