@@ -5,7 +5,7 @@ Browser Automation MCP Server
 Playwright-based browser control with stealth mode for Claude Code.
 
 Install:
-    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation browser-server
+    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation mcp-browser-automation-server
 
 Architecture: Runs locally (not Docker) for visible browser monitoring.
 """

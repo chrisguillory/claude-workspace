@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-browser-server = "browser_automation.server:main"
+mcp-browser-automation-server = "browser_automation.server:main"
 
 [tool.uv.sources]
 # Local development override: workspace reference takes precedence over git URL

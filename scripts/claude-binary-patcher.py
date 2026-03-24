@@ -156,9 +156,7 @@ def _handle_patch_error(exc: PatchError) -> None:
     print(exc, file=sys.stderr)
 
 
-@error_boundary.handler(
-    Exception
-)  # exception_safety_linter.py: swallowed-exception — process-boundary catch-all for user-facing CLI
+@error_boundary.handler(Exception)
 def _handle_crash(exc: Exception) -> None:
     print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
     for frame in traceback.format_tb(exc.__traceback__)[-2:]:
@@ -273,7 +271,7 @@ class BinaryPatcher:
             try:
                 atomic_write(self._path, original_path.read_bytes(), reference=original_path)
                 print(f'Restored original from {original_path}', file=sys.stderr)
-            except Exception as restore_err:  # exception_safety_linter.py: swallowed-exception — last-resort recovery from codesign failure
+            except Exception as restore_err:
                 print(f'CRITICAL: Codesign failed AND restore failed: {restore_err}', file=sys.stderr)
                 print(f'Manual recovery: cp "{original_path}" "{self._path}"', file=sys.stderr)
             raise
@@ -301,7 +299,7 @@ class BinaryPatcher:
         print(f'  Found {len(sites)} patch site(s)')
         for i, offset in enumerate(sites):
             ctx = self._data[max(0, offset - 10) : offset + len(patch.old)]
-            print(f'  [{i + 1}] 0x{offset:x}: ...{ctx}...')
+            print(f'  [{i + 1}] 0x{offset:x}: ...{ctx!r}...')
 
     def _save_original(self) -> Path:
         """Save the original binary to our workspace directory."""
