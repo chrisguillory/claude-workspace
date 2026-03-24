@@ -54,7 +54,7 @@ repos:
 
       - id: reexport-linter
         name: reexport-linter
-        description: Check for re-exported symbols in __init__.py
+        description: Check for re-exported symbols via __all__
         entry: ./linters/reexport_linter.py --report-unused-directives .
         language: system
         pass_filenames: false
