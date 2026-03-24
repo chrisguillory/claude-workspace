@@ -358,7 +358,7 @@ claude mcp add --scope user claude-session -- mcp-claude-session-server
 claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session mcp-claude-session-server
 
 # From local clone
-claude mcp add --scope user claude-session -- uv run --project ~/claude-session-mcp claude-session-mcp
+claude mcp add --scope user claude-session -- uv run --project ~/claude-workspace/mcp/claude-session mcp-claude-session-server
 ```
 
 **Tools:**

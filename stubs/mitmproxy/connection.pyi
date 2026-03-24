@@ -6,6 +6,7 @@ class Connection:
     sockname: tuple[str, int] | None
     timestamp_start: float | None
     timestamp_end: float | None
+    timestamp_tls_setup: float | None
     tls_version: str | None
     sni: str | None
     @property
