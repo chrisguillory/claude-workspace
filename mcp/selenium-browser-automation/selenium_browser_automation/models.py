@@ -713,6 +713,9 @@ class ConsoleLogsResult(ClosedModel):
 # =============================================================================
 
 
+
+
+
 class ChromeProfileStateExportResult(ClosedModel):
     """Result of exporting Chrome profile state from profile files.
 
@@ -743,3 +746,60 @@ class ChromeProfileStateExportResult(ClosedModel):
     indexeddb_origins: int
     session_storage_source: Literal['live', 'disk'] = 'disk'
     warnings: Sequence[str] = []
+
+
+# =============================================================================
+# MCP Tool Result Models (typed returns for ad-hoc dicts)
+# =============================================================================
+
+
+class DownloadResourceResult(ClosedModel):
+    """Result of download_resource tool."""
+
+    path: str
+    size_bytes: int
+    content_type: str
+    status: int
+    url: str
+
+
+class SleepResult(ClosedModel):
+    """Result of sleep tool."""
+
+    slept_ms: int
+
+
+class WaitForSelectorResult(ClosedModel):
+    """Result of wait_for_selector tool.
+
+    Fields beyond selector/state/elapsed_ms are optional because they vary
+    by achieved state (visible/hidden/attached/detached).
+    """
+
+    selector: str
+    state: str
+    elapsed_ms: int
+    element_count: int | None = None
+    reason: str | None = None
+
+
+class ResizeWindowResult(ClosedModel):
+    """Result of resize_window tool."""
+
+    width: int
+    height: int
+
+
+class ConfigureProxyResult(ClosedModel):
+    """Result of configure_proxy tool."""
+
+    status: str
+    host: str
+    port: int
+    note: str
+
+
+class ClearProxyResult(ClosedModel):
+    """Result of clear_proxy tool."""
+
+    status: str
