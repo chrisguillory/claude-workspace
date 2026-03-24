@@ -178,6 +178,36 @@ def main() -> int:
         print(f'WARNING: Edge case file not found: {EDGE_CASE_FILE}')
         all_passed = False
 
+    # Validate structural edge cases (zero-violation and skip scenarios)
+    structural_cases = [
+        ('reexport_empty_all.py', 0),
+        ('reexport_all_local_only.py', 0),
+        ('reexport_star_import.py', 0),
+        ('reexport_dynamic_all.py', 0),
+        ('reexport_annotated_all.py', 2),
+        ('reexport_tuple_all.py', 2),
+    ]
+    for filename, expected_count in structural_cases:
+        fixture = EDGE_CASES_DIR / filename
+        if not fixture.exists():
+            print(f'WARNING: Structural fixture not found: {fixture}')
+            all_passed = False
+            continue
+        output = run_linter(fixture, LINTER)
+        actual_count = output.count('REX001')
+        if actual_count != expected_count:
+            print(f'  {filename}: expected {expected_count} violations, got {actual_count}')
+            all_passed = False
+        else:
+            results.append(
+                ValidationResult(
+                    file_name=filename,
+                    errors=[],
+                    flagged_count=actual_count,
+                    expected_flag_count=expected_count,
+                )
+            )
+
     # Report results
     if not all_passed:
         print('VALIDATION FAILED')
