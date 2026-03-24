@@ -17,15 +17,17 @@ Example:
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-import attrs
 from mcp.server.fastmcp import Context, FastMCP
 
 from claude_session.exceptions import RunningSessionDeletionError, RunningSessionMoveError
@@ -49,12 +51,14 @@ from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
 
+logger = logging.getLogger(__name__)
+
 # ==============================================================================
 # Types
 # ==============================================================================
 
 
-@attrs.define(frozen=True)
+@dataclass(frozen=True)
 class ServerState:
     """
     Immutable server state initialized at startup.
@@ -70,7 +74,7 @@ class ServerState:
     archive_service: SessionArchiveService
 
 
-@attrs.define(frozen=True)
+@dataclass(frozen=True)
 class ClaudeContext:
     """Context information about the Claude Code session."""
 
@@ -125,16 +129,22 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
         # Register tools with closure over state
         register_tools(state)
 
-        print(f'[MCP Server] Session ID: {session_id}')
-        print(f'[MCP Server] Project: {project_path}')
-        print(f'[MCP Server] Temp dir: {temp_path}')
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+            stream=sys.stderr,
+        )
+
+        logger.info('Session ID: %s', session_id)
+        logger.info('Project: %s', project_path)
+        logger.info('Temp dir: %s', temp_path)
 
         yield  # Setup successful; application active
 
     finally:
         # Cleanup temp directory
         temp_dir.cleanup()
-        print('[MCP Server] Cleaned up temp directory')
+        logger.info('Cleaned up temp directory')
 
 
 # ==============================================================================
