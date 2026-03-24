@@ -146,6 +146,9 @@ def add_completion_command(app: typer.Typer) -> None:
         if dest:
             console.print(f'Completion installed: [bold]{dest}[/bold]')
             console.print('\nRestart shell to activate.')
+        else:
+            console.print(f'[red]Shell {shell_name!r} is not supported (zsh, bash)[/red]')
+            raise SystemExit(1)
 
     @app.command('uninstall-completions', rich_help_panel='Shell Completions')
     def uninstall_completions(

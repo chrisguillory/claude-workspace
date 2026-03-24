@@ -127,10 +127,7 @@ def _format_age(dt: datetime | None) -> str:
 
 def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
     """Complete session IDs from tracked sessions. Active first, then newest."""
-    try:
-        db = load_sessions('.')
-    except Exception:
-        return []
+    db = load_sessions('.')
     matches = [s for s in db.sessions if s.session_id.startswith(incomplete)]
     matches.sort(
         key=lambda s: (
@@ -148,7 +145,7 @@ def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
     # zsh groups completions with identical descriptions onto one line.
     # Deduplicate by appending the 8-char session prefix to collisions.
     seen: dict[str, int] = {}
-    for i, (sid, desc) in enumerate(results):
+    for sid, desc in results:
         seen.setdefault(desc, 0)
         seen[desc] += 1
     duped = {desc for desc, count in seen.items() if count > 1}
