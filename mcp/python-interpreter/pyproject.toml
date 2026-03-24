@@ -15,8 +15,8 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-py-server = "python_interpreter.server:main"
-mcp-py-client = "python_interpreter.client:main"
+mcp-python-interpreter-server = "python_interpreter.server:main"
+mcp-python-interpreter-client = "python_interpreter.client:main"
 
 [tool.uv.sources]
 # Local development override: workspace reference takes precedence over git URL in dependencies.
