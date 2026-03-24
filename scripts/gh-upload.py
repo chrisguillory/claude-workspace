@@ -34,8 +34,8 @@ from pathlib import Path
 
 import httpx
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.schemas.base import OpenModel
 from cc_lib.types import JsonDatetime
-from pydantic import BaseModel
 
 # Hardcoded for personal use with mainstay-io/monorepo
 REPO_SLUG = 'mainstay-io/monorepo'
@@ -63,7 +63,7 @@ class SessionExpiredError(UploadError):
     """GitHub session cookies are expired or invalid."""
 
 
-class BrowserCookie(BaseModel):
+class BrowserCookie(OpenModel):
     """Cookie from saved browser profile state."""
 
     name: str
@@ -71,20 +71,20 @@ class BrowserCookie(BaseModel):
     domain: str = ''
 
 
-class BrowserState(BaseModel):
+class BrowserState(OpenModel):
     """Saved browser session state from Selenium save_profile_state."""
 
     cookies: Sequence[BrowserCookie]
     saved_at: JsonDatetime | None = None
 
 
-class UploadAsset(BaseModel):
+class UploadAsset(OpenModel):
     """GitHub upload asset metadata."""
 
     href: str
 
 
-class UploadPolicy(BaseModel):
+class UploadPolicy(OpenModel):
     """GitHub upload policy response."""
 
     upload_url: str

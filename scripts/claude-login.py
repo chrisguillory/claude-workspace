@@ -117,7 +117,6 @@ from pathlib import Path
 from typing import Any
 
 import click
-import pydantic
 import rich.console
 import rich.panel
 import typer
@@ -130,13 +129,7 @@ from cc_lib.types import JsonObject
 # =============================================================================
 
 
-class PermissiveModel(pydantic.BaseModel):
-    """For Claude Code data — allow unknown fields for forward compatibility."""
-
-    model_config = pydantic.ConfigDict(extra='allow', frozen=True)
-
-
-class OAuthAccount(PermissiveModel):
+class OAuthAccount(StrictModel):
     """Claude Code oauthAccount from ~/.claude.json."""
 
     # Always present after login
@@ -155,7 +148,7 @@ class OAuthAccount(PermissiveModel):
     account_created_at: str | None = None
 
 
-class ClaudeAiOAuth(PermissiveModel):
+class ClaudeAiOAuth(StrictModel):
     """Claude account OAuth tokens from keychain.
 
     Fields are nullable because setup-tokens write accessToken with all other
@@ -170,7 +163,7 @@ class ClaudeAiOAuth(PermissiveModel):
     rate_limit_tier: str | None = None
 
 
-class McpOAuthEntry(PermissiveModel):
+class McpOAuthEntry(StrictModel):
     """MCP server OAuth token entry."""
 
     server_name: str
