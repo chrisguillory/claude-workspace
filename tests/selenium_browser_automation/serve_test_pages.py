@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project
 """
 Start HTTP servers on multiple ports for multi-origin localStorage testing.
 
