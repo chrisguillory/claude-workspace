@@ -98,8 +98,9 @@ trust levels for `extra` field handling (terminology follows JSON Schema closed/
 | `StrictModel` | `'allow'` default, `'forbid'` via `CC_STRICT_MODEL_EXTRA_FORBID=1` | Protocol data (Claude Code hooks, MCP) — forward-compatible         |
 | `CamelModel`  | Inherits from `StrictModel`                                        | Protocol data with camelCase JSON serialization                     |
 | `OpenModel`   | `'allow'` default, `'forbid'` via `CC_OPEN_MODEL_EXTRA_FORBID=1`   | External data (Chrome, CDP) — upstream schema evolves independently |
+| `SubsetModel` | `'ignore'` always                                                  | Subset of external data — need 3 fields out of 30                   |
 
-All four share: `frozen=True`, `strict=True`, `validate_default=True`, `serialize_by_alias=True`.
+All five share: `frozen=True`, `strict=True`, `validate_default=True`, `serialize_by_alias=True`.
 
 **Python 3.13 modern syntax:**
 - Use `| None` instead of `Optional`
