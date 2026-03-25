@@ -7,4 +7,4 @@ Expected: zero violations (not an error).
 
 from os.path import join  # imported but not in __all__
 
-__all__: list[str] = []
+__all__ = []
