@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Selenium Browser Automation MCP Server
 
@@ -39,11 +38,11 @@ from urllib.parse import parse_qs, unquote, urlparse
 # Third-Party Libraries
 import fastmcp.exceptions
 import httpx
+from cc_lib.schemas.base import SubsetModel
 from cc_lib.types import JsonObject
 from cc_lib.utils import Timer
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
@@ -2939,7 +2938,7 @@ def register_tools(service: BrowserService) -> None:
         collection_duration = (time.time() - start_time) * 1000
 
         # Parse results into Pydantic models
-        T = TypeVar('T', bound=BaseModel)
+        T = TypeVar('T', bound=SubsetModel)
 
         def parse_metric(data: JsonObject | None, model_cls: type[T]) -> T | None:
             if not data:

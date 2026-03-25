@@ -81,7 +81,7 @@ State (all under ~/.claude-workspace/statusline/):
 Schema Validation:
     Sub-objects use extra='forbid' — any new field in a nested object fails immediately.
     Top-level StatusLineInput uses extra='allow' — Claude Code can add new root fields
-    without breaking. External data models use extra='ignore'.
+    without breaking. External data models use SubsetModel (extra='ignore').
 
 Possible Improvements:
     Token insights (requires per-turn history infrastructure):
@@ -116,20 +116,9 @@ import psutil
 import pydantic
 import pydantic.alias_generators
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas import StrictModel
+from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.session_tracker import find_claude_pid
-
-# =============================================================================
-# Pydantic Models — strict, fail-fast on schema drift
-# =============================================================================
-
-
-class _ExternalModel(pydantic.BaseModel):
-    """Base for external data we don't control. Ignores unknown fields."""
-
-    model_config = pydantic.ConfigDict(extra='ignore', frozen=True)
-
 
 # =============================================================================
 # Credential Models — External Data (login files, config, keychain)
@@ -140,7 +129,7 @@ class _ExternalModel(pydantic.BaseModel):
 # =============================================================================
 
 
-class LoginFileOAuthAccount(_ExternalModel):
+class LoginFileOAuthAccount(SubsetModel):
     """Login file's oauth_account section (snake_case from disk)."""
 
     email_address: str = ''
@@ -148,14 +137,14 @@ class LoginFileOAuthAccount(_ExternalModel):
     billing_type: str | None = None
 
 
-class LoginFileClaudeAiOAuth(_ExternalModel):
+class LoginFileClaudeAiOAuth(SubsetModel):
     """Login file's claude_ai_oauth section (snake_case from disk)."""
 
     subscription_type: str | None = None
     rate_limit_tier: str | None = None
 
 
-class LoginFile(_ExternalModel):
+class LoginFile(SubsetModel):
     """Saved login file from ~/.claude-workspace/logins/*.json."""
 
     name: str = ''
@@ -164,14 +153,11 @@ class LoginFile(_ExternalModel):
     setup_token: str | None = None
 
 
-class ConfigOAuthAccount(_ExternalModel):
+class ConfigOAuthAccount(SubsetModel):
     """~/.claude.json oauthAccount section (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     email_address: str = ''
@@ -179,14 +165,11 @@ class ConfigOAuthAccount(_ExternalModel):
     billing_type: str = ''
 
 
-class KeychainClaudeAiOAuth(_ExternalModel):
+class KeychainClaudeAiOAuth(SubsetModel):
     """Keychain claudeAiOauth section (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     subscription_type: str = ''
@@ -194,27 +177,21 @@ class KeychainClaudeAiOAuth(_ExternalModel):
     access_token: str = ''
 
 
-class KeychainData(_ExternalModel):
+class KeychainData(SubsetModel):
     """Top-level keychain JSON from macOS security command."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     claude_ai_oauth: KeychainClaudeAiOAuth | None = None
 
 
-class SwitchPendingMarker(_ExternalModel):
+class SwitchPendingMarker(SubsetModel):
     """The .switch-pending file written by claude-login (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     email_address: str = ''

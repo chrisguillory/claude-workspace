@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project
 """Walk up the process tree and print each ancestor. Tests whether Claude Code is an ancestor."""
 
 from __future__ import annotations

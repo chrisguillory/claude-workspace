@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project
 """
 Intercept Claude Code API traffic via mitmproxy.
 
