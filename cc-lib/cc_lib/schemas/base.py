@@ -1,4 +1,4 @@
-"""Pydantic base models for three trust levels of extra field handling.
+"""Pydantic base models for extra field handling.
 
 Terminology follows JSON Schema: "closed" rejects additional properties,
 "open" accepts them. Trust level determines the default:
@@ -6,6 +6,7 @@ Terminology follows JSON Schema: "closed" rejects additional properties,
 - ClosedModel: internal data we construct. extra='forbid' always.
 - StrictModel: protocol data (Claude Code, MCP). extra='allow' by default.
 - OpenModel: external data (Chrome, CDP). extra='allow' by default.
+- SubsetModel: subset of external data. extra='ignore' always.
 - CamelModel: StrictModel with camelCase JSON serialization.
 """
 
@@ -110,6 +111,30 @@ class OpenModel(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(
         extra='forbid' if os.environ.get('CC_OPEN_MODEL_EXTRA_FORBID') == '1' else 'allow',
+        frozen=True,
+        strict=True,
+        validate_default=True,
+        use_attribute_docstrings=True,
+        validate_by_alias=True,
+        validate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+
+class SubsetModel(pydantic.BaseModel):
+    """Subset model for reading specific fields from external data.
+
+    Use when parsing data we don't control but only need specific fields.
+    Unknown fields are silently discarded — not preserved (unlike OpenModel),
+    not rejected (unlike ClosedModel). No env-var toggle — discarding extras
+    is always the right behavior for a subset.
+
+    Typical use: credential files, session JSONL records, browser API
+    responses, or any external schema where you need 3 fields out of 30.
+    """
+
+    model_config = pydantic.ConfigDict(
+        extra='ignore',
         frozen=True,
         strict=True,
         validate_default=True,
