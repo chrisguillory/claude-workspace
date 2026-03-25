@@ -1,8 +1,3 @@
-#!/usr/bin/env -S uv run --no-project --script
-# /// script
-# requires-python = ">=3.13"
-# dependencies = []
-# ///
 """Validate suppression_rationale_linter.py against its test cases.
 
 This script validates two test files:
@@ -226,9 +221,7 @@ def main() -> int:
     return 0
 
 
-def test_validation(capsys: object) -> None:
+def test_validation() -> None:
     """Run validation suite via pytest."""
     exit_code = main()
     assert exit_code == 0, f'Validation failed with exit code {exit_code}'
-
-
