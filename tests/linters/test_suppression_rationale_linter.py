@@ -1,6 +1,6 @@
 """Validate suppression_rationale_linter.py against its test cases.
 
-This script validates two test files:
+Validates two test files:
 
 1. suppression_rationale_linter_test_cases.py (Instructive)
    - Each scenario tests exactly one rule
@@ -9,14 +9,11 @@ This script validates two test files:
 2. suppression_rationale_linter_edge_cases.py (Regression)
    - False positive prevention, string contexts, boundary conditions
 
-Unlike the AST-based linter test runners (which map violations to functions),
-this runner uses line-level tags:
-    # EXPECT: SUP001     — this line should trigger SUP001
-    # EXPECT: SUP005     — this line should trigger SUP005
-    # OK                 — this line should NOT trigger any violation
-    (no tag)             — line is not tested (infrastructure, blank, etc.)
-
-Run: ./test_suppression_rationale_linter.py
+Uses line-level tags:
+    # EXPECT: SUP001     -- this line should trigger SUP001
+    # EXPECT: SUP005     -- this line should trigger SUP005
+    # OK                 -- this line should NOT trigger any violation
+    (no tag)             -- line is not tested (infrastructure, blank, etc.)
 """
 
 from __future__ import annotations
@@ -25,8 +22,9 @@ import re
 import subprocess
 import sys
 from collections.abc import Mapping, Set
-from dataclasses import dataclass
 from pathlib import Path
+
+import pytest
 
 # -- Configuration ------------------------------------------------------------
 
@@ -126,102 +124,136 @@ def parse_expectations(filepath: Path) -> tuple[Mapping[int, str], Set[int]]:
     return expected, ok_lines
 
 
-# -- Validation ---------------------------------------------------------------
+def _get_source_line(filepath: Path, lineno: int) -> str:
+    """Read a single source line (1-indexed) from a file."""
+    return filepath.read_text().splitlines()[lineno - 1].strip()
 
 
-@dataclass
-class ValidationResult:
-    """Result of validating a single test file."""
-
-    file_name: str
-    errors: list[str]
-    expected_count: int
-    actual_count: int
+# -- Module-Scoped Fixtures ---------------------------------------------------
 
 
-def validate_file(test_file: Path) -> ValidationResult:
-    """Validate a test file against its EXPECT/OK tags."""
-    expected, ok_lines = parse_expectations(test_file)
-
-    output = run_linter(test_file, LINTER)
+@pytest.fixture(scope='module')
+def instructive_data() -> tuple[Mapping[int, str], Mapping[int, str], Set[int]]:
+    """Run linter on instructive file and return (actual, expected, ok_lines)."""
+    expected, ok_lines = parse_expectations(TEST_FILE)
+    output = run_linter(TEST_FILE, LINTER)
     actual = parse_linter_output(output)
+    return actual, expected, ok_lines
 
-    errors: list[str] = []
 
-    # Check expected violations fired correctly
-    for lineno, expected_code in sorted(expected.items()):
-        actual_code = actual.get(lineno)
-        if actual_code is None:
-            errors.append(f'  line {lineno}: expected {expected_code}, got nothing')
-        elif actual_code != expected_code:
-            errors.append(f'  line {lineno}: expected {expected_code}, got {actual_code}')
+@pytest.fixture(scope='module')
+def edge_case_data() -> tuple[Mapping[int, str], Mapping[int, str], Set[int]]:
+    """Run linter on edge case file and return (actual, expected, ok_lines)."""
+    expected, ok_lines = parse_expectations(EDGE_CASE_FILE)
+    output = run_linter(EDGE_CASE_FILE, LINTER)
+    actual = parse_linter_output(output)
+    return actual, expected, ok_lines
 
-    # Check OK lines produced no violations
-    for lineno in sorted(ok_lines):
-        actual_code = actual.get(lineno)
-        if actual_code is not None:
-            source_line = test_file.read_text().splitlines()[lineno - 1].strip()
-            errors.append(f'  line {lineno}: expected OK, got {actual_code} ({source_line[:60]})')
 
-    # Check for unexpected violations on untagged lines
+# -- Helpers for parametrize IDs ----------------------------------------------
+
+# Pre-parse expectations at module level for parametrize decorators
+_INSTRUCTIVE_EXPECTED, _INSTRUCTIVE_OK = parse_expectations(TEST_FILE)
+_EDGE_CASE_EXPECTED, _EDGE_CASE_OK = parse_expectations(EDGE_CASE_FILE)
+
+
+def _expect_id(lineno: int, code: str) -> str:
+    """Generate a readable test ID for an EXPECT tag."""
+    return f'line{lineno}_{code}'
+
+
+def _ok_id(lineno: int) -> str:
+    """Generate a readable test ID for an OK tag."""
+    return f'line{lineno}_OK'
+
+
+# -- Parametrized Tests: Instructive ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('lineno', 'expected_code'),
+    _INSTRUCTIVE_EXPECTED.items(),
+    ids=[_expect_id(ln, code) for ln, code in _INSTRUCTIVE_EXPECTED.items()],
+)
+def test_instructive_expected(
+    lineno: int, expected_code: str, instructive_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]]
+) -> None:
+    """Each EXPECT-tagged line triggers the expected rule."""
+    actual, _, _ = instructive_data
+    actual_code = actual.get(lineno)
+    assert actual_code is not None, f'line {lineno}: expected {expected_code}, got nothing'
+    assert actual_code == expected_code, f'line {lineno}: expected {expected_code}, got {actual_code}'
+
+
+@pytest.mark.parametrize(
+    'lineno',
+    sorted(_INSTRUCTIVE_OK),
+    ids=[_ok_id(ln) for ln in sorted(_INSTRUCTIVE_OK)],
+)
+def test_instructive_ok(lineno: int, instructive_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]]) -> None:
+    """Each OK-tagged line produces no violation."""
+    actual, _, _ = instructive_data
+    actual_code = actual.get(lineno)
+    if actual_code is not None:
+        source_line = _get_source_line(TEST_FILE, lineno)
+        raise AssertionError(f'line {lineno}: expected OK, got {actual_code} ({source_line[:60]})')
+
+
+def test_instructive_no_unexpected(
+    instructive_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]],
+) -> None:
+    """No violations on untagged lines in the instructive file."""
+    actual, expected, ok_lines = instructive_data
     tagged_lines = set(expected.keys()) | ok_lines
+    unexpected = []
     for lineno, actual_code in sorted(actual.items()):
         if lineno not in tagged_lines:
-            source_line = test_file.read_text().splitlines()[lineno - 1].strip()
-            errors.append(f'  line {lineno}: unexpected {actual_code} (untagged line: {source_line[:60]})')
-
-    return ValidationResult(
-        file_name=test_file.name,
-        errors=errors,
-        expected_count=len(expected),
-        actual_count=len(actual),
-    )
+            source_line = _get_source_line(TEST_FILE, lineno)
+            unexpected.append(f'line {lineno}: unexpected {actual_code} (untagged: {source_line[:60]})')
+    assert not unexpected, '\n'.join(unexpected)
 
 
-# -- Main ---------------------------------------------------------------------
+# -- Parametrized Tests: Edge Cases -------------------------------------------
 
 
-def main() -> int:
-    """Run validation and return exit code."""
-    if not LINTER.exists():
-        print(f'ERROR: Linter not found: {LINTER}')
-        return 1
-
-    all_passed = True
-    results: list[ValidationResult] = []
-
-    for test_file in [TEST_FILE, EDGE_CASE_FILE]:
-        if test_file.exists():
-            result = validate_file(test_file)
-            results.append(result)
-            if result.errors:
-                all_passed = False
-        else:
-            print(f'WARNING: Test file not found: {test_file}')
-            all_passed = False
-
-    if not all_passed:
-        print('VALIDATION FAILED')
-        print()
-        for result in results:
-            if result.errors:
-                print(f'  {result.file_name}:')
-                for error in result.errors:
-                    print(f'    {error}')
-        print()
-        return 1
-
-    print('VALIDATION PASSED')
-    print()
-    for result in results:
-        print(f'  {result.file_name}:')
-        print(f'    Expected violations: {result.expected_count}')
-        print(f'    Actual violations: {result.actual_count}')
-    print()
-    return 0
+@pytest.mark.parametrize(
+    ('lineno', 'expected_code'),
+    _EDGE_CASE_EXPECTED.items(),
+    ids=[_expect_id(ln, code) for ln, code in _EDGE_CASE_EXPECTED.items()],
+)
+def test_edge_case_expected(
+    lineno: int, expected_code: str, edge_case_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]]
+) -> None:
+    """Each EXPECT-tagged line triggers the expected rule."""
+    actual, _, _ = edge_case_data
+    actual_code = actual.get(lineno)
+    assert actual_code is not None, f'line {lineno}: expected {expected_code}, got nothing'
+    assert actual_code == expected_code, f'line {lineno}: expected {expected_code}, got {actual_code}'
 
 
-def test_validation() -> None:
-    """Run validation suite via pytest."""
-    exit_code = main()
-    assert exit_code == 0, f'Validation failed with exit code {exit_code}'
+@pytest.mark.parametrize(
+    'lineno',
+    sorted(_EDGE_CASE_OK),
+    ids=[_ok_id(ln) for ln in sorted(_EDGE_CASE_OK)],
+)
+def test_edge_case_ok(lineno: int, edge_case_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]]) -> None:
+    """Each OK-tagged line produces no violation."""
+    actual, _, _ = edge_case_data
+    actual_code = actual.get(lineno)
+    if actual_code is not None:
+        source_line = _get_source_line(EDGE_CASE_FILE, lineno)
+        raise AssertionError(f'line {lineno}: expected OK, got {actual_code} ({source_line[:60]})')
+
+
+def test_edge_case_no_unexpected(
+    edge_case_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]],
+) -> None:
+    """No violations on untagged lines in the edge case file."""
+    actual, expected, ok_lines = edge_case_data
+    tagged_lines = set(expected.keys()) | ok_lines
+    unexpected = []
+    for lineno, actual_code in sorted(actual.items()):
+        if lineno not in tagged_lines:
+            source_line = _get_source_line(EDGE_CASE_FILE, lineno)
+            unexpected.append(f'line {lineno}: unexpected {actual_code} (untagged: {source_line[:60]})')
+    assert not unexpected, '\n'.join(unexpected)
