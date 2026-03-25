@@ -37,7 +37,7 @@ from typing import Literal, Protocol, cast
 import lazy_object_proxy
 import pydantic
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas.base import ClosedModel
+from cc_lib.schemas.base import ClosedModel, SubsetModel
 from cc_lib.schemas.hooks import BashToolInput
 from cc_lib.types import JsonDatetime, JsonObject
 from cc_lib.utils import load_module_from_path
@@ -117,13 +117,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class SessionModel(pydantic.BaseModel):
-    """Base model for Claude Code session JSONL records — ignores unknown fields."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
-
-
-class ContentBlock(SessionModel):
+class ContentBlock(SubsetModel):
     """A single content block from an assistant message."""
 
     type: str  # "tool_use", "text", "thinking"
@@ -132,13 +126,13 @@ class ContentBlock(SessionModel):
     input: JsonObject | None = None
 
 
-class AssistantMessage(SessionModel):
+class AssistantMessage(SubsetModel):
     """The message field of an assistant JSONL record."""
 
     content: Sequence[ContentBlock] | str = ()
 
 
-class SessionRecord(SessionModel):
+class SessionRecord(SubsetModel):
     """A single line from a Claude Code session JSONL file.
 
     Only validates the fields needed for Bash command extraction.

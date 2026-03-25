@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cc_lib.schemas.base import CamelModel, ClosedModel, OpenModel, StrictModel
+from cc_lib.schemas.base import CamelModel, ClosedModel, OpenModel, StrictModel, SubsetModel
 from cc_lib.schemas.hooks import (
     BashToolInput,
     EditToolInput,
@@ -28,5 +28,6 @@ __all__ = [
     'SessionEndHookInput',
     'SessionStartHookInput',
     'StrictModel',
+    'SubsetModel',
     'WriteToolInput',
 ]

@@ -7,7 +7,7 @@ from typing import Literal
 
 import pydantic
 import pydantic.alias_generators
-from cc_lib.schemas.base import ClosedModel, OpenModel
+from cc_lib.schemas.base import ClosedModel, OpenModel, SubsetModel
 from cc_lib.types import JsonObject
 from pydantic import JsonValue
 
@@ -202,10 +202,8 @@ class ChromeLocalState(OpenModel):
 MetricRating = Literal['good', 'needs-improvement', 'poor']
 
 
-class WebVitalMetric(pydantic.BaseModel):
+class WebVitalMetric(SubsetModel):
     """Base model for Web Vital metrics - allows extra fields from JS."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     name: str
     value: float  # milliseconds for timing, unitless for CLS
@@ -227,10 +225,8 @@ class LCPMetric(WebVitalMetric):
     url: str | None = None
 
 
-class TTFBPhases(pydantic.BaseModel):
+class TTFBPhases(SubsetModel):
     """TTFB timing phase breakdown."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     dns: float = 0
     tcp: float = 0
@@ -244,18 +240,14 @@ class TTFBMetric(WebVitalMetric):
     phases: TTFBPhases | None = None
 
 
-class LayoutShiftSource(pydantic.BaseModel):
+class LayoutShiftSource(SubsetModel):
     """Source element that caused layout shift."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     node: str | None = None
 
 
-class LayoutShiftEntry(pydantic.BaseModel):
+class LayoutShiftEntry(SubsetModel):
     """Individual layout shift entry."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     value: float
     time: float
@@ -269,10 +261,8 @@ class CLSMetric(WebVitalMetric):
     entries: Sequence[LayoutShiftEntry] = []
 
 
-class INPDetails(pydantic.BaseModel):
+class INPDetails(SubsetModel):
     """INP interaction phase breakdown."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     duration: float
     name: str
@@ -289,10 +279,8 @@ class INPMetric(WebVitalMetric):
     details: INPDetails | None = None
 
 
-class CoreWebVitals(pydantic.BaseModel):
+class CoreWebVitals(SubsetModel):
     """Complete Core Web Vitals report."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     url: str
     timestamp: float  # Unix timestamp when captured
@@ -316,10 +304,8 @@ class CoreWebVitals(pydantic.BaseModel):
 # =============================================================================
 
 
-class RequestTiming(pydantic.BaseModel):
+class RequestTiming(SubsetModel):
     """CDP ResourceTiming converted to milliseconds."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     blocked: float = 0
     dns: float = 0
@@ -335,10 +321,8 @@ class RequestTiming(pydantic.BaseModel):
         return self.blocked + self.dns + self.connect + self.ssl + self.send + self.wait + self.receive
 
 
-class NetworkRequest(pydantic.BaseModel):
+class NetworkRequest(SubsetModel):
     """Individual network request with timing data."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     request_id: str
     url: str
@@ -365,10 +349,8 @@ class SlowestRequestSummary(ClosedModel):
     type: str | None = None
 
 
-class NetworkCapture(pydantic.BaseModel):
+class NetworkCapture(SubsetModel):
     """Complete network capture result."""
-
-    model_config = pydantic.ConfigDict(extra='ignore')
 
     url: str
     timestamp: float
