@@ -81,7 +81,7 @@ State (all under ~/.claude-workspace/statusline/):
 Schema Validation:
     Sub-objects use extra='forbid' — any new field in a nested object fails immediately.
     Top-level StatusLineInput uses extra='allow' — Claude Code can add new root fields
-    without breaking. External data models use extra='ignore'.
+    without breaking. External data models use SubsetModel (extra='ignore').
 
 Possible Improvements:
     Token insights (requires per-turn history infrastructure):
@@ -157,10 +157,7 @@ class ConfigOAuthAccount(SubsetModel):
     """~/.claude.json oauthAccount section (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     email_address: str = ''
@@ -172,10 +169,7 @@ class KeychainClaudeAiOAuth(SubsetModel):
     """Keychain claudeAiOauth section (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     subscription_type: str = ''
@@ -187,10 +181,7 @@ class KeychainData(SubsetModel):
     """Top-level keychain JSON from macOS security command."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     claude_ai_oauth: KeychainClaudeAiOAuth | None = None
@@ -200,10 +191,7 @@ class SwitchPendingMarker(SubsetModel):
     """The .switch-pending file written by claude-login (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     email_address: str = ''
