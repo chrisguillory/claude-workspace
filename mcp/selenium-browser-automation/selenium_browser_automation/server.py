@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Selenium Browser Automation MCP Server
 
