@@ -1,8 +1,3 @@
-#!/usr/bin/env -S uv run --no-project --script
-# /// script
-# requires-python = ">=3.13"
-# dependencies = []
-# ///
 """Validate reexport_linter.py against its test cases.
 
 This script validates two test files:
@@ -178,6 +173,37 @@ def main() -> int:
         print(f'WARNING: Edge case file not found: {EDGE_CASE_FILE}')
         all_passed = False
 
+    # Validate structural edge cases (per-file __all__ patterns)
+    structural_dir = EDGE_CASES_DIR / 'reexport'
+    structural_cases = [
+        ('empty_all.py', 0),
+        ('all_local_only.py', 0),
+        ('star_import.py', 0),
+        ('dynamic_all.py', 0),
+        ('annotated_all.py', 2),
+        ('tuple_all.py', 2),
+    ]
+    for filename, expected_count in structural_cases:
+        fixture = structural_dir / filename
+        if not fixture.exists():
+            print(f'WARNING: Structural fixture not found: {fixture}')
+            all_passed = False
+            continue
+        output = run_linter(fixture, LINTER)
+        actual_count = output.count('REX001')
+        if actual_count != expected_count:
+            print(f'  {filename}: expected {expected_count} violations, got {actual_count}')
+            all_passed = False
+        else:
+            results.append(
+                ValidationResult(
+                    file_name=filename,
+                    errors=[],
+                    flagged_count=actual_count,
+                    expected_flag_count=expected_count,
+                )
+            )
+
     # Report results
     if not all_passed:
         print('VALIDATION FAILED')
@@ -203,5 +229,7 @@ def main() -> int:
     return 0
 
 
-if __name__ == '__main__':
-    sys.exit(main())
+def test_validation() -> None:
+    """Run validation suite via pytest."""
+    exit_code = main()
+    assert exit_code == 0, f'Validation failed with exit code {exit_code}'

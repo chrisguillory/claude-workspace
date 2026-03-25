@@ -1,4 +1,4 @@
-"""Shared config reader for per-file-ignores across custom linters.
+"""Shared config reader and utilities for custom linters.
 
 Reads ``[tool.<linter-name>.per-file-ignores]`` from pyproject.toml,
 following ruff's config discovery pattern: walk up from each file being
@@ -11,6 +11,7 @@ matching pre-commit hook IDs, while filenames use underscores
 
 from __future__ import annotations
 
+import subprocess
 import tomllib
 from collections.abc import Mapping, Sequence, Set
 from functools import lru_cache
@@ -91,3 +92,40 @@ def get_per_file_ignored_codes(
         if relative.full_match(glob_pattern):
             ignored.update(codes)
     return ignored
+
+
+def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: bool = True) -> Sequence[Path]:
+    """Find all .py files recursively under root, skipping excluded directories."""
+    all_files = sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
+
+    if respect_gitignore:
+        ignored = get_git_ignored_files(all_files, root)
+        all_files = [f for f in all_files if f not in ignored]
+
+    return all_files
+
+
+def get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Path]:
+    """Use git check-ignore to identify ignored files.
+
+    Returns set of ignored paths, or empty set if not a git repo or git unavailable.
+    """
+    if not file_paths:
+        return set()
+
+    try:
+        result = subprocess.run(
+            ['git', 'check-ignore', '--stdin'],
+            input='\n'.join(str(p) for p in file_paths),
+            capture_output=True,
+            text=True,
+            cwd=directory,
+            timeout=30,
+            check=False,
+        )
+        # Exit codes: 0 = some ignored, 1 = none ignored, 128 = not a git repo
+        if result.returncode == 128:
+            return set()
+        return {Path(line) for line in result.stdout.splitlines() if line}
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return set()
