@@ -1,0 +1,39 @@
+[project]
+name = "claude-session-mcp"
+version = "0.1.0"
+description = "MCP server for archiving and managing Claude Code sessions"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
+    "expiringdict>=1.2.2",
+    "fastmcp>=2.13.0.2",
+    "filelock>=3.20.1",
+    "httpx>=0.28.1",
+    "lazy-object-proxy>=1.12.0",
+    "orjson>=3.11.7",
+    "packaging>=24.0",
+    "psutil>=7.2.1",
+    "pydantic>=2.12.4",
+    "pydantic-settings>=2.12.0",
+    "typer>=0.20.0",
+    "uuid6>=2025.0.1",
+    "zstandard>=0.25.0",
+]
+
+[project.scripts]
+claude-session = "claude_session.cli.main:main"
+mcp-claude-session-server = "claude_session.mcp.server:main"
+
+[tool.uv.sources]
+cc-lib = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["claude_session/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 """
 Selenium Browser Automation MCP Server
 
 CDP stealth injection to bypass Cloudflare bot detection.
 
 Install:
-    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation selenium-server
+    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation mcp-selenium-browser-automation-server
 
 Architecture: Runs locally (not Docker) for visible browser monitoring.
 Uses Selenium with CDP stealth injection where Playwright fails.
@@ -39,11 +38,11 @@ from urllib.parse import parse_qs, unquote, urlparse
 # Third-Party Libraries
 import fastmcp.exceptions
 import httpx
+from cc_lib.schemas.base import SubsetModel
 from cc_lib.types import JsonObject
 from cc_lib.utils import Timer
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
@@ -72,12 +71,15 @@ from .models import (
     ChromeProfilesResult,
     # Chrome profile state export
     ChromeProfileStateExportResult,
+    ClearProxyResult,
     CLSMetric,
+    ConfigureProxyResult,
     # Console logs
     ConsoleLogEntry,
     ConsoleLogsResult,
     # Web Vitals
     CoreWebVitals,
+    DownloadResourceResult,
     FCPMetric,
     FocusableElement,
     HARExportResult,
@@ -96,10 +98,13 @@ from .models import (
     ProfileStateCookie,
     ProfileStateOriginStorage,
     RequestTiming,
+    ResizeWindowResult,
     SaveProfileStateResult,
+    SleepResult,
     SlowestRequestSummary,
     SmartExtractionInfo,
     TTFBMetric,
+    WaitForSelectorResult,
 )
 from .scripts import (
     ARIA_SNAPSHOT_SCRIPT,
@@ -1703,7 +1708,7 @@ def register_tools(service: BrowserService) -> None:
         return response.content, response.status_code, content_type
 
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
-    async def download_resource(url: str, output_filename: str) -> JsonObject:
+    async def download_resource(url: str, output_filename: str) -> DownloadResourceResult:
         """Download specific resource using current browser session's cookies and headers.
 
         Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
@@ -1736,13 +1741,13 @@ def register_tools(service: BrowserService) -> None:
                 raise fastmcp.exceptions.ToolError(f'Local file not found: {local_path}')
             body = local_path.read_bytes()
             save_path.write_bytes(body)
-            return {
-                'path': str(save_path),
-                'size_bytes': len(body),
-                'content_type': 'application/octet-stream',
-                'status': 200,
-                'url': url,
-            }
+            return DownloadResourceResult(
+                path=str(save_path),
+                size_bytes=len(body),
+                content_type='application/octet-stream',
+                status=200,
+                url=url,
+            )
 
         driver = await service.get_browser()
         logger.info('Downloading: %s', url)
@@ -1755,13 +1760,13 @@ def register_tools(service: BrowserService) -> None:
         save_path.write_bytes(body)
         logger.info('Downloaded %d bytes to %s', len(body), save_path)
 
-        return {
-            'path': str(save_path),
-            'size_bytes': len(body),
-            'content_type': content_type,
-            'status': status,
-            'url': url,
-        }
+        return DownloadResourceResult(
+            path=str(save_path),
+            size_bytes=len(body),
+            content_type=content_type,
+            status=status,
+            url=url,
+        )
 
     @mcp.tool(annotations=ToolAnnotations(title='Get ARIA Snapshot', readOnlyHint=True))
     async def get_aria_snapshot(
@@ -2574,7 +2579,7 @@ def register_tools(service: BrowserService) -> None:
         duration_ms: int,
         ctx: Context[Any, Any, Any],
         reason: str | None = None,
-    ) -> JsonObject:
+    ) -> SleepResult:
         """Pause execution for a fixed duration. Use sparingly.
 
         This is a simple time-based delay. For most automation scenarios,
@@ -2620,7 +2625,7 @@ def register_tools(service: BrowserService) -> None:
 
         await asyncio.sleep(duration_ms / 1000)
 
-        return {'slept_ms': duration_ms}
+        return SleepResult(slept_ms=duration_ms)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2634,7 +2639,7 @@ def register_tools(service: BrowserService) -> None:
         ctx: Context[Any, Any, Any],
         state: Literal['visible', 'hidden', 'attached', 'detached'] = 'visible',
         timeout: int = 30000,
-    ) -> JsonObject:
+    ) -> WaitForSelectorResult:
         """Wait for an element matching the selector to reach a desired state.
 
         More reliable than wait_for_network_idle() for modern SPAs because it waits
@@ -2702,23 +2707,23 @@ def register_tools(service: BrowserService) -> None:
                     if elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
                         logger.info(f"Selector '{css_selector}' attached after {elapsed_ms}ms")
-                        return {
-                            'selector': css_selector,
-                            'state': 'attached',
-                            'elapsed_ms': elapsed_ms,
-                            'element_count': len(elements),
-                        }
+                        return WaitForSelectorResult(
+                            selector=css_selector,
+                            state='attached',
+                            elapsed_ms=elapsed_ms,
+                            element_count=len(elements),
+                        )
 
                 elif state == 'detached':
                     # Element removed from DOM
                     if not elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
                         logger.info(f"Selector '{css_selector}' detached after {elapsed_ms}ms")
-                        return {
-                            'selector': css_selector,
-                            'state': 'detached',
-                            'elapsed_ms': elapsed_ms,
-                        }
+                        return WaitForSelectorResult(
+                            selector=css_selector,
+                            state='detached',
+                            elapsed_ms=elapsed_ms,
+                        )
 
                 elif state == 'visible':
                     # Element exists AND is displayed
@@ -2727,24 +2732,24 @@ def register_tools(service: BrowserService) -> None:
                         if is_displayed:
                             elapsed_ms = int((time.time() - start_time) * 1000)
                             logger.info(f"Selector '{css_selector}' visible after {elapsed_ms}ms")
-                            return {
-                                'selector': css_selector,
-                                'state': 'visible',
-                                'elapsed_ms': elapsed_ms,
-                                'element_count': len(elements),
-                            }
+                            return WaitForSelectorResult(
+                                selector=css_selector,
+                                state='visible',
+                                elapsed_ms=elapsed_ms,
+                                element_count=len(elements),
+                            )
 
                 elif state == 'hidden':
                     # Element not in DOM OR not displayed
                     if not elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
                         logger.info(f"Selector '{css_selector}' hidden (not in DOM) after {elapsed_ms}ms")
-                        return {
-                            'selector': css_selector,
-                            'state': 'hidden',
-                            'elapsed_ms': elapsed_ms,
-                            'reason': 'not_in_dom',
-                        }
+                        return WaitForSelectorResult(
+                            selector=css_selector,
+                            state='hidden',
+                            elapsed_ms=elapsed_ms,
+                            reason='not_in_dom',
+                        )
                     # Check if all matching elements are hidden
                     all_hidden = True
                     for element in elements:
@@ -2755,13 +2760,13 @@ def register_tools(service: BrowserService) -> None:
                     if all_hidden:
                         elapsed_ms = int((time.time() - start_time) * 1000)
                         logger.info(f"Selector '{css_selector}' hidden (not displayed) after {elapsed_ms}ms")
-                        return {
-                            'selector': css_selector,
-                            'state': 'hidden',
-                            'elapsed_ms': elapsed_ms,
-                            'reason': 'not_displayed',
-                            'element_count': len(elements),
-                        }
+                        return WaitForSelectorResult(
+                            selector=css_selector,
+                            state='hidden',
+                            elapsed_ms=elapsed_ms,
+                            reason='not_displayed',
+                            element_count=len(elements),
+                        )
 
             except Exception:  # exception_safety_linter.py: swallowed-exception — polling resilience; selector evaluation may hit stale element
                 pass
@@ -2835,7 +2840,7 @@ def register_tools(service: BrowserService) -> None:
         width: int,
         height: int,
         ctx: Context[Any, Any, Any],
-    ) -> JsonObject:
+    ) -> ResizeWindowResult:
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
@@ -2877,7 +2882,7 @@ def register_tools(service: BrowserService) -> None:
 
         logger.info(f'Window resized to {size["width"]}x{size["height"]}')
 
-        return {'width': size['width'], 'height': size['height']}
+        return ResizeWindowResult(width=size['width'], height=size['height'])
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2933,7 +2938,7 @@ def register_tools(service: BrowserService) -> None:
         collection_duration = (time.time() - start_time) * 1000
 
         # Parse results into Pydantic models
-        T = TypeVar('T', bound=BaseModel)
+        T = TypeVar('T', bound=SubsetModel)
 
         def parse_metric(data: JsonObject | None, model_cls: type[T]) -> T | None:
             if not data:
@@ -3584,7 +3589,7 @@ Workflow:
         username: str,
         password: str,
         ctx: Context[Any, Any, Any] | None = None,
-    ) -> JsonObject:
+    ) -> ConfigureProxyResult:
         """Configure authenticated HTTP proxy for bypassing IP-based rate limiting.
 
         Starts a local mitmproxy instance that handles authentication with the
@@ -3695,12 +3700,12 @@ Workflow:
                 service.state.mitmproxy_process = None
             raise fastmcp.exceptions.ToolError(f'Failed to start mitmproxy: {e}') from e
 
-        return {
-            'status': 'proxy_configured',
-            'host': host,
-            'port': port,
-            'note': 'Browser will use this proxy on next navigate()',
-        }
+        return ConfigureProxyResult(
+            status='proxy_configured',
+            host=host,
+            port=port,
+            note='Browser will use this proxy on next navigate()',
+        )
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -3711,7 +3716,7 @@ Workflow:
     )
     async def clear_proxy(
         ctx: Context[Any, Any, Any] | None = None,
-    ) -> JsonObject:
+    ) -> ClearProxyResult:
         """Clear proxy configuration and return to direct connection.
 
         Stops the mitmproxy subprocess and clears proxy settings.
@@ -3736,7 +3741,7 @@ Workflow:
 
         service.state.proxy_config = None
 
-        return {'status': 'proxy_cleared'}
+        return ClearProxyResult(status='proxy_cleared')
 
     @mcp.tool(
         annotations=ToolAnnotations(

@@ -34,11 +34,10 @@ class Collection(StrictModel):
     dimensions: int
 
 
-class CollectionRegistry(StrictModel, frozen=False):
+class CollectionRegistry(StrictModel):
     """Registry of all document collections.
 
     Persisted to disk and shared between MCP server and dashboard.
-    frozen=False allows mutation for add/remove operations.
     """
 
     collections: Mapping[str, Collection] = {}

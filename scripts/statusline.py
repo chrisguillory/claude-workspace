@@ -81,7 +81,7 @@ State (all under ~/.claude-workspace/statusline/):
 Schema Validation:
     Sub-objects use extra='forbid' — any new field in a nested object fails immediately.
     Top-level StatusLineInput uses extra='allow' — Claude Code can add new root fields
-    without breaking. External data models use extra='ignore'.
+    without breaking. External data models use SubsetModel (extra='ignore').
 
 Possible Improvements:
     Token insights (requires per-turn history infrastructure):
@@ -116,19 +116,9 @@ import psutil
 import pydantic
 import pydantic.alias_generators
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas import StrictModel
+from cc_lib.schemas import StrictModel, SubsetModel
+from cc_lib.schemas.base import ClosedModel
 from cc_lib.session_tracker import find_claude_pid
-
-# =============================================================================
-# Pydantic Models — strict, fail-fast on schema drift
-# =============================================================================
-
-
-class _ExternalModel(pydantic.BaseModel):
-    """Base for external data we don't control. Ignores unknown fields."""
-
-    model_config = pydantic.ConfigDict(extra='ignore', frozen=True)
-
 
 # =============================================================================
 # Credential Models — External Data (login files, config, keychain)
@@ -139,7 +129,7 @@ class _ExternalModel(pydantic.BaseModel):
 # =============================================================================
 
 
-class LoginFileOAuthAccount(_ExternalModel):
+class LoginFileOAuthAccount(SubsetModel):
     """Login file's oauth_account section (snake_case from disk)."""
 
     email_address: str = ''
@@ -147,14 +137,14 @@ class LoginFileOAuthAccount(_ExternalModel):
     billing_type: str | None = None
 
 
-class LoginFileClaudeAiOAuth(_ExternalModel):
+class LoginFileClaudeAiOAuth(SubsetModel):
     """Login file's claude_ai_oauth section (snake_case from disk)."""
 
     subscription_type: str | None = None
     rate_limit_tier: str | None = None
 
 
-class LoginFile(_ExternalModel):
+class LoginFile(SubsetModel):
     """Saved login file from ~/.claude-workspace/logins/*.json."""
 
     name: str = ''
@@ -163,14 +153,11 @@ class LoginFile(_ExternalModel):
     setup_token: str | None = None
 
 
-class ConfigOAuthAccount(_ExternalModel):
+class ConfigOAuthAccount(SubsetModel):
     """~/.claude.json oauthAccount section (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     email_address: str = ''
@@ -178,14 +165,11 @@ class ConfigOAuthAccount(_ExternalModel):
     billing_type: str = ''
 
 
-class KeychainClaudeAiOAuth(_ExternalModel):
+class KeychainClaudeAiOAuth(SubsetModel):
     """Keychain claudeAiOauth section (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     subscription_type: str = ''
@@ -193,27 +177,21 @@ class KeychainClaudeAiOAuth(_ExternalModel):
     access_token: str = ''
 
 
-class KeychainData(_ExternalModel):
+class KeychainData(SubsetModel):
     """Top-level keychain JSON from macOS security command."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     claude_ai_oauth: KeychainClaudeAiOAuth | None = None
 
 
-class SwitchPendingMarker(_ExternalModel):
+class SwitchPendingMarker(SubsetModel):
     """The .switch-pending file written by claude-login (camelCase from disk)."""
 
     model_config = pydantic.ConfigDict(
-        extra='ignore',
-        frozen=True,
         alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
     )
 
     email_address: str = ''
@@ -226,20 +204,8 @@ class SwitchPendingMarker(_ExternalModel):
 # =============================================================================
 
 
-class ResolvedCredentials(pydantic.BaseModel):
-    """Resolved credential state flowing through the pipeline.
-
-    Replaces Mapping[str, str] with typed fields. Uses camelCase JSON aliases
-    for backward compatibility with existing cache and snapshot files on disk.
-    """
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-        alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
-    )
+class ResolvedCredentials(ClosedModel):
+    """Resolved credential state flowing through the pipeline."""
 
     email_address: str = ''
     organization_uuid: str = ''
@@ -257,14 +223,8 @@ class CachedCredentials(StrictModel):
     credentials: ResolvedCredentials
 
 
-class CredentialSnapshot(pydantic.BaseModel):
-    """Per-session credential snapshot, persisted to disk.
-
-    Not strict — existing snapshot files may have numeric claude_pid that
-    needs coercion. credentials sub-object handles its own alias mapping.
-    """
-
-    model_config = pydantic.ConfigDict(extra='forbid', frozen=True)
+class CredentialSnapshot(ClosedModel):
+    """Per-session credential snapshot, persisted to disk."""
 
     session_id: str
     claude_pid: int
@@ -338,7 +298,7 @@ class ModelInfo(StrictModel):
 class WorkspaceInfo(StrictModel):
     current_dir: str
     project_dir: str
-    added_dirs: Sequence[str]  # Added in v2.1.47
+    added_dirs: Sequence[str] = ()  # Added in v2.1.47
 
 
 class CostInfo(StrictModel):
@@ -365,18 +325,12 @@ class ContextWindow(StrictModel):
     current_usage: CurrentUsage | None = None
 
 
-class StatusLineInput(pydantic.BaseModel):
+class StatusLineInput(StrictModel):
     """Top-level JSON received on stdin.
 
     Uses extra='allow' at top level since Claude Code may add new fields.
     Sub-objects use extra='forbid' to catch structural changes.
     """
-
-    model_config = pydantic.ConfigDict(
-        extra='allow',
-        strict=True,
-        frozen=True,
-    )
 
     model: ModelInfo
     cwd: str
@@ -388,9 +342,36 @@ class StatusLineInput(pydantic.BaseModel):
     version: str
     exceeds_200k_tokens: bool
     # Conditional fields
+    session_name: str | None = None  # Added in v2.1.41
+    rate_limits: RateLimits | None = None  # Added in v2.1.80
+    worktree: WorktreeInfo | None = None  # Added in v2.1.69
     vim: Mapping[str, str] | None = None
     agent: Mapping[str, str] | None = None
     output_style: Mapping[str, str] | None = None
+
+
+class RateLimits(StrictModel):
+    """Claude.ai rate limit usage. Only present for subscribers."""
+
+    five_hour: RateLimitWindow | None = None
+    seven_day: RateLimitWindow | None = None
+
+
+class RateLimitWindow(StrictModel):
+    """A single rate limit window (5-hour or 7-day)."""
+
+    used_percentage: float
+    resets_at: float  # Unix epoch seconds
+
+
+class WorktreeInfo(StrictModel):
+    """Worktree session context. Only present in --worktree sessions."""
+
+    name: str
+    path: str
+    branch: str | None = None
+    original_cwd: str
+    original_branch: str | None = None
 
 
 # =============================================================================
@@ -472,6 +453,34 @@ def _osc8_link(url: str, text: str) -> str:
 type CwdLocation = Literal['project', 'added', 'unknown']
 
 
+def _detect_git_worktree(cwd: str) -> str | None:
+    """Detect if cwd is a git worktree and return 'name (from: branch)' or None.
+
+    In a worktree, .git is a file (not a directory) containing a gitdir pointer
+    to the main repo. We read the main repo's HEAD to find the origin branch.
+    """
+    git_path = Path(cwd) / '.git'
+    if not git_path.is_file():
+        return None
+    try:
+        # .git file contains: "gitdir: /path/to/main-repo/.git/worktrees/<name>"
+        gitdir_line = git_path.read_text().strip()
+        if not gitdir_line.startswith('gitdir:'):
+            return None
+        gitdir = Path(gitdir_line.split(':', 1)[1].strip())
+        # Walk up from .git/worktrees/<name> to .git/ to find the main repo
+        main_git_dir = gitdir.parent.parent  # .git/worktrees/<name> → .git/
+        head_file = main_git_dir / 'HEAD'
+        if head_file.exists():
+            head_content = head_file.read_text().strip()
+            if head_content.startswith('ref: refs/heads/'):
+                branch = head_content.removeprefix('ref: refs/heads/')
+                return f'{Path(cwd).name} (from: {branch})'
+        return Path(cwd).name
+    except OSError:
+        return None
+
+
 def _classify_cwd(cwd: str, project_dir: str, added_dirs: Sequence[str]) -> CwdLocation:
     """Classify cwd relative to configured workspace directories."""
     cwd_n = cwd.rstrip('/')
@@ -540,12 +549,7 @@ def _read_cached_static() -> CachedCredentials | None:
 
 
 def _write_cache(creds: ResolvedCredentials) -> None:
-    """Write credentials to cache with current timestamp.
-
-    Uses default snake_case serialization (no by_alias). Snapshot files use
-    by_alias=True for camelCase backward compatibility. Both parse correctly
-    due to populate_by_name=True on ResolvedCredentials.
-    """
+    """Write credentials to cache with current timestamp."""
     cached = CachedCredentials(
         timestamp=datetime.now(UTC).timestamp(),
         credentials=creds,
@@ -755,7 +759,7 @@ def _get_active_credentials(
             created_at=datetime.now(UTC).isoformat(),
             credentials=creds,
         )
-        _atomic_write_json(snap_file, new.model_dump_json(by_alias=True, indent=2))
+        _atomic_write_json(snap_file, new.model_dump_json(indent=2))
         return new
 
     same_process = (
@@ -1507,8 +1511,8 @@ def main() -> None:
     # ── Line 1: Identity + Model ─────────────────────────────────────────
     parts: list[str] = []
 
-    # Session title (user-set via /rename)
-    session_title = _get_session_title(data.transcript_path)
+    # Session title — prefer native field (v2.1.41+), fall back to transcript scan
+    session_title = data.session_name or _get_session_title(data.transcript_path)
     if session_title:
         parts.append(f'{MAGENTA_BOLD}{session_title}{RESET}')
 
@@ -1595,6 +1599,17 @@ def main() -> None:
     if added or removed:
         metrics.append(f'{DIM}lines:{GREEN}+{added}{RESET}\u2009{RED}-{removed}{RESET}')
 
+    # Rate limits (v2.1.80+) — color by severity
+    if data.rate_limits:
+        rl_parts: list[str] = []
+        for label, window in [('5h', data.rate_limits.five_hour), ('7d', data.rate_limits.seven_day)]:
+            if window is not None:
+                pct_val = window.used_percentage
+                color = DIM if pct_val < 70 else YELLOW if pct_val < 90 else RED  # noqa: PLR2004 — threshold
+                rl_parts.append(f'{color}{label}:{pct_val:.0f}%{RESET}')
+        if rl_parts:
+            metrics.append(' '.join(rl_parts))
+
     print(' │ '.join(metrics))
 
     # ── Line 3: Workspace ──────────────────────────────────────────────
@@ -1617,6 +1632,15 @@ def main() -> None:
         for d in data.workspace.added_dirs
         if not cwd_n.startswith(d.rstrip('/'))
     )
+
+    # Worktree context — CC-managed (v2.1.69+) or detected via git
+    if data.worktree:
+        from_branch = f' (from: {data.worktree.original_branch})' if data.worktree.original_branch else ''
+        line3.append(f'{CYAN}worktree:{RESET} {data.worktree.name}{from_branch} {DIM}cc{RESET}')
+    else:
+        wt_info = _detect_git_worktree(data.cwd)
+        if wt_info:
+            line3.append(f'{CYAN}worktree:{RESET} {wt_info}')
 
     # Transcript path
     line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, _shorten_path(data.transcript_path))}')

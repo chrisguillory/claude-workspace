@@ -98,8 +98,9 @@ trust levels for `extra` field handling (terminology follows JSON Schema closed/
 | `StrictModel` | `'allow'` default, `'forbid'` via `CC_STRICT_MODEL_EXTRA_FORBID=1` | Protocol data (Claude Code hooks, MCP) — forward-compatible         |
 | `CamelModel`  | Inherits from `StrictModel`                                        | Protocol data with camelCase JSON serialization                     |
 | `OpenModel`   | `'allow'` default, `'forbid'` via `CC_OPEN_MODEL_EXTRA_FORBID=1`   | External data (Chrome, CDP) — upstream schema evolves independently |
+| `SubsetModel` | `'ignore'` always                                                  | Subset of external data — need 3 fields out of 30                   |
 
-All four share: `frozen=True`, `strict=True`, `validate_default=True`, `serialize_by_alias=True`.
+All five share: `frozen=True`, `strict=True`, `validate_default=True`, `serialize_by_alias=True`.
 
 **Python 3.13 modern syntax:**
 - Use `| None` instead of `Optional`
@@ -546,7 +547,7 @@ MCP servers are installed via `uv tool install` and registered in `~/.claude.jso
 uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
 
 # Configure Claude Code
-claude mcp add --scope user python-interpreter -- mcp-py-server
+claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
 ```
 
 This adds to `~/.claude.json`:
@@ -556,7 +557,7 @@ This adds to `~/.claude.json`:
   "mcpServers": {
     "python-interpreter": {
       "type": "stdio",
-      "command": "mcp-py-server",
+      "command": "mcp-python-interpreter-server",
       "args": []
     }
   }
@@ -579,10 +580,12 @@ Users see versions via `uv tool list` and upgrade via `uv tool upgrade <package-
 
 ### Entry Point Naming Convention
 
-| Component | Pattern                  | Example         |
-|-----------|--------------------------|-----------------|
-| Server    | `mcp-<shortname>-server` | `mcp-py-server` |
-| Client    | `mcp-<shortname>-client` | `mcp-py-client` |
+| Component | Pattern                            | Example                          |
+|-----------|------------------------------------|----------------------------------|
+| Server    | `mcp-<package-dir-name>-server`    | `mcp-python-interpreter-server`  |
+| Client    | `mcp-<package-dir-name>-client`    | `mcp-python-interpreter-client`  |
+
+The directory name under `mcp/` IS the entry point name. No abbreviations, no truncations.
 
 Avoid generic names like `server` that could collide with other tools when installed globally via `uv tool install`.
 
@@ -604,11 +607,11 @@ Example pattern:
 """Execute Python code in persistent scope...
 
 IMPORTANT: For better user experience, you should typically use the Bash client instead:
-    mcp-py-client <<'PY'
+    mcp-python-interpreter-client <<'PY'
     print("Hello")
     PY
 
-If mcp-py-client is not found, install via:
+If mcp-python-interpreter-client is not found, install via:
     uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
 
 Only use this MCP tool directly if the user explicitly requests it or you need structured output."""
@@ -621,7 +624,7 @@ Three installation patterns in order of preference:
 **1. Global install** (recommended for users):
 ```bash
 uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/<server>
-claude mcp add --scope user <name> -- mcp-<shortname>-server
+claude mcp add --scope user <name> -- mcp-<package-dir-name>-server
 ```
 - Fast startup (no network call)
 - Version locked until explicit upgrade
@@ -631,7 +634,7 @@ claude mcp add --scope user <name> -- mcp-<shortname>-server
 ```bash
 claude mcp add --scope user <name> -- uvx --refresh --from \
   git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/<server> \
-  mcp-<shortname>-server
+  mcp-<package-dir-name>-server
 ```
 - Network call every startup
 - Always gets latest from git
@@ -640,7 +643,7 @@ claude mcp add --scope user <name> -- uvx --refresh --from \
 **3. Local development - editable install** (recommended for developers):
 ```bash
 uv tool install --editable /path/to/claude-workspace/mcp/<server>
-claude mcp add --scope user <name> -- mcp-<shortname>-server
+claude mcp add --scope user <name> -- mcp-<package-dir-name>-server
 ```
 - Commands in PATH (permission patterns work)
 - Changes to source files take effect immediately
@@ -663,7 +666,7 @@ Claude Code permission patterns use **literal prefix matching** (no shell expans
 
 | Pattern | Works? | Reason |
 |---------|--------|--------|
-| `Bash(mcp-py-client:*)` | ✅ | Simple command name |
+| `Bash(mcp-python-interpreter-client:*)` | ✅ | Simple command name |
 | `Bash("$(git rev-parse ...)":*)` | ❌ | Shell expansion not evaluated |
 | `Bash(/absolute/path/client.py:*)` | ✅ | Literal path match |
 
@@ -674,7 +677,7 @@ This is why `uv tool install` is preferred—it creates simple commands in PATH 
 | Component | Use Case | Invocation |
 |-----------|----------|------------|
 | MCP Tool (`mcp__python-interpreter__execute`) | Structured output, explicit request | Via MCP protocol |
-| Bash Client (`mcp-py-client`) | Multiline code, readable approval prompts | Heredoc syntax |
+| Bash Client (`mcp-python-interpreter-client`) | Multiline code, readable approval prompts | Heredoc syntax |
 
 Claude should prefer the Bash client for multiline code because approval prompts show clean, readable Python instead of escaped JSON strings.
 
@@ -717,7 +720,7 @@ Should successfully import `cc_lib` and start the server.
 
 Test entry points work:
 ```bash
-uv run --project mcp/python-interpreter mcp-py-server
+uv run --project mcp/python-interpreter mcp-python-interpreter-server
 ```
 
 ## Next Steps

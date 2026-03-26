@@ -52,6 +52,14 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: reexport-linter
+        name: reexport-linter
+        description: Check for re-exported symbols via __all__
+        entry: ./linters/reexport_linter.py --report-unused-directives .
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: suppression-rationale-linter
         name: suppression-rationale-linter
         description: Check that lint suppression directives include rationale

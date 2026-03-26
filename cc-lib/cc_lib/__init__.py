@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from cc_lib.background_tasks import BackgroundTaskGroup
 from cc_lib.batch_loader import GenericBatchLoader
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_completion_command, add_install_command, create_app, run_app
 from cc_lib.concurrency_tracker import ConcurrencyTracker
 from cc_lib.error_boundary import ErrorBoundary, ErrorHandler
 from cc_lib.library_boundary import LibraryBoundary
@@ -17,6 +17,7 @@ __all__ = [
     'ErrorHandler',
     'GenericBatchLoader',
     'LibraryBoundary',
+    'add_completion_command',
     'add_install_command',
     'atomic_write',
     'create_app',
