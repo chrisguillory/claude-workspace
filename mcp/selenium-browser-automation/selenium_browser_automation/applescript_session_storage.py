@@ -13,6 +13,16 @@ Platform:
 
 from __future__ import annotations
 
+__all__ = [
+    'AppleScriptExtractionResult',
+    'AppleScriptTabTimeoutError',
+    'SeleniumChromeConflictError',
+    'extract_live_session_storage',
+    'is_applescript_available',
+    'is_chrome_running',
+    'is_selenium_chrome_running',
+]
+
 import json
 import subprocess
 import sys

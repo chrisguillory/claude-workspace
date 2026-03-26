@@ -23,7 +23,17 @@ the MCP server since it runs in a different Python environment.
 
 from __future__ import annotations
 
-__all__ = ['main']
+__all__ = [
+    'DriverRequest',
+    'ErrorResponse',
+    'ExecuteResponse',
+    'ReadyResponse',
+    'ShutdownResponse',
+    'execute_code',
+    'main',
+    'read_request',
+    'send_response',
+]
 
 import ast
 import contextlib

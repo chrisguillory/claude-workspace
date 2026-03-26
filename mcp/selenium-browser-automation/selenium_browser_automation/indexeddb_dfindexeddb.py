@@ -10,6 +10,10 @@ database reconstruction in Selenium sessions.
 
 from __future__ import annotations
 
+__all__ = [
+    'export_indexeddb_with_schema',
+]
+
 import logging
 from collections import defaultdict
 from collections.abc import Mapping, Sequence

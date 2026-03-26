@@ -35,7 +35,9 @@ Usage Examples:
 
 from __future__ import annotations
 
-__all__ = ['main']
+__all__ = [
+    'main',
+]
 
 import argparse
 import os
@@ -44,37 +46,6 @@ import subprocess
 import sys
 
 import httpx
-
-
-def get_socket_path() -> pathlib.Path:
-    """Get Unix socket path by finding Claude PID in process tree."""
-    current = os.getppid()
-
-    for _ in range(20):  # Depth limit
-        result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-
-        if not result.stdout.strip():
-            break
-
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-
-        # Check if this is Claude
-        if 'claude' in comm.lower():
-            return pathlib.Path(f'/tmp/python-interpreter-{current}.sock')
-
-        if ppid == 0:
-            break
-
-        current = ppid
-
-    raise RuntimeError('Could not find Claude process in process tree')
 
 
 def main() -> None:
@@ -116,6 +87,37 @@ def main() -> None:
         # Print result
         result = response.json()['result']
         print(result)
+
+
+def get_socket_path() -> pathlib.Path:
+    """Get Unix socket path by finding Claude PID in process tree."""
+    current = os.getppid()
+
+    for _ in range(20):  # Depth limit
+        result = subprocess.run(
+            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        if not result.stdout.strip():
+            break
+
+        parts = result.stdout.strip().split(None, 1)
+        ppid = int(parts[0])
+        comm = parts[1] if len(parts) > 1 else ''
+
+        # Check if this is Claude
+        if 'claude' in comm.lower():
+            return pathlib.Path(f'/tmp/python-interpreter-{current}.sock')
+
+        if ppid == 0:
+            break
+
+        current = ppid
+
+    raise RuntimeError('Could not find Claude process in process tree')
 
 
 if __name__ == '__main__':

@@ -66,7 +66,9 @@ See also:
 
 from __future__ import annotations
 
-__all__ = ['LibraryBoundary']
+__all__ = [
+    'LibraryBoundary',
+]
 
 import asyncio
 import functools

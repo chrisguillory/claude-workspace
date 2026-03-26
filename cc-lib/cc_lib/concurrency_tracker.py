@@ -12,7 +12,9 @@ import time
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
-__all__ = ['ConcurrencyTracker']
+__all__ = [
+    'ConcurrencyTracker',
+]
 
 
 class ConcurrencyTracker:
@@ -50,20 +52,6 @@ class ConcurrencyTracker:
         self._total_time = 0.0
         self._monitor_task: asyncio.Task[None] | None = None
         self._last_logged_calls = 0
-
-    def _start_monitor(self) -> None:
-        """Start background monitor if configured and not already running."""
-        if self._log_interval and self._monitor_task is None:
-            self._monitor_task = asyncio.create_task(self._monitor_loop())
-
-    async def _monitor_loop(self) -> None:
-        """Periodically log stats while there's activity."""
-        while True:
-            await asyncio.sleep(self._log_interval or 5.0)
-            # Only log if there's been activity since last log
-            if self._total_calls > self._last_logged_calls:
-                self._logger.debug(f'[{self.name}] {self.stats}')
-                self._last_logged_calls = self._total_calls
 
     @asynccontextmanager
     async def track(self) -> AsyncIterator[None]:
@@ -123,3 +111,17 @@ class ConcurrencyTracker:
         self._total_calls = 0
         self._total_time = 0.0
         self._last_logged_calls = 0
+
+    def _start_monitor(self) -> None:
+        """Start background monitor if configured and not already running."""
+        if self._log_interval and self._monitor_task is None:
+            self._monitor_task = asyncio.create_task(self._monitor_loop())
+
+    async def _monitor_loop(self) -> None:
+        """Periodically log stats while there's activity."""
+        while True:
+            await asyncio.sleep(self._log_interval or 5.0)
+            # Only log if there's been activity since last log
+            if self._total_calls > self._last_logged_calls:
+                self._logger.debug(f'[{self.name}] {self.stats}')
+                self._last_logged_calls = self._total_calls
