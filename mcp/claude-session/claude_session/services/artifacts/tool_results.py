@@ -33,9 +33,7 @@ TOOL_RESULT_EXTENSIONS: Set[str] = set(get_args(ToolResultExtension))
 KNOWN_DIR_PREFIXES = ('pdf-',)
 
 
-# ==============================================================================
-# Service-side Models (carry content bytes, used by clone/archive/move/restore)
-# ==============================================================================
+# -- Service-side Models (carry content bytes, used by clone/archive/move/restore) ---
 
 
 class ToolResultFile(StrictModel):
@@ -84,9 +82,7 @@ class ToolResultCollection(StrictModel):
         return bool(self.files) or bool(self.directories)
 
 
-# ==============================================================================
-# Discovery Types (lightweight, carry paths not content, never serialized)
-# ==============================================================================
+# -- Discovery Types (lightweight, carry paths not content, never serialized) ---
 # NamedTuple chosen over StrictModel because these are ephemeral internal types
 # that carry Path objects (not JSON-serializable) and are never persisted.
 
@@ -116,9 +112,7 @@ class DiscoveryResult(NamedTuple):
     unknown_files: Sequence[Path]  # callers decide: raise or collect
 
 
-# ==============================================================================
-# Functions
-# ==============================================================================
+# -- Functions -----------------------------------------------------------------
 
 
 def get_tool_results_dir(project_folder: Path, session_id: str) -> Path:

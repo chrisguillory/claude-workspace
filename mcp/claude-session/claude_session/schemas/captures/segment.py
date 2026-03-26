@@ -17,9 +17,7 @@ from claude_session.schemas.captures.base import RequestCapture, ResponseCapture
 from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.types import PermissiveModel
 
-# ==============================================================================
-# Context and Metadata
-# ==============================================================================
+# -- Context and Metadata ------------------------------------------------------
 
 
 class SegmentLibraryContext(StrictModel):
@@ -46,9 +44,7 @@ class SegmentMetadata(StrictModel):
     model_config = {'extra': 'allow'}
 
 
-# ==============================================================================
-# Event Base
-# ==============================================================================
+# -- Event Base ----------------------------------------------------------------
 
 
 class SegmentEventBase(StrictModel):
@@ -76,9 +72,7 @@ class SegmentEventBase(StrictModel):
     }
 
 
-# ==============================================================================
-# Claude Code-Specific Traits
-# ==============================================================================
+# -- Claude Code-Specific Traits -----------------------------------------------
 
 
 class ClaudeCodeIdentifyTraits(StrictModel):
@@ -112,9 +106,7 @@ class UnknownSegmentProperties(PermissiveModel):
     pass
 
 
-# ==============================================================================
-# Event Types (Discriminated by `type` field)
-# ==============================================================================
+# -- Event Types (Discriminated by `type` field) -------------------------------
 
 
 class SegmentIdentifyEvent(SegmentEventBase):
@@ -196,9 +188,7 @@ SegmentEvent = (
 )
 
 
-# ==============================================================================
-# Batch Request/Response
-# ==============================================================================
+# -- Batch Request/Response ----------------------------------------------------
 
 
 class SegmentBatchRequest(StrictModel):
@@ -217,9 +207,7 @@ class SegmentBatchResponse(StrictModel):
     success: bool
 
 
-# ==============================================================================
-# Capture Classes
-# ==============================================================================
+# -- Capture Classes -----------------------------------------------------------
 
 
 class SegmentRequestCapture(RequestCapture):

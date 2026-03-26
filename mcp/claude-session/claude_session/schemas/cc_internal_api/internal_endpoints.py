@@ -29,9 +29,7 @@ from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.cc_internal_api.request import RequestMessage, SystemBlock, ThinkingConfig, ToolDefinition
 from claude_session.schemas.types import EmptyDict, ModelId
 
-# ==============================================================================
-# Count Tokens (/v1/messages/count_tokens)
-# ==============================================================================
+# -- Count Tokens (/v1/messages/count_tokens) ----------------------------------
 
 
 class CountTokensRequest(StrictModel):
@@ -62,9 +60,7 @@ class CountTokensResponse(StrictModel):
     input_tokens: int
 
 
-# ==============================================================================
-# Grove (/api/claude_code/grove, /api/claude_code_grove)
-# ==============================================================================
+# -- Grove (/api/claude_code/grove, /api/claude_code_grove) --------------------
 
 
 class GroveResponse(StrictModel):
@@ -85,9 +81,7 @@ class GroveResponse(StrictModel):
     notice_reminder_frequency: int  # Reminder frequency (0 = no reminders)
 
 
-# ==============================================================================
-# Metrics (/api/claude_code/metrics, /api/claude_code/organizations/metrics_enabled)
-# ==============================================================================
+# -- Metrics (/api/claude_code/metrics, /api/claude_code/organizations/metrics_enabled) ---
 
 
 class ResourceAttributes(StrictModel):
@@ -196,9 +190,7 @@ class MetricsEnabledResponse(StrictModel):
     vcs_account_linking_enabled: bool  # Whether VCS account linking is enabled
 
 
-# ==============================================================================
-# OAuth Client Data (/api/oauth/claude_cli/client_data)
-# ==============================================================================
+# -- OAuth Client Data (/api/oauth/claude_cli/client_data) ---------------------
 
 
 class ClientDataResponse(StrictModel):
@@ -215,9 +207,7 @@ class ClientDataResponse(StrictModel):
     client_data: EmptyDict  # Always {} - will fail if API starts sending data
 
 
-# ==============================================================================
-# OAuth Account Settings (/api/oauth/account/settings)
-# ==============================================================================
+# -- OAuth Account Settings (/api/oauth/account/settings) ----------------------
 
 PaprikaMode = Literal['basic', 'extended', 'disabled']
 
@@ -320,9 +310,7 @@ class AccountSettingsResponse(StrictModel):
     ccr_sharing_show_display_name: bool | None = None
 
 
-# ==============================================================================
-# Health Check (/api/hello)
-# ==============================================================================
+# -- Health Check (/api/hello) -------------------------------------------------
 
 
 class HelloResponse(StrictModel):
@@ -336,9 +324,7 @@ class HelloResponse(StrictModel):
     message: Literal['hello']
 
 
-# ==============================================================================
-# Model Access Check (/api/organization/{uuid}/claude_code_sonnet_1m_access)
-# ==============================================================================
+# -- Model Access Check (/api/organization/{uuid}/claude_code_sonnet_1m_access) ---
 
 
 class ModelAccessResponse(StrictModel):
@@ -353,9 +339,7 @@ class ModelAccessResponse(StrictModel):
     has_access_not_as_default: bool  # Has access but not set as default
 
 
-# ==============================================================================
-# Referral Eligibility (/api/oauth/organizations/{uuid}/referral/eligibility)
-# ==============================================================================
+# -- Referral Eligibility (/api/oauth/organizations/{uuid}/referral/eligibility) ---
 
 
 class ReferralCodeDetails(StrictModel):
@@ -382,9 +366,7 @@ class ReferralEligibilityResponse(StrictModel):
     referral_code_details: ReferralCodeDetails | None = None
 
 
-# ==============================================================================
-# Referral Redemptions (/api/oauth/organizations/{uuid}/referral/redemptions)
-# ==============================================================================
+# -- Referral Redemptions (/api/oauth/organizations/{uuid}/referral/redemptions) ---
 
 
 class ReferralRedemption(StrictModel):
@@ -416,9 +398,7 @@ class ReferralRedemptionsResponse(StrictModel):
     has_referral_code: bool  # Whether user has referral code
 
 
-# ==============================================================================
-# OAuth API Key Creation (/api/oauth/claude_cli/create_api_key)
-# ==============================================================================
+# -- OAuth API Key Creation (/api/oauth/claude_cli/create_api_key) -------------
 
 
 class ApiKeyCreator(StrictModel):
@@ -453,9 +433,7 @@ class CreateApiKeyResponse(StrictModel):
     raw_key: str  # SENSITIVE: Full API key secret
 
 
-# ==============================================================================
-# OAuth CLI Roles (/api/oauth/claude_cli/roles)
-# ==============================================================================
+# -- OAuth CLI Roles (/api/oauth/claude_cli/roles) -----------------------------
 
 OrganizationRole = Literal['admin', 'user']
 WorkspaceRole = Literal['workspace_developer']  # May expand
@@ -481,9 +459,7 @@ class CliRolesResponse(StrictModel):
     workspace_role: WorkspaceRole | None = None
 
 
-# ==============================================================================
-# OAuth Profile (/api/oauth/profile)
-# ==============================================================================
+# -- OAuth Profile (/api/oauth/profile) ----------------------------------------
 
 OrganizationType = Literal['api_team', 'claude_team', 'claude_max']
 BillingType = Literal['prepaid', 'stripe_subscription']

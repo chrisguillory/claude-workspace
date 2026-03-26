@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-__all__ = ['atomic_write']
+__all__ = [
+    'atomic_write',
+]
 
 import os
 import shutil

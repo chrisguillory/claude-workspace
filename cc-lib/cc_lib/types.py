@@ -30,6 +30,16 @@ coercion by default, but JSON always encodes datetimes and UUIDs as strings:
 
 from __future__ import annotations
 
+__all__ = [
+    'CCVersion',
+    'JsonDatetime',
+    'JsonObject',
+    'JsonUuid',
+    'SessionSource',
+    'SessionState',
+    'StrictJsonObject',
+]
+
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any, Literal

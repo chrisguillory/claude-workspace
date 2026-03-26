@@ -341,7 +341,6 @@ def exc003_suppressed_top_level() -> int:
 #   Suppressed (`raise NewError() from None`):
 #     - Hides the original exception from traceback
 #     - Use sparingly (e.g., hiding internal implementation details)
-# =============================================================================
 
 
 def exc004_violation_basic() -> None:

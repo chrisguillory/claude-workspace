@@ -125,9 +125,7 @@ from cc_lib.schemas import StrictModel
 from cc_lib.session_tracker import find_claude_pid, resolve_session_id
 from cc_lib.types import JsonObject
 
-# =============================================================================
-# Pydantic Models
-# =============================================================================
+# -- Pydantic Models -----------------------------------------------------------
 
 
 class OAuthAccount(StrictModel):
@@ -193,9 +191,7 @@ class LoginFile(StrictModel):
     setup_token_created_at: datetime | None = None
 
 
-# =============================================================================
-# Constants
-# =============================================================================
+# -- Constants -----------------------------------------------------------------
 
 CONFIG_PATH = Path.home() / '.claude.json'
 WORKSPACE_DIR = Path.home() / '.claude-workspace'
@@ -208,9 +204,7 @@ SETUP_TOKEN_PREFIX = 'sk-ant-oat01-'
 SETUP_TOKEN_LIFETIME_DAYS = 365
 
 
-# =============================================================================
-# Process Relaunch
-# =============================================================================
+# -- Process Relaunch ----------------------------------------------------------
 
 _KILL_SCRIPT = """\
 import os, signal, time
@@ -252,9 +246,7 @@ def _spawn_kill_and_copy_resume(claude_pid: int, session_id: str, model: str | N
     )
 
 
-# =============================================================================
-# Keychain Operations
-# =============================================================================
+# -- Keychain Operations -------------------------------------------------------
 
 
 def read_keychain_raw() -> JsonObject | None:
@@ -379,9 +371,7 @@ def delete_api_key_keychain() -> None:
     )
 
 
-# =============================================================================
-# Config Operations
-# =============================================================================
+# -- Config Operations ---------------------------------------------------------
 
 
 _OAUTH_CAMEL_TO_SNAKE: Mapping[str, str] = {
@@ -462,9 +452,7 @@ def remove_primary_api_key() -> None:
         _write_file_atomically(CONFIG_PATH, json.dumps(config, indent=2))
 
 
-# =============================================================================
-# File Operations
-# =============================================================================
+# -- File Operations -----------------------------------------------------------
 
 
 def _write_file_atomically(path: Path, content: str) -> None:
@@ -483,9 +471,7 @@ def _write_file_atomically(path: Path, content: str) -> None:
         raise
 
 
-# =============================================================================
-# Login File Migration
-# =============================================================================
+# -- Login File Migration ------------------------------------------------------
 
 # Fields added after initial LoginFile schema. Each entry is (field_name, default_value).
 _LOGIN_MIGRATION_FIELDS: Sequence[
@@ -517,9 +503,7 @@ def migrate_login_files() -> int:
     return migrated
 
 
-# =============================================================================
-# Name Derivation
-# =============================================================================
+# -- Name Derivation -----------------------------------------------------------
 
 
 def derive_login_name(account: OAuthAccount, oauth: ClaudeAiOAuth | None) -> str:
@@ -535,9 +519,7 @@ def derive_login_name(account: OAuthAccount, oauth: ClaudeAiOAuth | None) -> str
     return f'{email}--Personal'
 
 
-# =============================================================================
-# Login Storage
-# =============================================================================
+# -- Login Storage -------------------------------------------------------------
 
 
 def login_path(name: str) -> Path:
@@ -580,9 +562,7 @@ def delete_login_file(name: str) -> None:
         path.unlink()
 
 
-# =============================================================================
-# MCP Auth Storage
-# =============================================================================
+# -- MCP Auth Storage ----------------------------------------------------------
 
 
 def save_mcp_auths(auths: Mapping[str, McpOAuthEntry]) -> None:
@@ -622,9 +602,7 @@ def mcp_auths_to_keychain(
     return result
 
 
-# =============================================================================
-# Current Login Detection
-# =============================================================================
+# -- Current Login Detection ---------------------------------------------------
 
 
 def get_current_login_name() -> str | None:
@@ -643,9 +621,7 @@ def get_current_login_name() -> str | None:
     return None
 
 
-# =============================================================================
-# Display Helpers
-# =============================================================================
+# -- Display Helpers -----------------------------------------------------------
 
 
 def _redact(val: str) -> str:
@@ -740,9 +716,7 @@ def _print_mcp_auth(name: str, entry: McpOAuthEntry) -> None:
     print(f'    {entry.server_url} | access expires: {expiry}{refresh_note}')
 
 
-# =============================================================================
-# Commands
-# =============================================================================
+# -- Commands ------------------------------------------------------------------
 
 
 def cmd_save_login(force: bool, inject_mcp: bool) -> None:
@@ -1198,9 +1172,7 @@ def cmd_nuke_claude_auth() -> None:
     print('Restart Claude Code to take effect.')
 
 
-# =============================================================================
-# Tab Completion
-# =============================================================================
+# -- Tab Completion ------------------------------------------------------------
 
 
 def _complete_login_id(incomplete: str) -> Sequence[tuple[str, str]]:
@@ -1271,9 +1243,7 @@ def _complete_setup_token_login_id(incomplete: str) -> Sequence[tuple[str, str]]
     return completions
 
 
-# =============================================================================
-# CLI
-# =============================================================================
+# -- CLI -----------------------------------------------------------------------
 
 app = create_app(help='Claude Code login and MCP auth manager.')
 

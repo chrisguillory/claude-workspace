@@ -31,9 +31,7 @@ _occlusion_specs = [s for s in _all_specs if s['section'] == 'occlusion']
 _duration_specs = [s for s in _all_specs if s['section'] == 'duration_validation']
 
 
-# ============================================================================
-# STABILITY TESTS
-# ============================================================================
+# -- STABILITY TESTS -----------------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _stability_specs, ids=lambda tc: tc['id'])
@@ -83,9 +81,7 @@ def test_hover_stability(
             )
 
 
-# ============================================================================
-# VISIBILITY TESTS
-# ============================================================================
+# -- VISIBILITY TESTS ----------------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _visibility_specs, ids=lambda tc: tc['id'])
@@ -106,9 +102,7 @@ def test_hover_visibility(
     _assert_hover_result(result, spec['expect'])
 
 
-# ============================================================================
-# OCCLUSION TESTS
-# ============================================================================
+# -- OCCLUSION TESTS -----------------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _occlusion_specs, ids=lambda tc: tc['id'])
@@ -129,9 +123,7 @@ def test_hover_occlusion(
     _assert_hover_result(result, spec['expect'])
 
 
-# ============================================================================
-# DURATION VALIDATION TESTS
-# ============================================================================
+# -- DURATION VALIDATION TESTS -------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _duration_specs, ids=lambda tc: tc['id'])

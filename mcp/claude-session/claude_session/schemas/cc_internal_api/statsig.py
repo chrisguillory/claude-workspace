@@ -26,9 +26,7 @@ import pydantic
 from claude_session.schemas.cc_internal_api.base import EmptyBody, StrictModel
 from claude_session.schemas.types import EmptyDict, PermissiveModel
 
-# ==============================================================================
-# Common Types
-# ==============================================================================
+# -- Common Types --------------------------------------------------------------
 
 
 class StatsigCustomIDs(StrictModel):
@@ -88,9 +86,7 @@ class StatsigMetadata(StrictModel):
     fallbackUrl: None  # Always present, always None in captures
 
 
-# ==============================================================================
-# Initialize Endpoint (/v1/initialize)
-# ==============================================================================
+# -- Initialize Endpoint (/v1/initialize) --------------------------------------
 
 
 class StatsigEvaluatedKeys(StrictModel):
@@ -142,13 +138,11 @@ class StatsigInitializeRequest(StrictModel):
     previousDerivedFields: DerivedFields | EmptyDict
 
 
-# ==============================================================================
 # Dynamic Config Value Types - Typed + Fallback Pattern
 #
 # Each observed value structure gets a typed model. Unknown structures fall
 # back to Mapping[str, Any]. This provides type safety for known patterns
 # while gracefully handling new configs.
-# ==============================================================================
 
 
 class EmptyConfigValue(StrictModel):
@@ -431,9 +425,7 @@ class StatsigNamedExperimentConfig(StatsigExperimentConfig):
 StatsigDynamicConfig = StatsigNamedExperimentConfig | StatsigExperimentConfig | StatsigEvaluatedConfig
 
 
-# ==============================================================================
-# Initialize Response - BIFURCATED into Full vs Delta
-# ==============================================================================
+# -- Initialize Response - BIFURCATED into Full vs Delta -----------------------
 
 
 class StatsigInitializeFullResponse(StrictModel):
@@ -519,9 +511,7 @@ StatsigInitializeResponse = Annotated[
 ]
 
 
-# ==============================================================================
-# Statsig Marker Types - BIFURCATED into 9 shapes
-# ==============================================================================
+# -- Statsig Marker Types - BIFURCATED into 9 shapes ---------------------------
 
 
 class StatsigMarkerEvaluationDetails(StrictModel):
@@ -690,9 +680,7 @@ StatsigMarker = Annotated[
 ]
 
 
-# ==============================================================================
-# Statsig Options (for diagnostics events)
-# ==============================================================================
+# -- Statsig Options (for diagnostics events) ----------------------------------
 
 
 class StatsigOptionsNetworkConfig(StrictModel):
@@ -730,9 +718,7 @@ class StatsigOptions(StrictModel):
     storageProvider: StatsigOptionsStorageProvider
 
 
-# ==============================================================================
-# Event Metadata Types - BIFURCATED per event type
-# ==============================================================================
+# -- Event Metadata Types - BIFURCATED per event type --------------------------
 
 
 # Common base for most tengu_* events
@@ -1240,9 +1226,7 @@ class TenguFileOperationMetadata(TenguEventMetadataBase):
     tool: str
 
 
-# ==============================================================================
-# Event Types - BIFURCATED by value/secondaryExposures presence
-# ==============================================================================
+# -- Event Types - BIFURCATED by value/secondaryExposures presence -------------
 
 
 def _discriminate_event_by_name(v: Any) -> str:
@@ -1807,9 +1791,7 @@ StatsigEvent = Annotated[
 ]
 
 
-# ==============================================================================
-# Register Endpoint (/v1/rgstr)
-# ==============================================================================
+# -- Register Endpoint (/v1/rgstr) ---------------------------------------------
 
 
 class StatsigRegisterRequest(StrictModel):

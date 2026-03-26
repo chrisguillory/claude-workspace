@@ -19,9 +19,7 @@ from claude_session.schemas.cc_internal_api.tool_input_schema import ToolInputPr
 from claude_session.schemas.session.models import ToolInput
 from claude_session.schemas.types import ModelId
 
-# ==============================================================================
-# System Block (API-only, not persisted)
-# ==============================================================================
+# -- System Block (API-only, not persisted) ------------------------------------
 
 
 class SystemBlock(StrictModel):
@@ -38,9 +36,7 @@ class SystemBlock(StrictModel):
     cache_control: CacheControl | None = None
 
 
-# ==============================================================================
-# Tool Definition (API-only, not persisted)
-# ==============================================================================
+# -- Tool Definition (API-only, not persisted) ---------------------------------
 
 
 class ToolInputSchema(StrictModel):
@@ -82,9 +78,7 @@ class ToolDefinition(StrictModel):
     ]
 
 
-# ==============================================================================
-# Message Content Block
-# ==============================================================================
+# -- Message Content Block -----------------------------------------------------
 
 
 class TextContentBlock(StrictModel):
@@ -171,9 +165,7 @@ class RequestToolResultBlock(StrictModel):
 RequestContentBlock = TextContentBlock | RequestThinkingBlock | RequestToolUseBlock | RequestToolResultBlock
 
 
-# ==============================================================================
-# Message
-# ==============================================================================
+# -- Message -------------------------------------------------------------------
 
 
 class RequestMessage(StrictModel):
@@ -188,9 +180,7 @@ class RequestMessage(StrictModel):
     content: Sequence[RequestContentBlock] | str
 
 
-# ==============================================================================
-# Thinking Configuration
-# ==============================================================================
+# -- Thinking Configuration ----------------------------------------------------
 
 
 class EnabledThinkingConfig(StrictModel):
@@ -212,9 +202,7 @@ ThinkingConfig = Annotated[
 ]
 
 
-# ==============================================================================
-# Context Management (Request)
-# ==============================================================================
+# -- Context Management (Request) ----------------------------------------------
 
 
 class ContextManagementEdit(StrictModel):
@@ -240,9 +228,7 @@ class RequestContextManagement(StrictModel):
     edits: Sequence[ContextManagementEdit]
 
 
-# ==============================================================================
-# Metadata
-# ==============================================================================
+# -- Metadata ------------------------------------------------------------------
 
 
 class RequestMetadata(StrictModel):
@@ -256,9 +242,7 @@ class RequestMetadata(StrictModel):
     user_id: str  # Always present in Claude Code requests
 
 
-# ==============================================================================
-# Messages Request
-# ==============================================================================
+# -- Messages Request ----------------------------------------------------------
 
 
 class MessagesRequest(StrictModel):

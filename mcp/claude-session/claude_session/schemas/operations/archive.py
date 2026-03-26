@@ -19,9 +19,7 @@ from claude_session.schemas.base import StrictModel
 from claude_session.schemas.session.models import SessionRecord, Task
 from claude_session.schemas.types import Base64JsonBytes, JsonDatetime, ToolResultExtension
 
-# ==============================================================================
-# Archive Format Version
-# ==============================================================================
+# -- Archive Format Version ----------------------------------------------------
 
 ARCHIVE_FORMAT_VERSION = '2.1'
 """Current archive format version. Used when creating new archives.
@@ -32,9 +30,7 @@ Version history:
 """
 
 
-# ==============================================================================
-# Archive Metadata (MCP Tool Response)
-# ==============================================================================
+# -- Archive Metadata (MCP Tool Response) --------------------------------------
 
 
 class FileMetadata(StrictModel):
@@ -63,16 +59,13 @@ class ArchiveMetadata(StrictModel):
     custom_title: str | None = None  # User-defined session name from /rename (if any)
 
 
-# ==============================================================================
-# Session Archive V2 - Explicit Artifact Models (Composite-First Ordering)
-# ==============================================================================
+# -- Session Archive V2 - Explicit Artifact Models (Composite-First Ordering) ---
 #
 # Design principles:
 # - Store only source-of-truth fields (filenames derivable from IDs)
 # - Explicit structure (no implicit path parsing)
 # - Metadata before data (record_count before records)
 # - Top-down ordering: composite model first, then constituents
-# ==============================================================================
 
 
 class SessionArchiveV2(StrictModel):
@@ -127,9 +120,7 @@ class SessionArchiveV2(StrictModel):
     total_agent_records: int
 
 
-# ==============================================================================
-# V2 Entry Models (Constituents)
-# ==============================================================================
+# -- V2 Entry Models (Constituents) --------------------------------------------
 
 
 class MainSessionFileEntry(StrictModel):
@@ -230,9 +221,7 @@ class TodoFileEntry(StrictModel):
     content: str  # JSON string (not parsed, may vary)
 
 
-# ==============================================================================
-# Session Archive V1 - Legacy Format (Backward Compatibility)
-# ==============================================================================
+# -- Session Archive V1 - Legacy Format (Backward Compatibility) ---------------
 
 
 class SessionArchiveV1(StrictModel):
@@ -259,17 +248,13 @@ class SessionArchiveV1(StrictModel):
     custom_title: str | None = None
 
 
-# ==============================================================================
-# Union Type for Archive Loading
-# ==============================================================================
+# -- Union Type for Archive Loading --------------------------------------------
 
 # Used by restore/clone to handle either format
 type SessionArchive = SessionArchiveV1 | SessionArchiveV2
 
 
-# ==============================================================================
-# Migration Functions
-# ==============================================================================
+# -- Migration Functions -------------------------------------------------------
 
 
 def migrate_v1_to_v2(v1: SessionArchiveV1) -> SessionArchiveV2:

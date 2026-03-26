@@ -30,9 +30,7 @@ from typing import Literal
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
-# ==============================================================================
-# String Schema Variants (type="string")
-# ==============================================================================
+# -- String Schema Variants (type="string") ------------------------------------
 # Observed shapes:
 #   [description, type] - 78 instances
 #   [description, enum, type] - 12 instances
@@ -142,9 +140,7 @@ StringSchema = (
 )
 
 
-# ==============================================================================
-# Number Schema Variants (type="number" or "integer")
-# ==============================================================================
+# -- Number Schema Variants (type="number" or "integer") -----------------------
 # Observed shapes:
 #   [description, type] - 24 instances
 #   [default, description, maximum, minimum, type] - 3 instances
@@ -217,9 +213,7 @@ NumberSchema = (
 )
 
 
-# ==============================================================================
-# Boolean Schema Variants (type="boolean")
-# ==============================================================================
+# -- Boolean Schema Variants (type="boolean") ----------------------------------
 # Observed shapes:
 #   [description, type] - 18 instances
 #   [default, description, type] - 6 instances
@@ -260,9 +254,7 @@ BooleanSchema = (
 )
 
 
-# ==============================================================================
-# Array Schema Variants (type="array")
-# ==============================================================================
+# -- Array Schema Variants (type="array") --------------------------------------
 # Observed shapes:
 #   [description, items, type] - 9 instances
 #   [description, items, maxItems, minItems, type] - 6 instances
@@ -298,9 +290,7 @@ class ArraySchemaItemsOnly(StrictModel):
 ArraySchema = ArraySchemaWithBounds | ArraySchemaBase | ArraySchemaItemsOnly
 
 
-# ==============================================================================
-# Null Schema (type="null")
-# ==============================================================================
+# -- Null Schema (type="null") -------------------------------------------------
 
 
 class NullSchema(StrictModel):
@@ -309,9 +299,7 @@ class NullSchema(StrictModel):
     type: Literal['null']
 
 
-# ==============================================================================
-# Object Schema Variants (type="object")
-# ==============================================================================
+# -- Object Schema Variants (type="object") ------------------------------------
 # Observed shapes:
 #   [additionalProperties, properties, required, type] - 9 instances (NO description)
 #   [additionalProperties, description, type] - 3 instances (NO properties/required)
@@ -375,9 +363,7 @@ ObjectSchema = (
 )
 
 
-# ==============================================================================
-# AnyOf Schema (nullable unions)
-# ==============================================================================
+# -- AnyOf Schema (nullable unions) --------------------------------------------
 # Observed shape: {"anyOf": [...], "default": null, "title": "..."}
 # Used for nullable arrays/objects in MCP tools
 
@@ -403,9 +389,7 @@ class AnyOfSchemaNoDefault(StrictModel):
     title: str
 
 
-# ==============================================================================
-# Combined Tool Input Property Type
-# ==============================================================================
+# -- Combined Tool Input Property Type -----------------------------------------
 # Union of all property types. Pydantic tries each variant in order.
 # With extra='forbid' on each model, only exact shape matches validate.
 

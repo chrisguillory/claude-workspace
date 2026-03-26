@@ -18,9 +18,7 @@ from typing import Any, Literal
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
-# ==============================================================================
-# Type Aliases (strict Literal types - add new values when discovered)
-# ==============================================================================
+# -- Type Aliases (strict Literal types - add new values when discovered) ------
 
 Platform = Literal['darwin', 'linux', 'win32', 'freebsd', 'openbsd']
 Arch = Literal['arm64', 'x64', 'x86', 'arm']
@@ -29,9 +27,7 @@ ClientType = Literal['cli', 'sdk']
 UserType = Literal['external', 'internal']
 
 
-# ==============================================================================
-# Environment Information
-# ==============================================================================
+# -- Environment Information ---------------------------------------------------
 
 
 class TelemetryEnv(StrictModel):
@@ -59,9 +55,7 @@ class TelemetryEnv(StrictModel):
     deployment_environment: str  # e.g., "unknown-darwin"
 
 
-# ==============================================================================
-# Event Data
-# ==============================================================================
+# -- Event Data ----------------------------------------------------------------
 
 
 class TelemetryEventData(StrictModel):
@@ -100,9 +94,7 @@ class TelemetryEventData(StrictModel):
         return dict(result)
 
 
-# ==============================================================================
-# Event Wrapper
-# ==============================================================================
+# -- Event Wrapper -------------------------------------------------------------
 
 
 class TelemetryEvent(StrictModel):
@@ -117,9 +109,7 @@ class TelemetryEvent(StrictModel):
     event_data: TelemetryEventData
 
 
-# ==============================================================================
-# Batch Request/Response
-# ==============================================================================
+# -- Batch Request/Response ----------------------------------------------------
 
 
 class TelemetryBatchRequest(StrictModel):
@@ -145,9 +135,7 @@ class TelemetryBatchResponse(StrictModel):
     rejected_count: int
 
 
-# ==============================================================================
-# Common Event Names (observed)
-# ==============================================================================
+# -- Common Event Names (observed) ---------------------------------------------
 
 # Documented for reference, not enforced as a type
 KNOWN_EVENT_NAMES = [
