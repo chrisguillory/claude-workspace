@@ -276,6 +276,7 @@ class _Embedding(OpenModel):
 class _Usage(OpenModel):
     prompt_tokens: int
     total_tokens: int
+    cost: float | None = None  # OpenRouter-specific, not consumed
 
 
 class _EmbeddingResponse(OpenModel):
