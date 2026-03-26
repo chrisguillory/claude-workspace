@@ -6,7 +6,7 @@ Provider-agnostic types for embedding operations.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal
 
 import numpy as np
 import pydantic
@@ -65,9 +65,14 @@ class EmbedBatchRequest(StrictModel):
 
 
 class EmbedResponse(StrictModel):
-    """Single embedding result."""
+    """Single embedding result.
 
-    values: Sequence[float]
+    Values may be a Python list (from API) or numpy array (from cache).
+    The hot path (indexing) keeps numpy for 8x memory savings; the cold
+    path (search) calls list(response.values) when native types are needed.
+    """
+
+    values: EmbeddingVector
     dimensions: int
 
     @classmethod
@@ -77,7 +82,7 @@ class EmbedResponse(StrictModel):
         Bypasses Pydantic validation — numpy arrays satisfy Sequence[float]
         at runtime but Pydantic can't generate a schema for NDArray.
         """
-        return cls.model_construct(values=cast(Sequence[float], values), dimensions=len(values))
+        return cls.model_construct(values=values, dimensions=len(values))
 
 
 class EmbedBatchResponse(StrictModel):

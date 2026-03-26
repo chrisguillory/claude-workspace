@@ -458,28 +458,33 @@ Returns:
             else f'Searching {collection_name} ({search_type}): "{query}"',
         )
 
-        # Compute embeddings based on search type
-        sparse_indices: Sequence[int] | None
-        sparse_values: Sequence[float] | None
+        # Compute embeddings based on search type.
+        # Dense embeddings may be numpy (from cache) or list (from API) —
+        # list() normalizes both to native Python for Pydantic strict validation.
+        # Sparse embeddings are always numpy NDArray from BM25 — .tolist()
+        # converts to native Python list[int] / list[float].
+        dense_vector: list[float] | None
+        sparse_indices: list[int] | None
+        sparse_values: list[float] | None
         if search_type == 'hybrid':
             # Both dense and sparse embeddings
             embed_request = EmbedRequest(text=query, intent='query')
             embed_response = await embedding_service.embed(embed_request)
-            dense_vector: Sequence[float] | None = embed_response.values
+            dense_vector = list(embed_response.values)
             np_indices, np_values = await state.sparse_embedding_service.embed(query)
-            sparse_indices = typing.cast(Sequence[int], np_indices)  # numpy → Pydantic boundary
-            sparse_values = typing.cast(Sequence[float], np_values)
+            sparse_indices = np_indices.tolist()
+            sparse_values = np_values.tolist()
         elif search_type == 'lexical':
             # Sparse only (BM25 keyword matching)
             dense_vector = None
             np_indices, np_values = await state.sparse_embedding_service.embed(query)
-            sparse_indices = typing.cast(Sequence[int], np_indices)
-            sparse_values = typing.cast(Sequence[float], np_values)
+            sparse_indices = np_indices.tolist()
+            sparse_values = np_values.tolist()
         elif search_type == 'embedding':
             # Dense only (semantic similarity)
             embed_request = EmbedRequest(text=query, intent='query')
             embed_response = await embedding_service.embed(embed_request)
-            dense_vector = embed_response.values
+            dense_vector = list(embed_response.values)
             sparse_indices = None
             sparse_values = None
         else:
