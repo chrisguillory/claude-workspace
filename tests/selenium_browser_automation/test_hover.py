@@ -31,19 +31,6 @@ _occlusion_specs = [s for s in _all_specs if s['section'] == 'occlusion']
 _duration_specs = [s for s in _all_specs if s['section'] == 'duration_validation']
 
 
-def _assert_hover_result(result: Mapping[str, Any], expect: Mapping[str, Any]) -> None:
-    """Assert hover check result matches YAML expectation."""
-    if expect['success']:
-        assert result['success'], f'Expected hover to succeed but got error: {result.get("error")}'
-    else:
-        assert not result['success'], 'Expected hover to fail but it succeeded'
-        if 'error_contains' in expect:
-            error = result.get('error', '')
-            assert expect['error_contains'] in error, (
-                f'Expected error containing {expect["error_contains"]!r}, got {error!r}'
-            )
-
-
 # ============================================================================
 # STABILITY TESTS
 # ============================================================================
@@ -163,3 +150,19 @@ def test_hover_duration_validation(test_case: dict[str, Any]) -> None:
         assert expected_error in str(exc_info.value), (
             f'Expected error containing {expected_error!r}, got {str(exc_info.value)!r}'
         )
+
+
+# -- Private Helpers ----------------------------------------------------------
+
+
+def _assert_hover_result(result: Mapping[str, Any], expect: Mapping[str, Any]) -> None:
+    """Assert hover check result matches YAML expectation."""
+    if expect['success']:
+        assert result['success'], f'Expected hover to succeed but got error: {result.get("error")}'
+    else:
+        assert not result['success'], 'Expected hover to fail but it succeeded'
+        if 'error_contains' in expect:
+            error = result.get('error', '')
+            assert expect['error_contains'] in error, (
+                f'Expected error containing {expect["error_contains"]!r}, got {error!r}'
+            )
