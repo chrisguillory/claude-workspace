@@ -12,10 +12,6 @@ from document_search.clients.openrouter import _decode_embedding, _parse_embeddi
 from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterUnexpectedResponse
 
 
-def _parse(body: Mapping[str, Any]) -> Any:
-    return _parse_embedding_response(body, status_code=200, model='test/model', batch_size=1)
-
-
 class TestParseSuccess:
     def test_float_format(self) -> None:
         body = {
@@ -122,3 +118,10 @@ class TestDecodeEmbedding:
         original = [0.1, 0.2, 0.3]
         decoded = _decode_embedding(original)
         assert decoded == original
+
+
+# -- Private Helpers ----------------------------------------------------------
+
+
+def _parse(body: Mapping[str, Any]) -> Any:
+    return _parse_embedding_response(body, status_code=200, model='test/model', batch_size=1)

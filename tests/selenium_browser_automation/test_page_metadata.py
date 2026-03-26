@@ -62,27 +62,6 @@ class TestCountTreeNodes:
 # --- _build_page_metadata ---
 
 
-def _meta(
-    page_stats: dict[str, Any] | None = None,
-    include_page_info: bool = False,
-    include_urls: bool = False,
-    compact_tree: bool = False,
-    raw_node_count: int = 0,
-    compacted_node_count: int = 0,
-    hidden_reason_keys: Sequence[tuple[str, str]] = _ARIA_HIDDEN_REASON_KEYS,
-) -> str:
-    """Helper to call _build_page_metadata with sensible defaults."""
-    return _build_page_metadata(
-        page_stats=page_stats or {},
-        include_page_info=include_page_info,
-        include_urls=include_urls,
-        compact_tree=compact_tree,
-        raw_node_count=raw_node_count,
-        compacted_node_count=compacted_node_count,
-        hidden_reason_keys=hidden_reason_keys,
-    )
-
-
 class TestBuildPageMetadataTier1:
     """Tier 1: Always-on metadata (hidden elements, iframes)."""
 
@@ -217,3 +196,27 @@ class TestBuildPageMetadataCombined:
         assert '# shadow_roots: 2' in result
         assert '# images: 5' in result
         assert '# links: 10' in result
+
+
+# -- Private Helpers ----------------------------------------------------------
+
+
+def _meta(
+    page_stats: dict[str, Any] | None = None,
+    include_page_info: bool = False,
+    include_urls: bool = False,
+    compact_tree: bool = False,
+    raw_node_count: int = 0,
+    compacted_node_count: int = 0,
+    hidden_reason_keys: Sequence[tuple[str, str]] = _ARIA_HIDDEN_REASON_KEYS,
+) -> str:
+    """Helper to call _build_page_metadata with sensible defaults."""
+    return _build_page_metadata(
+        page_stats=page_stats or {},
+        include_page_info=include_page_info,
+        include_urls=include_urls,
+        compact_tree=compact_tree,
+        raw_node_count=raw_node_count,
+        compacted_node_count=compacted_node_count,
+        hidden_reason_keys=hidden_reason_keys,
+    )

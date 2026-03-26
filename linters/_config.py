@@ -94,6 +94,34 @@ def get_per_file_ignored_codes(
     return ignored
 
 
+def load_enable_ordering(tool_name: str, config_path: Path) -> Sequence[str]:
+    """Read enable-ordering glob list from pyproject.toml."""
+    return _load_enable_ordering_cached(tool_name, config_path.resolve())
+
+
+@lru_cache(maxsize=32)
+def _load_enable_ordering_cached(tool_name: str, config_path: Path) -> Sequence[str]:
+    with config_path.open('rb') as f:
+        data = tomllib.load(f)
+    raw = data.get('tool', {}).get(tool_name, {}).get('enable-ordering', [])
+    if not isinstance(raw, list):
+        msg = f'enable-ordering must be a list, got {type(raw).__name__}'
+        raise TypeError(msg)
+    return raw
+
+
+def matches_enable_ordering(filepath: Path, patterns: Sequence[str], project_root: Path) -> bool:
+    """Check if filepath matches any enable-ordering glob pattern."""
+    if not patterns:
+        return False
+    resolved = filepath.resolve()
+    root = project_root.resolve()
+    if not resolved.is_relative_to(root):
+        return False
+    relative = PurePosixPath(resolved.relative_to(root))
+    return any(relative.full_match(pattern) for pattern in patterns)
+
+
 def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: bool = True) -> Sequence[Path]:
     """Find all .py files recursively under root, skipping excluded directories."""
     all_files = sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))

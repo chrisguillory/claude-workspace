@@ -121,8 +121,14 @@ filterwarnings = [
 
 # -- Custom Linter Configuration ----------------------------------------------
 
+[tool.strict-typing-linter]
+enable-ordering = ["tests/**"]
+
 [tool.strict-typing-linter.per-file-ignores]
-"tests/**" = ["mutable-type", "loose-typing"]
+"tests/**" = ["mutable-type", "loose-typing", "missing-all"]
+"tests/hooks/test_approve_compound_bash.py" = ["ordering"]  # 1400-line test with intentional helper-first layout
+"tests/cc_lib/fake_lib.py" = ["ordering"]  # Fake library intentionally mimics real library structure
+"tests/linters/test_suppression_rationale_linter.py" = ["ordering"]  # Private ID generators must precede parametrize decorators
 "tests/linters/edge_cases/**" = ["skip-file"]
 "mcp/claude-session/**" = ["mutable-type", "loose-typing"]  # TODO: tighten after migration
 # Linter crashes on complex annotations in these files (AST parsing bug)
