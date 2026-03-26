@@ -223,7 +223,7 @@ class DirectiveInstance:
 
 
 # Map from directive codes to violation kinds for --ignore flag
-# 'ordering' maps to both 'ordering' and 'missing-all' since they're both ordering-related
+# 'ordering' is a superset that suppresses all ordering-related kinds
 CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
     'mutable-type': {'mutable'},
     'loose-typing': {'loose'},
