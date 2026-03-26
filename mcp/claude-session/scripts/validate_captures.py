@@ -36,9 +36,7 @@ from claude_session.schemas.captures import (
 )
 from claude_session.schemas.types import PermissiveModel
 
-# ==============================================================================
-# Terminal Color Support
-# ==============================================================================
+# -- Terminal Color Support ----------------------------------------------------
 
 
 class Colors:
@@ -71,9 +69,7 @@ if not sys.stdout.isatty():
     Colors.disable()
 
 
-# ==============================================================================
-# Type Definitions
-# ==============================================================================
+# -- Type Definitions ----------------------------------------------------------
 
 
 class EnrichedFieldError(TypedDict):
@@ -137,9 +133,7 @@ class TotalStats(TypedDict):
     fallbacks: list[FallbackUsage]  # All PermissiveModel fallbacks found
 
 
-# ==============================================================================
-# Path Manipulation Utilities
-# ==============================================================================
+# -- Path Manipulation Utilities -----------------------------------------------
 
 
 def normalize_path(loc: tuple[str | int, ...]) -> str:
@@ -195,9 +189,7 @@ def generalize_path(loc: tuple[str | int, ...]) -> str:
     return '.'.join(generalized_parts)
 
 
-# ==============================================================================
-# Value Extraction and Formatting
-# ==============================================================================
+# -- Value Extraction and Formatting -------------------------------------------
 
 
 def extract_value_at_path(data: dict[str, Any], loc: tuple[str | int, ...]) -> Any:
@@ -377,9 +369,7 @@ def truncate_value(value: Any, full: bool = False) -> str:
         return result
 
 
-# ==============================================================================
-# Error Grouping
-# ==============================================================================
+# -- Error Grouping ------------------------------------------------------------
 
 
 def compute_grouping_key(error: EnrichedFieldError) -> tuple[str, str, str]:
@@ -424,9 +414,7 @@ def group_errors(errors: list[EnrichedFieldError]) -> list[ErrorGroup]:
     return result
 
 
-# ==============================================================================
-# Fallback Detection
-# ==============================================================================
+# -- Fallback Detection --------------------------------------------------------
 
 
 def find_fallbacks(obj: Any, path: str = '') -> list[FallbackUsage]:
@@ -480,9 +468,7 @@ def find_fallbacks(obj: Any, path: str = '') -> list[FallbackUsage]:
     return fallbacks
 
 
-# ==============================================================================
-# Validation with Value Extraction
-# ==============================================================================
+# -- Validation with Value Extraction ------------------------------------------
 
 
 def validate_capture_with_values(
@@ -539,9 +525,7 @@ def validate_capture_with_values(
         return ('exception', f'{type(e).__name__}: {str(e)[:150]}', [])
 
 
-# ==============================================================================
-# Session Validation
-# ==============================================================================
+# -- Session Validation --------------------------------------------------------
 
 
 def find_capture_sessions(captures_dir: Path) -> list[Path]:
@@ -604,9 +588,7 @@ def validate_session_captures(session_dir: Path) -> CaptureValidationResult:
     return results
 
 
-# ==============================================================================
-# Output Formatting
-# ==============================================================================
+# -- Output Formatting ---------------------------------------------------------
 
 
 def format_error_group(group: ErrorGroup, full: bool = False) -> str:
@@ -793,9 +775,7 @@ def print_summary_mode(
                 print(f'    {Colors.DIM}(empty fallbacks - no extra fields){Colors.RESET}')
 
 
-# ==============================================================================
-# Main
-# ==============================================================================
+# -- Main ----------------------------------------------------------------------
 
 
 def parse_args() -> argparse.Namespace:

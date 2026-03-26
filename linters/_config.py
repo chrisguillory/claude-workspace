@@ -52,22 +52,6 @@ def load_per_file_ignores(
     return _load_per_file_ignores_cached(tool_name, config_path.resolve())
 
 
-@lru_cache(maxsize=32)
-def _load_per_file_ignores_cached(
-    tool_name: str,
-    config_path: Path,
-) -> Mapping[str, Sequence[str]]:
-    with config_path.open('rb') as f:
-        data = tomllib.load(f)
-    raw = data.get('tool', {}).get(tool_name, {}).get('per-file-ignores', {})
-    for pattern, codes in raw.items():
-        if not isinstance(codes, list):
-            msg = f'per-file-ignores value for {pattern!r} must be a list, got {type(codes).__name__}: use ["{codes}"] instead of "{codes}"'
-            raise TypeError(msg)
-    result: Mapping[str, Sequence[str]] = raw
-    return result
-
-
 def get_per_file_ignored_codes(
     filepath: Path,
     per_file_ignores: Mapping[str, Sequence[str]],
@@ -92,34 +76,6 @@ def get_per_file_ignored_codes(
         if relative.full_match(glob_pattern):
             ignored.update(codes)
     return ignored
-
-
-def load_enable_ordering(tool_name: str, config_path: Path) -> Sequence[str]:
-    """Read enable-ordering glob list from pyproject.toml."""
-    return _load_enable_ordering_cached(tool_name, config_path.resolve())
-
-
-@lru_cache(maxsize=32)
-def _load_enable_ordering_cached(tool_name: str, config_path: Path) -> Sequence[str]:
-    with config_path.open('rb') as f:
-        data = tomllib.load(f)
-    raw = data.get('tool', {}).get(tool_name, {}).get('enable-ordering', [])
-    if not isinstance(raw, list):
-        msg = f'enable-ordering must be a list, got {type(raw).__name__}'
-        raise TypeError(msg)
-    return raw
-
-
-def matches_enable_ordering(filepath: Path, patterns: Sequence[str], project_root: Path) -> bool:
-    """Check if filepath matches any enable-ordering glob pattern."""
-    if not patterns:
-        return False
-    resolved = filepath.resolve()
-    root = project_root.resolve()
-    if not resolved.is_relative_to(root):
-        return False
-    relative = PurePosixPath(resolved.relative_to(root))
-    return any(relative.full_match(pattern) for pattern in patterns)
 
 
 def find_python_files(root: Path, exclude_dirs: Set[str], respect_gitignore: bool = True) -> Sequence[Path]:
@@ -157,3 +113,19 @@ def get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Pa
         return {Path(line) for line in result.stdout.splitlines() if line}
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return set()
+
+
+@lru_cache(maxsize=32)
+def _load_per_file_ignores_cached(
+    tool_name: str,
+    config_path: Path,
+) -> Mapping[str, Sequence[str]]:
+    with config_path.open('rb') as f:
+        data = tomllib.load(f)
+    raw = data.get('tool', {}).get(tool_name, {}).get('per-file-ignores', {})
+    for pattern, codes in raw.items():
+        if not isinstance(codes, list):
+            msg = f'per-file-ignores value for {pattern!r} must be a list, got {type(codes).__name__}: use ["{codes}"] instead of "{codes}"'
+            raise TypeError(msg)
+    result: Mapping[str, Sequence[str]] = raw
+    return result

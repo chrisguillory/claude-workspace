@@ -32,9 +32,7 @@ _overflow_specs = [s for s in _all_specs if s['section'] == 'overflow_metadata']
 PIXELS_PER_TICK = 100
 
 
-# ============================================================================
-# VIEWPORT SCROLL TESTS
-# ============================================================================
+# -- VIEWPORT SCROLL TESTS -----------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _viewport_specs, ids=lambda tc: tc['id'])
@@ -84,9 +82,7 @@ def test_viewport_scroll(
         )
 
 
-# ============================================================================
-# CONTAINER SCROLL TESTS
-# ============================================================================
+# -- CONTAINER SCROLL TESTS ----------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _container_specs, ids=lambda tc: tc['id'])
@@ -135,9 +131,7 @@ def test_container_scroll(
         )
 
 
-# ============================================================================
-# SCROLL TO ELEMENT TESTS
-# ============================================================================
+# -- SCROLL TO ELEMENT TESTS ---------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _scroll_to_specs, ids=lambda tc: tc['id'])
@@ -179,9 +173,7 @@ def test_scroll_to_element(
             assert key in result, f'Expected key {key!r} in result, got keys: {list(result.keys())}'
 
 
-# ============================================================================
-# PARAMETER VALIDATION TESTS
-# ============================================================================
+# -- PARAMETER VALIDATION TESTS ------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _validation_specs, ids=lambda tc: tc['id'])
@@ -226,9 +218,7 @@ def test_scroll_parameter_validation(
         assert result is not None
 
 
-# ============================================================================
-# SMOOTH SCROLL TESTS
-# ============================================================================
+# -- SMOOTH SCROLL TESTS -------------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _smooth_specs, ids=lambda tc: tc['id'])
@@ -292,9 +282,7 @@ def test_smooth_scroll(
         )
 
 
-# ============================================================================
-# POSITION SCROLL TESTS
-# ============================================================================
+# -- POSITION SCROLL TESTS -----------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _position_specs, ids=lambda tc: tc['id'])
@@ -389,9 +377,7 @@ def test_position_scroll(
         )
 
 
-# ============================================================================
-# OVERFLOW METADATA TESTS
-# ============================================================================
+# -- OVERFLOW METADATA TESTS ---------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _overflow_specs, ids=lambda tc: tc['id'])

@@ -17,9 +17,7 @@ from claude_session.schemas.cc_internal_api.base import FromSdk, FromSession, St
 from claude_session.schemas.cc_internal_api.common import ApiUsage
 from claude_session.schemas.types import ModelId
 
-# ==============================================================================
-# Stop Reason
-# ==============================================================================
+# -- Stop Reason ---------------------------------------------------------------
 
 
 # Note: 'max_tokens' observed in API traffic but NOT in session schemas.
@@ -35,9 +33,7 @@ StopReason = Literal[
 ]
 
 
-# ==============================================================================
-# Response Content Blocks
-# ==============================================================================
+# -- Response Content Blocks ---------------------------------------------------
 
 
 class ResponseTextContent(StrictModel):
@@ -101,9 +97,7 @@ class ToolUseContent(StrictModel):
 ResponseContent = ResponseTextContent | ThinkingContent | ToolUseContent
 
 
-# ==============================================================================
-# Context Management (Response)
-# ==============================================================================
+# -- Context Management (Response) ---------------------------------------------
 
 
 class AppliedEdit(StrictModel):
@@ -131,9 +125,7 @@ class ResponseContextManagement(StrictModel):
     applied_edits: Sequence[AppliedEdit]
 
 
-# ==============================================================================
-# Messages Response
-# ==============================================================================
+# -- Messages Response ---------------------------------------------------------
 
 
 class MessagesResponse(StrictModel):

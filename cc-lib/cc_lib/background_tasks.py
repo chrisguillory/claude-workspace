@@ -45,16 +45,6 @@ class BackgroundTaskGroup:
         self._tasks.add(task)
         task.add_done_callback(self._on_done)
 
-    def _on_done(self, task: asyncio.Task[object]) -> None:
-        """Callback: capture first error, discard completed tasks."""
-        self._tasks.discard(task)
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None and self._first_error is None:
-            self._first_error = exc
-            logger.error(f'[{self._name}] Background task failed: {exc}')
-
     def check_health(self) -> None:
         """Raise first captured error, if any. O(1) field read.
 
@@ -83,3 +73,13 @@ class BackgroundTaskGroup:
     def pending_count(self) -> int:
         """Number of tasks still running."""
         return len(self._tasks)
+
+    def _on_done(self, task: asyncio.Task[object]) -> None:
+        """Callback: capture first error, discard completed tasks."""
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None and self._first_error is None:
+            self._first_error = exc
+            logger.error(f'[{self._name}] Background task failed: {exc}')

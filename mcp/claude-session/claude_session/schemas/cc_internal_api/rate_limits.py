@@ -14,9 +14,7 @@ from typing import Literal
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
-# ==============================================================================
-# Rate Limit Status Types
-# ==============================================================================
+# -- Rate Limit Status Types ---------------------------------------------------
 
 RateLimitStatus = Literal['allowed', 'throttled']
 OverageStatus = Literal['allowed', 'rejected']  # Different from RateLimitStatus
@@ -24,9 +22,7 @@ FallbackStatus = Literal['available', 'unavailable']
 RepresentativeClaim = Literal['five_hour', 'seven_day']
 
 
-# ==============================================================================
-# Rate Limit Window
-# ==============================================================================
+# -- Rate Limit Window ---------------------------------------------------------
 
 
 class RateLimitWindow(StrictModel):
@@ -42,9 +38,7 @@ class RateLimitWindow(StrictModel):
     utilization: float  # 0.0 to 1.0+ (can exceed 1.0 if over limit)
 
 
-# ==============================================================================
-# Unified Rate Limit
-# ==============================================================================
+# -- Unified Rate Limit --------------------------------------------------------
 
 
 class UnifiedRateLimit(StrictModel):

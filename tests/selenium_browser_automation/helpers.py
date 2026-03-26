@@ -28,9 +28,7 @@ ARIA_SNAPSHOT_SCRIPT = (_SCRIPTS_DIR / 'aria_snapshot.js').read_text()
 VISUAL_TREE_SCRIPT = (_SCRIPTS_DIR / 'visual_tree.js').read_text()
 
 
-# ============================================================================
-# TREE TEST RUNNER
-# ============================================================================
+# -- TREE TEST RUNNER ----------------------------------------------------------
 
 
 class TreeTestRunner:
@@ -122,9 +120,7 @@ class TreeTestRunner:
         assert_includes_excludes(combined, includes, excludes)
 
 
-# ============================================================================
-# YAML LOADERS
-# ============================================================================
+# -- YAML LOADERS --------------------------------------------------------------
 
 
 def load_yaml_test_specs(yaml_path: Path) -> list[dict[str, Any]]:
@@ -216,9 +212,7 @@ def load_yaml_test_specs_nested(yaml_path: Path) -> list[dict[str, Any]]:
     return cases
 
 
-# ============================================================================
-# ASSERTION HELPERS
-# ============================================================================
+# -- ASSERTION HELPERS ---------------------------------------------------------
 
 
 def assert_includes_excludes(output: str, includes: Sequence[str], excludes: Sequence[str]) -> None:

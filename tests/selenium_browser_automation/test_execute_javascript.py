@@ -30,9 +30,7 @@ _standard_specs = [s for s in _all_specs if s['section'] != 'timeout_tests']
 _timeout_specs = [s for s in _all_specs if s['section'] == 'timeout_tests']
 
 
-# ============================================================================
-# STANDARD TESTS (primitives, objects, promises, special types, etc.)
-# ============================================================================
+# -- STANDARD TESTS (primitives, objects, promises, special types, etc.) -------
 
 
 @pytest.mark.parametrize(
@@ -49,9 +47,7 @@ def test_execute_javascript(headless_driver: webdriver.Chrome, test_case: dict[s
     assert_structured_result(result, spec['expect'])
 
 
-# ============================================================================
-# TIMEOUT TESTS (need reduced script timeout)
-# ============================================================================
+# -- TIMEOUT TESTS (need reduced script timeout) -------------------------------
 
 
 @pytest.mark.parametrize(
@@ -90,9 +86,7 @@ def test_execute_javascript_timeout(headless_driver: webdriver.Chrome, test_case
         headless_driver.set_script_timeout(original_timeout if original_timeout else 30)
 
 
-# ============================================================================
-# PRIVATE HELPERS
-# ============================================================================
+# -- PRIVATE HELPERS -----------------------------------------------------------
 
 
 def _execute_js(driver: webdriver.Chrome, code: str) -> dict[str, Any]:

@@ -5,6 +5,18 @@ See: https://code.claude.com/docs/en/hooks
 
 from __future__ import annotations
 
+__all__ = [
+    'BashToolInput',
+    'EditToolInput',
+    'PostToolUseHookInput',
+    'PreToolUseDecision',
+    'PreToolUseHookInput',
+    'PreToolUseHookOutput',
+    'SessionEndHookInput',
+    'SessionStartHookInput',
+    'WriteToolInput',
+]
+
 from typing import Literal
 
 import pydantic
