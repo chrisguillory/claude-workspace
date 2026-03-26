@@ -45,6 +45,29 @@ Browser Context: All requests share session/cookies - bypasses bot detection.
 Temp Files: Auto-cleanup on shutdown via _temp_dir.
 """
 
+__all__ = [
+    'CapturedResource',
+    'DownloadResourceResult',
+    'FocusableElement',
+    'InteractiveElement',
+    'NavigationResult',
+    'ResourceCapture',
+    'click',
+    'download_resource',
+    'get_aria_snapshot',
+    'get_browser',
+    'get_focusable_elements',
+    'get_interactive_elements',
+    'get_page_content',
+    'lifespan',
+    'main',
+    'navigate',
+    'press_key',
+    'screenshot',
+    'type_text',
+    'wait_for_network_idle',
+]
+
 logger = logging.getLogger(__name__)
 
 

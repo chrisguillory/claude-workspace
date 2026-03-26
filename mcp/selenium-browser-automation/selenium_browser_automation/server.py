@@ -124,6 +124,15 @@ from .scripts import (
 from .scroll import execute_scroll
 from .validators import validate_css_selector as _validate_css_selector_impl
 
+__all__ = [
+    'BrowserService',
+    'BrowserState',
+    'OriginTracker',
+    'lifespan',
+    'main',
+    'register_tools',
+]
+
 
 def _validate_css_selector(selector: str) -> None:
     """Validate CSS selector, converting ValueError to ToolError for MCP layer."""

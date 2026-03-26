@@ -10,17 +10,17 @@ This script enforces immutable interface types and module organization:
 2. STRICT TYPING: No Any, Mapping[str, Any], Sequence[Any] etc.
 3. TUPLE FIELDS: Flag tuple[X, ...] in class fields (use Sequence[T] instead)
 4. HASHABLE FIELDS (opt-in): Enforce hashable types via __strict_typing_linter__hashable_fields__
-5. MODULE ORDERING (opt-in): Public before private, classes before functions
+5. MODULE ORDERING: Public before private, classes before functions
 
 Checks ALL function/method parameters, return types, and class field annotations.
 Skips non-frozen dataclasses and attrs classes (mutable by design).
 Note: pydantic_settings.BaseSettings (intentionally non-frozen) is not supported at this time.
 Respects .gitignore when scanning directories.
 
-Module ordering is opt-in via enable-ordering globs in pyproject.toml:
-    [tool.strict-typing-linter]
-    enable-ordering = ["tests/**"]
-When enabled, matching files must:
+Module ordering is always enabled. Suppress per-area via per-file-ignores in pyproject.toml:
+    [tool.strict-typing-linter.per-file-ignores]
+    "scripts/**" = ["missing-all", "class-ordering"]
+Files with ordering enabled must:
 - Define __all__
 - Order definitions: __all__ items first, then public, then private
 - Within each group: classes before functions
@@ -34,7 +34,8 @@ Design Philosophy:
       - # strict_typing_linter.py: loose-typing - suppress loose typing violations
       - # strict_typing_linter.py: tuple-field - suppress tuple-in-field violations
       - # strict_typing_linter.py: hashable-field - suppress unhashable-field violations
-      - # strict_typing_linter.py: ordering - suppress ordering violations
+      - # strict_typing_linter.py: ordering - suppress all ordering violations
+      - # strict_typing_linter.py: class-ordering - suppress class-before-function violations
       - # strict_typing_linter.py: missing-all - suppress missing __all__ violations
       - # strict_typing_linter.py: trailing-comma - suppress trailing comma violations
 
@@ -67,9 +68,7 @@ from _config import (
     find_config,
     find_python_files,
     get_per_file_ignored_codes,
-    load_enable_ordering,
     load_per_file_ignores,
-    matches_enable_ordering,
 )
 from hashability_inspector import HashabilityInspector, QualifiedName
 
@@ -169,6 +168,7 @@ type DirectiveCode = Literal[
     'tuple-field',
     'hashable-field',
     'ordering',
+    'class-ordering',
     'missing-all',
     'trailing-comma',
     'unused-directive',
@@ -176,7 +176,7 @@ type DirectiveCode = Literal[
 
 # Violation kind literals - used in discriminated unions
 type TypeViolationKind = Literal['mutable', 'loose', 'tuple-field', 'hashable-field']
-type OrderingViolationKind = Literal['ordering', 'missing-all', 'trailing-comma', 'unused-directive']
+type OrderingViolationKind = Literal['ordering', 'class-ordering', 'missing-all', 'trailing-comma', 'unused-directive']
 type ViolationKind = TypeViolationKind | OrderingViolationKind
 
 
@@ -229,7 +229,8 @@ CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
     'loose-typing': {'loose'},
     'tuple-field': {'tuple-field'},
     'hashable-field': {'hashable-field'},
-    'ordering': {'ordering', 'missing-all', 'trailing-comma'},
+    'ordering': {'ordering', 'class-ordering', 'missing-all', 'trailing-comma'},
+    'class-ordering': {'class-ordering'},
     'missing-all': {'missing-all'},
     'trailing-comma': {'trailing-comma'},
 }
@@ -271,10 +272,9 @@ def main() -> int:
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
-        # Per-file-ignores and enable-ordering from pyproject.toml
+        # Per-file-ignores from pyproject.toml
         per_file_ignored_kinds: set[ViolationKind] = set()
         skip_file_via_config = False
-        ordering_enabled = False
         if not args.no_config:
             if explicit_config is not None:
                 config_path = explicit_config
@@ -297,15 +297,11 @@ def main() -> int:
                         if code == directive_code:
                             per_file_ignored_kinds.update(kind_set)
 
-                enable_ordering_patterns = load_enable_ordering('strict-typing-linter', config_path)
-                ordering_enabled = matches_enable_ordering(filepath, enable_ordering_patterns, project_root)
-
         if skip_file_via_config:
             continue
 
         violations = check_file(
             filepath,
-            ordering_enabled=ordering_enabled,
             inspector=inspector,
             respect_skip_file=not args.no_skip_file,
             report_unused_directives=args.report_unused_directives,
@@ -332,7 +328,9 @@ def main() -> int:
         loose_count = sum(1 for v in all_violations if v.kind == 'loose')
         tuple_count = sum(1 for v in all_violations if v.kind == 'tuple-field')
         hashable_count = sum(1 for v in all_violations if v.kind == 'hashable-field')
-        ordering_count = sum(1 for v in all_violations if v.kind in ('ordering', 'missing-all', 'trailing-comma'))
+        ordering_count = sum(
+            1 for v in all_violations if v.kind in ('ordering', 'class-ordering', 'missing-all', 'trailing-comma')
+        )
         summary_parts = []
         if mutable_count:
             summary_parts.append(f'{mutable_count} mutable')
@@ -379,6 +377,7 @@ def parse_args() -> argparse.Namespace:
             'tuple-field',
             'hashable-field',
             'ordering',
+            'class-ordering',
             'missing-all',
             'trailing-comma',
         ],
@@ -419,7 +418,6 @@ def parse_args() -> argparse.Namespace:
 def check_file(
     filepath: Path,
     *,
-    ordering_enabled: bool = False,
     inspector: HashabilityInspector | None = None,
     respect_skip_file: bool = True,
     report_unused_directives: bool = False,
@@ -475,16 +473,15 @@ def check_file(
 
     violations.extend(type_checker.violations)
 
-    # Module ordering (enabled via enable-ordering globs in pyproject.toml)
-    if ordering_enabled:
-        # Skip __main__.py (entry point, never exports)
-        if filepath.name != '__main__.py':
-            # Skip __init__.py only if it has no definitions (just boilerplate)
-            if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
-                violations.extend(check_all_defined(filepath, tree, source_lines))
-                violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
-                violations.extend(check_module_ordering(filepath, tree, source_lines))
-                violations.extend(check_class_method_ordering(filepath, tree, source_lines))
+    # Module ordering (always enabled, suppress per-area via per-file-ignores)
+    # Skip __main__.py (entry point, never exports)
+    if filepath.name != '__main__.py':
+        # Skip __init__.py only if it has no definitions (just boilerplate)
+        if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
+            violations.extend(check_all_defined(filepath, tree, source_lines))
+            violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
+            violations.extend(check_module_ordering(filepath, tree, source_lines))
+            violations.extend(check_class_method_ordering(filepath, tree, source_lines))
 
     if report_unused_directives:
         directives = collect_directives(source_lines)
@@ -1430,7 +1427,7 @@ def get_strict_hashable_fields(node: ast.ClassDef) -> bool:
     return False
 
 
-# -- Module Ordering Checks (opt-in via enable-ordering in pyproject.toml) ----
+# -- Module Ordering Checks ---------------------------------------------------
 
 
 # Recognized __strict_* variables (fail-fast on typos)
@@ -1521,7 +1518,7 @@ def has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
             idx = line.find(DIRECTIVE_PREFIX.lower())
             codes_part = line[idx + len(DIRECTIVE_PREFIX) :]
             codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
-            return 'ordering' in codes
+            return 'ordering' in codes or 'class-ordering' in codes
     return False
 
 
@@ -1542,6 +1539,15 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
             if has_ordering_directive(source_lines, actual.line):
                 continue
 
+            # Determine violation kind: class-ordering when the only difference is type_group
+            # (i.e., a function appears where a class should be, or vice versa)
+            is_class_ordering = (
+                actual.sort_key[0] == expected.sort_key[0]  # same all_group
+                and actual.sort_key[1] == expected.sort_key[1]  # same private_group
+                and actual.sort_key[2] != expected.sort_key[2]  # different type_group
+            )
+            violation_kind: OrderingViolationKind = 'class-ordering' if is_class_ordering else 'ordering'
+
             # Describe what's wrong
             if expected.in_all and not actual.in_all:
                 reason = f"'{actual.name}' should come after __all__ items"
@@ -1556,7 +1562,7 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
                 OrderingViolation(
                     filepath=filepath,
                     line=actual.line,
-                    kind='ordering',
+                    kind=violation_kind,
                     message=reason,
                     source_line=source_lines[actual.line - 1].strip() if actual.line <= len(source_lines) else '',
                     suggestion='Reorder: __all__ items (classes→functions) → public (classes→functions) → private (classes→functions)',
@@ -1919,7 +1925,7 @@ def format_violation(v: Violation) -> str:
             f'    Silence with: {DIRECTIVE_PREFIX} {directive_code}'
         )
     else:  # OrderingViolation
-        directive_code = 'ordering'
+        directive_code = v.kind if v.kind != 'unused-directive' else 'ordering'
         return (
             f'{v.filepath}:{v.line}: error: {v.message}\n'
             f'    {v.source_line}\n'

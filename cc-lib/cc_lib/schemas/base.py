@@ -12,6 +12,14 @@ Terminology follows JSON Schema: "closed" rejects additional properties,
 
 from __future__ import annotations
 
+__all__ = [
+    'CamelModel',
+    'ClosedModel',
+    'OpenModel',
+    'StrictModel',
+    'SubsetModel',
+]
+
 import os
 from typing import Any
 

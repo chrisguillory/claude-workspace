@@ -2,6 +2,19 @@
 
 from __future__ import annotations
 
+__all__ = [
+    'ChromeNotFoundError',
+    'ChromeProfileError',
+    'MetadataParseError',
+    'ProfileNotFoundError',
+    'get_chrome_base_path',
+    'get_profile_metadata',
+    'list_all_profiles',
+    'list_profile_directories',
+    'load_local_state',
+    'load_profile_preferences',
+]
+
 import json
 import os
 import platform

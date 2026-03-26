@@ -35,7 +35,12 @@ from python_interpreter.models import ExecuteRequest, InterpreterInfo
 from python_interpreter.service import PythonInterpreterService, ServerState
 
 __all__ = [
+    'get_interpreter_service',
+    'global_exception_handler',
+    'http_execute',
+    'lifespan',
     'main',
+    'register_tools',
     'server',
 ]
 

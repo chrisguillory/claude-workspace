@@ -185,79 +185,6 @@ class PythonInterpreterService:
         self._interpreter_sources: dict[str, InterpreterSource] = {'builtin': 'builtin'}
         self._start_locks: dict[str, asyncio.Lock] = {}
 
-    def _get_start_lock(self, name: str) -> asyncio.Lock:
-        """Get or create a per-interpreter startup lock."""
-        if name not in self._start_locks:
-            self._start_locks[name] = asyncio.Lock()
-        return self._start_locks[name]
-
-    async def _auto_start_interpreter(self, name: str) -> None:
-        """Auto-start a stopped interpreter from known config.
-
-        Resolution order: builtin -> saved registry -> jetbrains-run -> jetbrains-sdk.
-        """
-        config: InterpreterConfig
-        source: InterpreterSource
-
-        if name == 'builtin':
-            config = InterpreterConfig(
-                name='builtin',
-                python_path=pathlib.Path(sys.executable),
-            )
-            source = 'builtin'
-        else:
-            # Check saved registry
-            saved = self.state.interpreter_registry.get(name)
-            if saved is not None:
-                resolved_path = pathlib.Path(saved.python_path)
-                if not resolved_path.is_absolute():
-                    resolved_path = self.state.project_dir / resolved_path
-                config = InterpreterConfig(
-                    name=name,
-                    python_path=resolved_path,
-                    cwd=pathlib.Path(saved.cwd) if saved.cwd else None,
-                    env=dict(saved.env) if saved.env else None,
-                    startup_script=saved.startup_script,
-                )
-                source = 'saved'
-            else:
-                # Check JetBrains run configs
-                run_match = next((c for c in self.state.jetbrains_runs if c.name == name), None)
-                if run_match is not None:
-                    if run_match.python_path is None:
-                        raise ValueError(
-                            f"JetBrains config '{name}' has unresolved SDK. "
-                            f'Register it with an explicit python_path via register_interpreter.',
-                        )
-                    startup_script = _build_jetbrains_startup_script(run_match)
-                    config = InterpreterConfig(
-                        name=name,
-                        python_path=pathlib.Path(run_match.python_path),
-                        cwd=pathlib.Path(run_match.cwd) if run_match.cwd else None,
-                        env=dict(run_match.env) if run_match.env else None,
-                        startup_script=startup_script,
-                    )
-                    source = 'jetbrains-run'
-                else:
-                    # Check JetBrains SDK entries
-                    sdk_match = next((e for e in self.state.jetbrains_sdks if e.name == name), None)
-                    if sdk_match is not None:
-                        config = InterpreterConfig(
-                            name=name,
-                            python_path=pathlib.Path(sdk_match.python_path),
-                        )
-                        source = 'jetbrains-sdk'
-                    else:
-                        raise ValueError(
-                            f"Interpreter '{name}' not found. "
-                            f'Use register_interpreter to create one, '
-                            f'or list_interpreters to see available options.',
-                        )
-
-        logger.info(f"Auto-starting '{name}' ({source}, {config.python_path})")
-        await asyncio.to_thread(self.state.interpreter_manager.add_interpreter, config)
-        self._interpreter_sources[name] = source
-
     async def execute(self, code: str, interpreter: str = 'builtin') -> str:
         """Execute Python code in persistent scope.
 
@@ -493,6 +420,79 @@ class PythonInterpreterService:
             )
 
         return result
+
+    def _get_start_lock(self, name: str) -> asyncio.Lock:
+        """Get or create a per-interpreter startup lock."""
+        if name not in self._start_locks:
+            self._start_locks[name] = asyncio.Lock()
+        return self._start_locks[name]
+
+    async def _auto_start_interpreter(self, name: str) -> None:
+        """Auto-start a stopped interpreter from known config.
+
+        Resolution order: builtin -> saved registry -> jetbrains-run -> jetbrains-sdk.
+        """
+        config: InterpreterConfig
+        source: InterpreterSource
+
+        if name == 'builtin':
+            config = InterpreterConfig(
+                name='builtin',
+                python_path=pathlib.Path(sys.executable),
+            )
+            source = 'builtin'
+        else:
+            # Check saved registry
+            saved = self.state.interpreter_registry.get(name)
+            if saved is not None:
+                resolved_path = pathlib.Path(saved.python_path)
+                if not resolved_path.is_absolute():
+                    resolved_path = self.state.project_dir / resolved_path
+                config = InterpreterConfig(
+                    name=name,
+                    python_path=resolved_path,
+                    cwd=pathlib.Path(saved.cwd) if saved.cwd else None,
+                    env=dict(saved.env) if saved.env else None,
+                    startup_script=saved.startup_script,
+                )
+                source = 'saved'
+            else:
+                # Check JetBrains run configs
+                run_match = next((c for c in self.state.jetbrains_runs if c.name == name), None)
+                if run_match is not None:
+                    if run_match.python_path is None:
+                        raise ValueError(
+                            f"JetBrains config '{name}' has unresolved SDK. "
+                            f'Register it with an explicit python_path via register_interpreter.',
+                        )
+                    startup_script = _build_jetbrains_startup_script(run_match)
+                    config = InterpreterConfig(
+                        name=name,
+                        python_path=pathlib.Path(run_match.python_path),
+                        cwd=pathlib.Path(run_match.cwd) if run_match.cwd else None,
+                        env=dict(run_match.env) if run_match.env else None,
+                        startup_script=startup_script,
+                    )
+                    source = 'jetbrains-run'
+                else:
+                    # Check JetBrains SDK entries
+                    sdk_match = next((e for e in self.state.jetbrains_sdks if e.name == name), None)
+                    if sdk_match is not None:
+                        config = InterpreterConfig(
+                            name=name,
+                            python_path=pathlib.Path(sdk_match.python_path),
+                        )
+                        source = 'jetbrains-sdk'
+                    else:
+                        raise ValueError(
+                            f"Interpreter '{name}' not found. "
+                            f'Use register_interpreter to create one, '
+                            f'or list_interpreters to see available options.',
+                        )
+
+        logger.info(f"Auto-starting '{name}' ({source}, {config.python_path})")
+        await asyncio.to_thread(self.state.interpreter_manager.add_interpreter, config)
+        self._interpreter_sources[name] = source
 
 
 def _build_jetbrains_startup_script(config: JetBrainsRunConfig) -> str | None:

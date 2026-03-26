@@ -34,6 +34,15 @@ Cookie Decryption (DIY implementation):
 
 from __future__ import annotations
 
+__all__ = [
+    'AppleScriptNotEnabledError',
+    'SessionStorageExportResult',
+    'export_cookies',
+    'export_local_storage',
+    'get_chrome_base_path',
+    'get_chrome_profile_path',
+]
+
 import hashlib
 import os
 import re
