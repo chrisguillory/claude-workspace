@@ -14,9 +14,7 @@ from claude_session.protocols import LoggerProtocol, NullLogger
 from claude_session.schemas.session import SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 
-# ==============================================================================
-# Session Parser Service
-# ==============================================================================
+# -- Session Parser Service ----------------------------------------------------
 
 
 class SessionParserService:

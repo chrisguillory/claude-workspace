@@ -50,9 +50,7 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.version import get_version
 from claude_session.storage.protocol import StorageBackend
 
-# ==============================================================================
-# Archive Format Detection
-# ==============================================================================
+# -- Archive Format Detection --------------------------------------------------
 
 
 class FormatDetector:
@@ -134,9 +132,7 @@ class FormatDetector:
         return None
 
 
-# ==============================================================================
-# Session Archive Service
-# ==============================================================================
+# -- Session Archive Service ---------------------------------------------------
 
 
 class SessionArchiveService:

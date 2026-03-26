@@ -23,9 +23,7 @@ from claude_session.schemas.cc_internal_api.common import ApiCacheCreation
 from claude_session.schemas.cc_internal_api.response import StopReason
 from claude_session.schemas.types import EmptyDict, EmptySequence, ModelId
 
-# ==============================================================================
-# Delta Types (content_block_delta payloads)
-# ==============================================================================
+# -- Delta Types (content_block_delta payloads) --------------------------------
 
 
 class TextDelta(StrictModel):
@@ -83,9 +81,7 @@ DeltaContent = Annotated[
 ]
 
 
-# ==============================================================================
-# Content Block Types (content_block_start payloads)
-# ==============================================================================
+# -- Content Block Types (content_block_start payloads) ------------------------
 
 
 class TextBlockStart(StrictModel):
@@ -136,9 +132,7 @@ ContentBlockStart = Annotated[
 ]
 
 
-# ==============================================================================
-# Initial Message (message_start payload)
-# ==============================================================================
+# -- Initial Message (message_start payload) -----------------------------------
 
 
 class InitialUsage(StrictModel):
@@ -175,9 +169,7 @@ class InitialMessage(StrictModel):
     usage: InitialUsage
 
 
-# ==============================================================================
-# Message Delta (message_delta payload)
-# ==============================================================================
+# -- Message Delta (message_delta payload) -------------------------------------
 
 
 class MessageDeltaUsage(StrictModel):
@@ -231,9 +223,7 @@ class MessageDeltaContextManagement(StrictModel):
     applied_edits: Sequence[AppliedEdit]
 
 
-# ==============================================================================
-# SSE Event Types
-# ==============================================================================
+# -- SSE Event Types -----------------------------------------------------------
 
 
 class MessageStartEvent(StrictModel):
@@ -346,9 +336,7 @@ class ErrorEvent(StrictModel):
     error: StreamError
 
 
-# ==============================================================================
-# Main SSE Event Union
-# ==============================================================================
+# -- Main SSE Event Union ------------------------------------------------------
 
 
 SSEEvent = Annotated[

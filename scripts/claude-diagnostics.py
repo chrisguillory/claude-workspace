@@ -65,9 +65,7 @@ from cc_lib.types import JsonDatetime, JsonObject, StrictJsonObject
 # No common base type exists — this alias encapsulates the suppression in one place.
 type DiagnosticData = Any  # heterogeneous diagnostic payload with no common base type
 
-# =============================================================================
-# Configuration
-# =============================================================================
+# -- Configuration -------------------------------------------------------------
 
 CLAUDE_CONFIG_PATH = Path.home() / '.claude.json'
 CLAUDE_DIR = Path.home() / '.claude'
@@ -92,12 +90,10 @@ SETTINGS_PRECEDENCE: Sequence[tuple[str, Path | None]] = [
     ('Main (~/.claude.json)', CLAUDE_CONFIG_PATH),
 ]
 
-# =============================================================================
 # Known Environment Variables
 #
 # Grouped by category. Only non-default values are displayed.
 # Reference: https://github.com/chrisguillory/claude-session-mcp#readme
-# =============================================================================
 
 ENV_VAR_CATEGORIES: Sequence[tuple[str, Sequence[str]]] = [
     (
@@ -191,12 +187,10 @@ RATE_LIMIT_INFO: Mapping[str, str] = {
     'enterprise': 'Enterprise — custom limits, dedicated capacity',
 }
 
-# =============================================================================
 # Known Top-Level Keys in ~/.claude.json (for drift detection)
 #
 # Snapshot from Claude Code 2.1.37. Keys not in this set are reported as new.
 # Keys in this set but missing from the file are reported as removed.
-# =============================================================================
 
 KNOWN_TOP_LEVEL_KEYS: Set[str] = {
     'anonymousId',
@@ -270,9 +264,7 @@ KNOWN_TOP_LEVEL_KEYS: Set[str] = {
 }
 
 
-# =============================================================================
-# Display Mappings
-# =============================================================================
+# -- Display Mappings ----------------------------------------------------------
 
 SUBSCRIPTION_DISPLAY: Mapping[str, str] = {
     'free': 'Free',
@@ -292,9 +284,7 @@ INSTALL_METHOD_DISPLAY: Mapping[str, str] = {
 }
 
 
-# =============================================================================
-# ANSI Colors
-# =============================================================================
+# -- ANSI Colors ---------------------------------------------------------------
 
 
 class C:
@@ -332,17 +322,13 @@ if not sys.stdout.isatty():
     C.disable()
 
 
-# =============================================================================
 # Strict Pydantic Models — Sub-objects (extra='forbid')
 #
 # These models fail immediately if Claude Code changes the JSON shape.
 # That's the point: schema drift is detected, not silently ignored.
-# =============================================================================
 
 
-# -------------------------------------------------------------------------
-# OAuth Account (from ~/.claude.json → oauthAccount)
-# -------------------------------------------------------------------------
+# -- OAuth Account (from ~/.claude.json → oauthAccount) ------------------------
 
 type BillingType = Literal['stripe_subscription']
 type OrganizationRole = Literal['owner', 'admin', 'member', 'developer']
@@ -374,9 +360,7 @@ class OAuthAccount(ClosedModel):
     accountCreatedAt: str | None = None  # ISO 8601
 
 
-# -------------------------------------------------------------------------
-# Keychain Credentials (from macOS Keychain)
-# -------------------------------------------------------------------------
+# -- Keychain Credentials (from macOS Keychain) --------------------------------
 
 type SubscriptionType = Literal['free', 'pro', 'team', 'max', 'enterprise']
 
@@ -409,9 +393,7 @@ class KeychainCredentials(ClosedModel):
     claudeAiOauth: KeychainOAuth
 
 
-# -------------------------------------------------------------------------
-# Statsig Session (from ~/.claude/statsig/)
-# -------------------------------------------------------------------------
+# -- Statsig Session (from ~/.claude/statsig/) ---------------------------------
 
 
 class StatsigSession(ClosedModel):
@@ -422,9 +404,7 @@ class StatsigSession(ClosedModel):
     lastUpdate: int  # Unix timestamp ms
 
 
-# -------------------------------------------------------------------------
-# Hook-tracked Sessions (from ~/.claude-workspace/sessions.json)
-# -------------------------------------------------------------------------
+# -- Hook-tracked Sessions (from ~/.claude-workspace/sessions.json) ------------
 
 type SessionState = Literal['active', 'exited', 'completed', 'crashed']
 type SessionSource = Literal['startup', 'resume', 'compact', 'clear']
@@ -454,9 +434,7 @@ class SessionDatabase(ClosedModel):
     sessions: Sequence[TrackedSession] = ()
 
 
-# =============================================================================
-# Diagnostic Result Types
-# =============================================================================
+# -- Diagnostic Result Types ---------------------------------------------------
 
 
 class BinaryInfo(TypedDict, total=False):
@@ -526,9 +504,7 @@ class DiagnosticReport:
         return len(self.warnings) > 0
 
 
-# =============================================================================
-# Data Readers
-# =============================================================================
+# -- Data Readers --------------------------------------------------------------
 
 
 def read_claude_config() -> tuple[JsonObject, Sequence[ValidationWarning]]:
@@ -890,9 +866,7 @@ def check_credential_security() -> tuple[str, str]:
     return ('none', 'No credentials found')
 
 
-# =============================================================================
-# Formatting Helpers
-# =============================================================================
+# -- Formatting Helpers --------------------------------------------------------
 
 
 def fmt_header(title: str) -> str:
@@ -983,9 +957,7 @@ def redact_token(token: str) -> str:
     return token[:12] + '…***'
 
 
-# =============================================================================
-# Section Renderers
-# =============================================================================
+# -- Section Renderers ---------------------------------------------------------
 
 
 def render_identity(
@@ -1702,9 +1674,7 @@ def render_validation_error(section: str, error: pydantic.ValidationError, raw: 
             print(f'    {C.DIM}... ({lines - 20} more lines){C.RESET}')
 
 
-# =============================================================================
-# JSON Output Mode
-# =============================================================================
+# -- JSON Output Mode ----------------------------------------------------------
 
 
 def build_json_report(
@@ -1754,9 +1724,7 @@ def build_json_report(
     return report
 
 
-# =============================================================================
-# Main
-# =============================================================================
+# -- Main ----------------------------------------------------------------------
 
 SECTIONS = (
     'auth',

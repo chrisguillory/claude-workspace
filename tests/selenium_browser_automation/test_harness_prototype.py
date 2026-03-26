@@ -31,9 +31,7 @@ from tests.selenium_browser_automation.helpers import (
     load_yaml_test_specs,
 )
 
-# ============================================================================
-# PROTOTYPE 1: Minimal working test - direct JS execution
-# ============================================================================
+# -- PROTOTYPE 1: Minimal working test - direct JS execution -------------------
 
 
 class TestMinimalSeleniumIntegration:
@@ -123,9 +121,7 @@ class TestFixtureServer:
         assert headless_driver.title
 
 
-# ============================================================================
-# PROTOTYPE 2: YAML-driven test spec runner
-# ============================================================================
+# -- PROTOTYPE 2: YAML-driven test spec runner ---------------------------------
 
 
 # Load the include_hidden test specs for parametrization
@@ -179,9 +175,7 @@ class TestYamlSpecParsing:
             assert_includes_excludes(output, includes=[], excludes=['generic'])
 
 
-# ============================================================================
-# PROTOTYPE 3: End-to-end ARIA snapshot with data: URL
-# ============================================================================
+# -- PROTOTYPE 3: End-to-end ARIA snapshot with data: URL ----------------------
 
 
 class TestAriaSnapshotEndToEnd:
@@ -268,9 +262,7 @@ class TestAriaSnapshotEndToEnd:
         assert '[hidden:aria-hidden]' in output
 
 
-# ============================================================================
-# YAML-DRIVEN PARAMETRIZED TESTS
-# ============================================================================
+# -- YAML-DRIVEN PARAMETRIZED TESTS --------------------------------------------
 
 
 @pytest.mark.parametrize(

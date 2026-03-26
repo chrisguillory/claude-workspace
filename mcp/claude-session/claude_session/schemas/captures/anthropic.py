@@ -45,9 +45,7 @@ from claude_session.schemas.cc_internal_api import (
 )
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
-# ==============================================================================
-# Messages API (/v1/messages)
-# ==============================================================================
+# -- Messages API (/v1/messages) -----------------------------------------------
 
 
 class MessagesRequestCapture(AnthropicRequestCapture):
@@ -105,9 +103,7 @@ class MessagesJsonResponseCapture(AnthropicResponseCapture):
     body: MessagesResponse | ApiError
 
 
-# ==============================================================================
-# Telemetry (/api/event_logging/batch)
-# ==============================================================================
+# -- Telemetry (/api/event_logging/batch) --------------------------------------
 
 
 class TelemetryRequestCapture(AnthropicRequestCapture):
@@ -123,9 +119,7 @@ class TelemetryResponseCapture(AnthropicResponseCapture):
     body: TelemetryBatchResponse
 
 
-# ==============================================================================
-# Count Tokens (/v1/messages/count_tokens)
-# ==============================================================================
+# -- Count Tokens (/v1/messages/count_tokens) ----------------------------------
 
 
 class CountTokensRequestCapture(AnthropicRequestCapture):
@@ -141,9 +135,7 @@ class CountTokensResponseCapture(AnthropicResponseCapture):
     body: CountTokensResponse
 
 
-# ==============================================================================
-# Feature Flags (/api/eval/sdk-*)
-# ==============================================================================
+# -- Feature Flags (/api/eval/sdk-*) -------------------------------------------
 
 
 class EvalRequestCapture(AnthropicRequestCapture):
@@ -159,9 +151,7 @@ class EvalResponseCapture(AnthropicResponseCapture):
     body: EvalResponse
 
 
-# ==============================================================================
-# Metrics (/api/claude_code/metrics, /api/claude_code/organizations/metrics_enabled)
-# ==============================================================================
+# -- Metrics (/api/claude_code/metrics, /api/claude_code/organizations/metrics_enabled) ---
 
 
 class MetricsRequestCapture(AnthropicRequestCapture):
@@ -190,9 +180,7 @@ class MetricsEnabledResponseCapture(AnthropicResponseCapture):
     body: MetricsEnabledResponse
 
 
-# ==============================================================================
-# Health/OAuth (GET requests)
-# ==============================================================================
+# -- Health/OAuth (GET requests) -----------------------------------------------
 
 
 class HelloRequestCapture(AnthropicRequestCapture):
@@ -221,9 +209,7 @@ class ClientDataResponseCapture(AnthropicResponseCapture):
     body: ClientDataResponse
 
 
-# ==============================================================================
-# Grove (/api/claude_code_grove)
-# ==============================================================================
+# -- Grove (/api/claude_code_grove) --------------------------------------------
 
 
 class GroveRequestCapture(AnthropicRequestCapture):
@@ -239,9 +225,7 @@ class GroveResponseCapture(AnthropicResponseCapture):
     body: GroveResponse
 
 
-# ==============================================================================
-# Settings (/api/claude_code/settings)
-# ==============================================================================
+# -- Settings (/api/claude_code/settings) --------------------------------------
 
 
 class SettingsRequestCapture(AnthropicRequestCapture):
@@ -257,9 +241,7 @@ class SettingsResponseCapture(AnthropicResponseCapture):
     body: ApiError  # Observed as error response in captures
 
 
-# ==============================================================================
-# Profile (/api/oauth/profile)
-# ==============================================================================
+# -- Profile (/api/oauth/profile) ----------------------------------------------
 
 
 class ProfileRequestCapture(AnthropicRequestCapture):
@@ -275,9 +257,7 @@ class ProfileResponseCapture(AnthropicResponseCapture):
     body: ProfileResponse
 
 
-# ==============================================================================
-# Roles (/api/oauth/claude_cli/roles)
-# ==============================================================================
+# -- Roles (/api/oauth/claude_cli/roles) ---------------------------------------
 
 
 class RolesRequestCapture(AnthropicRequestCapture):
@@ -293,9 +273,7 @@ class RolesResponseCapture(AnthropicResponseCapture):
     body: CliRolesResponse
 
 
-# ==============================================================================
-# Account Settings (/api/oauth/account/settings)
-# ==============================================================================
+# -- Account Settings (/api/oauth/account/settings) ----------------------------
 
 
 class AccountSettingsRequestCapture(AnthropicRequestCapture):
@@ -311,9 +289,7 @@ class AccountSettingsResponseCapture(AnthropicResponseCapture):
     body: AccountSettingsResponse
 
 
-# ==============================================================================
-# Create API Key (/api/oauth/claude_cli/create_api_key)
-# ==============================================================================
+# -- Create API Key (/api/oauth/claude_cli/create_api_key) ---------------------
 
 
 class CreateApiKeyRequestCapture(AnthropicRequestCapture):
@@ -329,9 +305,7 @@ class CreateApiKeyResponseCapture(AnthropicResponseCapture):
     body: CreateApiKeyResponse
 
 
-# ==============================================================================
-# Referral Eligibility (/api/oauth/organizations/{uuid}/referral/eligibility)
-# ==============================================================================
+# -- Referral Eligibility (/api/oauth/organizations/{uuid}/referral/eligibility) ---
 
 
 class ReferralEligibilityRequestCapture(AnthropicRequestCapture):
@@ -347,9 +321,7 @@ class ReferralEligibilityResponseCapture(AnthropicResponseCapture):
     body: ReferralEligibilityResponse
 
 
-# ==============================================================================
-# Referral Redemptions (/api/oauth/organizations/{uuid}/referral/redemptions)
-# ==============================================================================
+# -- Referral Redemptions (/api/oauth/organizations/{uuid}/referral/redemptions) ---
 
 
 class ReferralRedemptionsRequestCapture(AnthropicRequestCapture):
@@ -365,9 +337,7 @@ class ReferralRedemptionsResponseCapture(AnthropicResponseCapture):
     body: ReferralRedemptionsResponse
 
 
-# ==============================================================================
-# Model Access (/api/organization/{uuid}/claude_code_sonnet_1m_access)
-# ==============================================================================
+# -- Model Access (/api/organization/{uuid}/claude_code_sonnet_1m_access) ------
 
 
 class ModelAccessRequestCapture(AnthropicRequestCapture):

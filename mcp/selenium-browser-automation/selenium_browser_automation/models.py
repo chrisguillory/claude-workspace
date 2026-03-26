@@ -246,9 +246,7 @@ class ChromeLocalState(OpenModel):
     was: JsonObject | None = None
 
 
-# =============================================================================
-# Core Web Vitals Models
-# =============================================================================
+# -- Core Web Vitals Models ----------------------------------------------------
 
 MetricRating = Literal['good', 'needs-improvement', 'poor']
 
@@ -350,9 +348,7 @@ class CoreWebVitals(SubsetModel):
     errors: Sequence[str] = []
 
 
-# =============================================================================
-# Network Timing / HAR Models
-# =============================================================================
+# -- Network Timing / HAR Models -----------------------------------------------
 
 
 class RequestTiming(SubsetModel):
@@ -417,9 +413,7 @@ class NetworkCapture(SubsetModel):
     errors: Sequence[str] = []
 
 
-# =============================================================================
-# JavaScript Execution Models
-# =============================================================================
+# -- JavaScript Execution Models -----------------------------------------------
 
 # Constrained types for JavaScript execution results
 JavaScriptResultType = Literal[
@@ -457,9 +451,7 @@ class JavaScriptResult(ClosedModel):
     note: str | None = None  # Explanation for special cases (e.g., why result is null)
 
 
-# =============================================================================
-# Navigation and Page Extraction Models
-# =============================================================================
+# -- Navigation and Page Extraction Models -------------------------------------
 
 
 class CapturedResource(ClosedModel):
@@ -551,9 +543,7 @@ class PageTextResult(ClosedModel):
     smart_info: SmartExtractionInfo | None = None
 
 
-# =============================================================================
-# Profile State Models (Browser state persistence)
-# =============================================================================
+# -- Profile State Models (Browser state persistence) --------------------------
 
 SameSitePolicy = Literal['Strict', 'Lax', 'None']
 
@@ -741,9 +731,7 @@ class ConsoleLogsResult(ClosedModel):
     info_count: int = 0
 
 
-# =============================================================================
-# Chrome Profile State Export Models
-# =============================================================================
+# -- Chrome Profile State Export Models ----------------------------------------
 
 
 class ChromeProfileStateExportResult(ClosedModel):
@@ -778,9 +766,7 @@ class ChromeProfileStateExportResult(ClosedModel):
     warnings: Sequence[str] = []
 
 
-# =============================================================================
-# MCP Tool Result Models (typed returns for ad-hoc dicts)
-# =============================================================================
+# -- MCP Tool Result Models (typed returns for ad-hoc dicts) -------------------
 
 
 class DownloadResourceResult(ClosedModel):

@@ -50,9 +50,7 @@ from claude_session.services.artifacts import (
 )
 from claude_session.services.lineage import LineageService
 
-# ==============================================================================
-# Path Translation Service
-# ==============================================================================
+# -- Path Translation Service --------------------------------------------------
 
 
 class PathTranslator:
@@ -114,9 +112,7 @@ class PathTranslator:
         return path
 
 
-# ==============================================================================
-# Utility Functions
-# ==============================================================================
+# -- Utility Functions ---------------------------------------------------------
 
 
 def is_restored_session(session_id: str) -> bool:
@@ -158,9 +154,7 @@ def get_restoration_timestamp(session_id: str) -> datetime | None:
     return datetime.fromtimestamp(timestamp_s, tz=UTC)
 
 
-# ==============================================================================
-# Session Restore Service
-# ==============================================================================
+# -- Session Restore Service ---------------------------------------------------
 
 
 class SessionRestoreService:

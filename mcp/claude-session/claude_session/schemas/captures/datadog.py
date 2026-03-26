@@ -22,9 +22,7 @@ from claude_session.schemas.captures.base import RequestCapture, ResponseCapture
 from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.types import EmptyDict
 
-# ==============================================================================
-# Shared Base (32 fields present in ALL log entry types)
-# ==============================================================================
+# -- Shared Base (32 fields present in ALL log entry types) --------------------
 
 
 class DatadogLogEntryBase(StrictModel):
@@ -82,9 +80,7 @@ class DatadogLogEntryBase(StrictModel):
     deployment_environment: str  # "unknown-darwin"
 
 
-# ==============================================================================
-# API Success Log Entry (message="tengu_api_success")
-# ==============================================================================
+# -- API Success Log Entry (message="tengu_api_success") -----------------------
 
 
 class DatadogApiSuccessLogEntry(DatadogLogEntryBase):
@@ -143,9 +139,7 @@ class DatadogApiSuccessLogEntry(DatadogLogEntryBase):
     agent_type: str | None = None  # TODO: bifurcate by querySource
 
 
-# ==============================================================================
-# API Error Log Entry (message="tengu_api_error")
-# ==============================================================================
+# -- API Error Log Entry (message="tengu_api_error") ---------------------------
 
 
 class DatadogApiErrorLogEntry(DatadogLogEntryBase):
@@ -184,9 +178,7 @@ class DatadogApiErrorLogEntry(DatadogLogEntryBase):
     request_id: str | None = None  # genuinely optional: (not always present on errors)
 
 
-# ==============================================================================
-# Tool Use Success Log Entry (message="tengu_tool_use_success")
-# ==============================================================================
+# -- Tool Use Success Log Entry (message="tengu_tool_use_success") -------------
 
 
 class DatadogToolUseSuccessLogEntry(DatadogLogEntryBase):
@@ -219,9 +211,7 @@ class DatadogToolUseSuccessLogEntry(DatadogLogEntryBase):
     mcp_server_type: str | None = None  # genuinely optional: (e.g., "stdio")
 
 
-# ==============================================================================
-# OAuth Success Log Entry (message="tengu_oauth_success")
-# ==============================================================================
+# -- OAuth Success Log Entry (message="tengu_oauth_success") -------------------
 
 
 class DatadogOAuthSuccessLogEntry(DatadogLogEntryBase):
@@ -236,9 +226,7 @@ class DatadogOAuthSuccessLogEntry(DatadogLogEntryBase):
     login_with_claude_ai: bool  # Whether using Claude AI auth
 
 
-# ==============================================================================
-# Discriminator Function and Union
-# ==============================================================================
+# -- Discriminator Function and Union ------------------------------------------
 
 
 def _get_datadog_log_entry_type(v: Any) -> str:
@@ -272,9 +260,7 @@ DatadogLogEntry = Annotated[
 ]
 
 
-# ==============================================================================
-# Datadog Capture Types
-# ==============================================================================
+# -- Datadog Capture Types -----------------------------------------------------
 
 
 class DatadogRequestCapture(RequestCapture):

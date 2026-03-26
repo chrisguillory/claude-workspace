@@ -16,9 +16,7 @@ from selenium_browser_automation.tree_utils import (
     serialize_visual_tree,
 )
 
-# ============================================================================
-# compact_aria_tree
-# ============================================================================
+# -- compact_aria_tree ---------------------------------------------------------
 
 
 class TestCompactAriaTreeNoneAndLeafNodes:
@@ -222,9 +220,7 @@ class TestCompactAriaTreeDoesNotMutate:
         assert original == frozen
 
 
-# ============================================================================
-# compact_visual_tree
-# ============================================================================
+# -- compact_visual_tree -------------------------------------------------------
 
 
 class TestCompactVisualTree:
@@ -259,9 +255,7 @@ class TestCompactVisualTree:
         assert compact_visual_tree(node) == {'role': 'button', 'name': 'OK'}
 
 
-# ============================================================================
-# serialize_aria_snapshot
-# ============================================================================
+# -- serialize_aria_snapshot ---------------------------------------------------
 
 
 class TestSerializeAriaSnapshot:
@@ -392,9 +386,7 @@ class TestSerializeAriaSnapshot:
         assert r'\"hello\"' in output
 
 
-# ============================================================================
-# serialize_visual_tree
-# ============================================================================
+# -- serialize_visual_tree -----------------------------------------------------
 
 
 class TestSerializeVisualTree:
