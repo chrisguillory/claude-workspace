@@ -401,7 +401,7 @@ class PipelineTracer:
 
         waits: list[float] = []
         queued_event = f'{stage}:queued'
-        # For embed, queue wait ends at dequeued (entering accumulator)
+        # For embed, queue wait ends at dequeued (worker picks up file)
         # For chunk/store, queue wait ends at started
         pickup_event = f'{stage}:dequeued' if stage == 'embed' else f'{stage}:started'
 
@@ -419,7 +419,7 @@ class PipelineTracer:
         stage: TraceableStage,
         warmup_ids: Set[str],
     ) -> Sequence[float]:
-        """Collect batch accumulation wait (batch_started - dequeued) in ms."""
+        """Collect embed setup wait (batch_started - dequeued) in ms."""
         if stage != 'embed':
             return []
 
@@ -470,10 +470,9 @@ class PipelineTracer:
 def _stage_event_keys(stage: TraceableStage) -> tuple[str, str]:
     """Return (start_event_key, end_event_key) for stage processing time.
 
-    Embed uses batch_started → completed to measure processing time from
-    when the batch starts processing (after accumulation wait), excluding
-    queue wait (dequeued → batch_started). All other stages measure from
-    their started event.
+    Embed uses batch_started → completed to measure embedding time,
+    excluding queue wait (dequeued → batch_started). All other stages
+    measure from their started event.
     """
     if stage == 'embed':
         return f'{stage}:batch_started', f'{stage}:completed'

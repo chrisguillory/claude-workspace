@@ -1017,153 +1017,67 @@ class IndexingService:
     ) -> None:
         """Stage 2: Generate dense + sparse embeddings and push to upsert queue.
 
-        Accumulates chunks from multiple small files before sending to
-        ProcessPoolExecutor for sparse embeddings, reducing IPC overhead.
-        Dense embeddings use BatchLoader which handles coalescing internally.
+        Each worker processes one file at a time. Dense embeddings flow through
+        the shared BatchLoader which coalesces requests across all 64 concurrent
+        workers into optimal API batches. This eliminates the convoy pattern where
+        accumulate-then-flush caused synchronized waves of API calls with idle gaps.
+
+        Large files are sub-batched via _embed_dense_sub_batched so their chunks
+        interleave with other workers' requests in the BatchLoader.
 
         Fail-fast: exceptions propagate immediately, task_done() only on success.
         """
-        # Accumulation settings for sparse embedding batch efficiency.
-        # Rayon needs enough work items to saturate cores — benchmarks show
-        # ~100 texts per thread for 95%+ efficiency on medium/long texts.
-        # The timeout ensures we don't stall when work arrives slowly.
-        sparse_threads = self._sparse_embedding.thread_count
-        BATCH_THRESHOLD = max(500, sparse_threads * 300)
-        BATCH_TIMEOUT = 0.05  # 50ms - don't wait forever for small files
-        logger.debug(f'[EMBED] batch_threshold={BATCH_THRESHOLD} (sparse_threads={sparse_threads})')
+        while True:
+            chunked = await embed_queue.get()
 
-        # Accumulators
-        accumulated_files: list[_ChunkedFile] = []
-        accumulated_texts: list[str] = []
-        text_boundaries: list[int] = []  # Cumulative end index for each file
+            fk = str(chunked.file_path)
+            tracer.record(fk, 'embed', 'dequeued')
 
-        async def flush_batch() -> None:
-            """Generate embeddings and push files to upsert queue."""
-            nonlocal accumulated_files, accumulated_texts, text_boundaries
-
-            if not accumulated_texts:
-                return
-
-            batch_size = len(accumulated_files)
-            flush_t0 = time.perf_counter()
-            logger.debug(
-                f'[EMBED-FLUSH] {batch_size} files, {len(accumulated_texts)} texts, t={flush_t0 - tracer.start_time:.3f}s',
-            )
-
-            # Record batch start for all files in batch
-            for chunked in accumulated_files:
-                fk = str(chunked.file_path)
-                tracer.record(fk, 'embed', 'batch_started')
-                tracer.record(fk, 'embed_sparse', 'started')
-                tracer.record(fk, 'embed_dense', 'started')
-                tracer.record_batch_size(fk, batch_size)
-
-            # Run sparse and dense embeddings in parallel with independent timing
-            async def sparse_with_tracing() -> tuple[Sequence[SparseVector], float]:
-                results, wall_secs, cpu_secs = await self._sparse_embedding.embed_batch(accumulated_texts)
-
-                # Amortize batch totals across files
-                per_file_cpu = cpu_secs / batch_size
-                per_file_wall = wall_secs / batch_size
-                for chunked in accumulated_files:
-                    fk = str(chunked.file_path)
-                    tracer.record(fk, 'embed_sparse', 'completed')
-                    tracer.record_cpu(fk, 'embed_sparse', per_file_cpu)
-                    tracer.record_wall(fk, 'embed_sparse', per_file_wall)
-
-                parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
-                logger.debug(
-                    f'[EMBED-SPARSE] {len(accumulated_texts)} texts in {wall_secs:.3f}s wall, '
-                    f'{cpu_secs:.3f}s cpu ({parallel:.1f}x), t={time.perf_counter() - tracer.start_time:.3f}s',
-                )
-                return results, cpu_secs
-
-            async def dense_with_tracing() -> Sequence[EmbedResponse]:
-                t0 = time.perf_counter()
-                results = await self._embed_dense_sub_batched(accumulated_texts)
-                elapsed = time.perf_counter() - t0
-
-                for chunked in accumulated_files:
-                    tracer.record(str(chunked.file_path), 'embed_dense', 'completed')
-
-                logger.debug(
-                    f'[EMBED-DENSE] {len(accumulated_texts)} texts done in {elapsed:.3f}s, '
-                    f't={time.perf_counter() - tracer.start_time:.3f}s',
-                )
-                return results
-
-            (sparse_results, _sparse_cpu), dense_results = await asyncio.gather(
-                sparse_with_tracing(),
-                dense_with_tracing(),
-            )
-
-            # Distribute results back to files and push to upsert queue
-            start_idx = 0
-            for i, chunked in enumerate(accumulated_files):
-                end_idx = text_boundaries[i]
-                file_sparse = list(sparse_results[start_idx:end_idx])
-                file_dense = list(dense_results[start_idx:end_idx])
-
-                # Create _EmbeddedFile with both embeddings
+            # Zero-chunk passthrough: deletion-only files skip embedding entirely
+            if not chunked.chunks:
                 embedded = _EmbeddedFile(
                     file_path=chunked.file_path,
                     file_hash=chunked.file_hash,
                     file_size=chunked.file_size,
-                    chunks=chunked.chunks,
-                    chunk_ids=chunked.chunk_ids,
+                    chunks=[],
+                    chunk_ids=[],
                     all_chunk_ids=chunked.all_chunk_ids,
                     deleted_chunk_ids=chunked.deleted_chunk_ids,
                     chunks_skipped=chunked.chunks_skipped,
-                    dense_embeddings=[r.values for r in file_dense],
-                    sparse_embeddings=file_sparse,
+                    dense_embeddings=[],
+                    sparse_embeddings=[],
                 )
-                fk = str(chunked.file_path)
                 tracer.record(fk, 'embed', 'completed')
                 tracer.record(fk, 'store', 'queued')
                 await upsert_queue.put(embedded)
                 embed_queue.task_done()
-                counters.chunks_embedded += len(chunked.chunks)
                 counters.files_embedded += 1
+                continue
 
-                # Enqueue reverse index update (await is lock only, not I/O). Drained at operation end.
-                await self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
-
-                start_idx = end_idx
-
-            # Reset accumulators
-            accumulated_files = []
-            accumulated_texts = []
-            text_boundaries = []
-
-        async def process_single_file(chunked: _ChunkedFile) -> None:
-            """Process a single file (used for large files to avoid accumulation)."""
-            fk = str(chunked.file_path)
             texts = [c.text for c in chunked.chunks]
 
             tracer.record(fk, 'embed', 'batch_started')
-            tracer.record_batch_size(fk, 1)
             tracer.record(fk, 'embed_sparse', 'started')
             tracer.record(fk, 'embed_dense', 'started')
 
-            # Run sparse and dense embeddings in parallel with independent completion tracking
-            async def sparse_single() -> tuple[Sequence[SparseVector], float]:
+            # Run sparse and dense embeddings in parallel
+            async def sparse_embed() -> tuple[Sequence[SparseVector], float]:
                 results, wall_secs, cpu_secs = await self._sparse_embedding.embed_batch(texts)
                 tracer.record(fk, 'embed_sparse', 'completed')
                 tracer.record_cpu(fk, 'embed_sparse', cpu_secs)
                 tracer.record_wall(fk, 'embed_sparse', wall_secs)
                 return results, cpu_secs
 
-            async def dense_single() -> Sequence[EmbedResponse]:
+            async def dense_embed() -> Sequence[EmbedResponse]:
                 results = await self._embed_dense_sub_batched(texts)
                 tracer.record(fk, 'embed_dense', 'completed')
                 return results
 
             (sparse_results, _sparse_cpu), dense_results = await asyncio.gather(
-                sparse_single(),
-                dense_single(),
+                sparse_embed(),
+                dense_embed(),
             )
 
-            # Create _EmbeddedFile
             embedded = _EmbeddedFile(
                 file_path=chunked.file_path,
                 file_hash=chunked.file_hash,
@@ -1185,84 +1099,6 @@ class IndexingService:
 
             # Fire-and-forget: reverse index update drained at operation completion
             await self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
-
-        _worker_id = id(asyncio.current_task()) % 10000  # short ID for logs
-
-        while True:
-            try:
-                # Try to get item with timeout to allow periodic flushing
-                try:
-                    get_t0 = time.perf_counter()
-                    chunked = await asyncio.wait_for(
-                        embed_queue.get(),
-                        timeout=BATCH_TIMEOUT,
-                    )
-                    get_elapsed = time.perf_counter() - get_t0
-                    if get_elapsed > 0.1:  # log slow gets (>100ms)
-                        logger.debug(
-                            f'[EMBED-W{_worker_id}] get() took {get_elapsed:.3f}s, accum={len(accumulated_texts)} texts',
-                        )
-                except TimeoutError:
-                    # No items available, flush what we have
-                    if accumulated_texts:
-                        logger.debug(
-                            f'[EMBED-W{_worker_id}] timeout flush: {len(accumulated_texts)} texts, '
-                            f'{len(accumulated_files)} files, t={time.perf_counter() - tracer.start_time:.3f}s',
-                        )
-                    await flush_batch()
-                    continue
-
-                # Record dequeue event (entering accumulator)
-                fk = str(chunked.file_path)
-                tracer.record(fk, 'embed', 'dequeued')
-
-                # Zero-chunk passthrough: deletion-only files skip embedding entirely
-                if not chunked.chunks:
-                    embedded = _EmbeddedFile(
-                        file_path=chunked.file_path,
-                        file_hash=chunked.file_hash,
-                        file_size=chunked.file_size,
-                        chunks=[],
-                        chunk_ids=[],
-                        all_chunk_ids=chunked.all_chunk_ids,
-                        deleted_chunk_ids=chunked.deleted_chunk_ids,
-                        chunks_skipped=chunked.chunks_skipped,
-                        dense_embeddings=[],
-                        sparse_embeddings=[],
-                    )
-                    tracer.record(fk, 'embed', 'completed')
-                    tracer.record(fk, 'store', 'queued')
-                    await upsert_queue.put(embedded)
-                    embed_queue.task_done()
-                    counters.files_embedded += 1
-                    continue
-
-                texts = [c.text for c in chunked.chunks]
-
-                # Large files: process immediately without accumulation
-                if len(texts) >= BATCH_THRESHOLD:
-                    # Flush any accumulated small files first
-                    await flush_batch()
-                    # Process large file directly
-                    await process_single_file(chunked)
-                    continue
-
-                # Small files: accumulate
-                accumulated_files.append(chunked)
-                accumulated_texts.extend(texts)
-                text_boundaries.append(len(accumulated_texts))
-
-                # Flush if we've accumulated enough
-                if len(accumulated_texts) >= BATCH_THRESHOLD:
-                    await flush_batch()
-
-            except asyncio.CancelledError:
-                # Final flush before exit, but preserve cancellation signal
-                try:
-                    await flush_batch()
-                except Exception as e:
-                    logger.warning(f'Failed to flush batch during shutdown: {e}', exc_info=True)
-                raise  # Re-raise CancelledError to signal proper cancellation
 
     async def _pipeline_upsert_worker(
         self,
