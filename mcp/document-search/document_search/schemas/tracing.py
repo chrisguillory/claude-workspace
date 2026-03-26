@@ -31,8 +31,8 @@ type TraceableStage = PipelineStage | EmbedSubStage
 # Events recorded at stage boundaries
 type TimingEvent = Literal[
     'queued',  # placed on input queue
-    'dequeued',  # worker accepted from queue (embed: into accumulator)
-    'batch_started',  # batch processing began (embed flush_batch)
+    'dequeued',  # worker accepted from queue
+    'batch_started',  # embedding began (sparse + dense in parallel)
     'started',  # processing began (chunk, store)
     'completed',  # processing finished
     'errored',  # processing failed
@@ -53,7 +53,7 @@ class StageTimingReport(StrictModel):
     """Timing report for a single pipeline stage.
 
     Top-level stages (chunk, embed, store) have queue_wait.
-    The embed stage has batch_wait (accumulation delay).
+    The embed stage has batch_wait (dequeued to batch_started).
     Sub-stages (embed_dense, embed_sparse) have processing only.
     """
 
