@@ -664,7 +664,7 @@ INDEX_HTML = """<!DOCTYPE html>
             const HEIGHT_PRESETS = {S: {ph: 120, qh: 70}, M: {ph: 158, qh: 90}, L: {ph: 240, qh: 130}, XL: {ph: 340, qh: 180}, XXL: {ph: 480, qh: 240}};
             const state = {
                 start: 0, end: totalElapsed,
-                vis: new Set(['chunk', 'embed', 'embed_sparse', 'embed_dense', 'store']),
+                vis: new Set(['chunk', 'embed_sparse', 'embed_dense', 'store']),
                 qvis: new Set(['file_queue', 'embed_queue', 'upsert_queue', 'chunk_inflight', 'embed_inflight', 'store_inflight', 'chunk_done', 'embed_done', 'store_done']),
                 pct: 0.50, wins: {}, ws: 5, wsMode: 'auto', logScale: false, heightKey: 'M',
                 y2v: null, qMaxY: 0, yBounds: null, px: null, py: null,
@@ -676,9 +676,9 @@ INDEX_HTML = """<!DOCTYPE html>
                 type: {axis: 8, axisSmall: 7, legend: 11},
                 chart: {dotR: 1.0, dotHoverR: 3.5, lineW: 1, lineOp: 0.7, dotOp: 0.85, qLineW: 1, qLineOp: 0.7},
             };
-            const COLORS = {embed_sparse:'#c62828', embed_dense:'#1565c0', store:'#2e7d32', embed:'#6a1b9a', chunk:'#78909c'};
+            const COLORS = {embed_sparse:'#c62828', embed_dense:'#1565c0', store:'#2e7d32', chunk:'#78909c'};
             const QCOLORS = {file_queue:'#e65100', embed_queue:'#1976d2', upsert_queue:'#388e3c', chunk_inflight:'#ff6f00', embed_inflight:'#1e88e5', store_inflight:'#43a047', cumulative:'#6a1b9a', chunk_done:'#ef5350', embed_done:'#42a5f5', store_done:'#66bb6a'};
-            const LABELS = {chunk:'chunk', embed:'embed', embed_sparse:'sparse', embed_dense:'dense', store:'store'};
+            const LABELS = {chunk:'chunk', embed_sparse:'sparse', embed_dense:'dense', store:'store'};
             const W = 600, ML = THEME.spacing.ml, MR = THEME.spacing.mr;
             const PT = THEME.spacing.mt, PB = THEME.spacing.mb;
             const QT = THEME.spacing.mt, QB = THEME.spacing.mb;
@@ -995,7 +995,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 ].map(o => '<option value="' + o.v + '"' + (o.v === state.wsMode ? ' selected' : '') + '>' + o.l + '</option>').join('');
 
                 // Stage legend
-                const allStages = ['embed_sparse', 'embed_dense', 'store', 'chunk', 'embed'];
+                const allStages = ['embed_sparse', 'embed_dense', 'store', 'chunk'];
                 const sLeg = allStages.filter(s => data.some(d => d.stage === s)).map(sid => {
                     const vis = state.vis.has(sid), p = aggP50(sid);
                     return '<span class="ts-sleg" data-s="' + sid + '" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;' + (vis ? '' : 'opacity:0.35;text-decoration:line-through;') + '">' +
