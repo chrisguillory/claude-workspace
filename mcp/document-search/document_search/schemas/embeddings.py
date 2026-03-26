@@ -12,6 +12,7 @@ import numpy as np
 import pydantic
 from cc_lib.schemas import StrictModel
 from numpy.typing import NDArray
+from pydantic import ConfigDict
 
 __all__ = [
     'MAX_TEXT_CHARS',
@@ -70,7 +71,13 @@ class EmbedResponse(StrictModel):
     Values may be a Python list (from API) or numpy array (from cache).
     The hot path (indexing) keeps numpy for 8x memory savings; the cold
     path (search) calls list(response.values) when native types are needed.
+
+    arbitrary_types_allowed enables honest typing: the field IS a union of
+    list and ndarray. Pydantic validates the list branch normally; the ndarray
+    branch passes through without schema validation (constructed via from_numpy).
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     values: EmbeddingVector
     dimensions: int
@@ -79,8 +86,8 @@ class EmbedResponse(StrictModel):
     def from_numpy(cls, values: NDArray[np.float32]) -> EmbedResponse:
         """Construct from numpy array (cache hot path).
 
-        Bypasses Pydantic validation — numpy arrays satisfy Sequence[float]
-        at runtime but Pydantic can't generate a schema for NDArray.
+        Uses model_construct to bypass validation — avoids per-element
+        float coercion on arrays with 100K+ embeddings.
         """
         return cls.model_construct(values=values, dimensions=len(values))
 
