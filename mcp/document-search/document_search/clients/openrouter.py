@@ -268,6 +268,7 @@ class OpenRouterClient:
 
 
 class _Embedding(OpenModel):
+    object: str  # OpenAI spec field name
     embedding: Sequence[float] | str
     index: int
 
@@ -278,9 +279,12 @@ class _Usage(OpenModel):
 
 
 class _EmbeddingResponse(OpenModel):
+    id: str | None = None  # OpenRouter-specific, not consumed
+    object: str  # OpenAI spec field name
     data: Sequence[_Embedding]
     model: str
     usage: _Usage
+    provider: str | None = None  # OpenRouter-specific, not consumed
 
 
 class _ErrorDetail(OpenModel):
