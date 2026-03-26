@@ -40,21 +40,22 @@ releases, so gaps should be addressed proactively.
 
 ### Feature Summary
 
-| Capability                       |      CiC      |  SMCP   | Notes                                                    |
-|----------------------------------|:-------------:|:-------:|----------------------------------------------------------|
-| Text extraction (hidden content) |       ✓       |    ✓    | Both extract display:none, visibility:hidden, etc        |
-| Text extraction (Shadow DOM)     |       -       |    ✓    | **Advantage**: Traverses web component shadows           |
-| Text extraction (filtering)      |       -       |    ✓    | **Advantage**: Filters SCRIPT/STYLE noise                |
-| JavaScript execution             |       ✓       |    ✓    | **Parity**: Both execute JS; SMCP adds statement support |
+| Capability                       |      CiC      |  SMCP   | Notes                                                      |
+|----------------------------------|:-------------:|:-------:|------------------------------------------------------------|
+| Text extraction (hidden content) |       ✓       |    ✓    | Both extract display:none, visibility:hidden, etc          |
+| Text extraction (Shadow DOM)     |       -       |    ✓    | **Advantage**: Traverses web component shadows             |
+| Text extraction (filtering)      |       -       |    ✓    | **Advantage**: Filters SCRIPT/STYLE noise                  |
+| JavaScript execution             |       ✓       |    ✓    | **Parity**: Both execute JS; SMCP adds statement support   |
 | Init script injection            |       -       |    ✓    | **Advantage**: Persistent scripts via `init_scripts` param |
-| Console log access               |       ✓       |    ✓    | **Parity**: Both read console.log/error/warn             |
-| Core Web Vitals                  |       -       |    ✓    | **Advantage**: LCP, CLS, INP, FCP, TTFB                  |
-| HAR export                       |       -       |    ✓    | **Advantage**: Full network traffic logging              |
-| Proxy/IP rotation                |       -       |    ✓    | **Advantage**: Rate limit bypass                         |
-| Network timing details           |     Basic     |    ✓    | **Advantage**: DNS, connect, TLS breakdown               |
-| Chrome profiles                  | Via extension |    ✓    | **Advantage**: Direct profile access                     |
-| GIF recording                    |       ✓       | **Gap** | P3: Low priority                                         |
-| Natural language find            |       ✓       |    -    | Chrome's `find` tool uses semantic matching              |
+| Console log access               |       ✓       |    ✓    | **Parity**: Both read console.log/error/warn               |
+| Core Web Vitals                  |       -       |    ✓    | **Advantage**: LCP, CLS, INP, FCP, TTFB                    |
+| HAR export                       |       -       |    ✓    | **Advantage**: Full network traffic logging                |
+| Proxy/IP rotation                |       -       |    ✓    | **Advantage**: Rate limit bypass                           |
+| Network timing details           |     Basic     |    ✓    | **Advantage**: DNS, connect, TLS breakdown                 |
+| Chrome profiles                  | Via extension |    ✓    | **Advantage**: Direct profile access                       |
+| URL blocking                     |       -       |    ✓    | **Advantage**: Block requests by URL pattern via CDP       |
+| GIF recording                    |       ✓       | **Gap** | P3: Low priority                                           |
+| Natural language find            |       ✓       |    -    | Chrome's `find` tool uses semantic matching                |
 
 ### CiC Advantages (Gaps to Close)
 
@@ -75,20 +76,21 @@ Capabilities where Claude in Chrome exceeds us:
 
 Capabilities where we exceed Claude in Chrome:
 
-| Capability                  | What It Provides                                   | Use Case                                         |
-|-----------------------------|----------------------------------------------------|--------------------------------------------------|
-| **Shadow DOM Traversal**    | Extracts text from web component shadow roots      | Modern sites using custom elements               |
-| **SCRIPT/STYLE Filtering**  | Removes non-content elements from text extraction  | Clean AI-readable output without code noise      |
-| **PRE/CODE Preservation**   | Exact whitespace in preformatted blocks            | Code extraction, config files, ASCII art         |
-| **Smart Extraction**        | main > article > body with 500-char threshold      | Better element selection than article-only       |
-| **Transparency Metadata**   | `source_element`, `fallback_used`, coverage ratio  | Detect silent partial extraction failures        |
+| Capability                  | What It Provides                                   | Use Case                                          |
+|-----------------------------|----------------------------------------------------|---------------------------------------------------|
+| **Shadow DOM Traversal**    | Extracts text from web component shadow roots      | Modern sites using custom elements                |
+| **SCRIPT/STYLE Filtering**  | Removes non-content elements from text extraction  | Clean AI-readable output without code noise       |
+| **PRE/CODE Preservation**   | Exact whitespace in preformatted blocks            | Code extraction, config files, ASCII art          |
+| **Smart Extraction**        | main > article > body with 500-char threshold      | Better element selection than article-only        |
+| **Transparency Metadata**   | `source_element`, `fallback_used`, coverage ratio  | Detect silent partial extraction failures         |
 | **Init Script Injection**   | User scripts via `init_scripts` parameter          | Persistent API interceptors, environment patching |
-| **Core Web Vitals**         | LCP, CLS, INP, FCP, TTFB with ratings              | Performance auditing, identifying slow pages     |
-| **HAR Export**              | Full network traffic in DevTools-compatible format | Deep network debugging, API analysis             |
-| **Detailed Network Timing** | DNS, connect, TLS, TTFB breakdown per request      | Identifying slow requests, bottleneck analysis   |
-| **Proxy/IP Rotation**       | Authenticated proxies via mitmproxy                | Bypass rate limiting, geographic testing         |
-| **Chrome Profiles**         | Direct access to saved browser profiles            | Authenticated sessions without re-login          |
-| **CDP Stealth**             | Bypass Cloudflare bot detection                    | Scrape protected sites where official tools fail |
+| **Core Web Vitals**         | LCP, CLS, INP, FCP, TTFB with ratings              | Performance auditing, identifying slow pages      |
+| **HAR Export**              | Full network traffic in DevTools-compatible format | Deep network debugging, API analysis              |
+| **Detailed Network Timing** | DNS, connect, TLS, TTFB breakdown per request      | Identifying slow requests, bottleneck analysis    |
+| **Proxy/IP Rotation**       | Authenticated proxies via mitmproxy                | Bypass rate limiting, geographic testing          |
+| **Chrome Profiles**         | Direct access to saved browser profiles            | Authenticated sessions without re-login           |
+| **URL Blocking**            | Block requests by URL pattern at CDP layer         | Remove analytics noise, test resource failures    |
+| **CDP Stealth**             | Bypass Cloudflare bot detection                    | Scrape protected sites where official tools fail  |
 
 ### Test Results (2025-12-23)
 
@@ -224,6 +226,7 @@ How CiC tools map to SMCP tools:
 | -                       | `download_resource`                             | SMCP-only | Download files using browser session cookies (bypasses bot detection)                                     |
 | -                       | `list_chrome_profiles`                          | SMCP-only | List available Chrome profiles with name, email, directory metadata                                       |
 | -                       | `save_profile_state`                            | SMCP-only | Export cookies + localStorage (+ IndexedDB opt-in) to Playwright-compatible JSON                         |
+| -                       | `set_blocked_urls`                              | SMCP-only | Block network requests by URL pattern (wildcards, CDP Network.setBlockedURLs)                            |
 
 See [docs/claude-in-chrome.md](docs/claude-in-chrome.md) for complete Claude in Chrome tool reference.
 
@@ -768,7 +771,8 @@ See [Wait Strategy Architecture](PLAN-interaction-tools.md#wait-strategy-archite
 - `download_resource(url, output_filename)` - Download with session cookies
 - `list_chrome_profiles(verbose?)` - Available Chrome profiles
 
-### Proxy (Rate Limit Bypass)
+### Network Control
+- `set_blocked_urls(urls)` - Block network requests matching URL patterns (wildcards, empty list clears)
 - `configure_proxy(host, port, username, password)` - Configure authenticated proxy via mitmproxy
 - `clear_proxy()` - Stop proxy and return to direct connection
 
@@ -923,6 +927,10 @@ We intentionally don't expose direct CDP Network event streaming for request int
 - Adding CDP would create Chrome-only, deprecated functionality
 
 When BiDi matures with cross-browser network interception support, we may add it then.
+
+**Note on URL blocking:** The `set_blocked_urls` tool uses CDP `Network.setBlockedURLs`, a simple
+declarative command — not event-based interception. Chrome blocks matching URLs internally with no
+event stream or real-time correlation required.
 
 ### Why Not Playwright?
 

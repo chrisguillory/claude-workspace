@@ -824,3 +824,10 @@ class ClearProxyResult(ClosedModel):
     """Result of clear_proxy tool."""
 
     status: str
+
+
+class SetBlockedURLsResult(ClosedModel):
+    """Result of set_blocked_urls tool."""
+
+    blocked_url_count: int
+    patterns: Sequence[str]

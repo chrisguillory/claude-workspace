@@ -100,6 +100,7 @@ from .models import (
     RequestTiming,
     ResizeWindowResult,
     SaveProfileStateResult,
+    SetBlockedURLsResult,
     SleepResult,
     SlowestRequestSummary,
     SmartExtractionInfo,
@@ -3184,6 +3185,54 @@ Workflow:
         service.state.proxy_config = None
 
         return ClearProxyResult(status='proxy_cleared')
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title='Set Blocked URLs',
+            destructiveHint=False,
+            idempotentHint=True,
+        ),
+    )
+    async def set_blocked_urls(
+        urls: Sequence[str],
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> SetBlockedURLsResult:
+        """Block network requests matching URL patterns via CDP.
+
+        Uses Chrome DevTools Protocol Network.setBlockedURLs to block requests
+        at the browser's network layer before they hit the network.
+
+        Each call REPLACES the blocked URL list. Pass an empty list to clear.
+        Blocks persist across navigations but reset on fresh_browser=True.
+
+        Args:
+            urls: URL patterns to block. Wildcards supported:
+                - '*cdn.segment.com*' blocks all Segment analytics
+                - '*.png' blocks all PNG images
+                - [] clears all blocks
+
+        Returns:
+            SetBlockedURLsResult with count and echoed patterns
+
+        Example:
+            set_blocked_urls(['*cdn.segment.com*', '*google-analytics.com*'])
+            navigate('https://example.com')  # Loads without analytics
+            set_blocked_urls([])  # Clear all blocks
+        """
+        driver = await service.get_browser()
+
+        await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.enable', {})
+        await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.setBlockedURLs', {'urls': list(urls)})
+
+        if urls:
+            logger.info(f'Blocked {len(urls)} URL pattern(s): {urls}')
+        else:
+            logger.info('Cleared all URL blocks')
+
+        return SetBlockedURLsResult(
+            blocked_url_count=len(urls),
+            patterns=list(urls),
+        )
 
     @mcp.tool(
         annotations=ToolAnnotations(
