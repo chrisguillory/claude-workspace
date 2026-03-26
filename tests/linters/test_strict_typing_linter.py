@@ -275,18 +275,6 @@ def map_violations_to_classes(
     return result
 
 
-def _build_actual_map(test_file: Path) -> tuple[ViolationMap, Set[str]]:
-    """Run linter and build actual violation map for a test file.
-
-    Returns (violation_map, all_class_names).
-    """
-    ranges = get_class_line_ranges(test_file)
-    output = run_linter(test_file, LINTER)
-    violations = parse_linter_output(output)
-    actual = map_violations_to_classes(violations, ranges)
-    return actual, set(ranges.keys())
-
-
 # -- Module-Scoped Fixtures ---------------------------------------------------
 
 
@@ -376,3 +364,18 @@ def test_edge_case_no_unexpected(edge_case_results: tuple[ViolationMap, Set[str]
         f'{name}: unexpected violations {sorted(kinds)}' for name, kinds in actual_map.items() if name not in known
     }
     assert not unexpected, '\n'.join(sorted(unexpected))
+
+
+# -- Private Helpers ----------------------------------------------------------
+
+
+def _build_actual_map(test_file: Path) -> tuple[ViolationMap, Set[str]]:
+    """Run linter and build actual violation map for a test file.
+
+    Returns (violation_map, all_class_names).
+    """
+    ranges = get_class_line_ranges(test_file)
+    output = run_linter(test_file, LINTER)
+    violations = parse_linter_output(output)
+    actual = map_violations_to_classes(violations, ranges)
+    return actual, set(ranges.keys())

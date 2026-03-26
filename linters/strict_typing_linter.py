@@ -17,8 +17,10 @@ Skips non-frozen dataclasses and attrs classes (mutable by design).
 Note: pydantic_settings.BaseSettings (intentionally non-frozen) is not supported at this time.
 Respects .gitignore when scanning directories.
 
-Module ordering is opt-in via __strict_module_ordering__ = True in package __init__.py.
-When enabled, all submodules in that package must:
+Module ordering is opt-in via enable-ordering globs in pyproject.toml:
+    [tool.strict-typing-linter]
+    enable-ordering = ["tests/**"]
+When enabled, matching files must:
 - Define __all__
 - Order definitions: __all__ items first, then public, then private
 - Within each group: classes before functions
@@ -33,6 +35,8 @@ Design Philosophy:
       - # strict_typing_linter.py: tuple-field - suppress tuple-in-field violations
       - # strict_typing_linter.py: hashable-field - suppress unhashable-field violations
       - # strict_typing_linter.py: ordering - suppress ordering violations
+      - # strict_typing_linter.py: missing-all - suppress missing __all__ violations
+      - # strict_typing_linter.py: trailing-comma - suppress trailing comma violations
 
 Usage:
     ./linters/strict_typing_linter.py <files...>
@@ -59,7 +63,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from _config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
+from _config import (
+    find_config,
+    find_python_files,
+    get_per_file_ignored_codes,
+    load_enable_ordering,
+    load_per_file_ignores,
+    matches_enable_ordering,
+)
 from hashability_inspector import HashabilityInspector, QualifiedName
 
 # -- Configuration ------------------------------------------------------------
@@ -158,6 +169,8 @@ type DirectiveCode = Literal[
     'tuple-field',
     'hashable-field',
     'ordering',
+    'missing-all',
+    'trailing-comma',
     'unused-directive',
 ]
 
@@ -217,6 +230,8 @@ CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
     'tuple-field': {'tuple-field'},
     'hashable-field': {'hashable-field'},
     'ordering': {'ordering', 'missing-all', 'trailing-comma'},
+    'missing-all': {'missing-all'},
+    'trailing-comma': {'trailing-comma'},
 }
 
 
@@ -243,10 +258,6 @@ def main() -> int:
     if not files:
         return 0
 
-    # Discover packages with strict module ordering enabled
-    # Raises ValueError on unrecognized __strict_* variables (fail-fast on typos)
-    strict_ordering_packages = discover_strict_ordering_packages(files)
-
     # Compute source roots from expanded files so the inspector can import project types.
     # Uses files (not args.paths) to handle nested projects when scanning from repo root.
     source_roots = tuple(sorted({find_source_root(f) for f in files}))
@@ -260,9 +271,10 @@ def main() -> int:
     # Check all files
     all_violations: list[Violation] = []
     for filepath in files:
-        # Per-file-ignores from pyproject.toml
+        # Per-file-ignores and enable-ordering from pyproject.toml
         per_file_ignored_kinds: set[ViolationKind] = set()
         skip_file_via_config = False
+        ordering_enabled = False
         if not args.no_config:
             if explicit_config is not None:
                 config_path = explicit_config
@@ -285,12 +297,15 @@ def main() -> int:
                         if code == directive_code:
                             per_file_ignored_kinds.update(kind_set)
 
+                enable_ordering_patterns = load_enable_ordering('strict-typing-linter', config_path)
+                ordering_enabled = matches_enable_ordering(filepath, enable_ordering_patterns, project_root)
+
         if skip_file_via_config:
             continue
 
         violations = check_file(
             filepath,
-            strict_ordering_packages,
+            ordering_enabled=ordering_enabled,
             inspector=inspector,
             respect_skip_file=not args.no_skip_file,
             report_unused_directives=args.report_unused_directives,
@@ -358,8 +373,16 @@ def parse_args() -> argparse.Namespace:
         nargs='*',
         default=[],
         metavar='CODE',
-        choices=['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering'],
-        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, hashable-field, ordering)',
+        choices=[
+            'mutable-type',
+            'loose-typing',
+            'tuple-field',
+            'hashable-field',
+            'ordering',
+            'missing-all',
+            'trailing-comma',
+        ],
+        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, hashable-field, ordering, missing-all, trailing-comma)',
     )
     parser.add_argument(
         '--no-gitignore',
@@ -395,9 +418,9 @@ def parse_args() -> argparse.Namespace:
 
 def check_file(
     filepath: Path,
-    strict_ordering_packages: Set[Path],
-    inspector: HashabilityInspector | None = None,
     *,
+    ordering_enabled: bool = False,
+    inspector: HashabilityInspector | None = None,
     respect_skip_file: bool = True,
     report_unused_directives: bool = False,
 ) -> Sequence[Violation]:
@@ -452,8 +475,8 @@ def check_file(
 
     violations.extend(type_checker.violations)
 
-    # Module ordering (if package or any parent opted in - recursive inheritance)
-    if is_under_strict_package(filepath, strict_ordering_packages):
+    # Module ordering (enabled via enable-ordering globs in pyproject.toml)
+    if ordering_enabled:
         # Skip __main__.py (entry point, never exports)
         if filepath.name != '__main__.py':
             # Skip __init__.py only if it has no definitions (just boilerplate)
@@ -475,48 +498,6 @@ def check_file(
         violations.extend(unused)
 
     return violations
-
-
-def discover_strict_ordering_packages(files: Sequence[Path]) -> Set[Path]:
-    """Find packages that have opted into strict module ordering.
-
-    Two discovery methods:
-    1. Scan __init__.py files in the input list
-    2. Walk up from each input file to find parent __init__.py files
-
-    This ensures single-file invocations still respect package-level settings.
-    Raises ValueError on unrecognized __strict_* variables (fail-fast on typos).
-
-    Strictness is inherited: if a parent package has the flag, all child packages
-    are also considered strict.
-    """
-    packages: set[Path] = set()
-    checked_init_files: set[Path] = set()
-
-    # Method 1: Check __init__.py files in input list
-    for f in files:
-        if f.name == '__init__.py':
-            checked_init_files.add(f)
-            if get_strict_module_ordering(f):
-                packages.add(f.parent)
-
-    # Method 2: Walk up from each file to find parent __init__.py files
-    for f in files:
-        for parent in f.parents:
-            init_path = parent / '__init__.py'
-            if init_path in checked_init_files:
-                continue
-            checked_init_files.add(init_path)
-            if init_path.exists():
-                if get_strict_module_ordering(init_path):
-                    packages.add(parent)
-
-    return packages
-
-
-def is_under_strict_package(filepath: Path, strict_packages: Set[Path]) -> bool:
-    """Check if filepath is under any strict ordering package (recursive inheritance)."""
-    return any(parent in strict_packages for parent in filepath.parents)
 
 
 # -- AST Visitor --------------------------------------------------------------
@@ -1414,16 +1395,12 @@ def validate_strict_var_in_class(name: str, class_name: str, lineno: int) -> Non
     """Validate a __strict_*__ variable found in a class body.
 
     Raises:
-        ValueError: If unrecognized or misplaced
+        ValueError: If unrecognized
     """
     if name not in RECOGNIZED_STRICT_VARS:
         raise ValueError(
             f'{class_name}:{lineno}: Unrecognized strict variable '
             f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?",
-        )
-    if name in MODULE_LEVEL_STRICT_VARS:
-        raise ValueError(
-            f"{class_name}:{lineno}: '{name}' is a module-level variable. Place it in __init__.py, not inside a class.",
         )
 
 
@@ -1453,19 +1430,12 @@ def get_strict_hashable_fields(node: ast.ClassDef) -> bool:
     return False
 
 
-# -- Module Ordering Checks (opt-in via __strict_module_ordering__) -----------
+# -- Module Ordering Checks (opt-in via enable-ordering in pyproject.toml) ----
 
 
 # Recognized __strict_* variables (fail-fast on typos)
-# Two namespaces: __strict_*__ (legacy module-level) and __strict_typing_linter__*__ (scoped)
 RECOGNIZED_STRICT_VARS: Set[str] = {
-    '__strict_module_ordering__',
     '__strict_typing_linter__hashable_fields__',
-}
-
-# Scope-aware sets for targeted error messages
-MODULE_LEVEL_STRICT_VARS: Set[str] = {
-    '__strict_module_ordering__',
 }
 
 CLASS_LEVEL_STRICT_VARS: Set[str] = {
@@ -1477,42 +1447,6 @@ STRICT_VAR_PREFIXES: Sequence[str] = (
     '__strict_typing_linter__',
     '__strict_',
 )
-
-
-def get_strict_module_ordering(init_path: Path) -> bool:
-    """Check if __init__.py opts into strict module ordering.
-
-    Raises:
-        ValueError: If unrecognized __strict_* variable found (fail-fast on typos)
-        OSError: If file cannot be read
-        SyntaxError: If file contains invalid Python syntax
-    """
-    if not init_path.exists():
-        return False
-
-    source = init_path.read_text(encoding='utf-8')
-    tree = ast.parse(source, filename=str(init_path))
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and is_strict_var(target.id):
-                    name = target.id
-                    # Fail-fast on unrecognized __strict_*__ variables
-                    if name not in RECOGNIZED_STRICT_VARS:
-                        raise ValueError(
-                            f'{init_path}:{node.lineno}: Unrecognized strict variable '
-                            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?",
-                        )
-                    if name in CLASS_LEVEL_STRICT_VARS:
-                        raise ValueError(
-                            f'{init_path}:{node.lineno}: '
-                            f"'{name}' is a class-level variable. Place it inside a class body, not in __init__.py.",
-                        )
-                    if name == '__strict_module_ordering__':
-                        if isinstance(node.value, ast.Constant):
-                            return node.value.value is True
-    return False
 
 
 def extract_all_names(tree: ast.Module) -> Set[str] | None:
