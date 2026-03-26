@@ -88,25 +88,16 @@ def run_linter(test_file: Path, linter: Path) -> str:
 def parse_flagged_names(output: str) -> Set[str]:
     """Parse linter output to extract names flagged with REX001.
 
-    Expects lines like:
-        path/file.py:42:0: error: REX001 Symbol imported from ...
-            'join',
-    The source_line contains the __all__ entry with the symbol name.
+    Extracts the symbol name from the error line itself:
+        path/file.py:42:0: error: REX001 'join' re-exported via __all__
     """
     flagged: set[str] = set()
 
-    # Pattern: Match the source line that follows the error line
-    # The source line contains the symbol name in quotes
-    lines = output.splitlines()
-    for i, line in enumerate(lines):
+    for line in output.splitlines():
         if 'REX001' in line:
-            # Next line is the indented source line containing the symbol
-            if i + 1 < len(lines):
-                source_line = lines[i + 1].strip()
-                # Extract name from patterns like: 'join', or 'join'
-                match = re.search(r"'([^']+)'", source_line)
-                if match:
-                    flagged.add(match.group(1))
+            match = re.search(r"REX001 '([^']+)'", line)
+            if match:
+                flagged.add(match.group(1))
 
     return flagged
 

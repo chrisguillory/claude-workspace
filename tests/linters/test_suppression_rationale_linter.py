@@ -132,29 +132,23 @@ def _get_source_line(filepath: Path, lineno: int) -> str:
 # -- Module-Scoped Fixtures ---------------------------------------------------
 
 
-@pytest.fixture(scope='module')
-def instructive_data() -> tuple[Mapping[int, str], Mapping[int, str], Set[int]]:
-    """Run linter on instructive file and return (actual, expected, ok_lines)."""
-    expected, ok_lines = parse_expectations(TEST_FILE)
-    output = run_linter(TEST_FILE, LINTER)
-    actual = parse_linter_output(output)
-    return actual, expected, ok_lines
-
-
-@pytest.fixture(scope='module')
-def edge_case_data() -> tuple[Mapping[int, str], Mapping[int, str], Set[int]]:
-    """Run linter on edge case file and return (actual, expected, ok_lines)."""
-    expected, ok_lines = parse_expectations(EDGE_CASE_FILE)
-    output = run_linter(EDGE_CASE_FILE, LINTER)
-    actual = parse_linter_output(output)
-    return actual, expected, ok_lines
-
-
-# -- Helpers for parametrize IDs ----------------------------------------------
-
-# Pre-parse expectations at module level for parametrize decorators
+# Pre-parse expectations at module level (used by parametrize decorators AND fixtures)
 _INSTRUCTIVE_EXPECTED, _INSTRUCTIVE_OK = parse_expectations(TEST_FILE)
 _EDGE_CASE_EXPECTED, _EDGE_CASE_OK = parse_expectations(EDGE_CASE_FILE)
+
+
+@pytest.fixture(scope='module')
+def instructive_actual() -> Mapping[int, str]:
+    """Run linter on instructive file, return actual violations."""
+    output = run_linter(TEST_FILE, LINTER)
+    return parse_linter_output(output)
+
+
+@pytest.fixture(scope='module')
+def edge_case_actual() -> Mapping[int, str]:
+    """Run linter on edge case file, return actual violations."""
+    output = run_linter(EDGE_CASE_FILE, LINTER)
+    return parse_linter_output(output)
 
 
 def _expect_id(lineno: int, code: str) -> str:
@@ -176,10 +170,10 @@ def _ok_id(lineno: int) -> str:
     ids=[_expect_id(ln, code) for ln, code in _INSTRUCTIVE_EXPECTED.items()],
 )
 def test_instructive_expected(
-    lineno: int, expected_code: str, instructive_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]]
+    lineno: int, expected_code: str, instructive_actual: Mapping[int, str]
 ) -> None:
     """Each EXPECT-tagged line triggers the expected rule."""
-    actual, _, _ = instructive_data
+    actual = instructive_actual
     actual_code = actual.get(lineno)
     assert actual_code is not None, f'line {lineno}: expected {expected_code}, got nothing'
     assert actual_code == expected_code, f'line {lineno}: expected {expected_code}, got {actual_code}'
@@ -190,9 +184,9 @@ def test_instructive_expected(
     sorted(_INSTRUCTIVE_OK),
     ids=[_ok_id(ln) for ln in sorted(_INSTRUCTIVE_OK)],
 )
-def test_instructive_ok(lineno: int, instructive_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]]) -> None:
+def test_instructive_ok(lineno: int, instructive_actual: Mapping[int, str]) -> None:
     """Each OK-tagged line produces no violation."""
-    actual, _, _ = instructive_data
+    actual = instructive_actual
     actual_code = actual.get(lineno)
     if actual_code is not None:
         source_line = _get_source_line(TEST_FILE, lineno)
@@ -200,11 +194,11 @@ def test_instructive_ok(lineno: int, instructive_data: tuple[Mapping[int, str], 
 
 
 def test_instructive_no_unexpected(
-    instructive_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]],
+    instructive_actual: Mapping[int, str],
 ) -> None:
     """No violations on untagged lines in the instructive file."""
-    actual, expected, ok_lines = instructive_data
-    tagged_lines = set(expected.keys()) | ok_lines
+    actual = instructive_actual
+    tagged_lines = set(_INSTRUCTIVE_EXPECTED.keys()) | _INSTRUCTIVE_OK
     unexpected = []
     for lineno, actual_code in sorted(actual.items()):
         if lineno not in tagged_lines:
@@ -222,10 +216,10 @@ def test_instructive_no_unexpected(
     ids=[_expect_id(ln, code) for ln, code in _EDGE_CASE_EXPECTED.items()],
 )
 def test_edge_case_expected(
-    lineno: int, expected_code: str, edge_case_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]]
+    lineno: int, expected_code: str, edge_case_actual: Mapping[int, str]
 ) -> None:
     """Each EXPECT-tagged line triggers the expected rule."""
-    actual, _, _ = edge_case_data
+    actual = edge_case_actual
     actual_code = actual.get(lineno)
     assert actual_code is not None, f'line {lineno}: expected {expected_code}, got nothing'
     assert actual_code == expected_code, f'line {lineno}: expected {expected_code}, got {actual_code}'
@@ -236,9 +230,9 @@ def test_edge_case_expected(
     sorted(_EDGE_CASE_OK),
     ids=[_ok_id(ln) for ln in sorted(_EDGE_CASE_OK)],
 )
-def test_edge_case_ok(lineno: int, edge_case_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]]) -> None:
+def test_edge_case_ok(lineno: int, edge_case_actual: Mapping[int, str]) -> None:
     """Each OK-tagged line produces no violation."""
-    actual, _, _ = edge_case_data
+    actual = edge_case_actual
     actual_code = actual.get(lineno)
     if actual_code is not None:
         source_line = _get_source_line(EDGE_CASE_FILE, lineno)
@@ -246,11 +240,11 @@ def test_edge_case_ok(lineno: int, edge_case_data: tuple[Mapping[int, str], Mapp
 
 
 def test_edge_case_no_unexpected(
-    edge_case_data: tuple[Mapping[int, str], Mapping[int, str], Set[int]],
+    edge_case_actual: Mapping[int, str],
 ) -> None:
     """No violations on untagged lines in the edge case file."""
-    actual, expected, ok_lines = edge_case_data
-    tagged_lines = set(expected.keys()) | ok_lines
+    actual = edge_case_actual
+    tagged_lines = set(_EDGE_CASE_EXPECTED.keys()) | _EDGE_CASE_OK
     unexpected = []
     for lineno, actual_code in sorted(actual.items()):
         if lineno not in tagged_lines:

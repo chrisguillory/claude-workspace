@@ -147,6 +147,7 @@ def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
     """Parse AST to get line ranges for each function.
 
     Returns dict mapping function name to (start_line, end_line).
+    Fixture files must use unique function names — duplicates overwrite silently.
     """
     source = filepath.read_text(encoding='utf-8')
     tree = ast.parse(source)
