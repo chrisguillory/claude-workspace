@@ -120,13 +120,11 @@ from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.session_tracker import find_claude_pid
 
-# =============================================================================
 # Credential Models — External Data (login files, config, keychain)
 #
 # Lightweight projections of external schemas. Only includes fields the
 # statusline needs. Uses extra='ignore' since these files have many fields
 # we don't care about (tokens, scopes, display_name, etc.).
-# =============================================================================
 
 
 class LoginFileOAuthAccount(SubsetModel):
@@ -199,9 +197,7 @@ class SwitchPendingMarker(SubsetModel):
     login_name: str = ''
 
 
-# =============================================================================
-# Credential Models — Internal (resolved state flowing through pipeline)
-# =============================================================================
+# -- Credential Models — Internal (resolved state flowing through pipeline) ----
 
 
 class ResolvedCredentials(ClosedModel):
@@ -246,7 +242,6 @@ def _extract_plan_info(login: LoginFile) -> tuple[str, str, str]:
     return login_name, subscription, tier
 
 
-# =============================================================================
 # Health Monitoring Models
 #
 # Tracks process health across statusline invocations via a per-session sidecar
@@ -255,7 +250,6 @@ def _extract_plan_info(login: LoginFile) -> tuple[str, str, str]:
 #
 # HealthSample: single point-in-time measurement from psutil
 # HealthSidecar: ring buffer of recent samples + session-level aggregates
-# =============================================================================
 
 
 class HealthSample(StrictModel):
@@ -285,9 +279,7 @@ class HealthSidecar(StrictModel):
     samples: Sequence[HealthSample]  # Capped at MAX_HEALTH_SAMPLES
 
 
-# =============================================================================
-# Status Line Input Models — strict, fail-fast on schema drift
-# =============================================================================
+# -- Status Line Input Models — strict, fail-fast on schema drift --------------
 
 
 class ModelInfo(StrictModel):
@@ -374,9 +366,7 @@ class WorktreeInfo(StrictModel):
     original_branch: str | None = None
 
 
-# =============================================================================
-# ANSI Colors
-# =============================================================================
+# -- ANSI Colors ---------------------------------------------------------------
 
 CYAN = '\033[36m'
 GREEN = '\033[32m'
@@ -388,7 +378,6 @@ BOLD = '\033[1m'
 RESET = '\033[0m'
 
 
-# =============================================================================
 # Health Monitoring Thresholds
 #
 # Calibrated against observed Claude Code behavior on macOS (Apple Silicon).
@@ -403,7 +392,6 @@ RESET = '\033[0m'
 #       Healthy session has ~45 FDs. (anthropics/claude-code#21701, #23645)
 # Kids: MCP servers and subagents accumulate if not cleaned up.
 #       Healthy session has 3-8 children. (anthropics/claude-code#25180)
-# =============================================================================
 
 # Memory RSS thresholds (bytes)
 MEMORY_WARN_BYTES = 1_000_000_000  # 1GB — above typical healthy range
@@ -494,12 +482,10 @@ def _classify_cwd(cwd: str, project_dir: str, added_dirs: Sequence[str]) -> CwdL
     return 'unknown'
 
 
-# =============================================================================
 # Static Data Cache
 #
 # Email and subscription type don't change within a session.
 # Cached per-session to avoid repeated keychain/config reads.
-# =============================================================================
 
 CONFIG_PATH = Path.home() / '.claude.json'
 SCRIPT_PATH = Path(__file__).resolve()
@@ -983,9 +969,7 @@ def _git_remote_url() -> str:
     return ''
 
 
-# =============================================================================
-# Formatting
-# =============================================================================
+# -- Formatting ----------------------------------------------------------------
 
 
 def _format_plan_compact(sub: str, tier: str) -> str:
@@ -1067,7 +1051,6 @@ def _format_tokens(n: int) -> str:
     return str(n)
 
 
-# =============================================================================
 # Process Health Monitoring
 #
 # Collects CPU, memory, file descriptor, and child process metrics via psutil.
@@ -1085,7 +1068,6 @@ def _format_tokens(n: int) -> str:
 # - All psutil calls wrapped in try/except for NoSuchProcess and AccessDenied.
 #   Per-child errors are handled individually — one dead child won't abort the
 #   survey. If the Claude process itself dies, we return None gracefully.
-# =============================================================================
 
 
 def _health_sidecar_path(session_id: str) -> Path:
@@ -1365,9 +1347,7 @@ def _format_health(sample: HealthSample, sidecar: HealthSidecar) -> str:
     return result
 
 
-# =============================================================================
-# Session Title
-# =============================================================================
+# -- Session Title -------------------------------------------------------------
 
 
 def _get_process_uptime_ms(claude_pid: int) -> float:
@@ -1405,13 +1385,11 @@ def _get_session_title(transcript_path: str) -> str | None:
         return None
 
 
-# =============================================================================
 # Error Boundary — type-dispatched error display for the statusline
 #
 # Errors propagate out of main() to the boundary, which dispatches to
 # type-specific handlers. Each handler writes the error log and prints
 # multi-line diagnostic output to stdout (the statusline area).
-# =============================================================================
 
 
 class StatusLineValidationError(Exception):
@@ -1475,9 +1453,7 @@ def _handle_crash(exc: Exception) -> None:
             print(f'{DIM}{line}{RESET}')
 
 
-# =============================================================================
-# Main
-# =============================================================================
+# -- Main ----------------------------------------------------------------------
 
 
 @boundary

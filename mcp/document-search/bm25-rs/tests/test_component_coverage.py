@@ -22,18 +22,14 @@ import py_rust_stemmers
 import pytest
 from fastembed import SparseTextEmbedding
 
-# ---------------------------------------------------------------------------
-# Constants and configuration
-# ---------------------------------------------------------------------------
+# -- Constants and configuration -----------------------------------------------
 
 DICT_PATH = Path('/usr/share/dict/words')
 SAMPLE_SIZE = 10_000
 SENTENCE_COUNT = 200
 RNG_SEED = 42
 
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
+# -- Data loading --------------------------------------------------------------
 
 
 def _load_dictionary_words() -> Sequence[str]:
@@ -51,9 +47,7 @@ def _sample_words(words: Sequence[str], n: int, seed: int = RNG_SEED) -> Sequenc
     return rng.sample(words, n)
 
 
-# ---------------------------------------------------------------------------
-# Edge case generators
-# ---------------------------------------------------------------------------
+# -- Edge case generators ------------------------------------------------------
 
 
 def _unicode_edge_cases() -> Sequence[str]:
@@ -184,9 +178,7 @@ def _whitespace_cases() -> Sequence[str]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+# -- Fixtures ------------------------------------------------------------------
 
 
 @pytest.fixture(scope='module')
@@ -214,9 +206,7 @@ def python_stemmer() -> py_rust_stemmers.SnowballStemmer:
     return py_rust_stemmers.SnowballStemmer('english')
 
 
-# ---------------------------------------------------------------------------
-# 1. Stemmer equivalence on vocabulary
-# ---------------------------------------------------------------------------
+# -- 1. Stemmer equivalence on vocabulary --------------------------------------
 
 
 class TestStemmerEquivalence:
@@ -296,9 +286,7 @@ class TestStemmerEquivalence:
         assert tested >= SAMPLE_SIZE * 0.9, f'Only tested {tested} words'
 
 
-# ---------------------------------------------------------------------------
-# 2. Hash equivalence on stems
-# ---------------------------------------------------------------------------
+# -- 2. Hash equivalence on stems ----------------------------------------------
 
 
 class TestHashEquivalence:
@@ -427,9 +415,7 @@ class TestHashEquivalence:
         )
 
 
-# ---------------------------------------------------------------------------
-# 3. Tokenization equivalence on diverse inputs
-# ---------------------------------------------------------------------------
+# -- 3. Tokenization equivalence on diverse inputs -----------------------------
 
 
 class TestTokenizationEquivalence:
@@ -504,9 +490,7 @@ class TestTokenizationEquivalence:
         )
 
 
-# ---------------------------------------------------------------------------
-# 4. Full pipeline on vocabulary sentences
-# ---------------------------------------------------------------------------
+# -- 4. Full pipeline on vocabulary sentences ----------------------------------
 
 
 class TestFullPipelineCoverage:
@@ -592,9 +576,7 @@ class TestFullPipelineCoverage:
         )
 
 
-# ---------------------------------------------------------------------------
-# 5. Stopword handling
-# ---------------------------------------------------------------------------
+# -- 5. Stopword handling ------------------------------------------------------
 
 
 class TestStopwordHandling:
@@ -630,9 +612,7 @@ class TestStopwordHandling:
         assert not mismatches, '\n'.join(str(m) for m in mismatches)
 
 
-# ---------------------------------------------------------------------------
-# 6. BM25 scoring precision
-# ---------------------------------------------------------------------------
+# -- 6. BM25 scoring precision -------------------------------------------------
 
 
 class TestBM25Scoring:
@@ -683,9 +663,7 @@ class TestBM25Scoring:
             assert fe[tid] == pytest.approx(rs[tid], abs=1e-15)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# -- Helpers -------------------------------------------------------------------
 
 
 def _fastembed_embed_single(text: str) -> Set[int]:

@@ -20,16 +20,12 @@ import pydantic
 from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.types import EmptyDict
 
-# ==============================================================================
-# Feature Source
-# ==============================================================================
+# -- Feature Source ------------------------------------------------------------
 
 FeatureSource = Literal['force', 'defaultValue', 'experiment']
 
 
-# ==============================================================================
-# Experiment Types
-# ==============================================================================
+# -- Experiment Types ----------------------------------------------------------
 
 
 class ExperimentConfig(StrictModel):
@@ -56,9 +52,7 @@ class ExperimentResult(StrictModel):
     hashUsed: bool  # Whether hash was used for assignment
 
 
-# ==============================================================================
-# Feature Flag Config Value Schemas
-# ==============================================================================
+# -- Feature Flag Config Value Schemas -----------------------------------------
 
 
 class FeedbackSurveyConfig(StrictModel):
@@ -150,9 +144,7 @@ class TopOfFeedTipConfig(StrictModel):
     color: str
 
 
-# ==============================================================================
-# Per-Flag Feature Value Types
-# ==============================================================================
+# -- Per-Flag Feature Value Types ----------------------------------------------
 
 
 class BoolFeatureValue(StrictModel):
@@ -295,9 +287,7 @@ class TopOfFeedTipFeatureValue(StrictModel):
     experimentResult: None  # Always null for defaultValue source
 
 
-# ==============================================================================
-# Strictly Typed Features Dict
-# ==============================================================================
+# -- Strictly Typed Features Dict ----------------------------------------------
 #
 # All known feature flags with strict per-flag typing.
 #
@@ -306,7 +296,6 @@ class TopOfFeedTipFeatureValue(StrictModel):
 #
 # total=False since different users may see different subsets of flags.
 # New flags from the API will cause validation failure (fail-fast).
-# ==============================================================================
 
 FeaturesDict = TypedDict(
     'FeaturesDict',
@@ -366,9 +355,7 @@ FeatureValue = (
 )
 
 
-# ==============================================================================
-# Eval Request/Response (moved from internal_endpoints.py)
-# ==============================================================================
+# -- Eval Request/Response (moved from internal_endpoints.py) ------------------
 
 
 class EvalAttributes(StrictModel):

@@ -23,9 +23,7 @@ from typing import Literal
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
-# ==============================================================================
-# Proxy Error (direction="error")
-# ==============================================================================
+# -- Proxy Error (direction="error") -------------------------------------------
 
 
 class ProxyErrorRequest(StrictModel):

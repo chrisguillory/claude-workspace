@@ -215,9 +215,7 @@ class LibraryBoundary:
         return cast(_T, _TranslatingProxy(library, self))
 
 
-# ---------------------------------------------------------------------------
-# Proxy implementation
-# ---------------------------------------------------------------------------
+# -- Proxy implementation ------------------------------------------------------
 
 
 class _TranslatingProxy:
@@ -318,9 +316,7 @@ class _TranslatingProxy:
         return result
 
 
-# ---------------------------------------------------------------------------
-# Wrapper types — translate exceptions during iteration / context management
-# ---------------------------------------------------------------------------
+# -- Wrapper types — translate exceptions during iteration / context management ---
 
 
 class _WrappedGenerator:

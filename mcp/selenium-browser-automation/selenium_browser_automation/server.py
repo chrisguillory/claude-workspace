@@ -287,9 +287,7 @@ def _save_large_output_to_file(
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# CDP DOMStorage Helpers (Multi-Origin localStorage Access)
-# =============================================================================
+# -- CDP DOMStorage Helpers (Multi-Origin localStorage Access) -----------------
 
 
 async def _cdp_enable_domstorage(driver: webdriver.Chrome) -> None:
@@ -506,9 +504,7 @@ async def _restore_pending_profile_state_for_current_origin(
         logger.info(f'Restored {indexeddb_count} IndexedDB databases for {current_origin}')
 
 
-# =============================================================================
-# Profile State Import Helpers
-# =============================================================================
+# -- Profile State Import Helpers ----------------------------------------------
 
 
 async def _load_profile_state_from_file(file_path: str) -> ProfileState:

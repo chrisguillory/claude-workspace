@@ -54,9 +54,7 @@ from claude_session.schemas.session.models import (
 from claude_session.schemas.types import PermissiveModel
 from pydantic import ValidationError
 
-# ==============================================================================
-# Terminal Color Support
-# ==============================================================================
+# -- Terminal Color Support ----------------------------------------------------
 
 
 class Colors:
@@ -89,9 +87,7 @@ if not sys.stdout.isatty():
     Colors.disable()
 
 
-# ==============================================================================
-# Type Definitions
-# ==============================================================================
+# -- Type Definitions ----------------------------------------------------------
 
 
 class EnrichedFieldError(TypedDict):
@@ -162,9 +158,7 @@ class TotalStats(TypedDict):
     fallbacks: list[FallbackUsage]
 
 
-# ==============================================================================
-# Path Manipulation Utilities
-# ==============================================================================
+# -- Path Manipulation Utilities -----------------------------------------------
 
 
 def normalize_path(loc: tuple[str | int, ...]) -> str:
@@ -220,9 +214,7 @@ def generalize_path(loc: tuple[str | int, ...]) -> str:
     return '.'.join(generalized_parts)
 
 
-# ==============================================================================
-# Value Extraction and Formatting
-# ==============================================================================
+# -- Value Extraction and Formatting -------------------------------------------
 
 
 def extract_value_at_path(data: dict[str, Any], loc: tuple[str | int, ...]) -> Any:
@@ -383,9 +375,7 @@ def truncate_value(value: Any, full: bool = False) -> str:
         return result
 
 
-# ==============================================================================
-# Error Grouping
-# ==============================================================================
+# -- Error Grouping ------------------------------------------------------------
 
 
 def compute_grouping_key(error: EnrichedFieldError) -> tuple[str, str, str]:
@@ -430,9 +420,7 @@ def group_errors(errors: list[EnrichedFieldError]) -> list[ErrorGroup]:
     return result
 
 
-# ==============================================================================
-# Fallback Detection
-# ==============================================================================
+# -- Fallback Detection --------------------------------------------------------
 
 
 def _may_contain_fallbacks(record: Any) -> bool:
@@ -552,9 +540,7 @@ def resolve_tool_name_for_result(
     return None
 
 
-# ==============================================================================
-# File Validation
-# ==============================================================================
+# -- File Validation -----------------------------------------------------------
 
 
 def find_all_session_files() -> list[Path]:
@@ -736,9 +722,7 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
     return results
 
 
-# ==============================================================================
-# Output Formatting
-# ==============================================================================
+# -- Output Formatting ---------------------------------------------------------
 
 
 def format_error_group(group: ErrorGroup, full: bool = False) -> str:
@@ -979,9 +963,7 @@ Examples:
     return args
 
 
-# ==============================================================================
-# Main
-# ==============================================================================
+# -- Main ----------------------------------------------------------------------
 
 
 def _aggregate_result(total_stats: TotalStats, results: FileValidationResult) -> None:

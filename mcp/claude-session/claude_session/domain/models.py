@@ -27,9 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from claude_session.schemas.session import SessionRecord
 
-# ==============================================================================
-# Base Configuration for Domain Models
-# ==============================================================================
+# -- Base Configuration for Domain Models --------------------------------------
 
 
 class DomainModel(BaseModel):
@@ -42,9 +40,7 @@ class DomainModel(BaseModel):
     )
 
 
-# ==============================================================================
-# Top Level: Complete Session Archive (for memorialization/teleportation)
-# ==============================================================================
+# -- Top Level: Complete Session Archive (for memorialization/teleportation) ---
 
 
 class CompleteSessionArchive(DomainModel):
@@ -61,9 +57,7 @@ class CompleteSessionArchive(DomainModel):
     archived_at: str  # ISO timestamp when archive was created
 
 
-# ==============================================================================
-# Session Level: Main and Agent Sessions
-# ==============================================================================
+# -- Session Level: Main and Agent Sessions ------------------------------------
 
 
 class Session(DomainModel):
@@ -91,9 +85,7 @@ class AgentSession(DomainModel):
     records: list[SessionRecord]  # All records from agent-{agentId}.jsonl
 
 
-# ==============================================================================
-# Analysis Level: Enriched with Costs and Insights
-# ==============================================================================
+# -- Analysis Level: Enriched with Costs and Insights --------------------------
 
 
 class SessionAnalysis(DomainModel):
@@ -123,9 +115,7 @@ class SessionAnalysis(DomainModel):
     errors_encountered: int = 0
 
 
-# ==============================================================================
-# Metadata Level: Computed Statistics
-# ==============================================================================
+# -- Metadata Level: Computed Statistics ---------------------------------------
 
 
 class SessionMetadata(DomainModel):

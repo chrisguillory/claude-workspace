@@ -78,9 +78,7 @@ from .models import (
     ProfileStateOriginStorage,
 )
 
-# =============================================================================
-# Chrome Profile Path Resolution
-# =============================================================================
+# -- Chrome Profile Path Resolution --------------------------------------------
 
 
 def get_chrome_base_path() -> Path:
@@ -114,9 +112,7 @@ def get_chrome_profile_path(profile_name: str = 'Default') -> Path:
     return profile_path
 
 
-# =============================================================================
-# Cookie Export
-# =============================================================================
+# -- Cookie Export -------------------------------------------------------------
 
 # Type alias for sameSite values
 type SameSiteValue = Literal['Strict', 'Lax', 'None']
@@ -255,9 +251,7 @@ def _domain_matches(host: str, pattern: str) -> bool:
     return host.endswith('.' + pattern)
 
 
-# =============================================================================
-# DIY Cookie Decryption (replaces browser-cookie3)
-# =============================================================================
+# -- DIY Cookie Decryption (replaces browser-cookie3) --------------------------
 #
 # Why DIY instead of browser-cookie3?
 # browser-cookie3.chrome() hardcodes the Default profile path. When you call
@@ -269,7 +263,6 @@ def _domain_matches(host: str, pattern: str) -> bool:
 #
 # Verified against browser-cookie3 (MIT), pycookiecheat (MIT), and
 # HackBrowserData (MIT) source code.
-# =============================================================================
 
 
 def _get_chrome_encryption_key() -> bytes:
@@ -501,9 +494,7 @@ def export_cookies(
     return cookies
 
 
-# =============================================================================
-# localStorage Export
-# =============================================================================
+# -- localStorage Export -------------------------------------------------------
 
 
 def export_local_storage(
@@ -564,9 +555,7 @@ def export_local_storage(
     return storage
 
 
-# =============================================================================
-# sessionStorage Export
-# =============================================================================
+# -- sessionStorage Export -----------------------------------------------------
 
 
 @dataclass
@@ -717,9 +706,7 @@ def export_session_storage(
     raise RuntimeError(f'AppleScript extraction failed: {live_result.error_reason}')
 
 
-# =============================================================================
-# Main Export Function
-# =============================================================================
+# -- Main Export Function ------------------------------------------------------
 
 
 def export_chrome_profile_state(

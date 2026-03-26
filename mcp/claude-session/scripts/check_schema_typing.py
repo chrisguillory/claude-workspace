@@ -40,9 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-# =============================================================================
-# Configuration - What to check (not WHERE to check - that's the caller's job)
-# =============================================================================
+# -- Configuration - What to check (not WHERE to check - that's the caller's job) ---
 
 # Types that trigger mutable-type errors
 MUTABLE_TYPES: Set[str] = {
@@ -97,9 +95,7 @@ EXEMPT_BASE_CLASSES: Set[str] = {
 }
 
 
-# =============================================================================
-# Data Types
-# =============================================================================
+# -- Data Types ----------------------------------------------------------------
 
 
 # Type aliases for constrained string values
@@ -122,9 +118,7 @@ class Violation:
     suggestion: str
 
 
-# =============================================================================
-# AST Visitor
-# =============================================================================
+# -- AST Visitor ---------------------------------------------------------------
 
 
 class SchemaTypeChecker(ast.NodeVisitor):
@@ -466,9 +460,7 @@ class SchemaTypeChecker(ast.NodeVisitor):
         return False
 
 
-# =============================================================================
-# File Processing
-# =============================================================================
+# -- File Processing -----------------------------------------------------------
 
 
 def check_file(filepath: Path) -> list[Violation]:
@@ -497,9 +489,7 @@ def find_python_files(root: Path, exclude_dirs: Set[str]) -> list[Path]:
     return sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
 
 
-# =============================================================================
-# Output Formatting
-# =============================================================================
+# -- Output Formatting ---------------------------------------------------------
 
 
 def format_violation(v: Violation) -> str:
@@ -524,9 +514,7 @@ def format_violation(v: Violation) -> str:
     )
 
 
-# =============================================================================
-# Main Entry Point
-# =============================================================================
+# -- Main Entry Point ----------------------------------------------------------
 
 
 # Map from directive codes to violation kinds for --ignore flag
