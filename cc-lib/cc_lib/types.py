@@ -43,6 +43,10 @@ from pydantic import JsonValue
 type SessionState = Literal['active', 'exited', 'completed', 'crashed']
 type SessionSource = Literal['startup', 'resume', 'compact', 'clear']
 
+# -- Claude Code versioning ---------------------------------------------------
+
+type CCVersion = str
+
 # -- JSON serialization helpers -----------------------------------------------
 
 JsonDatetime = Annotated[datetime, pydantic.Field(strict=False)]

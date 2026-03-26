@@ -54,14 +54,13 @@ from __future__ import annotations
 
 import argparse
 import ast
-import subprocess
 import sys
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from _config import find_config, get_per_file_ignored_codes, load_per_file_ignores
+from _config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
 
 # Name resolution (import map usage)
 type QualifiedName = str  # Fully qualified dotted name (e.g., 'builtins.Exception', 'asyncio.CancelledError')
@@ -444,21 +443,6 @@ def check_file(
         violations.extend(unused)
 
     return violations
-
-
-def find_python_files(
-    root: Path,
-    exclude_dirs: Set[str],
-    respect_gitignore: bool = True,
-) -> Sequence[Path]:
-    """Find all .py files recursively under root."""
-    all_files = sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
-
-    if respect_gitignore:
-        ignored = get_git_ignored_files(all_files, root)
-        all_files = [f for f in all_files if f not in ignored]
-
-    return all_files
 
 
 # -- AST Visitor --------------------------------------------------------------
@@ -1101,28 +1085,6 @@ def find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestRef
                         )
 
     return references
-
-
-def get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Path]:
-    """Use git check-ignore to identify ignored files."""
-    if not file_paths:
-        return set()
-
-    try:
-        result = subprocess.run(
-            ['git', 'check-ignore', '--stdin'],
-            input='\n'.join(str(p) for p in file_paths),
-            capture_output=True,
-            text=True,
-            cwd=directory,
-            timeout=30,
-            check=False,
-        )
-        if result.returncode == 128:
-            return set()
-        return {Path(line) for line in result.stdout.splitlines() if line}
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return set()
 
 
 # -- Output Formatting --------------------------------------------------------

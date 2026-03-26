@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-document-search = "document_search.server:main"
+mcp-document-search-server = "document_search.server:main"
 document-search-dashboard = "document_search.dashboard:main"
 
 [tool.uv.sources]

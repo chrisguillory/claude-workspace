@@ -4,14 +4,16 @@ Typer CLI factories for claude-workspace scripts.
 Typer is a dependency of cc-lib (declared in pyproject.toml).
 
 Provides:
-    create_app              Build a Typer app with standard conventions
-    add_install_command     Register install/uninstall/completion subcommands
-    run_app                 Entry-point helper: derives prog_name from sys.argv[0]
+    create_app                  Build a Typer app with standard conventions
+    add_install_command         Register install/uninstall/completion subcommands (standalone scripts)
+    add_completion_command      Register completion-only subcommands (uv tool install packages)
+    run_app                     Entry-point helper: derives prog_name from sys.argv[0]
 """
 
 from __future__ import annotations
 
 __all__ = [
+    'add_completion_command',
     'add_install_command',
     'create_app',
     'run_app',
@@ -110,6 +112,63 @@ def add_install_command(app: typer.Typer, *, script_path: str) -> None:
 
     @app.command(hidden=True)
     def completion(
+        shell: str | None = typer.Argument(None, help='Shell type (default: auto-detect)'),
+    ) -> None:
+        """Print shell tab completion script to stdout."""
+        prog_name = _prog_name_from_context()
+        shell_name = shell or _detect_shell()
+        if not shell_name:
+            print('Shell not detected — pass shell name as argument.', file=sys.stderr)
+            raise SystemExit(1)
+        click.echo(completions.script(prog_name, shell_name))
+
+
+def add_completion_command(app: typer.Typer) -> None:
+    """Register completion install/uninstall subcommands for installed packages.
+
+    Unlike ``add_install_command()``, this does NOT create a launcher script.
+    Use for commands already in PATH via ``uv tool install``.
+    """
+    completions = CompletionInstaller()
+
+    @app.command('install-completions', rich_help_panel='Shell Completions')
+    def install_completions(
+        shell: str | None = typer.Option(None, '--shell', help='Shell (default: auto-detect)'),
+    ) -> None:
+        """Install shell tab completions."""
+        console = rich.console.Console(stderr=True)
+        prog_name = _prog_name_from_context()
+        shell_name = shell or _detect_shell()
+        if not shell_name:
+            console.print('[red]Shell not detected — pass --shell zsh[/red]')
+            raise SystemExit(1)
+        dest = completions.install(prog_name, shell_name)
+        if dest:
+            console.print(f'Completion installed: [bold]{dest}[/bold]')
+            console.print('\nRestart shell to activate.')
+        else:
+            console.print(f'[red]Shell {shell_name!r} is not supported (zsh, bash)[/red]')
+            raise SystemExit(1)
+
+    @app.command('uninstall-completions', rich_help_panel='Shell Completions')
+    def uninstall_completions(
+        shell: str | None = typer.Option(None, '--shell', help='Shell (default: auto-detect)'),
+    ) -> None:
+        """Remove shell tab completions."""
+        console = rich.console.Console(stderr=True)
+        prog_name = _prog_name_from_context()
+        shell_name = shell or _detect_shell()
+        if not shell_name:
+            console.print('[red]Shell not detected — pass --shell zsh[/red]')
+            raise SystemExit(1)
+        removed = completions.uninstall(prog_name, shell_name)
+        if removed:
+            console.print(f'Removed: [bold]{removed}[/bold]')
+        else:
+            console.print('No completion script found.')
+
+    @app.command(hidden=True)
+    def show_completion(
         shell: str | None = typer.Argument(None, help='Shell type (default: auto-detect)'),
     ) -> None:
         """Print shell tab completion script to stdout."""

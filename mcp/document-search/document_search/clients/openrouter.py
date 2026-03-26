@@ -26,6 +26,7 @@ import numpy as np
 import pydantic
 import tenacity
 from cc_lib import ConcurrencyTracker
+from cc_lib.schemas.base import OpenModel
 from cc_lib.types import JsonObject
 from numpy.typing import NDArray
 
@@ -266,23 +267,23 @@ class OpenRouterClient:
 # ── OpenRouter API response models ───────────────────────────────────
 
 
-class _Embedding(pydantic.BaseModel):
+class _Embedding(OpenModel):
     embedding: Sequence[float] | str
     index: int
 
 
-class _Usage(pydantic.BaseModel):
+class _Usage(OpenModel):
     prompt_tokens: int
     total_tokens: int
 
 
-class _EmbeddingResponse(pydantic.BaseModel):
+class _EmbeddingResponse(OpenModel):
     data: Sequence[_Embedding]
     model: str
     usage: _Usage
 
 
-class _ErrorDetail(pydantic.BaseModel):
+class _ErrorDetail(OpenModel):
     message: str
     code: int | None = None
     type: str | None = None
@@ -291,11 +292,11 @@ class _ErrorDetail(pydantic.BaseModel):
     )
 
 
-class _ErrorResponse(pydantic.BaseModel):
+class _ErrorResponse(OpenModel):
     error: _ErrorDetail
 
 
-class _ModelsListResponse(pydantic.BaseModel):
+class _ModelsListResponse(OpenModel):
     data: Sequence[JsonObject]
 
 

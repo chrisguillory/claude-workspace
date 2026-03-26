@@ -70,7 +70,7 @@ Patterns:
         except ValidationError as e:
             raise RichValidationError(e, raw_input) from e
 
-    See ``scripts/claude-patch-statusline.py`` for the canonical real-world example.
+    See ``scripts/claude-binary-patcher.py`` for the canonical real-world example.
 
 Cross-language equivalents:
     React <ErrorBoundary> (renders fallback UI on error),
