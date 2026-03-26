@@ -130,14 +130,15 @@ filterwarnings = [
 "tests/linters/edge_cases/**" = ["skip-file"]
 
 # Standalone scripts (no __all__, main() before classes, private helpers interleave)
+# Note: 'ordering' is a superset of class-ordering/missing-all/trailing-comma.
+# Listed explicitly for readability.
 "linters/**" = ["missing-all", "class-ordering", "ordering"]
 "hooks/**" = ["missing-all"]
 "scripts/**" = ["missing-all", "class-ordering", "ordering"]
 "plugins/**" = ["missing-all", "class-ordering"]
 
 # Standalone root scripts
-"conftest.py" = ["missing-all"]
-"uv-wrapper.py" = ["missing-all", "class-ordering"]
+"uv-wrapper.py" = ["missing-all"]
 
 # MCP servers
 "mcp/browser-automation/browser_automation/server.py" = ["class-ordering"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 __all__ = [
+    'Browser',
     'CLSMetric',
     'CapturedResource',
     'ChromeInfoCacheEntry',
@@ -24,10 +25,13 @@ __all__ = [
     'INPDetails',
     'INPMetric',
     'InteractiveElement',
+    'JavaScriptErrorType',
     'JavaScriptResult',
+    'JavaScriptResultType',
     'LCPMetric',
     'LayoutShiftEntry',
     'LayoutShiftSource',
+    'MetricRating',
     'NavigationResult',
     'NetworkCapture',
     'NetworkRequest',
@@ -42,6 +46,7 @@ __all__ = [
     'RequestTiming',
     'ResizeWindowResult',
     'ResourceCapture',
+    'SameSitePolicy',
     'SaveProfileStateResult',
     'SleepResult',
     'SlowestRequestSummary',
