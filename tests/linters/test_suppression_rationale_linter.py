@@ -124,11 +124,6 @@ def parse_expectations(filepath: Path) -> tuple[Mapping[int, str], Set[int]]:
     return expected, ok_lines
 
 
-def _get_source_line(filepath: Path, lineno: int) -> str:
-    """Read a single source line (1-indexed) from a file."""
-    return filepath.read_text().splitlines()[lineno - 1].strip()
-
-
 # -- Module-Scoped Fixtures ---------------------------------------------------
 
 
@@ -151,6 +146,9 @@ def edge_case_actual() -> Mapping[int, str]:
     return parse_linter_output(output)
 
 
+# -- Private Helpers (must precede parametrize decorators that reference them) -
+
+
 def _expect_id(lineno: int, code: str) -> str:
     """Generate a readable test ID for an EXPECT tag."""
     return f'line{lineno}_{code}'
@@ -161,6 +159,11 @@ def _ok_id(lineno: int) -> str:
     return f'line{lineno}_OK'
 
 
+def _get_source_line(filepath: Path, lineno: int) -> str:
+    """Read a single source line (1-indexed) from a file."""
+    return filepath.read_text().splitlines()[lineno - 1].strip()
+
+
 # -- Parametrized Tests: Instructive ------------------------------------------
 
 
@@ -169,9 +172,7 @@ def _ok_id(lineno: int) -> str:
     _INSTRUCTIVE_EXPECTED.items(),
     ids=[_expect_id(ln, code) for ln, code in _INSTRUCTIVE_EXPECTED.items()],
 )
-def test_instructive_expected(
-    lineno: int, expected_code: str, instructive_actual: Mapping[int, str]
-) -> None:
+def test_instructive_expected(lineno: int, expected_code: str, instructive_actual: Mapping[int, str]) -> None:
     """Each EXPECT-tagged line triggers the expected rule."""
     actual = instructive_actual
     actual_code = actual.get(lineno)
@@ -215,9 +216,7 @@ def test_instructive_no_unexpected(
     _EDGE_CASE_EXPECTED.items(),
     ids=[_expect_id(ln, code) for ln, code in _EDGE_CASE_EXPECTED.items()],
 )
-def test_edge_case_expected(
-    lineno: int, expected_code: str, edge_case_actual: Mapping[int, str]
-) -> None:
+def test_edge_case_expected(lineno: int, expected_code: str, edge_case_actual: Mapping[int, str]) -> None:
     """Each EXPECT-tagged line triggers the expected rule."""
     actual = edge_case_actual
     actual_code = actual.get(lineno)
