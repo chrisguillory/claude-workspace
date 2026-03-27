@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 import zstandard as zstd
 
@@ -56,10 +56,10 @@ from claude_session.storage.protocol import StorageBackend
 class FormatDetector:
     """Detects and validates archive format from file extension and format parameter."""
 
-    SUPPORTED_FORMATS = {'json', 'zst'}  # 'zst' = JSON with zstd compression
+    SUPPORTED_FORMATS: ClassVar[set[str]] = {'json', 'zst'}  # 'zst' = JSON with zstd compression
 
     # Extension to format mapping
-    EXTENSION_MAP: dict[str, Literal['json', 'zst']] = {
+    EXTENSION_MAP: ClassVar[dict[str, Literal['json', 'zst']]] = {
         '.json': 'json',
         '.json.zst': 'zst',
         '.zst': 'zst',

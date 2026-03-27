@@ -105,22 +105,22 @@ class UnifiedRateLimit(StrictModel):
             return h.get(f'{prefix}{key}')
 
         return cls(
-            status=get('status'),  # type: ignore[arg-type]
+            status=get('status'),  # type: ignore[arg-type]  # str from header narrowed to Literal by Pydantic
             reset=int(get('reset')),
             h5=RateLimitWindow(
-                status=get('5h-status'),  # type: ignore[arg-type]
+                status=get('5h-status'),  # type: ignore[arg-type]  # str from header narrowed to Literal by Pydantic
                 reset=int(get('5h-reset')),
                 utilization=float(get('5h-utilization')),
             ),
             d7=RateLimitWindow(
-                status=get('7d-status'),  # type: ignore[arg-type]
+                status=get('7d-status'),  # type: ignore[arg-type]  # str from header narrowed to Literal by Pydantic
                 reset=int(get('7d-reset')),
                 utilization=float(get('7d-utilization')),
             ),
-            representative_claim=get('representative-claim'),  # type: ignore[arg-type]
-            fallback=get('fallback'),  # type: ignore[arg-type]
+            representative_claim=get('representative-claim'),  # type: ignore[arg-type]  # str from header narrowed to Literal by Pydantic
+            fallback=get('fallback'),  # type: ignore[arg-type]  # str from header narrowed to Literal by Pydantic
             fallback_percentage=float(get('fallback-percentage')),
-            overage_status=get('overage-status'),  # type: ignore[arg-type]
+            overage_status=get('overage-status'),  # type: ignore[arg-type]  # str from header narrowed to Literal by Pydantic
             overage_disabled_reason=get_optional('overage-disabled-reason'),
         )
 

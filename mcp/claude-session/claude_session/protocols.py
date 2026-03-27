@@ -23,7 +23,7 @@ class LoggerProtocol(Protocol):
 
     async def info(self, message: str) -> None: ...
     async def warning(self, message: str) -> None: ...
-    async def error(self, message: str) -> None: ...
+    async def error(self, message: str, *, exc_info: bool = False) -> None: ...
 
 
 class NullLogger:
@@ -40,5 +40,5 @@ class NullLogger:
     async def warning(self, message: str) -> None:
         pass
 
-    async def error(self, message: str) -> None:
+    async def error(self, message: str, *, exc_info: bool = False) -> None:
         pass

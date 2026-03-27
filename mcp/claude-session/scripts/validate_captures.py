@@ -521,7 +521,9 @@ def validate_capture_with_values(
 
         return ('error', None, enriched_errors)
 
-    except Exception as e:
+    except (
+        Exception
+    ) as e:  # exception_safety_linter.py: swallowed-exception — returns error tuple to caller for aggregation
         return ('exception', f'{type(e).__name__}: {str(e)[:150]}', [])
 
 
