@@ -475,13 +475,17 @@ def check_file(
 
     # Module ordering (always enabled, suppress per-area via per-file-ignores)
     # Skip __main__.py (entry point, never exports)
+    raw_ordering: list[tuple[int, str]] = []
     if filepath.name != '__main__.py':
         # Skip __init__.py only if it has no definitions (just boilerplate)
         if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
-            violations.extend(check_all_defined(filepath, tree, source_lines))
-            violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
-            violations.extend(check_module_ordering(filepath, tree, source_lines))
-            violations.extend(check_class_method_ordering(filepath, tree, source_lines))
+            violations.extend(check_all_defined(filepath, tree, source_lines, raw_ordering))
+            violations.extend(check_all_trailing_comma(filepath, tree, source_lines, raw_ordering))
+            violations.extend(check_module_ordering(filepath, tree, source_lines, raw_ordering))
+            violations.extend(check_class_method_ordering(filepath, tree, source_lines, raw_ordering))
+
+    # Merge ordering raw violations into all_raw for unused-directive detection
+    all_raw.extend(raw_ordering)
 
     if report_unused_directives:
         directives = collect_directives(source_lines)
@@ -1522,7 +1526,13 @@ def has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
     return False
 
 
-def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequence[str]) -> Sequence[OrderingViolation]:
+def check_module_ordering(
+    filepath: Path,
+    tree: ast.Module,
+    source_lines: Sequence[str],
+    raw_ordering: list[tuple[int, str]]
+    | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
+) -> Sequence[OrderingViolation]:
     """Check module ordering: __all__ items first, public before private, classes before functions."""
     violations: list[OrderingViolation] = []
 
@@ -1536,9 +1546,6 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
 
     for actual, expected in zip(definitions, expected_order, strict=True):
         if actual.name != expected.name:
-            if has_ordering_directive(source_lines, actual.line):
-                continue
-
             # Determine violation kind: class-ordering when the only difference is type_group
             # (i.e., a function appears where a class should be, or vice versa)
             is_class_ordering = (
@@ -1547,6 +1554,13 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
                 and actual.sort_key[2] != expected.sort_key[2]  # different type_group
             )
             violation_kind: OrderingViolationKind = 'class-ordering' if is_class_ordering else 'ordering'
+
+            # Record raw violation for unused-directive detection
+            if raw_ordering is not None:
+                raw_ordering.append((actual.line, violation_kind))
+
+            if has_ordering_directive(source_lines, actual.line):
+                continue
 
             # Describe what's wrong
             if expected.in_all and not actual.in_all:
@@ -1573,7 +1587,13 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
     return violations
 
 
-def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[str]) -> Sequence[OrderingViolation]:
+def check_all_defined(
+    filepath: Path,
+    tree: ast.Module,
+    source_lines: Sequence[str],
+    raw_ordering: list[tuple[int, str]]
+    | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
+) -> Sequence[OrderingViolation]:
     """Check that __all__ is defined."""
     all_names = extract_all_names(tree)
     if all_names is None:
@@ -1582,6 +1602,10 @@ def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[s
             if not isinstance(node, (ast.Import, ast.ImportFrom, ast.Expr)):
                 line = node.lineno
                 break
+
+        # Record raw violation for unused-directive detection
+        if raw_ordering is not None:
+            raw_ordering.append((line, 'missing-all'))
 
         return [
             OrderingViolation(
@@ -1635,6 +1659,8 @@ def check_all_trailing_comma(
     filepath: Path,
     tree: ast.Module,
     source_lines: Sequence[str],
+    raw_ordering: list[tuple[int, str]]
+    | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
 ) -> Sequence[OrderingViolation]:
     """Check that __all__ has trailing comma when it has 1+ items."""
     violations: list[OrderingViolation] = []
@@ -1644,9 +1670,12 @@ def check_all_trailing_comma(
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == '__all__':
                     if isinstance(node.value, ast.List) and node.value.elts:
-                        if has_ordering_directive(source_lines, node.lineno):
-                            continue
                         if not has_trailing_comma(source_lines, node.value):
+                            # Record raw violation for unused-directive detection
+                            if raw_ordering is not None:
+                                raw_ordering.append((node.lineno, 'trailing-comma'))
+                            if has_ordering_directive(source_lines, node.lineno):
+                                continue
                             violations.append(
                                 OrderingViolation(
                                     filepath=filepath,
@@ -1666,6 +1695,8 @@ def check_class_method_ordering(
     filepath: Path,
     tree: ast.Module,
     source_lines: Sequence[str],
+    raw_ordering: list[tuple[int, str]]
+    | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
 ) -> Sequence[OrderingViolation]:
     """Check that public methods come before private methods within classes."""
     violations: list[OrderingViolation] = []
@@ -1691,6 +1722,10 @@ def check_class_method_ordering(
                 seen_private = True
             elif seen_private:
                 # Public method after private method - violation
+                # Record raw violation for unused-directive detection
+                if raw_ordering is not None:
+                    raw_ordering.append((line, 'ordering'))
+
                 if has_ordering_directive(source_lines, line):
                     continue
 
