@@ -406,7 +406,7 @@ class SessionCloneService:
     async def _discover_session_files(
         self,
         session_info: SessionInfo,
-    ) -> tuple[list[Path], dict[str, bool]]:
+    ) -> tuple[Sequence[Path], Mapping[str, bool]]:
         """Discover all JSONL files for a session with structure detection.
 
         Returns:
@@ -461,7 +461,7 @@ class SessionCloneService:
         records: Sequence[SessionRecord],
         new_session_id: str,
         translator: PathTranslator | None,
-    ) -> list[SessionRecord]:
+    ) -> Sequence[SessionRecord]:
         """Transform records for cloning.
 
         Updates session IDs, translates paths, and generates clone custom titles.

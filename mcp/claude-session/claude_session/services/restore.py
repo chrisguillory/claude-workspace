@@ -541,7 +541,7 @@ class SessionRestoreService:  # strict_typing_linter.py: class-ordering — util
 
         return self._parse_archive_data(data)
 
-    def _parse_archive_data(self, data: dict[str, Any]) -> SessionArchiveV2:
+    def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchiveV2:
         """Parse archive data with version detection.
 
         V1 archives are migrated to V2 in memory for unified processing.

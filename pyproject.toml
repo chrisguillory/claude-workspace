@@ -89,6 +89,8 @@ exclude = [
     ".venv",
     "scratch",
     "tests/linters/edge_cases",  # intentionally bad code — linter test inputs
+    "mcp/document-search",  # fastembed not in workspace root venv
+    "tests/document_search",  # imports from mcp/document-search
 ]
 
 [[tool.mypy.overrides]]
@@ -144,11 +146,15 @@ filterwarnings = [
 # MCP servers
 "mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
 
-# claude-session (mutable-type and loose-typing are task #22's scope)
-"mcp/claude-session/**" = ["mutable-type", "loose-typing"]
-"mcp/claude-session/scripts/**" = ["missing-all", "class-ordering", "ordering"]
+# claude-session
+"mcp/claude-session/claude_session/cli/main.py" = ["missing-all", "ordering"]
+"mcp/claude-session/scripts/**" = ["missing-all", "class-ordering", "ordering", "mutable-type", "loose-typing"]
+"mcp/claude-session/claude_session/domain/models.py" = ["mutable-type"]
+"mcp/claude-session/claude_session/introspection.py" = ["mutable-type", "loose-typing"]
+"mcp/claude-session/claude_session/migrations.py" = ["mutable-type"]
 "mcp/claude-session/claude_session/schemas/cc_internal_api/feature_flags.py" = ["skip-file"]
 "mcp/claude-session/claude_session/schemas/cc_internal_api/statsig.py" = ["skip-file"]
+"mcp/claude-session/claude_session/schemas/cc_internal_api/telemetry.py" = ["mutable-type", "loose-typing"]
 "mcp/claude-session/claude_session/schemas/session/models.py" = ["skip-file"]
 "mcp/claude-session/scripts/validate_captures.py" = ["skip-file"]
 "mcp/claude-session/scripts/validate_models.py" = ["skip-file"]

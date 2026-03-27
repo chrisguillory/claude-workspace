@@ -12,6 +12,7 @@ import json
 import mmap
 import socket
 import subprocess
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -134,7 +135,7 @@ class LineageService:
         entry = self.get_entry(session_id)
         return entry.parent_session_id if entry else None
 
-    def get_children(self, parent_id: str) -> list[str]:
+    def get_children(self, parent_id: str) -> Sequence[str]:
         """Get all sessions cloned from this parent.
 
         Args:
@@ -156,7 +157,7 @@ class LineageService:
 
         return children
 
-    def get_ancestry(self, session_id: str, max_depth: int = 10) -> list[str]:
+    def get_ancestry(self, session_id: str, max_depth: int = 10) -> Sequence[str]:
         """Get full ancestry chain [root, ..., parent, self].
 
         Follows parent links recursively until:
@@ -330,7 +331,7 @@ class LineageService:
         return None
 
     @staticmethod
-    def _find_session_files(session_ids: list[str]) -> dict[str, Path]:
+    def _find_session_files(session_ids: Sequence[str]) -> Mapping[str, Path]:
         """Find JSONL session files for the given session IDs.
 
         Uses a single rg call to find all files efficiently.

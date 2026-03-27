@@ -402,7 +402,7 @@ class SessionMoveService:
     async def _discover_session_files(
         self,
         session_info: SessionInfo,
-    ) -> tuple[list[Path], dict[str, bool]]:
+    ) -> tuple[Sequence[Path], Mapping[str, bool]]:
         """Discover all JSONL files for a session with structure detection.
 
         Returns:
@@ -451,14 +451,14 @@ class SessionMoveService:
         self,
         records: Sequence[SessionRecord],
         translator: PathTranslator,
-    ) -> list[SessionRecord]:
+    ) -> Sequence[SessionRecord]:
         """Translate paths in records without changing session ID or other identifiers."""
         return [translator.translate_record(r) for r in records]
 
     async def _create_backup(
         self,
         session_info: SessionInfo,
-        files_data: Mapping[str, list[SessionRecord]],
+        files_data: Mapping[str, Sequence[SessionRecord]],
         agent_infos: Sequence[AgentFileInfo],
     ) -> Path:
         """Create a backup archive of the session before deleting source."""

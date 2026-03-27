@@ -42,7 +42,9 @@ __all__ = [
 # Mapping from (host, path_pattern, direction) to discriminator tag
 # Path patterns are normalized (no query strings, SDK variants normalized)
 # Note: Messages responses require body.type inspection, handled in get_capture_type()
-CAPTURE_REGISTRY: dict[tuple[str, str, str], str] = {
+CAPTURE_REGISTRY: dict[
+    tuple[str, str, str], str
+] = {  # strict_typing_linter.py: mutable-type — module-level lookup table, mutated at import time
     # Anthropic API - Messages (request only; response needs body.type inspection)
     ('api.anthropic.com', '/v1/messages', 'request'): 'messages_request',
     # Anthropic API - Telemetry
@@ -204,7 +206,9 @@ def extract_endpoint_from_filename(filename: str) -> tuple[str, str]:
     return host, path
 
 
-def get_capture_type(v: Any) -> str:
+def get_capture_type(
+    v: Any,
+) -> str:  # strict_typing_linter.py: loose-typing — Pydantic discriminator callback receives raw dict
     """
     Callable discriminator for CapturedTraffic union.
 

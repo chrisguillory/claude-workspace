@@ -32,7 +32,7 @@ import signal
 import subprocess
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -719,7 +719,7 @@ class SessionDeleteService:
         return metadata.file_path
 
     @staticmethod
-    def _parse_backup_data(data: dict[str, Any]) -> SessionArchiveV2:
+    def _parse_backup_data(data: Mapping[str, Any]) -> SessionArchiveV2:
         """
         Parse backup data with version detection.
 
@@ -838,7 +838,7 @@ class SessionDeleteService:
         logger.info('Rollback completed successfully')
 
     @staticmethod
-    def _compute_artifact_counts(manifest: DeleteManifest) -> dict[str, int]:
+    def _compute_artifact_counts(manifest: DeleteManifest) -> Mapping[str, int]:
         """
         Compute per-artifact-type counts from manifest.
 

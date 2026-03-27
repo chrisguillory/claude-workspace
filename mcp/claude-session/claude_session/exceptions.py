@@ -18,6 +18,8 @@ Exception Hierarchy:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 __all__ = [
     'AmbiguousSessionError',
     'ClaudeSessionError',
@@ -43,7 +45,7 @@ class SessionResolutionError(ClaudeSessionError):
 class AmbiguousSessionError(SessionResolutionError):
     """Raised when a session ID prefix matches multiple sessions."""
 
-    def __init__(self, prefix: str, matches: list[str]) -> None:
+    def __init__(self, prefix: str, matches: Sequence[str]) -> None:
         self.prefix = prefix
         self.matches = matches
         matches_str = '\n  '.join(matches[:10])

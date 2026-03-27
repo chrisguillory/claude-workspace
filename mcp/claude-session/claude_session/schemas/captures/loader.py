@@ -11,6 +11,7 @@ This module provides:
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -184,8 +185,9 @@ _CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(C
 
 
 def _preprocess_capture(  # strict_typing_linter.py: ordering — called by load_capture_file() below
-    data: dict[str, Any], filepath: Path | None = None
-) -> dict[str, Any]:
+    data: dict[str, Any],
+    filepath: Path | None = None,  # strict_typing_linter.py: mutable-type — mutates dict in place
+) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — returns same mutated dict
     """
     Preprocess capture data before Pydantic validation.
 
@@ -289,7 +291,7 @@ def load_capture(  # strict_typing_linter.py: ordering — functions follow call
 
 def load_captures_batch(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     directory: Path, pattern: str = '*.json'
-) -> tuple[list[CapturedTraffic], dict[Path, Exception]]:
+) -> tuple[Sequence[CapturedTraffic], Mapping[Path, Exception]]:
     """
     Load and validate multiple captures.
 
