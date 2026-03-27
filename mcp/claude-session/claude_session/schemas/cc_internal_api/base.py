@@ -18,9 +18,7 @@ from claude_session.schemas.types import BaseStrictModel
 __all__ = ['EmptyBody', 'FromSdk', 'FromSession', 'StrictModel', 'ValidationStatus']
 
 
-# ==============================================================================
-# Strict Base Model
-# ==============================================================================
+# -- Strict Base Model ---------------------------------------------------------
 
 
 class StrictModel(BaseStrictModel):
@@ -34,9 +32,7 @@ class StrictModel(BaseStrictModel):
     pass
 
 
-# ==============================================================================
-# Empty HTTP Body Type (Capture-layer specific)
-# ==============================================================================
+# -- Empty HTTP Body Type (Capture-layer specific) -----------------------------
 
 
 class EmptyBody(StrictModel):
@@ -57,9 +53,7 @@ class EmptyBody(StrictModel):
     size: int
 
 
-# ==============================================================================
-# Type Correspondence Markers
-# ==============================================================================
+# -- Type Correspondence Markers -----------------------------------------------
 #
 # These markers are used with typing.Annotated to create typed links between:
 # 1. Our API schemas (this module)
@@ -84,7 +78,6 @@ class EmptyBody(StrictModel):
 #
 # Note: Fields WITHOUT markers are implicitly "API only" - they exist in
 # CC's internal API traffic but have no session or SDK counterpart.
-# ==============================================================================
 
 ValidationStatus = Literal['validated', 'inferred', 'reference']
 

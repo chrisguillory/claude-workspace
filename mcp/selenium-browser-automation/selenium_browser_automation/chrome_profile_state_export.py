@@ -34,6 +34,15 @@ Cookie Decryption (DIY implementation):
 
 from __future__ import annotations
 
+__all__ = [
+    'AppleScriptNotEnabledError',
+    'SessionStorageExportResult',
+    'export_cookies',
+    'export_local_storage',
+    'get_chrome_base_path',
+    'get_chrome_profile_path',
+]
+
 import hashlib
 import os
 import re
@@ -69,9 +78,28 @@ from .models import (
     ProfileStateOriginStorage,
 )
 
-# =============================================================================
-# Chrome Profile Path Resolution
-# =============================================================================
+
+@dataclass
+class SessionStorageExportResult:
+    """Result from sessionStorage export with source metadata."""
+
+    storage: Mapping[str, Mapping[str, str]]
+    source: Literal['live', 'disk']
+    warning: str | None = None
+
+
+class AppleScriptNotEnabledError(Exception):
+    """Raised when Chrome is running but AppleScript JS execution is disabled.
+
+    This is a fail-first error that forces the user to either:
+    1. Enable Chrome > View > Developer > Allow JavaScript from Apple Events
+    2. Explicitly opt out with live_session_storage_via_applescript=False
+    """
+
+    pass
+
+
+# -- Chrome Profile Path Resolution --------------------------------------------
 
 
 def get_chrome_base_path() -> Path:
@@ -103,296 +131,6 @@ def get_chrome_profile_path(profile_name: str = 'Default') -> Path:
         raise FileNotFoundError(f'Chrome profile not found: {profile_path}\nAvailable profiles: {available}')
 
     return profile_path
-
-
-# =============================================================================
-# Cookie Export
-# =============================================================================
-
-# Type alias for sameSite values
-type SameSiteValue = Literal['Strict', 'Lax', 'None']
-
-# Chrome SQLite sameSite values → Playwright format
-_SAMESITE_MAP: Mapping[int, SameSiteValue] = {
-    -1: 'Lax',  # Unspecified → default to Lax
-    0: 'None',
-    1: 'Lax',
-    2: 'Strict',
-}
-
-# Regex for IPv4 addresses (validates 0-255 octets)
-_IPV4_PATTERN = re.compile(r'^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$')
-
-
-def _validate_domain_pattern(pattern: str) -> None:
-    """Validate that a domain pattern is well-formed.
-
-    Args:
-        pattern: User-provided domain filter (e.g., "amazon.com")
-
-    Raises:
-        ValueError: If pattern is empty or missing TLD
-
-    Examples:
-        _validate_domain_pattern("amazon.com")  # OK
-        _validate_domain_pattern(".amazon.com")  # OK (leading dot stripped)
-        _validate_domain_pattern("localhost")  # OK (special case)
-        _validate_domain_pattern("192.168.1.1")  # OK (IP address)
-        _validate_domain_pattern("amazon")  # Raises ValueError
-    """
-    # Strip leading/trailing dots and port numbers
-    cleaned = pattern.lower().strip('.')
-    if ':' in cleaned:
-        cleaned = cleaned.split(':')[0]  # Strip port if present
-
-    if not cleaned:
-        raise ValueError(f'Empty domain pattern: {pattern!r}')
-
-    # Allow localhost as special case
-    if cleaned == 'localhost':
-        return
-
-    # Allow IP addresses (IPv4)
-    if _IPV4_PATTERN.match(cleaned):
-        return
-
-    # For regular domains, require at least one dot (TLD)
-    if '.' not in cleaned:
-        raise ValueError(f"Invalid domain pattern: {pattern!r} - must include TLD (e.g., 'amazon.com' not 'amazon')")
-
-
-def _extract_domain_from_origin(origin: str) -> str:
-    """Extract domain from various origin formats.
-
-    Handles:
-    - Full URLs: https://www.amazon.com → www.amazon.com
-    - URLs with port: https://localhost:3000 → localhost
-    - URLs with path: https://www.amazon.com/ → www.amazon.com
-    - IndexedDB format: https_www.amazon.com_0 → www.amazon.com
-    - Bare domains: amazon.com → amazon.com
-
-    Args:
-        origin: Origin string in any format
-
-    Returns:
-        Bare domain without scheme, port, or path
-    """
-    # Handle full URLs (https://example.com or https://example.com/)
-    if '://' in origin:
-        # Remove scheme
-        origin = origin.split('://', 1)[1]
-        # Remove path
-        origin = origin.split('/', 1)[0]
-        # Remove port
-        origin = origin.split(':', 1)[0]
-        return origin
-
-    # Handle IndexedDB format (https_www.amazon.com_0)
-    if origin.startswith(('https_', 'http_')):
-        # Remove scheme prefix
-        origin = origin.split('_', 1)[1]
-        # Remove trailing _0, _1, etc.
-        if '_' in origin:
-            parts = origin.rsplit('_', 1)
-            if parts[-1].isdigit():
-                origin = parts[0]
-        return origin
-
-    # Already a bare domain
-    return origin
-
-
-def _normalize_origin_url(origin: str) -> str:
-    """Normalize origin URL by stripping trailing slashes.
-
-    Chrome's sessionStorage LevelDB stores origins with trailing slashes
-    (e.g., 'https://example.com/'), but window.location.origin returns
-    them without (e.g., 'https://example.com'). Normalize to match browser API.
-    """
-    return origin.rstrip('/')
-
-
-def _domain_matches(host: str, pattern: str) -> bool:
-    """RFC 6265 domain matching - suffix match with dot boundary.
-
-    This is the correct way to match cookie domains, NOT substring matching.
-    Substring matching would be insecure (e.g., "amazon" matching "amazon.evil.com").
-
-    Args:
-        host: The cookie's host_key from SQLite (e.g., ".amazon.com")
-        pattern: The filter pattern (e.g., "amazon.com")
-
-    Returns:
-        True if host matches pattern per RFC 6265 rules
-
-    Examples:
-        _domain_matches(".amazon.com", "amazon.com") → True
-        _domain_matches("www.amazon.com", "amazon.com") → True
-        _domain_matches("amazon.com", "amazon.com") → True
-        _domain_matches("amazon.evil.com", "amazon.com") → False
-        _domain_matches("notamazon.com", "amazon.com") → False
-    """
-    # Canonicalize: lowercase, strip leading/trailing dots, strip port
-    host = host.lower().strip('.')
-    pattern = pattern.lower().strip('.')
-    if ':' in pattern:
-        pattern = pattern.split(':')[0]
-
-    # Exact match (handles IPs and localhost)
-    if host == pattern:
-        return True
-
-    # Suffix match with dot boundary: host ends with ".pattern"
-    return host.endswith('.' + pattern)
-
-
-# =============================================================================
-# DIY Cookie Decryption (replaces browser-cookie3)
-# =============================================================================
-#
-# Why DIY instead of browser-cookie3?
-# browser-cookie3.chrome() hardcodes the Default profile path. When you call
-# it with profile_name="Profile 1", it silently ignores the parameter and
-# reads from Default. We need to decrypt cookies from ANY profile.
-#
-# The encryption key in macOS Keychain is SHARED across all profiles.
-# We just need to read from the correct profile's SQLite.
-#
-# Verified against browser-cookie3 (MIT), pycookiecheat (MIT), and
-# HackBrowserData (MIT) source code.
-# =============================================================================
-
-
-def _get_chrome_encryption_key() -> bytes:
-    """Retrieve Chrome's encryption key from macOS Keychain.
-
-    The key is stored under service "Chrome Safe Storage" and is
-    SHARED across all Chrome profiles on the machine.
-
-    Returns:
-        Raw password bytes for PBKDF2 derivation
-
-    Raises:
-        RuntimeError: If Keychain access fails (user denied, not found)
-    """
-    result = subprocess.run(
-        [
-            '/usr/bin/security',
-            '-q',
-            'find-generic-password',
-            '-w',
-            '-a',
-            'Chrome',
-            '-s',
-            'Chrome Safe Storage',
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f'Failed to retrieve Chrome Safe Storage from Keychain: {result.stderr}\n'
-            "First run may require clicking 'Always Allow' when prompted.",
-        )
-    return result.stdout.strip().encode('utf-8')
-
-
-def _derive_aes_key(keychain_password: bytes) -> bytes:
-    """Derive AES-128 key using Chrome's PBKDF2 parameters.
-
-    Chrome uses fixed, well-known parameters:
-    - Salt: 'saltysalt' (literal)
-    - Iterations: 1003
-    - Hash: SHA1
-    - Key length: 16 bytes (AES-128)
-
-    Args:
-        keychain_password: Raw password from macOS Keychain
-
-    Returns:
-        16-byte AES key for cookie decryption
-    """
-    return hashlib.pbkdf2_hmac(
-        'sha1',
-        keychain_password,
-        b'saltysalt',
-        1003,
-        dklen=16,
-    )
-
-
-def _get_chrome_cookies_version(cookies_db: Path) -> int:
-    """Get Chrome cookie format version from database.
-
-    Used to detect Chrome 130+ which adds domain hash to encrypted values.
-    Version 24+ means SHA256(domain) is prepended to decrypted values.
-
-    Args:
-        cookies_db: Path to Cookies SQLite file
-
-    Returns:
-        Version number (24+ means domain hash present)
-    """
-    conn = sqlite3.connect(f'file:{cookies_db}?mode=ro', uri=True)
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT value FROM meta WHERE key = 'version'")
-        row = cursor.fetchone()
-        # Handle both missing row and NULL value
-        if row and row[0] is not None:
-            return int(row[0])
-        return 0
-    except sqlite3.OperationalError:
-        return 0  # Assume old format if meta table missing
-    finally:
-        conn.close()
-
-
-def _decrypt_cookie_value(
-    encrypted_value: bytes,
-    aes_key: bytes,
-    chrome_version: int,
-) -> str:
-    """Decrypt a Chrome cookie value using AES-128-CBC.
-
-    Args:
-        encrypted_value: Raw bytes from SQLite encrypted_value column
-        aes_key: 16-byte AES key from _derive_aes_key()
-        chrome_version: From Cookies DB meta table (version key)
-
-    Returns:
-        Decrypted cookie value as string
-
-    Raises:
-        ValueError: If decryption fails (wrong key, corrupted data)
-    """
-    # Check for v10 prefix (macOS/Linux encrypted format)
-    if not encrypted_value.startswith(b'v10'):
-        # Unencrypted value (rare but possible)
-        return encrypted_value.decode('utf-8', errors='replace')
-
-    # Strip v10 prefix (3 bytes)
-    ciphertext = encrypted_value[3:]
-
-    # Decrypt with AES-128-CBC, IV = 16 spaces
-    iv = b' ' * 16
-    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
-    decrypted = cipher.decrypt(ciphertext)
-
-    # Remove PKCS7 padding
-    try:
-        unpadded = unpad(decrypted, AES.block_size)
-    except ValueError as e:
-        raise ValueError(f'PKCS7 unpadding failed: {e}') from e
-
-    # Chrome 130+ (version >= 24): SHA256(domain) prepended to decrypted value
-    # The hash is INSIDE the encrypted blob, so we strip it after decryption
-    # Use >= 32 to handle empty cookie values (exactly 32 bytes = just the hash)
-    if chrome_version >= 24 and len(unpadded) >= 32:
-        unpadded = unpadded[32:]
-
-    return unpadded.decode('utf-8', errors='replace')
 
 
 def export_cookies(
@@ -492,9 +230,7 @@ def export_cookies(
     return cookies
 
 
-# =============================================================================
-# localStorage Export
-# =============================================================================
+# -- localStorage Export -------------------------------------------------------
 
 
 def export_local_storage(
@@ -551,83 +287,6 @@ def export_local_storage(
                     storage[normalized_key].update(origin_storage)
                 else:
                     storage[normalized_key] = origin_storage
-
-    return storage
-
-
-# =============================================================================
-# sessionStorage Export
-# =============================================================================
-
-
-@dataclass
-class SessionStorageExportResult:
-    """Result from sessionStorage export with source metadata."""
-
-    storage: Mapping[str, Mapping[str, str]]
-    source: Literal['live', 'disk']
-    warning: str | None = None
-
-
-class AppleScriptNotEnabledError(Exception):
-    """Raised when Chrome is running but AppleScript JS execution is disabled.
-
-    This is a fail-first error that forces the user to either:
-    1. Enable Chrome > View > Developer > Allow JavaScript from Apple Events
-    2. Explicitly opt out with live_session_storage_via_applescript=False
-    """
-
-    pass
-
-
-def _export_session_storage_from_disk(
-    profile_path: Path,
-    origins_filter: Sequence[str] | None = None,
-) -> Mapping[str, Mapping[str, str]]:
-    """Export sessionStorage from Chrome's LevelDB files (may be stale).
-
-    Chrome persists sessionStorage to disk for session recovery, but this data
-    may be stale as Chrome doesn't flush in real-time. Prefer live extraction
-    via AppleScript when possible.
-
-    Args:
-        profile_path: Path to Chrome profile directory
-        origins_filter: Optional origin patterns to include
-
-    Returns:
-        Mapping of {origin: {key: value, ...}}
-
-    Raises:
-        FileNotFoundError: If sessionStorage path doesn't exist
-    """
-    storage: dict[str, dict[str, str]] = {}
-
-    session_storage_path = profile_path / 'Session Storage'
-
-    if not session_storage_path.exists():
-        raise FileNotFoundError(f'sessionStorage path not found: {session_storage_path}')
-
-    with ccl_chromium_sessionstorage.SessionStoreDb(session_storage_path) as ss:
-        for host in ss.iter_hosts():
-            # Filter origins (extract domain from URL, then RFC 6265 matching)
-            if origins_filter:
-                domain = _extract_domain_from_origin(host)
-                if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
-                    continue
-
-            origin_storage: dict[str, str] = {}
-            for record in ss.iter_records_for_host(host):
-                value = str(record.value) if record.value else ''
-                origin_storage[record.key] = value
-
-            if origin_storage:
-                # Normalize origin to match window.location.origin (no trailing slash)
-                normalized_host = _normalize_origin_url(host)
-                if normalized_host in storage:
-                    # Merge with existing (collision from normalization)
-                    storage[normalized_host].update(origin_storage)
-                else:
-                    storage[normalized_host] = origin_storage
 
     return storage
 
@@ -708,9 +367,7 @@ def export_session_storage(
     raise RuntimeError(f'AppleScript extraction failed: {live_result.error_reason}')
 
 
-# =============================================================================
-# Main Export Function
-# =============================================================================
+# -- Main Export Function ------------------------------------------------------
 
 
 def export_chrome_profile_state(
@@ -877,3 +534,343 @@ def export_chrome_profile_state(
         session_storage_source=session_storage_source,
         warnings=warnings,
     )
+
+
+# -- Cookie Export -------------------------------------------------------------
+
+# Type alias for sameSite values
+type SameSiteValue = Literal['Strict', 'Lax', 'None']
+
+# Chrome SQLite sameSite values → Playwright format
+_SAMESITE_MAP: Mapping[int, SameSiteValue] = {
+    -1: 'Lax',  # Unspecified → default to Lax
+    0: 'None',
+    1: 'Lax',
+    2: 'Strict',
+}
+
+# Regex for IPv4 addresses (validates 0-255 octets)
+_IPV4_PATTERN = re.compile(r'^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$')
+
+
+def _validate_domain_pattern(pattern: str) -> None:
+    """Validate that a domain pattern is well-formed.
+
+    Args:
+        pattern: User-provided domain filter (e.g., "amazon.com")
+
+    Raises:
+        ValueError: If pattern is empty or missing TLD
+
+    Examples:
+        _validate_domain_pattern("amazon.com")  # OK
+        _validate_domain_pattern(".amazon.com")  # OK (leading dot stripped)
+        _validate_domain_pattern("localhost")  # OK (special case)
+        _validate_domain_pattern("192.168.1.1")  # OK (IP address)
+        _validate_domain_pattern("amazon")  # Raises ValueError
+    """
+    # Strip leading/trailing dots and port numbers
+    cleaned = pattern.lower().strip('.')
+    if ':' in cleaned:
+        cleaned = cleaned.split(':')[0]  # Strip port if present
+
+    if not cleaned:
+        raise ValueError(f'Empty domain pattern: {pattern!r}')
+
+    # Allow localhost as special case
+    if cleaned == 'localhost':
+        return
+
+    # Allow IP addresses (IPv4)
+    if _IPV4_PATTERN.match(cleaned):
+        return
+
+    # For regular domains, require at least one dot (TLD)
+    if '.' not in cleaned:
+        raise ValueError(f"Invalid domain pattern: {pattern!r} - must include TLD (e.g., 'amazon.com' not 'amazon')")
+
+
+def _extract_domain_from_origin(origin: str) -> str:
+    """Extract domain from various origin formats.
+
+    Handles:
+    - Full URLs: https://www.amazon.com → www.amazon.com
+    - URLs with port: https://localhost:3000 → localhost
+    - URLs with path: https://www.amazon.com/ → www.amazon.com
+    - IndexedDB format: https_www.amazon.com_0 → www.amazon.com
+    - Bare domains: amazon.com → amazon.com
+
+    Args:
+        origin: Origin string in any format
+
+    Returns:
+        Bare domain without scheme, port, or path
+    """
+    # Handle full URLs (https://example.com or https://example.com/)
+    if '://' in origin:
+        # Remove scheme
+        origin = origin.split('://', 1)[1]
+        # Remove path
+        origin = origin.split('/', 1)[0]
+        # Remove port
+        origin = origin.split(':', 1)[0]
+        return origin
+
+    # Handle IndexedDB format (https_www.amazon.com_0)
+    if origin.startswith(('https_', 'http_')):
+        # Remove scheme prefix
+        origin = origin.split('_', 1)[1]
+        # Remove trailing _0, _1, etc.
+        if '_' in origin:
+            parts = origin.rsplit('_', 1)
+            if parts[-1].isdigit():
+                origin = parts[0]
+        return origin
+
+    # Already a bare domain
+    return origin
+
+
+def _normalize_origin_url(origin: str) -> str:
+    """Normalize origin URL by stripping trailing slashes.
+
+    Chrome's sessionStorage LevelDB stores origins with trailing slashes
+    (e.g., 'https://example.com/'), but window.location.origin returns
+    them without (e.g., 'https://example.com'). Normalize to match browser API.
+    """
+    return origin.rstrip('/')
+
+
+def _domain_matches(host: str, pattern: str) -> bool:
+    """RFC 6265 domain matching - suffix match with dot boundary.
+
+    This is the correct way to match cookie domains, NOT substring matching.
+    Substring matching would be insecure (e.g., "amazon" matching "amazon.evil.com").
+
+    Args:
+        host: The cookie's host_key from SQLite (e.g., ".amazon.com")
+        pattern: The filter pattern (e.g., "amazon.com")
+
+    Returns:
+        True if host matches pattern per RFC 6265 rules
+
+    Examples:
+        _domain_matches(".amazon.com", "amazon.com") → True
+        _domain_matches("www.amazon.com", "amazon.com") → True
+        _domain_matches("amazon.com", "amazon.com") → True
+        _domain_matches("amazon.evil.com", "amazon.com") → False
+        _domain_matches("notamazon.com", "amazon.com") → False
+    """
+    # Canonicalize: lowercase, strip leading/trailing dots, strip port
+    host = host.lower().strip('.')
+    pattern = pattern.lower().strip('.')
+    if ':' in pattern:
+        pattern = pattern.split(':')[0]
+
+    # Exact match (handles IPs and localhost)
+    if host == pattern:
+        return True
+
+    # Suffix match with dot boundary: host ends with ".pattern"
+    return host.endswith('.' + pattern)
+
+
+# -- DIY Cookie Decryption (replaces browser-cookie3) --------------------------
+#
+# Why DIY instead of browser-cookie3?
+# browser-cookie3.chrome() hardcodes the Default profile path. When you call
+# it with profile_name="Profile 1", it silently ignores the parameter and
+# reads from Default. We need to decrypt cookies from ANY profile.
+#
+# The encryption key in macOS Keychain is SHARED across all profiles.
+# We just need to read from the correct profile's SQLite.
+#
+# Verified against browser-cookie3 (MIT), pycookiecheat (MIT), and
+# HackBrowserData (MIT) source code.
+
+
+def _get_chrome_encryption_key() -> bytes:
+    """Retrieve Chrome's encryption key from macOS Keychain.
+
+    The key is stored under service "Chrome Safe Storage" and is
+    SHARED across all Chrome profiles on the machine.
+
+    Returns:
+        Raw password bytes for PBKDF2 derivation
+
+    Raises:
+        RuntimeError: If Keychain access fails (user denied, not found)
+    """
+    result = subprocess.run(
+        [
+            '/usr/bin/security',
+            '-q',
+            'find-generic-password',
+            '-w',
+            '-a',
+            'Chrome',
+            '-s',
+            'Chrome Safe Storage',
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f'Failed to retrieve Chrome Safe Storage from Keychain: {result.stderr}\n'
+            "First run may require clicking 'Always Allow' when prompted.",
+        )
+    return result.stdout.strip().encode('utf-8')
+
+
+def _derive_aes_key(keychain_password: bytes) -> bytes:
+    """Derive AES-128 key using Chrome's PBKDF2 parameters.
+
+    Chrome uses fixed, well-known parameters:
+    - Salt: 'saltysalt' (literal)
+    - Iterations: 1003
+    - Hash: SHA1
+    - Key length: 16 bytes (AES-128)
+
+    Args:
+        keychain_password: Raw password from macOS Keychain
+
+    Returns:
+        16-byte AES key for cookie decryption
+    """
+    return hashlib.pbkdf2_hmac(
+        'sha1',
+        keychain_password,
+        b'saltysalt',
+        1003,
+        dklen=16,
+    )
+
+
+def _get_chrome_cookies_version(cookies_db: Path) -> int:
+    """Get Chrome cookie format version from database.
+
+    Used to detect Chrome 130+ which adds domain hash to encrypted values.
+    Version 24+ means SHA256(domain) is prepended to decrypted values.
+
+    Args:
+        cookies_db: Path to Cookies SQLite file
+
+    Returns:
+        Version number (24+ means domain hash present)
+    """
+    conn = sqlite3.connect(f'file:{cookies_db}?mode=ro', uri=True)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT value FROM meta WHERE key = 'version'")
+        row = cursor.fetchone()
+        # Handle both missing row and NULL value
+        if row and row[0] is not None:
+            return int(row[0])
+        return 0
+    except sqlite3.OperationalError:
+        return 0  # Assume old format if meta table missing
+    finally:
+        conn.close()
+
+
+def _decrypt_cookie_value(
+    encrypted_value: bytes,
+    aes_key: bytes,
+    chrome_version: int,
+) -> str:
+    """Decrypt a Chrome cookie value using AES-128-CBC.
+
+    Args:
+        encrypted_value: Raw bytes from SQLite encrypted_value column
+        aes_key: 16-byte AES key from _derive_aes_key()
+        chrome_version: From Cookies DB meta table (version key)
+
+    Returns:
+        Decrypted cookie value as string
+
+    Raises:
+        ValueError: If decryption fails (wrong key, corrupted data)
+    """
+    # Check for v10 prefix (macOS/Linux encrypted format)
+    if not encrypted_value.startswith(b'v10'):
+        # Unencrypted value (rare but possible)
+        return encrypted_value.decode('utf-8', errors='replace')
+
+    # Strip v10 prefix (3 bytes)
+    ciphertext = encrypted_value[3:]
+
+    # Decrypt with AES-128-CBC, IV = 16 spaces
+    iv = b' ' * 16
+    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+    decrypted = cipher.decrypt(ciphertext)
+
+    # Remove PKCS7 padding
+    try:
+        unpadded = unpad(decrypted, AES.block_size)
+    except ValueError as e:
+        raise ValueError(f'PKCS7 unpadding failed: {e}') from e
+
+    # Chrome 130+ (version >= 24): SHA256(domain) prepended to decrypted value
+    # The hash is INSIDE the encrypted blob, so we strip it after decryption
+    # Use >= 32 to handle empty cookie values (exactly 32 bytes = just the hash)
+    if chrome_version >= 24 and len(unpadded) >= 32:
+        unpadded = unpadded[32:]
+
+    return unpadded.decode('utf-8', errors='replace')
+
+
+# -- sessionStorage Export -----------------------------------------------------
+
+
+def _export_session_storage_from_disk(
+    profile_path: Path,
+    origins_filter: Sequence[str] | None = None,
+) -> Mapping[str, Mapping[str, str]]:
+    """Export sessionStorage from Chrome's LevelDB files (may be stale).
+
+    Chrome persists sessionStorage to disk for session recovery, but this data
+    may be stale as Chrome doesn't flush in real-time. Prefer live extraction
+    via AppleScript when possible.
+
+    Args:
+        profile_path: Path to Chrome profile directory
+        origins_filter: Optional origin patterns to include
+
+    Returns:
+        Mapping of {origin: {key: value, ...}}
+
+    Raises:
+        FileNotFoundError: If sessionStorage path doesn't exist
+    """
+    storage: dict[str, dict[str, str]] = {}
+
+    session_storage_path = profile_path / 'Session Storage'
+
+    if not session_storage_path.exists():
+        raise FileNotFoundError(f'sessionStorage path not found: {session_storage_path}')
+
+    with ccl_chromium_sessionstorage.SessionStoreDb(session_storage_path) as ss:
+        for host in ss.iter_hosts():
+            # Filter origins (extract domain from URL, then RFC 6265 matching)
+            if origins_filter:
+                domain = _extract_domain_from_origin(host)
+                if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
+                    continue
+
+            origin_storage: dict[str, str] = {}
+            for record in ss.iter_records_for_host(host):
+                value = str(record.value) if record.value else ''
+                origin_storage[record.key] = value
+
+            if origin_storage:
+                # Normalize origin to match window.location.origin (no trailing slash)
+                normalized_host = _normalize_origin_url(host)
+                if normalized_host in storage:
+                    # Merge with existing (collision from normalization)
+                    storage[normalized_host].update(origin_storage)
+                else:
+                    storage[normalized_host] = origin_storage
+
+    return storage

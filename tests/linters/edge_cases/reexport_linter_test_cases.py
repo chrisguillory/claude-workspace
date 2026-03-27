@@ -13,18 +13,14 @@ against it and check which names in __all__ are flagged.
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# Imports that ARE re-exports (should flag REX001)
-# ---------------------------------------------------------------------------
+# -- Imports that ARE re-exports (should flag REX001) --------------------------
 
 from os.path import join  # imported from os.path
 from collections import OrderedDict  # imported from collections
 import json  # module import
 
 
-# ---------------------------------------------------------------------------
-# Local definitions (should NOT flag)
-# ---------------------------------------------------------------------------
+# -- Local definitions (should NOT flag) ---------------------------------------
 
 
 def local_function() -> None:
@@ -48,9 +44,7 @@ from typing import Any  # noqa: F811 — intentional shadow for test
 Any = object  # noqa: F811 — shadows the import, local def wins
 
 
-# ---------------------------------------------------------------------------
-# __all__ listing both re-exports and local definitions
-# ---------------------------------------------------------------------------
+# -- __all__ listing both re-exports and local definitions ---------------------
 
 __all__ = [
     # Re-exports (should flag REX001)

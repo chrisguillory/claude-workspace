@@ -13,9 +13,7 @@ from claude_session.schemas.captures.base import RequestCapture, ResponseCapture
 from claude_session.schemas.cc_internal_api import EmptyBody
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
-# ==============================================================================
-# GCS Version Check
-# ==============================================================================
+# -- GCS Version Check ---------------------------------------------------------
 
 
 class RawTextBody(StrictModel):

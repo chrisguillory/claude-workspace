@@ -506,28 +506,6 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         """Visit try* block (except* handlers) - same structure as try."""
         self._visit_try_structure(node)
 
-    def _visit_try_structure(self, node: ast.Try | ast.TryStar) -> None:
-        """Common visitor for try and try* blocks."""
-        # Visit try body
-        for child in node.body:
-            self.visit(child)
-
-        # Visit except/except* handlers
-        for handler in node.handlers:
-            self.visit(handler)
-
-        # Visit else
-        for child in node.orelse:
-            self.visit(child)
-
-        # Visit finally with context
-        if node.finalbody:
-            prev = self._in_finally_block
-            self._in_finally_block = True
-            for child in node.finalbody:
-                self.visit(child)
-            self._in_finally_block = prev
-
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         """Check except handler for violations."""
         # EXC001: Bare except
@@ -579,6 +557,28 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         # Restore context
         self._handler_stack.pop()
         self._in_except_handler = prev_in_except
+
+    def _visit_try_structure(self, node: ast.Try | ast.TryStar) -> None:
+        """Common visitor for try and try* blocks."""
+        # Visit try body
+        for child in node.body:
+            self.visit(child)
+
+        # Visit except/except* handlers
+        for handler in node.handlers:
+            self.visit(handler)
+
+        # Visit else
+        for child in node.orelse:
+            self.visit(child)
+
+        # Visit finally with context
+        if node.finalbody:
+            prev = self._in_finally_block
+            self._in_finally_block = True
+            for child in node.finalbody:
+                self.visit(child)
+            self._in_finally_block = prev
 
     def visit_Raise(self, node: ast.Raise) -> None:
         """Check raise statements."""

@@ -100,6 +100,7 @@ from .models import (
     RequestTiming,
     ResizeWindowResult,
     SaveProfileStateResult,
+    SetBlockedURLsResult,
     SleepResult,
     SlowestRequestSummary,
     SmartExtractionInfo,
@@ -124,14 +125,14 @@ from .scripts import (
 from .scroll import execute_scroll
 from .validators import validate_css_selector as _validate_css_selector_impl
 
-
-def _validate_css_selector(selector: str) -> None:
-    """Validate CSS selector, converting ValueError to ToolError for MCP layer."""
-    try:
-        _validate_css_selector_impl(selector)
-    except ValueError as e:
-        raise fastmcp.exceptions.ToolError(str(e)) from None
-
+__all__ = [
+    'BrowserService',
+    'BrowserState',
+    'OriginTracker',
+    'lifespan',
+    'main',
+    'register_tools',
+]
 
 # Valid URL prefixes for navigation (navigate, navigate_with_profile_state).
 VALID_URL_PREFIXES = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
@@ -161,564 +162,6 @@ _VISUAL_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
     ('offscreen', 'offscreen'),
     ('other', 'other'),
 ]
-
-
-def _count_tree_nodes(node: Mapping[str, Any] | None) -> int:
-    """Count nodes in a tree for compaction stats."""
-    if node is None:
-        return 0
-    count = 1
-    for child in node.get('children', []):
-        count += _count_tree_nodes(child)
-    return count
-
-
-def _build_page_metadata(
-    page_stats: Mapping[str, Any],
-    include_page_info: bool,
-    include_urls: bool,
-    compact_tree: bool,
-    raw_node_count: int,
-    compacted_node_count: int,
-    hidden_reason_keys: Sequence[tuple[str, str]],
-) -> str:
-    """Build YAML comment metadata footer from JS page stats.
-
-    Tier 1 (always shown when > 0): hidden element count + iframe count.
-    Tier 2 (only with include_page_info): shadow DOM, images, links, compaction, depth.
-
-    raw_node_count and compacted_node_count both use _count_tree_nodes
-    for apples-to-apples comparison.
-    """
-    lines: list[str] = []
-
-    # Tier 1: Always shown when > 0
-    hidden = page_stats.get('hidden', {})
-    hidden_total = hidden.get('total', 0)
-    if hidden_total > 0:
-        reasons = []
-        for key, label in hidden_reason_keys:
-            count = hidden.get(key, 0)
-            if count > 0:
-                reasons.append(f'{label}: {count}')
-        lines.append(f'# hidden: {hidden_total} ({", ".join(reasons)})')
-
-    iframe_count = page_stats.get('iframes', 0)
-    if iframe_count > 0:
-        lines.append(f'# iframes: {iframe_count} (content not traversed)')
-
-    # Tier 2: Only with include_page_info=True
-    if include_page_info:
-        shadow_count = page_stats.get('shadowRoots', 0)
-        if shadow_count > 0:
-            lines.append(f'# shadow_roots: {shadow_count} (content not traversed)')
-
-        images = page_stats.get('images', {})
-        img_total = images.get('total', 0)
-        if img_total > 0:
-            lines.append(
-                f'# images: {img_total} '
-                f'(with_alt: {images.get("withAlt", 0)}, without_alt: {images.get("withoutAlt", 0)})',
-            )
-
-        link_count = page_stats.get('links', 0)
-        if link_count > 0 and not include_urls:
-            lines.append(f'# links: {link_count} (urls not included \u2014 use include_urls=True)')
-
-        if raw_node_count > 0 and compact_tree and raw_node_count != compacted_node_count:
-            lines.append(f'# tree: {raw_node_count} nodes \u2192 {compacted_node_count} after compaction')
-
-        depth_trunc = page_stats.get('depthTruncated', 0)
-        if depth_trunc > 0:
-            lines.append(f'# depth_truncated: {depth_trunc} subtrees cut at depth 50')
-
-    if not lines:
-        return ''
-    return '\n# --- page metadata ---\n' + '\n'.join(lines)
-
-
-def _save_large_output_to_file(
-    content: str,
-    output_dir: Path,
-    prefix: str,
-    extension: str,
-) -> str:
-    """Save large output to file, return formatted response with path and preview.
-
-    Preserves natural line structure by writing directly to disk,
-    bypassing MCP JSON serialization that would escape newlines.
-
-    Args:
-        content: The full content to save
-        output_dir: Directory to save the file in
-        prefix: Filename prefix (e.g., "aria_snapshot")
-        extension: File extension without dot (e.g., "yaml")
-
-    Returns:
-        Formatted response string with file path, stats, and preview
-    """
-    timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')
-    filename = f'{prefix}_{timestamp}.{extension}'
-    file_path = output_dir / filename
-
-    file_path.write_text(content, encoding='utf-8')
-
-    line_count = content.count('\n') + 1
-    char_count = len(content)
-    preview = content[:2000]
-
-    return (
-        f'{prefix.replace("_", " ").title()} '
-        f'({char_count:,} chars, {line_count:,} lines) saved to:\n'
-        f'{file_path}\n\n'
-        f'Preview (first 2000 chars):\n{preview}'
-    )
-
-
-logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# CDP DOMStorage Helpers (Multi-Origin localStorage Access)
-# =============================================================================
-
-
-async def _cdp_enable_domstorage(driver: webdriver.Chrome) -> None:
-    """Enable CDP DOMStorage domain. Idempotent - safe to call multiple times."""
-    await asyncio.to_thread(driver.execute_cdp_cmd, 'DOMStorage.enable', {})
-
-
-async def _cdp_get_storage(
-    driver: webdriver.Chrome,
-    origin: str,
-    is_local: bool = True,
-) -> Sequence[Mapping[str, str]]:
-    """Get storage items for a specific origin via CDP.
-
-    Args:
-        driver: WebDriver with CDP support
-        origin: Security origin (e.g., "https://example.com")
-        is_local: True for localStorage, False for sessionStorage
-
-    Returns:
-        Sequence of {name, value} dicts, or empty sequence if origin has no storage
-
-    Note:
-        - Requires DOMStorage domain to be enabled first
-        - Read requires active frame for target origin (same as write)
-        - This is why we pre-capture before navigation - departed origins have no frame
-    """
-    result = await asyncio.to_thread(
-        driver.execute_cdp_cmd,
-        'DOMStorage.getDOMStorageItems',
-        {'storageId': {'securityOrigin': origin, 'isLocalStorage': is_local}},
-    )
-    # CDP returns {"entries": [["key1", "value1"], ["key2", "value2"], ...]}
-    entries = result.get('entries', [])
-    return [{'name': kv[0], 'value': kv[1]} for kv in entries]
-
-
-async def _cdp_set_storage(
-    driver: webdriver.Chrome,
-    origin: str,
-    key: str,
-    value: str,
-    is_local: bool = True,
-) -> None:
-    """Set a storage item for a specific origin via CDP.
-
-    Args:
-        driver: WebDriver with CDP support
-        origin: Security origin (e.g., "https://example.com")
-        key: Storage key
-        value: Storage value
-        is_local: True for localStorage, False for sessionStorage
-
-    Raises:
-        WebDriverException: "Frame not found for the given storage id" if no active frame
-
-    Note:
-        - Requires DOMStorage domain to be enabled first
-        - Write REQUIRES active frame for target origin (frame-dependent)
-        - This is why we use lazy restore pattern
-    """
-    await asyncio.to_thread(
-        driver.execute_cdp_cmd,
-        'DOMStorage.setDOMStorageItem',
-        {
-            'storageId': {'securityOrigin': origin, 'isLocalStorage': is_local},
-            'key': key,
-            'value': value,
-        },
-    )
-
-
-async def _capture_current_origin_storage(
-    service: BrowserService,
-    driver: webdriver.Chrome,
-) -> None:
-    """Capture current origin's localStorage, sessionStorage, and IndexedDB to cache.
-
-    Call this BEFORE any action that might navigate away (click, press_key, navigate).
-    Safe to call multiple times - idempotent, overwrites previous cache for same origin.
-
-    This is necessary because:
-    - CDP DOMStorage requires an active frame for the origin
-    - IndexedDB JavaScript capture requires page context
-    Once you navigate away, the frame is gone and these operations fail.
-    """
-    current_url = driver.current_url
-    if not current_url or current_url.startswith(('about:', 'data:', 'chrome:', 'blob:', 'file://')):
-        return
-
-    current_origin = await asyncio.to_thread(driver.execute_script, 'return window.location.origin')
-    if not current_origin or current_origin == 'null':
-        return
-
-    await _cdp_enable_domstorage(driver)
-
-    # Capture localStorage - always update cache (even if empty) to avoid stale data
-    # if user clears storage and then navigates away
-    local_storage_items = await _cdp_get_storage(driver, current_origin, is_local=True)
-    service.state.local_storage_cache[current_origin] = [dict(item) for item in local_storage_items]
-
-    # Capture sessionStorage - always update cache (even if empty)
-    session_storage_items = await _cdp_get_storage(driver, current_origin, is_local=False)
-    service.state.session_storage_cache[current_origin] = [dict(item) for item in session_storage_items]
-
-    # Capture IndexedDB - requires JavaScript (CDP has no write API, so we use JS for both)
-    # This may add ~100ms for sites with IndexedDB; most sites have none so this is fast.
-    # Note: INDEXEDDB_CAPTURE_SCRIPT returns a Promise, so we must use execute_async_script
-    # with a wrapper that awaits the Promise and calls the Selenium callback.
-    # Wrap in IIFE so 'return' statement works, then chain .then() on the Promise.
-    async_wrapper = f"""
-        var callback = arguments[arguments.length - 1];
-        (function() {{ {INDEXEDDB_CAPTURE_SCRIPT} }})()
-            .then(function(r) {{ callback(r); }})
-            .catch(function(e) {{ callback([]); }});
-    """
-    raw_result = await asyncio.to_thread(driver.execute_async_script, async_wrapper)
-    indexeddb_result: list[dict[str, Any]] = raw_result if isinstance(raw_result, list) else []
-    # INDEXEDDB_CAPTURE_SCRIPT returns list of database dicts, or empty list
-    if indexeddb_result:
-        service.state.indexed_db_cache[current_origin] = indexeddb_result
-    else:
-        # No databases - still update cache to avoid stale data
-        service.state.indexed_db_cache[current_origin] = []
-
-    # Log combined stats
-    total_domstorage = len(local_storage_items) + len(session_storage_items)
-    indexeddb_count = len(service.state.indexed_db_cache.get(current_origin, []))
-    if total_domstorage > 0 or indexeddb_count > 0:
-        parts = []
-        if local_storage_items:
-            parts.append(f'{len(local_storage_items)} localStorage')
-        if session_storage_items:
-            parts.append(f'{len(session_storage_items)} sessionStorage')
-        if indexeddb_count > 0:
-            parts.append(f'{indexeddb_count} IndexedDB databases')
-        logger.info(f'Cached {" + ".join(parts)} for {current_origin}')
-
-
-async def _restore_pending_profile_state_for_current_origin(
-    service: BrowserService,
-    driver: webdriver.Chrome,
-) -> None:
-    """Restore IndexedDB for current origin (localStorage/sessionStorage handled by init script).
-
-    Called after navigation to check if we have pending IndexedDB data for the
-    new current origin. Tracks restored origins to avoid double-restore which
-    could overwrite page modifications.
-
-    localStorage and sessionStorage are restored via Page.addScriptToEvaluateOnNewDocument
-    (init script approach), which runs BEFORE page JavaScript. This ensures storage
-    is populated before apps check for auth tokens or initialization data.
-
-    IndexedDB requires JavaScript execution in page context and uses async APIs,
-    so it must be restored after navigation via this lazy restore mechanism.
-
-    Note: sessionStorage is session-scoped. Restoring it to a new browser context
-    works, but the data will be lost when the browser closes (correct browser behavior).
-    """
-    if not service.state.pending_profile_state:
-        return
-
-    current_origin = await asyncio.to_thread(driver.execute_script, 'return window.location.origin')
-    if not current_origin or current_origin == 'null':
-        return
-
-    # Skip special origins
-    if current_origin.startswith(('chrome://', 'about:', 'data:', 'blob:', 'file://')):
-        return
-
-    if current_origin in service.state.restored_origins:
-        return  # Already restored in this session
-
-    # Find storage data for this origin (dict lookup, not array iteration)
-    origin_data = service.state.pending_profile_state.origins.get(current_origin)
-
-    if not origin_data:
-        # Mark as checked so we don't repeatedly search for non-existent origin
-        service.state.restored_origins.add(current_origin)
-        return
-
-    # Check if there's IndexedDB to restore
-    # Note: localStorage/sessionStorage are handled by init script (runs before page JS)
-    has_indexed_db = origin_data.indexed_db and len(origin_data.indexed_db) > 0
-
-    if not has_indexed_db:
-        service.state.restored_origins.add(current_origin)
-        return
-
-    # Restore IndexedDB via JavaScript (CDP has no write API)
-    # Note: localStorage/sessionStorage handled by init script (runs before page JS)
-    # Note: INDEXEDDB_RESTORE_SCRIPT returns a Promise, so we must use execute_async_script.
-    # The script expects arguments[0] to contain the databases list, so we use .apply()
-    # to set up the arguments array. Wrap in IIFE so 'return' statement works.
-    indexeddb_count = 0
-    if origin_data.indexed_db:  # Defensive check even though has_indexed_db was true
-        # Use by_alias=True to serialize as camelCase for JavaScript compatibility
-        databases_list = [db.model_dump(by_alias=True) for db in origin_data.indexed_db]
-        databases_json = json.dumps(databases_list)
-        async_wrapper = f"""
-            var callback = arguments[arguments.length - 1];
-            var data = {databases_json};
-            (function() {{ {INDEXEDDB_RESTORE_SCRIPT} }}).apply(null, [data])
-                .then(function(r) {{ callback(r); }})
-                .catch(function(e) {{ callback({{success: false, error: String(e)}}); }});
-        """
-        restore_result = await asyncio.to_thread(driver.execute_async_script, async_wrapper)
-        if restore_result and restore_result.get('success'):
-            indexeddb_count = restore_result.get('databases_restored', 0)
-
-    service.state.restored_origins.add(current_origin)
-
-    if indexeddb_count > 0:
-        logger.info(f'Restored {indexeddb_count} IndexedDB databases for {current_origin}')
-
-
-# =============================================================================
-# Profile State Import Helpers
-# =============================================================================
-
-
-async def _load_profile_state_from_file(file_path: str) -> ProfileState:
-    """Load and validate profile state from JSON file.
-
-    Args:
-        file_path: Path to profile state JSON file.
-                   Relative paths resolved from current working directory.
-
-    Returns:
-        Parsed and validated ProfileState model.
-
-    Raises:
-        ToolError: If file not found or invalid JSON/schema.
-    """
-    state_path = Path(file_path)
-    if not state_path.is_absolute():
-        state_path = Path.cwd() / file_path
-
-    if not state_path.exists():
-        raise fastmcp.exceptions.ToolError(f'Profile state file not found: {state_path}')
-
-    profile_state_json = state_path.read_text()
-    return ProfileState.model_validate_json(profile_state_json)
-
-
-def _build_storage_init_script(profile_state: ProfileState) -> str | None:
-    """Build JavaScript init script to restore localStorage/sessionStorage.
-
-    Creates a script that runs via Page.addScriptToEvaluateOnNewDocument BEFORE
-    any page JavaScript executes. This ensures storage is populated before apps
-    check for auth tokens, user preferences, or other initialization data.
-
-    The script:
-    - Checks window.location.origin against captured origins
-    - Restores matching localStorage and sessionStorage
-    - Logs errors to window.__storageRestoreState for debugging
-    - Handles quota errors and private browsing gracefully
-
-    This approach matches how Playwright's storageState option works internally.
-
-    Args:
-        profile_state: ProfileState containing origins with local_storage/session_storage.
-
-    Returns:
-        JavaScript source string, or None if no storage data to restore.
-    """
-    # Build storage data object keyed by origin
-    storage_data: dict[str, dict[str, dict[str, str]]] = {}
-
-    for origin_url, origin_data in profile_state.origins.items():
-        has_local = origin_data.local_storage and len(origin_data.local_storage) > 0
-        has_session = origin_data.session_storage and len(origin_data.session_storage) > 0
-
-        if has_local or has_session:
-            storage_data[origin_url] = {
-                'localStorage': dict(origin_data.local_storage) if origin_data.local_storage else {},
-                'sessionStorage': dict(origin_data.session_storage) if origin_data.session_storage else {},
-            }
-
-    if not storage_data:
-        return None
-
-    # Serialize to JSON for embedding in JavaScript
-    # json.dumps handles escaping of quotes, newlines, etc.
-    storage_json = json.dumps(storage_data, ensure_ascii=False)
-
-    # Build the init script
-    # This runs before any page JavaScript in every new document
-    return f"""
-(function() {{
-    'use strict';
-
-    // Storage restoration state for debugging
-    window.__storageRestoreState = {{
-        restored: {{ localStorage: [], sessionStorage: [] }},
-        errors: [],
-        origin: null,
-        timestamp: Date.now()
-    }};
-
-    var storageData = {storage_json};
-    var currentOrigin = window.location.origin;
-    window.__storageRestoreState.origin = currentOrigin;
-
-    var data = storageData[currentOrigin];
-    if (!data) {{
-        // No data for this origin - nothing to restore
-        return;
-    }}
-
-    // Restore localStorage
-    if (data.localStorage) {{
-        Object.keys(data.localStorage).forEach(function(key) {{
-            try {{
-                window.localStorage.setItem(key, data.localStorage[key]);
-                window.__storageRestoreState.restored.localStorage.push(key);
-            }} catch (e) {{
-                window.__storageRestoreState.errors.push({{
-                    type: 'localStorage',
-                    key: key,
-                    error: e.name,
-                    message: e.message
-                }});
-            }}
-        }});
-    }}
-
-    // Restore sessionStorage
-    if (data.sessionStorage) {{
-        Object.keys(data.sessionStorage).forEach(function(key) {{
-            try {{
-                window.sessionStorage.setItem(key, data.sessionStorage[key]);
-                window.__storageRestoreState.restored.sessionStorage.push(key);
-            }} catch (e) {{
-                window.__storageRestoreState.errors.push({{
-                    type: 'sessionStorage',
-                    key: key,
-                    error: e.name,
-                    message: e.message
-                }});
-            }}
-        }});
-    }}
-}})();
-"""
-
-
-async def _inject_cookies_via_cdp(
-    driver: webdriver.Chrome,
-    cookies: Sequence[ProfileStateCookie],
-) -> int:
-    """Inject cookies via CDP Network.setCookies.
-
-    Cookies are set BEFORE navigation so they're sent with the request.
-    CDP API requires camelCase field names, so we convert from our
-    snake_case ProfileStateCookie fields.
-
-    Args:
-        driver: WebDriver instance with CDP support.
-        cookies: Sequence of ProfileStateCookie objects.
-
-    Returns:
-        Number of cookies injected.
-    """
-    if not cookies:
-        return 0
-
-    cdp_cookies = []
-    for cookie in cookies:
-        cdp_cookie = {
-            'name': cookie.name,
-            'value': cookie.value,
-            'domain': cookie.domain,
-            'path': cookie.path,
-            'httpOnly': cookie.http_only,
-            'secure': cookie.secure,
-            'sameSite': cookie.same_site,
-        }
-        # Handle session cookies (expires: -1) vs persistent cookies
-        # For CDP, omit expires for session cookies
-        if cookie.expires != -1:
-            cdp_cookie['expires'] = cookie.expires
-
-        cdp_cookies.append(cdp_cookie)
-
-    # Set all cookies at once
-    await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.setCookies', {'cookies': cdp_cookies})
-
-    return len(cdp_cookies)
-
-
-async def _setup_pending_profile_state(
-    service: BrowserService,
-    profile_state: ProfileState,
-) -> None:
-    """Configure lazy restore for IndexedDB (localStorage/sessionStorage handled by init script).
-
-    Stores profile state for lazy IndexedDB restoration as origins are visited.
-    localStorage and sessionStorage are restored via Page.addScriptToEvaluateOnNewDocument
-    which runs BEFORE page JavaScript - no lazy restore needed.
-
-    IndexedDB requires JavaScript execution in page context with async APIs, so it
-    must be restored lazily via _restore_pending_profile_state_for_current_origin.
-
-    Args:
-        service: BrowserService instance.
-        profile_state: ProfileState to restore lazily (IndexedDB only).
-    """
-    service.state.pending_profile_state = profile_state
-    service.state.restored_origins.clear()
-
-
-async def _install_response_body_capture_if_needed(
-    driver: webdriver.Chrome,
-    service: BrowserService,
-    enable_har_capture: bool,
-    log_prefix: str,
-) -> None:
-    """Install JS interceptor for HAR response body capture if not already installed.
-
-    The interceptor patches fetch() and XMLHttpRequest to capture response bodies
-    in real-time, before Chrome garbage collects them. This enables export_har()
-    to retrieve bodies for API calls that JavaScript consumes immediately.
-
-    Args:
-        driver: WebDriver instance to install script on.
-        service: BrowserService to track installation state.
-        enable_har_capture: Whether HAR capture was requested.
-        log_prefix: Function name for log messages (e.g., 'navigate').
-    """
-    if enable_har_capture and not service.state.response_body_capture_enabled:
-        await asyncio.to_thread(
-            driver.execute_cdp_cmd,
-            'Page.addScriptToEvaluateOnNewDocument',
-            {'source': RESPONSE_BODY_CAPTURE_SCRIPT},
-        )
-        service.state.response_body_capture_enabled = True
-        logger.info('Response body capture interceptor installed')
 
 
 class OriginTracker:
@@ -3745,6 +3188,54 @@ Workflow:
 
     @mcp.tool(
         annotations=ToolAnnotations(
+            title='Set Blocked URLs',
+            destructiveHint=False,
+            idempotentHint=True,
+        ),
+    )
+    async def set_blocked_urls(
+        urls: Sequence[str],
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> SetBlockedURLsResult:
+        """Block network requests matching URL patterns via CDP.
+
+        Uses Chrome DevTools Protocol Network.setBlockedURLs to block requests
+        at the browser's network layer before they hit the network.
+
+        Each call REPLACES the blocked URL list. Pass an empty list to clear.
+        Blocks persist across navigations but reset on fresh_browser=True.
+
+        Args:
+            urls: URL patterns to block. Wildcards supported:
+                - '*cdn.segment.com*' blocks all Segment analytics
+                - '*.png' blocks all PNG images
+                - [] clears all blocks
+
+        Returns:
+            SetBlockedURLsResult with count and echoed patterns
+
+        Example:
+            set_blocked_urls(['*cdn.segment.com*', '*google-analytics.com*'])
+            navigate('https://example.com')  # Loads without analytics
+            set_blocked_urls([])  # Clear all blocks
+        """
+        driver = await service.get_browser()
+
+        await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.enable', {})
+        await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.setBlockedURLs', {'urls': list(urls)})
+
+        if urls:
+            logger.info(f'Blocked {len(urls)} URL pattern(s): {urls}')
+        else:
+            logger.info('Cleared all URL blocks')
+
+        return SetBlockedURLsResult(
+            blocked_url_count=len(urls),
+            patterns=list(urls),
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
             title='Execute JavaScript',
             readOnlyHint=False,
             idempotentHint=False,
@@ -4220,39 +3711,6 @@ Workflow:
         )
 
 
-def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:
-    """Synchronous cleanup for signal handlers (runs in main thread).
-
-    Uses a thread with timeout to prevent hanging on unresponsive ChromeDriver.
-    """
-    print('\n⚠ Signal received, cleaning up browser...', file=sys.stderr)
-    if state.driver:
-        try:
-            # driver.quit() sends an HTTP request to ChromeDriver which can hang
-            # if Chrome/ChromeDriver is unresponsive. Run in a thread with timeout.
-            quit_thread = threading.Thread(target=state.driver.quit, daemon=True)
-            quit_thread.start()
-            quit_thread.join(timeout=timeout)
-            if quit_thread.is_alive():
-                print(f'✗ Browser close timed out after {timeout}s, abandoning', file=sys.stderr)
-            else:
-                print('✓ Browser closed', file=sys.stderr)
-        except Exception as e:  # exception_safety_linter.py: swallowed-exception — signal cleanup must not raise
-            print(f'✗ Browser close error: {e}', file=sys.stderr)
-    if state.mitmproxy_process:
-        state.mitmproxy_process.terminate()
-        try:
-            state.mitmproxy_process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            state.mitmproxy_process.kill()
-    try:
-        state.temp_dir.cleanup()
-        state.capture_temp_dir.cleanup()
-    except Exception:  # exception_safety_linter.py: swallowed-exception — signal cleanup must not raise
-        pass
-    print('✓ Signal cleanup complete, exiting', file=sys.stderr)
-
-
 @contextlib.asynccontextmanager
 async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     """Manage browser lifecycle - initialization before requests, cleanup after shutdown."""
@@ -4302,6 +3760,601 @@ def main() -> None:
     """Entry point for uvx installation."""
     logger.info('Starting Selenium Browser Automation MCP server (CDP stealth injection for bot detection bypass)')
     mcp.run()
+
+
+def _validate_css_selector(selector: str) -> None:
+    """Validate CSS selector, converting ValueError to ToolError for MCP layer."""
+    try:
+        _validate_css_selector_impl(selector)
+    except ValueError as e:
+        raise fastmcp.exceptions.ToolError(str(e)) from None
+
+
+def _count_tree_nodes(node: Mapping[str, Any] | None) -> int:
+    """Count nodes in a tree for compaction stats."""
+    if node is None:
+        return 0
+    count = 1
+    for child in node.get('children', []):
+        count += _count_tree_nodes(child)
+    return count
+
+
+def _build_page_metadata(
+    page_stats: Mapping[str, Any],
+    include_page_info: bool,
+    include_urls: bool,
+    compact_tree: bool,
+    raw_node_count: int,
+    compacted_node_count: int,
+    hidden_reason_keys: Sequence[tuple[str, str]],
+) -> str:
+    """Build YAML comment metadata footer from JS page stats.
+
+    Tier 1 (always shown when > 0): hidden element count + iframe count.
+    Tier 2 (only with include_page_info): shadow DOM, images, links, compaction, depth.
+
+    raw_node_count and compacted_node_count both use _count_tree_nodes
+    for apples-to-apples comparison.
+    """
+    lines: list[str] = []
+
+    # Tier 1: Always shown when > 0
+    hidden = page_stats.get('hidden', {})
+    hidden_total = hidden.get('total', 0)
+    if hidden_total > 0:
+        reasons = []
+        for key, label in hidden_reason_keys:
+            count = hidden.get(key, 0)
+            if count > 0:
+                reasons.append(f'{label}: {count}')
+        lines.append(f'# hidden: {hidden_total} ({", ".join(reasons)})')
+
+    iframe_count = page_stats.get('iframes', 0)
+    if iframe_count > 0:
+        lines.append(f'# iframes: {iframe_count} (content not traversed)')
+
+    # Tier 2: Only with include_page_info=True
+    if include_page_info:
+        shadow_count = page_stats.get('shadowRoots', 0)
+        if shadow_count > 0:
+            lines.append(f'# shadow_roots: {shadow_count} (content not traversed)')
+
+        images = page_stats.get('images', {})
+        img_total = images.get('total', 0)
+        if img_total > 0:
+            lines.append(
+                f'# images: {img_total} '
+                f'(with_alt: {images.get("withAlt", 0)}, without_alt: {images.get("withoutAlt", 0)})',
+            )
+
+        link_count = page_stats.get('links', 0)
+        if link_count > 0 and not include_urls:
+            lines.append(f'# links: {link_count} (urls not included \u2014 use include_urls=True)')
+
+        if raw_node_count > 0 and compact_tree and raw_node_count != compacted_node_count:
+            lines.append(f'# tree: {raw_node_count} nodes \u2192 {compacted_node_count} after compaction')
+
+        depth_trunc = page_stats.get('depthTruncated', 0)
+        if depth_trunc > 0:
+            lines.append(f'# depth_truncated: {depth_trunc} subtrees cut at depth 50')
+
+    if not lines:
+        return ''
+    return '\n# --- page metadata ---\n' + '\n'.join(lines)
+
+
+def _save_large_output_to_file(
+    content: str,
+    output_dir: Path,
+    prefix: str,
+    extension: str,
+) -> str:
+    """Save large output to file, return formatted response with path and preview.
+
+    Preserves natural line structure by writing directly to disk,
+    bypassing MCP JSON serialization that would escape newlines.
+
+    Args:
+        content: The full content to save
+        output_dir: Directory to save the file in
+        prefix: Filename prefix (e.g., "aria_snapshot")
+        extension: File extension without dot (e.g., "yaml")
+
+    Returns:
+        Formatted response string with file path, stats, and preview
+    """
+    timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')
+    filename = f'{prefix}_{timestamp}.{extension}'
+    file_path = output_dir / filename
+
+    file_path.write_text(content, encoding='utf-8')
+
+    line_count = content.count('\n') + 1
+    char_count = len(content)
+    preview = content[:2000]
+
+    return (
+        f'{prefix.replace("_", " ").title()} '
+        f'({char_count:,} chars, {line_count:,} lines) saved to:\n'
+        f'{file_path}\n\n'
+        f'Preview (first 2000 chars):\n{preview}'
+    )
+
+
+logger = logging.getLogger(__name__)
+
+
+# -- CDP DOMStorage Helpers (Multi-Origin localStorage Access) -----------------
+
+
+async def _cdp_enable_domstorage(driver: webdriver.Chrome) -> None:
+    """Enable CDP DOMStorage domain. Idempotent - safe to call multiple times."""
+    await asyncio.to_thread(driver.execute_cdp_cmd, 'DOMStorage.enable', {})
+
+
+async def _cdp_get_storage(
+    driver: webdriver.Chrome,
+    origin: str,
+    is_local: bool = True,
+) -> Sequence[Mapping[str, str]]:
+    """Get storage items for a specific origin via CDP.
+
+    Args:
+        driver: WebDriver with CDP support
+        origin: Security origin (e.g., "https://example.com")
+        is_local: True for localStorage, False for sessionStorage
+
+    Returns:
+        Sequence of {name, value} dicts, or empty sequence if origin has no storage
+
+    Note:
+        - Requires DOMStorage domain to be enabled first
+        - Read requires active frame for target origin (same as write)
+        - This is why we pre-capture before navigation - departed origins have no frame
+    """
+    result = await asyncio.to_thread(
+        driver.execute_cdp_cmd,
+        'DOMStorage.getDOMStorageItems',
+        {'storageId': {'securityOrigin': origin, 'isLocalStorage': is_local}},
+    )
+    # CDP returns {"entries": [["key1", "value1"], ["key2", "value2"], ...]}
+    entries = result.get('entries', [])
+    return [{'name': kv[0], 'value': kv[1]} for kv in entries]
+
+
+async def _cdp_set_storage(
+    driver: webdriver.Chrome,
+    origin: str,
+    key: str,
+    value: str,
+    is_local: bool = True,
+) -> None:
+    """Set a storage item for a specific origin via CDP.
+
+    Args:
+        driver: WebDriver with CDP support
+        origin: Security origin (e.g., "https://example.com")
+        key: Storage key
+        value: Storage value
+        is_local: True for localStorage, False for sessionStorage
+
+    Raises:
+        WebDriverException: "Frame not found for the given storage id" if no active frame
+
+    Note:
+        - Requires DOMStorage domain to be enabled first
+        - Write REQUIRES active frame for target origin (frame-dependent)
+        - This is why we use lazy restore pattern
+    """
+    await asyncio.to_thread(
+        driver.execute_cdp_cmd,
+        'DOMStorage.setDOMStorageItem',
+        {
+            'storageId': {'securityOrigin': origin, 'isLocalStorage': is_local},
+            'key': key,
+            'value': value,
+        },
+    )
+
+
+async def _capture_current_origin_storage(
+    service: BrowserService,
+    driver: webdriver.Chrome,
+) -> None:
+    """Capture current origin's localStorage, sessionStorage, and IndexedDB to cache.
+
+    Call this BEFORE any action that might navigate away (click, press_key, navigate).
+    Safe to call multiple times - idempotent, overwrites previous cache for same origin.
+
+    This is necessary because:
+    - CDP DOMStorage requires an active frame for the origin
+    - IndexedDB JavaScript capture requires page context
+    Once you navigate away, the frame is gone and these operations fail.
+    """
+    current_url = driver.current_url
+    if not current_url or current_url.startswith(('about:', 'data:', 'chrome:', 'blob:', 'file://')):
+        return
+
+    current_origin = await asyncio.to_thread(driver.execute_script, 'return window.location.origin')
+    if not current_origin or current_origin == 'null':
+        return
+
+    await _cdp_enable_domstorage(driver)
+
+    # Capture localStorage - always update cache (even if empty) to avoid stale data
+    # if user clears storage and then navigates away
+    local_storage_items = await _cdp_get_storage(driver, current_origin, is_local=True)
+    service.state.local_storage_cache[current_origin] = [dict(item) for item in local_storage_items]
+
+    # Capture sessionStorage - always update cache (even if empty)
+    session_storage_items = await _cdp_get_storage(driver, current_origin, is_local=False)
+    service.state.session_storage_cache[current_origin] = [dict(item) for item in session_storage_items]
+
+    # Capture IndexedDB - requires JavaScript (CDP has no write API, so we use JS for both)
+    # This may add ~100ms for sites with IndexedDB; most sites have none so this is fast.
+    # Note: INDEXEDDB_CAPTURE_SCRIPT returns a Promise, so we must use execute_async_script
+    # with a wrapper that awaits the Promise and calls the Selenium callback.
+    # Wrap in IIFE so 'return' statement works, then chain .then() on the Promise.
+    async_wrapper = f"""
+        var callback = arguments[arguments.length - 1];
+        (function() {{ {INDEXEDDB_CAPTURE_SCRIPT} }})()
+            .then(function(r) {{ callback(r); }})
+            .catch(function(e) {{ callback([]); }});
+    """
+    raw_result = await asyncio.to_thread(driver.execute_async_script, async_wrapper)
+    indexeddb_result: list[dict[str, Any]] = raw_result if isinstance(raw_result, list) else []
+    # INDEXEDDB_CAPTURE_SCRIPT returns list of database dicts, or empty list
+    if indexeddb_result:
+        service.state.indexed_db_cache[current_origin] = indexeddb_result
+    else:
+        # No databases - still update cache to avoid stale data
+        service.state.indexed_db_cache[current_origin] = []
+
+    # Log combined stats
+    total_domstorage = len(local_storage_items) + len(session_storage_items)
+    indexeddb_count = len(service.state.indexed_db_cache.get(current_origin, []))
+    if total_domstorage > 0 or indexeddb_count > 0:
+        parts = []
+        if local_storage_items:
+            parts.append(f'{len(local_storage_items)} localStorage')
+        if session_storage_items:
+            parts.append(f'{len(session_storage_items)} sessionStorage')
+        if indexeddb_count > 0:
+            parts.append(f'{indexeddb_count} IndexedDB databases')
+        logger.info(f'Cached {" + ".join(parts)} for {current_origin}')
+
+
+async def _restore_pending_profile_state_for_current_origin(
+    service: BrowserService,
+    driver: webdriver.Chrome,
+) -> None:
+    """Restore IndexedDB for current origin (localStorage/sessionStorage handled by init script).
+
+    Called after navigation to check if we have pending IndexedDB data for the
+    new current origin. Tracks restored origins to avoid double-restore which
+    could overwrite page modifications.
+
+    localStorage and sessionStorage are restored via Page.addScriptToEvaluateOnNewDocument
+    (init script approach), which runs BEFORE page JavaScript. This ensures storage
+    is populated before apps check for auth tokens or initialization data.
+
+    IndexedDB requires JavaScript execution in page context and uses async APIs,
+    so it must be restored after navigation via this lazy restore mechanism.
+
+    Note: sessionStorage is session-scoped. Restoring it to a new browser context
+    works, but the data will be lost when the browser closes (correct browser behavior).
+    """
+    if not service.state.pending_profile_state:
+        return
+
+    current_origin = await asyncio.to_thread(driver.execute_script, 'return window.location.origin')
+    if not current_origin or current_origin == 'null':
+        return
+
+    # Skip special origins
+    if current_origin.startswith(('chrome://', 'about:', 'data:', 'blob:', 'file://')):
+        return
+
+    if current_origin in service.state.restored_origins:
+        return  # Already restored in this session
+
+    # Find storage data for this origin (dict lookup, not array iteration)
+    origin_data = service.state.pending_profile_state.origins.get(current_origin)
+
+    if not origin_data:
+        # Mark as checked so we don't repeatedly search for non-existent origin
+        service.state.restored_origins.add(current_origin)
+        return
+
+    # Check if there's IndexedDB to restore
+    # Note: localStorage/sessionStorage are handled by init script (runs before page JS)
+    has_indexed_db = origin_data.indexed_db and len(origin_data.indexed_db) > 0
+
+    if not has_indexed_db:
+        service.state.restored_origins.add(current_origin)
+        return
+
+    # Restore IndexedDB via JavaScript (CDP has no write API)
+    # Note: localStorage/sessionStorage handled by init script (runs before page JS)
+    # Note: INDEXEDDB_RESTORE_SCRIPT returns a Promise, so we must use execute_async_script.
+    # The script expects arguments[0] to contain the databases list, so we use .apply()
+    # to set up the arguments array. Wrap in IIFE so 'return' statement works.
+    indexeddb_count = 0
+    if origin_data.indexed_db:  # Defensive check even though has_indexed_db was true
+        # Use by_alias=True to serialize as camelCase for JavaScript compatibility
+        databases_list = [db.model_dump(by_alias=True) for db in origin_data.indexed_db]
+        databases_json = json.dumps(databases_list)
+        async_wrapper = f"""
+            var callback = arguments[arguments.length - 1];
+            var data = {databases_json};
+            (function() {{ {INDEXEDDB_RESTORE_SCRIPT} }}).apply(null, [data])
+                .then(function(r) {{ callback(r); }})
+                .catch(function(e) {{ callback({{success: false, error: String(e)}}); }});
+        """
+        restore_result = await asyncio.to_thread(driver.execute_async_script, async_wrapper)
+        if restore_result and restore_result.get('success'):
+            indexeddb_count = restore_result.get('databases_restored', 0)
+
+    service.state.restored_origins.add(current_origin)
+
+    if indexeddb_count > 0:
+        logger.info(f'Restored {indexeddb_count} IndexedDB databases for {current_origin}')
+
+
+# -- Profile State Import Helpers ----------------------------------------------
+
+
+async def _load_profile_state_from_file(file_path: str) -> ProfileState:
+    """Load and validate profile state from JSON file.
+
+    Args:
+        file_path: Path to profile state JSON file.
+                   Relative paths resolved from current working directory.
+
+    Returns:
+        Parsed and validated ProfileState model.
+
+    Raises:
+        ToolError: If file not found or invalid JSON/schema.
+    """
+    state_path = Path(file_path)
+    if not state_path.is_absolute():
+        state_path = Path.cwd() / file_path
+
+    if not state_path.exists():
+        raise fastmcp.exceptions.ToolError(f'Profile state file not found: {state_path}')
+
+    profile_state_json = state_path.read_text()
+    return ProfileState.model_validate_json(profile_state_json)
+
+
+def _build_storage_init_script(profile_state: ProfileState) -> str | None:
+    """Build JavaScript init script to restore localStorage/sessionStorage.
+
+    Creates a script that runs via Page.addScriptToEvaluateOnNewDocument BEFORE
+    any page JavaScript executes. This ensures storage is populated before apps
+    check for auth tokens, user preferences, or other initialization data.
+
+    The script:
+    - Checks window.location.origin against captured origins
+    - Restores matching localStorage and sessionStorage
+    - Logs errors to window.__storageRestoreState for debugging
+    - Handles quota errors and private browsing gracefully
+
+    This approach matches how Playwright's storageState option works internally.
+
+    Args:
+        profile_state: ProfileState containing origins with local_storage/session_storage.
+
+    Returns:
+        JavaScript source string, or None if no storage data to restore.
+    """
+    # Build storage data object keyed by origin
+    storage_data: dict[str, dict[str, dict[str, str]]] = {}
+
+    for origin_url, origin_data in profile_state.origins.items():
+        has_local = origin_data.local_storage and len(origin_data.local_storage) > 0
+        has_session = origin_data.session_storage and len(origin_data.session_storage) > 0
+
+        if has_local or has_session:
+            storage_data[origin_url] = {
+                'localStorage': dict(origin_data.local_storage) if origin_data.local_storage else {},
+                'sessionStorage': dict(origin_data.session_storage) if origin_data.session_storage else {},
+            }
+
+    if not storage_data:
+        return None
+
+    # Serialize to JSON for embedding in JavaScript
+    # json.dumps handles escaping of quotes, newlines, etc.
+    storage_json = json.dumps(storage_data, ensure_ascii=False)
+
+    # Build the init script
+    # This runs before any page JavaScript in every new document
+    return f"""
+(function() {{
+    'use strict';
+
+    // Storage restoration state for debugging
+    window.__storageRestoreState = {{
+        restored: {{ localStorage: [], sessionStorage: [] }},
+        errors: [],
+        origin: null,
+        timestamp: Date.now()
+    }};
+
+    var storageData = {storage_json};
+    var currentOrigin = window.location.origin;
+    window.__storageRestoreState.origin = currentOrigin;
+
+    var data = storageData[currentOrigin];
+    if (!data) {{
+        // No data for this origin - nothing to restore
+        return;
+    }}
+
+    // Restore localStorage
+    if (data.localStorage) {{
+        Object.keys(data.localStorage).forEach(function(key) {{
+            try {{
+                window.localStorage.setItem(key, data.localStorage[key]);
+                window.__storageRestoreState.restored.localStorage.push(key);
+            }} catch (e) {{
+                window.__storageRestoreState.errors.push({{
+                    type: 'localStorage',
+                    key: key,
+                    error: e.name,
+                    message: e.message
+                }});
+            }}
+        }});
+    }}
+
+    // Restore sessionStorage
+    if (data.sessionStorage) {{
+        Object.keys(data.sessionStorage).forEach(function(key) {{
+            try {{
+                window.sessionStorage.setItem(key, data.sessionStorage[key]);
+                window.__storageRestoreState.restored.sessionStorage.push(key);
+            }} catch (e) {{
+                window.__storageRestoreState.errors.push({{
+                    type: 'sessionStorage',
+                    key: key,
+                    error: e.name,
+                    message: e.message
+                }});
+            }}
+        }});
+    }}
+}})();
+"""
+
+
+async def _inject_cookies_via_cdp(
+    driver: webdriver.Chrome,
+    cookies: Sequence[ProfileStateCookie],
+) -> int:
+    """Inject cookies via CDP Network.setCookies.
+
+    Cookies are set BEFORE navigation so they're sent with the request.
+    CDP API requires camelCase field names, so we convert from our
+    snake_case ProfileStateCookie fields.
+
+    Args:
+        driver: WebDriver instance with CDP support.
+        cookies: Sequence of ProfileStateCookie objects.
+
+    Returns:
+        Number of cookies injected.
+    """
+    if not cookies:
+        return 0
+
+    cdp_cookies = []
+    for cookie in cookies:
+        cdp_cookie = {
+            'name': cookie.name,
+            'value': cookie.value,
+            'domain': cookie.domain,
+            'path': cookie.path,
+            'httpOnly': cookie.http_only,
+            'secure': cookie.secure,
+            'sameSite': cookie.same_site,
+        }
+        # Handle session cookies (expires: -1) vs persistent cookies
+        # For CDP, omit expires for session cookies
+        if cookie.expires != -1:
+            cdp_cookie['expires'] = cookie.expires
+
+        cdp_cookies.append(cdp_cookie)
+
+    # Set all cookies at once
+    await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.setCookies', {'cookies': cdp_cookies})
+
+    return len(cdp_cookies)
+
+
+async def _setup_pending_profile_state(
+    service: BrowserService,
+    profile_state: ProfileState,
+) -> None:
+    """Configure lazy restore for IndexedDB (localStorage/sessionStorage handled by init script).
+
+    Stores profile state for lazy IndexedDB restoration as origins are visited.
+    localStorage and sessionStorage are restored via Page.addScriptToEvaluateOnNewDocument
+    which runs BEFORE page JavaScript - no lazy restore needed.
+
+    IndexedDB requires JavaScript execution in page context with async APIs, so it
+    must be restored lazily via _restore_pending_profile_state_for_current_origin.
+
+    Args:
+        service: BrowserService instance.
+        profile_state: ProfileState to restore lazily (IndexedDB only).
+    """
+    service.state.pending_profile_state = profile_state
+    service.state.restored_origins.clear()
+
+
+async def _install_response_body_capture_if_needed(
+    driver: webdriver.Chrome,
+    service: BrowserService,
+    enable_har_capture: bool,
+    log_prefix: str,
+) -> None:
+    """Install JS interceptor for HAR response body capture if not already installed.
+
+    The interceptor patches fetch() and XMLHttpRequest to capture response bodies
+    in real-time, before Chrome garbage collects them. This enables export_har()
+    to retrieve bodies for API calls that JavaScript consumes immediately.
+
+    Args:
+        driver: WebDriver instance to install script on.
+        service: BrowserService to track installation state.
+        enable_har_capture: Whether HAR capture was requested.
+        log_prefix: Function name for log messages (e.g., 'navigate').
+    """
+    if enable_har_capture and not service.state.response_body_capture_enabled:
+        await asyncio.to_thread(
+            driver.execute_cdp_cmd,
+            'Page.addScriptToEvaluateOnNewDocument',
+            {'source': RESPONSE_BODY_CAPTURE_SCRIPT},
+        )
+        service.state.response_body_capture_enabled = True
+        logger.info('Response body capture interceptor installed')
+
+
+def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:
+    """Synchronous cleanup for signal handlers (runs in main thread).
+
+    Uses a thread with timeout to prevent hanging on unresponsive ChromeDriver.
+    """
+    print('\n⚠ Signal received, cleaning up browser...', file=sys.stderr)
+    if state.driver:
+        try:
+            # driver.quit() sends an HTTP request to ChromeDriver which can hang
+            # if Chrome/ChromeDriver is unresponsive. Run in a thread with timeout.
+            quit_thread = threading.Thread(target=state.driver.quit, daemon=True)
+            quit_thread.start()
+            quit_thread.join(timeout=timeout)
+            if quit_thread.is_alive():
+                print(f'✗ Browser close timed out after {timeout}s, abandoning', file=sys.stderr)
+            else:
+                print('✓ Browser closed', file=sys.stderr)
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception — signal cleanup must not raise
+            print(f'✗ Browser close error: {e}', file=sys.stderr)
+    if state.mitmproxy_process:
+        state.mitmproxy_process.terminate()
+        try:
+            state.mitmproxy_process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            state.mitmproxy_process.kill()
+    try:
+        state.temp_dir.cleanup()
+        state.capture_temp_dir.cleanup()
+    except Exception:  # exception_safety_linter.py: swallowed-exception — signal cleanup must not raise
+        pass
+    print('✓ Signal cleanup complete, exiting', file=sys.stderr)
 
 
 if __name__ == '__main__':

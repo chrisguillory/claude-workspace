@@ -86,9 +86,7 @@ from claude_session.schemas.captures.unknown import (
     UnknownResponseCapture,
 )
 
-# ==============================================================================
-# Discriminated union of all capture types
-# ==============================================================================
+# -- Discriminated union of all capture types ----------------------------------
 
 CapturedTraffic = Annotated[
     # Anthropic API - Messages
@@ -172,9 +170,7 @@ CapturedTraffic = Annotated[
 ]
 
 
-# ==============================================================================
-# Preprocessing and loading
-# ==============================================================================
+# -- Preprocessing and loading -------------------------------------------------
 
 # Cached adapter for performance
 _CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(CapturedTraffic)

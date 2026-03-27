@@ -14,7 +14,10 @@ from selenium.webdriver.common.by import By
 
 from .scripts import HOVER_OCCLUSION_SCRIPT
 
-__all__ = ['check_hover_actionability', 'validate_hover_duration']
+__all__ = [
+    'check_hover_actionability',
+    'validate_hover_duration',
+]
 
 
 def check_hover_actionability(

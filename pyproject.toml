@@ -123,10 +123,29 @@ filterwarnings = [
 # -- Custom Linter Configuration ----------------------------------------------
 
 [tool.strict-typing-linter.per-file-ignores]
-"tests/**" = ["mutable-type", "loose-typing"]
+# Test infrastructure
+"tests/**" = ["mutable-type", "loose-typing", "missing-all", "class-ordering"]
+"tests/hooks/test_approve_compound_bash.py" = ["ordering"]
+"tests/cc_lib/fake_lib.py" = ["ordering"]
+"tests/linters/test_suppression_rationale_linter.py" = ["ordering"]
 "tests/linters/edge_cases/**" = ["skip-file"]
-"mcp/claude-session/**" = ["mutable-type", "loose-typing"]  # TODO: tighten after migration
-# Linter crashes on complex annotations in these files (AST parsing bug)
+
+# Standalone scripts (no __all__, main() before classes, private helpers interleave)
+# Note: 'ordering' is a superset of class-ordering/missing-all/trailing-comma.
+# Listed explicitly for readability.
+"linters/**" = ["missing-all", "class-ordering", "ordering"]
+"hooks/**" = ["missing-all"]
+"scripts/**" = ["missing-all", "class-ordering", "ordering"]
+"plugins/**" = ["missing-all", "class-ordering"]
+
+# Standalone root scripts
+"uv-wrapper.py" = ["missing-all"]
+
+# MCP servers
+"mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
+
+# claude-session (aspirational — suppress all ordering for now)
+"mcp/claude-session/**" = ["mutable-type", "loose-typing", "ordering", "missing-all", "trailing-comma"]
 "mcp/claude-session/claude_session/schemas/cc_internal_api/feature_flags.py" = ["skip-file"]
 "mcp/claude-session/claude_session/schemas/cc_internal_api/statsig.py" = ["skip-file"]
 "mcp/claude-session/claude_session/schemas/session/models.py" = ["skip-file"]

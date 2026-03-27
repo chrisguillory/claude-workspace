@@ -97,9 +97,7 @@ def discover_run_configs(
     return configs
 
 
-# ---------------------------------------------------------------------------
-# SDK table parsing
-# ---------------------------------------------------------------------------
+# -- SDK table parsing ---------------------------------------------------------
 
 
 def _find_jetbrains_config_dirs() -> Sequence[pathlib.Path]:
@@ -164,9 +162,7 @@ def _parse_jdk_table(jdk_table_path: pathlib.Path) -> Sequence[JetBrainsSDKEntry
     return entries
 
 
-# ---------------------------------------------------------------------------
-# Run configuration parsing
-# ---------------------------------------------------------------------------
+# -- Run configuration parsing -------------------------------------------------
 
 
 _SKIP_DIRS = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', 'dist', 'build', '.tox', '.mypy_cache'}
@@ -256,9 +252,7 @@ def _parse_run_xml(
     )
 
 
-# ---------------------------------------------------------------------------
-# SDK resolution helpers
-# ---------------------------------------------------------------------------
+# -- SDK resolution helpers ----------------------------------------------------
 
 
 def _resolve_sdk_via_misc_xml(
@@ -309,9 +303,7 @@ def _find_idea_dir(starting_from: pathlib.Path) -> pathlib.Path | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# XML utility helpers
-# ---------------------------------------------------------------------------
+# -- XML utility helpers -------------------------------------------------------
 
 
 def _get_option(element: ET.Element, name: str) -> str | None:

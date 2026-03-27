@@ -27,9 +27,7 @@ import pydantic
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
-# ==============================================================================
-# Network address types
-# ==============================================================================
+# -- Network address types -----------------------------------------------------
 
 
 def _coerce_to_tuple(v: Any) -> Any:
@@ -48,9 +46,7 @@ IPv6Address = Annotated[tuple[str, int, int, int], pydantic.BeforeValidator(_coe
 # Network address can be either IPv4 or IPv6
 NetworkAddress = IPv4Address | IPv6Address
 
-# ==============================================================================
-# Connection metadata from mitmproxy
-# ==============================================================================
+# -- Connection metadata from mitmproxy ----------------------------------------
 
 
 class ClientConnectionTiming(StrictModel):
@@ -93,9 +89,7 @@ class ServerConnection(StrictModel):
     timing: ServerConnectionTiming
 
 
-# ==============================================================================
-# LEVEL 1: Decomposed base classes for requests vs responses
-# ==============================================================================
+# -- LEVEL 1: Decomposed base classes for requests vs responses ----------------
 
 
 class RequestCapture(StrictModel):
@@ -188,9 +182,7 @@ class ResponseCapture(StrictModel):
     session_id: str | None = pydantic.Field(description='Claude Code session ID')
 
 
-# ==============================================================================
-# LEVEL 2: Service-specific base classes
-# ==============================================================================
+# -- LEVEL 2: Service-specific base classes ------------------------------------
 
 
 class AnthropicRequestCapture(RequestCapture):

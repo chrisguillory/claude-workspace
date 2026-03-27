@@ -13,9 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-# ==============================================================================
-# Migration Registry
-# ==============================================================================
+# -- Migration Registry --------------------------------------------------------
 
 # Migrations are functions that transform record data from one version to another
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
@@ -48,9 +46,7 @@ def register_migration(from_version: str, to_version: str) -> Callable[[Migratio
     return decorator
 
 
-# ==============================================================================
-# Version Detection
-# ==============================================================================
+# -- Version Detection ---------------------------------------------------------
 
 
 def detect_record_version(record_data: dict[str, Any]) -> str | None:
@@ -110,9 +106,7 @@ def needs_migration(record_data: dict[str, Any], target_version: str) -> bool:
     return (current_version, target_version) in MIGRATIONS
 
 
-# ==============================================================================
-# Migration Application
-# ==============================================================================
+# -- Migration Application -----------------------------------------------------
 
 
 def apply_migration(record_data: dict[str, Any], from_version: str, to_version: str) -> dict[str, Any]:
@@ -173,9 +167,7 @@ def auto_migrate(record_data: dict[str, Any], target_version: str) -> dict[str, 
     return apply_migration(record_data, current_version, target_version)
 
 
-# ==============================================================================
-# Batch Migration
-# ==============================================================================
+# -- Batch Migration -----------------------------------------------------------
 
 
 def migrate_session_file(input_path: Path, output_path: Path, target_version: str) -> dict[str, int]:
@@ -237,9 +229,7 @@ def migrate_session_file(input_path: Path, output_path: Path, target_version: st
     return stats
 
 
-# ==============================================================================
-# Example Migrations
-# ==============================================================================
+# -- Example Migrations --------------------------------------------------------
 
 # Example: When Claude Code 2.1 adds a new field
 # @register_migration('2.0.36', '2.1.0')

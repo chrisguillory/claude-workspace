@@ -8,6 +8,10 @@ PYTHONPATH is the standard mechanism for this.
 
 from __future__ import annotations
 
+__all__ = [
+    'pytest_configure',
+]
+
 import os
 from pathlib import Path
 
