@@ -52,59 +52,6 @@ server: mcp.server.fastmcp.FastMCP
 fastapi_app = fastapi.FastAPI(title='Python Interpreter HTTP Bridge')
 
 
-def _format_interpreter_summary(service: PythonInterpreterService, max_shown: int = 5) -> str:
-    """Format saved + discovered interpreter list for injection into tool descriptions."""
-    saved = service.state.interpreter_registry.list_saved()
-    running = service.state.interpreter_manager.get_interpreters()
-    running_names = {name for name, _, _, _ in running}
-
-    items: list[str] = []
-
-    # Saved interpreters
-    for name, config in saved.items():
-        state = 'running' if name in running_names else 'stopped'
-        desc = f' — {config.description}' if config.description else ''
-        items.append(f'{name} ({state}, saved{desc})')
-
-    # JetBrains SDK entries
-    items.extend(
-        f'{entry.name} (jetbrains-sdk)'
-        for entry in service.state.jetbrains_sdks
-        if entry.name not in running_names and entry.name not in saved
-    )
-
-    # JetBrains run configs
-    items.extend(
-        f'{rc.name} (jetbrains-run)'
-        for rc in service.state.jetbrains_runs
-        if rc.name not in running_names and rc.name not in saved
-    )
-
-    if not items:
-        return ''
-
-    shown = items[:max_shown]
-    summary = ', '.join(shown)
-    remaining = len(items) - max_shown
-    if remaining > 0:
-        summary += f' ... and {remaining} more'
-
-    return f'**Available interpreters:** {summary}'
-
-
-def _inject_interpreter_summary(base_docstring: str, summary: str) -> str:
-    """Inject interpreter summary into tool description before Args."""
-    if not summary:
-        return base_docstring
-
-    if 'Args:' in base_docstring:
-        args_pos = base_docstring.find('Args:')
-        before_args = base_docstring[:args_pos].rstrip()
-        after_args = base_docstring[args_pos:]
-        return f'{before_args}\n\n{summary}\n\n{after_args}'
-    return f'{base_docstring.rstrip()}\n\n{summary}'
-
-
 def register_tools(service: PythonInterpreterService) -> None:
     """Register service methods as MCP tools via closures."""
     # Build interpreter summary for docstring injection
@@ -344,6 +291,59 @@ def main() -> None:
     """Main entry point for the Python Interpreter MCP server."""
     print('Starting Python Interpreter MCP server', file=sys.stderr)
     server.run()
+
+
+def _format_interpreter_summary(service: PythonInterpreterService, max_shown: int = 5) -> str:
+    """Format saved + discovered interpreter list for injection into tool descriptions."""
+    saved = service.state.interpreter_registry.list_saved()
+    running = service.state.interpreter_manager.get_interpreters()
+    running_names = {name for name, _, _, _ in running}
+
+    items: list[str] = []
+
+    # Saved interpreters
+    for name, config in saved.items():
+        state = 'running' if name in running_names else 'stopped'
+        desc = f' — {config.description}' if config.description else ''
+        items.append(f'{name} ({state}, saved{desc})')
+
+    # JetBrains SDK entries
+    items.extend(
+        f'{entry.name} (jetbrains-sdk)'
+        for entry in service.state.jetbrains_sdks
+        if entry.name not in running_names and entry.name not in saved
+    )
+
+    # JetBrains run configs
+    items.extend(
+        f'{rc.name} (jetbrains-run)'
+        for rc in service.state.jetbrains_runs
+        if rc.name not in running_names and rc.name not in saved
+    )
+
+    if not items:
+        return ''
+
+    shown = items[:max_shown]
+    summary = ', '.join(shown)
+    remaining = len(items) - max_shown
+    if remaining > 0:
+        summary += f' ... and {remaining} more'
+
+    return f'**Available interpreters:** {summary}'
+
+
+def _inject_interpreter_summary(base_docstring: str, summary: str) -> str:
+    """Inject interpreter summary into tool description before Args."""
+    if not summary:
+        return base_docstring
+
+    if 'Args:' in base_docstring:
+        args_pos = base_docstring.find('Args:')
+        before_args = base_docstring[:args_pos].rstrip()
+        after_args = base_docstring[args_pos:]
+        return f'{before_args}\n\n{summary}\n\n{after_args}'
+    return f'{base_docstring.rstrip()}\n\n{summary}'
 
 
 if __name__ == '__main__':

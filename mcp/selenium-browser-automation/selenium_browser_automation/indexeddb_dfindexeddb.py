@@ -40,137 +40,6 @@ from dfindexeddb.indexeddb.chromium.record import (
 logger = logging.getLogger(__name__)
 
 
-def _extract_domain_from_origin(origin: str) -> str:
-    """Extract domain from IndexedDB origin format.
-
-    Chrome stores IndexedDB origins as directory names like:
-    - https_example.com_0
-    - http_localhost_3000_0
-
-    Args:
-        origin: Origin in Chrome's directory format
-
-    Returns:
-        Bare domain (e.g., "example.com", "localhost")
-    """
-    # Remove trailing _0, _1, etc. (partition key)
-    if '_' in origin:
-        parts = origin.rsplit('_', 1)
-        if parts[-1].isdigit():
-            origin = parts[0]
-
-    # Remove scheme prefix (https_, http_, chrome-extension_, etc.)
-    if '_' in origin:
-        origin = origin.split('_', 1)[1]
-
-    # Handle port (localhost_3000 -> localhost)
-    if '_' in origin:
-        parts = origin.rsplit('_', 1)
-        if parts[-1].isdigit():
-            origin = parts[0]
-
-    return origin
-
-
-def _domain_matches(host: str, pattern: str) -> bool:
-    """RFC 6265 domain matching - suffix match with dot boundary.
-
-    Args:
-        host: Domain to check (e.g., "www.example.com")
-        pattern: Pattern to match against (e.g., "example.com")
-
-    Returns:
-        True if host matches pattern per RFC 6265 rules
-    """
-    host = host.lower().strip('.')
-    pattern = pattern.lower().strip('.')
-
-    # Remove port from pattern if present
-    if ':' in pattern:
-        pattern = pattern.split(':')[0]
-
-    # Exact match
-    if host == pattern:
-        return True
-
-    # Suffix match with dot boundary
-    return host.endswith('.' + pattern)
-
-
-def _make_json_serializable(value: Any) -> Any:
-    """Convert a value to JSON-serializable form.
-
-    Handles special types from dfindexeddb that aren't directly serializable.
-    Uses the same __type marker format as indexeddb_restore.js expects.
-
-    Args:
-        value: Any value that might need conversion
-
-    Returns:
-        JSON-serializable version of the value
-    """
-    if value is None:
-        return None
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, bytes):
-        # Encode as ArrayBuffer format matching indexeddb_restore.js deserializeValue()
-        return {'__type': 'ArrayBuffer', '__value': list(value)}
-    if isinstance(value, (list, tuple)):
-        return [_make_json_serializable(v) for v in value]
-    if isinstance(value, dict):
-        return {str(k): _make_json_serializable(v) for k, v in value.items()}
-    # For other types, convert to string
-    return str(value)
-
-
-def _keypath_to_value(keypath: IDBKeyPath | None) -> str | Sequence[str] | None:
-    """Convert IDBKeyPath to JSON-serializable value.
-
-    Args:
-        keypath: IDBKeyPath object from dfindexeddb
-
-    Returns:
-        None for null keyPath, string for single path, list for array
-    """
-    if keypath is None:
-        return None
-    if keypath.value is None:
-        return None
-    return keypath.value
-
-
-def _origin_dir_to_url(origin_dir: str) -> str:
-    """Convert Chrome origin directory name to URL format.
-
-    Args:
-        origin_dir: Directory name like "https_example.com_0"
-
-    Returns:
-        URL like "https://example.com"
-    """
-    # Remove partition key suffix
-    if '_' in origin_dir:
-        parts = origin_dir.rsplit('_', 1)
-        if parts[-1].isdigit():
-            origin_dir = parts[0]
-
-    # Parse scheme and domain
-    if '_' in origin_dir:
-        scheme, rest = origin_dir.split('_', 1)
-        # Handle port if present (localhost_3000 -> localhost:3000)
-        if '_' in rest:
-            parts = rest.rsplit('_', 1)
-            if parts[-1].isdigit():
-                domain = parts[0]
-                port = parts[1]
-                return f'{scheme}://{domain}:{port}'
-        return f'{scheme}://{rest}'
-
-    # Fallback
-    return f'https://{origin_dir}'
-
-
 def export_indexeddb_with_schema(
     profile_path: Path,
     origins_filter: Sequence[str] | None = None,
@@ -402,3 +271,134 @@ def _parse_indexeddb_folder(db_dir: Path) -> Sequence[JsonObject]:
             result.append(db_export)
 
     return result
+
+
+def _extract_domain_from_origin(origin: str) -> str:
+    """Extract domain from IndexedDB origin format.
+
+    Chrome stores IndexedDB origins as directory names like:
+    - https_example.com_0
+    - http_localhost_3000_0
+
+    Args:
+        origin: Origin in Chrome's directory format
+
+    Returns:
+        Bare domain (e.g., "example.com", "localhost")
+    """
+    # Remove trailing _0, _1, etc. (partition key)
+    if '_' in origin:
+        parts = origin.rsplit('_', 1)
+        if parts[-1].isdigit():
+            origin = parts[0]
+
+    # Remove scheme prefix (https_, http_, chrome-extension_, etc.)
+    if '_' in origin:
+        origin = origin.split('_', 1)[1]
+
+    # Handle port (localhost_3000 -> localhost)
+    if '_' in origin:
+        parts = origin.rsplit('_', 1)
+        if parts[-1].isdigit():
+            origin = parts[0]
+
+    return origin
+
+
+def _domain_matches(host: str, pattern: str) -> bool:
+    """RFC 6265 domain matching - suffix match with dot boundary.
+
+    Args:
+        host: Domain to check (e.g., "www.example.com")
+        pattern: Pattern to match against (e.g., "example.com")
+
+    Returns:
+        True if host matches pattern per RFC 6265 rules
+    """
+    host = host.lower().strip('.')
+    pattern = pattern.lower().strip('.')
+
+    # Remove port from pattern if present
+    if ':' in pattern:
+        pattern = pattern.split(':')[0]
+
+    # Exact match
+    if host == pattern:
+        return True
+
+    # Suffix match with dot boundary
+    return host.endswith('.' + pattern)
+
+
+def _make_json_serializable(value: Any) -> Any:
+    """Convert a value to JSON-serializable form.
+
+    Handles special types from dfindexeddb that aren't directly serializable.
+    Uses the same __type marker format as indexeddb_restore.js expects.
+
+    Args:
+        value: Any value that might need conversion
+
+    Returns:
+        JSON-serializable version of the value
+    """
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        # Encode as ArrayBuffer format matching indexeddb_restore.js deserializeValue()
+        return {'__type': 'ArrayBuffer', '__value': list(value)}
+    if isinstance(value, (list, tuple)):
+        return [_make_json_serializable(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _make_json_serializable(v) for k, v in value.items()}
+    # For other types, convert to string
+    return str(value)
+
+
+def _keypath_to_value(keypath: IDBKeyPath | None) -> str | Sequence[str] | None:
+    """Convert IDBKeyPath to JSON-serializable value.
+
+    Args:
+        keypath: IDBKeyPath object from dfindexeddb
+
+    Returns:
+        None for null keyPath, string for single path, list for array
+    """
+    if keypath is None:
+        return None
+    if keypath.value is None:
+        return None
+    return keypath.value
+
+
+def _origin_dir_to_url(origin_dir: str) -> str:
+    """Convert Chrome origin directory name to URL format.
+
+    Args:
+        origin_dir: Directory name like "https_example.com_0"
+
+    Returns:
+        URL like "https://example.com"
+    """
+    # Remove partition key suffix
+    if '_' in origin_dir:
+        parts = origin_dir.rsplit('_', 1)
+        if parts[-1].isdigit():
+            origin_dir = parts[0]
+
+    # Parse scheme and domain
+    if '_' in origin_dir:
+        scheme, rest = origin_dir.split('_', 1)
+        # Handle port if present (localhost_3000 -> localhost:3000)
+        if '_' in rest:
+            parts = rest.rsplit('_', 1)
+            if parts[-1].isdigit():
+                domain = parts[0]
+                port = parts[1]
+                return f'{scheme}://{domain}:{port}'
+        return f'{scheme}://{rest}'
+
+    # Fallback
+    return f'https://{origin_dir}'

@@ -141,13 +141,7 @@ filterwarnings = [
 "uv-wrapper.py" = ["missing-all"]
 
 # MCP servers
-"mcp/browser-automation/browser_automation/server.py" = ["class-ordering"]
 "mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
-"mcp/python-interpreter/python_interpreter/driver.py" = ["ordering"]
-"mcp/python-interpreter/python_interpreter/server.py" = ["ordering"]
-"mcp/selenium-browser-automation/selenium_browser_automation/chrome_profile_state_export.py" = ["class-ordering"]
-"mcp/selenium-browser-automation/selenium_browser_automation/indexeddb_dfindexeddb.py" = ["ordering"]
-"mcp/selenium-browser-automation/selenium_browser_automation/server.py" = ["ordering"]
 
 # claude-session (aspirational — suppress all ordering for now)
 "mcp/claude-session/**" = ["mutable-type", "loose-typing", "ordering", "missing-all", "trailing-comma"]
