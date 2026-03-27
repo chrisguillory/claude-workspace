@@ -13,6 +13,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import hashlib
 import logging
@@ -179,6 +180,17 @@ class IndexingService:
             )
             by_file_type[ft] = stats.to_summary()
 
+        # Estimate total chunks from bytes-based ratio.
+        # chunks_ingested + chunks_skipped = all chunks produced by chunk stage so far.
+        # bytes_chunked = bytes of files that completed chunking.
+        # Extrapolate: (total_chunks_so_far / bytes_chunked) * bytes_to_process
+        bytes_chunked = op.counters.bytes_chunked
+        total_chunks_so_far = op.counters.chunks_ingested + op.counters.chunks_skipped
+        estimated_total_chunks: int | None = None
+        if bytes_chunked > 0 and op.bytes_to_process > 0:
+            chunks_per_byte = total_chunks_so_far / bytes_chunked
+            estimated_total_chunks = round(chunks_per_byte * op.bytes_to_process)
+
         return PipelineSnapshot(
             scan_complete=op.scan_complete,
             files_found=op.files_found,
@@ -192,6 +204,9 @@ class IndexingService:
             embed_cache_misses=self._embedding.cache_misses,
             chunks_stored=op.counters.chunks_stored,
             chunks_skipped=op.counters.chunks_skipped,
+            bytes_to_process=op.bytes_to_process,
+            bytes_chunked=bytes_chunked,
+            estimated_total_chunks=estimated_total_chunks,
             files_chunked=op.counters.files_chunked,
             files_embedded=op.counters.files_embedded,
             files_stored=op.counters.files_stored,
@@ -422,6 +437,7 @@ class IndexingService:
             files_found=0,
             files_cached=0,
             files_ignored=0,
+            bytes_to_process=0,
             start_time=time.monotonic(),
             scanned_by_type={},
             cached_by_type={},
@@ -480,6 +496,14 @@ class IndexingService:
             # Yield to event loop every 100 files for monitoring visibility
             if i % 100 == 99:
                 await asyncio.sleep(0)
+
+        # Compute total bytes of files needing indexing for ETA estimation.
+        # File sizes are already stat'd during _needs_indexing; re-stat is cheap.
+        bytes_to_process = 0
+        for fp in files_to_index:
+            with contextlib.suppress(OSError):  # File may vanish between scan and here
+                bytes_to_process += fp.stat().st_size
+        self._operation.bytes_to_process = bytes_to_process
 
         self._operation.scan_complete = True
         files_cached_count = sum(cached_by_type.values())
@@ -934,6 +958,7 @@ class IndexingService:
                         )
                         async with results_lock:
                             results[file_key] = 0
+                    counters.bytes_chunked += file_size
                     logger.debug(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
 
                 elif not deleted_ids and chunks_skipped == len(all_chunk_ids):
@@ -954,6 +979,7 @@ class IndexingService:
                     )
                     counters.files_chunk_cached += 1
                     counters.chunks_skipped += chunks_skipped
+                    counters.bytes_chunked += file_size
                     # Refresh reverse index TTL so it doesn't expire before cache entries
                     await self._embedding.refresh_file_cache_index_ttl(file_key)
                     async with results_lock:
@@ -986,6 +1012,7 @@ class IndexingService:
                     )
                     counters.chunks_ingested += len(changed_chunks)
                     counters.chunks_skipped += chunks_skipped
+                    counters.bytes_chunked += file_size
                     counters.files_chunked += 1
                     logger.debug(
                         f'[CHUNK] {file_path.name}: {len(changed_chunks)} changed, '
@@ -993,7 +1020,12 @@ class IndexingService:
                     )
 
             except (TimeoutError, OSError, UnicodeDecodeError) as e:
-                # Known file-level errors: record and continue
+                # Known file-level errors: record and continue.
+                # Include errored file bytes so ETA estimate converges correctly.
+                try:
+                    counters.bytes_chunked += file_path.stat().st_size
+                except OSError:
+                    pass  # File gone — bytes_to_process already counted it, ETA slightly overestimates
                 tracer.record(file_key, 'chunk', 'errored')
                 async with results_lock:
                     results[file_key] = FileProcessingError(
@@ -1231,6 +1263,11 @@ class PipelineSnapshot:
     chunks_stored: int
     chunks_skipped: int
 
+    # Byte-level progress for ETA estimation
+    bytes_to_process: int  # Total bytes of files needing indexing (stable after scan)
+    bytes_chunked: int  # Bytes of files that completed chunking so far
+    estimated_total_chunks: int | None  # Extrapolated from chunks_per_byte ratio
+
     # Per-stage file completion (files that finished each stage)
     files_chunked: int
     files_embedded: int
@@ -1332,6 +1369,7 @@ class PipelineCounters:
     chunks_embedded: int = 0  # Embed worker → upsert queue
     chunks_stored: int = 0  # Upsert worker → complete
     chunks_skipped: int = 0  # Unchanged chunks (matched old IDs)
+    bytes_chunked: int = 0  # Total bytes of files that completed chunking
 
     # File-level completion tracking (one file → many chunks)
     files_chunked: int = 0  # Files that completed chunk stage
@@ -1365,6 +1403,7 @@ class _OperationState:
     files_found: int
     files_cached: int
     files_ignored: int
+    bytes_to_process: int  # Total bytes of files needing indexing (known after scan)
     start_time: float  # From time.monotonic()
 
     # File type breakdown (populated during scan, exposed via snapshot)

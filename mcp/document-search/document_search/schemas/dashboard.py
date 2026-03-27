@@ -115,6 +115,9 @@ class OperationProgress(StrictModel):
     timing_stats: Sequence[StageTimingReport] = ()
     scan_seconds: float | None = None
 
+    # ETA estimation (byte-based chunk extrapolation)
+    estimated_total_chunks: int | None = None
+
     # Redis connection diagnostics (high-water marks per operation)
     redis_hwm_single: int = 0
     redis_hwm_pipeline: int = 0
@@ -188,6 +191,7 @@ class OperationProgress(StrictModel):
             file_errors=snapshot.file_errors,
             timing_stats=snapshot.timing_stats,
             scan_seconds=snapshot.scan_seconds,
+            estimated_total_chunks=snapshot.estimated_total_chunks,
             redis_hwm_single=redis_conn_stats.hwm_single if redis_conn_stats else 0,
             redis_hwm_pipeline=redis_conn_stats.hwm_pipeline if redis_conn_stats else 0,
             redis_hwm_total=redis_conn_stats.hwm_total if redis_conn_stats else 0,
