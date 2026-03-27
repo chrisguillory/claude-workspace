@@ -42,7 +42,6 @@ from cc_lib.utils import encode_project_path
 
 from claude_session.config.base import DATA_DIR
 from claude_session.exceptions import NativeSessionDeletionError
-from claude_session.protocols import LoggerProtocol
 from claude_session.schemas.operations.archive import (
     SessionArchiveV1,
     SessionArchiveV2,
@@ -176,12 +175,12 @@ class SessionDeleteService:
         except asyncio.CancelledError:
             # Task cancellation - still perform cleanup, then propagate
             # Separate handling for clarity and potential future customization
-            logger.warning('Deletion cancelled, performing rollback...')
+            logger.warning('Deletion cancelled, performing rollback...', exc_info=True)
             try:
                 await self._rollback_from_backup(backup_path)
                 logger.info('Rollback completed after cancellation')
             except Exception as rollback_error:
-                logger.error(f'Rollback failed during cancellation: {rollback_error}')
+                logger.error(f'Rollback failed during cancellation: {rollback_error}', exc_info=True)
                 # Keep backup for manual recovery
             else:
                 # Rollback succeeded - remove backup
@@ -191,12 +190,12 @@ class SessionDeleteService:
 
         except BaseException as original_exc:
             # All other exceptions (including KeyboardInterrupt, SystemExit)
-            logger.error(f'Deletion failed: {original_exc}, performing rollback...')
+            logger.error(f'Deletion failed: {original_exc}, performing rollback...', exc_info=True)
             try:
                 await self._rollback_from_backup(backup_path)
                 logger.info('Rollback completed successfully')
             except Exception as rollback_error:
-                logger.error(f'Rollback failed: {rollback_error}')
+                logger.error(f'Rollback failed: {rollback_error}', exc_info=True)
                 # Keep backup for manual recovery
                 original_exc.add_note(f'Rollback failed: {rollback_error}')
                 original_exc.add_note(f'Backup preserved at: {backup_path}')
@@ -210,7 +209,6 @@ class SessionDeleteService:
     async def discover_artifacts(
         self,
         session_id: str,
-        logger: LoggerProtocol | None = None,
     ) -> DeleteManifest:
         """
         Find all artifacts for a session with explicit file enumeration.
@@ -227,7 +225,6 @@ class SessionDeleteService:
 
         Args:
             session_id: Session ID to discover artifacts for
-            logger: Optional logger
 
         Returns:
             DeleteManifest with all discovered artifacts and validation info
@@ -235,8 +232,7 @@ class SessionDeleteService:
         Raises:
             FileNotFoundError: If main session file not found
         """
-        if logger:
-            await logger.info(f'Discovering artifacts for session: {session_id}')
+        logger.info('Discovering artifacts for session: %s', session_id)
 
         # Get session directory
         session_dir = self._get_session_dir()
@@ -314,7 +310,7 @@ class SessionDeleteService:
 
         # 3. Extract slugs from session records to find plan files
         session_files = [main_file] + [Path(p) for p in agent_file_paths]
-        files_data = await self.parser_service.load_session_files(session_files, logger)
+        files_data = await self.parser_service.load_session_files(session_files)
         slugs = extract_slugs_from_records(files_data)
 
         plans_dir = Path.home() / '.claude' / 'plans'
@@ -331,8 +327,7 @@ class SessionDeleteService:
                 )
                 plan_file_paths.append(str(plan_path))
 
-        if logger:
-            await logger.info(f'Found {len(slugs)} slugs, {len(plan_file_paths)} plan files')
+        logger.info('Found %d slugs, %d plan files', len(slugs), len(plan_file_paths))
 
         # 4. Tool results - unified discovery with extension validation
         tool_results_dir = get_tool_results_dir(session_dir, session_id)
@@ -365,8 +360,8 @@ class SessionDeleteService:
         if tool_results_parent.exists():
             directories_to_cleanup.append(str(tool_results_parent))
 
-        if logger and tool_result_paths:
-            await logger.info(f'Found {len(tool_result_paths)} tool result files')
+        if tool_result_paths:
+            logger.info('Found %d tool result files', len(tool_result_paths))
 
         # 5. Todo files
         if TODOS_DIR.exists():
@@ -381,8 +376,8 @@ class SessionDeleteService:
                 )
                 todo_file_paths.append(str(path))
 
-        if logger and todo_file_paths:
-            await logger.info(f'Found {len(todo_file_paths)} todo files')
+        if todo_file_paths:
+            logger.info('Found %d todo files', len(todo_file_paths))
 
         # 6. Task files (CLAUDE_CODE_ENABLE_TASKS mode)
         task_contents = classify_task_directory(session_id)
@@ -417,8 +412,8 @@ class SessionDeleteService:
             tasks_session_dir = TASKS_DIR / session_id
             directories_to_cleanup.append(str(tasks_session_dir))
 
-        if logger and task_file_paths:
-            await logger.info(f'Found {len(task_file_paths)} task files and metadata')
+        if task_file_paths:
+            logger.info('Found %d task files and metadata', len(task_file_paths))
 
         # 7. Session-env - expected to be empty, any file is unexpected
         session_env_dir = SESSION_ENV_DIR / session_id
@@ -443,12 +438,11 @@ class SessionDeleteService:
         native = is_native_session(session_id)
         created_at = None if native else get_restoration_timestamp(session_id)
 
-        if logger:
-            await logger.info(f'Session type: {"native (UUIDv4)" if native else "cloned/restored (UUIDv7)"}')
-            await logger.info(f'Total artifacts: {len(artifacts)} files, {len(directories_to_cleanup)} directories')
-            await logger.info(f'Total size: {total_size:,} bytes')
-            if unexpected_files:
-                await logger.warning(f'Found {len(unexpected_files)} unexpected files')
+        logger.info('Session type: %s', 'native (UUIDv4)' if native else 'cloned/restored (UUIDv7)')
+        logger.info('Total artifacts: %d files, %d directories', len(artifacts), len(directories_to_cleanup))
+        logger.info('Total size: %s bytes', f'{total_size:,}')
+        if unexpected_files:
+            logger.warning('Found %d unexpected files', len(unexpected_files))
 
         return DeleteManifest(
             session_id=session_id,
@@ -472,7 +466,6 @@ class SessionDeleteService:
         force: bool = False,
         no_backup: bool = False,
         dry_run: bool = False,
-        logger: LoggerProtocol | None = None,
         terminate_pid_before_delete: int | None = None,
     ) -> DeleteResult:
         """
@@ -499,7 +492,7 @@ class SessionDeleteService:
         start_time = datetime.now(UTC)
 
         # Discover all artifacts
-        manifest = await self.discover_artifacts(session_id, logger)
+        manifest = await self.discover_artifacts(session_id)
 
         # Validation: check for unexpected files (fail fast)
         if manifest.unexpected_files:
@@ -509,8 +502,7 @@ class SessionDeleteService:
                 + '\n'.join(error_lines)
                 + '\n\nClaude Code may have changed. Update discovery logic to handle these files.'
             )
-            if logger:
-                await logger.error(error_msg)
+            logger.error(error_msg)
 
             return DeleteResult(
                 session_id=session_id,
@@ -537,13 +529,13 @@ class SessionDeleteService:
 
         # Dry run - return what would be deleted
         if dry_run:
-            if logger:
-                await logger.info('Dry run - no files will be deleted')
-                await logger.info(
-                    f'Would delete {len(manifest.files)} files, '
-                    f'{len(manifest.directories_to_cleanup)} directories '
-                    f'({manifest.total_size_bytes:,} bytes)'
-                )
+            logger.info('Dry run - no files will be deleted')
+            logger.info(
+                'Would delete %d files, %d directories (%s bytes)',
+                len(manifest.files),
+                len(manifest.directories_to_cleanup),
+                f'{manifest.total_size_bytes:,}',
+            )
 
             # Compute artifact counts for dry run
             counts = self._compute_artifact_counts(manifest)
@@ -568,14 +560,12 @@ class SessionDeleteService:
             )
 
         # Always create backup for atomic rollback capability
-        if logger:
-            await logger.info('Creating backup for atomic rollback...')
+        logger.info('Creating backup for atomic rollback...')
 
         try:
-            backup_path = Path(await self._create_backup(session_id, logger))
-            if logger:
-                await logger.info(f'Backup created: {backup_path}')
-        except Exception as e:
+            backup_path = Path(await self._create_backup(session_id))
+            logger.info('Backup created: %s', backup_path)
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception — returns failure result to caller
             return DeleteResult(
                 session_id=session_id,
                 was_dry_run=False,
@@ -599,8 +589,7 @@ class SessionDeleteService:
         # This happens AFTER backup (rollback safety) but BEFORE deletion (no interference)
         # Uses SIGKILL because SIGTERM allows graceful shutdown which writes to session file
         if terminate_pid_before_delete is not None:
-            if logger:
-                await logger.info(f'Terminating process {terminate_pid_before_delete} (SIGKILL) before deletion')
+            logger.info('Terminating process %d (SIGKILL) before deletion', terminate_pid_before_delete)
             os.kill(terminate_pid_before_delete, signal.SIGKILL)
             time.sleep(0.2)  # Brief pause to ensure process termination
 
@@ -616,8 +605,7 @@ class SessionDeleteService:
                     path.unlink()
                     deleted_files.append(artifact.path)
                     size_freed += artifact.size_bytes
-                    if logger:
-                        await logger.info(f'Deleted: {artifact.path}')
+                    logger.info('Deleted: %s', artifact.path)
 
                 # Delete all directories (sorted deepest-first)
                 directories_removed: list[str] = []
@@ -627,13 +615,11 @@ class SessionDeleteService:
                     if path.exists():
                         path.rmdir()  # Fails if not empty - intentional!
                         directories_removed.append(dir_path)
-                        if logger:
-                            await logger.info(f'Removed directory: {dir_path}')
+                        logger.info('Removed directory: %s', dir_path)
 
         except self.EXPECTED_DELETION_ERRORS as e:
             # Expected filesystem error - rollback already happened
-            if logger:
-                await logger.error(f'Deletion failed (rolled back): {e}')
+            logger.error('Deletion failed (rolled back): %s', e, exc_info=True)
 
             return DeleteResult(
                 session_id=session_id,
@@ -662,18 +648,19 @@ class SessionDeleteService:
         if no_backup:
             # User doesn't want undo capability - remove backup
             backup_path.unlink(missing_ok=True)
-            if logger:
-                await logger.info('Backup removed (--no-backup specified)')
+            logger.info('Backup removed (--no-backup specified)')
         else:
             # Keep backup for potential undo
             final_backup_path = str(backup_path)
 
         end_time = datetime.now(UTC)
 
-        if logger:
-            await logger.info(
-                f'Deleted {len(deleted_files)} files, {len(directories_removed)} directories ({size_freed:,} bytes)'
-            )
+        logger.info(
+            'Deleted %d files, %d directories (%s bytes)',
+            len(deleted_files),
+            len(directories_removed),
+            f'{size_freed:,}',
+        )
 
         # Compute per-artifact-type counts
         counts = self._compute_artifact_counts(manifest)
@@ -700,7 +687,6 @@ class SessionDeleteService:
     async def _create_backup(
         self,
         session_id: str,
-        logger: LoggerProtocol | None,
     ) -> str:
         """
         Create a backup archive for rollback capability.
@@ -727,7 +713,6 @@ class SessionDeleteService:
             storage=storage,
             output_path=str(backup_path),
             format_param='json',
-            logger=logger,
         )
 
         return metadata.file_path

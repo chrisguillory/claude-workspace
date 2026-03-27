@@ -218,7 +218,9 @@ def analyze_session(file_path: Path) -> AnalysisResult:
     try:
         with open(file_path) as f:
             raw_lines = f.readlines()
-    except Exception as e:
+    except (
+        Exception
+    ) as e:  # exception_safety_linter.py: swallowed-exception — returns error result to caller for aggregation
         return AnalysisResult(file_path=file_path, status='error', error_message=str(e))
 
     if not raw_lines:

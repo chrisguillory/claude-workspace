@@ -372,7 +372,8 @@ class LineageService:
                 line_end = mm.find(b'\n', pos)
                 if line_end == -1:
                     line_end = len(mm)
-                return json.loads(mm[line_start:line_end]).get('customTitle')  # type: ignore[no-any-return]
+                result: str | None = json.loads(mm[line_start:line_end]).get('customTitle')
+                return result
         except (OSError, json.JSONDecodeError, ValueError):
             return None
 

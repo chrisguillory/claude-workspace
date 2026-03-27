@@ -43,7 +43,7 @@ import webbrowser
 from collections.abc import Sequence
 from html import escape as html_escape
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pydantic
 
@@ -569,27 +569,40 @@ def render_record(record: dict[str, Any], counter: list[int]) -> list[str]:
     return []
 
 
+# -- SSE HTTP Server -----------------------------------------------------------
+
+
+class SSEHTTPServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer with typed SSE state attributes."""
+
+    sse_clients: list[queue.Queue[tuple[str, str]]]
+    sse_lock: threading.Lock
+    refresh_flag: threading.Event
+    jsonl_path: Path
+    msg_counter: list[int]
+
+
 # -- SSE Broadcasting ----------------------------------------------------------
 
 
-def broadcast_sse(server: http.server.HTTPServer, html: str, event_id: str = '') -> None:
+def broadcast_sse(server: SSEHTTPServer, html: str, event_id: str = '') -> None:
     """Push an HTML fragment to all connected SSE clients."""
     encoded = json.dumps(html)
-    with server.sse_lock:  # type: ignore[attr-defined]
-        dead: list[queue.Queue] = []  # type: ignore[type-arg]
-        for q in server.sse_clients:  # type: ignore[attr-defined]
+    with server.sse_lock:
+        dead: list[queue.Queue[tuple[str, str]]] = []
+        for q in server.sse_clients:
             try:
                 q.put_nowait((encoded, event_id))
             except queue.Full:
                 dead.append(q)
         for q in dead:
-            server.sse_clients.remove(q)  # type: ignore[attr-defined]
+            server.sse_clients.remove(q)
 
 
-def broadcast_event(server: http.server.HTTPServer, event: str, data: str = '') -> None:
+def broadcast_event(server: SSEHTTPServer, event: str, data: str = '') -> None:
     """Push a named SSE event to all connected clients."""
-    with server.sse_lock:  # type: ignore[attr-defined]
-        for q in server.sse_clients:  # type: ignore[attr-defined]
+    with server.sse_lock:
+        for q in server.sse_clients:
             with contextlib.suppress(queue.Full):
                 q.put_nowait(('__event__', f'event: {event}\ndata: {data}\n\n'))
 
@@ -600,7 +613,7 @@ def broadcast_event(server: http.server.HTTPServer, event: str, data: str = '') 
 class _WatchHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP handler with SSE endpoint for live session tailing."""
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 — stdlib override uses 'format' parameter name
         pass
 
     def finish(self) -> None:
@@ -617,6 +630,8 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def _handle_sse(self) -> None:
+        server = cast(SSEHTTPServer, self.server)
+
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
@@ -635,8 +650,8 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
             self._replay_from_offset(last_id)
 
         client_queue: queue.Queue[tuple[str, str]] = queue.Queue(maxsize=1000)
-        with self.server.sse_lock:  # type: ignore[attr-defined]
-            self.server.sse_clients.append(client_queue)  # type: ignore[attr-defined]
+        with server.sse_lock:
+            server.sse_clients.append(client_queue)
 
         try:
             while True:
@@ -659,18 +674,20 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
-            with self.server.sse_lock:  # type: ignore[attr-defined]
-                if client_queue in self.server.sse_clients:  # type: ignore[attr-defined]
-                    self.server.sse_clients.remove(client_queue)  # type: ignore[attr-defined]
+            with server.sse_lock:
+                if client_queue in server.sse_clients:
+                    server.sse_clients.remove(client_queue)
 
     def _replay_from_offset(self, last_id: str) -> None:
         """Replay records from a byte offset (Last-Event-ID reconnect)."""
+        server = cast(SSEHTTPServer, self.server)
+
         try:
             offset = int(last_id)
         except (ValueError, TypeError):
             return
 
-        jsonl_path = self.server.jsonl_path  # type: ignore[attr-defined]
+        jsonl_path = server.jsonl_path
         try:
             size = jsonl_path.stat().st_size
         except FileNotFoundError:
@@ -686,7 +703,7 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
         if not raw:
             return
 
-        counter = self.server.msg_counter  # type: ignore[attr-defined]
+        counter = server.msg_counter
         lines = raw.split(b'\n')
         current_offset = offset
         for line_bytes in lines:
@@ -707,7 +724,7 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.flush()
 
     def _handle_refresh(self) -> None:
-        self.server.refresh_flag.set()  # type: ignore[attr-defined]
+        cast(SSEHTTPServer, self.server).refresh_flag.set()
         self.send_response(200)
         self.send_header('Content-Type', 'text/plain')
         self.end_headers()
@@ -719,20 +736,20 @@ def start_http_server(
     jsonl_path: Path,
     msg_counter: list[int],
     port: int = 0,
-) -> tuple[http.server.HTTPServer, int]:
+) -> tuple[SSEHTTPServer, int]:
     """Start threaded HTTP server with SSE support. Returns (server, port)."""
-    server = http.server.ThreadingHTTPServer(
+    server = SSEHTTPServer(
         ('127.0.0.1', port),
         lambda *args, **kwargs: _WatchHandler(*args, directory=str(directory), **kwargs),
     )
     server.daemon_threads = True
 
-    # Shared state on server object (avoids handler __init__ ordering issues)
-    server.sse_clients = []  # type: ignore[attr-defined]
-    server.sse_lock = threading.Lock()  # type: ignore[attr-defined]
-    server.refresh_flag = threading.Event()  # type: ignore[attr-defined]
-    server.jsonl_path = jsonl_path  # type: ignore[attr-defined]
-    server.msg_counter = msg_counter  # type: ignore[attr-defined]
+    # Shared state for SSE broadcasting between server and handlers
+    server.sse_clients = []
+    server.sse_lock = threading.Lock()
+    server.refresh_flag = threading.Event()
+    server.jsonl_path = jsonl_path
+    server.msg_counter = msg_counter
 
     actual_port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -970,8 +987,8 @@ def watch(
             break
 
         # Check for full refresh request
-        if server.refresh_flag.is_set():  # type: ignore[attr-defined]
-            server.refresh_flag.clear()  # type: ignore[attr-defined]
+        if server.refresh_flag.is_set():
+            server.refresh_flag.clear()
             ts = time.strftime('%H:%M:%S')
             print(f'{Colors.DIM}[{ts}]{Colors.RESET} Full refresh requested...', flush=True)
             elapsed = regenerate(jsonl_path, html_path)

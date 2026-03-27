@@ -7,11 +7,12 @@ Provides commands to archive and restore Claude Code sessions.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
-import traceback
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +24,6 @@ from cc_lib.cli import add_completion_command, create_app, run_app
 from cc_lib.session_tracker import load_sessions
 from cc_lib.utils import encode_project_path
 
-from claude_session.cli.logger import CLILogger
 from claude_session.exceptions import ClaudeSessionError
 from claude_session.launcher import launch_claude_with_session
 from claude_session.schemas.operations.lineage import LineageTree
@@ -41,8 +41,23 @@ from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
 
+logger = logging.getLogger(__name__)
+
 app = create_app(help='Archive and restore Claude Code sessions.')
 add_completion_command(app)
+
+
+@app.callback(invoke_without_command=True)
+def _configure_logging(
+    ctx: typer.Context,
+    verbose: bool = typer.Option(False, '--verbose', '-v', help='Show detailed progress'),
+) -> None:
+    """Configure logging and show help when no command given."""
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+
 
 # Type aliases and validators
 ArchiveFormat = Literal['json', 'zst']
@@ -169,7 +184,6 @@ def archive(
         'secret', '--gist-visibility', help='Gist visibility (public or secret)'
     ),
     gist_description: str = typer.Option('Claude Code Session Archive', '--gist-description', help='Gist description'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Archive a Claude Code session to local file or GitHub Gist.
 
@@ -196,9 +210,7 @@ def archive(
     if output is None:
         output = 'gist://'
 
-    asyncio.run(
-        _archive_async(resolved_session_id, output, format, gist_token, gist_visibility, gist_description, verbose)
-    )
+    asyncio.run(_archive_async(resolved_session_id, output, format, gist_token, gist_visibility, gist_description))
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -210,7 +222,6 @@ def restore(
     in_place: bool = typer.Option(False, '--in-place', help='Restore with original session ID (verbatim restore)'),
     launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after restore'),
     gist_token: str | None = typer.Option(None, '--gist-token', help='GitHub token for private gists'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Restore a Claude Code session from local file or GitHub Gist.
 
@@ -221,7 +232,7 @@ def restore(
 
         claude-session restore ARCHIVE --launch -- --chrome
     """
-    asyncio.run(_restore_async(archive, project, not no_translate, in_place, launch, gist_token, verbose, ctx.args))
+    asyncio.run(_restore_async(archive, project, not no_translate, in_place, launch, gist_token, ctx.args))
 
 
 async def _archive_async(
@@ -231,10 +242,8 @@ async def _archive_async(
     gist_token: str | None,
     gist_visibility: Literal['public', 'secret'],
     gist_description: str,
-    verbose: bool,
 ) -> None:
     """Async implementation of archive command."""
-    logger = CLILogger(verbose=verbose)
 
     try:
         # Find the session
@@ -246,7 +255,7 @@ async def _archive_async(
             typer.echo(f'Searched in: {discovery.claude_sessions_dir}', err=True)
             raise typer.Exit(1)
 
-        await logger.info(f'Found session in folder: {session_info.session_folder}')
+        logger.info('Found session in folder: %s', session_info.session_folder)
 
         # Parse output parameter - check if it's a Gist URL
         use_gist = output.startswith('gist://')
@@ -302,18 +311,18 @@ async def _archive_async(
                     description=gist_description,
                 )
                 output_path = None  # Don't pass to archive service
-                await logger.info(f'Creating Gist archive: {filename}')
+                logger.info('Creating Gist archive: %s', filename)
             else:
                 # Local filesystem
                 output_file = Path(output)
                 storage = LocalFileSystemStorage(output_file.parent.resolve())
                 output_path = str(output)
                 filename = output_file.name
-                await logger.info(f'Creating archive: {output}')
+                logger.info('Creating archive: %s', output)
 
             # Create archive
             metadata = await archive_service.create_archive(
-                storage=storage, output_path=output_path, format_param=format, logger=logger
+                storage=storage, output_path=output_path, format_param=format
             )
 
             # Print success
@@ -334,19 +343,15 @@ async def _archive_async(
                 typer.echo(f'  Size: {metadata.size_mb} MB')
                 typer.echo(f'  Records: {metadata.session_records:,} session, {metadata.agent_records:,} agent')
                 typer.echo(f'  Files: {metadata.file_count}')
-                if verbose:
-                    typer.echo('\n  File breakdown:')
-                    for file_meta in metadata.files:
-                        typer.echo(f'    - {file_meta.filename}: {file_meta.record_count} records')
+                for file_meta in metadata.files:
+                    logger.info('    - %s: %d records', file_meta.filename, file_meta.record_count)
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to create archive: {e}')
-        if verbose:
-            traceback.print_exc()
-        raise typer.Exit(1)
+        logger.error('Failed to create archive: %s', e, exc_info=True)
+        raise typer.Exit(1) from None
 
 
 async def _restore_async(
@@ -356,11 +361,9 @@ async def _restore_async(
     in_place: bool,
     launch: bool,
     gist_token: str | None,
-    verbose: bool,
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of restore command."""
-    logger = CLILogger(verbose=verbose)
 
     try:
         # Check if it's a Gist URL
@@ -374,7 +377,7 @@ async def _restore_async(
             # Get token (public gists don't need auth for reading, but use it if provided)
             token = _get_github_token_cli(gist_token) or ''
 
-            await logger.info(f'Downloading from Gist: {gist_id}')
+            logger.info('Downloading from Gist: %s', gist_id)
 
             # Create Gist storage
             storage = GistStorage(token=token, gist_id=gist_id)
@@ -411,7 +414,7 @@ async def _restore_async(
                     raise typer.Exit(1)
 
             # Download to temp file
-            await logger.info(f'Downloading {archive_file}...')
+            logger.info('Downloading %s...', archive_file)
             data = await storage.load(archive_file)
 
             # Use logical filename (without .b64) so restore service detects format correctly
@@ -420,7 +423,7 @@ async def _restore_async(
                 temp_file.write(data)
                 archive_path = Path(temp_file.name)
 
-            await logger.info(f'Downloaded {len(data):,} bytes')
+            logger.info('Downloaded %s bytes', f'{len(data):,}')
 
         else:
             # Local file
@@ -440,20 +443,19 @@ async def _restore_async(
         else:
             project_path = Path.cwd()
 
-        await logger.info(f'Restoring to project: {project_path}')
+        logger.info('Restoring to project: %s', project_path)
 
         # Initialize restore service
         restore_service = SessionRestoreService(project_path)
 
         # Restore the archive
-        await logger.info(f'Loading archive: {archive_path}')
+        logger.info('Loading archive: %s', archive_path)
         if in_place:
-            await logger.info('In-place mode: restoring with original session ID')
+            logger.info('In-place mode: restoring with original session ID')
         result = await restore_service.restore_archive(
             archive_path=str(archive_path),
             translate_paths=translate_paths,
             in_place=in_place,
-            logger=logger,
         )
 
         # Clean up temp file if we downloaded from Gist
@@ -491,11 +493,12 @@ async def _restore_async(
             typer.echo('To continue this session, run:')
             typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
 
+    except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
+        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to restore session: {e}')
-        if verbose:
-            traceback.print_exc()
-        raise typer.Exit(1)
+        logger.error('Failed to restore session: %s', e, exc_info=True)
+        raise typer.Exit(1) from None
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -507,7 +510,6 @@ def clone(
     project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
     no_translate: bool = typer.Option(False, '--no-translate', help="Don't translate file paths"),
     launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after clone'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Clone a session directly (no archive file needed).
 
@@ -529,7 +531,7 @@ def clone(
     if session_id is None:
         session_id = detected
 
-    asyncio.run(_clone_async(_resolve_session_id(session_id), project, not no_translate, launch, verbose, ctx.args))
+    asyncio.run(_clone_async(_resolve_session_id(session_id), project, not no_translate, launch, ctx.args))
 
 
 async def _clone_async(
@@ -537,11 +539,9 @@ async def _clone_async(
     project: Path | None,
     translate_paths: bool,
     launch: bool,
-    verbose: bool,
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of clone command."""
-    logger = CLILogger(verbose=verbose)
 
     try:
         # Determine project path
@@ -553,7 +553,7 @@ async def _clone_async(
         else:
             project_path = Path.cwd()
 
-        await logger.info(f'Cloning to project: {project_path}')
+        logger.info('Cloning to project: %s', project_path)
 
         # Initialize clone service
         clone_service = SessionCloneService(project_path)
@@ -562,7 +562,6 @@ async def _clone_async(
         result = await clone_service.clone(
             source_session_id=session_id,
             translate_paths=translate_paths,
-            logger=logger,
         )
 
         # Print success
@@ -595,12 +594,10 @@ async def _clone_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to clone session: {e}')
-        if verbose:
-            traceback.print_exc()
-        raise typer.Exit(1)
+        logger.error('Failed to clone session: %s', e, exc_info=True)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -615,7 +612,6 @@ def delete(
     no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
     dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be deleted'),
     project: Path | None = typer.Option(None, '--project', '-p', help='Project directory (default: current)'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Delete session artifacts with auto-backup.
 
@@ -629,7 +625,7 @@ def delete(
     A backup is saved to ~/.claude-workspace/claude-session/deleted/ for undo capability.
     Use 'restore --in-place' on the backup to undo.
     """
-    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project, verbose))
+    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project))
 
 
 async def _delete_async(
@@ -639,10 +635,8 @@ async def _delete_async(
     no_backup: bool,
     dry_run: bool,
     project: Path | None,
-    verbose: bool,
 ) -> None:
     """Async implementation of delete command."""
-    logger = CLILogger(verbose=verbose)
 
     try:
         # Resolve session ID prefix to full ID
@@ -673,7 +667,7 @@ async def _delete_async(
                 raise typer.Exit(1)
             else:
                 # Running with --terminate: will terminate
-                await logger.info(f'Session is running (PID {running_pid}), will terminate before deletion')
+                logger.info('Session is running (PID %s), will terminate before deletion', running_pid)
 
         # Initialize delete service
         # When --project is explicit, use it (user intent wins over discovery)
@@ -696,7 +690,6 @@ async def _delete_async(
             force=force,
             no_backup=no_backup,
             dry_run=dry_run,
-            logger=logger,
             terminate_pid_before_delete=terminate_pid,
         )
 
@@ -710,14 +703,10 @@ async def _delete_async(
             typer.echo(f'  Files: {result.files_deleted}')
             typer.echo(f'  Directories: {len(result.directories_removed)}')
             typer.echo(f'  Size: {result.size_freed_bytes:,} bytes')
-            if verbose:
-                typer.echo('\n  Files to delete:')
-                for path in result.deleted_files:
-                    typer.echo(f'    - {path}')
-                if result.directories_removed:
-                    typer.echo('\n  Directories to clean up:')
-                    for path in result.directories_removed:
-                        typer.echo(f'    - {path}')
+            for path in result.deleted_files:
+                logger.info('    - %s', path)
+            for path in result.directories_removed:
+                logger.info('    dir: %s', path)
         else:
             typer.secho('✓ Session deleted successfully!', fg=typer.colors.GREEN)
             typer.echo(f'  Session ID: {result.session_id}')
@@ -744,12 +733,10 @@ async def _delete_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to delete session: {e}')
-        if verbose:
-            traceback.print_exc()
-        raise typer.Exit(1)
+        logger.error('Failed to delete session: %s', e, exc_info=True)
+        raise typer.Exit(1) from None
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -766,7 +753,6 @@ def move(
     no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
     dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be moved'),
     launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code in target project after move'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Move a session from one project to another.
 
@@ -801,9 +787,7 @@ def move(
         session_id = detected
 
     asyncio.run(
-        _move_async(
-            _resolve_session_id(session_id), project, force, terminate, no_backup, dry_run, launch, verbose, ctx.args
-        )
+        _move_async(_resolve_session_id(session_id), project, force, terminate, no_backup, dry_run, launch, ctx.args)
     )
 
 
@@ -815,11 +799,9 @@ async def _move_async(
     no_backup: bool,
     dry_run: bool,
     launch: bool,
-    verbose: bool,
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of move command."""
-    logger = CLILogger(verbose=verbose)
 
     try:
         # Resolve session ID prefix to full ID
@@ -843,7 +825,7 @@ async def _move_async(
                 typer.echo('Use --terminate to kill the process before moving.', err=True)
                 raise typer.Exit(1)
             else:
-                await logger.info(f'Session is running (PID {running_pid}), will terminate before move')
+                logger.info('Session is running (PID %s), will terminate before move', running_pid)
 
         # Determine target project path
         if project:
@@ -865,7 +847,6 @@ async def _move_async(
             no_backup=no_backup,
             dry_run=dry_run,
             terminate_pid=terminate_pid,
-            log=logger,
         )
 
         if dry_run:
@@ -906,12 +887,10 @@ async def _move_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to move session: {e}')
-        if verbose:
-            traceback.print_exc()
-        raise typer.Exit(1)
+        logger.error('Failed to move session: %s', e, exc_info=True)
+        raise typer.Exit(1) from None
 
 
 def _render_lineage_tree(tree: LineageTree) -> None:
@@ -1009,7 +988,7 @@ def lineage(
 
     except ClaudeSessionError as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -1047,7 +1026,7 @@ async def _info_async(
         context = await info_service.get_info(session_id)
     except (ClaudeSessionError, FileNotFoundError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     if format == 'json':
         typer.echo(context.model_dump_json(indent=2))

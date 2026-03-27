@@ -63,11 +63,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Migrated code — intentional patterns, tighten in follow-up
-"mcp/claude-session/**" = [
+"mcp/claude-session/scripts/intercept_traffic.py" = [
     "PLW0603",  # global statement — mitmproxy addon caching pattern
-    "RUF012",   # ClassVar — Pydantic model class attributes
-    "RUF022",   # __all__ sorting — intentionally grouped by category
+]
+"mcp/claude-session/claude_session/**/__init__.py" = [
+    "RUF022",  # __all__ sorting — intentionally grouped by category
 ]
 
 [tool.ruff.lint.isort]
@@ -154,14 +154,12 @@ filterwarnings = [
 
 [tool.exception-safety-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
-"mcp/claude-session/**" = ["swallowed-exception", "raise-without-from", "logger-no-exc-info"]  # TODO: tighten after migration
 
 [tool.reexport-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
 [tool.suppression-rationale-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
-"mcp/claude-session/**" = ["type-ignore-without-rationale", "noqa-without-rationale"]  # TODO: tighten after migration
 
 # -- Development Dependencies -------------------------------------------------
 

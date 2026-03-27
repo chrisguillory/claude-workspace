@@ -7,12 +7,14 @@ Framework-agnostic service for loading and validating Claude Code session files.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from claude_session.protocols import LoggerProtocol, NullLogger
 from claude_session.schemas.session import SessionRecord
 from claude_session.schemas.session.models import validate_session_record
+
+logger = logging.getLogger(__name__)
 
 # -- Session Parser Service ----------------------------------------------------
 
@@ -24,40 +26,33 @@ class SessionParserService:
     Pure domain logic - loads and validates JSONL files into typed SessionRecord objects.
     """
 
-    async def load_session_files(
-        self, session_files: Sequence[Path], logger: LoggerProtocol | None = None
-    ) -> dict[str, list[SessionRecord]]:
+    async def load_session_files(self, session_files: Sequence[Path]) -> dict[str, list[SessionRecord]]:
         """
         Load and parse session JSONL files.
 
         Args:
             session_files: Sequence of JSONL file paths
-            logger: Logger instance (optional, uses NullLogger if None)
-
         Returns:
             Dict mapping filename to list of validated records
         """
-        log = logger or NullLogger()
         files_data: dict[str, list[SessionRecord]] = {}
 
         for file_path in session_files:
-            await log.info(f'Loading {file_path.name}')
+            logger.info('Loading %s', file_path.name)
 
-            records = await self._parse_jsonl_file(file_path, log)
+            records = await self._parse_jsonl_file(file_path)
             files_data[file_path.name] = records
 
-            await log.info(f'Loaded {len(records)} records from {file_path.name}')
+            logger.info('Loaded %d records from %s', len(records), file_path.name)
 
         return files_data
 
-    async def _parse_jsonl_file(self, file_path: Path, logger: LoggerProtocol) -> list[SessionRecord]:
+    async def _parse_jsonl_file(self, file_path: Path) -> list[SessionRecord]:
         """
         Parse a single JSONL file into validated records.
 
         Args:
             file_path: Path to JSONL file
-            logger: Logger instance
-
         Returns:
             List of validated SessionRecord objects
         """

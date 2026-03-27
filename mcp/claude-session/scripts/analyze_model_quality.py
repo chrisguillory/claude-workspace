@@ -187,7 +187,9 @@ def analyze_actual_values(
                         for p in record_data['projectPaths']:
                             path_fields['projectPaths'].add(p)
 
-                except Exception:
+                except (
+                    Exception
+                ):  # exception_safety_linter.py: swallowed-exception — skip unparseable JSONL lines during analysis
                     pass
 
     return analysis, path_fields
