@@ -105,7 +105,7 @@ class LineageFile(StrictModel):
     This model is NOT frozen to allow mutable sessions dict.
     """
 
-    model_config = {'extra': 'forbid', 'strict': True, 'frozen': False}
+    model_config = pydantic.ConfigDict(extra='forbid', strict=True, frozen=False)
 
     schema_version: str = '1.0'
     # Intentionally mutable - this model is frozen=False to allow dict mutation

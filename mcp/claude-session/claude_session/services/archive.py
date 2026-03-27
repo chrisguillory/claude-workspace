@@ -7,17 +7,17 @@ archive creation, compression, and format detection.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 import zstandard as zstd
 
 from claude_session.config.mcp import settings
 from claude_session.paths import encode_path
-from claude_session.protocols import LoggerProtocol, NullLogger
 from claude_session.schemas.operations.archive import (
     ARCHIVE_FORMAT_VERSION,
     AgentFileEntry,
@@ -50,16 +50,18 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.version import get_version
 from claude_session.storage.protocol import StorageBackend
 
+logger = logging.getLogger(__name__)
+
 # -- Archive Format Detection --------------------------------------------------
 
 
 class FormatDetector:
     """Detects and validates archive format from file extension and format parameter."""
 
-    SUPPORTED_FORMATS = {'json', 'zst'}  # 'zst' = JSON with zstd compression
+    SUPPORTED_FORMATS: ClassVar[set[str]] = {'json', 'zst'}  # 'zst' = JSON with zstd compression
 
     # Extension to format mapping
-    EXTENSION_MAP: dict[str, Literal['json', 'zst']] = {
+    EXTENSION_MAP: ClassVar[dict[str, Literal['json', 'zst']]] = {
         '.json': 'json',
         '.json.zst': 'zst',
         '.zst': 'zst',
@@ -218,7 +220,6 @@ class SessionArchiveService:
         storage: StorageBackend,
         output_path: str | None,
         format_param: Literal['json', 'zst'] | None,
-        logger: LoggerProtocol | None = None,
     ) -> ArchiveMetadata:
         """
         Create archive of current session.
@@ -227,8 +228,6 @@ class SessionArchiveService:
             storage: Storage backend (call-time parameter!)
             output_path: Optional output path (None = temp file)
             format_param: Optional format override
-            logger: Optional logger instance (uses NullLogger if None)
-
         Returns:
             Archive metadata
 
@@ -236,8 +235,7 @@ class SessionArchiveService:
             ValueError: If format detection fails or conflicts
             FileNotFoundError: If session files not found
         """
-        log = logger or NullLogger()
-        await log.info(f'Creating archive for session {self.session_id}')
+        logger.info('Creating archive for session %s', self.session_id)
 
         # Determine output path
         if output_path:
@@ -253,48 +251,48 @@ class SessionArchiveService:
             if not output_file.parent.exists():
                 raise ValueError(f'Output directory does not exist: {output_file.parent}. Please create it first.')
 
-            await log.info(f'Output path: {output_file}')
+            logger.info('Output path: %s', output_file)
         else:
             # Use temp directory (default) with correct extension for format
             timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S')
             ext = '.json.zst' if format_param == 'zst' else '.json'
             filename = f'session-{self.session_id[:8]}-{timestamp}{ext}'
             output_file = self.temp_dir / filename
-            await log.info(f'Using temp file: {output_file}')
+            logger.info('Using temp file: %s', output_file)
 
         # Detect format
         archive_format = FormatDetector.detect_format(output_file, format_param)
-        await log.info(f'Archive format: {archive_format}')
+        logger.info('Archive format: %s', archive_format)
 
         # Get project folder (computed once, cached)
         project_folder = self._get_project_folder()
-        await log.info(f'Project folder: {project_folder.name}')
+        logger.info('Project folder: %s', project_folder.name)
 
         # Discover session files
-        session_files = await self._discover_session_files(project_folder, log)
-        await log.info(f'Found {len(session_files)} session files')
+        session_files = await self._discover_session_files(project_folder)
+        logger.info('Found %d session files', len(session_files))
 
         # Load and parse all records
-        files_data, total_records = await self._load_session_files(session_files, log)
-        await log.info(f'Loaded {total_records} total records')
+        files_data, total_records = await self._load_session_files(session_files)
+        logger.info('Loaded %d total records', total_records)
 
         # Extract Claude Code version from records
-        claude_code_version = await self._extract_claude_code_version(files_data, log)
+        claude_code_version = await self._extract_claude_code_version(files_data)
 
         # Extract slugs and collect plan files
         slugs = extract_slugs_from_records(files_data)
-        await log.info(f'Found {len(slugs)} unique slugs in session')
+        logger.info('Found %d unique slugs in session', len(slugs))
 
         plan_files = collect_plan_files(slugs)
-        await log.info(f'Collected {len(plan_files)} plan files (of {len(slugs)} slugs)')
+        logger.info('Collected %d plan files (of %d slugs)', len(plan_files), len(slugs))
 
         # Collect tool results (v1.2+)
         tool_results = collect_tool_results(project_folder, self.session_id)
-        await log.info(f'Collected {tool_results.total_file_count} tool result files')
+        logger.info('Collected %d tool result files', tool_results.total_file_count)
 
         # Collect todos (v1.2+)
         todos = collect_todos(self.session_id)
-        await log.info(f'Collected {len(todos)} todo files')
+        logger.info('Collected %d todo files', len(todos))
 
         # Validate session-env is empty (future-proofing)
         validate_session_env_empty(self.session_id)
@@ -309,17 +307,17 @@ class SessionArchiveService:
         # Extract custom title (user-defined session name from /rename)
         custom_title = extract_custom_title_from_records(files_data)
         if custom_title:
-            await log.info(f'Found custom title: {custom_title}')
+            logger.info('Found custom title: %s', custom_title)
 
         # Collect tasks
         tasks = list(iter_tasks(self.session_id))
         if tasks:
-            await log.info(f'Collected {len(tasks)} tasks')
+            logger.info('Collected %d tasks', len(tasks))
 
         # Collect task metadata (.highwatermark, etc.)
         task_metadata = collect_task_metadata(self.session_id)
         if task_metadata:
-            await log.info(f'Collected {len(task_metadata)} task metadata files')
+            logger.info('Collected %d task metadata files', len(task_metadata))
 
         # Build v2 explicit entry models
         main_filename = f'{self.session_id}.jsonl'
@@ -385,7 +383,7 @@ class SessionArchiveService:
         # Handle None version (v2 requires string)
         if claude_code_version is None:
             claude_code_version = 'unknown'
-            await log.warning('Claude Code version not found, using "unknown"')
+            logger.warning('Claude Code version not found, using "unknown"')
 
         # Create v2 archive structure
         archive = SessionArchiveV2(
@@ -410,15 +408,15 @@ class SessionArchiveService:
 
         # Serialize and compress
         if archive_format == 'json':
-            data = await self._serialize_json(archive, log)
+            data = await self._serialize_json(archive)
         elif archive_format == 'zst':
-            data = await self._serialize_zst(archive, log)
+            data = await self._serialize_zst(archive)
         else:
             raise ValueError(f'Unsupported format: {archive_format}')
 
         # Save via storage backend
         final_path = await storage.save(output_file.name, data)
-        await log.info(f'Archive saved: {len(data):,} bytes')
+        logger.info('Archive saved: %s bytes', f'{len(data):,}')
 
         # Calculate size in MB (rounded to 2 decimal places)
         size_mb = round(len(data) / (1024 * 1024), 2)
@@ -448,7 +446,7 @@ class SessionArchiveService:
             custom_title=custom_title,
         )
 
-    async def _discover_session_files(self, project_folder: Path, logger: LoggerProtocol) -> Sequence[Path]:
+    async def _discover_session_files(self, project_folder: Path) -> Sequence[Path]:
         """
         Discover all JSONL files for current session.
 
@@ -459,7 +457,6 @@ class SessionArchiveService:
 
         Args:
             project_folder: Path to project folder in ~/.claude/projects/
-            logger: Logger for progress messages
 
         Returns:
             Sequence of JSONL file paths
@@ -467,7 +464,7 @@ class SessionArchiveService:
         Raises:
             FileNotFoundError: If main session file not found
         """
-        await logger.info('Discovering session files')
+        logger.info('Discovering session files')
 
         # Find main session file
         main_file = project_folder / f'{self.session_id}.jsonl'
@@ -493,19 +490,16 @@ class SessionArchiveService:
 
         session_files.extend(agent_files)
 
-        await logger.info(f'Found {len(session_files)} files: 1 main + {len(agent_files)} agents')
+        logger.info('Found %d files: 1 main + %d agents', len(session_files), len(agent_files))
 
         return session_files
 
-    async def _load_session_files(
-        self, session_files: Sequence[Path], logger: LoggerProtocol
-    ) -> tuple[dict[str, list[SessionRecord]], int]:
+    async def _load_session_files(self, session_files: Sequence[Path]) -> tuple[dict[str, list[SessionRecord]], int]:
         """
         Load and parse all session files using parser service.
 
         Args:
             session_files: Sequence of JSONL file paths
-            logger: Logger instance
 
         Returns:
             Tuple of (files_data dict, total_record_count)
@@ -515,16 +509,14 @@ class SessionArchiveService:
             pydantic.ValidationError: If record validation fails (fail fast)
         """
         # Delegate parsing to parser service
-        files_data = await self.parser_service.load_session_files(session_files, logger)
+        files_data = await self.parser_service.load_session_files(session_files)
 
         # Calculate total records
         total_records = sum(len(records) for records in files_data.values())
 
         return files_data, total_records
 
-    async def _extract_claude_code_version(
-        self, files_data: dict[str, list[SessionRecord]], logger: LoggerProtocol
-    ) -> str | None:
+    async def _extract_claude_code_version(self, files_data: dict[str, list[SessionRecord]]) -> str | None:
         """
         Extract Claude Code version using best available method.
 
@@ -535,7 +527,6 @@ class SessionArchiveService:
 
         Args:
             files_data: Parsed session records
-            logger: Logger instance
 
         Returns:
             Claude Code version string (e.g., '2.0.37'), or None if not found
@@ -546,21 +537,21 @@ class SessionArchiveService:
         version = get_version(claude_pid=self.claude_pid, records=all_records)
 
         if version:
-            await logger.info(f'Extracted Claude version: {version}')
+            logger.info('Extracted Claude version: %s', version)
         else:
-            await logger.warning('No version found')
+            logger.warning('No version found')
 
         return version
 
-    async def _serialize_json(self, archive: SessionArchiveV2, logger: LoggerProtocol) -> bytes:
+    async def _serialize_json(self, archive: SessionArchiveV2) -> bytes:
         """Serialize archive to uncompressed JSON."""
-        await logger.info('Serializing to JSON')
+        logger.info('Serializing to JSON')
         json_str = archive.model_dump_json(indent=2, exclude_unset=True)
         return json_str.encode('utf-8')
 
-    async def _serialize_zst(self, archive: SessionArchiveV2, logger: LoggerProtocol) -> bytes:
+    async def _serialize_zst(self, archive: SessionArchiveV2) -> bytes:
         """Serialize archive to zstd-compressed JSON."""
-        await logger.info('Serializing to zstd-compressed JSON')
+        logger.info('Serializing to zstd-compressed JSON')
 
         # Serialize to JSON
         json_str = archive.model_dump_json(indent=2, exclude_unset=True)
@@ -571,6 +562,8 @@ class SessionArchiveService:
         compressed = compressor.compress(json_bytes)
 
         compression_ratio = len(json_bytes) / len(compressed)
-        await logger.info(f'Compressed {len(json_bytes):,} → {len(compressed):,} bytes ({compression_ratio:.1f}x)')
+        logger.info(
+            'Compressed %s -> %s bytes (%.1fx)', f'{len(json_bytes):,}', f'{len(compressed):,}', compression_ratio
+        )
 
         return compressed

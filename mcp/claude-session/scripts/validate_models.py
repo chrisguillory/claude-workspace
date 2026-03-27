@@ -669,7 +669,9 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                             }
                         )
 
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # exception_safety_linter.py: swallowed-exception — collects error for validation report
                 results['invalid_records'] += 1
                 error_msg = f'Line {line_num} ({record_type}): {str(e)[:500]}'
                 results['errors'].append(error_msg)
@@ -716,8 +718,10 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                         # Track missing fields
                         if 'Validation error' in str(e) or 'Field required' in str(e):
                             results['missing_fields'][record_type].append(str(e)[:150])
-                    except Exception:
-                        pass  # Ignore errors in error handling
+                    except (
+                        Exception
+                    ):  # exception_safety_linter.py: swallowed-exception — error enrichment is best-effort
+                        pass
 
     return results
 

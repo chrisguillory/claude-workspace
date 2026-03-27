@@ -217,7 +217,7 @@ def migrate_session_file(input_path: Path, output_path: Path, target_version: st
                 # Write migrated record
                 outfile.write(json.dumps(record_data) + '\n')
 
-            except Exception as e:
+            except Exception as e:  # exception_safety_linter.py: swallowed-exception — writes original record on error, continues migration
                 stats['errors'] += 1
                 print(
                     f'Error migrating record at line {line_num}: {e}',
