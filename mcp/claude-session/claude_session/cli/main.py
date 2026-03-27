@@ -47,13 +47,16 @@ app = create_app(help='Archive and restore Claude Code sessions.')
 add_completion_command(app)
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def _configure_logging(
+    ctx: typer.Context,
     verbose: bool = typer.Option(False, '--verbose', '-v', help='Show detailed progress'),
 ) -> None:
-    """Configure logging level for all commands."""
+    """Configure logging and show help when no command given."""
     level = logging.INFO if verbose else logging.WARNING
     logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
 
 
 # Type aliases and validators
@@ -490,6 +493,9 @@ async def _restore_async(
             typer.echo('To continue this session, run:')
             typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
 
+    except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
+        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
     except Exception as e:
         logger.error('Failed to restore session: %s', e, exc_info=True)
         raise typer.Exit(1) from None
