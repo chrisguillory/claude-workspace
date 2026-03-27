@@ -12,7 +12,6 @@ Tools:
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import atexit
 import contextlib
@@ -927,19 +926,6 @@ server = mcp.server.fastmcp.FastMCP('document-search', lifespan=lifespan)
 # Create FastMCP server with lifespan
 def main() -> None:
     """Entry point for the MCP server."""
-    parser = argparse.ArgumentParser(description='Document Search MCP Server')
-    parser.add_argument(
-        '--log-level',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        default=None,
-        help='Server log level (default: INFO, env: DOCUMENT_SEARCH_LOG_LEVEL)',
-    )
-    args = parser.parse_args()
-
-    # Store in env so lifespan() picks it up (CLI arg wins over env var)
-    if args.log_level:
-        os.environ['DOCUMENT_SEARCH_LOG_LEVEL'] = args.log_level
-
     server.run()
 
 
