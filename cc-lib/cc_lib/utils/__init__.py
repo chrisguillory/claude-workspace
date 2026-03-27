@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+__all__ = [
+    'Timer',
+    'encode_project_path',
+    'humanize_seconds',
+    'load_module_from_path',
+    'temporary_module',
+]
+
 import importlib.util
 import sys
 import time
@@ -10,6 +18,21 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
+
+
+class Timer:
+    """Simple stopwatch-style timer for measuring elapsed time."""
+
+    def __init__(self) -> None:
+        self._start = time.perf_counter()
+
+    def elapsed(self) -> float:
+        """Return elapsed time in seconds."""
+        return time.perf_counter() - self._start
+
+    def elapsed_ms(self) -> int:
+        """Return elapsed time in milliseconds."""
+        return int(self.elapsed() * 1000)
 
 
 def encode_project_path(path: Path | str) -> str:
@@ -42,21 +65,6 @@ def encode_project_path(path: Path | str) -> str:
     for char in ['/', '.', ' ', '~', '_']:
         result = result.replace(char, '-')
     return result
-
-
-class Timer:
-    """Simple stopwatch-style timer for measuring elapsed time."""
-
-    def __init__(self) -> None:
-        self._start = time.perf_counter()
-
-    def elapsed(self) -> float:
-        """Return elapsed time in seconds."""
-        return time.perf_counter() - self._start
-
-    def elapsed_ms(self) -> int:
-        """Return elapsed time in milliseconds."""
-        return int(self.elapsed() * 1000)
 
 
 def humanize_seconds(seconds: float) -> str:

@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import re
 
-__all__ = ['NON_CSS_SELECTOR_RE', 'validate_css_selector']
+__all__ = [
+    'NON_CSS_SELECTOR_RE',
+    'validate_css_selector',
+]
 
 NON_CSS_SELECTOR_RE = re.compile(
     r':(?:has-text|text|nth-match)\s*\('

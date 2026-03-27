@@ -18,9 +18,7 @@ from typing import Annotated, Any, Literal
 
 import pydantic
 
-# ==============================================================================
-# Base Strict Model (Foundation)
-# ==============================================================================
+# -- Base Strict Model (Foundation) --------------------------------------------
 
 
 class BaseStrictModel(pydantic.BaseModel):
@@ -42,9 +40,7 @@ class BaseStrictModel(pydantic.BaseModel):
     )
 
 
-# ==============================================================================
-# Permissive Model (Foundation)
-# ==============================================================================
+# -- Permissive Model (Foundation) ---------------------------------------------
 
 
 class PermissiveModel(pydantic.BaseModel):
@@ -84,9 +80,7 @@ class PermissiveModel(pydantic.BaseModel):
         return dict(self.__pydantic_extra__) if self.__pydantic_extra__ else {}
 
 
-# ==============================================================================
-# Empty JSON Types
-# ==============================================================================
+# -- Empty JSON Types ----------------------------------------------------------
 #
 # These types represent always-empty JSON structures observed in API traffic.
 # Using explicit types rather than inline constraints because:
@@ -102,7 +96,6 @@ class PermissiveModel(pydantic.BaseModel):
 #
 # TODO: Analyze session models for EmptyDict opportunities - there may be
 # always-empty dict fields that should use EmptyDict for strictness.
-# ==============================================================================
 
 
 class EmptyDict(BaseStrictModel):
@@ -131,9 +124,7 @@ Example:
 """
 
 
-# ==============================================================================
-# Primitive Types
-# ==============================================================================
+# -- Primitive Types -----------------------------------------------------------
 
 type JsonDatetime = Annotated[datetime, pydantic.Field(strict=False)]
 """Pydantic-enhanced datetime for JSON serialization (allows string->datetime conversion)."""
@@ -181,9 +172,7 @@ schemas.operations.archive needs this type, but services imports from schemas.
 """
 
 
-# ==============================================================================
-# Model ID Types
-# ==============================================================================
+# -- Model ID Types ------------------------------------------------------------
 
 # Model IDs actually observed in session data (validated against 180k+ records)
 # Used for strict validation of the model field in Message and AssistantRecord

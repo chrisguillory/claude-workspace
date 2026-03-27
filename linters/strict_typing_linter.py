@@ -10,15 +10,17 @@ This script enforces immutable interface types and module organization:
 2. STRICT TYPING: No Any, Mapping[str, Any], Sequence[Any] etc.
 3. TUPLE FIELDS: Flag tuple[X, ...] in class fields (use Sequence[T] instead)
 4. HASHABLE FIELDS (opt-in): Enforce hashable types via __strict_typing_linter__hashable_fields__
-5. MODULE ORDERING (opt-in): Public before private, classes before functions
+5. MODULE ORDERING: Public before private, classes before functions
 
 Checks ALL function/method parameters, return types, and class field annotations.
 Skips non-frozen dataclasses and attrs classes (mutable by design).
 Note: pydantic_settings.BaseSettings (intentionally non-frozen) is not supported at this time.
 Respects .gitignore when scanning directories.
 
-Module ordering is opt-in via __strict_module_ordering__ = True in package __init__.py.
-When enabled, all submodules in that package must:
+Module ordering is always enabled. Suppress per-area via per-file-ignores in pyproject.toml:
+    [tool.strict-typing-linter.per-file-ignores]
+    "scripts/**" = ["missing-all", "class-ordering"]
+Files with ordering enabled must:
 - Define __all__
 - Order definitions: __all__ items first, then public, then private
 - Within each group: classes before functions
@@ -32,7 +34,10 @@ Design Philosophy:
       - # strict_typing_linter.py: loose-typing - suppress loose typing violations
       - # strict_typing_linter.py: tuple-field - suppress tuple-in-field violations
       - # strict_typing_linter.py: hashable-field - suppress unhashable-field violations
-      - # strict_typing_linter.py: ordering - suppress ordering violations
+      - # strict_typing_linter.py: ordering - suppress all ordering violations
+      - # strict_typing_linter.py: class-ordering - suppress class-before-function violations
+      - # strict_typing_linter.py: missing-all - suppress missing __all__ violations
+      - # strict_typing_linter.py: trailing-comma - suppress trailing comma violations
 
 Usage:
     ./linters/strict_typing_linter.py <files...>
@@ -59,7 +64,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from _config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
+from _config import (
+    find_config,
+    find_python_files,
+    get_per_file_ignored_codes,
+    load_per_file_ignores,
+)
 from hashability_inspector import HashabilityInspector, QualifiedName
 
 # -- Configuration ------------------------------------------------------------
@@ -158,12 +168,15 @@ type DirectiveCode = Literal[
     'tuple-field',
     'hashable-field',
     'ordering',
+    'class-ordering',
+    'missing-all',
+    'trailing-comma',
     'unused-directive',
 ]
 
 # Violation kind literals - used in discriminated unions
 type TypeViolationKind = Literal['mutable', 'loose', 'tuple-field', 'hashable-field']
-type OrderingViolationKind = Literal['ordering', 'missing-all', 'trailing-comma', 'unused-directive']
+type OrderingViolationKind = Literal['ordering', 'class-ordering', 'missing-all', 'trailing-comma', 'unused-directive']
 type ViolationKind = TypeViolationKind | OrderingViolationKind
 
 
@@ -210,13 +223,16 @@ class DirectiveInstance:
 
 
 # Map from directive codes to violation kinds for --ignore flag
-# 'ordering' maps to both 'ordering' and 'missing-all' since they're both ordering-related
+# 'ordering' is a superset that suppresses all ordering-related kinds
 CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
     'mutable-type': {'mutable'},
     'loose-typing': {'loose'},
     'tuple-field': {'tuple-field'},
     'hashable-field': {'hashable-field'},
-    'ordering': {'ordering', 'missing-all', 'trailing-comma'},
+    'ordering': {'ordering', 'class-ordering', 'missing-all', 'trailing-comma'},
+    'class-ordering': {'class-ordering'},
+    'missing-all': {'missing-all'},
+    'trailing-comma': {'trailing-comma'},
 }
 
 
@@ -242,10 +258,6 @@ def main() -> int:
 
     if not files:
         return 0
-
-    # Discover packages with strict module ordering enabled
-    # Raises ValueError on unrecognized __strict_* variables (fail-fast on typos)
-    strict_ordering_packages = discover_strict_ordering_packages(files)
 
     # Compute source roots from expanded files so the inspector can import project types.
     # Uses files (not args.paths) to handle nested projects when scanning from repo root.
@@ -290,7 +302,6 @@ def main() -> int:
 
         violations = check_file(
             filepath,
-            strict_ordering_packages,
             inspector=inspector,
             respect_skip_file=not args.no_skip_file,
             report_unused_directives=args.report_unused_directives,
@@ -317,7 +328,9 @@ def main() -> int:
         loose_count = sum(1 for v in all_violations if v.kind == 'loose')
         tuple_count = sum(1 for v in all_violations if v.kind == 'tuple-field')
         hashable_count = sum(1 for v in all_violations if v.kind == 'hashable-field')
-        ordering_count = sum(1 for v in all_violations if v.kind in ('ordering', 'missing-all', 'trailing-comma'))
+        ordering_count = sum(
+            1 for v in all_violations if v.kind in ('ordering', 'class-ordering', 'missing-all', 'trailing-comma')
+        )
         summary_parts = []
         if mutable_count:
             summary_parts.append(f'{mutable_count} mutable')
@@ -358,8 +371,17 @@ def parse_args() -> argparse.Namespace:
         nargs='*',
         default=[],
         metavar='CODE',
-        choices=['mutable-type', 'loose-typing', 'tuple-field', 'hashable-field', 'ordering'],
-        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, hashable-field, ordering)',
+        choices=[
+            'mutable-type',
+            'loose-typing',
+            'tuple-field',
+            'hashable-field',
+            'ordering',
+            'class-ordering',
+            'missing-all',
+            'trailing-comma',
+        ],
+        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, hashable-field, ordering, missing-all, trailing-comma)',
     )
     parser.add_argument(
         '--no-gitignore',
@@ -395,9 +417,8 @@ def parse_args() -> argparse.Namespace:
 
 def check_file(
     filepath: Path,
-    strict_ordering_packages: Set[Path],
-    inspector: HashabilityInspector | None = None,
     *,
+    inspector: HashabilityInspector | None = None,
     respect_skip_file: bool = True,
     report_unused_directives: bool = False,
 ) -> Sequence[Violation]:
@@ -452,16 +473,19 @@ def check_file(
 
     violations.extend(type_checker.violations)
 
-    # Module ordering (if package or any parent opted in - recursive inheritance)
-    if is_under_strict_package(filepath, strict_ordering_packages):
-        # Skip __main__.py (entry point, never exports)
-        if filepath.name != '__main__.py':
-            # Skip __init__.py only if it has no definitions (just boilerplate)
-            if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
-                violations.extend(check_all_defined(filepath, tree, source_lines))
-                violations.extend(check_all_trailing_comma(filepath, tree, source_lines))
-                violations.extend(check_module_ordering(filepath, tree, source_lines))
-                violations.extend(check_class_method_ordering(filepath, tree, source_lines))
+    # Module ordering (always enabled, suppress per-area via per-file-ignores)
+    # Skip __main__.py (entry point, never exports)
+    raw_ordering: list[tuple[int, str]] = []
+    if filepath.name != '__main__.py':
+        # Skip __init__.py only if it has no definitions (just boilerplate)
+        if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
+            violations.extend(check_all_defined(filepath, tree, source_lines, raw_ordering))
+            violations.extend(check_all_trailing_comma(filepath, tree, source_lines, raw_ordering))
+            violations.extend(check_module_ordering(filepath, tree, source_lines, raw_ordering))
+            violations.extend(check_class_method_ordering(filepath, tree, source_lines, raw_ordering))
+
+    # Merge ordering raw violations into all_raw for unused-directive detection
+    all_raw.extend(raw_ordering)
 
     if report_unused_directives:
         directives = collect_directives(source_lines)
@@ -475,48 +499,6 @@ def check_file(
         violations.extend(unused)
 
     return violations
-
-
-def discover_strict_ordering_packages(files: Sequence[Path]) -> Set[Path]:
-    """Find packages that have opted into strict module ordering.
-
-    Two discovery methods:
-    1. Scan __init__.py files in the input list
-    2. Walk up from each input file to find parent __init__.py files
-
-    This ensures single-file invocations still respect package-level settings.
-    Raises ValueError on unrecognized __strict_* variables (fail-fast on typos).
-
-    Strictness is inherited: if a parent package has the flag, all child packages
-    are also considered strict.
-    """
-    packages: set[Path] = set()
-    checked_init_files: set[Path] = set()
-
-    # Method 1: Check __init__.py files in input list
-    for f in files:
-        if f.name == '__init__.py':
-            checked_init_files.add(f)
-            if get_strict_module_ordering(f):
-                packages.add(f.parent)
-
-    # Method 2: Walk up from each file to find parent __init__.py files
-    for f in files:
-        for parent in f.parents:
-            init_path = parent / '__init__.py'
-            if init_path in checked_init_files:
-                continue
-            checked_init_files.add(init_path)
-            if init_path.exists():
-                if get_strict_module_ordering(init_path):
-                    packages.add(parent)
-
-    return packages
-
-
-def is_under_strict_package(filepath: Path, strict_packages: Set[Path]) -> bool:
-    """Check if filepath is under any strict ordering package (recursive inheritance)."""
-    return any(parent in strict_packages for parent in filepath.parents)
 
 
 # -- AST Visitor --------------------------------------------------------------
@@ -1414,16 +1396,12 @@ def validate_strict_var_in_class(name: str, class_name: str, lineno: int) -> Non
     """Validate a __strict_*__ variable found in a class body.
 
     Raises:
-        ValueError: If unrecognized or misplaced
+        ValueError: If unrecognized
     """
     if name not in RECOGNIZED_STRICT_VARS:
         raise ValueError(
             f'{class_name}:{lineno}: Unrecognized strict variable '
             f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?",
-        )
-    if name in MODULE_LEVEL_STRICT_VARS:
-        raise ValueError(
-            f"{class_name}:{lineno}: '{name}' is a module-level variable. Place it in __init__.py, not inside a class.",
         )
 
 
@@ -1453,19 +1431,12 @@ def get_strict_hashable_fields(node: ast.ClassDef) -> bool:
     return False
 
 
-# -- Module Ordering Checks (opt-in via __strict_module_ordering__) -----------
+# -- Module Ordering Checks ---------------------------------------------------
 
 
 # Recognized __strict_* variables (fail-fast on typos)
-# Two namespaces: __strict_*__ (legacy module-level) and __strict_typing_linter__*__ (scoped)
 RECOGNIZED_STRICT_VARS: Set[str] = {
-    '__strict_module_ordering__',
     '__strict_typing_linter__hashable_fields__',
-}
-
-# Scope-aware sets for targeted error messages
-MODULE_LEVEL_STRICT_VARS: Set[str] = {
-    '__strict_module_ordering__',
 }
 
 CLASS_LEVEL_STRICT_VARS: Set[str] = {
@@ -1477,42 +1448,6 @@ STRICT_VAR_PREFIXES: Sequence[str] = (
     '__strict_typing_linter__',
     '__strict_',
 )
-
-
-def get_strict_module_ordering(init_path: Path) -> bool:
-    """Check if __init__.py opts into strict module ordering.
-
-    Raises:
-        ValueError: If unrecognized __strict_* variable found (fail-fast on typos)
-        OSError: If file cannot be read
-        SyntaxError: If file contains invalid Python syntax
-    """
-    if not init_path.exists():
-        return False
-
-    source = init_path.read_text(encoding='utf-8')
-    tree = ast.parse(source, filename=str(init_path))
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and is_strict_var(target.id):
-                    name = target.id
-                    # Fail-fast on unrecognized __strict_*__ variables
-                    if name not in RECOGNIZED_STRICT_VARS:
-                        raise ValueError(
-                            f'{init_path}:{node.lineno}: Unrecognized strict variable '
-                            f"'{name}'. Did you mean one of: {', '.join(sorted(RECOGNIZED_STRICT_VARS))}?",
-                        )
-                    if name in CLASS_LEVEL_STRICT_VARS:
-                        raise ValueError(
-                            f'{init_path}:{node.lineno}: '
-                            f"'{name}' is a class-level variable. Place it inside a class body, not in __init__.py.",
-                        )
-                    if name == '__strict_module_ordering__':
-                        if isinstance(node.value, ast.Constant):
-                            return node.value.value is True
-    return False
 
 
 def extract_all_names(tree: ast.Module) -> Set[str] | None:
@@ -1587,11 +1522,17 @@ def has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
             idx = line.find(DIRECTIVE_PREFIX.lower())
             codes_part = line[idx + len(DIRECTIVE_PREFIX) :]
             codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
-            return 'ordering' in codes
+            return 'ordering' in codes or 'class-ordering' in codes
     return False
 
 
-def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequence[str]) -> Sequence[OrderingViolation]:
+def check_module_ordering(
+    filepath: Path,
+    tree: ast.Module,
+    source_lines: Sequence[str],
+    raw_ordering: list[tuple[int, str]]
+    | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
+) -> Sequence[OrderingViolation]:
     """Check module ordering: __all__ items first, public before private, classes before functions."""
     violations: list[OrderingViolation] = []
 
@@ -1605,6 +1546,19 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
 
     for actual, expected in zip(definitions, expected_order, strict=True):
         if actual.name != expected.name:
+            # Determine violation kind: class-ordering when the only difference is type_group
+            # (i.e., a function appears where a class should be, or vice versa)
+            is_class_ordering = (
+                actual.sort_key[0] == expected.sort_key[0]  # same all_group
+                and actual.sort_key[1] == expected.sort_key[1]  # same private_group
+                and actual.sort_key[2] != expected.sort_key[2]  # different type_group
+            )
+            violation_kind: OrderingViolationKind = 'class-ordering' if is_class_ordering else 'ordering'
+
+            # Record raw violation for unused-directive detection
+            if raw_ordering is not None:
+                raw_ordering.append((actual.line, violation_kind))
+
             if has_ordering_directive(source_lines, actual.line):
                 continue
 
@@ -1622,7 +1576,7 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
                 OrderingViolation(
                     filepath=filepath,
                     line=actual.line,
-                    kind='ordering',
+                    kind=violation_kind,
                     message=reason,
                     source_line=source_lines[actual.line - 1].strip() if actual.line <= len(source_lines) else '',
                     suggestion='Reorder: __all__ items (classes→functions) → public (classes→functions) → private (classes→functions)',
@@ -1633,7 +1587,13 @@ def check_module_ordering(filepath: Path, tree: ast.Module, source_lines: Sequen
     return violations
 
 
-def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[str]) -> Sequence[OrderingViolation]:
+def check_all_defined(
+    filepath: Path,
+    tree: ast.Module,
+    source_lines: Sequence[str],
+    raw_ordering: list[tuple[int, str]]
+    | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
+) -> Sequence[OrderingViolation]:
     """Check that __all__ is defined."""
     all_names = extract_all_names(tree)
     if all_names is None:
@@ -1642,6 +1602,10 @@ def check_all_defined(filepath: Path, tree: ast.Module, source_lines: Sequence[s
             if not isinstance(node, (ast.Import, ast.ImportFrom, ast.Expr)):
                 line = node.lineno
                 break
+
+        # Record raw violation for unused-directive detection
+        if raw_ordering is not None:
+            raw_ordering.append((line, 'missing-all'))
 
         return [
             OrderingViolation(
@@ -1695,6 +1659,8 @@ def check_all_trailing_comma(
     filepath: Path,
     tree: ast.Module,
     source_lines: Sequence[str],
+    raw_ordering: list[tuple[int, str]]
+    | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
 ) -> Sequence[OrderingViolation]:
     """Check that __all__ has trailing comma when it has 1+ items."""
     violations: list[OrderingViolation] = []
@@ -1704,9 +1670,12 @@ def check_all_trailing_comma(
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == '__all__':
                     if isinstance(node.value, ast.List) and node.value.elts:
-                        if has_ordering_directive(source_lines, node.lineno):
-                            continue
                         if not has_trailing_comma(source_lines, node.value):
+                            # Record raw violation for unused-directive detection
+                            if raw_ordering is not None:
+                                raw_ordering.append((node.lineno, 'trailing-comma'))
+                            if has_ordering_directive(source_lines, node.lineno):
+                                continue
                             violations.append(
                                 OrderingViolation(
                                     filepath=filepath,
@@ -1726,6 +1695,8 @@ def check_class_method_ordering(
     filepath: Path,
     tree: ast.Module,
     source_lines: Sequence[str],
+    raw_ordering: list[tuple[int, str]]
+    | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
 ) -> Sequence[OrderingViolation]:
     """Check that public methods come before private methods within classes."""
     violations: list[OrderingViolation] = []
@@ -1751,6 +1722,10 @@ def check_class_method_ordering(
                 seen_private = True
             elif seen_private:
                 # Public method after private method - violation
+                # Record raw violation for unused-directive detection
+                if raw_ordering is not None:
+                    raw_ordering.append((line, 'ordering'))
+
                 if has_ordering_directive(source_lines, line):
                     continue
 
@@ -1985,7 +1960,7 @@ def format_violation(v: Violation) -> str:
             f'    Silence with: {DIRECTIVE_PREFIX} {directive_code}'
         )
     else:  # OrderingViolation
-        directive_code = 'ordering'
+        directive_code = v.kind if v.kind != 'unused-directive' else 'ordering'
         return (
             f'{v.filepath}:{v.line}: error: {v.message}\n'
             f'    {v.source_line}\n'

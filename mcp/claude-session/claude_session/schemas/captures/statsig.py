@@ -18,9 +18,7 @@ from claude_session.schemas.cc_internal_api import (
     StatsigRegisterResponse,
 )
 
-# ==============================================================================
-# Register (/v1/rgstr)
-# ==============================================================================
+# -- Register (/v1/rgstr) ------------------------------------------------------
 
 
 class StatsigRegisterRequestCapture(StatsigRequestCapture):
@@ -36,9 +34,7 @@ class StatsigRegisterResponseCapture(StatsigResponseCapture):
     body: StatsigRegisterResponse
 
 
-# ==============================================================================
-# Initialize (/v1/initialize)
-# ==============================================================================
+# -- Initialize (/v1/initialize) -----------------------------------------------
 
 
 class StatsigInitializeRequestCapture(StatsigRequestCapture):

@@ -1,6 +1,6 @@
 """Validate reexport_linter.py against its test cases.
 
-This script validates two test files:
+Validates three fixture categories:
 
 1. reexport_linter_test_cases.py (Instructive)
    - Re-exports that should flag REX001
@@ -8,6 +8,9 @@ This script validates two test files:
 
 2. reexport_linter_edge_cases.py (Regression)
    - TYPE_CHECKING imports, aliases, module imports, type aliases
+
+3. reexport/ structural fixtures (Structural)
+   - Empty __all__, star imports, dynamic __all__, annotated/tuple forms
 """
 
 from __future__ import annotations
@@ -15,9 +18,10 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence, Set
-from dataclasses import dataclass
+from collections.abc import Mapping, Set
 from pathlib import Path
+
+import pytest
 
 # -- Configuration ------------------------------------------------------------
 
@@ -28,6 +32,7 @@ LINTER = CC_DIR / 'linters' / 'reexport_linter.py'
 EDGE_CASES_DIR = TEST_DIR / 'edge_cases'
 TEST_FILE = EDGE_CASES_DIR / 'reexport_linter_test_cases.py'
 EDGE_CASE_FILE = EDGE_CASES_DIR / 'reexport_linter_edge_cases.py'
+STRUCTURAL_DIR = EDGE_CASES_DIR / 'reexport'
 
 # -- Expected Violations: Instructive Test File -------------------------------
 
@@ -54,6 +59,16 @@ EXPECTED_EDGE_CASES: Mapping[str, bool] = {
     'some_submodule': True,  # relative import (from . import X)
 }
 
+# -- Structural Fixtures ------------------------------------------------------
+
+STRUCTURAL_CASES: list[tuple[str, int]] = [
+    ('empty_all.py', 0),
+    ('all_local_only.py', 0),
+    ('star_import.py', 0),
+    ('dynamic_all.py', 0),
+    ('annotated_all.py', 2),
+    ('tuple_all.py', 2),
+]
 
 # -- Linter Output Parsing ---------------------------------------------------
 
@@ -73,163 +88,96 @@ def run_linter(test_file: Path, linter: Path) -> str:
 def parse_flagged_names(output: str) -> Set[str]:
     """Parse linter output to extract names flagged with REX001.
 
-    Expects lines like:
-        path/file.py:42:0: error: REX001 Symbol imported from ...
-            'join',
-    The source_line contains the __all__ entry with the symbol name.
+    Extracts the symbol name from the error line itself:
+        path/file.py:42:0: error: REX001 'join' re-exported via __all__
     """
     flagged: set[str] = set()
 
-    # Pattern: Match the source line that follows the error line
-    # The source line contains the symbol name in quotes
-    lines = output.splitlines()
-    for i, line in enumerate(lines):
+    for line in output.splitlines():
         if 'REX001' in line:
-            # Next line is the indented source line containing the symbol
-            if i + 1 < len(lines):
-                source_line = lines[i + 1].strip()
-                # Extract name from patterns like: 'join', or 'join'
-                match = re.search(r"'([^']+)'", source_line)
-                if match:
-                    flagged.add(match.group(1))
+            match = re.search(r"REX001 '([^']+)'", line)
+            if match:
+                flagged.add(match.group(1))
 
     return flagged
 
 
-# -- Validation ---------------------------------------------------------------
+# -- Module-Scoped Fixtures ---------------------------------------------------
 
 
-@dataclass
-class ValidationResult:
-    """Result of validating a single test file."""
-
-    file_name: str
-    errors: Sequence[str]
-    flagged_count: int
-    expected_flag_count: int
+@pytest.fixture(scope='module')
+def instructive_output() -> str:
+    """Run linter on instructive test file once for all parametrized cases."""
+    return run_linter(TEST_FILE, LINTER)
 
 
-def validate_file(
-    test_file: Path,
-    expected: Mapping[str, bool],
-) -> ValidationResult:
-    """Validate a single test file against expected violations."""
-    output = run_linter(test_file, LINTER)
-    flagged_names = parse_flagged_names(output)
-
-    errors: list[str] = []
-    expected_flag_count = 0
-
-    for name, should_flag in expected.items():
-        if should_flag:
-            expected_flag_count += 1
-            if name not in flagged_names:
-                errors.append(f'{name}: expected REX001 violation, but not flagged')
-        elif name in flagged_names:
-            errors.append(f'{name}: should NOT be flagged, but got REX001')
-
-    # Check for unexpected flags (names not in expected map)
-    errors.extend(
-        f'{name}: unexpected REX001 violation (not in expected map)' for name in flagged_names if name not in expected
-    )
-
-    return ValidationResult(
-        file_name=test_file.name,
-        errors=errors,
-        flagged_count=len(flagged_names),
-        expected_flag_count=expected_flag_count,
-    )
+@pytest.fixture(scope='module')
+def instructive_flagged(instructive_output: str) -> Set[str]:
+    """Parse flagged names from instructive test file output."""
+    return parse_flagged_names(instructive_output)
 
 
-# -- Main ---------------------------------------------------------------------
+@pytest.fixture(scope='module')
+def edge_case_output() -> str:
+    """Run linter on edge case file once for all parametrized cases."""
+    return run_linter(EDGE_CASE_FILE, LINTER)
 
 
-def main() -> int:
-    """Run validation and return exit code."""
-    if not LINTER.exists():
-        print(f'ERROR: Linter not found: {LINTER}')
-        return 1
+@pytest.fixture(scope='module')
+def edge_case_flagged(edge_case_output: str) -> Set[str]:
+    """Parse flagged names from edge case file output."""
+    return parse_flagged_names(edge_case_output)
 
-    all_passed = True
-    results: list[ValidationResult] = []
 
-    # Validate instructive test file
-    if TEST_FILE.exists():
-        result = validate_file(TEST_FILE, EXPECTED_TEST_CASES)
-        results.append(result)
-        if result.errors:
-            all_passed = False
+# -- Parametrized Tests -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('name', 'should_flag'),
+    EXPECTED_TEST_CASES.items(),
+    ids=EXPECTED_TEST_CASES.keys(),
+)
+def test_instructive_case(name: str, should_flag: bool, instructive_flagged: Set[str]) -> None:
+    """Each symbol in the instructive fixture is correctly flagged or not."""
+    if should_flag:
+        assert name in instructive_flagged, f'{name}: expected REX001 violation but not flagged'
     else:
-        print(f'WARNING: Test file not found: {TEST_FILE}')
-        all_passed = False
+        assert name not in instructive_flagged, f'{name}: should NOT be flagged but got REX001'
 
-    # Validate edge case file
-    if EDGE_CASE_FILE.exists():
-        result = validate_file(EDGE_CASE_FILE, EXPECTED_EDGE_CASES)
-        results.append(result)
-        if result.errors:
-            all_passed = False
+
+def test_instructive_no_unexpected(instructive_flagged: Set[str]) -> None:
+    """No unexpected flags in instructive test file."""
+    unexpected = instructive_flagged - set(EXPECTED_TEST_CASES.keys())
+    assert not unexpected, f'Unexpected REX001 violations: {sorted(unexpected)}'
+
+
+@pytest.mark.parametrize(
+    ('name', 'should_flag'),
+    EXPECTED_EDGE_CASES.items(),
+    ids=EXPECTED_EDGE_CASES.keys(),
+)
+def test_edge_case(name: str, should_flag: bool, edge_case_flagged: Set[str]) -> None:
+    """Each symbol in the edge case fixture is correctly flagged or not."""
+    if should_flag:
+        assert name in edge_case_flagged, f'{name}: expected REX001 violation but not flagged'
     else:
-        print(f'WARNING: Edge case file not found: {EDGE_CASE_FILE}')
-        all_passed = False
-
-    # Validate structural edge cases (per-file __all__ patterns)
-    structural_dir = EDGE_CASES_DIR / 'reexport'
-    structural_cases = [
-        ('empty_all.py', 0),
-        ('all_local_only.py', 0),
-        ('star_import.py', 0),
-        ('dynamic_all.py', 0),
-        ('annotated_all.py', 2),
-        ('tuple_all.py', 2),
-    ]
-    for filename, expected_count in structural_cases:
-        fixture = structural_dir / filename
-        if not fixture.exists():
-            print(f'WARNING: Structural fixture not found: {fixture}')
-            all_passed = False
-            continue
-        output = run_linter(fixture, LINTER)
-        actual_count = output.count('REX001')
-        if actual_count != expected_count:
-            print(f'  {filename}: expected {expected_count} violations, got {actual_count}')
-            all_passed = False
-        else:
-            results.append(
-                ValidationResult(
-                    file_name=filename,
-                    errors=[],
-                    flagged_count=actual_count,
-                    expected_flag_count=expected_count,
-                )
-            )
-
-    # Report results
-    if not all_passed:
-        print('VALIDATION FAILED')
-        print()
-        for result in results:
-            if result.errors:
-                print(f'  {result.file_name}:')
-                for error in sorted(result.errors):
-                    print(f'    - {error}')
-        print()
-        return 1
-
-    # Success summary
-    print('VALIDATION PASSED')
-    print()
-
-    for result in results:
-        print(f'  {result.file_name}:')
-        print(f'    Expected violations: {result.expected_flag_count}')
-        print(f'    Actual violations: {result.flagged_count}')
-        print()
-
-    return 0
+        assert name not in edge_case_flagged, f'{name}: should NOT be flagged but got REX001'
 
 
-def test_validation() -> None:
-    """Run validation suite via pytest."""
-    exit_code = main()
-    assert exit_code == 0, f'Validation failed with exit code {exit_code}'
+def test_edge_case_no_unexpected(edge_case_flagged: Set[str]) -> None:
+    """No unexpected flags in edge case file."""
+    unexpected = edge_case_flagged - set(EXPECTED_EDGE_CASES.keys())
+    assert not unexpected, f'Unexpected REX001 violations: {sorted(unexpected)}'
+
+
+@pytest.mark.parametrize(
+    ('filename', 'expected_count'),
+    STRUCTURAL_CASES,
+    ids=[case[0] for case in STRUCTURAL_CASES],
+)
+def test_structural_case(filename: str, expected_count: int) -> None:
+    """Structural edge cases produce the expected violation count."""
+    fixture = STRUCTURAL_DIR / filename
+    output = run_linter(fixture, LINTER)
+    actual = output.count('REX001')
+    assert actual == expected_count, f'{filename}: expected {expected_count} violations, got {actual}'

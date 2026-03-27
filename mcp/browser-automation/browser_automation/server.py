@@ -45,32 +45,30 @@ Browser Context: All requests share session/cookies - bypasses bot detection.
 Temp Files: Auto-cleanup on shutdown via _temp_dir.
 """
 
+__all__ = [
+    'CapturedResource',
+    'DownloadResourceResult',
+    'FocusableElement',
+    'InteractiveElement',
+    'NavigationResult',
+    'ResourceCapture',
+    'click',
+    'download_resource',
+    'get_aria_snapshot',
+    'get_browser',
+    'get_focusable_elements',
+    'get_interactive_elements',
+    'get_page_content',
+    'lifespan',
+    'main',
+    'navigate',
+    'press_key',
+    'screenshot',
+    'type_text',
+    'wait_for_network_idle',
+]
+
 logger = logging.getLogger(__name__)
-
-
-@asynccontextmanager
-async def lifespan(server: FastMCP) -> AsyncIterator[None]:
-    """Manage browser lifecycle - cleanup on shutdown."""
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        stream=sys.stderr,
-    )
-
-    # Browser is lazy-initialized on first use
-    try:
-        yield
-    finally:
-        # Cleanup: browser.close() closes all contexts/pages automatically
-        global _playwright, _browser
-        if _browser:
-            await _browser.close()
-        if _playwright:
-            await _playwright.stop()
-
-
-mcp = FastMCP('browser-automation', lifespan=lifespan)
 
 
 # Pydantic models for structured output
@@ -129,6 +127,31 @@ class FocusableElement(ClosedModel):
     classes: str
 
 
+@asynccontextmanager
+async def lifespan(server: FastMCP) -> AsyncIterator[None]:
+    """Manage browser lifecycle - cleanup on shutdown."""
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        stream=sys.stderr,
+    )
+
+    # Browser is lazy-initialized on first use
+    try:
+        yield
+    finally:
+        # Cleanup: browser.close() closes all contexts/pages automatically
+        global _playwright, _browser
+        if _browser:
+            await _browser.close()
+        if _playwright:
+            await _playwright.stop()
+
+
+mcp = FastMCP('browser-automation', lifespan=lifespan)
+
+
 # Browser session state (lazy initialized)
 _playwright = None
 _browser: playwright.async_api.Browser | None = None
@@ -143,67 +166,6 @@ _screenshot_dir = Path(_temp_dir.name)
 _capture_temp_dir = tempfile.TemporaryDirectory()
 _capture_dir = Path(_capture_temp_dir.name)
 _capture_counter = 0  # Zero-padded 3-digit counter for capture directories
-
-
-def _save_captured_resource(capture_dir: Path, url: str, data: Mapping[str, Any]) -> CapturedResource | None:
-    """Save single captured resource to hierarchical path. Returns metadata or None on error."""
-    # Create hierarchical path from URL
-    parsed = urlparse(url)
-    rel_path = Path(parsed.netloc) / parsed.path.lstrip('/')
-
-    # Sanitize filename (last component only)
-    parts = list(rel_path.parts)
-    parts[-1] = ''.join(c if c.isalnum() or c in '.-_' else '_' for c in parts[-1])
-    if not parts[-1]:
-        parts[-1] = 'resource'
-    rel_path = Path(*parts) if len(parts) > 1 else Path(parts[0])
-
-    abs_path = capture_dir / rel_path
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Save resource
-    abs_path.write_bytes(data['body'])
-
-    return CapturedResource(
-        url=url,
-        path=str(rel_path),
-        absolute_path=str(abs_path),
-        type=data['type'],
-        size_bytes=data['size'],
-        content_type=data['content_type'],
-        status=data['status'],
-    )
-
-
-def _remove_url_fields(node: Any) -> Any:
-    """Recursively remove /url fields and empty containers from YAML data structure."""
-    if isinstance(node, dict):
-        filtered_dict = {k: _remove_url_fields(v) for k, v in node.items() if k != '/url'}
-        # Remove keys with empty/None values
-        filtered_dict = {k: v for k, v in filtered_dict.items() if v not in (None, [], {})}
-        return filtered_dict if filtered_dict else None
-    elif isinstance(node, list):
-        filtered_list = [_remove_url_fields(item) for item in node]
-        # Filter out None and empty containers
-        filtered_list = [item for item in filtered_list if item not in (None, [], {})]
-        return filtered_list if filtered_list else None
-    else:
-        return node
-
-
-async def _close_browser() -> None:
-    """Tear down browser, context, and page. Reset all global state."""
-    global _playwright, _browser, _context, _page
-
-    if _browser:
-        await _browser.close()
-    if _playwright:
-        await _playwright.stop()
-
-    _page = None
-    _context = None
-    _browser = None
-    _playwright = None
 
 
 async def get_browser() -> tuple[
@@ -815,6 +777,70 @@ def main() -> None:
     """Entry point for uvx installation."""
     logger.info('Starting Browser Automation MCP server')
     mcp.run()
+
+
+# Private helpers
+
+
+def _save_captured_resource(capture_dir: Path, url: str, data: Mapping[str, Any]) -> CapturedResource | None:
+    """Save single captured resource to hierarchical path. Returns metadata or None on error."""
+    # Create hierarchical path from URL
+    parsed = urlparse(url)
+    rel_path = Path(parsed.netloc) / parsed.path.lstrip('/')
+
+    # Sanitize filename (last component only)
+    parts = list(rel_path.parts)
+    parts[-1] = ''.join(c if c.isalnum() or c in '.-_' else '_' for c in parts[-1])
+    if not parts[-1]:
+        parts[-1] = 'resource'
+    rel_path = Path(*parts) if len(parts) > 1 else Path(parts[0])
+
+    abs_path = capture_dir / rel_path
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save resource
+    abs_path.write_bytes(data['body'])
+
+    return CapturedResource(
+        url=url,
+        path=str(rel_path),
+        absolute_path=str(abs_path),
+        type=data['type'],
+        size_bytes=data['size'],
+        content_type=data['content_type'],
+        status=data['status'],
+    )
+
+
+def _remove_url_fields(node: Any) -> Any:
+    """Recursively remove /url fields and empty containers from YAML data structure."""
+    if isinstance(node, dict):
+        filtered_dict = {k: _remove_url_fields(v) for k, v in node.items() if k != '/url'}
+        # Remove keys with empty/None values
+        filtered_dict = {k: v for k, v in filtered_dict.items() if v not in (None, [], {})}
+        return filtered_dict if filtered_dict else None
+    elif isinstance(node, list):
+        filtered_list = [_remove_url_fields(item) for item in node]
+        # Filter out None and empty containers
+        filtered_list = [item for item in filtered_list if item not in (None, [], {})]
+        return filtered_list if filtered_list else None
+    else:
+        return node
+
+
+async def _close_browser() -> None:
+    """Tear down browser, context, and page. Reset all global state."""
+    global _playwright, _browser, _context, _page
+
+    if _browser:
+        await _browser.close()
+    if _playwright:
+        await _playwright.stop()
+
+    _page = None
+    _context = None
+    _browser = None
+    _playwright = None
 
 
 if __name__ == '__main__':

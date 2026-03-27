@@ -14,9 +14,7 @@ import anthropic.types
 from claude_session.schemas import session
 from claude_session.schemas.cc_internal_api.base import FromSdk, FromSession, StrictModel
 
-# ==============================================================================
-# Cache Control (API-only, not persisted to session files)
-# ==============================================================================
+# -- Cache Control (API-only, not persisted to session files) ------------------
 
 
 class CacheControl(StrictModel):
@@ -32,9 +30,7 @@ class CacheControl(StrictModel):
     type: Literal['ephemeral']
 
 
-# ==============================================================================
-# Cache Creation (nested in Usage)
-# ==============================================================================
+# -- Cache Creation (nested in Usage) ------------------------------------------
 
 
 class ApiCacheCreation(StrictModel):
@@ -58,9 +54,7 @@ class ApiCacheCreation(StrictModel):
     ]
 
 
-# ==============================================================================
-# Token Usage
-# ==============================================================================
+# -- Token Usage ---------------------------------------------------------------
 
 
 class ApiUsage(StrictModel):

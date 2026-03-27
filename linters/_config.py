@@ -52,22 +52,6 @@ def load_per_file_ignores(
     return _load_per_file_ignores_cached(tool_name, config_path.resolve())
 
 
-@lru_cache(maxsize=32)
-def _load_per_file_ignores_cached(
-    tool_name: str,
-    config_path: Path,
-) -> Mapping[str, Sequence[str]]:
-    with config_path.open('rb') as f:
-        data = tomllib.load(f)
-    raw = data.get('tool', {}).get(tool_name, {}).get('per-file-ignores', {})
-    for pattern, codes in raw.items():
-        if not isinstance(codes, list):
-            msg = f'per-file-ignores value for {pattern!r} must be a list, got {type(codes).__name__}: use ["{codes}"] instead of "{codes}"'
-            raise TypeError(msg)
-    result: Mapping[str, Sequence[str]] = raw
-    return result
-
-
 def get_per_file_ignored_codes(
     filepath: Path,
     per_file_ignores: Mapping[str, Sequence[str]],
@@ -129,3 +113,19 @@ def get_git_ignored_files(file_paths: Sequence[Path], directory: Path) -> Set[Pa
         return {Path(line) for line in result.stdout.splitlines() if line}
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return set()
+
+
+@lru_cache(maxsize=32)
+def _load_per_file_ignores_cached(
+    tool_name: str,
+    config_path: Path,
+) -> Mapping[str, Sequence[str]]:
+    with config_path.open('rb') as f:
+        data = tomllib.load(f)
+    raw = data.get('tool', {}).get(tool_name, {}).get('per-file-ignores', {})
+    for pattern, codes in raw.items():
+        if not isinstance(codes, list):
+            msg = f'per-file-ignores value for {pattern!r} must be a list, got {type(codes).__name__}: use ["{codes}"] instead of "{codes}"'
+            raise TypeError(msg)
+    result: Mapping[str, Sequence[str]] = raw
+    return result

@@ -31,22 +31,7 @@ _occlusion_specs = [s for s in _all_specs if s['section'] == 'occlusion']
 _duration_specs = [s for s in _all_specs if s['section'] == 'duration_validation']
 
 
-def _assert_hover_result(result: Mapping[str, Any], expect: Mapping[str, Any]) -> None:
-    """Assert hover check result matches YAML expectation."""
-    if expect['success']:
-        assert result['success'], f'Expected hover to succeed but got error: {result.get("error")}'
-    else:
-        assert not result['success'], 'Expected hover to fail but it succeeded'
-        if 'error_contains' in expect:
-            error = result.get('error', '')
-            assert expect['error_contains'] in error, (
-                f'Expected error containing {expect["error_contains"]!r}, got {error!r}'
-            )
-
-
-# ============================================================================
-# STABILITY TESTS
-# ============================================================================
+# -- STABILITY TESTS -----------------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _stability_specs, ids=lambda tc: tc['id'])
@@ -96,9 +81,7 @@ def test_hover_stability(
             )
 
 
-# ============================================================================
-# VISIBILITY TESTS
-# ============================================================================
+# -- VISIBILITY TESTS ----------------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _visibility_specs, ids=lambda tc: tc['id'])
@@ -119,9 +102,7 @@ def test_hover_visibility(
     _assert_hover_result(result, spec['expect'])
 
 
-# ============================================================================
-# OCCLUSION TESTS
-# ============================================================================
+# -- OCCLUSION TESTS -----------------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _occlusion_specs, ids=lambda tc: tc['id'])
@@ -142,9 +123,7 @@ def test_hover_occlusion(
     _assert_hover_result(result, spec['expect'])
 
 
-# ============================================================================
-# DURATION VALIDATION TESTS
-# ============================================================================
+# -- DURATION VALIDATION TESTS -------------------------------------------------
 
 
 @pytest.mark.parametrize('test_case', _duration_specs, ids=lambda tc: tc['id'])
@@ -163,3 +142,19 @@ def test_hover_duration_validation(test_case: dict[str, Any]) -> None:
         assert expected_error in str(exc_info.value), (
             f'Expected error containing {expected_error!r}, got {str(exc_info.value)!r}'
         )
+
+
+# -- Private Helpers ----------------------------------------------------------
+
+
+def _assert_hover_result(result: Mapping[str, Any], expect: Mapping[str, Any]) -> None:
+    """Assert hover check result matches YAML expectation."""
+    if expect['success']:
+        assert result['success'], f'Expected hover to succeed but got error: {result.get("error")}'
+    else:
+        assert not result['success'], 'Expected hover to fail but it succeeded'
+        if 'error_contains' in expect:
+            error = result.get('error', '')
+            assert expect['error_contains'] in error, (
+                f'Expected error containing {expect["error_contains"]!r}, got {error!r}'
+            )

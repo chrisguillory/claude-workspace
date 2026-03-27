@@ -116,9 +116,7 @@ import pydantic
 from claude_session.schemas.session.markers import PathField, PathListField
 from claude_session.schemas.types import BaseStrictModel, EmptyDict, EmptySequence, ModelId, PermissiveModel
 
-# ==============================================================================
-# Schema Version
-# ==============================================================================
+# -- Schema Version ------------------------------------------------------------
 
 SCHEMA_VERSION = '0.2.19'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
@@ -127,9 +125,7 @@ LAST_VALIDATED = '2026-03-21'
 VALIDATION_RECORD_COUNT = 315_107
 
 
-# ==============================================================================
-# Base Configuration
-# ==============================================================================
+# -- Base Configuration --------------------------------------------------------
 
 
 class StrictModel(BaseStrictModel):
@@ -166,9 +162,7 @@ def validated_copy[T: pydantic.BaseModel](model: T, update: Mapping[str, Any]) -
     return model_class(**new_data)
 
 
-# ==============================================================================
-# Message Content Types (Discriminated Union)
-# ==============================================================================
+# -- Message Content Types (Discriminated Union) -------------------------------
 
 
 class ThinkingContent(StrictModel):
@@ -186,9 +180,7 @@ class TextContent(StrictModel):
     text: str
 
 
-# ==============================================================================
-# Tool Use Input Types (for tools that use file paths)
-# ==============================================================================
+# -- Tool Use Input Types (for tools that use file paths) ----------------------
 
 
 class ReadToolInput(StrictModel):
@@ -311,9 +303,7 @@ class TaskOutputToolInput(StrictModel):
     timeout: int | None = None  # Optional timeout in milliseconds
 
 
-# ==============================================================================
-# Bash Tool Input (23,236x occurrences)
-# ==============================================================================
+# -- Bash Tool Input (23,236x occurrences) -------------------------------------
 
 
 class BashToolInput(StrictModel):
@@ -334,9 +324,7 @@ class BashToolInput(StrictModel):
     dangerouslyDisableSandbox: bool | None = None
 
 
-# ==============================================================================
-# Grep Tool Input (2,909x occurrences)
-# ==============================================================================
+# -- Grep Tool Input (2,909x occurrences) --------------------------------------
 
 
 class GrepToolInput(StrictModel):
@@ -384,9 +372,7 @@ class GrepToolInput(StrictModel):
     dash_i: bool | None = pydantic.Field(None, alias='-i')
 
 
-# ==============================================================================
-# Glob Tool Input (2,507x occurrences)
-# ==============================================================================
+# -- Glob Tool Input (2,507x occurrences) --------------------------------------
 
 
 class GlobToolInput(StrictModel):
@@ -401,9 +387,7 @@ class GlobToolInput(StrictModel):
     path: PathField | None = None
 
 
-# ==============================================================================
-# Task Tool Input (872x occurrences)
-# ==============================================================================
+# -- Task Tool Input (872x occurrences) ----------------------------------------
 
 
 class TaskToolInput(StrictModel):
@@ -434,9 +418,7 @@ class TaskToolInput(StrictModel):
     isolation: str | None = None  # Isolation mode (e.g., "worktree") for Agent tool
 
 
-# ==============================================================================
-# TeamCreate Tool Input (Claude Code 2.1.63+)
-# ==============================================================================
+# -- TeamCreate Tool Input (Claude Code 2.1.63+) -------------------------------
 
 
 class TeamCreateToolInput(StrictModel):
@@ -446,9 +428,7 @@ class TeamCreateToolInput(StrictModel):
     description: str
 
 
-# ==============================================================================
-# SendMessage Tool Input (Claude Code 2.1.63+)
-# ==============================================================================
+# -- SendMessage Tool Input (Claude Code 2.1.63+) ------------------------------
 
 
 class SendMessageToolInput(StrictModel):
@@ -460,9 +440,7 @@ class SendMessageToolInput(StrictModel):
     summary: str
 
 
-# ==============================================================================
-# TaskCreate Tool Input (Claude Code 2.1.17+)
-# ==============================================================================
+# -- TaskCreate Tool Input (Claude Code 2.1.17+) -------------------------------
 
 
 class TaskCreateToolInput(StrictModel):
@@ -479,9 +457,7 @@ class TaskCreateToolInput(StrictModel):
     activeForm: str | None = None
 
 
-# ==============================================================================
-# TaskUpdate Tool Input (Claude Code 2.1.17+)
-# ==============================================================================
+# -- TaskUpdate Tool Input (Claude Code 2.1.17+) -------------------------------
 
 
 class TaskUpdateToolInput(StrictModel):
@@ -505,9 +481,7 @@ class TaskUpdateToolInput(StrictModel):
     addBlockedBy: Sequence[str] | None = None
 
 
-# ==============================================================================
-# TaskList Tool Input (Claude Code 2.1.17+)
-# ==============================================================================
+# -- TaskList Tool Input (Claude Code 2.1.17+) ---------------------------------
 
 
 class TaskListToolInput(StrictModel):
@@ -516,9 +490,7 @@ class TaskListToolInput(StrictModel):
     pass
 
 
-# ==============================================================================
-# TodoWrite Tool Input (3,186x occurrences)
-# ==============================================================================
+# -- TodoWrite Tool Input (3,186x occurrences) ---------------------------------
 
 
 class TodoWriteToolInput(StrictModel):
@@ -531,9 +503,7 @@ class TodoWriteToolInput(StrictModel):
     todos: Sequence[TodoItem]
 
 
-# ==============================================================================
-# WebSearch Tool Input (284x occurrences)
-# ==============================================================================
+# -- WebSearch Tool Input (284x occurrences) -----------------------------------
 
 
 class WebSearchToolInput(StrictModel):
@@ -550,9 +520,7 @@ class WebSearchToolInput(StrictModel):
     blocked_domains: Sequence[str] | None = None
 
 
-# ==============================================================================
-# WebFetch Tool Input (177x occurrences)
-# ==============================================================================
+# -- WebFetch Tool Input (177x occurrences) ------------------------------------
 
 
 class WebFetchToolInput(StrictModel):
@@ -567,9 +535,7 @@ class WebFetchToolInput(StrictModel):
     prompt: str
 
 
-# ==============================================================================
-# BashOutput Tool Input (192x occurrences)
-# ==============================================================================
+# -- BashOutput Tool Input (192x occurrences) ----------------------------------
 
 
 class BashOutputToolInput(StrictModel):
@@ -588,9 +554,7 @@ class BashOutputToolInput(StrictModel):
     wait_up_to: int | None = None
 
 
-# ==============================================================================
-# AskUserQuestion Tool Input (159x occurrences)
-# ==============================================================================
+# -- AskUserQuestion Tool Input (159x occurrences) -----------------------------
 
 
 class AskUserQuestionToolInput(StrictModel):
@@ -605,9 +569,7 @@ class AskUserQuestionToolInput(StrictModel):
     answers: Mapping[str, str] | None = None
 
 
-# ==============================================================================
-# ExitPlanMode Tool Input (150x occurrences)
-# ==============================================================================
+# -- ExitPlanMode Tool Input (150x occurrences) --------------------------------
 
 
 class PromptPermission(StrictModel):
@@ -637,9 +599,7 @@ class ExitPlanModeToolInput(StrictModel):
     planFilePath: str | None = None
 
 
-# ==============================================================================
-# KillShell Tool Input (58x occurrences)
-# ==============================================================================
+# -- KillShell Tool Input (58x occurrences) ------------------------------------
 
 
 class KillShellToolInput(StrictModel):
@@ -652,9 +612,7 @@ class KillShellToolInput(StrictModel):
     shell_id: str
 
 
-# ==============================================================================
-# ListMcpResourcesTool Input (5x occurrences)
-# ==============================================================================
+# -- ListMcpResourcesTool Input (5x occurrences) -------------------------------
 
 
 class ListMcpResourcesToolInput(StrictModel):
@@ -667,9 +625,7 @@ class ListMcpResourcesToolInput(StrictModel):
     server: str | None = None
 
 
-# ==============================================================================
-# NotebookEdit Tool Input
-# ==============================================================================
+# -- NotebookEdit Tool Input ---------------------------------------------------
 
 
 class NotebookEditToolInput(StrictModel):
@@ -690,9 +646,7 @@ class NotebookEditToolInput(StrictModel):
     edit_mode: Literal['replace', 'insert', 'delete'] | None = None
 
 
-# ==============================================================================
-# ReadMcpResource Tool Input
-# ==============================================================================
+# -- ReadMcpResource Tool Input ------------------------------------------------
 
 
 class ReadMcpResourceToolInput(StrictModel):
@@ -707,9 +661,7 @@ class ReadMcpResourceToolInput(StrictModel):
     uri: str
 
 
-# ==============================================================================
-# LSP Tool Input (Language Server Protocol operations)
-# ==============================================================================
+# -- LSP Tool Input (Language Server Protocol operations) ----------------------
 
 
 LSPOperation = Literal[
@@ -741,9 +693,7 @@ class LSPToolInput(StrictModel):
     character: int
 
 
-# ==============================================================================
-# MCPSearch Tool Input
-# ==============================================================================
+# -- MCPSearch Tool Input ------------------------------------------------------
 
 
 class MCPSearchToolInput(StrictModel):
@@ -758,9 +708,7 @@ class MCPSearchToolInput(StrictModel):
     max_results: int | str | None = None  # Can be "1" string or 1 int depending on serialization
 
 
-# ==============================================================================
-# MCP Tool Input (Third-Party Tools)
-# ==============================================================================
+# -- MCP Tool Input (Third-Party Tools) ----------------------------------------
 
 
 class MCPToolInput(PermissiveModel):
@@ -825,9 +773,7 @@ ToolInput = Annotated[
 ]
 
 
-# ==============================================================================
-# Image Source (must be defined before ImageContent)
-# ==============================================================================
+# -- Image Source (must be defined before ImageContent) ------------------------
 
 
 class ImageSource(StrictModel):
@@ -940,9 +886,7 @@ MessageContent = Annotated[
 ]
 
 
-# ==============================================================================
-# Context Management (Claude Code 2.0.51+)
-# ==============================================================================
+# -- Context Management (Claude Code 2.0.51+) ----------------------------------
 
 
 class ClearThinkingEdit(StrictModel):
@@ -963,9 +907,7 @@ class ContextManagement(StrictModel):
     applied_edits: Sequence[AppliedEdit]  # Can be empty or contain edit records
 
 
-# ==============================================================================
-# Message Structure
-# ==============================================================================
+# -- Message Structure ---------------------------------------------------------
 
 
 class Message(StrictModel):
@@ -999,9 +941,7 @@ class Message(StrictModel):
     )
 
 
-# ==============================================================================
-# Token Usage
-# ==============================================================================
+# -- Token Usage ---------------------------------------------------------------
 
 
 class CacheCreation(StrictModel):
@@ -1034,9 +974,7 @@ class TokenUsage(StrictModel):
     research_preview_2026_02: str | None = None  # Research preview feature flag (e.g. 'active')
 
 
-# ==============================================================================
-# Thinking Metadata
-# ==============================================================================
+# -- Thinking Metadata ---------------------------------------------------------
 
 
 def _normalize_ultrathink(v: Any) -> Any:
@@ -1079,9 +1017,7 @@ class SimpleThinkingMetadata(StrictModel):
     maxThinkingTokens: int
 
 
-# ==============================================================================
-# Todo Item
-# ==============================================================================
+# -- Todo Item -----------------------------------------------------------------
 
 
 class TodoItem(StrictModel):
@@ -1092,9 +1028,7 @@ class TodoItem(StrictModel):
     activeForm: str
 
 
-# ==============================================================================
-# Compact Metadata
-# ==============================================================================
+# -- Compact Metadata ----------------------------------------------------------
 
 
 class CompactMetadata(StrictModel):
@@ -1114,9 +1048,7 @@ class MicrocompactMetadata(StrictModel):
     clearedAttachmentUUIDs: EmptySequence  # Only empty arrays observed
 
 
-# ==============================================================================
-# API Error
-# ==============================================================================
+# -- API Error -----------------------------------------------------------------
 
 
 class ApiErrorDetail(StrictModel):
@@ -1164,9 +1096,7 @@ class EmptyError(StrictModel):
     pass
 
 
-# ==============================================================================
-# MCP Metadata (Claude Code 2.1.19+)
-# ==============================================================================
+# -- MCP Metadata (Claude Code 2.1.19+) ----------------------------------------
 
 
 class MCPStructuredContent(PermissiveModel):
@@ -1217,9 +1147,7 @@ class McpMeta(StrictModel):
     structuredContent: MCPStructuredContent | None = None
 
 
-# ==============================================================================
-# File Info
-# ==============================================================================
+# -- File Info -----------------------------------------------------------------
 
 
 class FileInfo(StrictModel):
@@ -1258,9 +1186,7 @@ class ImageDimensions(StrictModel):
     displayHeight: int
 
 
-# ==============================================================================
-# Structured Patch
-# ==============================================================================
+# -- Structured Patch ----------------------------------------------------------
 
 
 class PatchHunk(StrictModel):
@@ -1273,9 +1199,7 @@ class PatchHunk(StrictModel):
     lines: Sequence[str]
 
 
-# ==============================================================================
-# Tool Use Result Structures
-# ==============================================================================
+# -- Tool Use Result Structures ------------------------------------------------
 
 
 class BashToolResult(StrictModel):
@@ -1393,9 +1317,7 @@ class TaskToolResult(StrictModel):
     agentId: str  # Always present (621/621)
 
 
-# ==============================================================================
-# TaskCreate/TaskUpdate/TaskList Result Structures (Claude Code 2.1.17+)
-# ==============================================================================
+# -- TaskCreate/TaskUpdate/TaskList Result Structures (Claude Code 2.1.17+) ----
 
 
 class TaskListItem(StrictModel):
@@ -1472,15 +1394,12 @@ class LSPToolResult(StrictModel):
     fileCount: int
 
 
-# ==============================================================================
-# Task Model (Session Artifact - On-Disk Format)
-# ==============================================================================
+# -- Task Model (Session Artifact - On-Disk Format) ----------------------------
 #
 # Task files are session-scoped artifacts stored separately from session JSONL.
 # They don't appear in session records but are persisted under the session ID.
 #
 # Path: ~/.claude/tasks/{session_id}/{id}.json
-# ==============================================================================
 
 
 class Task(StrictModel):
@@ -1499,9 +1418,7 @@ class Task(StrictModel):
     owner: str | None = None  # Agent/owner identifier
 
 
-# ==============================================================================
-# AskUserQuestion Structures
-# ==============================================================================
+# -- AskUserQuestion Structures ------------------------------------------------
 
 
 class QuestionOption(StrictModel):
@@ -1537,9 +1454,7 @@ class AskUserQuestionToolResult(StrictModel):
     annotations: Mapping[str, QuestionAnnotation] | None = None  # Per-question annotations (Claude Code 2.1.45+)
 
 
-# ==============================================================================
-# WebSearch Structures
-# ==============================================================================
+# -- WebSearch Structures ------------------------------------------------------
 
 
 class WebSearchResult(StrictModel):
@@ -1651,9 +1566,7 @@ class BashOutputToolResult(StrictModel):
     filterPattern: str | None = None
 
 
-# ==============================================================================
-# TaskOutput Polling Results
-# ==============================================================================
+# -- TaskOutput Polling Results ------------------------------------------------
 
 
 class BackgroundTask(StrictModel):
@@ -1677,9 +1590,7 @@ class TaskOutputPollingResult(StrictModel):
     task: BackgroundTask | None  # null when retrieval_status='timeout'
 
 
-# ==============================================================================
-# Async Task Launch Results
-# ==============================================================================
+# -- Async Task Launch Results -------------------------------------------------
 
 
 class AsyncTaskLaunchResult(StrictModel):
@@ -1694,9 +1605,7 @@ class AsyncTaskLaunchResult(StrictModel):
     canReadOutputFile: bool | None = None  # Whether the output file can be read (2.1.47+)
 
 
-# ==============================================================================
-# Multi-Agent Retrieval Results
-# ==============================================================================
+# -- Multi-Agent Retrieval Results ---------------------------------------------
 
 
 class AgentState(StrictModel):
@@ -1715,9 +1624,7 @@ class AgentsRetrievalResult(StrictModel):
     agents: Mapping[str, AgentState]  # Empty dict when not_ready
 
 
-# ==============================================================================
-# KillShell Message Variant
-# ==============================================================================
+# -- KillShell Message Variant -------------------------------------------------
 
 
 class KillShellMessageResult(StrictModel):
@@ -1727,9 +1634,7 @@ class KillShellMessageResult(StrictModel):
     shell_id: str  # Note: uses snake_case, not camelCase
 
 
-# ==============================================================================
-# WebSearch Nested Structure Variant
-# ==============================================================================
+# -- WebSearch Nested Structure Variant ----------------------------------------
 
 
 class WebSearchResultWrapper(StrictModel):
@@ -1747,9 +1652,7 @@ class WebSearchNestedResult(StrictModel):
     durationSeconds: float
 
 
-# ==============================================================================
-# Handoff Command Result
-# ==============================================================================
+# -- Handoff Command Result ----------------------------------------------------
 
 
 class HandoffCommandResult(StrictModel):
@@ -1760,9 +1663,7 @@ class HandoffCommandResult(StrictModel):
     allowedTools: Sequence[str]
 
 
-# ==============================================================================
-# EnterPlanMode Tool Result
-# ==============================================================================
+# -- EnterPlanMode Tool Result -------------------------------------------------
 
 
 class EnterPlanModeToolResult(StrictModel):
@@ -1778,9 +1679,7 @@ class SkillToolResult(StrictModel):
     commandName: str  # Skill name (e.g. 'canvas-design')
 
 
-# ==============================================================================
-# EnterWorktree Tool Result (Claude Code 2.1.63+)
-# ==============================================================================
+# -- EnterWorktree Tool Result (Claude Code 2.1.63+) ---------------------------
 
 
 class EnterWorktreeToolResult(StrictModel):
@@ -1791,9 +1690,7 @@ class EnterWorktreeToolResult(StrictModel):
     message: str  # Confirmation message
 
 
-# ==============================================================================
-# TeamCreate Tool Result (Claude Code 2.1.63+)
-# ==============================================================================
+# -- TeamCreate Tool Result (Claude Code 2.1.63+) ------------------------------
 
 
 class TeamCreateToolResult(StrictModel):
@@ -1804,9 +1701,7 @@ class TeamCreateToolResult(StrictModel):
     lead_agent_id: str  # ID of the team lead agent
 
 
-# ==============================================================================
-# Agent Teammate Spawned Result (Claude Code 2.1.63+)
-# ==============================================================================
+# -- Agent Teammate Spawned Result (Claude Code 2.1.63+) -----------------------
 
 
 class AgentTeammateSpawnedResult(StrictModel):
@@ -1828,9 +1723,7 @@ class AgentTeammateSpawnedResult(StrictModel):
     plan_mode_required: bool  # Whether plan mode is required for this agent
 
 
-# ==============================================================================
-# SendMessage Tool Result (Claude Code 2.1.63+)
-# ==============================================================================
+# -- SendMessage Tool Result (Claude Code 2.1.63+) -----------------------------
 
 
 class SendMessageRouting(StrictModel):
@@ -1852,9 +1745,7 @@ class SendMessageToolResult(StrictModel):
     routing: SendMessageRouting
 
 
-# ==============================================================================
-# MCP Tool Result (Third-Party Tools)
-# ==============================================================================
+# -- MCP Tool Result (Third-Party Tools) ---------------------------------------
 
 
 class MCPToolResult(PermissiveModel):
@@ -1925,9 +1816,7 @@ ToolResult = Annotated[
     pydantic.Field(union_mode='left_to_right'),
 ]
 
-# ==============================================================================
-# Base Record
-# ==============================================================================
+# -- Base Record ---------------------------------------------------------------
 
 
 class BaseRecord(StrictModel):
@@ -1939,9 +1828,7 @@ class BaseRecord(StrictModel):
     sessionId: str
 
 
-# ==============================================================================
-# User Record
-# ==============================================================================
+# -- User Record ---------------------------------------------------------------
 
 
 class UserRecord(BaseRecord):
@@ -2024,9 +1911,7 @@ class UserRecord(BaseRecord):
     agentName: str | None = pydantic.Field(None, description='Agent name within team (may be absent for lead agent)')
 
 
-# ==============================================================================
-# Assistant Record
-# ==============================================================================
+# -- Assistant Record ----------------------------------------------------------
 
 
 class AssistantRecord(BaseRecord):
@@ -2070,9 +1955,7 @@ class AssistantRecord(BaseRecord):
     agentName: str | None = pydantic.Field(None, description='Agent name within team')
 
 
-# ==============================================================================
-# Summary Record (does NOT inherit from BaseRecord - different schema)
-# ==============================================================================
+# -- Summary Record (does NOT inherit from BaseRecord - different schema) ------
 
 
 class SummaryRecord(StrictModel):
@@ -2088,9 +1971,7 @@ class SummaryRecord(StrictModel):
     leafUuid: str
 
 
-# ==============================================================================
-# System Record
-# ==============================================================================
+# -- System Record -------------------------------------------------------------
 
 
 class SystemRecord(BaseRecord):
@@ -2103,9 +1984,7 @@ class SystemRecord(BaseRecord):
     message: str  # Always string (0 dict occurrences across all sessions)
 
 
-# ==============================================================================
-# System Subtype Records (discriminated by subtype field)
-# ==============================================================================
+# -- System Subtype Records (discriminated by subtype field) -------------------
 
 
 class LocalCommandSystemRecord(BaseRecord):
@@ -2304,9 +2183,7 @@ SystemSubtypeRecord = Annotated[
 ]
 
 
-# ==============================================================================
-# File History Snapshot Record (does NOT inherit from BaseRecord - different schema)
-# ==============================================================================
+# -- File History Snapshot Record (does NOT inherit from BaseRecord - different schema) ---
 
 
 class FileBackupInfo(StrictModel):
@@ -2334,9 +2211,7 @@ class FileHistorySnapshotRecord(StrictModel):
     isSnapshotUpdate: bool
 
 
-# ==============================================================================
-# Queue Operation Record (does NOT inherit from BaseRecord - no uuid field)
-# ==============================================================================
+# -- Queue Operation Record (does NOT inherit from BaseRecord - no uuid field) ---
 
 
 class QueueOperationRecord(StrictModel):
@@ -2352,9 +2227,7 @@ class QueueOperationRecord(StrictModel):
     data: None = pydantic.Field(None, description='Reserved for future use', json_schema_extra={'status': 'reserved'})
 
 
-# ==============================================================================
-# Custom Title Record (does NOT inherit from BaseRecord - minimal schema)
-# ==============================================================================
+# -- Custom Title Record (does NOT inherit from BaseRecord - minimal schema) ---
 
 
 class CustomTitleRecord(StrictModel):
@@ -2365,9 +2238,7 @@ class CustomTitleRecord(StrictModel):
     sessionId: str
 
 
-# ==============================================================================
-# Progress Record (Claude Code 2.1.9+)
-# ==============================================================================
+# -- Progress Record (Claude Code 2.1.9+) --------------------------------------
 
 
 class HookProgressData(StrictModel):
@@ -2497,9 +2368,7 @@ class ProgressRecord(StrictModel):
     agentName: str | None = pydantic.Field(None, description='Agent name within team')
 
 
-# ==============================================================================
-# PR Link Record (Claude Code 2.1.31+)
-# ==============================================================================
+# -- PR Link Record (Claude Code 2.1.31+) --------------------------------------
 
 
 class PrLinkRecord(StrictModel):
@@ -2513,9 +2382,7 @@ class PrLinkRecord(StrictModel):
     prRepository: str
 
 
-# ==============================================================================
-# Saved Hook Context Record (Claude Code 2.1.27+)
-# ==============================================================================
+# -- Saved Hook Context Record (Claude Code 2.1.27+) ---------------------------
 
 
 class SavedHookContextRecord(StrictModel):
@@ -2538,9 +2405,7 @@ class SavedHookContextRecord(StrictModel):
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
 
 
-# ==============================================================================
-# Agent Name Record (Claude Code 2.1.80+)
-# ==============================================================================
+# -- Agent Name Record (Claude Code 2.1.80+) -----------------------------------
 
 
 class AgentNameRecord(StrictModel):
@@ -2554,9 +2419,7 @@ class AgentNameRecord(StrictModel):
     sessionId: str
 
 
-# ==============================================================================
-# Last Prompt Record (Claude Code 2.1.69+)
-# ==============================================================================
+# -- Last Prompt Record (Claude Code 2.1.69+) ----------------------------------
 
 
 class LastPromptRecord(StrictModel):
@@ -2567,9 +2430,7 @@ class LastPromptRecord(StrictModel):
     sessionId: str
 
 
-# ==============================================================================
-# Session Record (Discriminated Union)
-# ==============================================================================
+# -- Session Record (Discriminated Union) --------------------------------------
 
 # Union of all record types (validated left-to-right)
 # NOTE: Cannot use discriminator='type' because multiple records have type='system'
@@ -2602,9 +2463,7 @@ SessionRecord = Annotated[
 SessionRecordAdapter: pydantic.TypeAdapter[SessionRecord] = pydantic.TypeAdapter(SessionRecord)
 
 
-# ==============================================================================
-# Fast Dispatch Validation
-# ==============================================================================
+# -- Fast Dispatch Validation --------------------------------------------------
 
 # Per-type TypeAdapters bypass the 17-member left-to-right union scan.
 # When adding a new record type to SessionRecord, also add a branch below.
@@ -2675,9 +2534,7 @@ def validate_session_record(data: dict[str, Any]) -> SessionRecord:
         return SessionRecordAdapter.validate_python(data)
 
 
-# ==============================================================================
-# Session Metadata
-# ==============================================================================
+# -- Session Metadata ----------------------------------------------------------
 
 
 class SessionMetadata(StrictModel):
@@ -2703,9 +2560,7 @@ class SessionMetadata(StrictModel):
     git_branches: Sequence[str]
 
 
-# ==============================================================================
-# Analysis Results
-# ==============================================================================
+# -- Analysis Results ----------------------------------------------------------
 
 
 class SessionAnalysis(StrictModel):

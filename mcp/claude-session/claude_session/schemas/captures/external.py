@@ -18,9 +18,7 @@ from claude_session.schemas.captures.gcs import RawTextBody
 from claude_session.schemas.cc_internal_api import EmptyBody
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
-# ==============================================================================
-# OAuth Token (console.anthropic.com)
-# ==============================================================================
+# -- OAuth Token (console.anthropic.com) ---------------------------------------
 
 
 class OAuthTokenRequest(StrictModel):
@@ -85,9 +83,7 @@ class OAuthTokenResponseCapture(ConsoleResponseCapture):
     body: OAuthTokenResponse
 
 
-# ==============================================================================
-# Domain Info (claude.ai)
-# ==============================================================================
+# -- Domain Info (claude.ai) ---------------------------------------------------
 
 
 class DomainInfoResponse(StrictModel):
@@ -122,9 +118,7 @@ class DomainInfoResponseCapture(ClaudeAiResponseCapture):
     body: DomainInfoResponse
 
 
-# ==============================================================================
-# Documentation Fetches (code.claude.com, platform.claude.com)
-# ==============================================================================
+# -- Documentation Fetches (code.claude.com, platform.claude.com) --------------
 
 
 class CodeClaudeComRequestCapture(RequestCapture):

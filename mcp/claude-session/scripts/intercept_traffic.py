@@ -99,9 +99,7 @@ from expiringdict import ExpiringDict
 from mitmproxy import addonmanager, connection, http
 from pydantic import TypeAdapter
 
-# ==============================================================================
-# Configuration
-# ==============================================================================
+# -- Configuration -------------------------------------------------------------
 
 CAPTURE_VERSION = 2  # Increment when capture format changes
 
@@ -141,9 +139,7 @@ _SESSION_CACHE_MTIME: float = 0.0
 _SESSION_CACHE_LOCK = threading.Lock()
 
 
-# ==============================================================================
-# Claude Code Process Verification
-# ==============================================================================
+# -- Claude Code Process Verification ------------------------------------------
 
 
 def _is_claude_code_process(pid: int) -> bool:
@@ -269,9 +265,7 @@ def _get_session_with_retry(pid: int) -> Session | None:
     return None
 
 
-# ==============================================================================
-# Session Correlation
-# ==============================================================================
+# -- Session Correlation -------------------------------------------------------
 
 
 def _get_pid_for_port(source_port: int) -> int | None:
@@ -399,9 +393,7 @@ def _write_manifest(session_dir: Path, session: Session | None) -> None:
     _save_json_atomic(manifest_path, manifest)
 
 
-# ==============================================================================
-# Thread-Safe Counter
-# ==============================================================================
+# -- Thread-Safe Counter -------------------------------------------------------
 
 
 class ThreadSafeCounter:
@@ -426,9 +418,7 @@ class ThreadSafeCounter:
 COUNTER = ThreadSafeCounter()
 
 
-# ==============================================================================
-# Utility Functions
-# ==============================================================================
+# -- Utility Functions ---------------------------------------------------------
 
 
 def _log(message: str) -> None:
@@ -493,9 +483,7 @@ def _save_json_atomic(filename: Path, data: dict[str, Any]) -> bool:
         return False
 
 
-# ==============================================================================
-# SSE Parsing (WHATWG HTML § 9.2.5 compliant)
-# ==============================================================================
+# -- SSE Parsing (WHATWG HTML § 9.2.5 compliant) -------------------------------
 
 
 def _parse_sse_events(content: bytes) -> list[dict[str, Any]]:
@@ -553,9 +541,7 @@ def _parse_sse_events(content: bytes) -> list[dict[str, Any]]:
     return events
 
 
-# ==============================================================================
-# Body Parsing
-# ==============================================================================
+# -- Body Parsing --------------------------------------------------------------
 
 
 def _parse_body(content: bytes | None, content_type: str) -> dict[str, Any]:
@@ -674,9 +660,7 @@ def _parse_body(content: bytes | None, content_type: str) -> dict[str, Any]:
     }
 
 
-# ==============================================================================
-# Connection Timing
-# ==============================================================================
+# -- Connection Timing ---------------------------------------------------------
 
 
 def _extract_connection_timing(
@@ -690,9 +674,7 @@ def _extract_connection_timing(
     return timing if timing else None
 
 
-# ==============================================================================
-# Lifecycle Hooks
-# ==============================================================================
+# -- Lifecycle Hooks -----------------------------------------------------------
 
 
 def load(loader: addonmanager.Loader) -> None:
@@ -715,9 +697,7 @@ def done() -> None:
     _log(f'  WebSocket flows: {COUNTER.get("ws")}\n')
 
 
-# ==============================================================================
-# Session Discovery
-# ==============================================================================
+# -- Session Discovery ---------------------------------------------------------
 
 
 def _get_session_for_connection(client_id: str) -> Session | None:
@@ -770,9 +750,7 @@ def client_disconnected(client: connection.Client) -> None:
         _CONNECTION_SESSIONS.pop(client.id, None)
 
 
-# ==============================================================================
-# HTTP Capture
-# ==============================================================================
+# -- HTTP Capture --------------------------------------------------------------
 
 
 def request(flow: http.HTTPFlow) -> None:
@@ -980,10 +958,8 @@ def error(flow: http.HTTPFlow) -> None:
     _log(f'  Saved: {filename.name}\n')
 
 
-# ==============================================================================
 # WebSocket Support
 # Note: Since mitmproxy 6+, WebSocket hooks receive http.HTTPFlow
-# ==============================================================================
 
 
 def websocket_start(flow: http.HTTPFlow) -> None:

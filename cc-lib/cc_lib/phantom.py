@@ -36,6 +36,10 @@ stops growing - signaling the workaround is dead code and can be removed.
 
 from __future__ import annotations
 
+__all__ = [
+    'PhantomHandler',
+]
+
 import json
 import tempfile
 from collections.abc import Set
