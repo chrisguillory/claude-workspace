@@ -134,36 +134,6 @@ def send_response(response: DriverMessage) -> None:
     sys.stdout.flush()
 
 
-def _split_last_expression(code: str) -> tuple[str, str] | None:
-    """Split code into preceding statements and final expression.
-
-    Uses ast.unparse on AST nodes for splitting, which correctly handles
-    semicolons (multiple statements on one line) and multi-line expressions.
-
-    Returns:
-        (preceding_code, expression_code) or None if last statement isn't an expression.
-    """
-    try:
-        tree = ast.parse(code)
-        if not tree.body:
-            return None
-
-        last_node = tree.body[-1]
-        if not isinstance(last_node, ast.Expr):
-            return None
-
-        # Build preceding code from all nodes except the last
-        if len(tree.body) > 1:
-            preceding = ast.unparse(ast.Module(body=tree.body[:-1], type_ignores=[]))
-        else:
-            preceding = ''
-
-        expr_code = ast.unparse(last_node.value)
-        return preceding, expr_code
-    except SyntaxError:
-        return None
-
-
 def execute_code(code: str) -> ExecuteResponse:
     """Execute code in persistent scope.
 
@@ -261,6 +231,36 @@ def main() -> None:
                     traceback=None,
                 ),
             )
+
+
+def _split_last_expression(code: str) -> tuple[str, str] | None:
+    """Split code into preceding statements and final expression.
+
+    Uses ast.unparse on AST nodes for splitting, which correctly handles
+    semicolons (multiple statements on one line) and multi-line expressions.
+
+    Returns:
+        (preceding_code, expression_code) or None if last statement isn't an expression.
+    """
+    try:
+        tree = ast.parse(code)
+        if not tree.body:
+            return None
+
+        last_node = tree.body[-1]
+        if not isinstance(last_node, ast.Expr):
+            return None
+
+        # Build preceding code from all nodes except the last
+        if len(tree.body) > 1:
+            preceding = ast.unparse(ast.Module(body=tree.body[:-1], type_ignores=[]))
+        else:
+            preceding = ''
+
+        expr_code = ast.unparse(last_node.value)
+        return preceding, expr_code
+    except SyntaxError:
+        return None
 
 
 if __name__ == '__main__':

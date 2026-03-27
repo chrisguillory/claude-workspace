@@ -78,6 +78,27 @@ from .models import (
     ProfileStateOriginStorage,
 )
 
+
+@dataclass
+class SessionStorageExportResult:
+    """Result from sessionStorage export with source metadata."""
+
+    storage: Mapping[str, Mapping[str, str]]
+    source: Literal['live', 'disk']
+    warning: str | None = None
+
+
+class AppleScriptNotEnabledError(Exception):
+    """Raised when Chrome is running but AppleScript JS execution is disabled.
+
+    This is a fail-first error that forces the user to either:
+    1. Enable Chrome > View > Developer > Allow JavaScript from Apple Events
+    2. Explicitly opt out with live_session_storage_via_applescript=False
+    """
+
+    pass
+
+
 # -- Chrome Profile Path Resolution --------------------------------------------
 
 
@@ -110,6 +131,409 @@ def get_chrome_profile_path(profile_name: str = 'Default') -> Path:
         raise FileNotFoundError(f'Chrome profile not found: {profile_path}\nAvailable profiles: {available}')
 
     return profile_path
+
+
+def export_cookies(
+    profile_path: Path,
+    origins_filter: Sequence[str] | None = None,
+) -> Sequence[ProfileStateCookie]:
+    """Export cookies from any Chrome profile with full decryption.
+
+    Unlike browser-cookie3, this supports ANY Chrome profile, not just Default.
+    Uses direct Keychain access + AES decryption.
+
+    Args:
+        profile_path: Path to Chrome profile directory
+        origins_filter: Optional domain patterns to include
+
+    Returns:
+        Sequence of ProfileStateCookie models
+
+    Raises:
+        FileNotFoundError: If Cookies database doesn't exist
+        RuntimeError: If Keychain access fails
+        sqlite3.Error: If database read fails
+        ValueError: If cookie decryption fails
+    """
+    cookies: list[ProfileStateCookie] = []
+
+    cookies_db = profile_path / 'Cookies'
+    if not cookies_db.exists():
+        raise FileNotFoundError(f'Cookies database not found: {cookies_db}')
+
+    # Get encryption key from Keychain (shared across all profiles)
+    keychain_password = _get_chrome_encryption_key()
+    aes_key = _derive_aes_key(keychain_password)
+
+    # Detect Chrome version for hash handling
+    chrome_version = _get_chrome_cookies_version(cookies_db)
+
+    # Read and decrypt all cookies from this profile's SQLite
+    conn = sqlite3.connect(f'file:{cookies_db}?mode=ro', uri=True)
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT host_key, name, path, expires_utc, is_secure,
+                   is_httponly, samesite, value, encrypted_value
+            FROM cookies
+        """)
+
+        for row in cursor.fetchall():
+            (
+                host,
+                name,
+                path,
+                expires_utc,
+                secure,
+                httponly,
+                samesite,
+                value,
+                encrypted_value,
+            ) = row
+
+            # Apply origin filter (RFC 6265 domain matching)
+            if origins_filter:
+                if not any(_domain_matches(host, pattern) for pattern in origins_filter):
+                    continue
+
+            # Decrypt if needed
+            if encrypted_value:
+                cookie_value = _decrypt_cookie_value(encrypted_value, aes_key, chrome_version)
+            else:
+                cookie_value = value or ''
+
+            # Convert Chrome epoch to Unix timestamp
+            # Chrome epoch: microseconds since 1601-01-01
+            # Unix epoch: seconds since 1970-01-01
+            # Offset: 11644473600 seconds
+            if expires_utc and expires_utc > 0:
+                expires = float(expires_utc // 1_000_000 - 11644473600)
+            else:
+                expires = -1.0  # Session cookie
+
+            cookies.append(
+                ProfileStateCookie(
+                    name=name,
+                    value=cookie_value,
+                    domain=host,
+                    path=path,
+                    expires=expires,
+                    http_only=bool(httponly),
+                    secure=bool(secure),
+                    same_site=_SAMESITE_MAP.get(samesite, 'Lax'),
+                ),
+            )
+    finally:
+        conn.close()
+
+    return cookies
+
+
+# -- localStorage Export -------------------------------------------------------
+
+
+def export_local_storage(
+    profile_path: Path,
+    origins_filter: Sequence[str] | None = None,
+) -> Mapping[str, Mapping[str, str]]:
+    """Export localStorage from Chrome's LevelDB.
+
+    Args:
+        profile_path: Path to Chrome profile directory
+        origins_filter: Optional origin patterns to include
+
+    Returns:
+        Mapping of {origin: {key: value, ...}}
+
+    Raises:
+        FileNotFoundError: If localStorage path doesn't exist
+    """
+    storage: dict[str, dict[str, str]] = {}
+
+    # CRITICAL: localStorage is in "Local Storage/leveldb/", not "Local Storage/"
+    leveldb_path = profile_path / 'Local Storage' / 'leveldb'
+
+    if not leveldb_path.exists():
+        raise FileNotFoundError(f'localStorage path not found: {leveldb_path}')
+
+    with ccl_chromium_localstorage.LocalStoreDb(leveldb_path) as ls:
+        for storage_key in ls.iter_storage_keys():
+            # Filter origins (extract domain from URL, then RFC 6265 matching)
+            if origins_filter:
+                domain = _extract_domain_from_origin(storage_key)
+                if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
+                    continue
+
+            origin_storage: dict[str, str] = {}
+
+            # Handle "orphan" storage keys: iter_storage_keys() returns keys from META:
+            # entries, but records may have been deleted. The library raises KeyError
+            # when accessing _records for these orphan keys.
+            try:
+                for record in ls.iter_records_for_storage_key(storage_key):
+                    value = str(record.value) if record.value else ''
+                    origin_storage[record.script_key] = value
+            except KeyError:
+                # Orphan key: META: entry exists but no record data (localStorage cleared)
+                # Skip silently - there's no data to export
+                continue
+
+            if origin_storage:
+                # Normalize origin to match window.location.origin (no trailing slash)
+                normalized_key = _normalize_origin_url(storage_key)
+                if normalized_key in storage:
+                    # Merge with existing (collision from normalization)
+                    storage[normalized_key].update(origin_storage)
+                else:
+                    storage[normalized_key] = origin_storage
+
+    return storage
+
+
+def export_session_storage(
+    profile_path: Path,
+    origins_filter: Sequence[str] | None = None,
+    live_session_storage_via_applescript: bool = True,
+) -> SessionStorageExportResult:
+    """Export sessionStorage with fail-first live extraction.
+
+    On macOS, attempts to extract LIVE sessionStorage from open Chrome tabs
+    via AppleScript. This provides accurate, real-time data rather than
+    potentially stale disk-persisted data.
+
+    Fail-First Behavior (live_session_storage_via_applescript=True, the default):
+    - If Chrome is running but the AppleScript setting is disabled, FAILS
+      with AppleScriptNotEnabledError containing setup instructions.
+    - If Chrome is not running, falls back to disk with a warning.
+    - If not on macOS, falls back to disk silently.
+
+    Args:
+        profile_path: Path to Chrome profile directory
+        origins_filter: Optional origin patterns to include
+        live_session_storage_via_applescript: If True (default), attempt AppleScript extraction.
+            FAILS if Chrome is running but setting is disabled.
+            Falls back to disk only if Chrome is not running.
+
+    Returns:
+        SessionStorageExportResult with storage data, source indicator, and warnings.
+
+    Raises:
+        AppleScriptNotEnabledError: If Chrome is running but AppleScript JS
+            execution is disabled. User must enable:
+            Chrome > View > Developer > Allow JavaScript from Apple Events
+    """
+    if not live_session_storage_via_applescript:
+        # User explicitly opted out - use disk only
+        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
+        return SessionStorageExportResult(storage=disk_storage, source='disk')
+
+    if not is_applescript_available():
+        # Not on macOS - fall back to disk silently
+        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
+        return SessionStorageExportResult(storage=disk_storage, source='disk')
+
+    if not is_chrome_running():
+        # Chrome not running - fall back to disk with note
+        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
+        return SessionStorageExportResult(
+            storage=disk_storage,
+            source='disk',
+            warning='Chrome not running - sessionStorage from disk (may be stale)',
+        )
+
+    # Chrome IS running - try live extraction
+    live_result = extract_live_session_storage(origins_filter)
+
+    if live_result.success:
+        return SessionStorageExportResult(
+            storage=live_result.session_storage,
+            source='live',
+        )
+
+    # Chrome running but AppleScript failed - FAIL LOUDLY
+    if live_result.error_reason == 'JavaScript from Apple Events disabled':
+        raise AppleScriptNotEnabledError(
+            'Chrome is running but cannot extract live sessionStorage.\n\n'
+            'Enable this ONE-TIME Chrome setting:\n'
+            '  1. Open Chrome\n'
+            '  2. Go to: View > Developer > Allow JavaScript from Apple Events\n'
+            '  3. Check the box\n'
+            '  4. RESTART Chrome (required for setting to take effect)\n\n'
+            'Or set live_session_storage_via_applescript=False to use disk-based extraction (may be stale).',
+        )
+
+    # Other AppleScript failure
+    raise RuntimeError(f'AppleScript extraction failed: {live_result.error_reason}')
+
+
+# -- Main Export Function ------------------------------------------------------
+
+
+def export_chrome_profile_state(
+    output_file: str,
+    chrome_profile: str = 'Default',
+    include_session_storage: bool = True,
+    include_indexeddb: bool = False,
+    origins_filter: Sequence[str] | None = None,
+    live_session_storage_via_applescript: bool = True,
+) -> ChromeProfileStateExportResult:
+    """Export Chrome profile state to ProfileState JSON format.
+
+    Produces JSON compatible with navigate_with_profile_state(profile_state_file=...)
+    for restoring authenticated state in Selenium automation.
+
+    Args:
+        output_file: Path to save JSON output
+        chrome_profile: Chrome profile name ("Default", "Profile 1", etc.)
+        include_session_storage: Include sessionStorage (default True)
+        include_indexeddb: Include IndexedDB records (default False)
+        origins_filter: Only export origins matching these patterns
+        live_session_storage_via_applescript: If True (default), attempt live sessionStorage extraction
+            via AppleScript when Chrome is running. FAILS if Chrome is running but
+            the setting is disabled. Falls back to disk only if Chrome is not running.
+            Set False to always use disk-based extraction (may be stale).
+
+    Returns:
+        ChromeProfileStateExportResult with statistics and session_storage_source
+
+    Raises:
+        AppleScriptNotEnabledError: If live_session_storage_via_applescript=True, Chrome is running,
+            but "Allow JavaScript from Apple Events" setting is disabled.
+
+    Example:
+        # After logging into sites in Chrome...
+        result = export_chrome_profile_state("auth.json", origins_filter=["github.com"])
+
+        # Then in Selenium:
+        navigate_with_profile_state("https://github.com", profile_state_file="auth.json")
+    """
+    # Fail if output file exists - delete first to replace
+    if Path(output_file).expanduser().exists():
+        raise FileExistsError(f'Output file already exists: {output_file}')
+
+    # Resolve profile path
+    profile_path = get_chrome_profile_path(chrome_profile)
+
+    # Validate filter patterns
+    if origins_filter:
+        for pattern in origins_filter:
+            _validate_domain_pattern(pattern)
+
+    # Convert to list for filtering if provided
+    filter_list = list(origins_filter) if origins_filter else None
+
+    # Export cookies (already returns Sequence[ProfileStateCookie])
+    cookies = export_cookies(profile_path, filter_list)
+
+    # Export localStorage (returns Mapping[origin, Mapping[key, value]])
+    local_storage = export_local_storage(profile_path, filter_list)
+
+    # Export sessionStorage (optional, default on)
+    session_storage: Mapping[str, Mapping[str, str]] = {}
+    session_storage_source: Literal['live', 'disk'] = 'disk'
+    warnings: list[str] = []
+    if include_session_storage:
+        ss_result = export_session_storage(profile_path, filter_list, live_session_storage_via_applescript)
+        session_storage = ss_result.storage
+        session_storage_source = ss_result.source
+        if ss_result.warning:
+            warnings.append(ss_result.warning)
+
+    # Export IndexedDB with full schema (optional, default off - can be huge)
+    indexeddb: Mapping[str, Sequence[Mapping[str, Any]]] = {}
+    if include_indexeddb:
+        indexeddb = export_indexeddb_with_schema(profile_path, filter_list)
+
+    # Build origins dict with ProfileStateOriginStorage models
+    all_origins = set(local_storage.keys()) | set(session_storage.keys()) | set(indexeddb.keys())
+    origins_data: dict[str, ProfileStateOriginStorage] = {}
+
+    for origin in all_origins:
+        # Get localStorage for this origin (empty dict if not present)
+        ls_data = dict(local_storage.get(origin, {}))
+
+        # Get sessionStorage for this origin (None if not present)
+        ss_data = dict(session_storage[origin]) if origin in session_storage else None
+
+        # Convert IndexedDB dicts to Pydantic models
+        idb_models: list[ProfileStateIndexedDB] | None = None
+        if origin in indexeddb:
+            idb_models = []
+            for db_dict in indexeddb[origin]:
+                # Convert object stores
+                object_stores: list[ProfileStateIndexedDBObjectStore] = []
+                for store_dict in db_dict.get('object_stores', []):
+                    # Convert indexes
+                    indexes: list[ProfileStateIndexedDBIndex] = [
+                        ProfileStateIndexedDBIndex(
+                            name=idx['name'],
+                            key_path=idx['key_path'],
+                            unique=idx['unique'],
+                            multi_entry=idx['multi_entry'],
+                        )
+                        for idx in store_dict.get('indexes', [])
+                    ]
+                    # Convert records
+                    records: list[ProfileStateIndexedDBRecord] = [
+                        ProfileStateIndexedDBRecord(key=rec['key'], value=rec['value'])
+                        for rec in store_dict.get('records', [])
+                    ]
+                    object_stores.append(
+                        ProfileStateIndexedDBObjectStore(
+                            name=store_dict['name'],
+                            key_path=store_dict['key_path'],
+                            auto_increment=store_dict['auto_increment'],
+                            indexes=indexes,
+                            records=records,
+                        ),
+                    )
+                idb_models.append(
+                    ProfileStateIndexedDB(
+                        database_name=db_dict['database_name'],
+                        version=db_dict['version'],
+                        object_stores=object_stores,
+                    ),
+                )
+
+        origins_data[origin] = ProfileStateOriginStorage(
+            local_storage=ls_data,
+            session_storage=ss_data,
+            indexed_db=idb_models,
+        )
+
+    # Build ProfileState with typed models
+    profile_state = ProfileState(
+        schema_version='1.0',
+        captured_at=datetime.now(UTC).isoformat(),
+        cookies=list(cookies),
+        origins=origins_data,
+    )
+
+    # Write to file with secure permissions (avoid TOCTOU race)
+    # SECURITY: Output contains sensitive auth tokens - create with 0o600
+    output_path = Path(output_file).expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        # Use by_alias=True to serialize IndexedDB fields as camelCase for JS compatibility
+        f.write(profile_state.model_dump_json(indent=2, by_alias=True))
+
+    # Calculate statistics
+    ls_keys = sum(len(storage) for storage in local_storage.values())
+    ss_keys = sum(len(storage) for storage in session_storage.values())
+
+    return ChromeProfileStateExportResult(
+        path=str(output_path),
+        cookie_count=len(cookies),
+        origin_count=len(origins_data),
+        local_storage_keys=ls_keys,
+        session_storage_keys=ss_keys,
+        indexeddb_origins=len(indexeddb),
+        session_storage_source=session_storage_source,
+        warnings=warnings,
+    )
 
 
 # -- Cookie Export -------------------------------------------------------------
@@ -397,185 +821,7 @@ def _decrypt_cookie_value(
     return unpadded.decode('utf-8', errors='replace')
 
 
-def export_cookies(
-    profile_path: Path,
-    origins_filter: Sequence[str] | None = None,
-) -> Sequence[ProfileStateCookie]:
-    """Export cookies from any Chrome profile with full decryption.
-
-    Unlike browser-cookie3, this supports ANY Chrome profile, not just Default.
-    Uses direct Keychain access + AES decryption.
-
-    Args:
-        profile_path: Path to Chrome profile directory
-        origins_filter: Optional domain patterns to include
-
-    Returns:
-        Sequence of ProfileStateCookie models
-
-    Raises:
-        FileNotFoundError: If Cookies database doesn't exist
-        RuntimeError: If Keychain access fails
-        sqlite3.Error: If database read fails
-        ValueError: If cookie decryption fails
-    """
-    cookies: list[ProfileStateCookie] = []
-
-    cookies_db = profile_path / 'Cookies'
-    if not cookies_db.exists():
-        raise FileNotFoundError(f'Cookies database not found: {cookies_db}')
-
-    # Get encryption key from Keychain (shared across all profiles)
-    keychain_password = _get_chrome_encryption_key()
-    aes_key = _derive_aes_key(keychain_password)
-
-    # Detect Chrome version for hash handling
-    chrome_version = _get_chrome_cookies_version(cookies_db)
-
-    # Read and decrypt all cookies from this profile's SQLite
-    conn = sqlite3.connect(f'file:{cookies_db}?mode=ro', uri=True)
-    try:
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT host_key, name, path, expires_utc, is_secure,
-                   is_httponly, samesite, value, encrypted_value
-            FROM cookies
-        """)
-
-        for row in cursor.fetchall():
-            (
-                host,
-                name,
-                path,
-                expires_utc,
-                secure,
-                httponly,
-                samesite,
-                value,
-                encrypted_value,
-            ) = row
-
-            # Apply origin filter (RFC 6265 domain matching)
-            if origins_filter:
-                if not any(_domain_matches(host, pattern) for pattern in origins_filter):
-                    continue
-
-            # Decrypt if needed
-            if encrypted_value:
-                cookie_value = _decrypt_cookie_value(encrypted_value, aes_key, chrome_version)
-            else:
-                cookie_value = value or ''
-
-            # Convert Chrome epoch to Unix timestamp
-            # Chrome epoch: microseconds since 1601-01-01
-            # Unix epoch: seconds since 1970-01-01
-            # Offset: 11644473600 seconds
-            if expires_utc and expires_utc > 0:
-                expires = float(expires_utc // 1_000_000 - 11644473600)
-            else:
-                expires = -1.0  # Session cookie
-
-            cookies.append(
-                ProfileStateCookie(
-                    name=name,
-                    value=cookie_value,
-                    domain=host,
-                    path=path,
-                    expires=expires,
-                    http_only=bool(httponly),
-                    secure=bool(secure),
-                    same_site=_SAMESITE_MAP.get(samesite, 'Lax'),
-                ),
-            )
-    finally:
-        conn.close()
-
-    return cookies
-
-
-# -- localStorage Export -------------------------------------------------------
-
-
-def export_local_storage(
-    profile_path: Path,
-    origins_filter: Sequence[str] | None = None,
-) -> Mapping[str, Mapping[str, str]]:
-    """Export localStorage from Chrome's LevelDB.
-
-    Args:
-        profile_path: Path to Chrome profile directory
-        origins_filter: Optional origin patterns to include
-
-    Returns:
-        Mapping of {origin: {key: value, ...}}
-
-    Raises:
-        FileNotFoundError: If localStorage path doesn't exist
-    """
-    storage: dict[str, dict[str, str]] = {}
-
-    # CRITICAL: localStorage is in "Local Storage/leveldb/", not "Local Storage/"
-    leveldb_path = profile_path / 'Local Storage' / 'leveldb'
-
-    if not leveldb_path.exists():
-        raise FileNotFoundError(f'localStorage path not found: {leveldb_path}')
-
-    with ccl_chromium_localstorage.LocalStoreDb(leveldb_path) as ls:
-        for storage_key in ls.iter_storage_keys():
-            # Filter origins (extract domain from URL, then RFC 6265 matching)
-            if origins_filter:
-                domain = _extract_domain_from_origin(storage_key)
-                if not any(_domain_matches(domain, pattern) for pattern in origins_filter):
-                    continue
-
-            origin_storage: dict[str, str] = {}
-
-            # Handle "orphan" storage keys: iter_storage_keys() returns keys from META:
-            # entries, but records may have been deleted. The library raises KeyError
-            # when accessing _records for these orphan keys.
-            try:
-                for record in ls.iter_records_for_storage_key(storage_key):
-                    value = str(record.value) if record.value else ''
-                    origin_storage[record.script_key] = value
-            except KeyError:
-                # Orphan key: META: entry exists but no record data (localStorage cleared)
-                # Skip silently - there's no data to export
-                continue
-
-            if origin_storage:
-                # Normalize origin to match window.location.origin (no trailing slash)
-                normalized_key = _normalize_origin_url(storage_key)
-                if normalized_key in storage:
-                    # Merge with existing (collision from normalization)
-                    storage[normalized_key].update(origin_storage)
-                else:
-                    storage[normalized_key] = origin_storage
-
-    return storage
-
-
 # -- sessionStorage Export -----------------------------------------------------
-
-
-@dataclass
-class SessionStorageExportResult:
-    """Result from sessionStorage export with source metadata."""
-
-    storage: Mapping[str, Mapping[str, str]]
-    source: Literal['live', 'disk']
-    warning: str | None = None
-
-
-class AppleScriptNotEnabledError(Exception):
-    """Raised when Chrome is running but AppleScript JS execution is disabled.
-
-    This is a fail-first error that forces the user to either:
-    1. Enable Chrome > View > Developer > Allow JavaScript from Apple Events
-    2. Explicitly opt out with live_session_storage_via_applescript=False
-    """
-
-    pass
 
 
 def _export_session_storage_from_disk(
@@ -628,248 +874,3 @@ def _export_session_storage_from_disk(
                     storage[normalized_host] = origin_storage
 
     return storage
-
-
-def export_session_storage(
-    profile_path: Path,
-    origins_filter: Sequence[str] | None = None,
-    live_session_storage_via_applescript: bool = True,
-) -> SessionStorageExportResult:
-    """Export sessionStorage with fail-first live extraction.
-
-    On macOS, attempts to extract LIVE sessionStorage from open Chrome tabs
-    via AppleScript. This provides accurate, real-time data rather than
-    potentially stale disk-persisted data.
-
-    Fail-First Behavior (live_session_storage_via_applescript=True, the default):
-    - If Chrome is running but the AppleScript setting is disabled, FAILS
-      with AppleScriptNotEnabledError containing setup instructions.
-    - If Chrome is not running, falls back to disk with a warning.
-    - If not on macOS, falls back to disk silently.
-
-    Args:
-        profile_path: Path to Chrome profile directory
-        origins_filter: Optional origin patterns to include
-        live_session_storage_via_applescript: If True (default), attempt AppleScript extraction.
-            FAILS if Chrome is running but setting is disabled.
-            Falls back to disk only if Chrome is not running.
-
-    Returns:
-        SessionStorageExportResult with storage data, source indicator, and warnings.
-
-    Raises:
-        AppleScriptNotEnabledError: If Chrome is running but AppleScript JS
-            execution is disabled. User must enable:
-            Chrome > View > Developer > Allow JavaScript from Apple Events
-    """
-    if not live_session_storage_via_applescript:
-        # User explicitly opted out - use disk only
-        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
-        return SessionStorageExportResult(storage=disk_storage, source='disk')
-
-    if not is_applescript_available():
-        # Not on macOS - fall back to disk silently
-        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
-        return SessionStorageExportResult(storage=disk_storage, source='disk')
-
-    if not is_chrome_running():
-        # Chrome not running - fall back to disk with note
-        disk_storage = _export_session_storage_from_disk(profile_path, origins_filter)
-        return SessionStorageExportResult(
-            storage=disk_storage,
-            source='disk',
-            warning='Chrome not running - sessionStorage from disk (may be stale)',
-        )
-
-    # Chrome IS running - try live extraction
-    live_result = extract_live_session_storage(origins_filter)
-
-    if live_result.success:
-        return SessionStorageExportResult(
-            storage=live_result.session_storage,
-            source='live',
-        )
-
-    # Chrome running but AppleScript failed - FAIL LOUDLY
-    if live_result.error_reason == 'JavaScript from Apple Events disabled':
-        raise AppleScriptNotEnabledError(
-            'Chrome is running but cannot extract live sessionStorage.\n\n'
-            'Enable this ONE-TIME Chrome setting:\n'
-            '  1. Open Chrome\n'
-            '  2. Go to: View > Developer > Allow JavaScript from Apple Events\n'
-            '  3. Check the box\n'
-            '  4. RESTART Chrome (required for setting to take effect)\n\n'
-            'Or set live_session_storage_via_applescript=False to use disk-based extraction (may be stale).',
-        )
-
-    # Other AppleScript failure
-    raise RuntimeError(f'AppleScript extraction failed: {live_result.error_reason}')
-
-
-# -- Main Export Function ------------------------------------------------------
-
-
-def export_chrome_profile_state(
-    output_file: str,
-    chrome_profile: str = 'Default',
-    include_session_storage: bool = True,
-    include_indexeddb: bool = False,
-    origins_filter: Sequence[str] | None = None,
-    live_session_storage_via_applescript: bool = True,
-) -> ChromeProfileStateExportResult:
-    """Export Chrome profile state to ProfileState JSON format.
-
-    Produces JSON compatible with navigate_with_profile_state(profile_state_file=...)
-    for restoring authenticated state in Selenium automation.
-
-    Args:
-        output_file: Path to save JSON output
-        chrome_profile: Chrome profile name ("Default", "Profile 1", etc.)
-        include_session_storage: Include sessionStorage (default True)
-        include_indexeddb: Include IndexedDB records (default False)
-        origins_filter: Only export origins matching these patterns
-        live_session_storage_via_applescript: If True (default), attempt live sessionStorage extraction
-            via AppleScript when Chrome is running. FAILS if Chrome is running but
-            the setting is disabled. Falls back to disk only if Chrome is not running.
-            Set False to always use disk-based extraction (may be stale).
-
-    Returns:
-        ChromeProfileStateExportResult with statistics and session_storage_source
-
-    Raises:
-        AppleScriptNotEnabledError: If live_session_storage_via_applescript=True, Chrome is running,
-            but "Allow JavaScript from Apple Events" setting is disabled.
-
-    Example:
-        # After logging into sites in Chrome...
-        result = export_chrome_profile_state("auth.json", origins_filter=["github.com"])
-
-        # Then in Selenium:
-        navigate_with_profile_state("https://github.com", profile_state_file="auth.json")
-    """
-    # Fail if output file exists - delete first to replace
-    if Path(output_file).expanduser().exists():
-        raise FileExistsError(f'Output file already exists: {output_file}')
-
-    # Resolve profile path
-    profile_path = get_chrome_profile_path(chrome_profile)
-
-    # Validate filter patterns
-    if origins_filter:
-        for pattern in origins_filter:
-            _validate_domain_pattern(pattern)
-
-    # Convert to list for filtering if provided
-    filter_list = list(origins_filter) if origins_filter else None
-
-    # Export cookies (already returns Sequence[ProfileStateCookie])
-    cookies = export_cookies(profile_path, filter_list)
-
-    # Export localStorage (returns Mapping[origin, Mapping[key, value]])
-    local_storage = export_local_storage(profile_path, filter_list)
-
-    # Export sessionStorage (optional, default on)
-    session_storage: Mapping[str, Mapping[str, str]] = {}
-    session_storage_source: Literal['live', 'disk'] = 'disk'
-    warnings: list[str] = []
-    if include_session_storage:
-        ss_result = export_session_storage(profile_path, filter_list, live_session_storage_via_applescript)
-        session_storage = ss_result.storage
-        session_storage_source = ss_result.source
-        if ss_result.warning:
-            warnings.append(ss_result.warning)
-
-    # Export IndexedDB with full schema (optional, default off - can be huge)
-    indexeddb: Mapping[str, Sequence[Mapping[str, Any]]] = {}
-    if include_indexeddb:
-        indexeddb = export_indexeddb_with_schema(profile_path, filter_list)
-
-    # Build origins dict with ProfileStateOriginStorage models
-    all_origins = set(local_storage.keys()) | set(session_storage.keys()) | set(indexeddb.keys())
-    origins_data: dict[str, ProfileStateOriginStorage] = {}
-
-    for origin in all_origins:
-        # Get localStorage for this origin (empty dict if not present)
-        ls_data = dict(local_storage.get(origin, {}))
-
-        # Get sessionStorage for this origin (None if not present)
-        ss_data = dict(session_storage[origin]) if origin in session_storage else None
-
-        # Convert IndexedDB dicts to Pydantic models
-        idb_models: list[ProfileStateIndexedDB] | None = None
-        if origin in indexeddb:
-            idb_models = []
-            for db_dict in indexeddb[origin]:
-                # Convert object stores
-                object_stores: list[ProfileStateIndexedDBObjectStore] = []
-                for store_dict in db_dict.get('object_stores', []):
-                    # Convert indexes
-                    indexes: list[ProfileStateIndexedDBIndex] = [
-                        ProfileStateIndexedDBIndex(
-                            name=idx['name'],
-                            key_path=idx['key_path'],
-                            unique=idx['unique'],
-                            multi_entry=idx['multi_entry'],
-                        )
-                        for idx in store_dict.get('indexes', [])
-                    ]
-                    # Convert records
-                    records: list[ProfileStateIndexedDBRecord] = [
-                        ProfileStateIndexedDBRecord(key=rec['key'], value=rec['value'])
-                        for rec in store_dict.get('records', [])
-                    ]
-                    object_stores.append(
-                        ProfileStateIndexedDBObjectStore(
-                            name=store_dict['name'],
-                            key_path=store_dict['key_path'],
-                            auto_increment=store_dict['auto_increment'],
-                            indexes=indexes,
-                            records=records,
-                        ),
-                    )
-                idb_models.append(
-                    ProfileStateIndexedDB(
-                        database_name=db_dict['database_name'],
-                        version=db_dict['version'],
-                        object_stores=object_stores,
-                    ),
-                )
-
-        origins_data[origin] = ProfileStateOriginStorage(
-            local_storage=ls_data,
-            session_storage=ss_data,
-            indexed_db=idb_models,
-        )
-
-    # Build ProfileState with typed models
-    profile_state = ProfileState(
-        schema_version='1.0',
-        captured_at=datetime.now(UTC).isoformat(),
-        cookies=list(cookies),
-        origins=origins_data,
-    )
-
-    # Write to file with secure permissions (avoid TOCTOU race)
-    # SECURITY: Output contains sensitive auth tokens - create with 0o600
-    output_path = Path(output_file).expanduser().resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'w') as f:
-        # Use by_alias=True to serialize IndexedDB fields as camelCase for JS compatibility
-        f.write(profile_state.model_dump_json(indent=2, by_alias=True))
-
-    # Calculate statistics
-    ls_keys = sum(len(storage) for storage in local_storage.values())
-    ss_keys = sum(len(storage) for storage in session_storage.values())
-
-    return ChromeProfileStateExportResult(
-        path=str(output_path),
-        cookie_count=len(cookies),
-        origin_count=len(origins_data),
-        local_storage_keys=ls_keys,
-        session_storage_keys=ss_keys,
-        indexeddb_origins=len(indexeddb),
-        session_storage_source=session_storage_source,
-        warnings=warnings,
-    )
