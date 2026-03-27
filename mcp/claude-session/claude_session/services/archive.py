@@ -50,6 +50,13 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.version import get_version
 from claude_session.storage.protocol import StorageBackend
 
+__all__ = [
+    'FormatDetector',
+    'SessionArchiveService',
+    'logger',
+]
+
+
 logger = logging.getLogger(__name__)
 
 # -- Archive Format Detection --------------------------------------------------
@@ -215,7 +222,7 @@ class SessionArchiveService:
             f'Could not find session folder for project {self.project_path} in {self.claude_sessions_dir}'
         )
 
-    async def create_archive(
+    async def create_archive(  # strict_typing_linter.py: ordering — _get_project_folder is a lazy init helper used by this method
         self,
         storage: StorageBackend,
         output_path: str | None,

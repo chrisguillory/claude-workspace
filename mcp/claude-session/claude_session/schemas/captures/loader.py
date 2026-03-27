@@ -86,6 +86,13 @@ from claude_session.schemas.captures.unknown import (
     UnknownResponseCapture,
 )
 
+__all__ = [
+    'CapturedTraffic',
+    'load_capture',
+    'load_captures_batch',
+]
+
+
 # -- Discriminated union of all capture types ----------------------------------
 
 CapturedTraffic = Annotated[
@@ -176,7 +183,9 @@ CapturedTraffic = Annotated[
 _CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(CapturedTraffic)
 
 
-def _preprocess_capture(data: dict[str, Any], filepath: Path | None = None) -> dict[str, Any]:
+def _preprocess_capture(  # strict_typing_linter.py: ordering — called by load_capture_file() below
+    data: dict[str, Any], filepath: Path | None = None
+) -> dict[str, Any]:
     """
     Preprocess capture data before Pydantic validation.
 
@@ -243,7 +252,9 @@ def _preprocess_capture(data: dict[str, Any], filepath: Path | None = None) -> d
     return data
 
 
-def load_capture(filepath: Path) -> CapturedTraffic:
+def load_capture(  # strict_typing_linter.py: ordering — functions follow call-graph order
+    filepath: Path,
+) -> CapturedTraffic:
     """
     Load and validate a capture file.
 
@@ -276,7 +287,7 @@ def load_capture(filepath: Path) -> CapturedTraffic:
     return _CAPTURE_ADAPTER.validate_python(clean_data)
 
 
-def load_captures_batch(
+def load_captures_batch(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     directory: Path, pattern: str = '*.json'
 ) -> tuple[list[CapturedTraffic], dict[Path, Exception]]:
     """

@@ -55,6 +55,13 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import PathTranslator
 from claude_session.storage.local import LocalFileSystemStorage
 
+__all__ = [
+    'DELETED_SESSIONS_DIR',
+    'SessionMoveService',
+    'logger',
+]
+
+
 logger = logging.getLogger(__name__)
 
 # Backup location (same as delete service)

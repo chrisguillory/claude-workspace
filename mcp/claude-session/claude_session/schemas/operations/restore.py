@@ -11,6 +11,10 @@ from datetime import datetime
 
 from claude_session.schemas.base import StrictModel
 
+__all__ = [
+    'RestoreResult',
+]
+
 
 class RestoreResult(StrictModel):
     """Result of a session restore operation.

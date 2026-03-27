@@ -36,6 +36,20 @@ from pathlib import Path
 
 from claude_session.schemas.session import SessionRecord
 
+__all__ = [
+    'AGENT_FILENAME_PATTERN',
+    'AgentFileInfo',
+    'apply_agent_id_mapping',
+    'collect_agent_file_info',
+    'detect_agent_structure',
+    'extract_agent_ids_from_files',
+    'extract_base_agent_id',
+    'generate_agent_id_mapping',
+    'generate_clone_agent_id',
+    'transform_agent_filename',
+]
+
+
 # Pattern for agent filenames - matches native (hex or typed) and cloned formats:
 # - agent-5271c147.jsonl (native hex)
 # - agent-aprompt_suggestion-d7f1a0.jsonl (native typed, 2.1.25+)

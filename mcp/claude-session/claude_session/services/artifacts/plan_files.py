@@ -30,6 +30,17 @@ from claude_session.schemas.session import (
     UserRecord,
 )
 
+__all__ = [
+    'SLUG_RECORD_TYPES',
+    'apply_slug_mapping',
+    'collect_plan_files',
+    'extract_base_slug',
+    'extract_slugs_from_records',
+    'generate_clone_slug',
+    'write_plan_files',
+]
+
+
 # Record types that have the slug field
 SLUG_RECORD_TYPES = (
     UserRecord,

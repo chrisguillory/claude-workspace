@@ -50,6 +50,15 @@ from claude_session.services.artifacts import (
 )
 from claude_session.services.lineage import LineageService
 
+__all__ = [
+    'PathTranslator',
+    'SessionRestoreService',
+    'get_restoration_timestamp',
+    'is_restored_session',
+    'logger',
+]
+
+
 logger = logging.getLogger(__name__)
 
 # -- Path Translation Service --------------------------------------------------
@@ -117,7 +126,9 @@ class PathTranslator:
 # -- Utility Functions ---------------------------------------------------------
 
 
-def is_restored_session(session_id: str) -> bool:
+def is_restored_session(  # strict_typing_linter.py: class-ordering — utility functions grouped before large service class for readability
+    session_id: str,
+) -> bool:
     """
     Check if a session ID is from a restored session.
 
@@ -133,7 +144,9 @@ def is_restored_session(session_id: str) -> bool:
     return uid.version == 7
 
 
-def get_restoration_timestamp(session_id: str) -> datetime | None:
+def get_restoration_timestamp(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    session_id: str,
+) -> datetime | None:
     """
     Extract the restoration timestamp from a restored session ID.
 
@@ -159,7 +172,7 @@ def get_restoration_timestamp(session_id: str) -> datetime | None:
 # -- Session Restore Service ---------------------------------------------------
 
 
-class SessionRestoreService:
+class SessionRestoreService:  # strict_typing_linter.py: class-ordering — utility functions grouped before service class for readability
     """
     Service for restoring archived sessions.
 

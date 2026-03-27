@@ -27,6 +27,14 @@ from claude_session.services.discovery import SessionDiscoveryService
 from claude_session.services.lineage import LineageService, get_machine_id
 from claude_session.services.version import get_version_from_process
 
+__all__ = [
+    'CLAUDE_DEBUG_DIR',
+    'CLAUDE_WORKSPACE_SESSIONS',
+    'CurrentSessionContext',
+    'SessionInfoService',
+]
+
+
 # Claude workspace sessions.json location
 CLAUDE_WORKSPACE_SESSIONS = Path.home() / '.claude-workspace' / 'sessions.json'
 
@@ -332,7 +340,9 @@ class SessionInfoService:
 
         return None
 
-    def is_session_running(self, session_id: str) -> tuple[bool, int | None]:
+    def is_session_running(  # strict_typing_linter.py: ordering — private helpers are internal data-fetching methods
+        self, session_id: str
+    ) -> tuple[bool, int | None]:
         """
         Check if a session's Claude process is still running.
 
@@ -373,7 +383,9 @@ class SessionInfoService:
         except psutil.NoSuchProcess:
             return False, None  # Process is gone
 
-    async def resolve_session(self, session_id_or_prefix: str, *, project_filter: Path | None = None) -> SessionInfo:
+    async def resolve_session(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+        self, session_id_or_prefix: str, *, project_filter: Path | None = None
+    ) -> SessionInfo:
         """
         Resolve a session ID or prefix to a full session.
 

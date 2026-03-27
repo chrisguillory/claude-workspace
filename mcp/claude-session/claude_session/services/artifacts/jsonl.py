@@ -16,6 +16,10 @@ from claude_session.schemas.session import SessionRecord
 from .agent_ids import apply_agent_id_mapping
 from .plan_files import apply_slug_mapping
 
+__all__ = [
+    'write_jsonl',
+]
+
 
 def write_jsonl(
     path: Path,

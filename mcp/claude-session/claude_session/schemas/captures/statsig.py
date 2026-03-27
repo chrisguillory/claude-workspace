@@ -18,6 +18,14 @@ from claude_session.schemas.cc_internal_api import (
     StatsigRegisterResponse,
 )
 
+__all__ = [
+    'StatsigInitializeRequestCapture',
+    'StatsigInitializeResponseCapture',
+    'StatsigRegisterRequestCapture',
+    'StatsigRegisterResponseCapture',
+]
+
+
 # -- Register (/v1/rgstr) ------------------------------------------------------
 
 

@@ -51,6 +51,12 @@ from claude_session.services.lineage import LineageService
 from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import PathTranslator
 
+__all__ = [
+    'SessionCloneService',
+    'logger',
+]
+
+
 logger = logging.getLogger(__name__)
 
 

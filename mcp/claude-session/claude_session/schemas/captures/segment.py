@@ -19,6 +19,30 @@ from claude_session.schemas.captures.base import RequestCapture, ResponseCapture
 from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.types import PermissiveModel
 
+__all__ = [
+    'ClaudeCodeIdentifyTraits',
+    'SegmentAliasEvent',
+    'SegmentBatchRequest',
+    'SegmentBatchRequestCapture',
+    'SegmentBatchResponse',
+    'SegmentBatchResponseCapture',
+    'SegmentContext',
+    'SegmentEvent',
+    'SegmentEventBase',
+    'SegmentGroupEvent',
+    'SegmentIdentifyEvent',
+    'SegmentLibraryContext',
+    'SegmentMetadata',
+    'SegmentPageEvent',
+    'SegmentRequestCapture',
+    'SegmentResponseCapture',
+    'SegmentScreenEvent',
+    'SegmentTrackEvent',
+    'UnknownSegmentProperties',
+    'UnknownSegmentTraits',
+]
+
+
 # -- Context and Metadata ------------------------------------------------------
 
 
