@@ -13,7 +13,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import traceback
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +45,16 @@ logger = logging.getLogger(__name__)
 
 app = create_app(help='Archive and restore Claude Code sessions.')
 add_completion_command(app)
+
+
+@app.callback()
+def _configure_logging(
+    verbose: bool = typer.Option(False, '--verbose', '-v', help='Show detailed progress'),
+) -> None:
+    """Configure logging level for all commands."""
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
+
 
 # Type aliases and validators
 ArchiveFormat = Literal['json', 'zst']
@@ -172,7 +181,6 @@ def archive(
         'secret', '--gist-visibility', help='Gist visibility (public or secret)'
     ),
     gist_description: str = typer.Option('Claude Code Session Archive', '--gist-description', help='Gist description'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Archive a Claude Code session to local file or GitHub Gist.
 
@@ -199,9 +207,7 @@ def archive(
     if output is None:
         output = 'gist://'
 
-    asyncio.run(
-        _archive_async(resolved_session_id, output, format, gist_token, gist_visibility, gist_description, verbose)
-    )
+    asyncio.run(_archive_async(resolved_session_id, output, format, gist_token, gist_visibility, gist_description))
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -213,7 +219,6 @@ def restore(
     in_place: bool = typer.Option(False, '--in-place', help='Restore with original session ID (verbatim restore)'),
     launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after restore'),
     gist_token: str | None = typer.Option(None, '--gist-token', help='GitHub token for private gists'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Restore a Claude Code session from local file or GitHub Gist.
 
@@ -224,7 +229,7 @@ def restore(
 
         claude-session restore ARCHIVE --launch -- --chrome
     """
-    asyncio.run(_restore_async(archive, project, not no_translate, in_place, launch, gist_token, verbose, ctx.args))
+    asyncio.run(_restore_async(archive, project, not no_translate, in_place, launch, gist_token, ctx.args))
 
 
 async def _archive_async(
@@ -234,11 +239,8 @@ async def _archive_async(
     gist_token: str | None,
     gist_visibility: Literal['public', 'secret'],
     gist_description: str,
-    verbose: bool,
 ) -> None:
     """Async implementation of archive command."""
-    level = logging.INFO if verbose else logging.WARNING
-    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Find the session
@@ -338,18 +340,14 @@ async def _archive_async(
                 typer.echo(f'  Size: {metadata.size_mb} MB')
                 typer.echo(f'  Records: {metadata.session_records:,} session, {metadata.agent_records:,} agent')
                 typer.echo(f'  Files: {metadata.file_count}')
-                if verbose:
-                    typer.echo('\n  File breakdown:')
-                    for file_meta in metadata.files:
-                        typer.echo(f'    - {file_meta.filename}: {file_meta.record_count} records')
+                for file_meta in metadata.files:
+                    logger.info('    - %s: %d records', file_meta.filename, file_meta.record_count)
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     except Exception as e:
         logger.error('Failed to create archive: %s', e, exc_info=True)
-        if verbose:
-            traceback.print_exc()
         raise typer.Exit(1) from None
 
 
@@ -360,12 +358,9 @@ async def _restore_async(
     in_place: bool,
     launch: bool,
     gist_token: str | None,
-    verbose: bool,
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of restore command."""
-    level = logging.INFO if verbose else logging.WARNING
-    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Check if it's a Gist URL
@@ -497,8 +492,6 @@ async def _restore_async(
 
     except Exception as e:
         logger.error('Failed to restore session: %s', e, exc_info=True)
-        if verbose:
-            traceback.print_exc()
         raise typer.Exit(1) from None
 
 
@@ -511,7 +504,6 @@ def clone(
     project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
     no_translate: bool = typer.Option(False, '--no-translate', help="Don't translate file paths"),
     launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after clone'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Clone a session directly (no archive file needed).
 
@@ -533,7 +525,7 @@ def clone(
     if session_id is None:
         session_id = detected
 
-    asyncio.run(_clone_async(_resolve_session_id(session_id), project, not no_translate, launch, verbose, ctx.args))
+    asyncio.run(_clone_async(_resolve_session_id(session_id), project, not no_translate, launch, ctx.args))
 
 
 async def _clone_async(
@@ -541,12 +533,9 @@ async def _clone_async(
     project: Path | None,
     translate_paths: bool,
     launch: bool,
-    verbose: bool,
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of clone command."""
-    level = logging.INFO if verbose else logging.WARNING
-    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Determine project path
@@ -602,8 +591,6 @@ async def _clone_async(
         raise typer.Exit(1) from None
     except Exception as e:
         logger.error('Failed to clone session: %s', e, exc_info=True)
-        if verbose:
-            traceback.print_exc()
         raise typer.Exit(1) from None
 
 
@@ -619,7 +606,6 @@ def delete(
     no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
     dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be deleted'),
     project: Path | None = typer.Option(None, '--project', '-p', help='Project directory (default: current)'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Delete session artifacts with auto-backup.
 
@@ -633,7 +619,7 @@ def delete(
     A backup is saved to ~/.claude-workspace/claude-session/deleted/ for undo capability.
     Use 'restore --in-place' on the backup to undo.
     """
-    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project, verbose))
+    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project))
 
 
 async def _delete_async(
@@ -643,11 +629,8 @@ async def _delete_async(
     no_backup: bool,
     dry_run: bool,
     project: Path | None,
-    verbose: bool,
 ) -> None:
     """Async implementation of delete command."""
-    level = logging.INFO if verbose else logging.WARNING
-    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Resolve session ID prefix to full ID
@@ -714,14 +697,10 @@ async def _delete_async(
             typer.echo(f'  Files: {result.files_deleted}')
             typer.echo(f'  Directories: {len(result.directories_removed)}')
             typer.echo(f'  Size: {result.size_freed_bytes:,} bytes')
-            if verbose:
-                typer.echo('\n  Files to delete:')
-                for path in result.deleted_files:
-                    typer.echo(f'    - {path}')
-                if result.directories_removed:
-                    typer.echo('\n  Directories to clean up:')
-                    for path in result.directories_removed:
-                        typer.echo(f'    - {path}')
+            for path in result.deleted_files:
+                logger.info('    - %s', path)
+            for path in result.directories_removed:
+                logger.info('    dir: %s', path)
         else:
             typer.secho('✓ Session deleted successfully!', fg=typer.colors.GREEN)
             typer.echo(f'  Session ID: {result.session_id}')
@@ -751,8 +730,6 @@ async def _delete_async(
         raise typer.Exit(1) from None
     except Exception as e:
         logger.error('Failed to delete session: %s', e, exc_info=True)
-        if verbose:
-            traceback.print_exc()
         raise typer.Exit(1) from None
 
 
@@ -770,7 +747,6 @@ def move(
     no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
     dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be moved'),
     launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code in target project after move'),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Verbose output'),
 ) -> None:
     """Move a session from one project to another.
 
@@ -805,9 +781,7 @@ def move(
         session_id = detected
 
     asyncio.run(
-        _move_async(
-            _resolve_session_id(session_id), project, force, terminate, no_backup, dry_run, launch, verbose, ctx.args
-        )
+        _move_async(_resolve_session_id(session_id), project, force, terminate, no_backup, dry_run, launch, ctx.args)
     )
 
 
@@ -819,12 +793,9 @@ async def _move_async(
     no_backup: bool,
     dry_run: bool,
     launch: bool,
-    verbose: bool,
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of move command."""
-    level = logging.INFO if verbose else logging.WARNING
-    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Resolve session ID prefix to full ID
@@ -913,8 +884,6 @@ async def _move_async(
         raise typer.Exit(1) from None
     except Exception as e:
         logger.error('Failed to move session: %s', e, exc_info=True)
-        if verbose:
-            traceback.print_exc()
         raise typer.Exit(1) from None
 
 
