@@ -12,6 +12,8 @@ import logging
 from collections.abc import Sequence
 
 import bm25_rs
+import numpy as np
+from numpy.typing import NDArray
 
 __all__ = [
     'SparseEmbeddingService',
@@ -19,8 +21,9 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Type alias for sparse vector result
-type SparseVector = tuple[Sequence[int], Sequence[float]]
+# Type alias for sparse vector: numpy arrays for indices (int32) and values (float32).
+# Compact representation: ~8x smaller than tuple[list[int], list[float]] at scale.
+type SparseVector = tuple[NDArray[np.int32], NDArray[np.float32]]
 
 
 class SparseEmbeddingService:
@@ -76,7 +79,14 @@ class SparseEmbeddingService:
         # asyncio.to_thread prevents event loop blocking during PyO3 argument
         # conversion (list → Vec<String>). The Rust computation itself releases
         # the GIL via py.allow_threads, so only the conversion phase blocks.
-        results, wall_secs, cpu_secs = await asyncio.to_thread(self._model.embed_batch, list(texts))
+        raw_results, wall_secs, cpu_secs = await asyncio.to_thread(self._model.embed_batch, list(texts))
+        # Convert Python lists to numpy arrays at the boundary.
+        # bm25_rs returns list[tuple[list[int], list[float]]]; numpy arrays are
+        # ~8x smaller in memory at scale (int32 + float32 vs Python objects).
+        results: list[SparseVector] = [
+            (np.asarray(indices, dtype=np.int32), np.asarray(values, dtype=np.float32))
+            for indices, values in raw_results
+        ]
         parallel = cpu_secs / wall_secs if wall_secs > 0 else 0.0
         logger.debug(
             f'[SPARSE] {len(texts)} texts in {wall_secs:.3f}s wall, {cpu_secs:.3f}s cpu ({parallel:.1f}x parallel)',

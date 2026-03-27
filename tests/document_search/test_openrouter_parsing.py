@@ -15,7 +15,8 @@ from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRo
 class TestParseSuccess:
     def test_float_format(self) -> None:
         body = {
-            'data': [{'embedding': [0.1, 0.2, 0.3], 'index': 0}],
+            'object': 'list',
+            'data': [{'object': 'embedding', 'embedding': [0.1, 0.2, 0.3], 'index': 0}],
             'model': 'test/model',
             'usage': {'prompt_tokens': 10, 'total_tokens': 10},
         }
@@ -27,7 +28,8 @@ class TestParseSuccess:
         vector = np.array([0.1, 0.2, 0.3], dtype=np.float32)
         encoded = base64.b64encode(vector.tobytes()).decode()
         body = {
-            'data': [{'embedding': encoded, 'index': 0}],
+            'object': 'list',
+            'data': [{'object': 'embedding', 'embedding': encoded, 'index': 0}],
             'model': 'test/model',
             'usage': {'prompt_tokens': 10, 'total_tokens': 10},
         }
@@ -37,7 +39,8 @@ class TestParseSuccess:
     def test_int_in_float_array(self) -> None:
         """JSON integer 0 must not crash strict mode."""
         body = {
-            'data': [{'embedding': [0, 1.5, -0.3], 'index': 0}],
+            'object': 'list',
+            'data': [{'object': 'embedding', 'embedding': [0, 1.5, -0.3], 'index': 0}],
             'model': 'test/model',
             'usage': {'prompt_tokens': 10, 'total_tokens': 10},
         }
@@ -46,9 +49,10 @@ class TestParseSuccess:
 
     def test_multiple_embeddings_preserve_order(self) -> None:
         body = {
+            'object': 'list',
             'data': [
-                {'embedding': [0.1], 'index': 1},
-                {'embedding': [0.2], 'index': 0},
+                {'object': 'embedding', 'embedding': [0.1], 'index': 1},
+                {'object': 'embedding', 'embedding': [0.2], 'index': 0},
             ],
             'model': 'test/model',
             'usage': {'prompt_tokens': 10, 'total_tokens': 10},
@@ -59,7 +63,8 @@ class TestParseSuccess:
 
     def test_usage_tracked(self) -> None:
         body = {
-            'data': [{'embedding': [0.1], 'index': 0}],
+            'object': 'list',
+            'data': [{'object': 'embedding', 'embedding': [0.1], 'index': 0}],
             'model': 'test/model',
             'usage': {'prompt_tokens': 42, 'total_tokens': 100},
         }
@@ -117,7 +122,7 @@ class TestDecodeEmbedding:
     def test_float_passthrough(self) -> None:
         original = [0.1, 0.2, 0.3]
         decoded = _decode_embedding(original)
-        assert decoded == original
+        assert list(decoded) == pytest.approx(original)
 
 
 # -- Private Helpers ----------------------------------------------------------

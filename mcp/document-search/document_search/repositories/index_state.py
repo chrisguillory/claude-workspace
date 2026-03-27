@@ -15,7 +15,7 @@ from datetime import datetime
 from uuid import UUID
 
 from document_search.clients.redis import RedisClient
-from document_search.schemas.indexing import FileIndexState
+from document_search.schemas.indexing import FileIndexState, FileIndexSummary
 
 __all__ = [
     'IndexStateStore',
@@ -78,6 +78,34 @@ class IndexStateStore:
             if raw:
                 states[path] = _decode_file_state(path, raw)
         return states
+
+    async def get_all_summaries(self, file_paths: Sequence[str]) -> Mapping[str, FileIndexSummary]:
+        """Pre-load lightweight summaries for scan-phase classification.
+
+        Only deserializes fields needed for change detection (file_hash,
+        file_size, chunk_strategy_version). Skips chunk_ids entirely,
+        avoiding ~240 MB of UUID allocations for large indexes.
+        """
+        if not file_paths:
+            return {}
+
+        pipe = self._redis.pipeline()
+        for path in file_paths:
+            pipe.hmget(  # type: ignore[attr-defined]  # hmget exists at runtime, missing from redis Pipeline stubs
+                self._key(path),
+                b'file_hash',
+                b'file_size',
+                b'chunk_count',
+                b'chunk_strategy_version',
+            )
+        results = await self._redis.execute_pipeline(pipe)
+
+        summaries: dict[str, FileIndexSummary] = {}
+        for path, fields in zip(file_paths, results):
+            # hmget returns a list of values (None for missing keys)
+            if fields and fields[0] is not None:
+                summaries[path] = _decode_file_summary(path, fields)
+        return summaries
 
     # --- Directory operations (SCAN-based) ---
 
@@ -189,4 +217,22 @@ def _decode_file_state(file_path: str, raw: Mapping[bytes, bytes]) -> FileIndexS
         chunk_ids=[UUID(uid) for uid in json.loads(raw[b'chunk_ids'])],
         indexed_at=datetime.fromisoformat(raw[b'indexed_at'].decode()),
         chunk_strategy_version=int(raw[b'chunk_strategy_version']),
+    )
+
+
+def _decode_file_summary(file_path: str, fields: Sequence[bytes | None]) -> FileIndexSummary:
+    """Decode HMGET result to FileIndexSummary.
+
+    fields order: [file_hash, file_size, chunk_count, chunk_strategy_version]
+    Caller guarantees fields[0] is not None (checked before calling).
+    """
+    f_hash, f_size, f_count, f_version = fields[0], fields[1], fields[2], fields[3]
+    if f_hash is None or f_size is None or f_count is None or f_version is None:
+        raise ValueError(f'Incomplete Redis state for {file_path}: missing required fields')
+    return FileIndexSummary(
+        file_path=file_path,
+        file_hash=f_hash.decode(),
+        file_size=int(f_size),
+        chunk_count=int(f_count),
+        chunk_strategy_version=int(f_version),
     )

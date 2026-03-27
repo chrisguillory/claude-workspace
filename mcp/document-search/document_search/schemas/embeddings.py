@@ -8,8 +8,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Annotated, Literal
 
+import numpy as np
 import pydantic
 from cc_lib.schemas import StrictModel
+from numpy.typing import NDArray
+from pydantic import ConfigDict
 
 __all__ = [
     'MAX_TEXT_CHARS',
@@ -17,12 +20,22 @@ __all__ = [
     'EmbedBatchResponse',
     'EmbedRequest',
     'EmbedResponse',
+    'EmbeddingVector',
+    'SparseIndices',
+    'SparseValues',
     'TaskIntent',
 ]
 
 # Embedding intent - document (for indexing) or query (for search)
 # Each provider translates this to their specific format
 type TaskIntent = Literal['document', 'query']
+
+# A single embedding vector: Python list (from API) or numpy array (from cache)
+type EmbeddingVector = Sequence[float] | NDArray[np.float32]
+
+# Sparse vector components: Python list (from cold path) or numpy array (from pipeline)
+type SparseIndices = Sequence[int] | NDArray[np.int32]
+type SparseValues = Sequence[float] | NDArray[np.float32]
 
 # Max characters before truncation risk with most embedding models
 # Conservative limit that works across providers (~2048 tokens * ~3 chars/token)
@@ -53,10 +66,30 @@ class EmbedBatchRequest(StrictModel):
 
 
 class EmbedResponse(StrictModel):
-    """Single embedding result."""
+    """Single embedding result.
 
-    values: Sequence[float]
+    Values may be a Python list (from API) or numpy array (from cache).
+    The hot path (indexing) keeps numpy for 8x memory savings; the cold
+    path (search) calls list(response.values) when native types are needed.
+
+    arbitrary_types_allowed enables honest typing: the field IS a union of
+    list and ndarray. Pydantic validates the list branch normally; the ndarray
+    branch passes through without schema validation (constructed via from_numpy).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    values: EmbeddingVector
     dimensions: int
+
+    @classmethod
+    def from_numpy(cls, values: NDArray[np.float32]) -> EmbedResponse:
+        """Construct from numpy array (cache hot path).
+
+        Uses model_construct to bypass validation — avoids per-element
+        float coercion on arrays with 100K+ embeddings.
+        """
+        return cls.model_construct(values=values, dimensions=len(values))
 
 
 class EmbedBatchResponse(StrictModel):

@@ -355,10 +355,17 @@ INDEX_HTML = """<!DOCTYPE html>
             }
             const filesPct = p.files_to_process > 0
                 ? (p.files_done / p.files_to_process * 100).toFixed(1) : 0;
-            const chunksEmbedPct = p.chunks_ingested > 0
-                ? (p.chunks_embedded / p.chunks_ingested * 100).toFixed(1) : 0;
-            const chunksStorePct = p.chunks_ingested > 0
-                ? (p.chunks_stored / p.chunks_ingested * 100).toFixed(1) : 0;
+            // Use byte-extrapolated estimate when available; fall back to known ingested count
+            const estTotal = (p.estimated_total_chunks != null && p.estimated_total_chunks > 0)
+                ? p.estimated_total_chunks : null;
+            const chunksDenom = estTotal || p.chunks_ingested;
+            const chunksEmbedPct = chunksDenom > 0
+                ? Math.min(100, p.chunks_embedded / chunksDenom * 100).toFixed(1) : 0;
+            const chunksStorePct = chunksDenom > 0
+                ? Math.min(100, p.chunks_stored / chunksDenom * 100).toFixed(1) : 0;
+            const denomLabel = estTotal
+                ? '~' + chunksDenom.toLocaleString()
+                : chunksDenom.toLocaleString();
             const totalChunked = p.chunks_ingested + (p.chunks_skipped || 0);
             const chunkSkipPct = totalChunked > 0
                 ? ((p.chunks_skipped || 0) / totalChunked * 100).toFixed(1) : 0;
@@ -372,11 +379,11 @@ INDEX_HTML = """<!DOCTYPE html>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill embedded" style="width: ${chunksEmbedPct}%"></div>
-                    <div class="progress-text">Chunks Embedded: ${p.chunks_embedded.toLocaleString()} / ${p.chunks_ingested.toLocaleString()}</div>
+                    <div class="progress-text">Chunks Embedded: ${p.chunks_embedded.toLocaleString()} / ${denomLabel}</div>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" style="width: ${chunksStorePct}%"></div>
-                    <div class="progress-text">Chunks Stored: ${p.chunks_stored.toLocaleString()} / ${p.chunks_ingested.toLocaleString()}</div>
+                    <div class="progress-text">Chunks Stored: ${p.chunks_stored.toLocaleString()} / ${denomLabel}</div>
                 </div>
                 ${chunkCacheText}
                 <div class="pipeline">
@@ -391,6 +398,12 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="stat"><div class="stat-label">Errored</div><div class="stat-value">${p.files_errored}</div></div>
                     <div class="stat"><div class="stat-label">429 Errors</div><div class="stat-value">${p.errors_429}</div></div>
                     <div class="stat"><div class="stat-label">Redis HWM</div><div class="stat-value">${p.redis_hwm_total || 0}</div></div>
+                    <div class="stat"><div class="stat-label">Loop Lag HWM</div><div class="stat-value">${(p.event_loop_lag_hwm_ms || 0).toFixed(1)} ms</div></div>
+                    <div class="stat"><div class="stat-label">RSS HWM</div><div class="stat-value">${(p.rss_hwm_mb || 0).toFixed(0)} MB</div></div>
+                    <div class="stat"><div class="stat-label">HTTP p50</div><div class="stat-value">${(p.http_p50_ms || 0).toFixed(0)} ms</div></div>
+                    <div class="stat"><div class="stat-label">HTTP p99</div><div class="stat-value">${(p.http_p99_ms || 0).toFixed(0)} ms</div></div>
+                    <div class="stat"><div class="stat-label">Task HWM</div><div class="stat-value">${p.asyncio_task_hwm || 0}</div></div>
+                    <div class="stat"><div class="stat-label">GC Gen2</div><div class="stat-value">${p.gc_gen2_total || 0}</div></div>
                 </div>
                 ${p.by_file_type && Object.keys(p.by_file_type).length > 0 ? formatFileTypeChart(p.by_file_type) : ''}
                 ${formatQueueDepthChart(p.queue_depth_series)}
@@ -460,8 +473,13 @@ INDEX_HTML = """<!DOCTYPE html>
 
         function estimateEta(p) {
             if (p.status !== 'running' || p.chunks_stored === 0) return null;
+            // Use estimated_total_chunks (byte-extrapolated) when available,
+            // fall back to chunks_ingested (which grows as chunk stage runs).
+            const total = (p.estimated_total_chunks != null && p.estimated_total_chunks > 0)
+                ? p.estimated_total_chunks
+                : p.chunks_ingested;
             const rate = p.chunks_stored / p.elapsed_seconds;
-            const remaining = p.chunks_ingested - p.chunks_stored;
+            const remaining = total - p.chunks_stored;
             if (rate <= 0 || remaining <= 0) return null;
             return remaining / rate;
         }
@@ -658,7 +676,7 @@ INDEX_HTML = """<!DOCTYPE html>
             const HEIGHT_PRESETS = {S: {ph: 120, qh: 70}, M: {ph: 158, qh: 90}, L: {ph: 240, qh: 130}, XL: {ph: 340, qh: 180}, XXL: {ph: 480, qh: 240}};
             const state = {
                 start: 0, end: totalElapsed,
-                vis: new Set(['chunk', 'embed', 'embed_sparse', 'embed_dense', 'store']),
+                vis: new Set(['chunk', 'embed_sparse', 'embed_dense', 'store']),
                 qvis: new Set(['file_queue', 'embed_queue', 'upsert_queue', 'chunk_inflight', 'embed_inflight', 'store_inflight', 'chunk_done', 'embed_done', 'store_done']),
                 pct: 0.50, wins: {}, ws: 5, wsMode: 'auto', logScale: false, heightKey: 'M',
                 y2v: null, qMaxY: 0, yBounds: null, px: null, py: null,
@@ -670,9 +688,9 @@ INDEX_HTML = """<!DOCTYPE html>
                 type: {axis: 8, axisSmall: 7, legend: 11},
                 chart: {dotR: 1.0, dotHoverR: 3.5, lineW: 1, lineOp: 0.7, dotOp: 0.85, qLineW: 1, qLineOp: 0.7},
             };
-            const COLORS = {embed_sparse:'#c62828', embed_dense:'#1565c0', store:'#2e7d32', embed:'#6a1b9a', chunk:'#78909c'};
+            const COLORS = {embed_sparse:'#c62828', embed_dense:'#1565c0', store:'#2e7d32', chunk:'#78909c'};
             const QCOLORS = {file_queue:'#e65100', embed_queue:'#1976d2', upsert_queue:'#388e3c', chunk_inflight:'#ff6f00', embed_inflight:'#1e88e5', store_inflight:'#43a047', cumulative:'#6a1b9a', chunk_done:'#ef5350', embed_done:'#42a5f5', store_done:'#66bb6a'};
-            const LABELS = {chunk:'chunk', embed:'embed', embed_sparse:'sparse', embed_dense:'dense', store:'store'};
+            const LABELS = {chunk:'chunk', embed_sparse:'sparse', embed_dense:'dense', store:'store'};
             const W = 600, ML = THEME.spacing.ml, MR = THEME.spacing.mr;
             const PT = THEME.spacing.mt, PB = THEME.spacing.mb;
             const QT = THEME.spacing.mt, QB = THEME.spacing.mb;
@@ -989,7 +1007,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 ].map(o => '<option value="' + o.v + '"' + (o.v === state.wsMode ? ' selected' : '') + '>' + o.l + '</option>').join('');
 
                 // Stage legend
-                const allStages = ['embed_sparse', 'embed_dense', 'store', 'chunk', 'embed'];
+                const allStages = ['embed_sparse', 'embed_dense', 'store', 'chunk'];
                 const sLeg = allStages.filter(s => data.some(d => d.stage === s)).map(sid => {
                     const vis = state.vis.has(sid), p = aggP50(sid);
                     return '<span class="ts-sleg" data-s="' + sid + '" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;' + (vis ? '' : 'opacity:0.35;text-decoration:line-through;') + '">' +
