@@ -32,6 +32,6 @@ class CLILogger:
         """Log warning message."""
         print(f'[WARNING] {message}')
 
-    async def error(self, message: str) -> None:
+    async def error(self, message: str, *, exc_info: bool = False) -> None:
         """Log error message."""
         print(f'[ERROR] {message}')

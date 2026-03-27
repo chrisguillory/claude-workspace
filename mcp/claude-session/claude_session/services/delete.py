@@ -176,12 +176,12 @@ class SessionDeleteService:
         except asyncio.CancelledError:
             # Task cancellation - still perform cleanup, then propagate
             # Separate handling for clarity and potential future customization
-            logger.warning('Deletion cancelled, performing rollback...')
+            logger.warning('Deletion cancelled, performing rollback...', exc_info=True)
             try:
                 await self._rollback_from_backup(backup_path)
                 logger.info('Rollback completed after cancellation')
             except Exception as rollback_error:
-                logger.error(f'Rollback failed during cancellation: {rollback_error}')
+                logger.error(f'Rollback failed during cancellation: {rollback_error}', exc_info=True)
                 # Keep backup for manual recovery
             else:
                 # Rollback succeeded - remove backup
@@ -191,12 +191,12 @@ class SessionDeleteService:
 
         except BaseException as original_exc:
             # All other exceptions (including KeyboardInterrupt, SystemExit)
-            logger.error(f'Deletion failed: {original_exc}, performing rollback...')
+            logger.error(f'Deletion failed: {original_exc}, performing rollback...', exc_info=True)
             try:
                 await self._rollback_from_backup(backup_path)
                 logger.info('Rollback completed successfully')
             except Exception as rollback_error:
-                logger.error(f'Rollback failed: {rollback_error}')
+                logger.error(f'Rollback failed: {rollback_error}', exc_info=True)
                 # Keep backup for manual recovery
                 original_exc.add_note(f'Rollback failed: {rollback_error}')
                 original_exc.add_note(f'Backup preserved at: {backup_path}')
@@ -575,7 +575,7 @@ class SessionDeleteService:
             backup_path = Path(await self._create_backup(session_id, logger))
             if logger:
                 await logger.info(f'Backup created: {backup_path}')
-        except Exception as e:
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception — returns failure result to caller
             return DeleteResult(
                 session_id=session_id,
                 was_dry_run=False,
@@ -633,7 +633,7 @@ class SessionDeleteService:
         except self.EXPECTED_DELETION_ERRORS as e:
             # Expected filesystem error - rollback already happened
             if logger:
-                await logger.error(f'Deletion failed (rolled back): {e}')
+                await logger.error(f'Deletion failed (rolled back): {e}', exc_info=True)
 
             return DeleteResult(
                 session_id=session_id,

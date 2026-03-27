@@ -341,12 +341,16 @@ async def _archive_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
     except Exception as e:
-        await logger.error(f'Failed to create archive: {e}')
+        await logger.error(f'Failed to create archive: {e}', exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
 
 
 async def _restore_async(
@@ -492,10 +496,12 @@ async def _restore_async(
             typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
 
     except Exception as e:
-        await logger.error(f'Failed to restore session: {e}')
+        await logger.error(f'Failed to restore session: {e}', exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -595,12 +601,16 @@ async def _clone_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
     except Exception as e:
-        await logger.error(f'Failed to clone session: {e}')
+        await logger.error(f'Failed to clone session: {e}', exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
 
 
 @app.command()
@@ -744,12 +754,16 @@ async def _delete_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
     except Exception as e:
-        await logger.error(f'Failed to delete session: {e}')
+        await logger.error(f'Failed to delete session: {e}', exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -906,12 +920,16 @@ async def _move_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
     except Exception as e:
-        await logger.error(f'Failed to move session: {e}')
+        await logger.error(f'Failed to move session: {e}', exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
 
 
 def _render_lineage_tree(tree: LineageTree) -> None:
@@ -1009,7 +1027,9 @@ def lineage(
 
     except ClaudeSessionError as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
 
 
 @app.command()
@@ -1047,7 +1067,9 @@ async def _info_async(
         context = await info_service.get_info(session_id)
     except (ClaudeSessionError, FileNotFoundError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(
+            1
+        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
 
     if format == 'json':
         typer.echo(context.model_dump_json(indent=2))

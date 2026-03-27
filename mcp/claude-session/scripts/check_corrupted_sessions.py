@@ -41,7 +41,9 @@ def check_file(jsonl_file: Path) -> tuple[bool, int, str | None]:
 
         return (True, total_lines, None)
 
-    except Exception as e:
+    except (
+        Exception
+    ) as e:  # exception_safety_linter.py: swallowed-exception — returns error tuple to caller for aggregation
         return (False, 0, f'Failed to read file: {e}')
 
 

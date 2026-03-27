@@ -575,21 +575,21 @@ def render_record(record: dict[str, Any], counter: list[int]) -> list[str]:
 def broadcast_sse(server: http.server.HTTPServer, html: str, event_id: str = '') -> None:
     """Push an HTML fragment to all connected SSE clients."""
     encoded = json.dumps(html)
-    with server.sse_lock:  # type: ignore[attr-defined]
-        dead: list[queue.Queue] = []  # type: ignore[type-arg]
-        for q in server.sse_clients:  # type: ignore[attr-defined]
+    with server.sse_lock:  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
+        dead: list[queue.Queue] = []  # type: ignore[type-arg]  # Queue generic param unsupported at runtime in 3.13
+        for q in server.sse_clients:  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
             try:
                 q.put_nowait((encoded, event_id))
             except queue.Full:
                 dead.append(q)
         for q in dead:
-            server.sse_clients.remove(q)  # type: ignore[attr-defined]
+            server.sse_clients.remove(q)  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
 
 
 def broadcast_event(server: http.server.HTTPServer, event: str, data: str = '') -> None:
     """Push a named SSE event to all connected clients."""
-    with server.sse_lock:  # type: ignore[attr-defined]
-        for q in server.sse_clients:  # type: ignore[attr-defined]
+    with server.sse_lock:  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
+        for q in server.sse_clients:  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
             with contextlib.suppress(queue.Full):
                 q.put_nowait(('__event__', f'event: {event}\ndata: {data}\n\n'))
 
@@ -600,7 +600,7 @@ def broadcast_event(server: http.server.HTTPServer, event: str, data: str = '') 
 class _WatchHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP handler with SSE endpoint for live session tailing."""
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 — stdlib override uses 'format' parameter name
         pass
 
     def finish(self) -> None:
@@ -635,8 +635,8 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
             self._replay_from_offset(last_id)
 
         client_queue: queue.Queue[tuple[str, str]] = queue.Queue(maxsize=1000)
-        with self.server.sse_lock:  # type: ignore[attr-defined]
-            self.server.sse_clients.append(client_queue)  # type: ignore[attr-defined]
+        with self.server.sse_lock:  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
+            self.server.sse_clients.append(client_queue)  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
 
         try:
             while True:
@@ -659,9 +659,9 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
-            with self.server.sse_lock:  # type: ignore[attr-defined]
-                if client_queue in self.server.sse_clients:  # type: ignore[attr-defined]
-                    self.server.sse_clients.remove(client_queue)  # type: ignore[attr-defined]
+            with self.server.sse_lock:  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
+                if client_queue in self.server.sse_clients:  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
+                    self.server.sse_clients.remove(client_queue)  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
 
     def _replay_from_offset(self, last_id: str) -> None:
         """Replay records from a byte offset (Last-Event-ID reconnect)."""
@@ -670,7 +670,7 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
         except (ValueError, TypeError):
             return
 
-        jsonl_path = self.server.jsonl_path  # type: ignore[attr-defined]
+        jsonl_path = self.server.jsonl_path  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
         try:
             size = jsonl_path.stat().st_size
         except FileNotFoundError:
@@ -686,7 +686,7 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
         if not raw:
             return
 
-        counter = self.server.msg_counter  # type: ignore[attr-defined]
+        counter = self.server.msg_counter  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
         lines = raw.split(b'\n')
         current_offset = offset
         for line_bytes in lines:
@@ -707,7 +707,7 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.flush()
 
     def _handle_refresh(self) -> None:
-        self.server.refresh_flag.set()  # type: ignore[attr-defined]
+        self.server.refresh_flag.set()  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
         self.send_response(200)
         self.send_header('Content-Type', 'text/plain')
         self.end_headers()
@@ -728,11 +728,11 @@ def start_http_server(
     server.daemon_threads = True
 
     # Shared state on server object (avoids handler __init__ ordering issues)
-    server.sse_clients = []  # type: ignore[attr-defined]
-    server.sse_lock = threading.Lock()  # type: ignore[attr-defined]
-    server.refresh_flag = threading.Event()  # type: ignore[attr-defined]
-    server.jsonl_path = jsonl_path  # type: ignore[attr-defined]
-    server.msg_counter = msg_counter  # type: ignore[attr-defined]
+    server.sse_clients = []  # type: ignore[attr-defined]  # monkey-patch HTTPServer to share state with handlers
+    server.sse_lock = threading.Lock()  # type: ignore[attr-defined]  # monkey-patch HTTPServer to share state with handlers
+    server.refresh_flag = threading.Event()  # type: ignore[attr-defined]  # monkey-patch HTTPServer to share state with handlers
+    server.jsonl_path = jsonl_path  # type: ignore[attr-defined]  # monkey-patch HTTPServer to share state with handlers
+    server.msg_counter = msg_counter  # type: ignore[attr-defined]  # monkey-patch HTTPServer to share state with handlers
 
     actual_port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -970,8 +970,8 @@ def watch(
             break
 
         # Check for full refresh request
-        if server.refresh_flag.is_set():  # type: ignore[attr-defined]
-            server.refresh_flag.clear()  # type: ignore[attr-defined]
+        if server.refresh_flag.is_set():  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
+            server.refresh_flag.clear()  # type: ignore[attr-defined]  # custom attr on HTTPServer for SSE state sharing
             ts = time.strftime('%H:%M:%S')
             print(f'{Colors.DIM}[{ts}]{Colors.RESET} Full refresh requested...', flush=True)
             elapsed = regenerate(jsonl_path, html_path)

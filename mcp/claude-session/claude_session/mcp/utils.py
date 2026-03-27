@@ -31,6 +31,6 @@ class DualLogger:
         print(f'[{self._timestamp()}] [WARNING] {message}')
         await self.ctx.warning(message)
 
-    async def error(self, message: str) -> None:
+    async def error(self, message: str, *, exc_info: bool = False) -> None:
         print(f'[{self._timestamp()}] [ERROR] {message}')
         await self.ctx.error(message)

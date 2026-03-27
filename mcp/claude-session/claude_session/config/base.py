@@ -75,7 +75,7 @@ def _migrate_legacy_data_dir() -> None:
         if DATA_DIR.exists():
             logger.info('Migration completed by another process')
         else:
-            logger.error('Migration failed: source disappeared but target does not exist')
+            logger.error('Migration failed: source disappeared but target does not exist', exc_info=True)
     except OSError:
         # Partial move (e.g., cross-device, disk full) — clean up so next attempt retries
         if DATA_DIR.exists() and not any(DATA_DIR.iterdir()):

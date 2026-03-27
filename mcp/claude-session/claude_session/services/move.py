@@ -354,12 +354,12 @@ class SessionMoveService:
                 if dir_path.exists() and not any(dir_path.iterdir()):
                     dir_path.rmdir()
 
-        except Exception as e:
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception — partial source deletion adds warning; target already written successfully
             backup_note = f' Backup at: {backup_path}' if backup_path else ''
             msg = f'Source deletion partially failed: {e}. Session may exist in both projects.{backup_note}'
             warnings.append(msg)
             if log:
-                await log.error(msg)
+                await log.error(msg, exc_info=True)
 
         if log:
             await log.info(f'Phase 4 complete: {files_deleted} source files deleted')
