@@ -101,6 +101,7 @@ class PipelineTracer:
         self._rss_hwm_mb: float = 0.0
         self._asyncio_task_hwm: int = 0
         self._gc_gen2_total: int = 0
+        self._gc_gen2_baseline: int = 0
 
         # Track item order for warm-up flagging
         self._item_order: list[str] = []
@@ -168,6 +169,7 @@ class PipelineTracer:
 
     def start_monitoring(self, interval: float = 1.0) -> None:
         """Start periodic queue depth sampling."""
+        self._gc_gen2_baseline = gc.get_stats()[2]['collections']
         if self._monitor_task is None:
             self._monitor_task = asyncio.create_task(self._monitor_loop(interval))
 
@@ -302,17 +304,18 @@ class PipelineTracer:
         loop = asyncio.get_running_loop()
 
         while True:
-            await asyncio.sleep(interval)
-
-            # Event loop lag: measure how long sleep(0) actually takes
+            # Event loop lag: measure overshoot of the interval sleep.
+            # If the loop is busy when our timer fires, resumption is delayed.
+            # That delay IS the lag — unlike sleep(0) which underestimates
+            # because the callback queue was already drained to reach us.
             t0 = loop.time()
-            await asyncio.sleep(0)
-            lag_ms = (loop.time() - t0) * 1000
+            await asyncio.sleep(interval)
+            lag_ms = (loop.time() - t0 - interval) * 1000
 
             # RSS memory + task count + GC
             rss_mb = process.memory_info().rss / (1024 * 1024)
             task_count = len(asyncio.all_tasks())
-            gc_gen2 = gc.get_stats()[2]['collections']
+            gc_gen2 = gc.get_stats()[2]['collections'] - self._gc_gen2_baseline
 
             # Track HWMs
             self._event_loop_lag_hwm_ms = max(self._event_loop_lag_hwm_ms, lag_ms)

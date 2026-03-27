@@ -378,7 +378,6 @@ class IndexingService:
         on_progress: ProgressCallback | None = None,
         stop_after: StopAfterStage | None = None,
         embed_workers: int = NUM_EMBED_WORKERS,
-        max_concurrent: int | None = None,
     ) -> IndexingResult:
         """Index files using pipeline architecture with separate worker pools.
 
