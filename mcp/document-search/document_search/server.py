@@ -12,6 +12,7 @@ Tools:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import atexit
 import contextlib
@@ -252,6 +253,7 @@ Returns:
         path: str | None = None,
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
+        embed_workers: int = 64,
         include_timing: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
@@ -336,6 +338,7 @@ Returns:
                 resolved_path,
                 respect_gitignore=respect_gitignore,
                 stop_after=stop_after,
+                embed_workers=embed_workers,
             ),
         )
 
@@ -359,6 +362,8 @@ Returns:
                         status='running',
                         errors_429=errors_429_delta,
                         redis_conn_stats=state.redis_client.connection_stats,
+                        http_p50_ms=getattr(embedding_client, 'http_p50_ms', 0.0),
+                        http_p99_ms=getattr(embedding_client, 'http_p99_ms', 0.0),
                     )
                     progress_writer.update_progress(progress)
                 await asyncio.sleep(0.5)
@@ -454,22 +459,33 @@ Returns:
             else f'Searching {collection_name} ({search_type}): "{query}"',
         )
 
-        # Compute embeddings based on search type
+        # Compute embeddings based on search type.
+        # Dense embeddings may be numpy (from cache) or list (from API) —
+        # list() normalizes both to native Python for Pydantic strict validation.
+        # Sparse embeddings are always numpy NDArray from BM25 — .tolist()
+        # converts to native Python list[int] / list[float].
+        dense_vector: list[float] | None
+        sparse_indices: list[int] | None
+        sparse_values: list[float] | None
         if search_type == 'hybrid':
             # Both dense and sparse embeddings
             embed_request = EmbedRequest(text=query, intent='query')
             embed_response = await embedding_service.embed(embed_request)
-            dense_vector: Sequence[float] | None = embed_response.values
-            sparse_indices, sparse_values = await state.sparse_embedding_service.embed(query)
+            dense_vector = list(embed_response.values)
+            np_indices, np_values = await state.sparse_embedding_service.embed(query)
+            sparse_indices = np_indices.tolist()
+            sparse_values = np_values.tolist()
         elif search_type == 'lexical':
             # Sparse only (BM25 keyword matching)
             dense_vector = None
-            sparse_indices, sparse_values = await state.sparse_embedding_service.embed(query)
+            np_indices, np_values = await state.sparse_embedding_service.embed(query)
+            sparse_indices = np_indices.tolist()
+            sparse_values = np_values.tolist()
         elif search_type == 'embedding':
             # Dense only (semantic similarity)
             embed_request = EmbedRequest(text=query, intent='query')
             embed_response = await embedding_service.embed(embed_request)
-            dense_vector = embed_response.values
+            dense_vector = list(embed_response.values)
             sparse_indices = None
             sparse_values = None
         else:
@@ -834,13 +850,16 @@ Returns:
 async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
 
-    # Configure logging with timestamps to stderr
-    # Set level=logging.DEBUG temporarily for performance investigation
+    # Configure logging with timestamps to stderr.
+    # force=True overrides any prior configuration (e.g., from FastMCP)
+    # so that our format and level take effect.
+    log_level = os.environ.get('DOCUMENT_SEARCH_LOG_LEVEL', 'INFO')
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, log_level, logging.INFO),
         format='%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
         datefmt='%H:%M:%S',
         stream=sys.stderr,
+        force=True,
     )
     # Silence noisy third-party loggers
     logging.getLogger('httpx').setLevel(logging.WARNING)
@@ -908,6 +927,19 @@ server = mcp.server.fastmcp.FastMCP('document-search', lifespan=lifespan)
 # Create FastMCP server with lifespan
 def main() -> None:
     """Entry point for the MCP server."""
+    parser = argparse.ArgumentParser(description='Document Search MCP Server')
+    parser.add_argument(
+        '--log-level',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        default=None,
+        help='Server log level (default: INFO, env: DOCUMENT_SEARCH_LOG_LEVEL)',
+    )
+    args = parser.parse_args()
+
+    # Store in env so lifespan() picks it up (CLI arg wins over env var)
+    if args.log_level:
+        os.environ['DOCUMENT_SEARCH_LOG_LEVEL'] = args.log_level
+
     server.run()
 
 

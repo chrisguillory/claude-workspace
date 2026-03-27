@@ -10,13 +10,16 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal
 from uuid import UUID
 
+import numpy as np
 import pydantic
 from cc_lib.schemas import StrictModel
 from cc_lib.types import JsonDatetime
+from numpy.typing import NDArray
 
 from document_search.schemas.chunking import Chunk, FileType
 from document_search.schemas.collections import Collection
 from document_search.schemas.config import EmbeddingProvider, default_config
+from document_search.schemas.embeddings import EmbeddingVector
 
 __all__ = [
     'ClearResult',
@@ -82,17 +85,22 @@ class VectorPoint(StrictModel):
     def from_chunk(
         cls,
         chunk: Chunk,
-        dense_vector: Sequence[float],
-        sparse_indices: Sequence[int],
-        sparse_values: Sequence[float],
+        dense_vector: EmbeddingVector,
+        sparse_indices: NDArray[np.int32],
+        sparse_values: NDArray[np.float32],
         point_id: UUID,
     ) -> VectorPoint:
-        """Create VectorPoint from Chunk and embeddings."""
+        """Create VectorPoint from Chunk and embeddings.
+
+        Sparse parameters accept NDArray directly — callers always pass numpy
+        from BM25. The .tolist() conversion produces native Python types that
+        satisfy Pydantic strict validation for tuple[int, ...] / tuple[float, ...].
+        """
         return cls(
             id=point_id,
             dense_vector=tuple(dense_vector),
-            sparse_indices=tuple(sparse_indices),
-            sparse_values=tuple(sparse_values),
+            sparse_indices=tuple(sparse_indices.tolist()),
+            sparse_values=tuple(sparse_values.tolist()),
             source_path=chunk.source_path,
             chunk_index=chunk.chunk_index,
             file_type=chunk.file_type,

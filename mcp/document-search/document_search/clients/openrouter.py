@@ -15,6 +15,8 @@ import asyncio
 import base64
 import json
 import logging
+import time
+from collections import deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
@@ -26,10 +28,11 @@ import tenacity
 from cc_lib import ConcurrencyTracker
 from cc_lib.schemas.base import OpenModel
 from cc_lib.types import JsonObject
+from numpy.typing import NDArray
 
 from document_search.clients import _retry
 from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterUnexpectedResponse
-from document_search.schemas.embeddings import TaskIntent
+from document_search.schemas.embeddings import EmbeddingVector, TaskIntent
 
 __all__ = [
     'OpenRouterClient',
@@ -109,6 +112,9 @@ class OpenRouterClient:
             max_keepalive_connections=max_keepalive,
             keepalive_expiry=keepalive_expiry,
         )
+        # HTTP round-trip latencies (populated by event hooks)
+        self._http_latencies: deque[float] = deque(maxlen=10_000)
+
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             headers={
@@ -117,6 +123,10 @@ class OpenRouterClient:
             },
             timeout=timeout_ms / 1000,  # Convert to seconds for httpx
             limits=limits,
+            event_hooks={
+                'request': [self._on_request],
+                'response': [self._on_response],
+            },
         )
 
         self._semaphore = asyncio.Semaphore(max_concurrent)
@@ -135,7 +145,7 @@ class OpenRouterClient:
         texts: Sequence[str],
         *,
         intent: TaskIntent,
-    ) -> Sequence[Sequence[float]]:
+    ) -> Sequence[EmbeddingVector]:
         """Embed texts using OpenRouter API.
 
         Uses native async httpx for concurrent requests.
@@ -192,6 +202,20 @@ class OpenRouterClient:
         """Cumulative tokens consumed across all embed() calls."""
         return self._total_tokens
 
+    @property
+    def http_p50_ms(self) -> float:
+        """Median HTTP round-trip time across all API calls."""
+        if not self._http_latencies:
+            return 0.0
+        return float(np.percentile(self._http_latencies, 50))
+
+    @property
+    def http_p99_ms(self) -> float:
+        """99th percentile HTTP round-trip time across all API calls."""
+        if not self._http_latencies:
+            return 0.0
+        return float(np.percentile(self._http_latencies, 99))
+
     async def list_models(
         self,
     ) -> Sequence[JsonObject]:
@@ -230,11 +254,21 @@ class OpenRouterClient:
         """Async context manager exit."""
         await self.close()
 
+    async def _on_request(self, request: httpx.Request) -> None:
+        request.extensions['timing_start'] = time.perf_counter()
+
+    async def _on_response(self, response: httpx.Response) -> None:
+        start = response.request.extensions.get('timing_start')
+        if start is not None:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            self._http_latencies.append(elapsed_ms)
+
 
 # ── OpenRouter API response models ───────────────────────────────────
 
 
 class _Embedding(OpenModel):
+    object: str  # OpenAI spec field name
     embedding: Sequence[float] | str
     index: int
 
@@ -242,12 +276,16 @@ class _Embedding(OpenModel):
 class _Usage(OpenModel):
     prompt_tokens: int
     total_tokens: int
+    cost: float | None = None  # OpenRouter-specific, not consumed
 
 
 class _EmbeddingResponse(OpenModel):
+    id: str | None = None  # OpenRouter-specific, not consumed
+    object: str  # OpenAI spec field name
     data: Sequence[_Embedding]
     model: str
     usage: _Usage
+    provider: str | None = None  # OpenRouter-specific, not consumed
 
 
 class _ErrorDetail(OpenModel):
@@ -348,9 +386,8 @@ def _parse_models_response(
     return result
 
 
-def _decode_embedding(embedding: Sequence[float] | str) -> Sequence[float]:
-    """Decode from float array or base64 string."""
+def _decode_embedding(embedding: Sequence[float] | str) -> NDArray[np.float32]:
+    """Decode to numpy float32 array. Stays compact (3KB) instead of list[float] (24KB)."""
     if isinstance(embedding, str):
-        values: Sequence[float] = np.frombuffer(base64.b64decode(embedding), dtype=np.float32).tolist()
-        return values
-    return list(embedding)
+        return np.frombuffer(base64.b64decode(embedding), dtype=np.float32).copy()
+    return np.asarray(embedding, dtype=np.float32)

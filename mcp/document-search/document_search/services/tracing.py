@@ -13,11 +13,14 @@ records before/after run_in_executor.
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import time
 from collections.abc import Sequence, Set
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import psutil
 
 from document_search.schemas.tracing import (
     PercentileStats,
@@ -93,6 +96,13 @@ class PipelineTracer:
         # Monitor task
         self._monitor_task: asyncio.Task[None] | None = None
 
+        # System health HWMs
+        self._event_loop_lag_hwm_ms: float = 0.0
+        self._rss_hwm_mb: float = 0.0
+        self._asyncio_task_hwm: int = 0
+        self._gc_gen2_total: int = 0
+        self._gc_gen2_baseline: int = 0
+
         # Track item order for warm-up flagging
         self._item_order: list[str] = []
 
@@ -100,6 +110,26 @@ class PipelineTracer:
     def start_time(self) -> float:
         """Pipeline start time (perf_counter)."""
         return self._start
+
+    @property
+    def event_loop_lag_hwm_ms(self) -> float:
+        """Peak event loop lag observed during this operation."""
+        return self._event_loop_lag_hwm_ms
+
+    @property
+    def rss_hwm_mb(self) -> float:
+        """Peak RSS memory observed during this operation."""
+        return self._rss_hwm_mb
+
+    @property
+    def asyncio_task_hwm(self) -> int:
+        """Peak asyncio task count observed during this operation."""
+        return self._asyncio_task_hwm
+
+    @property
+    def gc_gen2_collections_total(self) -> int:
+        """Cumulative gen2 GC collections during this operation."""
+        return self._gc_gen2_total
 
     # ── Per-item timing ─────────────────────────────────────────
 
@@ -139,6 +169,7 @@ class PipelineTracer:
 
     def start_monitoring(self, interval: float = 1.0) -> None:
         """Start periodic queue depth sampling."""
+        self._gc_gen2_baseline = gc.get_stats()[2]['collections']
         if self._monitor_task is None:
             self._monitor_task = asyncio.create_task(self._monitor_loop(interval))
 
@@ -268,9 +299,30 @@ class PipelineTracer:
     # ── Private: queue monitoring ────────────────────────────────
 
     async def _monitor_loop(self, interval: float) -> None:
-        """Sample queue depths, in-flight counts, and completion counts periodically."""
+        """Sample queue depths, in-flight counts, system health periodically."""
+        process = psutil.Process()
+        loop = asyncio.get_running_loop()
+
         while True:
+            # Event loop lag: measure overshoot of the interval sleep.
+            # If the loop is busy when our timer fires, resumption is delayed.
+            # That delay IS the lag — unlike sleep(0) which underestimates
+            # because the callback queue was already drained to reach us.
+            t0 = loop.time()
             await asyncio.sleep(interval)
+            lag_ms = (loop.time() - t0 - interval) * 1000
+
+            # RSS memory + task count + GC
+            rss_mb = process.memory_info().rss / (1024 * 1024)
+            task_count = len(asyncio.all_tasks())
+            gc_gen2 = gc.get_stats()[2]['collections'] - self._gc_gen2_baseline
+
+            # Track HWMs
+            self._event_loop_lag_hwm_ms = max(self._event_loop_lag_hwm_ms, lag_ms)
+            self._rss_hwm_mb = max(self._rss_hwm_mb, rss_mb)
+            self._asyncio_task_hwm = max(self._asyncio_task_hwm, task_count)
+            self._gc_gen2_total = gc_gen2
+
             chunk_in, embed_in, store_in = self.get_in_flight_counts()
             chunk_done, embed_done, store_done = self.get_completion_counts()
             self._queue_depths.append(
@@ -285,6 +337,10 @@ class PipelineTracer:
                     files_chunk_done=chunk_done,
                     files_embed_done=embed_done,
                     files_store_done=store_done,
+                    event_loop_lag_ms=round(lag_ms, 2),
+                    rss_memory_mb=round(rss_mb, 1),
+                    asyncio_task_count=task_count,
+                    gc_gen2_collections=gc_gen2,
                 ),
             )
 
@@ -348,7 +404,7 @@ class PipelineTracer:
 
         waits: list[float] = []
         queued_event = f'{stage}:queued'
-        # For embed, queue wait ends at dequeued (entering accumulator)
+        # For embed, queue wait ends at dequeued (worker picks up file)
         # For chunk/store, queue wait ends at started
         pickup_event = f'{stage}:dequeued' if stage == 'embed' else f'{stage}:started'
 
@@ -366,7 +422,7 @@ class PipelineTracer:
         stage: TraceableStage,
         warmup_ids: Set[str],
     ) -> Sequence[float]:
-        """Collect batch accumulation wait (batch_started - dequeued) in ms."""
+        """Collect embed setup wait (batch_started - dequeued) in ms."""
         if stage != 'embed':
             return []
 
@@ -417,10 +473,9 @@ class PipelineTracer:
 def _stage_event_keys(stage: TraceableStage) -> tuple[str, str]:
     """Return (start_event_key, end_event_key) for stage processing time.
 
-    Embed uses batch_started → completed to measure processing time from
-    when the batch starts processing (after accumulation wait), excluding
-    queue wait (dequeued → batch_started). All other stages measure from
-    their started event.
+    Embed uses batch_started → completed to measure embedding time,
+    excluding queue wait (dequeued → batch_started). All other stages
+    measure from their started event.
     """
     if stage == 'embed':
         return f'{stage}:batch_started', f'{stage}:completed'

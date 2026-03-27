@@ -31,6 +31,7 @@ from document_search.schemas.indexing import (
     DirectoryIndexState,
     ErrorCategory,
     FileIndexState,
+    FileIndexSummary,
     FileProcessingError,
     IndexingProgress,
     IndexingResult,
@@ -73,6 +74,7 @@ __all__ = [  # noqa: RUF022 — grouped by schema module, not alphabetical
     # Indexing
     'CHUNK_STRATEGY_VERSION',
     'FileIndexState',
+    'FileIndexSummary',
     'DirectoryIndexState',
     'FileProcessingError',
     'ErrorCategory',

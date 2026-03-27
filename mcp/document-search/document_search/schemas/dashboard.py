@@ -115,10 +115,25 @@ class OperationProgress(StrictModel):
     timing_stats: Sequence[StageTimingReport] = ()
     scan_seconds: float | None = None
 
+    # ETA estimation (byte-based chunk extrapolation)
+    estimated_total_chunks: int | None = None
+
     # Redis connection diagnostics (high-water marks per operation)
     redis_hwm_single: int = 0
     redis_hwm_pipeline: int = 0
     redis_hwm_total: int = 0
+
+    # System health (high-water marks per operation)
+    event_loop_lag_hwm_ms: float = 0.0
+    rss_hwm_mb: float = 0.0
+
+    # HTTP round-trip timing (OpenRouter API, excludes event loop overhead)
+    http_p50_ms: float = 0.0
+    http_p99_ms: float = 0.0
+
+    # Diagnostic counters
+    asyncio_task_hwm: int = 0
+    gc_gen2_total: int = 0
 
     @classmethod
     def from_snapshot(
@@ -128,6 +143,8 @@ class OperationProgress(StrictModel):
         status: OperationStatus,
         errors_429: int,
         redis_conn_stats: ConnectionStats | None = None,
+        http_p50_ms: float = 0.0,
+        http_p99_ms: float = 0.0,
     ) -> OperationProgress:
         """Build from PipelineSnapshot with cross-layer metrics.
 
@@ -136,6 +153,8 @@ class OperationProgress(StrictModel):
             status: Lifecycle status ('running', 'complete', 'failed').
             errors_429: Count of rate limit errors (tracked by embedding client).
             redis_conn_stats: Redis connection diagnostics (HWM tracking).
+            http_p50_ms: Median HTTP round-trip time (from embedding client).
+            http_p99_ms: 99th percentile HTTP round-trip time.
 
         Returns:
             Complete OperationProgress ready for dashboard.
@@ -172,9 +191,16 @@ class OperationProgress(StrictModel):
             file_errors=snapshot.file_errors,
             timing_stats=snapshot.timing_stats,
             scan_seconds=snapshot.scan_seconds,
+            estimated_total_chunks=snapshot.estimated_total_chunks,
             redis_hwm_single=redis_conn_stats.hwm_single if redis_conn_stats else 0,
             redis_hwm_pipeline=redis_conn_stats.hwm_pipeline if redis_conn_stats else 0,
             redis_hwm_total=redis_conn_stats.hwm_total if redis_conn_stats else 0,
+            event_loop_lag_hwm_ms=snapshot.event_loop_lag_hwm_ms,
+            rss_hwm_mb=snapshot.rss_hwm_mb,
+            http_p50_ms=http_p50_ms,
+            http_p99_ms=http_p99_ms,
+            asyncio_task_hwm=snapshot.asyncio_task_hwm,
+            gc_gen2_total=snapshot.gc_gen2_total,
         )
 
     @classmethod
@@ -241,6 +267,12 @@ class OperationProgress(StrictModel):
             redis_hwm_single=redis_conn_stats.hwm_single if redis_conn_stats else 0,
             redis_hwm_pipeline=redis_conn_stats.hwm_pipeline if redis_conn_stats else 0,
             redis_hwm_total=redis_conn_stats.hwm_total if redis_conn_stats else 0,
+            event_loop_lag_hwm_ms=prior_progress.event_loop_lag_hwm_ms if prior_progress else 0.0,
+            rss_hwm_mb=prior_progress.rss_hwm_mb if prior_progress else 0.0,
+            http_p50_ms=prior_progress.http_p50_ms if prior_progress else 0.0,
+            http_p99_ms=prior_progress.http_p99_ms if prior_progress else 0.0,
+            asyncio_task_hwm=prior_progress.asyncio_task_hwm if prior_progress else 0,
+            gc_gen2_total=prior_progress.gc_gen2_total if prior_progress else 0,
         )
 
 
