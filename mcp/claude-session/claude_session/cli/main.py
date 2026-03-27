@@ -7,9 +7,11 @@ Provides commands to archive and restore Claude Code sessions.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import traceback
 from collections.abc import Sequence
@@ -23,7 +25,6 @@ from cc_lib.cli import add_completion_command, create_app, run_app
 from cc_lib.session_tracker import load_sessions
 from cc_lib.utils import encode_project_path
 
-from claude_session.cli.logger import CLILogger
 from claude_session.exceptions import ClaudeSessionError
 from claude_session.launcher import launch_claude_with_session
 from claude_session.schemas.operations.lineage import LineageTree
@@ -40,6 +41,8 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
+
+cli_logger = logging.getLogger(__name__)
 
 app = create_app(help='Archive and restore Claude Code sessions.')
 add_completion_command(app)
@@ -234,7 +237,8 @@ async def _archive_async(
     verbose: bool,
 ) -> None:
     """Async implementation of archive command."""
-    logger = CLILogger(verbose=verbose)
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Find the session
@@ -246,7 +250,7 @@ async def _archive_async(
             typer.echo(f'Searched in: {discovery.claude_sessions_dir}', err=True)
             raise typer.Exit(1)
 
-        await logger.info(f'Found session in folder: {session_info.session_folder}')
+        cli_logger.info('Found session in folder: %s', session_info.session_folder)
 
         # Parse output parameter - check if it's a Gist URL
         use_gist = output.startswith('gist://')
@@ -302,18 +306,18 @@ async def _archive_async(
                     description=gist_description,
                 )
                 output_path = None  # Don't pass to archive service
-                await logger.info(f'Creating Gist archive: {filename}')
+                cli_logger.info('Creating Gist archive: %s', filename)
             else:
                 # Local filesystem
                 output_file = Path(output)
                 storage = LocalFileSystemStorage(output_file.parent.resolve())
                 output_path = str(output)
                 filename = output_file.name
-                await logger.info(f'Creating archive: {output}')
+                cli_logger.info('Creating archive: %s', output)
 
             # Create archive
             metadata = await archive_service.create_archive(
-                storage=storage, output_path=output_path, format_param=format, logger=logger
+                storage=storage, output_path=output_path, format_param=format
             )
 
             # Print success
@@ -341,16 +345,12 @@ async def _archive_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to create archive: {e}', exc_info=True)
+        cli_logger.error('Failed to create archive: %s', e, exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
+        raise typer.Exit(1) from None
 
 
 async def _restore_async(
@@ -364,7 +364,8 @@ async def _restore_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of restore command."""
-    logger = CLILogger(verbose=verbose)
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Check if it's a Gist URL
@@ -378,7 +379,7 @@ async def _restore_async(
             # Get token (public gists don't need auth for reading, but use it if provided)
             token = _get_github_token_cli(gist_token) or ''
 
-            await logger.info(f'Downloading from Gist: {gist_id}')
+            cli_logger.info('Downloading from Gist: %s', gist_id)
 
             # Create Gist storage
             storage = GistStorage(token=token, gist_id=gist_id)
@@ -415,7 +416,7 @@ async def _restore_async(
                     raise typer.Exit(1)
 
             # Download to temp file
-            await logger.info(f'Downloading {archive_file}...')
+            cli_logger.info('Downloading %s...', archive_file)
             data = await storage.load(archive_file)
 
             # Use logical filename (without .b64) so restore service detects format correctly
@@ -424,7 +425,7 @@ async def _restore_async(
                 temp_file.write(data)
                 archive_path = Path(temp_file.name)
 
-            await logger.info(f'Downloaded {len(data):,} bytes')
+            cli_logger.info('Downloaded %s bytes', f'{len(data):,}')
 
         else:
             # Local file
@@ -444,20 +445,19 @@ async def _restore_async(
         else:
             project_path = Path.cwd()
 
-        await logger.info(f'Restoring to project: {project_path}')
+        cli_logger.info('Restoring to project: %s', project_path)
 
         # Initialize restore service
         restore_service = SessionRestoreService(project_path)
 
         # Restore the archive
-        await logger.info(f'Loading archive: {archive_path}')
+        cli_logger.info('Loading archive: %s', archive_path)
         if in_place:
-            await logger.info('In-place mode: restoring with original session ID')
+            cli_logger.info('In-place mode: restoring with original session ID')
         result = await restore_service.restore_archive(
             archive_path=str(archive_path),
             translate_paths=translate_paths,
             in_place=in_place,
-            logger=logger,
         )
 
         # Clean up temp file if we downloaded from Gist
@@ -496,12 +496,10 @@ async def _restore_async(
             typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
 
     except Exception as e:
-        await logger.error(f'Failed to restore session: {e}', exc_info=True)
+        cli_logger.error('Failed to restore session: %s', e, exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
+        raise typer.Exit(1) from None
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -547,7 +545,8 @@ async def _clone_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of clone command."""
-    logger = CLILogger(verbose=verbose)
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Determine project path
@@ -559,7 +558,7 @@ async def _clone_async(
         else:
             project_path = Path.cwd()
 
-        await logger.info(f'Cloning to project: {project_path}')
+        cli_logger.info('Cloning to project: %s', project_path)
 
         # Initialize clone service
         clone_service = SessionCloneService(project_path)
@@ -568,7 +567,6 @@ async def _clone_async(
         result = await clone_service.clone(
             source_session_id=session_id,
             translate_paths=translate_paths,
-            logger=logger,
         )
 
         # Print success
@@ -601,16 +599,12 @@ async def _clone_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to clone session: {e}', exc_info=True)
+        cli_logger.error('Failed to clone session: %s', e, exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -652,7 +646,8 @@ async def _delete_async(
     verbose: bool,
 ) -> None:
     """Async implementation of delete command."""
-    logger = CLILogger(verbose=verbose)
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Resolve session ID prefix to full ID
@@ -683,7 +678,7 @@ async def _delete_async(
                 raise typer.Exit(1)
             else:
                 # Running with --terminate: will terminate
-                await logger.info(f'Session is running (PID {running_pid}), will terminate before deletion')
+                cli_logger.info('Session is running (PID %s), will terminate before deletion', running_pid)
 
         # Initialize delete service
         # When --project is explicit, use it (user intent wins over discovery)
@@ -706,7 +701,6 @@ async def _delete_async(
             force=force,
             no_backup=no_backup,
             dry_run=dry_run,
-            logger=logger,
             terminate_pid_before_delete=terminate_pid,
         )
 
@@ -754,16 +748,12 @@ async def _delete_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to delete session: {e}', exc_info=True)
+        cli_logger.error('Failed to delete session: %s', e, exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
+        raise typer.Exit(1) from None
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -833,7 +823,8 @@ async def _move_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of move command."""
-    logger = CLILogger(verbose=verbose)
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
 
     try:
         # Resolve session ID prefix to full ID
@@ -857,7 +848,7 @@ async def _move_async(
                 typer.echo('Use --terminate to kill the process before moving.', err=True)
                 raise typer.Exit(1)
             else:
-                await logger.info(f'Session is running (PID {running_pid}), will terminate before move')
+                cli_logger.info('Session is running (PID %s), will terminate before move', running_pid)
 
         # Determine target project path
         if project:
@@ -879,7 +870,6 @@ async def _move_async(
             no_backup=no_backup,
             dry_run=dry_run,
             terminate_pid=terminate_pid,
-            log=logger,
         )
 
         if dry_run:
@@ -920,16 +910,12 @@ async def _move_async(
 
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
+        raise typer.Exit(1) from None
     except Exception as e:
-        await logger.error(f'Failed to move session: {e}', exc_info=True)
+        cli_logger.error('Failed to move session: %s', e, exc_info=True)
         if verbose:
             traceback.print_exc()
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: log error and exit
+        raise typer.Exit(1) from None
 
 
 def _render_lineage_tree(tree: LineageTree) -> None:
@@ -1027,9 +1013,7 @@ def lineage(
 
     except ClaudeSessionError as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -1067,9 +1051,7 @@ async def _info_async(
         context = await info_service.get_info(session_id)
     except (ClaudeSessionError, FileNotFoundError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(
-            1
-        ) from None  # exception_safety_linter.py: raise-without-from — CLI boundary: display error and exit
+        raise typer.Exit(1) from None
 
     if format == 'json':
         typer.echo(context.model_dump_json(indent=2))
