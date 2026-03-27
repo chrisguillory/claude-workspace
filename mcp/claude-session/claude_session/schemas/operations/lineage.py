@@ -15,6 +15,13 @@ import pydantic
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.types import JsonDatetime
 
+__all__ = [
+    'LineageEntry',
+    'LineageFile',
+    'LineageTree',
+    'LineageTreeNode',
+]
+
 
 class LineageEntry(StrictModel):
     """Lineage entry for a cloned/restored session.

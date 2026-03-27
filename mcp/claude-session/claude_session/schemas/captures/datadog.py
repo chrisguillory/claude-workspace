@@ -22,6 +22,18 @@ from claude_session.schemas.captures.base import RequestCapture, ResponseCapture
 from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.types import EmptyDict
 
+__all__ = [
+    'DatadogApiErrorLogEntry',
+    'DatadogApiSuccessLogEntry',
+    'DatadogLogEntry',
+    'DatadogLogEntryBase',
+    'DatadogOAuthSuccessLogEntry',
+    'DatadogRequestCapture',
+    'DatadogResponseCapture',
+    'DatadogToolUseSuccessLogEntry',
+]
+
+
 # -- Shared Base (32 fields present in ALL log entry types) --------------------
 
 
@@ -229,7 +241,9 @@ class DatadogOAuthSuccessLogEntry(DatadogLogEntryBase):
 # -- Discriminator Function and Union ------------------------------------------
 
 
-def _get_datadog_log_entry_type(v: Any) -> str:
+def _get_datadog_log_entry_type(  # strict_typing_linter.py: ordering — runtime dependency of DatadogLogEntry discriminator below
+    v: Any,
+) -> str:
     """
     Callable discriminator for DatadogLogEntry union.
 
@@ -263,7 +277,9 @@ DatadogLogEntry = Annotated[
 # -- Datadog Capture Types -----------------------------------------------------
 
 
-class DatadogRequestCapture(RequestCapture):
+class DatadogRequestCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    RequestCapture
+):  # strict_typing_linter.py: ordering — classes follow natural request/response grouping
     """Captured POST /api/v2/logs request (Datadog logging)."""
 
     host: Literal['http-intake.logs.us5.datadoghq.com']
@@ -271,7 +287,9 @@ class DatadogRequestCapture(RequestCapture):
     body: Sequence[DatadogLogEntry]
 
 
-class DatadogResponseCapture(ResponseCapture):
+class DatadogResponseCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    ResponseCapture
+):  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     """
     Captured POST /api/v2/logs response (202 Accepted).
 

@@ -25,6 +25,15 @@ from pathlib import Path
 
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 
+__all__ = [
+    'CLONE_SUFFIX_PATTERN',
+    'extract_base_custom_title',
+    'extract_custom_title_from_file',
+    'extract_custom_title_from_records',
+    'generate_clone_custom_title',
+]
+
+
 # Regex to match clone suffix: " (clone-XXXXXXXX)" where X is hex char
 CLONE_SUFFIX_PATTERN = re.compile(r'\s*\(clone-[0-9a-fA-F]{8}\)$')
 

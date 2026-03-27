@@ -16,6 +16,19 @@ from pathlib import Path
 
 from claude_session.schemas.session.models import Task
 
+__all__ = [
+    'TASKS_DIR',
+    'TASK_METADATA_FILES',
+    'TaskDirectoryContents',
+    'classify_task_directory',
+    'collect_task_metadata',
+    'iter_task_paths',
+    'iter_tasks',
+    'write_task_metadata',
+    'write_tasks',
+]
+
+
 TASKS_DIR = Path.home() / '.claude' / 'tasks'
 
 # Known metadata files in task directories (not task data)

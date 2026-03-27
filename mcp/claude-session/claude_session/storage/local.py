@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import pathlib
 
+__all__ = [
+    'LocalFileSystemStorage',
+]
+
 
 class LocalFileSystemStorage:
     """Local filesystem storage backend."""

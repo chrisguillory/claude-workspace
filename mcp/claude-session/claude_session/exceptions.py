@@ -18,6 +18,19 @@ Exception Hierarchy:
 
 from __future__ import annotations
 
+__all__ = [
+    'AmbiguousSessionError',
+    'ClaudeSessionError',
+    'NativeSessionDeletionError',
+    'NativeSessionMoveError',
+    'RunningSessionDeletionError',
+    'RunningSessionMoveError',
+    'SameProjectMoveError',
+    'SessionDeletionError',
+    'SessionMoveError',
+    'SessionResolutionError',
+]
+
 
 class ClaudeSessionError(Exception):
     """Base exception for all claude-session errors."""

@@ -12,7 +12,10 @@ from pathlib import Path
 
 from claude_session.schemas.session import AssistantRecord, SessionRecord, UserRecord
 
-__all__ = ['MissingCwdError', 'extract_source_project_path']
+__all__ = [
+    'MissingCwdError',
+    'extract_source_project_path',
+]
 
 
 class MissingCwdError(Exception):

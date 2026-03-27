@@ -28,6 +28,14 @@ from claude_session.schemas.session import (
     UserRecord,
 )
 
+__all__ = [
+    'VERSION_RECORD_TYPES',
+    'get_version',
+    'get_version_from_process',
+    'get_version_from_records',
+]
+
+
 # All record types that have a version field
 VERSION_RECORD_TYPES = (
     UserRecord,

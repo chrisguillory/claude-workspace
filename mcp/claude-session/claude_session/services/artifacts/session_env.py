@@ -15,6 +15,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+__all__ = [
+    'SESSION_ENV_DIR',
+    'create_session_env_dir',
+    'validate_session_env_empty',
+]
+
+
 SESSION_ENV_DIR = Path.home() / '.claude' / 'session-env'
 
 

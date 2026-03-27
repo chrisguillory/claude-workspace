@@ -31,6 +31,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
+__all__ = [
+    'CAPTURE_REGISTRY',
+    'extract_endpoint_from_filename',
+    'get_capture_type',
+    'normalize_path',
+]
+
+
 # Mapping from (host, path_pattern, direction) to discriminator tag
 # Path patterns are normalized (no query strings, SDK variants normalized)
 # Note: Messages responses require body.type inspection, handled in get_capture_type()

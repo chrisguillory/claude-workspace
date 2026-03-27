@@ -13,6 +13,12 @@ from typing import Literal
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.types import PathStr
 
+__all__ = [
+    'ArtifactFile',
+    'DeleteManifest',
+    'DeleteResult',
+]
+
 
 class ArtifactFile(StrictModel):
     """Single file in delete manifest."""

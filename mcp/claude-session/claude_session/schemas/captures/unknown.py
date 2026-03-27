@@ -26,6 +26,12 @@ import pydantic
 
 from claude_session.schemas.captures.base import RequestCapture, ResponseCapture
 
+__all__ = [
+    'UnknownRequestCapture',
+    'UnknownResponseCapture',
+]
+
+
 # -- Fallback for unknown endpoints --------------------------------------------
 
 

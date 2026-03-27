@@ -144,8 +144,9 @@ filterwarnings = [
 # MCP servers
 "mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
 
-# claude-session (aspirational — suppress all ordering for now)
-"mcp/claude-session/**" = ["mutable-type", "loose-typing", "ordering", "missing-all", "trailing-comma"]
+# claude-session (mutable-type and loose-typing are task #22's scope)
+"mcp/claude-session/**" = ["mutable-type", "loose-typing"]
+"mcp/claude-session/scripts/**" = ["missing-all", "class-ordering", "ordering"]
 "mcp/claude-session/claude_session/schemas/cc_internal_api/feature_flags.py" = ["skip-file"]
 "mcp/claude-session/claude_session/schemas/cc_internal_api/statsig.py" = ["skip-file"]
 "mcp/claude-session/claude_session/schemas/session/models.py" = ["skip-file"]

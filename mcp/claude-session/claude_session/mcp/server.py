@@ -50,6 +50,17 @@ from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
 
+__all__ = [
+    'ClaudeContext',
+    'ServerState',
+    'lifespan',
+    'logger',
+    'main',
+    'register_tools',
+    'server',
+]
+
+
 logger = logging.getLogger(__name__)
 
 # -- Types ---------------------------------------------------------------------
@@ -792,7 +803,7 @@ def register_tools(state: ServerState) -> None:
 # -- Private Helpers -----------------------------------------------------------
 
 
-def _find_claude_context() -> ClaudeContext:
+def _find_claude_context() -> ClaudeContext:  # strict_typing_linter.py: ordering — private helper after public API
     """
     Find Claude process and extract its context (PID, project directory).
 
@@ -847,7 +858,7 @@ def _find_claude_context() -> ClaudeContext:
     return ClaudeContext(claude_pid=pid, project_dir=cwd)
 
 
-def _discover_session_id(claude_pid: int) -> str:
+def _discover_session_id(claude_pid: int) -> str:  # strict_typing_linter.py: ordering — private helper after public API
     """
     Discover Claude Code session ID from claude-workspace sessions.json.
 
@@ -873,7 +884,7 @@ def _discover_session_id(claude_pid: int) -> str:
     return session_id
 
 
-def _get_github_token() -> str | None:
+def _get_github_token() -> str | None:  # strict_typing_linter.py: ordering — private helper after public API
     """
     Get GitHub token from environment or gh CLI.
 
@@ -905,7 +916,7 @@ def _get_github_token() -> str | None:
 # -- Server Entry Point --------------------------------------------------------
 
 
-def main() -> None:
+def main() -> None:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     """Run the MCP server."""
     server.run()
 

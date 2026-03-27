@@ -30,6 +30,48 @@ from typing import Literal
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
+__all__ = [
+    'AnyOfSchema',
+    'AnyOfSchemaNoDefault',
+    'ArraySchema',
+    'ArraySchemaBase',
+    'ArraySchemaItemsOnly',
+    'ArraySchemaWithBounds',
+    'BooleanSchema',
+    'BooleanSchemaDescriptionOnly',
+    'BooleanSchemaWithDefault',
+    'BooleanSchemaWithTitle',
+    'BooleanSchemaWithTitleDefault',
+    'NullSchema',
+    'NumberSchema',
+    'NumberSchemaDescriptionOnly',
+    'NumberSchemaTypeOnly',
+    'NumberSchemaWithBounds',
+    'NumberSchemaWithBoundsNoDefault',
+    'NumberSchemaWithDefaultOnly',
+    'NumberSchemaWithTitle',
+    'NumberSchemaWithTitleDefault',
+    'ObjectSchema',
+    'ObjectSchemaFull',
+    'ObjectSchemaPropertiesOnly',
+    'ObjectSchemaSimple',
+    'ObjectSchemaWithNestedAdditionalProps',
+    'StringSchema',
+    'StringSchemaDescriptionOnly',
+    'StringSchemaEnumNoDesc',
+    'StringSchemaMinLengthNoDesc',
+    'StringSchemaTypeOnly',
+    'StringSchemaWithDefault',
+    'StringSchemaWithEnum',
+    'StringSchemaWithFormat',
+    'StringSchemaWithMinLength',
+    'StringSchemaWithTitle',
+    'StringSchemaWithTitleDefault',
+    'StringSchemaWithTitleEnumDefault',
+    'ToolInputProperty',
+]
+
+
 # -- String Schema Variants (type="string") ------------------------------------
 # Observed shapes:
 #   [description, type] - 78 instances

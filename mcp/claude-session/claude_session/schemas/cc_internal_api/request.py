@@ -19,6 +19,27 @@ from claude_session.schemas.cc_internal_api.tool_input_schema import ToolInputPr
 from claude_session.schemas.session.models import ToolInput
 from claude_session.schemas.types import ModelId
 
+__all__ = [
+    'ContextManagementEdit',
+    'DisabledThinkingConfig',
+    'EnabledThinkingConfig',
+    'MessagesRequest',
+    'RequestContentBlock',
+    'RequestContextManagement',
+    'RequestMessage',
+    'RequestMetadata',
+    'RequestThinkingBlock',
+    'RequestToolResultBlock',
+    'RequestToolUseBlock',
+    'SystemBlock',
+    'TextContentBlock',
+    'ThinkingConfig',
+    'ToolDefinition',
+    'ToolInputSchema',
+    'ToolResultTextItem',
+]
+
+
 # -- System Block (API-only, not persisted) ------------------------------------
 
 

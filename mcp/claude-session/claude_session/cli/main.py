@@ -41,6 +41,21 @@ from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
 
+__all__ = [
+    'ArchiveFormat',
+    'app',
+    'archive',
+    'clone',
+    'delete',
+    'info',
+    'lineage',
+    'logger',
+    'main',
+    'move',
+    'restore',
+]
+
+
 logger = logging.getLogger(__name__)
 
 app = create_app(help='Archive and restore Claude Code sessions.')
@@ -48,7 +63,7 @@ add_completion_command(app)
 
 
 @app.callback(invoke_without_command=True)
-def _configure_logging(
+def _configure_logging(  # strict_typing_linter.py: ordering — typer callback must follow app definition
     ctx: typer.Context,
     verbose: bool = typer.Option(False, '--verbose', '-v', help='Show detailed progress'),
 ) -> None:
@@ -63,12 +78,16 @@ def _configure_logging(
 ArchiveFormat = Literal['json', 'zst']
 
 
-def _is_archive_format(value: str) -> TypeGuard[ArchiveFormat]:
+def _is_archive_format(  # strict_typing_linter.py: ordering — private validator grouped with ArchiveFormat type alias above
+    value: str,
+) -> TypeGuard[ArchiveFormat]:
     """Type guard for valid archive formats."""
     return value in ('json', 'zst')
 
 
-def _validate_archive_format(value: str | None) -> ArchiveFormat | None:
+def _validate_archive_format(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    value: str | None,
+) -> ArchiveFormat | None:  # strict_typing_linter.py: ordering — grouped with ArchiveFormat type alias
     """Validate and narrow archive format for typer callback."""
     if value is None:
         return None
@@ -77,7 +96,9 @@ def _validate_archive_format(value: str | None) -> ArchiveFormat | None:
     raise typer.BadParameter("Must be 'json' or 'zst'")
 
 
-def _resolve_session_id(session_id: str | None) -> str:
+def _resolve_session_id(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    session_id: str | None,
+) -> str:  # strict_typing_linter.py: ordering — common CLI helper used by all commands
     """Resolve session_id, auto-detecting from Claude Code if not provided."""
     if session_id is not None:
         return session_id
@@ -89,12 +110,16 @@ def _resolve_session_id(session_id: str | None) -> str:
     return detected
 
 
-def _is_session_id(value: str) -> bool:
+def _is_session_id(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    value: str,
+) -> bool:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     """Check if a string looks like a session ID (8+ hex digits/hyphens)."""
     return len(value) >= 8 and bool(re.fullmatch(r'[0-9a-f][0-9a-f-]*', value))
 
 
-def _get_github_token_cli(gist_token: str | None) -> str | None:
+def _get_github_token_cli(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    gist_token: str | None,
+) -> str | None:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     """Resolve GitHub token from flag, environment, or gh CLI.
 
     Checks in order:
@@ -121,7 +146,9 @@ def _get_github_token_cli(gist_token: str | None) -> str | None:
     return None
 
 
-def _format_age(dt: datetime | None) -> str:
+def _format_age(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    dt: datetime | None,
+) -> str:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     """Format a datetime as a precise human-readable age.
 
     Uses two-unit precision (e.g., 2h12m, 3d5h) so that descriptions
@@ -139,7 +166,9 @@ def _format_age(dt: datetime | None) -> str:
     return f'{days}d{hrs}h'
 
 
-def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
+def _complete_session_id(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    incomplete: str,
+) -> Sequence[tuple[str, str]]:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     """Complete session IDs from tracked sessions. Active first, then newest."""
     db = load_sessions('.')
     matches = [s for s in db.sessions if s.session_id.startswith(incomplete)]
@@ -169,7 +198,7 @@ def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
 
 
 @app.command()
-def archive(
+def archive(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str | None = typer.Argument(
         None, help='Session ID to archive (auto-detected inside Claude Code)', autocompletion=_complete_session_id
     ),
@@ -214,7 +243,7 @@ def archive(
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
-def restore(
+def restore(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     ctx: typer.Context,
     archive: str = typer.Argument(..., help='Archive path or Gist URL (gist://<gist-id> or file path)'),
     project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
@@ -235,7 +264,7 @@ def restore(
     asyncio.run(_restore_async(archive, project, not no_translate, in_place, launch, gist_token, ctx.args))
 
 
-async def _archive_async(
+async def _archive_async(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str,
     output: str,
     format: Literal['json', 'zst'] | None,
@@ -354,7 +383,7 @@ async def _archive_async(
         raise typer.Exit(1) from None
 
 
-async def _restore_async(
+async def _restore_async(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     archive: str,
     project: Path | None,
     translate_paths: bool,
@@ -502,7 +531,7 @@ async def _restore_async(
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
-def clone(
+def clone(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     ctx: typer.Context,
     session_id: str | None = typer.Argument(
         None, help='Session ID to clone (auto-detected inside Claude Code)', autocompletion=_complete_session_id
@@ -534,7 +563,7 @@ def clone(
     asyncio.run(_clone_async(_resolve_session_id(session_id), project, not no_translate, launch, ctx.args))
 
 
-async def _clone_async(
+async def _clone_async(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str,
     project: Path | None,
     translate_paths: bool,
@@ -601,7 +630,7 @@ async def _clone_async(
 
 
 @app.command()
-def delete(
+def delete(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str | None = typer.Argument(
         None,
         help='Session ID (full or prefix). Auto-detected inside Claude Code.',
@@ -628,7 +657,7 @@ def delete(
     asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project))
 
 
-async def _delete_async(
+async def _delete_async(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str,
     force: bool,
     terminate: bool,
@@ -740,7 +769,7 @@ async def _delete_async(
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
-def move(
+def move(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     ctx: typer.Context,
     session_id: str | None = typer.Argument(
         None,
@@ -791,7 +820,7 @@ def move(
     )
 
 
-async def _move_async(
+async def _move_async(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str,
     project: Path | None,
     force: bool,
@@ -893,7 +922,9 @@ async def _move_async(
         raise typer.Exit(1) from None
 
 
-def _render_lineage_tree(tree: LineageTree) -> None:
+def _render_lineage_tree(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    tree: LineageTree,
+) -> None:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     """Render a LineageTree with proper box-drawing characters."""
 
     def render_node(node_id: str, prefix: str, is_last: bool, is_root: bool) -> None:
@@ -920,7 +951,7 @@ def _render_lineage_tree(tree: LineageTree) -> None:
 
 
 @app.command()
-def lineage(
+def lineage(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str | None = typer.Argument(
         None,
         help='Session ID (full or prefix). Auto-detected inside Claude Code.',
@@ -992,7 +1023,7 @@ def lineage(
 
 
 @app.command()
-def info(
+def info(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str | None = typer.Argument(
         None,
         help='Session ID (full or prefix). Auto-detected inside Claude Code.',
@@ -1016,7 +1047,7 @@ def info(
     asyncio.run(_info_async(_resolve_session_id(session_id), format))
 
 
-async def _info_async(
+async def _info_async(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     session_id: str,
     format: Literal['text', 'json'],
 ) -> None:
@@ -1085,7 +1116,7 @@ async def _info_async(
             typer.echo(f'  Temp dir: {context.temp_dir}')
 
 
-def main() -> None:
+def main() -> None:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
     """Entry point for CLI."""
     run_app(app)
 

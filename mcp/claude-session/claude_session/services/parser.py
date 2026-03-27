@@ -14,6 +14,12 @@ from pathlib import Path
 from claude_session.schemas.session import SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 
+__all__ = [
+    'SessionParserService',
+    'logger',
+]
+
+
 logger = logging.getLogger(__name__)
 
 # -- Session Parser Service ----------------------------------------------------

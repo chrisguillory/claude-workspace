@@ -13,6 +13,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+__all__ = [
+    'MIGRATIONS',
+    'Migration',
+    'apply_migration',
+    'auto_migrate',
+    'detect_record_version',
+    'migrate_session_file',
+    'needs_migration',
+    'register_migration',
+]
+
+
 # -- Migration Registry --------------------------------------------------------
 
 # Migrations are functions that transform record data from one version to another
