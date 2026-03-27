@@ -850,9 +850,9 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
 
     # Configure logging with timestamps to stderr
-    # Set level=logging.DEBUG temporarily for performance investigation
+    log_level = os.environ.get('DOCUMENT_SEARCH_LOG_LEVEL', 'INFO')
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, log_level, logging.INFO),
         format='%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
         datefmt='%H:%M:%S',
         stream=sys.stderr,
