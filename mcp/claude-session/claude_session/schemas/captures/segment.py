@@ -87,7 +87,9 @@ class SegmentEventBase(StrictModel):
     anonymousId: str | None = None
     # Optional common fields
     context: SegmentContext | None = None
-    integrations: Mapping[str, Any] | None = None  # check_schema_typing.py: loose-typing
+    integrations: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — Segment API sends arbitrary integration config
+    )
     # SDK metadata (uses underscore prefix in JSON)
     segment_metadata: SegmentMetadata | None = None
 

@@ -84,7 +84,7 @@ class AgentFileInfo:
 def collect_agent_file_info(
     files_data: Mapping[str, Sequence[SessionRecord]],
     agent_structure: Mapping[str, bool],
-) -> list[AgentFileInfo]:
+) -> Sequence[AgentFileInfo]:
     """
     Collect agent file information from loaded session data.
 

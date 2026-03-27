@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from claude_session.schemas.session import SessionRecord
@@ -32,7 +32,7 @@ class SessionParserService:
     Pure domain logic - loads and validates JSONL files into typed SessionRecord objects.
     """
 
-    async def load_session_files(self, session_files: Sequence[Path]) -> dict[str, list[SessionRecord]]:
+    async def load_session_files(self, session_files: Sequence[Path]) -> Mapping[str, Sequence[SessionRecord]]:
         """
         Load and parse session JSONL files.
 
@@ -53,7 +53,11 @@ class SessionParserService:
 
         return files_data
 
-    async def _parse_jsonl_file(self, file_path: Path) -> list[SessionRecord]:
+    async def _parse_jsonl_file(
+        self, file_path: Path
+    ) -> list[
+        SessionRecord
+    ]:  # strict_typing_linter.py: mutable-type — builds list via .append(), assigned to dict value
         """
         Parse a single JSONL file into validated records.
 

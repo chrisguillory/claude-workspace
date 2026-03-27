@@ -45,9 +45,13 @@ class TaskDirectoryContents:
     metadata files and flags anything unexpected for fail-fast behavior.
     """
 
-    task_files: list[Path]  # {id}.json data files
-    metadata_files: list[Path]  # .lock, .highwatermark
-    unexpected_files: list[Path]  # Anything else (signals bug in task system)
+    task_files: list[Path]  # strict_typing_linter.py: mutable-type — built via .append() in classify_task_directory()
+    metadata_files: list[
+        Path
+    ]  # strict_typing_linter.py: mutable-type — built via .append() in classify_task_directory()
+    unexpected_files: list[
+        Path
+    ]  # strict_typing_linter.py: mutable-type — built via .append() in classify_task_directory()
 
 
 def classify_task_directory(session_id: str) -> TaskDirectoryContents | None:
