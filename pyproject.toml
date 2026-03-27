@@ -58,6 +58,7 @@ ignore = [
     "RUF100",  # unused-noqa — pre-emptive noqa for custom linters / future rules
     "SIM102",  # allow nested if statements
     "SIM103",  # allow explicit if-return-false for clarity
+    "SIM105",  # allow try/except/pass over contextlib.suppress
     "SIM108",  # allow if-else over ternary
 ]
 

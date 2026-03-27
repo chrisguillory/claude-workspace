@@ -355,10 +355,17 @@ INDEX_HTML = """<!DOCTYPE html>
             }
             const filesPct = p.files_to_process > 0
                 ? (p.files_done / p.files_to_process * 100).toFixed(1) : 0;
-            const chunksEmbedPct = p.chunks_ingested > 0
-                ? (p.chunks_embedded / p.chunks_ingested * 100).toFixed(1) : 0;
-            const chunksStorePct = p.chunks_ingested > 0
-                ? (p.chunks_stored / p.chunks_ingested * 100).toFixed(1) : 0;
+            // Use byte-extrapolated estimate when available; fall back to known ingested count
+            const estTotal = (p.estimated_total_chunks != null && p.estimated_total_chunks > 0)
+                ? p.estimated_total_chunks : null;
+            const chunksDenom = estTotal || p.chunks_ingested;
+            const chunksEmbedPct = chunksDenom > 0
+                ? Math.min(100, p.chunks_embedded / chunksDenom * 100).toFixed(1) : 0;
+            const chunksStorePct = chunksDenom > 0
+                ? Math.min(100, p.chunks_stored / chunksDenom * 100).toFixed(1) : 0;
+            const denomLabel = estTotal
+                ? '~' + chunksDenom.toLocaleString()
+                : chunksDenom.toLocaleString();
             const totalChunked = p.chunks_ingested + (p.chunks_skipped || 0);
             const chunkSkipPct = totalChunked > 0
                 ? ((p.chunks_skipped || 0) / totalChunked * 100).toFixed(1) : 0;
@@ -372,11 +379,11 @@ INDEX_HTML = """<!DOCTYPE html>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill embedded" style="width: ${chunksEmbedPct}%"></div>
-                    <div class="progress-text">Chunks Embedded: ${p.chunks_embedded.toLocaleString()} / ${p.chunks_ingested.toLocaleString()}</div>
+                    <div class="progress-text">Chunks Embedded: ${p.chunks_embedded.toLocaleString()} / ${denomLabel}</div>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" style="width: ${chunksStorePct}%"></div>
-                    <div class="progress-text">Chunks Stored: ${p.chunks_stored.toLocaleString()} / ${p.chunks_ingested.toLocaleString()}</div>
+                    <div class="progress-text">Chunks Stored: ${p.chunks_stored.toLocaleString()} / ${denomLabel}</div>
                 </div>
                 ${chunkCacheText}
                 <div class="pipeline">
@@ -466,8 +473,13 @@ INDEX_HTML = """<!DOCTYPE html>
 
         function estimateEta(p) {
             if (p.status !== 'running' || p.chunks_stored === 0) return null;
+            // Use estimated_total_chunks (byte-extrapolated) when available,
+            // fall back to chunks_ingested (which grows as chunk stage runs).
+            const total = (p.estimated_total_chunks != null && p.estimated_total_chunks > 0)
+                ? p.estimated_total_chunks
+                : p.chunks_ingested;
             const rate = p.chunks_stored / p.elapsed_seconds;
-            const remaining = p.chunks_ingested - p.chunks_stored;
+            const remaining = total - p.chunks_stored;
             if (rate <= 0 || remaining <= 0) return null;
             return remaining / rate;
         }
