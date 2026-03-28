@@ -50,6 +50,15 @@ from claude_session.services.artifacts import (
 )
 from claude_session.services.lineage import LineageService
 
+__all__ = [
+    'PathTranslator',
+    'SessionRestoreService',
+    'get_restoration_timestamp',
+    'is_restored_session',
+    'logger',
+]
+
+
 logger = logging.getLogger(__name__)
 
 # -- Path Translation Service --------------------------------------------------
@@ -528,7 +537,7 @@ class SessionRestoreService:
 
         return self._parse_archive_data(data)
 
-    def _parse_archive_data(self, data: dict[str, Any]) -> SessionArchiveV2:
+    def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchiveV2:
         """Parse archive data with version detection.
 
         V1 archives are migrated to V2 in memory for unified processing.

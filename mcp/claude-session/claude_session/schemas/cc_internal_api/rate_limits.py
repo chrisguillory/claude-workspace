@@ -14,6 +14,16 @@ from typing import Literal, cast
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
+__all__ = [
+    'FallbackStatus',
+    'OverageStatus',
+    'RateLimitStatus',
+    'RateLimitWindow',
+    'RepresentativeClaim',
+    'UnifiedRateLimit',
+]
+
+
 # -- Rate Limit Status Types ---------------------------------------------------
 
 RateLimitStatus = Literal['allowed', 'throttled']

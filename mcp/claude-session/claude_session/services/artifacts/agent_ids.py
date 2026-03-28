@@ -36,6 +36,20 @@ from pathlib import Path
 
 from claude_session.schemas.session import SessionRecord
 
+__all__ = [
+    'AGENT_FILENAME_PATTERN',
+    'AgentFileInfo',
+    'apply_agent_id_mapping',
+    'collect_agent_file_info',
+    'detect_agent_structure',
+    'extract_agent_ids_from_files',
+    'extract_base_agent_id',
+    'generate_agent_id_mapping',
+    'generate_clone_agent_id',
+    'transform_agent_filename',
+]
+
+
 # Pattern for agent filenames - matches native (hex or typed) and cloned formats:
 # - agent-5271c147.jsonl (native hex)
 # - agent-aprompt_suggestion-d7f1a0.jsonl (native typed, 2.1.25+)
@@ -70,7 +84,7 @@ class AgentFileInfo:
 def collect_agent_file_info(
     files_data: Mapping[str, Sequence[SessionRecord]],
     agent_structure: Mapping[str, bool],
-) -> list[AgentFileInfo]:
+) -> Sequence[AgentFileInfo]:
     """
     Collect agent file information from loaded session data.
 
@@ -127,9 +141,7 @@ def extract_base_agent_id(agent_id: str) -> str:
     return agent_id
 
 
-def extract_agent_ids_from_files(
-    files_data: Mapping[str, Sequence[SessionRecord]],
-) -> Set[str]:
+def extract_agent_ids_from_files(files_data: Mapping[str, Sequence[SessionRecord]]) -> Set[str]:
     """
     Extract agent IDs from loaded session files.
 
@@ -184,10 +196,7 @@ def generate_clone_agent_id(old_agent_id: str, new_session_id: str) -> str:
     return f'{base_id}-clone-{prefix}'
 
 
-def generate_agent_id_mapping(
-    agent_ids: Set[str],
-    new_session_id: str,
-) -> Mapping[str, str]:
+def generate_agent_id_mapping(agent_ids: Set[str], new_session_id: str) -> Mapping[str, str]:
     """
     Generate mapping of old agent IDs to new cloned agent IDs.
 
@@ -203,10 +212,7 @@ def generate_agent_id_mapping(
     return {old_id: generate_clone_agent_id(old_id, new_session_id) for old_id in agent_ids}
 
 
-def transform_agent_filename(
-    old_filename: str,
-    agent_id_mapping: Mapping[str, str],
-) -> str:
+def transform_agent_filename(old_filename: str, agent_id_mapping: Mapping[str, str]) -> str:
     """
     Transform an agent filename using the agent ID mapping.
 
@@ -267,11 +273,7 @@ def apply_agent_id_mapping(json_str: str, agent_id_mapping: Mapping[str, str]) -
     return result
 
 
-def detect_agent_structure(
-    agent_path: Path,
-    session_id: str,
-    project_folder: Path,
-) -> bool:
+def detect_agent_structure(agent_path: Path, session_id: str, project_folder: Path) -> bool:
     """
     Detect if agent file is nested (subagents/) or flat.
 

@@ -47,6 +47,9 @@ app = create_app(help='Archive and restore Claude Code sessions.')
 add_completion_command(app)
 
 
+# -- Typer infrastructure (private, must precede commands that reference them) --
+
+
 @app.callback(invoke_without_command=True)
 def _configure_logging(
     ctx: typer.Context,
@@ -59,7 +62,6 @@ def _configure_logging(
         typer.echo(ctx.get_help())
 
 
-# Type aliases and validators
 ArchiveFormat = Literal['json', 'zst']
 
 
@@ -75,50 +77,6 @@ def _validate_archive_format(value: str | None) -> ArchiveFormat | None:
     if _is_archive_format(value):
         return value
     raise typer.BadParameter("Must be 'json' or 'zst'")
-
-
-def _resolve_session_id(session_id: str | None) -> str:
-    """Resolve session_id, auto-detecting from Claude Code if not provided."""
-    if session_id is not None:
-        return session_id
-    detected = auto_detect_session_id()
-    if detected is None:
-        typer.secho('Error: Not running inside Claude Code.', fg=typer.colors.RED, err=True)
-        typer.echo('Provide a session ID: claude-session <command> <session-id>', err=True)
-        raise typer.Exit(1)
-    return detected
-
-
-def _is_session_id(value: str) -> bool:
-    """Check if a string looks like a session ID (8+ hex digits/hyphens)."""
-    return len(value) >= 8 and bool(re.fullmatch(r'[0-9a-f][0-9a-f-]*', value))
-
-
-def _get_github_token_cli(gist_token: str | None) -> str | None:
-    """Resolve GitHub token from flag, environment, or gh CLI.
-
-    Checks in order:
-    1. --gist-token flag value
-    2. GITHUB_TOKEN environment variable
-    3. `gh auth token` command (GitHub CLI)
-    """
-    if gist_token:
-        return gist_token
-    token = os.environ.get('GITHUB_TOKEN')
-    if token:
-        return token
-    try:
-        result = subprocess.run(
-            ['gh', 'auth', 'token'],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except FileNotFoundError:
-        pass  # gh CLI not installed
-    return None
 
 
 def _format_age(dt: datetime | None) -> str:
@@ -166,6 +124,9 @@ def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
     if duped:
         results = [(sid, f'{desc} ({sid[:8]})') if desc in duped else (sid, desc) for sid, desc in results]
     return results
+
+
+# -- Commands (public @app.command functions) --
 
 
 @app.command()
@@ -233,6 +194,224 @@ def restore(
         claude-session restore ARCHIVE --launch -- --chrome
     """
     asyncio.run(_restore_async(archive, project, not no_translate, in_place, launch, gist_token, ctx.args))
+
+
+@app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
+def clone(
+    ctx: typer.Context,
+    session_id: str | None = typer.Argument(
+        None, help='Session ID to clone (auto-detected inside Claude Code)', autocompletion=_complete_session_id
+    ),
+    project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
+    no_translate: bool = typer.Option(False, '--no-translate', help="Don't translate file paths"),
+    launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after clone'),
+) -> None:
+    """Clone a session directly (no archive file needed).
+
+    When run inside Claude Code, session ID is auto-detected if not provided.
+
+    \b
+    Examples:
+        claude-session clone                  # clone current session
+        claude-session clone SESSION_ID       # clone specific session
+        claude-session clone SESSION_ID -l    # clone and launch
+    """
+    detected = auto_detect_session_id()
+    if launch and detected is not None:
+        typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
+        typer.echo('Use claude --resume <session-id> after cloning instead.', err=True)
+        raise typer.Exit(1)
+
+    # Use cached detection result to avoid a second process tree walk
+    if session_id is None:
+        session_id = detected
+
+    asyncio.run(_clone_async(_resolve_session_id(session_id), project, not no_translate, launch, ctx.args))
+
+
+@app.command()
+def delete(
+    session_id: str | None = typer.Argument(
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+        autocompletion=_complete_session_id,
+    ),
+    force: bool = typer.Option(False, '--force', '-f', help='Required to delete native (UUIDv4) sessions'),
+    terminate: bool = typer.Option(False, '--terminate', '-t', help='Terminate running Claude process before deletion'),
+    no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
+    dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be deleted'),
+    project: Path | None = typer.Option(None, '--project', '-p', help='Project directory (default: current)'),
+) -> None:
+    """Delete session artifacts with auto-backup.
+
+    By default, only cloned/restored sessions (UUIDv7) can be deleted.
+    Native Claude sessions (UUIDv4) require --force.
+
+    If the session is currently running, use --terminate to kill the Claude
+    process before deletion. This prevents the session file from being
+    recreated when the process exits.
+
+    A backup is saved to ~/.claude-workspace/claude-session/deleted/ for undo capability.
+    Use 'restore --in-place' on the backup to undo.
+    """
+    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project))
+
+
+@app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
+def move(
+    ctx: typer.Context,
+    session_id: str | None = typer.Argument(
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+        autocompletion=_complete_session_id,
+    ),
+    project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
+    force: bool = typer.Option(False, '--force', '-f', help='Required to move native (UUIDv4) sessions'),
+    terminate: bool = typer.Option(False, '--terminate', '-t', help='Terminate running Claude process before move'),
+    no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
+    dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be moved'),
+    launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code in target project after move'),
+) -> None:
+    """Move a session from one project to another.
+
+    Relocates project-specific artifacts (JSONL, tool results, session memory)
+    to the target project. Path references are translated. Session ID is preserved.
+
+    By default, only cloned/restored sessions (UUIDv7) can be moved.
+    Native Claude sessions (UUIDv4) require --force.
+
+    If the session is currently running, use --terminate to kill the Claude
+    process before moving.
+
+    \b
+    Extra arguments after -- are passed to claude CLI:
+        claude-session move SESSION_ID --launch -- --chrome
+
+    \b
+    Examples:
+        claude-session move 019b5232               # current project
+        claude-session move 019b5232 -p ~/proj-b   # specific project
+        claude-session move 019b5232 --dry-run     # preview
+        claude-session move 019b5232 --launch      # move and resume
+        claude-session move a1b2c3d4 --force       # native session
+    """
+    detected = auto_detect_session_id()
+    if launch and detected is not None:
+        typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
+        typer.echo('Use claude --resume <session-id> after moving instead.', err=True)
+        raise typer.Exit(1)
+
+    if session_id is None:
+        session_id = detected
+
+    asyncio.run(
+        _move_async(_resolve_session_id(session_id), project, force, terminate, no_backup, dry_run, launch, ctx.args)
+    )
+
+
+@app.command()
+def lineage(
+    session_id: str | None = typer.Argument(
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+        autocompletion=_complete_session_id,
+    ),
+    format: Literal['text', 'tree', 'json'] = typer.Option(
+        'text', '--format', '-f', help='Output format: text, tree, or json'
+    ),
+) -> None:
+    """Show the lineage (parent-child relationships) for a session.
+
+    When run inside Claude Code without a session ID, auto-detects the current session.
+
+    \b
+    Examples:
+        claude-session lineage
+        claude-session lineage 019b53ff
+        claude-session lineage c3bac5a6 --format tree
+    """
+    session_id = _resolve_session_id(session_id)
+    try:
+        lineage_service = LineageService()
+        tree = lineage_service.get_full_tree(session_id)
+
+        if tree is None:
+            typer.secho(f'No lineage found for {session_id}', fg=typer.colors.YELLOW)
+            typer.echo('(This is either a native session or lineage tracking was not enabled)')
+            return
+
+        if format == 'text':
+            node = tree.nodes[tree.queried_session_id]
+            typer.echo(f'Session: {node.session_id}')
+            if node.custom_title:
+                typer.echo(f'Title:   {node.custom_title}')
+            if node.cloned_at is not None:
+                # Child node — show operation metadata
+                typer.echo(f'Parent:  {node.parent_id}')
+                typer.echo(f'Cloned:  {node.cloned_at}')
+                typer.echo(f'Method:  {node.method}')
+                typer.echo(f'Source:  {node.parent_project_path}')
+                typer.echo(f'Target:  {node.target_project_path}')
+                typer.echo(f'Machine: {node.target_machine_id}')
+                if node.parent_machine_id:
+                    if node.is_cross_machine:
+                        typer.secho(f'Source Machine: {node.parent_machine_id} (cross-machine)', fg=typer.colors.YELLOW)
+                    else:
+                        typer.echo(f'Source Machine: {node.parent_machine_id} (same machine)')
+                if node.archive_path:
+                    typer.echo(f'Archive: {node.archive_path}')
+                if node.paths_translated:
+                    typer.secho('Paths translated: yes', fg=typer.colors.CYAN)
+            else:
+                # Root node — no operation metadata
+                typer.secho(f'Root session with {len(node.children)} clone(s)', fg=typer.colors.CYAN)
+                for child_id in node.children:
+                    child_node = tree.nodes[child_id]
+                    title_suffix = f' ({child_node.custom_title})' if child_node.custom_title else ''
+                    typer.echo(f'  └─ {child_id}{title_suffix}')
+
+        elif format == 'tree':
+            _render_lineage_tree(tree)
+
+        elif format == 'json':
+            typer.echo(tree.model_dump_json(indent=2))
+
+    except ClaudeSessionError as e:
+        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@app.command()
+def info(
+    session_id: str | None = typer.Argument(
+        None,
+        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+        autocompletion=_complete_session_id,
+    ),
+    format: Literal['text', 'json'] = typer.Option('text', '--format', '-f', help='Output format: text or json'),
+) -> None:
+    """Display comprehensive information about a session.
+
+    Shows session context including ID, project path, file locations,
+    origin (how it was created), state, and characteristics.
+
+    When run inside Claude Code without a session ID, auto-detects the current session.
+
+    \b
+    Examples:
+        claude-session info
+        claude-session info 019b53ff
+        claude-session info c3bac5a6 --format json
+    """
+    asyncio.run(_info_async(_resolve_session_id(session_id), format))
+
+
+def main() -> None:
+    """Entry point for CLI."""
+    run_app(app)
+
+
+# -- Private implementations (called at runtime, not definition time) --
 
 
 async def _archive_async(
@@ -501,39 +680,6 @@ async def _restore_async(
         raise typer.Exit(1) from None
 
 
-@app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
-def clone(
-    ctx: typer.Context,
-    session_id: str | None = typer.Argument(
-        None, help='Session ID to clone (auto-detected inside Claude Code)', autocompletion=_complete_session_id
-    ),
-    project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
-    no_translate: bool = typer.Option(False, '--no-translate', help="Don't translate file paths"),
-    launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after clone'),
-) -> None:
-    """Clone a session directly (no archive file needed).
-
-    When run inside Claude Code, session ID is auto-detected if not provided.
-
-    \b
-    Examples:
-        claude-session clone                  # clone current session
-        claude-session clone SESSION_ID       # clone specific session
-        claude-session clone SESSION_ID -l    # clone and launch
-    """
-    detected = auto_detect_session_id()
-    if launch and detected is not None:
-        typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
-        typer.echo('Use claude --resume <session-id> after cloning instead.', err=True)
-        raise typer.Exit(1)
-
-    # Use cached detection result to avoid a second process tree walk
-    if session_id is None:
-        session_id = detected
-
-    asyncio.run(_clone_async(_resolve_session_id(session_id), project, not no_translate, launch, ctx.args))
-
-
 async def _clone_async(
     session_id: str,
     project: Path | None,
@@ -598,34 +744,6 @@ async def _clone_async(
     except Exception as e:
         logger.error('Failed to clone session: %s', e, exc_info=True)
         raise typer.Exit(1) from None
-
-
-@app.command()
-def delete(
-    session_id: str | None = typer.Argument(
-        None,
-        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
-        autocompletion=_complete_session_id,
-    ),
-    force: bool = typer.Option(False, '--force', '-f', help='Required to delete native (UUIDv4) sessions'),
-    terminate: bool = typer.Option(False, '--terminate', '-t', help='Terminate running Claude process before deletion'),
-    no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
-    dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be deleted'),
-    project: Path | None = typer.Option(None, '--project', '-p', help='Project directory (default: current)'),
-) -> None:
-    """Delete session artifacts with auto-backup.
-
-    By default, only cloned/restored sessions (UUIDv7) can be deleted.
-    Native Claude sessions (UUIDv4) require --force.
-
-    If the session is currently running, use --terminate to kill the Claude
-    process before deletion. This prevents the session file from being
-    recreated when the process exits.
-
-    A backup is saved to ~/.claude-workspace/claude-session/deleted/ for undo capability.
-    Use 'restore --in-place' on the backup to undo.
-    """
-    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project))
 
 
 async def _delete_async(
@@ -737,58 +855,6 @@ async def _delete_async(
     except Exception as e:
         logger.error('Failed to delete session: %s', e, exc_info=True)
         raise typer.Exit(1) from None
-
-
-@app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
-def move(
-    ctx: typer.Context,
-    session_id: str | None = typer.Argument(
-        None,
-        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
-        autocompletion=_complete_session_id,
-    ),
-    project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
-    force: bool = typer.Option(False, '--force', '-f', help='Required to move native (UUIDv4) sessions'),
-    terminate: bool = typer.Option(False, '--terminate', '-t', help='Terminate running Claude process before move'),
-    no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
-    dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be moved'),
-    launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code in target project after move'),
-) -> None:
-    """Move a session from one project to another.
-
-    Relocates project-specific artifacts (JSONL, tool results, session memory)
-    to the target project. Path references are translated. Session ID is preserved.
-
-    By default, only cloned/restored sessions (UUIDv7) can be moved.
-    Native Claude sessions (UUIDv4) require --force.
-
-    If the session is currently running, use --terminate to kill the Claude
-    process before moving.
-
-    \b
-    Extra arguments after -- are passed to claude CLI:
-        claude-session move SESSION_ID --launch -- --chrome
-
-    \b
-    Examples:
-        claude-session move 019b5232               # current project
-        claude-session move 019b5232 -p ~/proj-b   # specific project
-        claude-session move 019b5232 --dry-run     # preview
-        claude-session move 019b5232 --launch      # move and resume
-        claude-session move a1b2c3d4 --force       # native session
-    """
-    detected = auto_detect_session_id()
-    if launch and detected is not None:
-        typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
-        typer.echo('Use claude --resume <session-id> after moving instead.', err=True)
-        raise typer.Exit(1)
-
-    if session_id is None:
-        session_id = detected
-
-    asyncio.run(
-        _move_async(_resolve_session_id(session_id), project, force, terminate, no_backup, dry_run, launch, ctx.args)
-    )
 
 
 async def _move_async(
@@ -919,107 +985,7 @@ def _render_lineage_tree(tree: LineageTree) -> None:
     render_node(tree.root_session_id, '', is_last=True, is_root=True)
 
 
-@app.command()
-def lineage(
-    session_id: str | None = typer.Argument(
-        None,
-        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
-        autocompletion=_complete_session_id,
-    ),
-    format: Literal['text', 'tree', 'json'] = typer.Option(
-        'text', '--format', '-f', help='Output format: text, tree, or json'
-    ),
-) -> None:
-    """Show the lineage (parent-child relationships) for a session.
-
-    When run inside Claude Code without a session ID, auto-detects the current session.
-
-    \b
-    Examples:
-        claude-session lineage
-        claude-session lineage 019b53ff
-        claude-session lineage c3bac5a6 --format tree
-    """
-    session_id = _resolve_session_id(session_id)
-    try:
-        lineage_service = LineageService()
-        tree = lineage_service.get_full_tree(session_id)
-
-        if tree is None:
-            typer.secho(f'No lineage found for {session_id}', fg=typer.colors.YELLOW)
-            typer.echo('(This is either a native session or lineage tracking was not enabled)')
-            return
-
-        if format == 'text':
-            node = tree.nodes[tree.queried_session_id]
-            typer.echo(f'Session: {node.session_id}')
-            if node.custom_title:
-                typer.echo(f'Title:   {node.custom_title}')
-            if node.cloned_at is not None:
-                # Child node — show operation metadata
-                typer.echo(f'Parent:  {node.parent_id}')
-                typer.echo(f'Cloned:  {node.cloned_at}')
-                typer.echo(f'Method:  {node.method}')
-                typer.echo(f'Source:  {node.parent_project_path}')
-                typer.echo(f'Target:  {node.target_project_path}')
-                typer.echo(f'Machine: {node.target_machine_id}')
-                if node.parent_machine_id:
-                    if node.is_cross_machine:
-                        typer.secho(f'Source Machine: {node.parent_machine_id} (cross-machine)', fg=typer.colors.YELLOW)
-                    else:
-                        typer.echo(f'Source Machine: {node.parent_machine_id} (same machine)')
-                if node.archive_path:
-                    typer.echo(f'Archive: {node.archive_path}')
-                if node.paths_translated:
-                    typer.secho('Paths translated: yes', fg=typer.colors.CYAN)
-            else:
-                # Root node — no operation metadata
-                typer.secho(f'Root session with {len(node.children)} clone(s)', fg=typer.colors.CYAN)
-                for child_id in node.children:
-                    child_node = tree.nodes[child_id]
-                    title_suffix = f' ({child_node.custom_title})' if child_node.custom_title else ''
-                    typer.echo(f'  └─ {child_id}{title_suffix}')
-
-        elif format == 'tree':
-            _render_lineage_tree(tree)
-
-        elif format == 'json':
-            typer.echo(tree.model_dump_json(indent=2))
-
-    except ClaudeSessionError as e:
-        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
-
-
-@app.command()
-def info(
-    session_id: str | None = typer.Argument(
-        None,
-        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
-        autocompletion=_complete_session_id,
-    ),
-    format: Literal['text', 'json'] = typer.Option('text', '--format', '-f', help='Output format: text or json'),
-) -> None:
-    """Display comprehensive information about a session.
-
-    Shows session context including ID, project path, file locations,
-    origin (how it was created), state, and characteristics.
-
-    When run inside Claude Code without a session ID, auto-detects the current session.
-
-    \b
-    Examples:
-        claude-session info
-        claude-session info 019b53ff
-        claude-session info c3bac5a6 --format json
-    """
-    asyncio.run(_info_async(_resolve_session_id(session_id), format))
-
-
-async def _info_async(
-    session_id: str,
-    format: Literal['text', 'json'],
-) -> None:
+async def _info_async(session_id: str, format: Literal['text', 'json']) -> None:
     """Async implementation of info command."""
     info_service = SessionInfoService()
     try:
@@ -1085,9 +1051,48 @@ async def _info_async(
             typer.echo(f'  Temp dir: {context.temp_dir}')
 
 
-def main() -> None:
-    """Entry point for CLI."""
-    run_app(app)
+def _resolve_session_id(session_id: str | None) -> str:
+    """Resolve session_id, auto-detecting from Claude Code if not provided."""
+    if session_id is not None:
+        return session_id
+    detected = auto_detect_session_id()
+    if detected is None:
+        typer.secho('Error: Not running inside Claude Code.', fg=typer.colors.RED, err=True)
+        typer.echo('Provide a session ID: claude-session <command> <session-id>', err=True)
+        raise typer.Exit(1)
+    return detected
+
+
+def _is_session_id(value: str) -> bool:
+    """Check if a string looks like a session ID (8+ hex digits/hyphens)."""
+    return len(value) >= 8 and bool(re.fullmatch(r'[0-9a-f][0-9a-f-]*', value))
+
+
+def _get_github_token_cli(gist_token: str | None) -> str | None:
+    """Resolve GitHub token from flag, environment, or gh CLI.
+
+    Checks in order:
+    1. --gist-token flag value
+    2. GITHUB_TOKEN environment variable
+    3. `gh auth token` command (GitHub CLI)
+    """
+    if gist_token:
+        return gist_token
+    token = os.environ.get('GITHUB_TOKEN')
+    if token:
+        return token
+    try:
+        result = subprocess.run(
+            ['gh', 'auth', 'token'],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except FileNotFoundError:
+        pass  # gh CLI not installed
+    return None
 
 
 if __name__ == '__main__':

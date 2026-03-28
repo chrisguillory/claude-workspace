@@ -140,12 +140,7 @@ class OpenRouterClient:
         wait=tenacity.wait_exponential(multiplier=0.5, max=5),
         before_sleep=_retry.log_openrouter_retry,
     )
-    async def embed(
-        self,
-        texts: Sequence[str],
-        *,
-        intent: TaskIntent,
-    ) -> Sequence[EmbeddingVector]:
+    async def embed(self, texts: Sequence[str], *, intent: TaskIntent) -> Sequence[EmbeddingVector]:
         """Embed texts using OpenRouter API.
 
         Uses native async httpx for concurrent requests.
@@ -216,9 +211,7 @@ class OpenRouterClient:
             return 0.0
         return float(np.percentile(self._http_latencies, 99))
 
-    async def list_models(
-        self,
-    ) -> Sequence[JsonObject]:
+    async def list_models(self) -> Sequence[JsonObject]:
         """List all available embedding models.
 
         Returns model metadata including id, name, pricing, context_length, etc.
@@ -355,12 +348,7 @@ def _parse_embedding_response(
     return result
 
 
-def _parse_models_response(
-    body: Mapping[str, Any],
-    *,
-    status_code: int,
-    model: str,
-) -> _ModelsListResponse:
+def _parse_models_response(body: Mapping[str, Any], *, status_code: int, model: str) -> _ModelsListResponse:
     """Validate and discriminate models list API response via Pydantic union."""
     try:
         result = _models_response_adapter.validate_python(body)

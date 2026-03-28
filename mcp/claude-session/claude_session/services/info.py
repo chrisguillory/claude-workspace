@@ -27,6 +27,14 @@ from claude_session.services.discovery import SessionDiscoveryService
 from claude_session.services.lineage import LineageService, get_machine_id
 from claude_session.services.version import get_version_from_process
 
+__all__ = [
+    'CLAUDE_DEBUG_DIR',
+    'CLAUDE_WORKSPACE_SESSIONS',
+    'CurrentSessionContext',
+    'SessionInfoService',
+]
+
+
 # Claude workspace sessions.json location
 CLAUDE_WORKSPACE_SESSIONS = Path.home() / '.claude-workspace' / 'sessions.json'
 
@@ -66,11 +74,7 @@ class SessionInfoService:
         self.discovery = SessionDiscoveryService()
         self.lineage = LineageService()
 
-    async def get_info(
-        self,
-        session_id: str,
-        current_context: CurrentSessionContext | None = None,
-    ) -> SessionContext:
+    async def get_info(self, session_id: str, current_context: CurrentSessionContext | None = None) -> SessionContext:
         """
         Get comprehensive context for a session.
 
@@ -278,11 +282,7 @@ class SessionInfoService:
 
         return None
 
-    def _get_process_created_at(
-        self,
-        pid: int | None,
-        fallback: datetime | None,
-    ) -> datetime | None:
+    def _get_process_created_at(self, pid: int | None, fallback: datetime | None) -> datetime | None:
         """
         Get process creation time from OS (authoritative).
 

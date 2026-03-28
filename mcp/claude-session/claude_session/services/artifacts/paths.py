@@ -12,7 +12,10 @@ from pathlib import Path
 
 from claude_session.schemas.session import AssistantRecord, SessionRecord, UserRecord
 
-__all__ = ['MissingCwdError', 'extract_source_project_path']
+__all__ = [
+    'MissingCwdError',
+    'extract_source_project_path',
+]
 
 
 class MissingCwdError(Exception):
@@ -21,9 +24,7 @@ class MissingCwdError(Exception):
     pass
 
 
-def extract_source_project_path(
-    files_data: Mapping[str, Sequence[SessionRecord]],
-) -> Path:
+def extract_source_project_path(files_data: Mapping[str, Sequence[SessionRecord]]) -> Path:
     """
     Extract the source project path from session records.
 

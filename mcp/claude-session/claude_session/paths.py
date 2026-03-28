@@ -17,7 +17,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-__all__ = ['encode_path']
+__all__ = [
+    'encode_path',
+]
 
 
 def encode_path(path: Path | str) -> str:

@@ -25,6 +25,7 @@ class Rect:
 
 class TextPage:
     def get_text(self) -> str: ...
+    def extractText(self) -> str: ...
 
 class Page:
     @property

@@ -89,6 +89,8 @@ exclude = [
     ".venv",
     "scratch",
     "tests/linters/edge_cases",  # intentionally bad code — linter test inputs
+    "mcp/document-search",  # fastembed not in workspace root venv
+    "tests/document_search",  # imports from mcp/document-search
 ]
 
 [[tool.mypy.overrides]]
@@ -144,13 +146,30 @@ filterwarnings = [
 # MCP servers
 "mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
 
-# claude-session (aspirational — suppress all ordering for now)
-"mcp/claude-session/**" = ["mutable-type", "loose-typing", "ordering", "missing-all", "trailing-comma"]
+# claude-session
+"mcp/claude-session/claude_session/cli/main.py" = ["missing-all", "ordering"]
+"mcp/claude-session/scripts/**" = ["missing-all", "class-ordering", "ordering", "mutable-type", "loose-typing"]
+"mcp/claude-session/claude_session/domain/models.py" = ["mutable-type"]
+"mcp/claude-session/claude_session/introspection.py" = ["mutable-type", "loose-typing"]
+"mcp/claude-session/claude_session/migrations.py" = ["mutable-type"]
+# Linter AST crash on complex annotations (task #63 — fix linter, not code)
 "mcp/claude-session/claude_session/schemas/cc_internal_api/feature_flags.py" = ["skip-file"]
 "mcp/claude-session/claude_session/schemas/cc_internal_api/statsig.py" = ["skip-file"]
-"mcp/claude-session/claude_session/schemas/session/models.py" = ["skip-file"]
-"mcp/claude-session/scripts/validate_captures.py" = ["skip-file"]
-"mcp/claude-session/scripts/validate_models.py" = ["skip-file"]
+"mcp/claude-session/claude_session/schemas/cc_internal_api/telemetry.py" = ["mutable-type", "loose-typing"]
+"mcp/claude-session/claude_session/schemas/session/models.py" = ["skip-file"]  # linter AST crash
+"mcp/claude-session/scripts/validate_captures.py" = ["skip-file"]  # linter AST crash
+"mcp/claude-session/scripts/validate_models.py" = ["skip-file"]  # linter AST crash
+# claude-session: ordering — composite-first, call-graph order, private helpers near callers
+"mcp/claude-session/claude_session/mcp/server.py" = ["ordering"]
+"mcp/claude-session/claude_session/schemas/captures/base.py" = ["ordering"]
+"mcp/claude-session/claude_session/schemas/captures/datadog.py" = ["ordering"]
+"mcp/claude-session/claude_session/schemas/captures/loader.py" = ["ordering"]
+"mcp/claude-session/claude_session/services/archive.py" = ["ordering"]
+"mcp/claude-session/claude_session/services/artifacts/tool_results.py" = ["ordering"]
+"mcp/claude-session/claude_session/services/delete.py" = ["ordering"]
+"mcp/claude-session/claude_session/services/info.py" = ["ordering"]
+"mcp/claude-session/claude_session/services/restore.py" = ["ordering"]
+"mcp/claude-session/claude_session/storage/gist.py" = ["ordering"]
 
 [tool.exception-safety-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]

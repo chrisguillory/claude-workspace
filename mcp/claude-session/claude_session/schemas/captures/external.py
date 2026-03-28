@@ -18,6 +18,33 @@ from claude_session.schemas.captures.gcs import RawTextBody
 from claude_session.schemas.cc_internal_api import EmptyBody
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
+__all__ = [
+    'ClaudeAiRequestCapture',
+    'ClaudeAiResponseCapture',
+    'CodeClaudeComDocRequestCapture',
+    'CodeClaudeComDocResponseCapture',
+    'CodeClaudeComRequestCapture',
+    'CodeClaudeComResponseCapture',
+    'ConsoleRequestCapture',
+    'ConsoleResponseCapture',
+    'DocFetchRequestCapture',
+    'DocFetchResponseCapture',
+    'DomainInfoRequestCapture',
+    'DomainInfoResponse',
+    'DomainInfoResponseCapture',
+    'OAuthTokenAccount',
+    'OAuthTokenOrganization',
+    'OAuthTokenRequest',
+    'OAuthTokenRequestCapture',
+    'OAuthTokenResponse',
+    'OAuthTokenResponseCapture',
+    'PlatformClaudeComDocRequestCapture',
+    'PlatformClaudeComDocResponseCapture',
+    'PlatformClaudeComRequestCapture',
+    'PlatformClaudeComResponseCapture',
+]
+
+
 # -- OAuth Token (console.anthropic.com) ---------------------------------------
 
 

@@ -32,7 +32,7 @@ import typing
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
 # Third-Party Libraries
@@ -96,6 +96,7 @@ from .models import (
     ProfileState,
     # Profile state (browser state persistence)
     ProfileStateCookie,
+    ProfileStateIndexedDB,
     ProfileStateOriginStorage,
     RequestTiming,
     ResizeWindowResult,
@@ -302,11 +303,7 @@ class BrowserService:
         # Reset response body capture state - new browser needs interceptor reinstalled
         self.state.response_body_capture_enabled = False
 
-    async def get_browser(
-        self,
-        enable_har_capture: bool = False,
-        browser: Browser | None = None,
-    ) -> webdriver.Chrome:
+    async def get_browser(self, enable_har_capture: bool = False, browser: Browser | None = None) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
         Args:
@@ -958,11 +955,7 @@ def register_tools(service: BrowserService) -> None:
             openWorldHint=True,
         ),
     )
-    async def get_page_html(
-        ctx: Context[Any, Any, Any],
-        selector: str | None = None,
-        limit: int | None = None,
-    ) -> str:
+    async def get_page_html(ctx: Context[Any, Any, Any], selector: str | None = None, limit: int | None = None) -> str:
         """Get raw HTML source or specific elements.
 
         Use this when you need actual HTML markup for inspection or parsing.
@@ -1815,11 +1808,7 @@ def register_tools(service: BrowserService) -> None:
             idempotentHint=True,
         ),
     )
-    async def hover(
-        css_selector: str,
-        ctx: Context[Any, Any, Any],
-        duration_ms: int = 0,
-    ) -> None:
+    async def hover(css_selector: str, ctx: Context[Any, Any, Any], duration_ms: int = 0) -> None:
         """Move mouse over an element to trigger hover states.
 
         Essential for dropdown menus, tooltips, and hover-triggered UI.
@@ -2018,11 +2007,7 @@ def register_tools(service: BrowserService) -> None:
             idempotentHint=True,
         ),
     )
-    async def sleep(
-        duration_ms: int,
-        ctx: Context[Any, Any, Any],
-        reason: str | None = None,
-    ) -> SleepResult:
+    async def sleep(duration_ms: int, ctx: Context[Any, Any, Any], reason: str | None = None) -> SleepResult:
         """Pause execution for a fixed duration. Use sparingly.
 
         This is a simple time-based delay. For most automation scenarios,
@@ -2279,11 +2264,7 @@ def register_tools(service: BrowserService) -> None:
             idempotentHint=True,
         ),
     )
-    async def resize_window(
-        width: int,
-        height: int,
-        ctx: Context[Any, Any, Any],
-    ) -> ResizeWindowResult:
+    async def resize_window(width: int, height: int, ctx: Context[Any, Any, Any]) -> ResizeWindowResult:
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
@@ -2334,10 +2315,7 @@ def register_tools(service: BrowserService) -> None:
             idempotentHint=True,
         ),
     )
-    async def capture_web_vitals(
-        ctx: Context[Any, Any, Any],
-        timeout_ms: int = 5000,
-    ) -> CoreWebVitals:
+    async def capture_web_vitals(ctx: Context[Any, Any, Any], timeout_ms: int = 5000) -> CoreWebVitals:
         """Capture Core Web Vitals (LCP, CLS, INP, FCP, TTFB) for current page.
 
         Uses JavaScript Performance APIs to collect metrics post-navigation.
@@ -2732,9 +2710,7 @@ Workflow:
                 started_datetime = datetime.now(UTC).isoformat().replace('+00:00', 'Z')
 
             # Convert headers dict to HAR array format
-            def headers_to_har(
-                headers_dict: JsonObject | None,
-            ) -> Sequence[Mapping[str, str]]:
+            def headers_to_har(headers_dict: JsonObject | None) -> Sequence[Mapping[str, str]]:
                 if not headers_dict:
                     return []
                 return [{'name': k, 'value': str(v)} for k, v in headers_dict.items()]
@@ -2746,9 +2722,7 @@ Workflow:
                 return [{'name': name, 'value': value} for name, values in query_params.items() for value in values]
 
             # Convert CDP timing to HAR timing (duration in ms)
-            def convert_timing(
-                timing_obj: JsonObject,
-            ) -> Mapping[str, float | int]:
+            def convert_timing(timing_obj: JsonObject) -> Mapping[str, float | int]:
                 def safe_duration(start_key: str, end_key: str) -> float | int:
                     start = timing_obj.get(start_key)
                     end = timing_obj.get(end_key)
@@ -3157,9 +3131,7 @@ Workflow:
             idempotentHint=True,
         ),
     )
-    async def clear_proxy(
-        ctx: Context[Any, Any, Any] | None = None,
-    ) -> ClearProxyResult:
+    async def clear_proxy(ctx: Context[Any, Any, Any] | None = None) -> ClearProxyResult:
         """Clear proxy configuration and return to direct connection.
 
         Stops the mitmproxy subprocess and clears proxy settings.
@@ -3193,10 +3165,7 @@ Workflow:
             idempotentHint=True,
         ),
     )
-    async def set_blocked_urls(
-        urls: Sequence[str],
-        ctx: Context[Any, Any, Any] | None = None,
-    ) -> SetBlockedURLsResult:
+    async def set_blocked_urls(urls: Sequence[str], ctx: Context[Any, Any, Any] | None = None) -> SetBlockedURLsResult:
         """Block network requests matching URL patterns via CDP.
 
         Uses Chrome DevTools Protocol Network.setBlockedURLs to block requests
@@ -3241,11 +3210,7 @@ Workflow:
             idempotentHint=False,
         ),
     )
-    async def execute_javascript(
-        code: str,
-        ctx: Context[Any, Any, Any],
-        timeout_ms: int = 5000,
-    ) -> JavaScriptResult:
+    async def execute_javascript(code: str, ctx: Context[Any, Any, Any], timeout_ms: int = 5000) -> JavaScriptResult:
         """Execute JavaScript in the browser and return the result.
 
         Evaluates a JavaScript expression in the current page context.
@@ -3520,8 +3485,8 @@ Workflow:
                             .catch(function(e) {{ callback([]); }});
                     """
                     indexeddb_result = await asyncio.to_thread(driver.execute_async_script, async_wrapper)
-                    # Raw JavaScript results - type: ignore until we add proper validation
-                    indexeddb_databases = indexeddb_result if indexeddb_result else []  # type: ignore[assignment]  # JS execute_async_script returns untyped Any
+                    # execute_async_script returns Any; cast to expected JS structure
+                    indexeddb_databases = cast(list[dict[str, Any]], indexeddb_result) if indexeddb_result else []
                 elif origin in service.state.indexed_db_cache:
                     indexeddb_databases = service.state.indexed_db_cache[origin]
 
@@ -3533,11 +3498,17 @@ Workflow:
                     {item['name']: item['value'] for item in session_storage_items} if session_storage_items else None
                 )
 
+                # Validate raw JS dicts through Pydantic model
+                validated_indexeddb: list[ProfileStateIndexedDB] | None = (
+                    [ProfileStateIndexedDB.model_validate(db) for db in indexeddb_databases]
+                    if indexeddb_databases
+                    else None
+                )
+
                 origins_data[origin] = ProfileStateOriginStorage(
                     local_storage=local_storage_dict,
                     session_storage=session_storage_dict,
-                    # Raw JavaScript dicts - type: ignore until we add ProfileStateIndexedDB validation
-                    indexed_db=indexeddb_databases if indexeddb_databases else None,  # type: ignore[arg-type]  # raw JS dicts pending ProfileStateIndexedDB validation
+                    indexed_db=validated_indexeddb,
                 )
 
                 total_localstorage_items += len(local_storage_items)
@@ -3844,12 +3815,7 @@ def _build_page_metadata(
     return '\n# --- page metadata ---\n' + '\n'.join(lines)
 
 
-def _save_large_output_to_file(
-    content: str,
-    output_dir: Path,
-    prefix: str,
-    extension: str,
-) -> str:
+def _save_large_output_to_file(content: str, output_dir: Path, prefix: str, extension: str) -> str:
     """Save large output to file, return formatted response with path and preview.
 
     Preserves natural line structure by writing directly to disk,
@@ -3893,11 +3859,7 @@ async def _cdp_enable_domstorage(driver: webdriver.Chrome) -> None:
     await asyncio.to_thread(driver.execute_cdp_cmd, 'DOMStorage.enable', {})
 
 
-async def _cdp_get_storage(
-    driver: webdriver.Chrome,
-    origin: str,
-    is_local: bool = True,
-) -> Sequence[Mapping[str, str]]:
+async def _cdp_get_storage(driver: webdriver.Chrome, origin: str, is_local: bool = True) -> Sequence[Mapping[str, str]]:
     """Get storage items for a specific origin via CDP.
 
     Args:
@@ -3923,13 +3885,7 @@ async def _cdp_get_storage(
     return [{'name': kv[0], 'value': kv[1]} for kv in entries]
 
 
-async def _cdp_set_storage(
-    driver: webdriver.Chrome,
-    origin: str,
-    key: str,
-    value: str,
-    is_local: bool = True,
-) -> None:
+async def _cdp_set_storage(driver: webdriver.Chrome, origin: str, key: str, value: str, is_local: bool = True) -> None:
     """Set a storage item for a specific origin via CDP.
 
     Args:
@@ -3958,10 +3914,7 @@ async def _cdp_set_storage(
     )
 
 
-async def _capture_current_origin_storage(
-    service: BrowserService,
-    driver: webdriver.Chrome,
-) -> None:
+async def _capture_current_origin_storage(service: BrowserService, driver: webdriver.Chrome) -> None:
     """Capture current origin's localStorage, sessionStorage, and IndexedDB to cache.
 
     Call this BEFORE any action that might navigate away (click, press_key, navigate).
@@ -4025,10 +3978,7 @@ async def _capture_current_origin_storage(
         logger.info(f'Cached {" + ".join(parts)} for {current_origin}')
 
 
-async def _restore_pending_profile_state_for_current_origin(
-    service: BrowserService,
-    driver: webdriver.Chrome,
-) -> None:
+async def _restore_pending_profile_state_for_current_origin(service: BrowserService, driver: webdriver.Chrome) -> None:
     """Restore IndexedDB for current origin (localStorage/sessionStorage handled by init script).
 
     Called after navigation to check if we have pending IndexedDB data for the
@@ -4231,10 +4181,7 @@ def _build_storage_init_script(profile_state: ProfileState) -> str | None:
 """
 
 
-async def _inject_cookies_via_cdp(
-    driver: webdriver.Chrome,
-    cookies: Sequence[ProfileStateCookie],
-) -> int:
+async def _inject_cookies_via_cdp(driver: webdriver.Chrome, cookies: Sequence[ProfileStateCookie]) -> int:
     """Inject cookies via CDP Network.setCookies.
 
     Cookies are set BEFORE navigation so they're sent with the request.
@@ -4275,10 +4222,7 @@ async def _inject_cookies_via_cdp(
     return len(cdp_cookies)
 
 
-async def _setup_pending_profile_state(
-    service: BrowserService,
-    profile_state: ProfileState,
-) -> None:
+async def _setup_pending_profile_state(service: BrowserService, profile_state: ProfileState) -> None:
     """Configure lazy restore for IndexedDB (localStorage/sessionStorage handled by init script).
 
     Stores profile state for lazy IndexedDB restoration as origins are visited.

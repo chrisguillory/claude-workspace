@@ -1457,11 +1457,7 @@ def _walk_files(directory: Path, extensions: Set[str]) -> Iterator[Path]:
                 yield root_path / filename
 
 
-def _walk_files_counted(
-    directory: Path,
-    extensions: Set[str],
-    operation: _OperationState,
-) -> Sequence[Path]:
+def _walk_files_counted(directory: Path, extensions: Set[str], operation: _OperationState) -> Sequence[Path]:
     """Walk directory, updating operation.files_found as files are discovered.
 
     Called from a thread via asyncio.to_thread. The monitor on the main thread

@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from claude_session.schemas.session import SessionRecord
 from claude_session.schemas.session.models import validate_session_record
+
+__all__ = [
+    'SessionParserService',
+    'logger',
+]
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +32,7 @@ class SessionParserService:
     Pure domain logic - loads and validates JSONL files into typed SessionRecord objects.
     """
 
-    async def load_session_files(self, session_files: Sequence[Path]) -> dict[str, list[SessionRecord]]:
+    async def load_session_files(self, session_files: Sequence[Path]) -> Mapping[str, Sequence[SessionRecord]]:
         """
         Load and parse session JSONL files.
 
@@ -35,7 +41,7 @@ class SessionParserService:
         Returns:
             Dict mapping filename to list of validated records
         """
-        files_data: dict[str, list[SessionRecord]] = {}
+        files_data: dict[str, Sequence[SessionRecord]] = {}
 
         for file_path in session_files:
             logger.info('Loading %s', file_path.name)
@@ -47,7 +53,7 @@ class SessionParserService:
 
         return files_data
 
-    async def _parse_jsonl_file(self, file_path: Path) -> list[SessionRecord]:
+    async def _parse_jsonl_file(self, file_path: Path) -> Sequence[SessionRecord]:
         """
         Parse a single JSONL file into validated records.
 

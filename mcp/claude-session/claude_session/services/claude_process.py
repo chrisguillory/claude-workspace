@@ -11,6 +11,12 @@ from pathlib import Path
 import pydantic
 from cc_lib.session_tracker import SessionDatabase
 
+__all__ = [
+    'auto_detect_session_id',
+    'find_ancestor_claude_pid',
+    'resolve_session_id_from_pid',
+]
+
 
 def find_ancestor_claude_pid() -> int | None:
     """Walk process tree to find an ancestor Claude Code process.
