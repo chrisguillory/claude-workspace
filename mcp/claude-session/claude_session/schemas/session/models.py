@@ -345,13 +345,6 @@ class GrepToolInput(StrictModel):
         Hyphenated flags: -n (line numbers), -A/-B/-C (context), -i (case insensitive)
     """
 
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-        populate_by_name=True,  # Allow both alias and field name
-    )
-
     pattern: str
     path: PathField | None = None
     output_mode: Literal['content', 'files_with_matches', 'count', 'context'] | None = None
@@ -1070,7 +1063,7 @@ class ApiError(StrictModel):
     """Complete API error information."""
 
     status: int
-    headers: Mapping[str, str]
+    headers: Mapping[str, str | Sequence[str]]
     requestID: str | None = None  # Can be null for some errors
     error: ApiErrorResponse | None = None  # Can be missing for some errors (e.g., 503)
 
@@ -1135,13 +1128,6 @@ class McpMeta(StrictModel):
     Only populated for MCP tools returning JSON - tools returning plain text
     (like Perplexity) do not populate this field.
     """
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-        populate_by_name=True,  # Allow field access by both name and alias
-    )
 
     meta: EmptyDict | None = pydantic.Field(None, alias='_meta')  # Always {} when present
     structuredContent: MCPStructuredContent | None = None
@@ -1953,6 +1939,7 @@ class AssistantRecord(BaseRecord):
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
     teamName: str | None = pydantic.Field(None, description='Team name when running in multi-agent team mode')
     agentName: str | None = pydantic.Field(None, description='Agent name within team')
+    errorDetails: str | None = pydantic.Field(None, description='API error details string (e.g., prompt too long)')
 
 
 # -- Summary Record (does NOT inherit from BaseRecord - different schema) ------
@@ -2430,6 +2417,32 @@ class LastPromptRecord(StrictModel):
     sessionId: str
 
 
+# -- Worktree State Record (Claude Code 2.1.81+) ------------------------------
+
+
+class WorktreeSessionData(StrictModel):
+    """Worktree session metadata embedded in WorktreeStateRecord."""
+
+    originalCwd: str
+    worktreePath: str
+    worktreeName: str
+    worktreeBranch: str
+    originalBranch: str
+    originalHeadCommit: str
+    sessionId: str
+
+
+class WorktreeStateRecord(StrictModel):
+    """Records worktree state at the start of a worktree session (line 1 only).
+
+    Does NOT inherit from BaseRecord -- minimal schema with no uuid/timestamp.
+    """
+
+    type: Literal['worktree-state']
+    worktreeSession: WorktreeSessionData
+    sessionId: str
+
+
 # -- Session Record (Discriminated Union) --------------------------------------
 
 # Union of all record types (validated left-to-right)
@@ -2455,7 +2468,8 @@ SessionRecord = Annotated[
     | PrLinkRecord
     | SavedHookContextRecord
     | AgentNameRecord
-    | LastPromptRecord,
+    | LastPromptRecord
+    | WorktreeStateRecord,
     pydantic.Field(union_mode='left_to_right'),
 ]
 
@@ -2481,6 +2495,7 @@ _pr_link_adapter = pydantic.TypeAdapter(PrLinkRecord)
 _saved_hook_context_adapter = pydantic.TypeAdapter(SavedHookContextRecord)
 _agent_name_adapter = pydantic.TypeAdapter(AgentNameRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
+_worktree_state_adapter = pydantic.TypeAdapter(WorktreeStateRecord)
 
 
 def validate_session_record(data: dict[str, Any]) -> SessionRecord:
@@ -2530,6 +2545,8 @@ def validate_session_record(data: dict[str, Any]) -> SessionRecord:
         return _agent_name_adapter.validate_python(data)
     elif record_type == 'last-prompt':
         return _last_prompt_adapter.validate_python(data)
+    elif record_type == 'worktree-state':
+        return _worktree_state_adapter.validate_python(data)
     else:
         return SessionRecordAdapter.validate_python(data)
 

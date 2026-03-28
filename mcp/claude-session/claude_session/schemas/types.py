@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 import pydantic
-from cc_lib.schemas.base import ClosedModel
+from cc_lib.schemas.base import StrictModel
 
 __all__ = [
     'Base64JsonBytes',
@@ -34,10 +34,11 @@ __all__ = [
 # -- Base Strict Model (Foundation) --------------------------------------------
 
 
-class BaseStrictModel(ClosedModel):
+class BaseStrictModel(StrictModel):
     """Foundation strict model - domain packages inherit from this.
 
-    Inherits cc-lib's ClosedModel (extra='forbid', frozen=True, strict=True,
+    Inherits cc-lib's StrictModel (extra='allow' default, extra='forbid' via
+    CC_STRICT_MODEL_EXTRA_FORBID=1, frozen=True, strict=True,
     validate_default=True, use_attribute_docstrings=True, serialize_by_alias=True).
 
     Domain packages (session/, cc_internal_api/) define their own StrictModel
@@ -49,11 +50,10 @@ class BaseStrictModel(ClosedModel):
 # -- Permissive Model (Foundation) ---------------------------------------------
 
 
-class PermissiveModel(ClosedModel):
+class PermissiveModel(StrictModel):
     """Foundation permissive model for typed fallbacks in unions.
 
-    Inherits cc-lib's ClosedModel but overrides extra='allow' to accept
-    unknown fields. Unique to claude-session -- no cc-lib equivalent.
+    Inherits cc-lib's StrictModel but overrides extra='allow' unconditionally.
 
     Symmetry with BaseStrictModel:
     - BaseStrictModel: extra='forbid' (rejects unknown fields)
