@@ -418,7 +418,8 @@ def register_tools(state: ServerState) -> None:
                     terminate_pid = None
                 elif not terminate_running:
                     # Running without terminate_running: raise exception
-                    assert running_pid is not None  # is_running=True guarantees this
+                    if running_pid is None:
+                        raise RuntimeError(f'is_session_running returned True but pid is None for {full_session_id}')
                     raise RunningSessionDeletionError(full_session_id, running_pid)
                 else:
                     # Running with terminate_running: will terminate
@@ -537,7 +538,8 @@ def register_tools(state: ServerState) -> None:
                     logger.info('Warning: Session is currently running (PID %s)', running_pid)
                     terminate_pid = None
                 elif not terminate_running:
-                    assert running_pid is not None
+                    if running_pid is None:
+                        raise RuntimeError(f'is_session_running returned True but pid is None for {full_session_id}')
                     raise RunningSessionMoveError(full_session_id, running_pid)
                 else:
                     logger.info('Session is running (PID %s), will terminate before move', running_pid)
