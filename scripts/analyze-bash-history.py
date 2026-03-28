@@ -360,7 +360,8 @@ class HookModule:
             raise HookModule.LoadError(str(e)) from e
 
 
-hook: HookModule.Interface = lazy_object_proxy.Proxy(HookModule.load)  # type: ignore[assignment]  # Proxy[Interface] not assignable but behaves identically at runtime
+# Proxy[Interface] acts as Interface at runtime — cast to satisfy mypy
+hook: HookModule.Interface = cast(HookModule.Interface, lazy_object_proxy.Proxy(HookModule.load))
 
 
 # Boundary handlers — registered after main, dispatched when main raises

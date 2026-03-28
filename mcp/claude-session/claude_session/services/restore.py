@@ -126,7 +126,7 @@ class PathTranslator:
 # -- Utility Functions ---------------------------------------------------------
 
 
-def is_restored_session(  # strict_typing_linter.py: class-ordering — utility functions grouped before large service class for readability
+def is_restored_session(
     session_id: str,
 ) -> bool:
     """
@@ -144,7 +144,7 @@ def is_restored_session(  # strict_typing_linter.py: class-ordering — utility 
     return uid.version == 7
 
 
-def get_restoration_timestamp(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+def get_restoration_timestamp(
     session_id: str,
 ) -> datetime | None:
     """
@@ -172,7 +172,7 @@ def get_restoration_timestamp(  # strict_typing_linter.py: ordering — interlea
 # -- Session Restore Service ---------------------------------------------------
 
 
-class SessionRestoreService:  # strict_typing_linter.py: class-ordering — utility functions grouped before service class for readability
+class SessionRestoreService:
     """
     Service for restoring archived sessions.
 

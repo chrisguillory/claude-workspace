@@ -803,7 +803,7 @@ def register_tools(state: ServerState) -> None:
 # -- Private Helpers -----------------------------------------------------------
 
 
-def _find_claude_context() -> ClaudeContext:  # strict_typing_linter.py: ordering — private helper after public API
+def _find_claude_context() -> ClaudeContext:
     """
     Find Claude process and extract its context (PID, project directory).
 
@@ -858,7 +858,7 @@ def _find_claude_context() -> ClaudeContext:  # strict_typing_linter.py: orderin
     return ClaudeContext(claude_pid=pid, project_dir=cwd)
 
 
-def _discover_session_id(claude_pid: int) -> str:  # strict_typing_linter.py: ordering — private helper after public API
+def _discover_session_id(claude_pid: int) -> str:
     """
     Discover Claude Code session ID from claude-workspace sessions.json.
 
@@ -884,7 +884,7 @@ def _discover_session_id(claude_pid: int) -> str:  # strict_typing_linter.py: or
     return session_id
 
 
-def _get_github_token() -> str | None:  # strict_typing_linter.py: ordering — private helper after public API
+def _get_github_token() -> str | None:
     """
     Get GitHub token from environment or gh CLI.
 
@@ -916,7 +916,7 @@ def _get_github_token() -> str | None:  # strict_typing_linter.py: ordering — 
 # -- Server Entry Point --------------------------------------------------------
 
 
-def main() -> None:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+def main() -> None:
     """Run the MCP server."""
     server.run()
 

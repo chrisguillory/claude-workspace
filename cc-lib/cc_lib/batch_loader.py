@@ -8,7 +8,7 @@ import asyncio
 import collections
 import logging
 from collections.abc import Callable, Coroutine, Hashable, Sequence, Set
-from typing import Any
+from typing import Any, cast
 
 import more_itertools
 
@@ -123,7 +123,9 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
                 self._load_task = asyncio.create_task(self._process_pending())
 
         await batch.future
-        return batch.results  # type: ignore[return-value]  # Batch.results is list[T|None], narrowed by caller
+        # Batch.results is list[TResponse | None] but all None slots are filled
+        # after batch.future resolves — cast narrows to caller's expected type.
+        return cast(list[TResponse], batch.results)
 
     # ── Fire-and-forget: submit / drain ──────────────────────────
 

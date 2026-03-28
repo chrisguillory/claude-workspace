@@ -14,6 +14,7 @@ import hashlib
 import logging
 import time
 from collections.abc import Sequence
+from typing import cast
 
 import numpy as np
 from cc_lib.batch_loader import GenericBatchLoader
@@ -387,7 +388,8 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
                 f'tasks={task_count}',
             )
 
-        return results  # type: ignore[return-value]  # list[EmbedResponse | None] but all None slots filled after miss resolution
+        # All None slots filled after miss resolution — cast narrows the type.
+        return cast(list[EmbedResponse], results)
 
     async def _bulk_cache_write(self, items: Sequence[tuple[str, bytes, int]]) -> Sequence[None]:
         """Pipeline cache SET operations."""

@@ -241,7 +241,7 @@ class DatadogOAuthSuccessLogEntry(DatadogLogEntryBase):
 # -- Discriminator Function and Union ------------------------------------------
 
 
-def _get_datadog_log_entry_type(  # strict_typing_linter.py: ordering — runtime dependency of DatadogLogEntry discriminator below
+def _get_datadog_log_entry_type(
     v: Any,
 ) -> str:
     """
@@ -277,9 +277,7 @@ DatadogLogEntry = Annotated[
 # -- Datadog Capture Types -----------------------------------------------------
 
 
-class DatadogRequestCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    RequestCapture
-):  # strict_typing_linter.py: ordering — classes follow natural request/response grouping
+class DatadogRequestCapture(RequestCapture):
     """Captured POST /api/v2/logs request (Datadog logging)."""
 
     host: Literal['http-intake.logs.us5.datadoghq.com']
@@ -287,9 +285,7 @@ class DatadogRequestCapture(  # strict_typing_linter.py: ordering — interleave
     body: Sequence[DatadogLogEntry]
 
 
-class DatadogResponseCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    ResponseCapture
-):  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+class DatadogResponseCapture(ResponseCapture):
     """
     Captured POST /api/v2/logs response (202 Accepted).
 
