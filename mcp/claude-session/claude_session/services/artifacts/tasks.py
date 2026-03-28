@@ -124,12 +124,7 @@ def collect_task_metadata(session_id: str) -> Mapping[str, str]:
     return result
 
 
-def write_task_metadata(
-    session_id: str,
-    metadata: Mapping[str, str],
-    *,
-    exist_ok: bool = False,
-) -> int:
+def write_task_metadata(session_id: str, metadata: Mapping[str, str], *, exist_ok: bool = False) -> int:
     """Write task metadata files (.highwatermark, etc.) for a session.
 
     Used during restore, clone, and delete rollback.
@@ -155,12 +150,7 @@ def write_task_metadata(
     return len(metadata)
 
 
-def write_tasks(
-    session_id: str,
-    tasks: Sequence[Task],
-    *,
-    exist_ok: bool = False,
-) -> int:
+def write_tasks(session_id: str, tasks: Sequence[Task], *, exist_ok: bool = False) -> int:
     """Write task data files ({id}.json) for a session.
 
     Used during restore, clone, and delete rollback.

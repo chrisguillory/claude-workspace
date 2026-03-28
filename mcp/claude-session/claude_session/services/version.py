@@ -48,10 +48,7 @@ VERSION_RECORD_TYPES = (
 )
 
 
-def get_version(
-    claude_pid: int | None = None,
-    records: Sequence[SessionRecord] | None = None,
-) -> str | None:
+def get_version(claude_pid: int | None = None, records: Sequence[SessionRecord] | None = None) -> str | None:
     """Get Claude Code version using best available method.
 
     Fallback chain:

@@ -126,9 +126,7 @@ class PathTranslator:
 # -- Utility Functions ---------------------------------------------------------
 
 
-def is_restored_session(
-    session_id: str,
-) -> bool:
+def is_restored_session(session_id: str) -> bool:
     """
     Check if a session ID is from a restored session.
 
@@ -144,9 +142,7 @@ def is_restored_session(
     return uid.version == 7
 
 
-def get_restoration_timestamp(
-    session_id: str,
-) -> datetime | None:
+def get_restoration_timestamp(session_id: str) -> datetime | None:
     """
     Extract the restoration timestamp from a restored session ID.
 

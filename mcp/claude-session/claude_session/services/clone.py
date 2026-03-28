@@ -88,11 +88,7 @@ class SessionCloneService:
         self.parser_service = parser_service or SessionParserService()
         self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
 
-    async def clone(
-        self,
-        source_session_id: str,
-        translate_paths: bool = True,
-    ) -> RestoreResult:
+    async def clone(self, source_session_id: str, translate_paths: bool = True) -> RestoreResult:
         """
         Clone a session directly without creating an archive file.
 
@@ -378,10 +374,7 @@ class SessionCloneService:
             custom_title=source_custom_title,  # Source title for provenance
         )
 
-    async def _resolve_session(
-        self,
-        session_id_or_prefix: str,
-    ) -> SessionInfo:
+    async def _resolve_session(self, session_id_or_prefix: str) -> SessionInfo:
         """
         Resolve a session ID or prefix to a full session.
 
@@ -403,10 +396,7 @@ class SessionCloneService:
             raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
         return match
 
-    async def _discover_session_files(
-        self,
-        session_info: SessionInfo,
-    ) -> tuple[Sequence[Path], Mapping[str, bool]]:
+    async def _discover_session_files(self, session_info: SessionInfo) -> tuple[Sequence[Path], Mapping[str, bool]]:
         """Discover all JSONL files for a session with structure detection.
 
         Returns:

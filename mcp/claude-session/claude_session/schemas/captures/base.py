@@ -47,9 +47,7 @@ __all__ = [
 # -- Network address types -----------------------------------------------------
 
 
-def _coerce_to_tuple(
-    v: Any,
-) -> Any:
+def _coerce_to_tuple(v: Any) -> Any:
     """Convert lists to tuples (JSON doesn't have tuples, only arrays)."""
     if isinstance(v, list):
         return tuple(v)

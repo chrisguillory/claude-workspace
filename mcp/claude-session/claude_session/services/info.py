@@ -74,11 +74,7 @@ class SessionInfoService:
         self.discovery = SessionDiscoveryService()
         self.lineage = LineageService()
 
-    async def get_info(
-        self,
-        session_id: str,
-        current_context: CurrentSessionContext | None = None,
-    ) -> SessionContext:
+    async def get_info(self, session_id: str, current_context: CurrentSessionContext | None = None) -> SessionContext:
         """
         Get comprehensive context for a session.
 
@@ -286,11 +282,7 @@ class SessionInfoService:
 
         return None
 
-    def _get_process_created_at(
-        self,
-        pid: int | None,
-        fallback: datetime | None,
-    ) -> datetime | None:
+    def _get_process_created_at(self, pid: int | None, fallback: datetime | None) -> datetime | None:
         """
         Get process creation time from OS (authoritative).
 

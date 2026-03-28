@@ -70,11 +70,7 @@ def collect_todos(session_id: str) -> Mapping[str, str]:
     return results
 
 
-def transform_todo_filename(
-    old_filename: str,
-    old_session_id: str,
-    new_session_id: str,
-) -> str:
+def transform_todo_filename(old_filename: str, old_session_id: str, new_session_id: str) -> str:
     """
     Transform a todo filename to use the new session ID.
 
@@ -102,11 +98,7 @@ def transform_todo_filename(
     return old_filename.replace(old_session_id, new_session_id, 1)
 
 
-def write_todos(
-    todos: Iterable[tuple[str, str]],
-    *,
-    exist_ok: bool = False,
-) -> int:
+def write_todos(todos: Iterable[tuple[str, str]], *, exist_ok: bool = False) -> int:
     """Write todo files to ~/.claude/todos/.
 
     Mode-agnostic writer — caller computes target filenames.

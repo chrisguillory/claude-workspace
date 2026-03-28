@@ -53,9 +53,7 @@ class SessionParserService:
 
         return files_data
 
-    async def _parse_jsonl_file(
-        self, file_path: Path
-    ) -> Sequence[SessionRecord]:
+    async def _parse_jsonl_file(self, file_path: Path) -> Sequence[SessionRecord]:
         """
         Parse a single JSONL file into validated records.
 

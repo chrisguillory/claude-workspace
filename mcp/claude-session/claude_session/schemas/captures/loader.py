@@ -254,9 +254,7 @@ def _preprocess_capture(
     return data
 
 
-def load_capture(
-    filepath: Path,
-) -> CapturedTraffic:
+def load_capture(filepath: Path) -> CapturedTraffic:
     """
     Load and validate a capture file.
 
