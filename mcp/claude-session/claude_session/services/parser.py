@@ -41,7 +41,7 @@ class SessionParserService:
         Returns:
             Dict mapping filename to list of validated records
         """
-        files_data: dict[str, list[SessionRecord]] = {}
+        files_data: dict[str, Sequence[SessionRecord]] = {}
 
         for file_path in session_files:
             logger.info('Loading %s', file_path.name)
@@ -55,9 +55,7 @@ class SessionParserService:
 
     async def _parse_jsonl_file(
         self, file_path: Path
-    ) -> list[
-        SessionRecord
-    ]:  # strict_typing_linter.py: mutable-type — builds list via .append(), assigned to dict value
+    ) -> Sequence[SessionRecord]:
         """
         Parse a single JSONL file into validated records.
 

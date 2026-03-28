@@ -45,13 +45,9 @@ class TaskDirectoryContents:
     metadata files and flags anything unexpected for fail-fast behavior.
     """
 
-    task_files: list[Path]  # strict_typing_linter.py: mutable-type — built via .append() in classify_task_directory()
-    metadata_files: list[
-        Path
-    ]  # strict_typing_linter.py: mutable-type — built via .append() in classify_task_directory()
-    unexpected_files: list[
-        Path
-    ]  # strict_typing_linter.py: mutable-type — built via .append() in classify_task_directory()
+    task_files: Sequence[Path]
+    metadata_files: Sequence[Path]
+    unexpected_files: Sequence[Path]
 
 
 def classify_task_directory(session_id: str) -> TaskDirectoryContents | None:
@@ -72,17 +68,23 @@ def classify_task_directory(session_id: str) -> TaskDirectoryContents | None:
     if not tasks_dir.exists():
         return None
 
-    result = TaskDirectoryContents(task_files=[], metadata_files=[], unexpected_files=[])
+    task_files: list[Path] = []
+    metadata_files: list[Path] = []
+    unexpected_files: list[Path] = []
     for path in tasks_dir.iterdir():
         if not path.is_file():
             continue
         if path.name in TASK_METADATA_FILES:
-            result.metadata_files.append(path)
+            metadata_files.append(path)
         elif path.suffix == '.json' and path.stem.isdigit():
-            result.task_files.append(path)
+            task_files.append(path)
         else:
-            result.unexpected_files.append(path)
-    return result
+            unexpected_files.append(path)
+    return TaskDirectoryContents(
+        task_files=task_files,
+        metadata_files=metadata_files,
+        unexpected_files=unexpected_files,
+    )
 
 
 def iter_task_paths(session_id: str) -> Iterator[Path]:
