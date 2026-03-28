@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import ast
 import builtins
+import enum
 import io
 import sys
 import tokenize
@@ -178,6 +179,19 @@ type DirectiveCode = Literal[
 type TypeViolationKind = Literal['mutable', 'loose', 'tuple-field', 'hashable-field']
 type OrderingViolationKind = Literal['ordering', 'class-ordering', 'missing-all', 'trailing-comma', 'unused-directive']
 type ViolationKind = TypeViolationKind | OrderingViolationKind
+
+
+class SubscriptKind(enum.Enum):
+    """Classification of subscript type forms in annotations.
+
+    Literal: contains values, not types — skip entirely
+    Annotated: first arg is type, rest is metadata — recurse first arg only
+    Generic: regular parameterized type (including Union) — recurse all args
+    """
+
+    LITERAL = 'literal'
+    ANNOTATED = 'annotated'
+    GENERIC = 'generic'
 
 
 @dataclass(frozen=True)
@@ -810,6 +824,26 @@ class AnnotationChecker(ast.NodeVisitor):
         else:
             return f'ensure {unhashable} fields use hashable types (tuple instead of Sequence/list)'
 
+    def _classify_subscript(self, node: ast.Subscript) -> tuple[SubscriptKind, str]:
+        """Classify a subscript node by its type form.
+
+        Returns (kind, resolved_name) so callers needing the resolved name
+        for further checks (container classification, ALLOWED_CONTAINERS) don't re-resolve.
+        """
+        resolved = resolve_qualified_name(node.value, self.import_map)
+        if resolved in ('typing.Literal', 'typing_extensions.Literal'):
+            return SubscriptKind.LITERAL, resolved
+        if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
+            return SubscriptKind.ANNOTATED, resolved
+        return SubscriptKind.GENERIC, resolved
+
+    @staticmethod
+    def _get_annotated_type_arg(node: ast.Subscript) -> ast.expr:
+        """Extract the type argument from Annotated[Type, ...metadata]."""
+        if isinstance(node.slice, ast.Tuple) and node.slice.elts:
+            return node.slice.elts[0]
+        return node.slice
+
     def _find_tuple_field(self, node: ast.expr) -> bool:
         """Recursively check if annotation contains tuple[X, ...] (variable-length).
 
@@ -819,13 +853,11 @@ class AnnotationChecker(ast.NodeVisitor):
             return True
 
         if isinstance(node, ast.Subscript):
-            resolved = resolve_qualified_name(node.value, self.import_map)
-            # Annotated: check first type arg only (rest is metadata)
-            if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
-                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
-                    return self._find_tuple_field(node.slice.elts[0])
-                return self._find_tuple_field(node.slice)
-            # Recurse into all type parameters
+            kind, _ = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return False
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_tuple_field(self._get_annotated_type_arg(node))
             return self._find_tuple_field_in_slice(node.slice)
 
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -872,13 +904,11 @@ class AnnotationChecker(ast.NodeVisitor):
             if container_class == 'transparent':
                 return self._get_type_name(node.value)
 
-            resolved = resolve_qualified_name(node.value, self.import_map)
-            # Annotated: check first type arg only
-            if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
-                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
-                    return self._find_unhashable_field(node.slice.elts[0])
-                return self._find_unhashable_field(node.slice)
-            # Recurse into type parameters
+            kind, _ = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return None
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_unhashable_field(self._get_annotated_type_arg(node))
             return self._find_unhashable_in_slice(node.slice)
 
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -951,9 +981,14 @@ class AnnotationChecker(ast.NodeVisitor):
             return None
 
         elif isinstance(node, ast.Subscript):
-            container_name = self._get_type_name(node.value)
+            kind, resolved_name = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return None
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_forbidden_type(self._get_annotated_type_arg(node))
 
-            # Resolve and classify the container
+            # Container-level checks (mutable, transparent, allowed)
+            container_name = self._get_type_name(node.value)
             classification = self._classify_by_qualified_name(node.value)
             if classification == 'mutable':
                 return container_name
@@ -965,32 +1000,8 @@ class AnnotationChecker(ast.NodeVisitor):
             # Fall back to short name checks for builtins
             if container_name in FORBIDDEN_TYPES:
                 return container_name
-
-            # Immutable containers that don't need content checking
             if container_name in ALLOWED_CONTAINERS:
                 return None
-
-            # Resolve qualified name for remaining checks
-            resolved_name = resolve_qualified_name(node.value, self.import_map)
-
-            # Union, Optional - check all components
-            if resolved_name in (
-                'typing.Union',
-                'typing.Optional',
-                'typing_extensions.Union',
-                'typing_extensions.Optional',
-            ):
-                return self._find_forbidden_in_slice(node.slice)
-
-            # Literal types contain values, not type annotations - skip entirely
-            if resolved_name in ('typing.Literal', 'typing_extensions.Literal'):
-                return None
-
-            # Annotated types: only check the first argument (the actual type), skip metadata
-            if resolved_name in ('typing.Annotated', 'typing_extensions.Annotated'):
-                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
-                    return self._find_forbidden_type(node.slice.elts[0])
-                return self._find_forbidden_type(node.slice)
 
             # Position-aware Any allowances for library types
             if resolved_name in ANY_ALLOWED_POSITIONS:
@@ -1118,9 +1129,14 @@ class AnnotationChecker(ast.NodeVisitor):
             return None
 
         elif isinstance(node, ast.Subscript):
-            container_name = self._get_type_name(node.value)
+            kind, _ = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return None
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_forbidden_type_no_any(self._get_annotated_type_arg(node))
 
-            # Use qualified resolution first
+            # Container-level checks (mutable, transparent, allowed)
+            container_name = self._get_type_name(node.value)
             classification = self._classify_by_qualified_name(node.value)
             if classification == 'mutable':
                 return container_name
@@ -1132,32 +1148,8 @@ class AnnotationChecker(ast.NodeVisitor):
             # Fall back to short name for builtins
             if container_name in MUTABLE_TYPES:
                 return container_name
-
-            # Immutable containers
             if container_name in ALLOWED_CONTAINERS:
                 return None
-
-            # Resolve qualified name for remaining checks
-            resolved_name = resolve_qualified_name(node.value, self.import_map)
-
-            # Union, Optional - check all components
-            if resolved_name in (
-                'typing.Union',
-                'typing.Optional',
-                'typing_extensions.Union',
-                'typing_extensions.Optional',
-            ):
-                return self._find_forbidden_in_slice_no_any(node.slice)
-
-            # Literal types contain values, not type annotations - skip entirely
-            if resolved_name in ('typing.Literal', 'typing_extensions.Literal'):
-                return None
-
-            # Annotated types: only check the first argument (the actual type), skip metadata
-            if resolved_name in ('typing.Annotated', 'typing_extensions.Annotated'):
-                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
-                    return self._find_forbidden_type_no_any(node.slice.elts[0])
-                return self._find_forbidden_type_no_any(node.slice)
 
             # Recurse into slice for unknown containers
             return self._find_forbidden_in_slice_no_any(node.slice)
