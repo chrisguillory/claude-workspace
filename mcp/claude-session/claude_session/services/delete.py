@@ -107,12 +107,7 @@ class SessionDeleteService:
     # - IsADirectoryError: wrong operation = bug in our code
     EXPECTED_DELETION_ERRORS = (PermissionError,)
 
-    def __init__(
-        self,
-        *,
-        project_path: Path | None = None,
-        session_folder: Path | None = None,
-    ) -> None:
+    def __init__(self, *, project_path: Path | None = None, session_folder: Path | None = None) -> None:
         """
         Initialize delete service.
 
@@ -207,10 +202,7 @@ class SessionDeleteService:
                 original_exc.add_note('Rollback completed successfully')
             raise
 
-    async def discover_artifacts(
-        self,
-        session_id: str,
-    ) -> DeleteManifest:
+    async def discover_artifacts(self, session_id: str) -> DeleteManifest:
         """
         Find all artifacts for a session with explicit file enumeration.
 
@@ -685,10 +677,7 @@ class SessionDeleteService:
             deleted_at=end_time,
         )
 
-    async def _create_backup(
-        self,
-        session_id: str,
-    ) -> str:
+    async def _create_backup(self, session_id: str) -> str:
         """
         Create a backup archive for rollback capability.
 

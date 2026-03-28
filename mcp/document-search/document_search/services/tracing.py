@@ -376,11 +376,7 @@ class PipelineTracer:
 
     # ── Private: metric collection ──────────────────────────────
 
-    def _collect_processing_times(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_processing_times(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect processing times (completed - started) for a stage in ms."""
         start_key, end_key = _stage_event_keys(stage)
         times: list[float] = []
@@ -393,11 +389,7 @@ class PipelineTracer:
                 times.append((end - start) * 1000)
         return times
 
-    def _collect_queue_wait(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_queue_wait(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect queue wait times (started/dequeued - queued) for a stage in ms."""
         if stage not in _QUEUED_STAGES:
             return []
@@ -417,11 +409,7 @@ class PipelineTracer:
                 waits.append((picked_up - queued) * 1000)
         return waits
 
-    def _collect_batch_wait(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_batch_wait(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect embed setup wait (batch_started - dequeued) in ms."""
         if stage != 'embed':
             return []
@@ -436,11 +424,7 @@ class PipelineTracer:
                 waits.append((batch_started - dequeued) * 1000)
         return waits
 
-    def _collect_cpu_times(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_cpu_times(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect CPU times for a stage in ms."""
         times: list[float] = []
         for item_id, cpus in self._cpu_times.items():
@@ -451,11 +435,7 @@ class PipelineTracer:
                 times.append(cpu * 1000)
         return times
 
-    def _collect_wall_times(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_wall_times(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect Rust-internal wall times for a stage in ms."""
         times: list[float] = []
         for item_id, walls in self._wall_times.items():

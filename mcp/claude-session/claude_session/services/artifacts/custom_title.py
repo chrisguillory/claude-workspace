@@ -38,9 +38,7 @@ __all__ = [
 CLONE_SUFFIX_PATTERN = re.compile(r'\s*\(clone-[0-9a-fA-F]{8}\)$')
 
 
-def extract_custom_title_from_records(
-    files_data: Mapping[str, Sequence[SessionRecord]],
-) -> str | None:
+def extract_custom_title_from_records(files_data: Mapping[str, Sequence[SessionRecord]]) -> str | None:
     """
     Extract the custom title from session records.
 

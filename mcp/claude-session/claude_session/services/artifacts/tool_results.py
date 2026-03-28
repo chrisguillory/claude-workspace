@@ -149,10 +149,7 @@ def get_tool_results_dir(project_folder: Path, session_id: str) -> Path:
     return project_folder / session_id / 'tool-results'
 
 
-def discover_tool_results(
-    project_folder: Path,
-    session_id: str,
-) -> DiscoveryResult:
+def discover_tool_results(project_folder: Path, session_id: str) -> DiscoveryResult:
     """Discover and validate all tool result artifacts without reading content.
 
     Scans the tool-results/ directory one level deep. For flat files, validates
@@ -219,9 +216,7 @@ def discover_tool_results(
     return DiscoveryResult(files=files, directories=directories, unknown_files=unknown_files)
 
 
-def _raise_on_unknown(
-    discovery: DiscoveryResult,
-) -> None:
+def _raise_on_unknown(discovery: DiscoveryResult) -> None:
     """Raise FileNotFoundError if any unknown files in discovery result."""
     if discovery.unknown_files:
         file_list = '\n  '.join(str(p) for p in discovery.unknown_files)
@@ -232,10 +227,7 @@ def _raise_on_unknown(
         )
 
 
-def collect_tool_results(
-    project_folder: Path,
-    session_id: str,
-) -> ToolResultCollection:
+def collect_tool_results(project_folder: Path, session_id: str) -> ToolResultCollection:
     """
     Collect tool result files and directories for a session.
 

@@ -389,20 +389,14 @@ class SessionMoveService:
         encoded = encode_path(self.target_project_path)
         return self.claude_sessions_dir / encoded
 
-    async def _resolve_session(
-        self,
-        session_id_or_prefix: str,
-    ) -> SessionInfo:
+    async def _resolve_session(self, session_id_or_prefix: str) -> SessionInfo:
         """Resolve a session ID or prefix to a full session."""
         match = await self.discovery_service.find_session_by_id(session_id_or_prefix)
         if not match:
             raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
         return match
 
-    async def _discover_session_files(
-        self,
-        session_info: SessionInfo,
-    ) -> tuple[Sequence[Path], Mapping[str, bool]]:
+    async def _discover_session_files(self, session_info: SessionInfo) -> tuple[Sequence[Path], Mapping[str, bool]]:
         """Discover all JSONL files for a session with structure detection.
 
         Returns:

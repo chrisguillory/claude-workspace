@@ -290,13 +290,7 @@ def _scroll_to_position(
     }
 
 
-def _scroll_into_view(
-    driver: webdriver.Chrome,
-    *,
-    css_selector: str,
-    behavior: str,
-    timeout: int = 10,
-) -> JsonObject:
+def _scroll_into_view(driver: webdriver.Chrome, *, css_selector: str, behavior: str, timeout: int = 10) -> JsonObject:
     """Mode 3: Scroll element into view."""
     element = _find_element(driver, css_selector, 'element', timeout=timeout)
 

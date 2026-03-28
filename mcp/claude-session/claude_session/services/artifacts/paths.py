@@ -24,9 +24,7 @@ class MissingCwdError(Exception):
     pass
 
 
-def extract_source_project_path(
-    files_data: Mapping[str, Sequence[SessionRecord]],
-) -> Path:
+def extract_source_project_path(files_data: Mapping[str, Sequence[SessionRecord]]) -> Path:
     """
     Extract the source project path from session records.
 

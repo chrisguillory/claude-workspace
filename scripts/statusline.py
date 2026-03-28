@@ -1149,11 +1149,7 @@ def _collect_health_sample(claude_pid: int) -> HealthSample | None:
     )
 
 
-def _update_health_sidecar(
-    session_id: str,
-    claude_pid: int,
-    sample: HealthSample,
-) -> HealthSidecar:
+def _update_health_sidecar(session_id: str, claude_pid: int, sample: HealthSample) -> HealthSidecar:
     """Conditionally persist sample to sidecar, decoupling display from history.
 
     The statusline fires multiple times per assistant turn (streaming start,

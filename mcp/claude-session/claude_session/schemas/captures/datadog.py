@@ -241,9 +241,7 @@ class DatadogOAuthSuccessLogEntry(DatadogLogEntryBase):
 # -- Discriminator Function and Union ------------------------------------------
 
 
-def _get_datadog_log_entry_type(
-    v: Any,
-) -> str:
+def _get_datadog_log_entry_type(v: Any) -> str:
     """
     Callable discriminator for DatadogLogEntry union.
 

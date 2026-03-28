@@ -65,16 +65,12 @@ def _configure_logging(
 ArchiveFormat = Literal['json', 'zst']
 
 
-def _is_archive_format(
-    value: str,
-) -> TypeGuard[ArchiveFormat]:
+def _is_archive_format(value: str) -> TypeGuard[ArchiveFormat]:
     """Type guard for valid archive formats."""
     return value in ('json', 'zst')
 
 
-def _validate_archive_format(
-    value: str | None,
-) -> ArchiveFormat | None:
+def _validate_archive_format(value: str | None) -> ArchiveFormat | None:
     """Validate and narrow archive format for typer callback."""
     if value is None:
         return None
@@ -83,9 +79,7 @@ def _validate_archive_format(
     raise typer.BadParameter("Must be 'json' or 'zst'")
 
 
-def _format_age(
-    dt: datetime | None,
-) -> str:
+def _format_age(dt: datetime | None) -> str:
     """Format a datetime as a precise human-readable age.
 
     Uses two-unit precision (e.g., 2h12m, 3d5h) so that descriptions
@@ -103,9 +97,7 @@ def _format_age(
     return f'{days}d{hrs}h'
 
 
-def _complete_session_id(
-    incomplete: str,
-) -> Sequence[tuple[str, str]]:
+def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
     """Complete session IDs from tracked sessions. Active first, then newest."""
     db = load_sessions('.')
     matches = [s for s in db.sessions if s.session_id.startswith(incomplete)]
@@ -967,9 +959,7 @@ async def _move_async(
         raise typer.Exit(1) from None
 
 
-def _render_lineage_tree(
-    tree: LineageTree,
-) -> None:
+def _render_lineage_tree(tree: LineageTree) -> None:
     """Render a LineageTree with proper box-drawing characters."""
 
     def render_node(node_id: str, prefix: str, is_last: bool, is_root: bool) -> None:
@@ -995,10 +985,7 @@ def _render_lineage_tree(
     render_node(tree.root_session_id, '', is_last=True, is_root=True)
 
 
-async def _info_async(
-    session_id: str,
-    format: Literal['text', 'json'],
-) -> None:
+async def _info_async(session_id: str, format: Literal['text', 'json']) -> None:
     """Async implementation of info command."""
     info_service = SessionInfoService()
     try:
@@ -1064,9 +1051,7 @@ async def _info_async(
             typer.echo(f'  Temp dir: {context.temp_dir}')
 
 
-def _resolve_session_id(
-    session_id: str | None,
-) -> str:
+def _resolve_session_id(session_id: str | None) -> str:
     """Resolve session_id, auto-detecting from Claude Code if not provided."""
     if session_id is not None:
         return session_id
@@ -1078,16 +1063,12 @@ def _resolve_session_id(
     return detected
 
 
-def _is_session_id(
-    value: str,
-) -> bool:
+def _is_session_id(value: str) -> bool:
     """Check if a string looks like a session ID (8+ hex digits/hyphens)."""
     return len(value) >= 8 and bool(re.fullmatch(r'[0-9a-f][0-9a-f-]*', value))
 
 
-def _get_github_token_cli(
-    gist_token: str | None,
-) -> str | None:
+def _get_github_token_cli(gist_token: str | None) -> str | None:
     """Resolve GitHub token from flag, environment, or gh CLI.
 
     Checks in order:
