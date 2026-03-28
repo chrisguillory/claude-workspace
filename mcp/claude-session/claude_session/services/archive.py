@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -50,6 +50,13 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.version import get_version
 from claude_session.storage.protocol import StorageBackend
 
+__all__ = [
+    'FormatDetector',
+    'SessionArchiveService',
+    'logger',
+]
+
+
 logger = logging.getLogger(__name__)
 
 # -- Archive Format Detection --------------------------------------------------
@@ -58,10 +65,10 @@ logger = logging.getLogger(__name__)
 class FormatDetector:
     """Detects and validates archive format from file extension and format parameter."""
 
-    SUPPORTED_FORMATS: ClassVar[set[str]] = {'json', 'zst'}  # 'zst' = JSON with zstd compression
+    SUPPORTED_FORMATS: ClassVar[frozenset[str]] = frozenset({'json', 'zst'})  # 'zst' = JSON with zstd compression
 
     # Extension to format mapping
-    EXTENSION_MAP: ClassVar[dict[str, Literal['json', 'zst']]] = {
+    EXTENSION_MAP: ClassVar[Mapping[str, Literal['json', 'zst']]] = {
         '.json': 'json',
         '.json.zst': 'zst',
         '.zst': 'zst',
@@ -494,7 +501,9 @@ class SessionArchiveService:
 
         return session_files
 
-    async def _load_session_files(self, session_files: Sequence[Path]) -> tuple[dict[str, list[SessionRecord]], int]:
+    async def _load_session_files(
+        self, session_files: Sequence[Path]
+    ) -> tuple[Mapping[str, Sequence[SessionRecord]], int]:
         """
         Load and parse all session files using parser service.
 
@@ -516,7 +525,7 @@ class SessionArchiveService:
 
         return files_data, total_records
 
-    async def _extract_claude_code_version(self, files_data: dict[str, list[SessionRecord]]) -> str | None:
+    async def _extract_claude_code_version(self, files_data: Mapping[str, Sequence[SessionRecord]]) -> str | None:
         """
         Extract Claude Code version using best available method.
 

@@ -18,7 +18,7 @@ import logging
 import time
 from collections.abc import Sequence, Set
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import psutil
 
@@ -275,7 +275,7 @@ class PipelineTracer:
 
         completion_series = self._build_completion_series()
 
-        partial_kwargs: dict[str, object] = {}
+        partial_kwargs: _PartialReportKwargs = {}
         if partial:
             _chunk_done, _embed_done, store_done = self.get_completion_counts()
             chunk_in, embed_in, store_in = self.get_in_flight_counts()
@@ -293,7 +293,7 @@ class PipelineTracer:
             total_elapsed_seconds=round(total_elapsed, 3),
             sparse_threads=self._sparse_threads,
             completion_series=completion_series,
-            **partial_kwargs,  # type: ignore[arg-type]  # partial_kwargs values typed as object, PipelineTimingReport expects specific types
+            **partial_kwargs,
         )
 
     # ── Private: queue monitoring ────────────────────────────────
@@ -376,11 +376,7 @@ class PipelineTracer:
 
     # ── Private: metric collection ──────────────────────────────
 
-    def _collect_processing_times(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_processing_times(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect processing times (completed - started) for a stage in ms."""
         start_key, end_key = _stage_event_keys(stage)
         times: list[float] = []
@@ -393,11 +389,7 @@ class PipelineTracer:
                 times.append((end - start) * 1000)
         return times
 
-    def _collect_queue_wait(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_queue_wait(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect queue wait times (started/dequeued - queued) for a stage in ms."""
         if stage not in _QUEUED_STAGES:
             return []
@@ -417,11 +409,7 @@ class PipelineTracer:
                 waits.append((picked_up - queued) * 1000)
         return waits
 
-    def _collect_batch_wait(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_batch_wait(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect embed setup wait (batch_started - dequeued) in ms."""
         if stage != 'embed':
             return []
@@ -436,11 +424,7 @@ class PipelineTracer:
                 waits.append((batch_started - dequeued) * 1000)
         return waits
 
-    def _collect_cpu_times(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_cpu_times(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect CPU times for a stage in ms."""
         times: list[float] = []
         for item_id, cpus in self._cpu_times.items():
@@ -451,11 +435,7 @@ class PipelineTracer:
                 times.append(cpu * 1000)
         return times
 
-    def _collect_wall_times(
-        self,
-        stage: TraceableStage,
-        warmup_ids: Set[str],
-    ) -> Sequence[float]:
+    def _collect_wall_times(self, stage: TraceableStage, warmup_ids: Set[str]) -> Sequence[float]:
         """Collect Rust-internal wall times for a stage in ms."""
         times: list[float] = []
         for item_id, walls in self._wall_times.items():
@@ -468,6 +448,14 @@ class PipelineTracer:
 
 
 # ── Module-level helpers ────────────────────────────────────────
+
+
+class _PartialReportKwargs(TypedDict, total=False):
+    """Optional kwargs for partial pipeline reports."""
+
+    is_partial: bool
+    items_completed: int
+    items_in_flight: int
 
 
 def _stage_event_keys(stage: TraceableStage) -> tuple[str, str]:

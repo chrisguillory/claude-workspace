@@ -10,6 +10,10 @@ import os
 import shutil
 from collections.abc import Sequence
 
+__all__ = [
+    'launch_claude_with_session',
+]
+
 
 def launch_claude_with_session(session_id: str, extra_args: Sequence[str]) -> None:
     """

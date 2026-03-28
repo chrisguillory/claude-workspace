@@ -11,6 +11,7 @@ This module provides:
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -85,6 +86,13 @@ from claude_session.schemas.captures.unknown import (
     UnknownRequestCapture,
     UnknownResponseCapture,
 )
+
+__all__ = [
+    'CapturedTraffic',
+    'load_capture',
+    'load_captures_batch',
+]
+
 
 # -- Discriminated union of all capture types ----------------------------------
 
@@ -176,7 +184,10 @@ CapturedTraffic = Annotated[
 _CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(CapturedTraffic)
 
 
-def _preprocess_capture(data: dict[str, Any], filepath: Path | None = None) -> dict[str, Any]:
+def _preprocess_capture(
+    data: dict[str, Any],
+    filepath: Path | None = None,  # strict_typing_linter.py: mutable-type — mutates dict in place
+) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — returns same mutated dict
     """
     Preprocess capture data before Pydantic validation.
 
@@ -278,7 +289,7 @@ def load_capture(filepath: Path) -> CapturedTraffic:
 
 def load_captures_batch(
     directory: Path, pattern: str = '*.json'
-) -> tuple[list[CapturedTraffic], dict[Path, Exception]]:
+) -> tuple[Sequence[CapturedTraffic], Mapping[Path, Exception]]:
     """
     Load and validate multiple captures.
 

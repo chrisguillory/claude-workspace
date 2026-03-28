@@ -30,6 +30,17 @@ from claude_session.schemas.session import (
     UserRecord,
 )
 
+__all__ = [
+    'SLUG_RECORD_TYPES',
+    'apply_slug_mapping',
+    'collect_plan_files',
+    'extract_base_slug',
+    'extract_slugs_from_records',
+    'generate_clone_slug',
+    'write_plan_files',
+]
+
+
 # Record types that have the slug field
 SLUG_RECORD_TYPES = (
     UserRecord,
@@ -65,9 +76,7 @@ def extract_base_slug(slug: str) -> str:
     return slug
 
 
-def extract_slugs_from_records(
-    files_data: Mapping[str, Sequence[SessionRecord]],
-) -> Set[str]:
+def extract_slugs_from_records(files_data: Mapping[str, Sequence[SessionRecord]]) -> Set[str]:
     """
     Extract all unique slugs from session records.
 
@@ -132,11 +141,7 @@ def generate_clone_slug(old_slug: str, new_session_id: str) -> str:
     return f'{base_slug}-clone-{prefix}'
 
 
-def write_plan_files(
-    plans: Iterable[tuple[str, str]],
-    *,
-    exist_ok: bool = False,
-) -> int:
+def write_plan_files(plans: Iterable[tuple[str, str]], *, exist_ok: bool = False) -> int:
     """Write plan files to ~/.claude/plans/.
 
     Mode-agnostic writer — caller computes target slugs.

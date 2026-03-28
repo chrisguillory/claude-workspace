@@ -24,6 +24,24 @@ from typing import NamedTuple, cast, get_args
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.types import Base64JsonBytes, ToolResultExtension
 
+__all__ = [
+    'KNOWN_DIR_PREFIXES',
+    'TOOL_RESULT_EXTENSIONS',
+    'DiscoveredDirectory',
+    'DiscoveredFile',
+    'DiscoveryResult',
+    'ToolResultCollection',
+    'ToolResultDirectory',
+    'ToolResultDirectoryFile',
+    'ToolResultFile',
+    'collect_tool_results',
+    'discover_tool_results',
+    'get_tool_results_dir',
+    'logger',
+    'write_tool_results',
+]
+
+
 logger = logging.getLogger(__name__)
 
 TOOL_RESULT_EXTENSIONS: Set[str] = set(get_args(ToolResultExtension))
@@ -131,10 +149,7 @@ def get_tool_results_dir(project_folder: Path, session_id: str) -> Path:
     return project_folder / session_id / 'tool-results'
 
 
-def discover_tool_results(
-    project_folder: Path,
-    session_id: str,
-) -> DiscoveryResult:
+def discover_tool_results(project_folder: Path, session_id: str) -> DiscoveryResult:
     """Discover and validate all tool result artifacts without reading content.
 
     Scans the tool-results/ directory one level deep. For flat files, validates
@@ -212,10 +227,7 @@ def _raise_on_unknown(discovery: DiscoveryResult) -> None:
         )
 
 
-def collect_tool_results(
-    project_folder: Path,
-    session_id: str,
-) -> ToolResultCollection:
+def collect_tool_results(project_folder: Path, session_id: str) -> ToolResultCollection:
     """
     Collect tool result files and directories for a session.
 

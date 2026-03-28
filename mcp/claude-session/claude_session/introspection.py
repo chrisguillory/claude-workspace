@@ -14,6 +14,15 @@ from pydantic.fields import FieldInfo
 
 from claude_session.schemas.session.markers import PathMarker
 
+__all__ = [
+    'get_field_version_info',
+    'get_literal_values',
+    'get_path_fields',
+    'get_reserved_fields',
+    'model_summary',
+    'print_model_summary',
+]
+
 
 def get_path_fields(model: type[BaseModel]) -> list[str]:
     """

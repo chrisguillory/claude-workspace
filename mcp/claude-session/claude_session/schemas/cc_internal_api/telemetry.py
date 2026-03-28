@@ -18,6 +18,21 @@ from typing import Any, Literal
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 
+__all__ = [
+    'KNOWN_EVENT_NAMES',
+    'Arch',
+    'ClientType',
+    'Entrypoint',
+    'Platform',
+    'TelemetryBatchRequest',
+    'TelemetryBatchResponse',
+    'TelemetryEnv',
+    'TelemetryEvent',
+    'TelemetryEventData',
+    'UserType',
+]
+
+
 # -- Type Aliases (strict Literal types - add new values when discovered) ------
 
 Platform = Literal['darwin', 'linux', 'win32', 'freebsd', 'openbsd']

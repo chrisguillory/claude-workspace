@@ -32,7 +32,7 @@ import signal
 import subprocess
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -74,6 +74,7 @@ from claude_session.services.parser import SessionParserService
 from claude_session.storage.local import LocalFileSystemStorage
 
 __all__ = [
+    'ArtifactCounts',
     'SessionDeleteService',
     'is_native_session',
 ]
@@ -106,12 +107,7 @@ class SessionDeleteService:
     # - IsADirectoryError: wrong operation = bug in our code
     EXPECTED_DELETION_ERRORS = (PermissionError,)
 
-    def __init__(
-        self,
-        *,
-        project_path: Path | None = None,
-        session_folder: Path | None = None,
-    ) -> None:
+    def __init__(self, *, project_path: Path | None = None, session_folder: Path | None = None) -> None:
         """
         Initialize delete service.
 
@@ -206,10 +202,7 @@ class SessionDeleteService:
                 original_exc.add_note('Rollback completed successfully')
             raise
 
-    async def discover_artifacts(
-        self,
-        session_id: str,
-    ) -> DeleteManifest:
+    async def discover_artifacts(self, session_id: str) -> DeleteManifest:
         """
         Find all artifacts for a session with explicit file enumeration.
 
@@ -684,10 +677,7 @@ class SessionDeleteService:
             deleted_at=end_time,
         )
 
-    async def _create_backup(
-        self,
-        session_id: str,
-    ) -> str:
+    async def _create_backup(self, session_id: str) -> str:
         """
         Create a backup archive for rollback capability.
 
@@ -718,7 +708,7 @@ class SessionDeleteService:
         return metadata.file_path
 
     @staticmethod
-    def _parse_backup_data(data: dict[str, Any]) -> SessionArchiveV2:
+    def _parse_backup_data(data: Mapping[str, Any]) -> SessionArchiveV2:
         """
         Parse backup data with version detection.
 
@@ -837,7 +827,7 @@ class SessionDeleteService:
         logger.info('Rollback completed successfully')
 
     @staticmethod
-    def _compute_artifact_counts(manifest: DeleteManifest) -> dict[str, int]:
+    def _compute_artifact_counts(manifest: DeleteManifest) -> Mapping[str, int]:
         """
         Compute per-artifact-type counts from manifest.
 

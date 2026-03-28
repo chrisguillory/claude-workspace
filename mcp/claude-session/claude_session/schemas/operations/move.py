@@ -11,6 +11,10 @@ from datetime import datetime
 
 from claude_session.schemas.base import StrictModel
 
+__all__ = [
+    'MoveResult',
+]
+
 
 class MoveResult(StrictModel):
     """Result of a session move operation."""

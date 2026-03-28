@@ -91,7 +91,7 @@ class IndexStateStore:
 
         pipe = self._redis.pipeline()
         for path in file_paths:
-            pipe.hmget(  # type: ignore[attr-defined]  # hmget exists at runtime, missing from redis Pipeline stubs
+            pipe.hmget(
                 self._key(path),
                 b'file_hash',
                 b'file_size',

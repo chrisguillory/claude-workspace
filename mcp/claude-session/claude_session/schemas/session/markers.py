@@ -12,6 +12,12 @@ from typing import Annotated
 
 from claude_session.schemas.types import PathStr
 
+__all__ = [
+    'PathField',
+    'PathListField',
+    'PathMarker',
+]
+
 
 @dataclass(frozen=True)
 class PathMarker:

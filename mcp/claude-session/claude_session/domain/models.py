@@ -27,6 +27,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from claude_session.schemas.session import SessionRecord
 
+__all__ = [
+    'AgentSession',
+    'CompleteSessionArchive',
+    'DomainModel',
+    'Session',
+    'SessionAnalysis',
+    'SessionMetadata',
+    'TokenCosts',
+]
+
+
 # -- Base Configuration for Domain Models --------------------------------------
 
 

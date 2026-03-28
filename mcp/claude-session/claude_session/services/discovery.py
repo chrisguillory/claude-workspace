@@ -14,6 +14,10 @@ from pathlib import Path
 from claude_session.exceptions import AmbiguousSessionError
 from claude_session.schemas.operations.discovery import SessionInfo
 
+__all__ = [
+    'SessionDiscoveryService',
+]
+
 
 class SessionDiscoveryService:
     """

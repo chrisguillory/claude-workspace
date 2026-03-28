@@ -15,6 +15,10 @@ from typing import Literal
 
 import httpx
 
+__all__ = [
+    'GistStorage',
+]
+
 
 class GistStorage:
     """
