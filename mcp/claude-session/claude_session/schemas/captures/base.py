@@ -47,7 +47,7 @@ __all__ = [
 # -- Network address types -----------------------------------------------------
 
 
-def _coerce_to_tuple(  # strict_typing_linter.py: ordering — runtime dependency of IPv4Address/IPv6Address constants below
+def _coerce_to_tuple(
     v: Any,
 ) -> Any:
     """Convert lists to tuples (JSON doesn't have tuples, only arrays)."""
@@ -68,18 +68,14 @@ NetworkAddress = IPv4Address | IPv6Address
 # -- Connection metadata from mitmproxy ----------------------------------------
 
 
-class ClientConnectionTiming(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    StrictModel
-):
+class ClientConnectionTiming(StrictModel):
     """Timing for client connection (no TCP setup - local proxy connection)."""
 
     start: float = pydantic.Field(description='Connection start timestamp')
     tls_setup: float = pydantic.Field(description='TLS handshake completion timestamp')
 
 
-class ServerConnectionTiming(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    StrictModel
-):
+class ServerConnectionTiming(StrictModel):
     """Timing for server connection (includes TCP setup to remote server)."""
 
     start: float = pydantic.Field(description='Connection start timestamp')
@@ -87,9 +83,7 @@ class ServerConnectionTiming(  # strict_typing_linter.py: ordering — interleav
     tls_setup: float = pydantic.Field(description='TLS handshake completion timestamp')
 
 
-class ClientConnection(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    StrictModel
-):
+class ClientConnection(StrictModel):
     """Client connection metadata from mitmproxy."""
 
     id: str = pydantic.Field(description='Connection UUID')
@@ -100,9 +94,7 @@ class ClientConnection(  # strict_typing_linter.py: ordering — interleaved def
     timing: ClientConnectionTiming
 
 
-class ServerConnection(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    StrictModel
-):
+class ServerConnection(StrictModel):
     """Server connection metadata from mitmproxy."""
 
     id: str = pydantic.Field(description='Connection UUID')
@@ -119,9 +111,7 @@ class ServerConnection(  # strict_typing_linter.py: ordering — interleaved def
 # -- LEVEL 1: Decomposed base classes for requests vs responses ----------------
 
 
-class RequestCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    StrictModel
-):
+class RequestCapture(StrictModel):
     """
     Base for all HTTP request captures.
 
@@ -163,9 +153,7 @@ class RequestCapture(  # strict_typing_linter.py: ordering — interleaved defin
     session_id: str | None = pydantic.Field(description='Claude Code session ID')
 
 
-class ResponseCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    StrictModel
-):
+class ResponseCapture(StrictModel):
     """
     Base for all HTTP response captures.
 
@@ -216,33 +204,25 @@ class ResponseCapture(  # strict_typing_linter.py: ordering — interleaved defi
 # -- LEVEL 2: Service-specific base classes ------------------------------------
 
 
-class AnthropicRequestCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    RequestCapture
-):
+class AnthropicRequestCapture(RequestCapture):
     """Base for all Anthropic API request captures."""
 
     host: Literal['api.anthropic.com']
 
 
-class AnthropicResponseCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    ResponseCapture
-):
+class AnthropicResponseCapture(ResponseCapture):
     """Base for all Anthropic API response captures."""
 
     host: Literal['api.anthropic.com']
 
 
-class StatsigRequestCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    RequestCapture
-):
+class StatsigRequestCapture(RequestCapture):
     """Base for all Statsig request captures."""
 
     host: Literal['statsig.anthropic.com']
 
 
-class StatsigResponseCapture(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-    ResponseCapture
-):
+class StatsigResponseCapture(ResponseCapture):
     """Base for all Statsig response captures."""
 
     host: Literal['statsig.anthropic.com']

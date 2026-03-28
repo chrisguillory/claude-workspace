@@ -207,7 +207,7 @@ class SessionDeleteService:
                 original_exc.add_note('Rollback completed successfully')
             raise
 
-    async def discover_artifacts(  # strict_typing_linter.py: ordering — private helpers (_get_session_dir, _atomic_deletion) are infrastructure used by public methods
+    async def discover_artifacts(
         self,
         session_id: str,
     ) -> DeleteManifest:
@@ -461,7 +461,7 @@ class SessionDeleteService:
             unexpected_files=unexpected_files,
         )
 
-    async def delete_session(  # strict_typing_linter.py: ordering — discover_artifacts and delete_session share private infrastructure above
+    async def delete_session(
         self,
         session_id: str,
         force: bool = False,

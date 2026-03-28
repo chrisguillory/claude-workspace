@@ -86,13 +86,18 @@ def execute_scroll(
 
     # ── Directional scroll (modes 1 and 2) ──
 
-    delta_map = {
+    # direction is non-None here: position=None guard above returns early,
+    # and the css_selector-only branch returns early when direction is None.
+    if direction is None:
+        raise ValueError('direction must be provided for directional scroll')
+
+    delta_map: dict[str, tuple[int, int]] = {
         'up': (0, -PIXELS_PER_TICK * scroll_amount),
         'down': (0, PIXELS_PER_TICK * scroll_amount),
         'left': (-PIXELS_PER_TICK * scroll_amount, 0),
         'right': (PIXELS_PER_TICK * scroll_amount, 0),
     }
-    delta_x, delta_y = delta_map[direction]  # type: ignore[index]  # direction is validated by caller but mypy sees str | None
+    delta_x, delta_y = delta_map[direction]
 
     if css_selector is not None:
         return _scroll_container(

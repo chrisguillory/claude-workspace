@@ -32,7 +32,7 @@ import typing
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
 # Third-Party Libraries
@@ -96,6 +96,7 @@ from .models import (
     ProfileState,
     # Profile state (browser state persistence)
     ProfileStateCookie,
+    ProfileStateIndexedDB,
     ProfileStateOriginStorage,
     RequestTiming,
     ResizeWindowResult,
@@ -3520,8 +3521,8 @@ Workflow:
                             .catch(function(e) {{ callback([]); }});
                     """
                     indexeddb_result = await asyncio.to_thread(driver.execute_async_script, async_wrapper)
-                    # Raw JavaScript results - type: ignore until we add proper validation
-                    indexeddb_databases = indexeddb_result if indexeddb_result else []  # type: ignore[assignment]  # JS execute_async_script returns untyped Any
+                    # execute_async_script returns Any; cast to expected JS structure
+                    indexeddb_databases = cast(list[dict[str, Any]], indexeddb_result) if indexeddb_result else []
                 elif origin in service.state.indexed_db_cache:
                     indexeddb_databases = service.state.indexed_db_cache[origin]
 
@@ -3533,11 +3534,17 @@ Workflow:
                     {item['name']: item['value'] for item in session_storage_items} if session_storage_items else None
                 )
 
+                # Validate raw JS dicts through Pydantic model
+                validated_indexeddb: list[ProfileStateIndexedDB] | None = (
+                    [ProfileStateIndexedDB.model_validate(db) for db in indexeddb_databases]
+                    if indexeddb_databases
+                    else None
+                )
+
                 origins_data[origin] = ProfileStateOriginStorage(
                     local_storage=local_storage_dict,
                     session_storage=session_storage_dict,
-                    # Raw JavaScript dicts - type: ignore until we add ProfileStateIndexedDB validation
-                    indexed_db=indexeddb_databases if indexeddb_databases else None,  # type: ignore[arg-type]  # raw JS dicts pending ProfileStateIndexedDB validation
+                    indexed_db=validated_indexeddb,
                 )
 
                 total_localstorage_items += len(local_storage_items)

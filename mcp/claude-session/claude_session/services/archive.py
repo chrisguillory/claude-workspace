@@ -222,7 +222,7 @@ class SessionArchiveService:
             f'Could not find session folder for project {self.project_path} in {self.claude_sessions_dir}'
         )
 
-    async def create_archive(  # strict_typing_linter.py: ordering — _get_project_folder is a lazy init helper used by this method
+    async def create_archive(
         self,
         storage: StorageBackend,
         output_path: str | None,

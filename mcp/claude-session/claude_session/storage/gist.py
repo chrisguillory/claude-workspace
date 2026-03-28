@@ -140,9 +140,7 @@ class GistStorage:
             html_url: str = gist_data['html_url']
             return html_url
 
-    async def exists(  # strict_typing_linter.py: ordering — save() delegates to _create/_update which logically precede exists/load
-        self, filename: str
-    ) -> bool:
+    async def exists(self, filename: str) -> bool:
         """
         Check if gist exists and contains the specified file.
 
@@ -176,9 +174,7 @@ class GistStorage:
         except httpx.HTTPError:
             return False
 
-    async def load(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
-        self, filename: str
-    ) -> bytes:  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+    async def load(self, filename: str) -> bytes:
         """
         Load archive from GitHub Gist.
 

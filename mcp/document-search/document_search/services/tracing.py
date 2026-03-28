@@ -18,7 +18,7 @@ import logging
 import time
 from collections.abc import Sequence, Set
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import psutil
 
@@ -275,7 +275,7 @@ class PipelineTracer:
 
         completion_series = self._build_completion_series()
 
-        partial_kwargs: dict[str, object] = {}
+        partial_kwargs: _PartialReportKwargs = {}
         if partial:
             _chunk_done, _embed_done, store_done = self.get_completion_counts()
             chunk_in, embed_in, store_in = self.get_in_flight_counts()
@@ -293,7 +293,7 @@ class PipelineTracer:
             total_elapsed_seconds=round(total_elapsed, 3),
             sparse_threads=self._sparse_threads,
             completion_series=completion_series,
-            **partial_kwargs,  # type: ignore[arg-type]  # partial_kwargs values typed as object, PipelineTimingReport expects specific types
+            **partial_kwargs,
         )
 
     # ── Private: queue monitoring ────────────────────────────────
@@ -468,6 +468,14 @@ class PipelineTracer:
 
 
 # ── Module-level helpers ────────────────────────────────────────
+
+
+class _PartialReportKwargs(TypedDict, total=False):
+    """Optional kwargs for partial pipeline reports."""
+
+    is_partial: bool
+    items_completed: int
+    items_in_flight: int
 
 
 def _stage_event_keys(stage: TraceableStage) -> tuple[str, str]:

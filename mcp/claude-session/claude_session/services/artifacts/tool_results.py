@@ -219,7 +219,7 @@ def discover_tool_results(
     return DiscoveryResult(files=files, directories=directories, unknown_files=unknown_files)
 
 
-def _raise_on_unknown(  # strict_typing_linter.py: ordering — called by collect_tool_results() below
+def _raise_on_unknown(
     discovery: DiscoveryResult,
 ) -> None:
     """Raise FileNotFoundError if any unknown files in discovery result."""
@@ -232,7 +232,7 @@ def _raise_on_unknown(  # strict_typing_linter.py: ordering — called by collec
         )
 
 
-def collect_tool_results(  # strict_typing_linter.py: ordering — functions follow call-graph order
+def collect_tool_results(
     project_folder: Path,
     session_id: str,
 ) -> ToolResultCollection:
@@ -284,7 +284,7 @@ def collect_tool_results(  # strict_typing_linter.py: ordering — functions fol
     return ToolResultCollection(files=files, directories=directories)
 
 
-def write_tool_results(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+def write_tool_results(
     collection: ToolResultCollection,
     target_dir: Path,
     new_session_id: str,

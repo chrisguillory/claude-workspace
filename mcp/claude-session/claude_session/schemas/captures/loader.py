@@ -184,7 +184,7 @@ CapturedTraffic = Annotated[
 _CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(CapturedTraffic)
 
 
-def _preprocess_capture(  # strict_typing_linter.py: ordering — called by load_capture_file() below
+def _preprocess_capture(
     data: dict[str, Any],
     filepath: Path | None = None,  # strict_typing_linter.py: mutable-type — mutates dict in place
 ) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — returns same mutated dict
@@ -254,7 +254,7 @@ def _preprocess_capture(  # strict_typing_linter.py: ordering — called by load
     return data
 
 
-def load_capture(  # strict_typing_linter.py: ordering — functions follow call-graph order
+def load_capture(
     filepath: Path,
 ) -> CapturedTraffic:
     """
@@ -289,7 +289,7 @@ def load_capture(  # strict_typing_linter.py: ordering — functions follow call
     return _CAPTURE_ADAPTER.validate_python(clean_data)
 
 
-def load_captures_batch(  # strict_typing_linter.py: ordering — interleaved definitions preserve logical grouping
+def load_captures_batch(
     directory: Path, pattern: str = '*.json'
 ) -> tuple[Sequence[CapturedTraffic], Mapping[Path, Exception]]:
     """
