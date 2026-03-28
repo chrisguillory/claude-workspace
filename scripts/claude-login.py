@@ -264,9 +264,7 @@ def read_keychain_raw() -> JsonObject | None:
     return data
 
 
-def write_keychain_raw(
-    data: JsonObject,
-) -> None:
+def write_keychain_raw(data: JsonObject) -> None:
     """Write full keychain JSON atomically using -U (update-or-insert).
 
     Cleans up duplicate entries first (may exist from manual keychain edits),
@@ -580,9 +578,7 @@ def load_mcp_auths() -> Mapping[str, McpOAuthEntry]:
     return {k: McpOAuthEntry.model_validate(v) for k, v in raw.items()}
 
 
-def mcp_auths_to_keychain(
-    auths: Mapping[str, McpOAuthEntry],
-) -> JsonObject:
+def mcp_auths_to_keychain(auths: Mapping[str, McpOAuthEntry]) -> JsonObject:
     """Convert MCP auths to keychain format."""
     result = {}
     for entry in auths.values():

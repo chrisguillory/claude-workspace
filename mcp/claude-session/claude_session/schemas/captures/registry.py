@@ -206,9 +206,7 @@ def extract_endpoint_from_filename(filename: str) -> tuple[str, str]:
     return host, path
 
 
-def get_capture_type(
-    v: Any,
-) -> str:  # strict_typing_linter.py: loose-typing — Pydantic discriminator callback receives raw dict
+def get_capture_type(v: Any) -> str:  # strict_typing_linter.py: loose-typing — discriminator callback gets raw dict
     """
     Callable discriminator for CapturedTraffic union.
 
