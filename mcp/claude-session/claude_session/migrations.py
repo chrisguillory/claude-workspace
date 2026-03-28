@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -182,7 +182,7 @@ def auto_migrate(record_data: dict[str, Any], target_version: str) -> dict[str, 
 # -- Batch Migration -----------------------------------------------------------
 
 
-def migrate_session_file(input_path: Path, output_path: Path, target_version: str) -> dict[str, int]:
+def migrate_session_file(input_path: Path, output_path: Path, target_version: str) -> Mapping[str, int]:
     """
     Migrate an entire session JSONL file.
 

@@ -7,6 +7,7 @@ and schema evolution tracking.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel
@@ -24,7 +25,7 @@ __all__ = [
 ]
 
 
-def get_path_fields(model: type[BaseModel]) -> list[str]:
+def get_path_fields(model: type[BaseModel]) -> Sequence[str]:
     """
     Find all fields marked with PathMarker.
 
@@ -78,7 +79,7 @@ def get_path_fields(model: type[BaseModel]) -> list[str]:
     return path_fields
 
 
-def get_reserved_fields(model: type[BaseModel]) -> dict[str, dict[str, Any]]:
+def get_reserved_fields(model: type[BaseModel]) -> Mapping[str, Mapping[str, Any]]:
     """
     Find all reserved (always-null) fields.
 
@@ -109,7 +110,7 @@ def get_reserved_fields(model: type[BaseModel]) -> dict[str, dict[str, Any]]:
     return reserved
 
 
-def get_field_version_info(model: type[BaseModel]) -> dict[str, str]:
+def get_field_version_info(model: type[BaseModel]) -> Mapping[str, str]:
     """
     Get version information for fields that track when they were added.
 
@@ -139,7 +140,7 @@ def get_field_version_info(model: type[BaseModel]) -> dict[str, str]:
     return version_info
 
 
-def get_literal_values(field_info: FieldInfo) -> list[Any] | None:
+def get_literal_values(field_info: FieldInfo) -> Sequence[Any] | None:
     """
     Extract literal values from a field definition.
 
@@ -160,7 +161,7 @@ def get_literal_values(field_info: FieldInfo) -> list[Any] | None:
     return None
 
 
-def model_summary(model: type[BaseModel]) -> dict[str, Any]:
+def model_summary(model: type[BaseModel]) -> Mapping[str, Any]:
     """
     Generate a comprehensive summary of a model's metadata.
 
@@ -239,7 +240,7 @@ if __name__ == '__main__':
     print('=' * 80)
     print()
 
-    models: list[type[BaseModel]] = [UserRecord, AssistantRecord, Message]
+    models: Sequence[type[BaseModel]] = [UserRecord, AssistantRecord, Message]
     for model in models:
         print_model_summary(model)
         print()
