@@ -20,6 +20,37 @@ import pydantic
 from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.types import EmptyDict
 
+__all__ = [
+    'KNOWN_FEATURE_FLAGS',
+    'BoolFeatureValue',
+    'EvalAttributes',
+    'EvalRequest',
+    'EvalResponse',
+    'EventBatchConfig',
+    'EventBatchFeatureValue',
+    'EventSamplingFeatureValue',
+    'ExperimentConfig',
+    'ExperimentResult',
+    'FeatureSource',
+    'FeatureValue',
+    'FeaturesDict',
+    'FeedbackSurveyConfig',
+    'FeedbackSurveyFeatureValue',
+    'OffSwitchConfig',
+    'OffSwitchFeatureValue',
+    'SmConfig',
+    'SmConfigFeatureValue',
+    'SpinnerWordsConfig',
+    'SpinnerWordsFeatureValue',
+    'StringFeatureValue',
+    'StringFeatureValueExperiment',
+    'StringFeatureValueNonExperiment',
+    'TopOfFeedTipConfig',
+    'TopOfFeedTipFeatureValue',
+    'VersionConfig',
+    'VersionConfigFeatureValue',
+]
+
 # -- Feature Source ------------------------------------------------------------
 
 FeatureSource = Literal['force', 'defaultValue', 'experiment']

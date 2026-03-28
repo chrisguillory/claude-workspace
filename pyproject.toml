@@ -148,19 +148,15 @@ filterwarnings = [
 
 # claude-session
 "mcp/claude-session/claude_session/cli/main.py" = ["missing-all", "ordering"]
-"mcp/claude-session/scripts/**" = ["missing-all", "class-ordering", "ordering", "mutable-type", "loose-typing"]
+"mcp/claude-session/scripts/**" = ["missing-all", "class-ordering", "ordering", "mutable-type", "loose-typing", "tuple-field"]
 "mcp/claude-session/claude_session/domain/models.py" = ["mutable-type"]
 "mcp/claude-session/claude_session/introspection.py" = ["loose-typing"]
 "mcp/claude-session/claude_session/migrations.py" = ["mutable-type"]
-# Linter AST crash on complex annotations (task #63 — fix linter, not code)
-"mcp/claude-session/claude_session/schemas/cc_internal_api/feature_flags.py" = ["skip-file"]
-"mcp/claude-session/claude_session/schemas/cc_internal_api/statsig.py" = ["skip-file"]
-"mcp/claude-session/claude_session/schemas/session/models.py" = ["skip-file"]  # linter AST crash
-"mcp/claude-session/scripts/validate_captures.py" = ["skip-file"]  # linter AST crash
-"mcp/claude-session/scripts/validate_models.py" = ["skip-file"]  # linter AST crash
 # claude-session: ordering — import-time Annotated[..., BeforeValidator/Discriminator] needs private fn defined first
 "mcp/claude-session/claude_session/schemas/captures/base.py" = ["ordering"]
 "mcp/claude-session/claude_session/schemas/captures/datadog.py" = ["ordering"]
+"mcp/claude-session/claude_session/schemas/cc_internal_api/statsig.py" = ["ordering"]
+"mcp/claude-session/claude_session/schemas/session/models.py" = ["ordering", "mutable-type", "loose-typing"]
 
 [tool.exception-safety-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
