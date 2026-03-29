@@ -488,9 +488,9 @@ def check_file(
     violations.extend(type_checker.violations)
 
     # Module ordering (always enabled, suppress per-area via per-file-ignores)
-    # Skip __main__.py (entry point, never exports)
+    # Skip entry points (__main__.py, main.py, shebang scripts)
     raw_ordering: list[tuple[int, str]] = []
-    if filepath.name != '__main__.py':
+    if not _is_entry_point(filepath, source_lines):
         # Skip __init__.py only if it has no definitions (just boilerplate)
         if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
             violations.extend(check_all_defined(filepath, tree, source_lines, raw_ordering))
@@ -1577,6 +1577,19 @@ def check_module_ordering(
             break  # Report first violation only
 
     return violations
+
+
+def _is_entry_point(filepath: Path, source_lines: Sequence[str]) -> bool:
+    """Detect entry point files that don't need __all__.
+
+    Returns True if ANY of these signals match:
+    - __main__.py: package entry point (python -m)
+    - main.py: CLI entry point by convention (pyproject.toml entry points)
+    - Shebang on line 1: directly executable script
+    """
+    if filepath.name in ('__main__.py', 'main.py'):
+        return True
+    return bool(source_lines) and source_lines[0].startswith('#!')
 
 
 def check_all_defined(
