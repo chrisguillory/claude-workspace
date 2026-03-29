@@ -1476,10 +1476,41 @@ class Definition:
         return (all_group, private_group, type_group)
 
 
+def _collect_import_time_refs(tree: ast.Module) -> Set[str]:
+    """Collect private function names referenced in module-level non-definition statements.
+
+    These are functions used in type aliases, Annotated[..., BeforeValidator(fn)],
+    Discriminator(fn), decorator arguments, etc. They must be defined before the
+    classes/aliases that reference them — exempt from "private after public" ordering.
+    """
+    # Collect all private function names first
+    private_fns = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith('_')
+    }
+    if not private_fns:
+        return set()
+
+    # Scan module-level statements for references to private functions.
+    # Includes: type alias assignments AND class body annotations (BeforeValidator in fields).
+    # Excludes: function bodies (those are runtime-only, no import-time dependency).
+    refs: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and child.id in private_fns:
+                refs.add(child.id)
+
+    return refs
+
+
 def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequence[Definition]:
     """Extract top-level class and function definitions."""
     definitions = []
     all_names = all_names or set()
+    import_time_refs = _collect_import_time_refs(tree)
 
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -1493,6 +1524,9 @@ def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequenc
                 ),
             )
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Skip private functions referenced at import time (BeforeValidator, Discriminator, etc.)
+            if node.name in import_time_refs:
+                continue
             definitions.append(
                 Definition(
                     name=node.name,
