@@ -827,8 +827,8 @@ class AnnotationChecker(ast.NodeVisitor):
     def _classify_subscript(self, node: ast.Subscript) -> tuple[SubscriptKind, str]:
         """Classify a subscript node by its type form.
 
-        Returns (kind, resolved_name) so callers needing the resolved name
-        for further checks (container classification, ALLOWED_CONTAINERS) don't re-resolve.
+        Returns (kind, resolved_name). The resolved name is used by
+        _find_forbidden_type for the ANY_ALLOWED_POSITIONS check.
         """
         resolved = resolve_qualified_name(node.value, self.import_map)
         if resolved in ('typing.Literal', 'typing_extensions.Literal'):
@@ -899,16 +899,16 @@ class AnnotationChecker(ast.NodeVisitor):
                 return result
 
         if isinstance(node, ast.Subscript):
-            # Check the container itself
-            container_class = self._classify_by_qualified_name(node.value)
-            if container_class == 'transparent':
-                return self._get_type_name(node.value)
-
             kind, _ = self._classify_subscript(node)
             if kind is SubscriptKind.LITERAL:
                 return None
             if kind is SubscriptKind.ANNOTATED:
                 return self._find_unhashable_field(self._get_annotated_type_arg(node))
+
+            # Container-level check (Sequence/Mapping are unhashable)
+            container_class = self._classify_by_qualified_name(node.value)
+            if container_class == 'transparent':
+                return self._get_type_name(node.value)
             return self._find_unhashable_in_slice(node.slice)
 
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
