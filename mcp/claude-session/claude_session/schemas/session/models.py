@@ -2660,7 +2660,7 @@ _agent_name_adapter = pydantic.TypeAdapter(AgentNameRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
 
 
-def validate_session_record(data: dict[str, Any]) -> SessionRecord:
+def validate_session_record(data: Mapping[str, Any]) -> SessionRecord:
     """Validate a session record dict using type-dispatch for performance.
 
     Dispatches to per-type TypeAdapters based on the 'type' field, avoiding
