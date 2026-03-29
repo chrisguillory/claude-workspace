@@ -123,48 +123,6 @@ class PathTranslator:
         return path
 
 
-# -- Utility Functions ---------------------------------------------------------
-
-
-def is_restored_session(session_id: str) -> bool:
-    """
-    Check if a session ID is from a restored session.
-
-    Restored sessions use UUIDv7 (time-ordered) while Claude uses UUIDv4 (random).
-
-    Args:
-        session_id: Session ID to check
-
-    Returns:
-        True if this is a restored session (UUIDv7), False otherwise
-    """
-    uid = uuid.UUID(session_id)
-    return uid.version == 7
-
-
-def get_restoration_timestamp(session_id: str) -> datetime | None:
-    """
-    Extract the restoration timestamp from a restored session ID.
-
-    UUIDv7 embeds a Unix timestamp in the first 48 bits.
-
-    Args:
-        session_id: Session ID (must be UUIDv7)
-
-    Returns:
-        Restoration datetime or None if not a UUIDv7
-    """
-    uid = uuid.UUID(session_id)
-
-    if uid.version != 7:
-        return None
-
-    # Extract timestamp from first 48 bits (in milliseconds)
-    timestamp_ms = int.from_bytes(uid.bytes[:6], 'big')
-    timestamp_s = timestamp_ms / 1000
-    return datetime.fromtimestamp(timestamp_s, tz=UTC)
-
-
 # -- Session Restore Service ---------------------------------------------------
 
 
@@ -591,3 +549,45 @@ class SessionRestoreService:
         """Get the session directory for the current project."""
         encoded = encode_path(self.project_path)
         return self.claude_sessions_dir / encoded
+
+
+# -- Utility Functions ---------------------------------------------------------
+
+
+def is_restored_session(session_id: str) -> bool:
+    """
+    Check if a session ID is from a restored session.
+
+    Restored sessions use UUIDv7 (time-ordered) while Claude uses UUIDv4 (random).
+
+    Args:
+        session_id: Session ID to check
+
+    Returns:
+        True if this is a restored session (UUIDv7), False otherwise
+    """
+    uid = uuid.UUID(session_id)
+    return uid.version == 7
+
+
+def get_restoration_timestamp(session_id: str) -> datetime | None:
+    """
+    Extract the restoration timestamp from a restored session ID.
+
+    UUIDv7 embeds a Unix timestamp in the first 48 bits.
+
+    Args:
+        session_id: Session ID (must be UUIDv7)
+
+    Returns:
+        Restoration datetime or None if not a UUIDv7
+    """
+    uid = uuid.UUID(session_id)
+
+    if uid.version != 7:
+        return None
+
+    # Extract timestamp from first 48 bits (in milliseconds)
+    timestamp_ms = int.from_bytes(uid.bytes[:6], 'big')
+    timestamp_s = timestamp_ms / 1000
+    return datetime.fromtimestamp(timestamp_s, tz=UTC)

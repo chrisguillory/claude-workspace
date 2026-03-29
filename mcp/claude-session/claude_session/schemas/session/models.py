@@ -116,6 +116,181 @@ import pydantic
 from claude_session.schemas.session.markers import PathField, PathListField
 from claude_session.schemas.types import BaseStrictModel, EmptyDict, EmptySequence, ModelId, PermissiveModel
 
+__all__ = [
+    'CLAUDE_CODE_MAX_VERSION',
+    'CLAUDE_CODE_MIN_VERSION',
+    'LAST_VALIDATED',
+    'SCHEMA_VERSION',
+    'VALIDATION_RECORD_COUNT',
+    'AgentNameRecord',
+    'AgentOutputToolInput',
+    'AgentProgressData',
+    'AgentState',
+    'AgentTeammateSpawnedResult',
+    'AgentsRetrievalResult',
+    'ApiError',
+    'ApiErrorDetail',
+    'ApiErrorResponse',
+    'ApiErrorSystemRecord',
+    'AppliedEdit',
+    'AskUserQuestionToolInput',
+    'AskUserQuestionToolResult',
+    'AssistantRecord',
+    'AsyncTaskLaunchResult',
+    'BackgroundTask',
+    'BaseRecord',
+    'BashOutputToolInput',
+    'BashOutputToolResult',
+    'BashProgressData',
+    'BashToolInput',
+    'BashToolResult',
+    'BridgeStatusSystemRecord',
+    'CacheCreation',
+    'ClearThinkingEdit',
+    'CompactBoundarySystemRecord',
+    'CompactMetadata',
+    'ConnectionError',
+    'ContextManagement',
+    'CustomTitleRecord',
+    'DocumentContent',
+    'DocumentSource',
+    'EditToolInput',
+    'EditToolResult',
+    'EmptyError',
+    'EnterPlanModeToolInput',
+    'EnterPlanModeToolResult',
+    'EnterWorktreeToolInput',
+    'EnterWorktreeToolResult',
+    'ExitPlanModeToolInput',
+    'ExitPlanModeToolResult',
+    'FileBackupInfo',
+    'FileHistorySnapshot',
+    'FileHistorySnapshotRecord',
+    'FileInfo',
+    'GlobToolInput',
+    'GlobToolResult',
+    'GrepToolInput',
+    'GrepToolResult',
+    'HandoffCommandResult',
+    'HookInfo',
+    'HookProgressData',
+    'ImageContent',
+    'ImageDimensions',
+    'ImageFileInfo',
+    'ImageSource',
+    'InformationalSystemRecord',
+    'KillShellMessageResult',
+    'KillShellToolInput',
+    'KillShellToolResult',
+    'LSPOperation',
+    'LSPToolInput',
+    'LSPToolResult',
+    'LastPromptRecord',
+    'ListMcpResourcesToolInput',
+    'LocalCommandSystemRecord',
+    'MCPSearchToolInput',
+    'MCPStructuredContent',
+    'MCPToolInput',
+    'MCPToolResult',
+    'MalformedWriteToolInput',
+    'McpMeta',
+    'McpProgressCompletedData',
+    'McpProgressFailedData',
+    'McpProgressStartedData',
+    'McpResource',
+    'McpResourceContent',
+    'Message',
+    'MessageContent',
+    'MicrocompactBoundarySystemRecord',
+    'MicrocompactMetadata',
+    'NetworkError',
+    'NotebookEditToolInput',
+    'PatchHunk',
+    'PdfFileInfo',
+    'PrLinkRecord',
+    'ProgressData',
+    'ProgressRecord',
+    'PromptPermission',
+    'QueryUpdateData',
+    'QuestionAnnotation',
+    'QuestionOption',
+    'QueueOperationRecord',
+    'ReadImageToolResult',
+    'ReadMcpResourceToolInput',
+    'ReadMcpResourceToolResult',
+    'ReadPdfToolResult',
+    'ReadTextToolResult',
+    'ReadToolInput',
+    'SavedHookContextRecord',
+    'SearchResultsReceivedData',
+    'SendMessageRouting',
+    'SendMessageToolInput',
+    'SendMessageToolResult',
+    'ServerToolUse',
+    'SessionAnalysis',
+    'SessionMetadata',
+    'SessionRecord',
+    'SessionRecordAdapter',
+    'SimpleThinkingMetadata',
+    'SkillToolInput',
+    'SkillToolResult',
+    'StatusChange',
+    'StopHookSummarySystemRecord',
+    'StrictModel',
+    'SummaryRecord',
+    'SystemRecord',
+    'SystemSubtypeRecord',
+    'Task',
+    'TaskCreateToolInput',
+    'TaskGetItem',
+    'TaskGetToolResult',
+    'TaskListItem',
+    'TaskListToolInput',
+    'TaskListToolResult',
+    'TaskOutputPollingResult',
+    'TaskOutputToolInput',
+    'TaskSingleItem',
+    'TaskSingleToolResult',
+    'TaskStopToolResult',
+    'TaskToolInput',
+    'TaskToolResult',
+    'TaskUpdateSuccessResult',
+    'TaskUpdateToolInput',
+    'TeamCreateToolInput',
+    'TeamCreateToolResult',
+    'TextContent',
+    'ThinkingContent',
+    'ThinkingMetadata',
+    'ThinkingTrigger',
+    'TodoItem',
+    'TodoToolResult',
+    'TodoWriteToolInput',
+    'TokenUsage',
+    'ToolInput',
+    'ToolReferenceContent',
+    'ToolResult',
+    'ToolResultContent',
+    'ToolResultContentBlock',
+    'ToolSearchToolResult',
+    'ToolUseCaller',
+    'ToolUseContent',
+    'TurnDurationSystemRecord',
+    'UserQuestion',
+    'UserRecord',
+    'WaitingForTaskData',
+    'WebFetchToolInput',
+    'WebFetchToolResult',
+    'WebSearchNestedResult',
+    'WebSearchResult',
+    'WebSearchResultWrapper',
+    'WebSearchToolInput',
+    'WebSearchToolResult',
+    'WriteToolInput',
+    'WriteToolResult',
+    'validate_session_record',
+    'validated_copy',
+]
+
 # -- Schema Version ------------------------------------------------------------
 
 SCHEMA_VERSION = '0.2.19'
@@ -136,30 +311,6 @@ class StrictModel(BaseStrictModel):
     """
 
     pass
-
-
-# noinspection PyNewStyleGenericSyntax
-def validated_copy[T: pydantic.BaseModel](model: T, update: Mapping[str, Any]) -> T:
-    """
-    Create a validated copy of a model with updates.
-
-    This is the type-safe way to modify frozen Pydantic models.
-    The returned instance is validated through the model's __init__.
-
-    Args:
-        model: The source model instance
-        update: Fields to update (keys must be valid field names)
-
-    Returns:
-        A new validated instance of the same type with updates applied
-
-    Example:
-        updated_record = validated_copy(record, {'sessionId': new_session_id})
-    """
-    model_class = type(model)
-    new_data = model.model_dump()
-    new_data.update(update)
-    return model_class(**new_data)
 
 
 # -- Message Content Types (Discriminated Union) -------------------------------
@@ -2463,6 +2614,32 @@ SessionRecord = Annotated[
 SessionRecordAdapter: pydantic.TypeAdapter[SessionRecord] = pydantic.TypeAdapter(SessionRecord)
 
 
+# -- Utility Functions ---------------------------------------------------------
+
+
+# noinspection PyNewStyleGenericSyntax
+def validated_copy[T: pydantic.BaseModel](model: T, update: Mapping[str, Any]) -> T:
+    """Create a validated copy of a model with updates.
+
+    This is the type-safe way to modify frozen Pydantic models.
+    The returned instance is validated through the model's __init__.
+
+    Args:
+        model: The source model instance
+        update: Fields to update (keys must be valid field names)
+
+    Returns:
+        A new validated instance of the same type with updates applied
+
+    Example:
+        updated_record = validated_copy(record, {'sessionId': new_session_id})
+    """
+    model_class = type(model)
+    new_data = model.model_dump()
+    new_data.update(update)
+    return model_class(**new_data)
+
+
 # -- Fast Dispatch Validation --------------------------------------------------
 
 # Per-type TypeAdapters bypass the 17-member left-to-right union scan.
@@ -2483,7 +2660,7 @@ _agent_name_adapter = pydantic.TypeAdapter(AgentNameRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
 
 
-def validate_session_record(data: dict[str, Any]) -> SessionRecord:
+def validate_session_record(data: Mapping[str, Any]) -> SessionRecord:
     """Validate a session record dict using type-dispatch for performance.
 
     Dispatches to per-type TypeAdapters based on the 'type' field, avoiding
