@@ -676,7 +676,7 @@ class ChunkingService:
                 source_path=cd['source_path'],
                 chunk_index=cd['chunk_index'],
                 file_type=cd['file_type'],
-                metadata=ChunkMetadata.model_validate(cd['metadata']),
+                metadata=ChunkMetadata(**cd['metadata']),
             )
             for cd in chunk_data
         ]

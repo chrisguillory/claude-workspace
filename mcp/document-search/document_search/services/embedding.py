@@ -5,6 +5,9 @@ Two-stage BatchLoader pipeline:
 2. Cache misses forward to EmbedLoader for API batches (100-1000 batch, 10ms delay)
 
 Cache values use numpy float32 binary (~3KB per 768-dim embedding vs ~17KB JSON).
+
+Hot path (indexing pipeline) returns bare NDArray[np.float32] to avoid Pydantic
+wrapper overhead. Cold path (single embed requests) still uses typed EmbedResponse.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from collections.abc import Sequence
 
 import numpy as np
 from cc_lib.batch_loader import GenericBatchLoader
+from numpy.typing import NDArray
 
 from document_search.clients.protocols import EmbeddingClient
 from document_search.clients.redis import RedisClient
@@ -79,50 +83,34 @@ class EmbeddingService:
 
     @property
     def cache_hits(self) -> int:
-        """Cumulative cache hits across all embed_text() calls."""
+        """Cumulative cache hits across all embed_texts() calls."""
         return self._cache_loader.hits
 
     @property
     def cache_misses(self) -> int:
-        """Cumulative cache misses across all embed_text() calls."""
+        """Cumulative cache misses across all embed_texts() calls."""
         return self._cache_loader.misses
 
-    async def embed_text(self, text: str) -> EmbedResponse:
-        """Embed single text with automatic batching.
+    async def embed_texts(self, texts: Sequence[str]) -> Sequence[NDArray[np.float32]]:
+        """Embed multiple texts as bare numpy arrays (hot path).
 
-        Checks Redis first. Cache hits return immediately.
-        Misses forward to embed loader for API batches.
+        Returns bare NDArray[np.float32] instead of EmbedResponse wrappers
+        to avoid ~614 bytes of Pydantic overhead per embedding on the
+        indexing pipeline hot path.
 
-        Args:
-            text: Text to embed.
-
-        Returns:
-            Typed embed response.
-        """
-        return await self._cache_loader.load(text)
-
-    async def embed_texts(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
-        """Embed multiple texts as a single batch-aware call.
-
-        Same cache/embed pipeline as embed_text(), but submits all items
-        in one lock acquisition — no per-text Task creation on the event loop.
-
-        Args:
-            texts: Texts to embed.
-
-        Returns:
-            Typed embed responses in same order as texts.
+        Same cache/embed pipeline, submits all items
+        in one lock acquisition -- no per-text Task creation on the event loop.
         """
         return await self._cache_loader.load_many(texts)
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
-        """Embed single text.
+        """Embed single text (cold path -- MCP tool requests).
 
         Args:
             request: Typed embed request.
 
         Returns:
-            Typed embed response.
+            Typed embed response with Pydantic wrapper.
         """
         vectors = await self._client.embed(
             texts=[request.text],
@@ -132,13 +120,13 @@ class EmbeddingService:
         return EmbedResponse.from_numpy(v) if isinstance(v, np.ndarray) else EmbedResponse(values=v, dimensions=len(v))
 
     async def embed_batch(self, request: EmbedBatchRequest) -> EmbedBatchResponse:
-        """Embed batch of texts.
+        """Embed batch of texts (cold path -- MCP tool requests).
 
         Args:
             request: Typed batch request.
 
         Returns:
-            Typed batch response.
+            Typed batch response with Pydantic wrappers.
         """
         vectors = await self._client.embed(
             texts=request.texts,
@@ -153,12 +141,29 @@ class EmbeddingService:
     # ── Reverse index pass-through ────────────────────────────
 
     async def update_file_cache_index(self, file_path: str, texts: Sequence[str]) -> None:
-        """Update reverse index mapping file → embedding cache keys."""
+        """Update reverse index mapping file -> embedding cache keys."""
         await self._cache_loader.update_file_index(file_path, texts)
 
     async def submit_file_cache_index(self, file_path: str, texts: Sequence[str]) -> None:
         """Fire-and-forget reverse index update via write batcher."""
         await self._cache_loader.submit_file_index(file_path, texts)
+
+    async def submit_file_cache_index_keys(self, file_path: str, cache_keys: Sequence[bytes]) -> None:
+        """Fire-and-forget reverse index update with pre-computed cache keys.
+
+        Avoids re-hashing texts when the caller already computed cache keys.
+        Used by the pipeline to eliminate text duplication in _ChunkedFile.
+        """
+        await self._cache_loader.submit_file_index_keys(file_path, cache_keys)
+
+    @property
+    def cache_key_prefix(self) -> str:
+        """Cache key prefix for computing keys outside the embedding service.
+
+        Format: 'embed:{model}:{dims}:document:'
+        Caller appends sha256[:16] of text content.
+        """
+        return self._cache_loader.cache_key_prefix
 
     async def refresh_file_cache_index_ttl(self, file_path: str) -> None:
         """Refresh TTL on reverse index for a chunk-cached file."""
@@ -187,18 +192,21 @@ class EmbeddingService:
         self._cache_loader.cancel_writes()
 
 
-class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
+class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
     """Batch cache lookups with miss forwarding.
 
     Coalesces concurrent cache lookups into Redis MGET batches.
     Cache hits return immediately. Misses are forwarded to the
     embed loader for coalescing into API batches.
 
+    Returns bare NDArray[np.float32] instead of EmbedResponse wrappers
+    to avoid Pydantic overhead on the indexing hot path.
+
     Cache and index writes are batched via separate GenericBatchLoader
     instances using submit/drain for fire-and-forget semantics.
 
     Cache key format: embed:{model}:{dims}:document:{sha256[:16]}
-    Intent is always 'document' since only embed_text() uses this path.
+    Intent is always 'document' since only embed_texts() uses this path.
     """
 
     def __init__(
@@ -235,6 +243,15 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
             coalesce_delay=CACHE_COALESCE_DELAY,
         )
 
+    @property
+    def cache_key_prefix(self) -> str:
+        """Cache key prefix for pre-computing keys outside the loader.
+
+        Format: 'embed:{model}:{dims}:document:'
+        Caller appends sha256[:16] of text content.
+        """
+        return f'embed:{self._model}:{self._dimensions}:document:'
+
     def cache_key(self, text: str) -> str:
         """Generate cache key for a text.
 
@@ -251,6 +268,14 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         index_key = self._index_key(file_path)
         cache_keys = tuple(self.cache_key(t).encode() for t in texts) if texts else ()
         await self._index_write_batcher.submit((index_key, cache_keys))
+
+    async def submit_file_index_keys(self, file_path: str, cache_keys: Sequence[bytes]) -> None:
+        """Fire-and-forget reverse index update with pre-computed cache keys.
+
+        Avoids re-hashing texts when the caller already computed keys.
+        """
+        index_key = self._index_key(file_path)
+        await self._index_write_batcher.submit((index_key, tuple(cache_keys)))
 
     async def refresh_file_index_ttl(self, file_path: str) -> None:
         """Refresh TTL on an existing reverse index entry (no content change)."""
@@ -327,8 +352,10 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         """Reverse index key for a file path."""
         return f'embed-idx:file:{file_path}'
 
-    async def _bulk_lookup(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
+    async def _bulk_lookup(self, texts: Sequence[str]) -> Sequence[NDArray[np.float32]]:
         """Look up cached embeddings, forward misses to embed loader.
+
+        Returns bare numpy arrays (no Pydantic wrapper) for hot-path efficiency.
 
         Redis errors propagate intentionally — Redis is required infrastructure
         (index state + embedding cache), not an optional optimization layer.
@@ -344,13 +371,12 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         t_mget = time.perf_counter()
 
         # Separate hits and misses
-        results: list[EmbedResponse | None] = []
+        results: list[NDArray[np.float32] | None] = []
         miss_indices: list[int] = []
 
         for i, raw in enumerate(cached):
             if raw is not None:
-                values = np.frombuffer(raw, dtype=np.float32)
-                results.append(EmbedResponse.from_numpy(values))
+                results.append(np.frombuffer(raw, dtype=np.float32))
                 self.hits += 1
             else:
                 results.append(None)
@@ -361,15 +387,14 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
 
         if miss_indices:
             # Forward misses to the embed loader (coalesces into API batches)
-            miss_responses = await self._embed_loader.load_many([texts[i] for i in miss_indices])
+            miss_arrays = await self._embed_loader.load_many([texts[i] for i in miss_indices])
 
             # Prepare cache writes for batching
             write_items: list[tuple[str, bytes, int]] = []
-            for idx, response in zip(miss_indices, miss_responses):
-                results[idx] = response
+            for idx, arr in zip(miss_indices, miss_arrays):
+                results[idx] = arr
                 key = self.cache_key(texts[idx])
-                value = np.array(response.values, dtype=np.float32).tobytes()
-                write_items.append((key, value, CACHE_TTL_SECONDS))
+                write_items.append((key, arr.tobytes(), CACHE_TTL_SECONDS))
 
             # Fire-and-forget cache writes via batcher
             await self._cache_write_batcher.submit_many(write_items)
@@ -387,7 +412,7 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
                 f'tasks={task_count}',
             )
 
-        return results  # type: ignore[return-value]  # list[EmbedResponse | None] but all None slots filled after miss resolution
+        return results  # type: ignore[return-value]  # list[NDArray | None] but all None slots filled after miss resolution
 
     async def _bulk_cache_write(self, items: Sequence[tuple[str, bytes, int]]) -> Sequence[None]:
         """Pipeline cache SET operations."""
@@ -416,11 +441,11 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         return [None] * len(items)
 
 
-class _EmbedLoader(GenericBatchLoader[str, EmbedResponse]):
+class _EmbedLoader(GenericBatchLoader[str, NDArray[np.float32]]):
     """Internal batch loader for embedding requests.
 
     Coalesces individual text embedding requests into batches.
-    Uses text string as request key for deduplication.
+    Returns bare numpy arrays for hot-path efficiency.
     """
 
     def __init__(self, service: EmbeddingService, *, batch_size: int, coalesce_delay: float = 0.01) -> None:
@@ -431,10 +456,11 @@ class _EmbedLoader(GenericBatchLoader[str, EmbedResponse]):
             coalesce_delay=coalesce_delay,
         )
 
-    async def _bulk_embed(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
-        """Embed a batch of texts."""
+    async def _bulk_embed(self, texts: Sequence[str]) -> Sequence[NDArray[np.float32]]:
+        """Embed a batch of texts, returning bare numpy arrays."""
         total_chars = sum(len(t) for t in texts)
         logger.debug(f'[BATCH] Embedding {len(texts)} texts ({total_chars:,} chars)')
         request = EmbedBatchRequest(texts=texts, intent='document')
         response = await self._service.embed_batch(request)
-        return response.embeddings
+        # Extract bare arrays from EmbedResponse wrappers (cold-path API returns typed responses)
+        return [np.asarray(r.values, dtype=np.float32) for r in response.embeddings]

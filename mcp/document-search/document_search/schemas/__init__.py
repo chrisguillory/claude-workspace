@@ -10,6 +10,7 @@ from document_search.schemas.chunking import (
     ChunkMetadata,
     ChunkResult,
     FileType,
+    chunk_metadata_asdict,
     get_file_type,
 )
 from document_search.schemas.config import (
@@ -60,6 +61,7 @@ __all__ = [  # noqa: RUF022 — grouped by schema module, not alphabetical
     'ChunkMetadata',
     'Chunk',
     'ChunkResult',
+    'chunk_metadata_asdict',
     # Embeddings
     'TaskIntent',
     'EmbedRequest',

@@ -27,7 +27,9 @@ from pathlib import Path
 from uuid import UUID
 
 import git
+import numpy as np
 from cc_lib.utils import Timer
+from numpy.typing import NDArray
 
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.redis import RedisClient
@@ -35,7 +37,7 @@ from document_search.repositories.document_vector import DocumentVectorRepositor
 from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import EXTENSION_MAP, Chunk, FileType, get_file_type
 from document_search.schemas.config import EmbeddingConfig
-from document_search.schemas.embeddings import EmbeddingVector, EmbedResponse
+from document_search.schemas.embeddings import EmbeddingVector
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
     FileIndexState,
@@ -113,6 +115,7 @@ class IndexingService:
         self._pre_loaded: Mapping[str, FileIndexSummary] = {}
         self._cached_hashes: dict[str, str] = {}
         self._operation: _OperationState | None = None
+        self._cache_key_prefix = embedding_service.cache_key_prefix
 
         # Cached aggregate timing stats (updated every ~5s by monitor loop)
         self._cached_timing_stats: Sequence[StageTimingReport] = ()
@@ -308,8 +311,7 @@ class IndexingService:
 
         # Embed (dense + sparse)
         texts = [c.text for c in chunks]
-        responses = await self._embedding.embed_texts(texts)
-        dense = [r.values for r in responses]
+        dense = await self._embedding.embed_texts(texts)
         await self._embedding.update_file_cache_index(file_key, texts)
 
         sparse_results, _wall, _cpu = await self._sparse_embedding.embed_batch(texts)
@@ -820,7 +822,7 @@ class IndexingService:
 
         return ClearResult(files_removed=files_removed, chunks_removed=len(all_chunk_ids_str), path=path)
 
-    async def _embed_dense_sub_batched(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
+    async def _embed_dense_sub_batched(self, texts: Sequence[str]) -> Sequence[NDArray[np.float32]]:
         """Embed texts with sub-batching to avoid single-call stalls.
 
         For large text lists (350+ chunks from a single file), sending everything
@@ -829,6 +831,8 @@ class IndexingService:
         the slowest sub-batch rather than one monolithic call.
 
         Small lists (<= DENSE_SUB_BATCH_SIZE) pass through to embed_texts() directly.
+
+        Returns bare NDArray[np.float32] (no Pydantic wrapper) for hot-path efficiency.
         """
         if len(texts) <= DENSE_SUB_BATCH_SIZE:
             return await self._embedding.embed_texts(texts)
@@ -845,7 +849,7 @@ class IndexingService:
         )
 
         # Flatten sub-batch results back into a single ordered sequence
-        result: list[EmbedResponse] = []
+        result: list[NDArray[np.float32]] = []
         for sub in sub_results:
             result.extend(sub)
         return result
@@ -935,7 +939,7 @@ class IndexingService:
                                 chunks=[],
                                 chunk_ids=[],
                                 all_chunk_ids=[],
-                                all_chunk_texts=[],
+                                all_chunk_cache_keys=[],
                                 deleted_chunk_ids=deleted_ids,
                                 chunks_skipped=0,
                             ),
@@ -994,6 +998,13 @@ class IndexingService:
                             changed_chunks.append(chunk)
                             changed_ids.append(cid)
 
+                    # Pre-compute cache keys from ALL chunk texts (avoids
+                    # carrying full text strings through the pipeline).
+                    all_cache_keys = [
+                        (self._cache_key_prefix + hashlib.sha256(c.text.encode()).hexdigest()[:16]).encode()
+                        for c in chunks
+                    ]
+
                     tracer.record(file_key, 'chunk', 'completed')
                     tracer.record(file_key, 'embed', 'queued')
                     await embed_queue.put(
@@ -1004,7 +1015,7 @@ class IndexingService:
                             chunks=changed_chunks,
                             chunk_ids=changed_ids,
                             all_chunk_ids=all_chunk_ids,
-                            all_chunk_texts=[c.text for c in chunks],
+                            all_chunk_cache_keys=all_cache_keys,
                             deleted_chunk_ids=deleted_ids,
                             chunks_skipped=chunks_skipped,
                         ),
@@ -1099,7 +1110,7 @@ class IndexingService:
                 tracer.record_wall(fk, 'embed_sparse', wall_secs)
                 return results, cpu_secs
 
-            async def dense_embed() -> Sequence[EmbedResponse]:
+            async def dense_embed() -> Sequence[NDArray[np.float32]]:
                 results = await self._embed_dense_sub_batched(texts)
                 tracer.record(fk, 'embed_dense', 'completed')
                 return results
@@ -1118,7 +1129,7 @@ class IndexingService:
                 all_chunk_ids=chunked.all_chunk_ids,
                 deleted_chunk_ids=chunked.deleted_chunk_ids,
                 chunks_skipped=chunked.chunks_skipped,
-                dense_embeddings=[r.values for r in dense_results],
+                dense_embeddings=dense_results,
                 sparse_embeddings=sparse_results,
             )
             tracer.record(fk, 'embed', 'completed')
@@ -1129,7 +1140,7 @@ class IndexingService:
             counters.files_embedded += 1
 
             # Fire-and-forget: reverse index update drained at operation completion
-            await self._embedding.submit_file_cache_index(fk, list(chunked.all_chunk_texts))
+            await self._embedding.submit_file_cache_index_keys(fk, chunked.all_chunk_cache_keys)
 
     async def _pipeline_upsert_worker(
         self,
@@ -1427,7 +1438,7 @@ class _ChunkedFile:
     chunks: Sequence[Chunk]  # Only changed chunks (need embedding)
     chunk_ids: Sequence[UUID]  # IDs for chunks above (parallel arrays)
     all_chunk_ids: Sequence[UUID]  # ALL chunk IDs (for Redis state)
-    all_chunk_texts: Sequence[str]  # ALL chunk texts (for reverse index)
+    all_chunk_cache_keys: Sequence[bytes]  # Pre-computed embedding cache keys (for reverse index)
     deleted_chunk_ids: Sequence[UUID]  # Old chunks to delete from Qdrant
     chunks_skipped: int  # Count of unchanged chunks
 
