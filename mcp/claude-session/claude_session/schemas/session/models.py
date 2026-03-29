@@ -2614,6 +2614,44 @@ SessionRecord = Annotated[
 SessionRecordAdapter: pydantic.TypeAdapter[SessionRecord] = pydantic.TypeAdapter(SessionRecord)
 
 
+# -- Session Metadata ----------------------------------------------------------
+
+
+class SessionMetadata(StrictModel):
+    """Metadata extracted from a session."""
+
+    session_id: str
+    record_count: int
+    first_timestamp: str
+    last_timestamp: str
+    unique_cwds: Sequence[str]
+    unique_project_paths: Sequence[str]
+    user_message_count: int
+    assistant_message_count: int
+    summary_count: int
+    system_message_count: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_creation_tokens: int
+    total_cache_read_tokens: int
+    models_used: Sequence[str]
+    tools_used: Sequence[str]
+    files_touched: Sequence[str]
+    git_branches: Sequence[str]
+
+
+# -- Analysis Results ----------------------------------------------------------
+
+
+class SessionAnalysis(StrictModel):
+    """Complete analysis of a session."""
+
+    metadata: SessionMetadata
+    summary_text: str | None = None
+    cost_estimate_usd: float | None = None
+    duration_seconds: float | None = None
+
+
 # -- Utility Functions ---------------------------------------------------------
 
 
@@ -2709,41 +2747,3 @@ def validate_session_record(data: Mapping[str, Any]) -> SessionRecord:
         return _last_prompt_adapter.validate_python(data)
     else:
         return SessionRecordAdapter.validate_python(data)
-
-
-# -- Session Metadata ----------------------------------------------------------
-
-
-class SessionMetadata(StrictModel):
-    """Metadata extracted from a session."""
-
-    session_id: str
-    record_count: int
-    first_timestamp: str
-    last_timestamp: str
-    unique_cwds: Sequence[str]
-    unique_project_paths: Sequence[str]
-    user_message_count: int
-    assistant_message_count: int
-    summary_count: int
-    system_message_count: int
-    total_input_tokens: int
-    total_output_tokens: int
-    total_cache_creation_tokens: int
-    total_cache_read_tokens: int
-    models_used: Sequence[str]
-    tools_used: Sequence[str]
-    files_touched: Sequence[str]
-    git_branches: Sequence[str]
-
-
-# -- Analysis Results ----------------------------------------------------------
-
-
-class SessionAnalysis(StrictModel):
-    """Complete analysis of a session."""
-
-    metadata: SessionMetadata
-    summary_text: str | None = None
-    cost_estimate_usd: float | None = None
-    duration_seconds: float | None = None
