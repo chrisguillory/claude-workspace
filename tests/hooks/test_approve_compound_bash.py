@@ -700,20 +700,6 @@ class TestLoadBashPrefixes:
 class TestMainIntegration:
     """Verify the main() function end-to-end with mocked stdin/stdout."""
 
-    @staticmethod
-    def _hook_input(command: str, tool_name: str = 'Bash', cwd: str = '/tmp') -> str:
-        return json.dumps(
-            {
-                'session_id': 'test',
-                'cwd': cwd,
-                'transcript_path': '/tmp/transcript.jsonl',
-                'hook_event_name': 'PreToolUse',
-                'tool_name': tool_name,
-                'tool_input': {'command': command},
-                'tool_use_id': 'tu_test',
-            },
-        )
-
     def test_approves_compound(
         self,
         hook_module: ModuleType,
@@ -999,6 +985,20 @@ class TestMainIntegration:
             importlib.reload(cc_lib.schemas.base)
             importlib.reload(cc_lib.schemas.hooks)
             importlib.reload(cc_lib.schemas)
+
+    @staticmethod
+    def _hook_input(command: str, tool_name: str = 'Bash', cwd: str = '/tmp') -> str:
+        return json.dumps(
+            {
+                'session_id': 'test',
+                'cwd': cwd,
+                'transcript_path': '/tmp/transcript.jsonl',
+                'hook_event_name': 'PreToolUse',
+                'tool_name': tool_name,
+                'tool_input': {'command': command},
+                'tool_use_id': 'tu_test',
+            },
+        )
 
 
 class TestRealWorldCommands:
@@ -1311,29 +1311,6 @@ class TestQuotingEdgeCases:
 class TestCheckBatch:
     """Verify --check-batch JSON-lines output."""
 
-    @staticmethod
-    def _setup_prefixes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
-        """Create a settings file with common prefixes and return cwd."""
-        home = tmp_path / 'home'
-        (home / '.claude').mkdir(parents=True)
-        (home / '.claude' / 'settings.json').write_text(
-            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}}),
-        )
-        monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
-        return str(tmp_path)
-
-    @staticmethod
-    def _run_batch(
-        hook_module: ModuleType,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-        commands: str,
-        cwd: str,
-    ) -> list[dict[str, object]]:
-        monkeypatch.setattr('sys.stdin', io.StringIO(commands))
-        hook_module.check_batch(cwd)
-        return [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
-
     def test_simple_match(
         self,
         hook_module: ModuleType,
@@ -1428,3 +1405,26 @@ class TestCheckBatch:
         assert results[0]['match'] is True
         assert results[1]['match'] is False
         assert results[2]['error'] == 'approve_compound_bash_exception'
+
+    @staticmethod
+    def _setup_prefixes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+        """Create a settings file with common prefixes and return cwd."""
+        home = tmp_path / 'home'
+        (home / '.claude').mkdir(parents=True)
+        (home / '.claude' / 'settings.json').write_text(
+            json.dumps({'permissions': {'allow': ['Bash(git log:*)', 'Bash(echo:*)']}}),
+        )
+        monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
+        return str(tmp_path)
+
+    @staticmethod
+    def _run_batch(
+        hook_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        commands: str,
+        cwd: str,
+    ) -> list[dict[str, object]]:
+        monkeypatch.setattr('sys.stdin', io.StringIO(commands))
+        hook_module.check_batch(cwd)
+        return [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]

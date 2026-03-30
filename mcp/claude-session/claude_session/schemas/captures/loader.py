@@ -5,7 +5,6 @@ This module provides:
 - CapturedTraffic: The discriminated union of all capture types
 - load_capture(): Load and validate a single capture file
 - load_captures_batch(): Load multiple captures with error handling
-- _preprocess_capture(): Transform raw JSON for Pydantic validation
 """
 
 from __future__ import annotations
@@ -181,7 +180,68 @@ CapturedTraffic = Annotated[
 # -- Preprocessing and loading -------------------------------------------------
 
 # Cached adapter for performance
-_CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(CapturedTraffic)
+CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(CapturedTraffic)
+
+
+def load_capture(filepath: Path) -> CapturedTraffic:
+    """
+    Load and validate a capture file.
+
+    Returns a CapturedTraffic instance, which will be one of:
+    - MessagesRequestCapture for /v1/messages requests
+    - MessagesStreamResponseCapture for /v1/messages SSE responses (stream: true)
+    - MessagesJsonResponseCapture for /v1/messages JSON responses (stream: false)
+    - TelemetryRequestCapture for /api/event_logging/batch
+    - StatsigRegisterRequestCapture for Statsig /v1/rgstr
+    - UnknownRequestCapture, UnknownResponseCapture for unmapped endpoints
+
+    The discriminator automatically routes to the correct type based on
+    HTTP context (host, path, direction, body format).
+
+    Args:
+        filepath: Path to capture JSON file
+
+    Returns:
+        Validated capture object with full type information
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        json.JSONDecodeError: If file isn't valid JSON
+        ValidationError: If data doesn't match capture schema
+    """
+    with open(filepath) as f:
+        raw_data = json.load(f)
+
+    clean_data = _preprocess_capture(raw_data, filepath)
+    return CAPTURE_ADAPTER.validate_python(clean_data)
+
+
+def load_captures_batch(
+    directory: Path, pattern: str = '*.json'
+) -> tuple[Sequence[CapturedTraffic], Mapping[Path, Exception]]:
+    """
+    Load and validate multiple captures.
+
+    Args:
+        directory: Directory containing capture files
+        pattern: Glob pattern for filenames
+
+    Returns:
+        Tuple of (validated captures, errors dict with file -> error mapping)
+    """
+    captures: list[CapturedTraffic] = []
+    errors: dict[Path, Exception] = {}
+
+    for filepath in sorted(directory.glob(pattern)):
+        try:
+            captures.append(load_capture(filepath))
+        except (pydantic.ValidationError, json.JSONDecodeError, OSError) as e:
+            errors[filepath] = e
+
+    return captures, errors
+
+
+# -- Private helpers -----------------------------------------------------------
 
 
 def _preprocess_capture(
@@ -252,61 +312,3 @@ def _preprocess_capture(
             data['body'] = {}
 
     return data
-
-
-def load_capture(filepath: Path) -> CapturedTraffic:
-    """
-    Load and validate a capture file.
-
-    Returns a CapturedTraffic instance, which will be one of:
-    - MessagesRequestCapture for /v1/messages requests
-    - MessagesStreamResponseCapture for /v1/messages SSE responses (stream: true)
-    - MessagesJsonResponseCapture for /v1/messages JSON responses (stream: false)
-    - TelemetryRequestCapture for /api/event_logging/batch
-    - StatsigRegisterRequestCapture for Statsig /v1/rgstr
-    - UnknownRequestCapture, UnknownResponseCapture for unmapped endpoints
-
-    The discriminator automatically routes to the correct type based on
-    HTTP context (host, path, direction, body format).
-
-    Args:
-        filepath: Path to capture JSON file
-
-    Returns:
-        Validated capture object with full type information
-
-    Raises:
-        FileNotFoundError: If file doesn't exist
-        json.JSONDecodeError: If file isn't valid JSON
-        ValidationError: If data doesn't match capture schema
-    """
-    with open(filepath) as f:
-        raw_data = json.load(f)
-
-    clean_data = _preprocess_capture(raw_data, filepath)
-    return _CAPTURE_ADAPTER.validate_python(clean_data)
-
-
-def load_captures_batch(
-    directory: Path, pattern: str = '*.json'
-) -> tuple[Sequence[CapturedTraffic], Mapping[Path, Exception]]:
-    """
-    Load and validate multiple captures.
-
-    Args:
-        directory: Directory containing capture files
-        pattern: Glob pattern for filenames
-
-    Returns:
-        Tuple of (validated captures, errors dict with file -> error mapping)
-    """
-    captures: list[CapturedTraffic] = []
-    errors: dict[Path, Exception] = {}
-
-    for filepath in sorted(directory.glob(pattern)):
-        try:
-            captures.append(load_capture(filepath))
-        except (pydantic.ValidationError, json.JSONDecodeError, OSError) as e:
-            errors[filepath] = e
-
-    return captures, errors
