@@ -85,7 +85,7 @@ _T = TypeVar('_T')
 # translated. StopIteration terminates iteration; StopAsyncIteration terminates
 # async iteration. Translating these breaks Python's iterator/generator protocols.
 # (GeneratorExit is BaseException, not Exception, so it's caught by the prior check.)
-_PASSTHROUGH = (StopIteration, StopAsyncIteration)
+PASSTHROUGH = (StopIteration, StopAsyncIteration)
 
 
 class LibraryBoundary:
@@ -166,7 +166,7 @@ class LibraryBoundary:
     ) -> None:
         if exc_value is None or isinstance(exc_value, self._target):
             return  # No exception, or already translated (double-wrap guard)
-        if not isinstance(exc_value, Exception) or isinstance(exc_value, _PASSTHROUGH):
+        if not isinstance(exc_value, Exception) or isinstance(exc_value, PASSTHROUGH):
             return  # System or control-flow exception — pass through
         try:
             original_message = str(exc_value)  # type preserved in __cause__, not here

@@ -13,7 +13,7 @@ Privacy controls:
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
@@ -98,7 +98,7 @@ class TelemetryEventData(StrictModel):
     # Optional - JSON-encoded string with event-specific metadata
     additional_metadata: str | None = None
 
-    def get_metadata(self) -> dict[str, Any]:
+    def get_metadata(self) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — unstructured JSON
         """Parse additional_metadata JSON string to dict."""
         if not self.additional_metadata:
             return {}
