@@ -8,7 +8,7 @@ and schema evolution tracking.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Union, get_args, get_origin
+from typing import Any, TypedDict, Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -16,6 +16,7 @@ from pydantic.fields import FieldInfo
 from claude_session.schemas.session.markers import PathMarker
 
 __all__ = [
+    'ModelSummary',
     'get_field_version_info',
     'get_literal_values',
     'get_path_fields',
@@ -23,6 +24,19 @@ __all__ = [
     'model_summary',
     'print_model_summary',
 ]
+
+
+class ModelSummary(TypedDict):
+    """Summary of a Pydantic model's metadata."""
+
+    model_name: str
+    total_fields: int
+    required_fields: Sequence[str]
+    optional_fields: Sequence[str]
+    path_fields: Sequence[str]
+    reserved_fields: Sequence[str]
+    versioned_fields: Mapping[str, str]
+    docstring: str | None
 
 
 def get_path_fields(model: type[BaseModel]) -> Sequence[str]:
@@ -43,7 +57,9 @@ def get_path_fields(model: type[BaseModel]) -> Sequence[str]:
         ['cwd', 'projectPaths']
     """
 
-    def check_for_path_marker(annotation: Any) -> bool:
+    def check_for_path_marker(
+        annotation: Any,
+    ) -> bool:  # strict_typing_linter.py: loose-typing — FieldInfo.annotation is Any in Pydantic's API
         """Check if annotation contains PathMarker, handling type aliases and unions."""
         # Check Annotated directly
         if get_origin(annotation) is not None:
@@ -79,7 +95,7 @@ def get_path_fields(model: type[BaseModel]) -> Sequence[str]:
     return path_fields
 
 
-def get_reserved_fields(model: type[BaseModel]) -> Mapping[str, Mapping[str, Any]]:
+def get_reserved_fields(model: type[BaseModel]) -> Mapping[str, Mapping[str, object]]:
     """
     Find all reserved (always-null) fields.
 
@@ -140,7 +156,7 @@ def get_field_version_info(model: type[BaseModel]) -> Mapping[str, str]:
     return version_info
 
 
-def get_literal_values(field_info: FieldInfo) -> Sequence[Any] | None:
+def get_literal_values(field_info: FieldInfo) -> Sequence[str | int | bool] | None:
     """
     Extract literal values from a field definition.
 
@@ -161,7 +177,7 @@ def get_literal_values(field_info: FieldInfo) -> Sequence[Any] | None:
     return None
 
 
-def model_summary(model: type[BaseModel]) -> Mapping[str, Any]:
+def model_summary(model: type[BaseModel]) -> ModelSummary:
     """
     Generate a comprehensive summary of a model's metadata.
 
