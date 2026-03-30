@@ -79,6 +79,11 @@ Upstream context
 
 from __future__ import annotations
 
+__all__ = [
+    'PydanticReplacePlugin',
+    'plugin',
+]
+
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -87,12 +92,6 @@ from mypy.plugin import ClassDefContext, Plugin, ReportConfigContext
 from mypy.plugins.common import add_method_to_class
 from mypy.typevars import fill_typevars
 from pydantic.mypy import METADATA_KEY, PydanticModelField, PydanticPlugin
-
-
-def plugin(version: str) -> type[Plugin]:
-    """Mypy plugin entry point."""
-    return PydanticReplacePlugin
-
 
 _PLUGIN_VERSION = 1  # Increment when synthesis logic changes to invalidate mypy cache
 
@@ -120,6 +119,11 @@ class PydanticReplacePlugin(PydanticPlugin):
             _synthesize_replace(ctx)
 
         return chained_hook
+
+
+def plugin(version: str) -> type[Plugin]:
+    """Mypy plugin entry point."""
+    return PydanticReplacePlugin
 
 
 def _collect_parent_fields(info: TypeInfo) -> Mapping[str, tuple[TypeInfo, Any]]:

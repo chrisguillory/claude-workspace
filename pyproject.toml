@@ -132,10 +132,6 @@ filterwarnings = [
 "tests/linters/test_suppression_rationale_linter.py" = ["ordering"]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
-# Library modules within script directories (no shebang, so not auto-detected as entry points)
-"linters/_config.py" = ["missing-all"]
-"plugins/pydantic_replace.py" = ["missing-all", "class-ordering"]
-
 # MCP servers
 "mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
 
