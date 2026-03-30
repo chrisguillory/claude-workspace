@@ -79,8 +79,8 @@ DENSE_SUB_BATCH_SIZE = 100
 
 # Queue size limits for backpressure between stages.
 # Configurable via env vars for benchmarking; defaults match original constants.
-EMBED_QUEUE_SIZE = int(os.environ.get('DOCUMENT_SEARCH_EMBED_QUEUE_SIZE', '500'))
-UPSERT_QUEUE_SIZE = int(os.environ.get('DOCUMENT_SEARCH_UPSERT_QUEUE_SIZE', '500'))
+EMBED_QUEUE_SIZE = int(os.environ.get('DOCUMENT_SEARCH_EMBED_QUEUE_SIZE', '200'))
+UPSERT_QUEUE_SIZE = int(os.environ.get('DOCUMENT_SEARCH_UPSERT_QUEUE_SIZE', '200'))
 
 # Timeout for file chunking operations (detects deadlocks)
 FILE_CHUNK_TIMEOUT_SECONDS = 60
