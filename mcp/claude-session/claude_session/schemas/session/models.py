@@ -2472,11 +2472,10 @@ class AgentProgressData(StrictModel):
     type: Literal['agent_progress']
     agentId: str
     prompt: str
-    # TODO: Remove "loose" typing below
-    message: Mapping[str, Any]  # check_schema_typing.py: loose-typing
-    # TODO: Remove "loose" typing below
-    # TODO: Remove "loose" typing below
-    normalizedMessages: Sequence[Mapping[str, Any]] | None = None  # check_schema_typing.py: loose-typing
+    message: Mapping[str, Any]  # strict_typing_linter.py: loose-typing — API error body is unstructured JSON
+    normalizedMessages: Sequence[Mapping[str, Any]] | None = (
+        None  # strict_typing_linter.py: loose-typing — API error body is unstructured JSON
+    )
     resume: str | None = None  # Agent resume ID (Claude Code 2.1.15+)
 
 
@@ -2656,7 +2655,9 @@ class SessionAnalysis(StrictModel):
 
 
 # noinspection PyNewStyleGenericSyntax
-def validated_copy[T: pydantic.BaseModel](model: T, update: Mapping[str, Any]) -> T:
+def validated_copy[T: pydantic.BaseModel](
+    model: T, update: Mapping[str, Any]
+) -> T:  # strict_typing_linter.py: loose-typing — generic copy accepts any field values
     """Create a validated copy of a model with updates.
 
     This is the type-safe way to modify frozen Pydantic models.
@@ -2698,7 +2699,9 @@ _agent_name_adapter = pydantic.TypeAdapter(AgentNameRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
 
 
-def validate_session_record(data: Mapping[str, Any]) -> SessionRecord:
+def validate_session_record(
+    data: Mapping[str, Any],
+) -> SessionRecord:  # strict_typing_linter.py: loose-typing — raw JSON-parsed session record
     """Validate a session record dict using type-dispatch for performance.
 
     Dispatches to per-type TypeAdapters based on the 'type' field, avoiding

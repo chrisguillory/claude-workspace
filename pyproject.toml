@@ -134,10 +134,6 @@ filterwarnings = [
 
 # claude-session
 "mcp/claude-session/scripts/**" = ["mutable-type", "loose-typing", "tuple-field"]
-"mcp/claude-session/claude_session/introspection.py" = ["loose-typing"]
-"mcp/claude-session/claude_session/migrations.py" = ["mutable-type"]
-# claude-session: unstructured JSON fields (API errors, normalized messages)
-"mcp/claude-session/claude_session/schemas/session/models.py" = ["loose-typing"]
 
 [tool.exception-safety-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
