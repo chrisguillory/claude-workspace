@@ -97,6 +97,7 @@ INDEX_HTML = """<!DOCTYPE html>
             text-transform: uppercase;
         }
         .status-running { background: #e3f2fd; color: #1976d2; }
+        .status-stalled { background: #fff8e1; color: #f57f17; }
         .status-complete { background: #e8f5e9; color: #388e3c; }
         .status-failed { background: #ffebee; color: #d32f2f; }
         .op-meta { font-size: 13px; color: #666; }
@@ -335,15 +336,31 @@ INDEX_HTML = """<!DOCTYPE html>
                              .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
+        function deriveStatus(op) {
+            if (op.ended_at) return op.error ? 'failed' : 'complete';
+            if (op.progress && op.progress.status === 'stalled') return 'stalled';
+            return 'running';
+        }
+
+        function formatStalledText(op) {
+            const p = op.progress;
+            if (!p || p.status !== 'stalled' || !p.stalled_since) return '';
+            const stalledMs = Date.now() - new Date(p.stalled_since).getTime();
+            const stalledMin = Math.floor(stalledMs / 60000);
+            return ` | <span style="color:#f57f17;font-weight:600">No progress for ${stalledMin}m</span>`;
+        }
+
         function formatOperationMeta(op) {
             const p = op.progress;
-            const status = op.ended_at ? (op.error ? 'failed' : 'complete') : 'running';
-            const elapsed = status === 'running'
+            const status = deriveStatus(op);
+            const isActive = status === 'running' || status === 'stalled';
+            const elapsed = isActive
                 ? (Date.now() - new Date(op.created_at).getTime()) / 1000
                 : (op.result?.elapsed_seconds ?? p?.elapsed_seconds ?? 0);
             const eta = p ? estimateEta(p) : null;
             const etaText = eta ? ` | ETA ${formatDuration(eta)}` : '';
-            return `${formatDuration(elapsed)} elapsed${etaText}${p ? ` | Scan: ${p.scan_complete ? 'complete' : 'in progress'}` : ''}`;
+            const stalledText = formatStalledText(op);
+            return `${formatDuration(elapsed)} elapsed${etaText}${stalledText}${p ? ` | Scan: ${p.scan_complete ? 'complete' : 'in progress'}` : ''}`;
         }
 
         function formatOperationProgressHtml(op) {
@@ -442,15 +459,16 @@ INDEX_HTML = """<!DOCTYPE html>
         }
 
         function formatOperation(op) {
-            const status = op.ended_at ? (op.error ? 'failed' : 'complete') : 'running';
+            const status = deriveStatus(op);
+            const isActive = status === 'running' || status === 'stalled';
             const isComplete = op.ended_at && !op.error;
             return `
                 <div class="operation">
                     <div class="op-header">
                         <div class="op-title">
-                            <span class="status-badge status-${status}">${status}</span>
+                            <span id="badge-${op.operation_id}" class="status-badge status-${status}">${status}</span>
                             <span>${escapeHtml(op.collection_name)}</span>
-                            ${status !== 'running' ? `<button class="btn-delete" onclick="deleteOp('${op.operation_id}')" title="Delete">&times;</button>` : ''}
+                            ${!isActive ? `<button class="btn-delete" onclick="deleteOp('${op.operation_id}')" title="Delete">&times;</button>` : ''}
                         </div>
                         ${!isComplete ? `<div class="op-meta" id="meta-${op.operation_id}">${formatOperationMeta(op)}</div>` : ''}
                     </div>
@@ -1653,13 +1671,17 @@ INDEX_HTML = """<!DOCTYPE html>
                         if (el) { el.style.display = 'block'; if (toggle) toggle.textContent = '\\u25bc Errors'; }
                     }
                 } else if (activeOps.length > 0) {
-                    // Same ops — update only progress and meta, leave logs untouched
+                    // Same ops — update only progress, meta, and badge; leave logs untouched
                     for (const op of activeOps) {
                         const metaEl = document.getElementById('meta-' + op.operation_id);
                         const progressEl = document.getElementById('progress-' + op.operation_id);
+                        const badgeEl = document.getElementById('badge-' + op.operation_id);
                         if (metaEl) metaEl.innerHTML = formatOperationMeta(op);
-                        if (progressEl) {
-                            progressEl.innerHTML = formatOperationProgressHtml(op);
+                        if (progressEl) progressEl.innerHTML = formatOperationProgressHtml(op);
+                        if (badgeEl) {
+                            const st = deriveStatus(op);
+                            badgeEl.className = 'status-badge status-' + st;
+                            badgeEl.textContent = st;
                         }
                     }
                     // Refresh open logs (fetchLogs skips if unchanged)
@@ -1909,17 +1931,24 @@ class DashboardServer:
         def get_active_operations() -> Sequence[OperationState]:
             """Get currently running operations.
 
-            Detects orphaned operations whose MCP server PID is dead and
-            marks them as failed so they don't appear as perpetually running.
+            Detects two failure modes:
+            1. Orphaned: MCP server PID is dead (process crashed/exited).
+            2. Stale: updated_at is >1 hour old (server hung or restarted
+               without proper cleanup).
             """
             ops = _read_operations()
             active: list[OperationState] = []
+            now = datetime.now(UTC)
             for op in ops:
                 if op.ended_at is not None:
                     continue
                 # Check if the MCP server that started this operation is still alive
                 if op.mcp_server_pid and not _pid_alive(op.mcp_server_pid):
                     _mark_orphaned(op)
+                    continue
+                # Check for stale operations (no update for >1 hour)
+                if _is_stale(op, now):
+                    _mark_stale(op)
                     continue
                 active.append(op)
             return active
@@ -2141,4 +2170,35 @@ def _mark_orphaned(op: OperationState) -> None:
     data = json.loads(file_path.read_text())
     data['ended_at'] = data['updated_at']
     data['error'] = f'MCP server (PID {op.mcp_server_pid}) exited before operation completed'
+    if data.get('progress'):
+        data['progress']['status'] = 'failed'
     file_path.write_text(json.dumps(data))
+
+
+# An operation with no update for this long is considered stale (seconds).
+_STALE_OPERATION_THRESHOLD_SECONDS = 3600
+
+
+def _is_stale(op: OperationState, now: datetime) -> bool:
+    """Check if a running operation's updated_at is older than 1 hour."""
+    age = (now - op.updated_at.astimezone(UTC)).total_seconds()
+    return age > _STALE_OPERATION_THRESHOLD_SECONDS
+
+
+def _mark_stale(op: OperationState) -> None:
+    """Mark a stale operation as failed on disk.
+
+    Called on dashboard startup when a 'running' operation has not been
+    updated for >1 hour, indicating the server hung or restarted without
+    proper cleanup.
+    """
+    file_path = OPERATIONS_DIR / f'{op.operation_id}.json'
+    if not file_path.exists():
+        return
+    data = json.loads(file_path.read_text())
+    data['ended_at'] = data['updated_at']
+    data['error'] = 'Operation stale \u2014 no progress update for >1 hour (server likely restarted)'
+    if data.get('progress'):
+        data['progress']['status'] = 'failed'
+    file_path.write_text(json.dumps(data))
+    logger.info('Marked stale operation %s as failed', op.operation_id)
