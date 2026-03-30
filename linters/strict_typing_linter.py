@@ -1493,11 +1493,16 @@ def _collect_import_time_refs(tree: ast.Module) -> Set[str]:
         return set()
 
     # Scan module-level statements for references to private functions.
-    # Includes: type alias assignments AND class body annotations (BeforeValidator in fields).
-    # Excludes: function bodies (those are runtime-only, no import-time dependency).
+    # Includes: type alias assignments, class body annotations, and function/class decorators.
+    # Excludes: function/method bodies (those are runtime-only, no import-time dependency).
     refs: set[str] = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Skip body but scan decorators (evaluated at definition time)
+            for decorator in node.decorator_list:
+                for child in ast.walk(decorator):
+                    if isinstance(child, ast.Name) and child.id in private_fns:
+                        refs.add(child.id)
             continue
         for child in ast.walk(node):
             if isinstance(child, ast.Name) and child.id in private_fns:
