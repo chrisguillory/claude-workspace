@@ -67,3 +67,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: shebang-check
+        name: shebang-check
+        description: Ensure shebangs use uv run, not bare python
+        entry: ./linters/shebang_check.py .
+        language: system
+        pass_filenames: false
+        always_run: true
