@@ -180,7 +180,7 @@ CapturedTraffic = Annotated[
 # -- Preprocessing and loading -------------------------------------------------
 
 # Cached adapter for performance
-_CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(CapturedTraffic)
+CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(CapturedTraffic)
 
 
 def load_capture(filepath: Path) -> CapturedTraffic:
@@ -213,7 +213,7 @@ def load_capture(filepath: Path) -> CapturedTraffic:
         raw_data = json.load(f)
 
     clean_data = _preprocess_capture(raw_data, filepath)
-    return _CAPTURE_ADAPTER.validate_python(clean_data)
+    return CAPTURE_ADAPTER.validate_python(clean_data)
 
 
 def load_captures_batch(
