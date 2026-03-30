@@ -159,11 +159,6 @@ def _ok_id(lineno: int) -> str:
     return f'line{lineno}_OK'
 
 
-def _get_source_line(filepath: Path, lineno: int) -> str:
-    """Read a single source line (1-indexed) from a file."""
-    return filepath.read_text().splitlines()[lineno - 1].strip()
-
-
 # -- Parametrized Tests: Instructive ------------------------------------------
 
 
@@ -250,3 +245,8 @@ def test_edge_case_no_unexpected(
             source_line = _get_source_line(EDGE_CASE_FILE, lineno)
             unexpected.append(f'line {lineno}: unexpected {actual_code} (untagged: {source_line[:60]})')
     assert not unexpected, '\n'.join(unexpected)
+
+
+def _get_source_line(filepath: Path, lineno: int) -> str:
+    """Read a single source line (1-indexed) from a file."""
+    return filepath.read_text().splitlines()[lineno - 1].strip()
