@@ -132,30 +132,15 @@ filterwarnings = [
 "tests/linters/test_suppression_rationale_linter.py" = ["ordering"]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
-# Standalone scripts (no __all__, main() before classes, private helpers interleave)
-# Note: 'ordering' is a superset of class-ordering/missing-all/trailing-comma.
-# Listed explicitly for readability.
-"linters/**" = ["missing-all", "class-ordering", "ordering"]
-"hooks/**" = ["missing-all"]
-"scripts/**" = ["missing-all", "class-ordering", "ordering"]
-"plugins/**" = ["missing-all", "class-ordering"]
-
-# Standalone root scripts
-"uv-wrapper.py" = ["missing-all"]
-
 # MCP servers
 "mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
 
 # claude-session
-"mcp/claude-session/claude_session/cli/main.py" = ["missing-all", "ordering"]
-"mcp/claude-session/scripts/**" = ["missing-all", "class-ordering", "ordering", "mutable-type", "loose-typing", "tuple-field"]
+"mcp/claude-session/scripts/**" = ["mutable-type", "loose-typing", "tuple-field"]
 "mcp/claude-session/claude_session/introspection.py" = ["loose-typing"]
 "mcp/claude-session/claude_session/migrations.py" = ["mutable-type"]
-# claude-session: ordering — import-time Annotated[..., BeforeValidator/Discriminator] needs private fn defined first
-"mcp/claude-session/claude_session/schemas/captures/base.py" = ["ordering"]
-"mcp/claude-session/claude_session/schemas/captures/datadog.py" = ["ordering"]
-"mcp/claude-session/claude_session/schemas/cc_internal_api/statsig.py" = ["ordering"]
-"mcp/claude-session/claude_session/schemas/session/models.py" = ["ordering", "loose-typing"]
+# claude-session: unstructured JSON fields (API errors, normalized messages)
+"mcp/claude-session/claude_session/schemas/session/models.py" = ["loose-typing"]
 
 [tool.exception-safety-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
