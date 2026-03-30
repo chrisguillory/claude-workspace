@@ -27,11 +27,10 @@ __all__ = [
 
 # -- Migration Registry --------------------------------------------------------
 
-# Migrations are functions that transform record data from one version to another
-Migration = Callable[[dict[str, Any]], dict[str, Any]]
+Migration = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
-# Registry mapping source_version -> target_version -> migration_function
-MIGRATIONS: dict[tuple[str, str], Migration] = {}
+# Registry mapping (from_version, to_version) -> migration_function
+MIGRATIONS: dict[tuple[str, str], Migration] = {}  # strict_typing_linter.py: mutable-type — mutable registry
 
 
 def register_migration(from_version: str, to_version: str) -> Callable[[Migration], Migration]:
@@ -61,7 +60,9 @@ def register_migration(from_version: str, to_version: str) -> Callable[[Migratio
 # -- Version Detection ---------------------------------------------------------
 
 
-def detect_record_version(record_data: dict[str, Any]) -> str | None:
+def detect_record_version(
+    record_data: Mapping[str, Any],
+) -> str | None:  # strict_typing_linter.py: loose-typing — raw JSON record
     """
     Detect which Claude Code version created this record.
 
@@ -97,7 +98,9 @@ def detect_record_version(record_data: dict[str, Any]) -> str | None:
     return None
 
 
-def needs_migration(record_data: dict[str, Any], target_version: str) -> bool:
+def needs_migration(
+    record_data: Mapping[str, Any], target_version: str
+) -> bool:  # strict_typing_linter.py: loose-typing — raw JSON record
     """
     Check if a record needs migration to target version.
 
@@ -121,7 +124,9 @@ def needs_migration(record_data: dict[str, Any], target_version: str) -> bool:
 # -- Migration Application -----------------------------------------------------
 
 
-def apply_migration(record_data: dict[str, Any], from_version: str, to_version: str) -> dict[str, Any]:
+def apply_migration(
+    record_data: Mapping[str, Any], from_version: str, to_version: str
+) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — raw JSON record
     """
     Apply a specific migration to a record.
 
@@ -147,7 +152,9 @@ def apply_migration(record_data: dict[str, Any], from_version: str, to_version: 
     return migration_func(record_data)
 
 
-def auto_migrate(record_data: dict[str, Any], target_version: str) -> dict[str, Any]:
+def auto_migrate(
+    record_data: Mapping[str, Any], target_version: str
+) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — raw JSON record
     """
     Automatically migrate a record to target version.
 
