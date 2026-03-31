@@ -463,7 +463,7 @@ class SchemaTypeChecker(ast.NodeVisitor):
 # -- File Processing -----------------------------------------------------------
 
 
-def check_file(filepath: Path) -> list[Violation]:
+def check_file(filepath: Path) -> Sequence[Violation]:
     """Check a single file for mutable type violations."""
     try:
         source = filepath.read_text(encoding='utf-8')
@@ -484,7 +484,7 @@ def check_file(filepath: Path) -> list[Violation]:
     return checker.violations
 
 
-def find_python_files(root: Path, exclude_dirs: Set[str]) -> list[Path]:
+def find_python_files(root: Path, exclude_dirs: Set[str]) -> Sequence[Path]:
     """Find all .py files recursively under root, skipping excluded directories."""
     return sorted(path for path in root.rglob('*.py') if not any(part in exclude_dirs for part in path.parts))
 
