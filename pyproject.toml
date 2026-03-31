@@ -126,11 +126,8 @@ filterwarnings = [
 
 [tool.strict-typing-linter.per-file-ignores]
 # Test infrastructure
-"tests/**" = ["mutable-type", "loose-typing", "missing-all", "class-ordering"]
+"**/tests/**" = ["mutable-type", "loose-typing", "missing-all", "class-ordering"]
 "tests/linters/edge_cases/**" = ["skip-file"]
-
-# MCP servers
-"mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
 
 # claude-session
 "mcp/claude-session/scripts/**" = ["mutable-type", "loose-typing", "tuple-field"]

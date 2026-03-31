@@ -29,24 +29,6 @@ SAMPLE_SIZE = 10_000
 SENTENCE_COUNT = 200
 RNG_SEED = 42
 
-# -- Data loading --------------------------------------------------------------
-
-
-def _load_dictionary_words() -> Sequence[str]:
-    """Load macOS dictionary, return all non-empty lines."""
-    if not DICT_PATH.exists():
-        pytest.skip(f'{DICT_PATH} not found')
-    return [line.strip() for line in DICT_PATH.read_text().splitlines() if line.strip()]
-
-
-def _sample_words(words: Sequence[str], n: int, seed: int = RNG_SEED) -> Sequence[str]:
-    """Deterministic random sample of n words."""
-    rng = random.Random(seed)
-    if len(words) <= n:
-        return words
-    return rng.sample(words, n)
-
-
 # -- Edge case generators ------------------------------------------------------
 
 
@@ -664,6 +646,21 @@ class TestBM25Scoring:
 
 
 # -- Helpers -------------------------------------------------------------------
+
+
+def _load_dictionary_words() -> Sequence[str]:
+    """Load macOS dictionary, return all non-empty lines."""
+    if not DICT_PATH.exists():
+        pytest.skip(f'{DICT_PATH} not found')
+    return [line.strip() for line in DICT_PATH.read_text().splitlines() if line.strip()]
+
+
+def _sample_words(words: Sequence[str], n: int, seed: int = RNG_SEED) -> Sequence[str]:
+    """Deterministic random sample of n words."""
+    rng = random.Random(seed)
+    if len(words) <= n:
+        return words
+    return rng.sample(words, n)
 
 
 def _fastembed_embed_single(text: str) -> Set[int]:

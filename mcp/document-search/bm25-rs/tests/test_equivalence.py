@@ -77,24 +77,6 @@ TEXTS = [
 ]
 
 
-def _fastembed_embed(model: SparseTextEmbedding, text: str) -> Mapping[int, float]:
-    """Embed with fastembed, return {token_id: score} dict."""
-    results = list(model.embed([text]))
-    if not results:
-        return {}
-    sparse = results[0]
-    return dict(zip(sparse.indices.tolist(), sparse.values.tolist()))
-
-
-def _rust_embed(model: bm25_rs.BM25Model, text: str) -> Mapping[int, float]:
-    """Embed with bm25_rs, return {token_id: score} dict."""
-    embeddings, _, _ = model.embed_batch([text])
-    if not embeddings:
-        return {}
-    indices, values = embeddings[0]
-    return dict(zip(indices, values))
-
-
 @pytest.mark.parametrize('text', TEXTS, ids=[t[:40] for t in TEXTS])
 def test_sparse_vectors_match(
     fastembed_model: SparseTextEmbedding,
@@ -151,3 +133,21 @@ def test_parallel_deterministic(rust_model: bm25_rs.BM25Model) -> None:
         d2 = dict(zip(r2[i][0], r2[i][1]))
         for k, v in d1.items():
             assert v == d2[k]
+
+
+def _fastembed_embed(model: SparseTextEmbedding, text: str) -> Mapping[int, float]:
+    """Embed with fastembed, return {token_id: score} dict."""
+    results = list(model.embed([text]))
+    if not results:
+        return {}
+    sparse = results[0]
+    return dict(zip(sparse.indices.tolist(), sparse.values.tolist()))
+
+
+def _rust_embed(model: bm25_rs.BM25Model, text: str) -> Mapping[int, float]:
+    """Embed with bm25_rs, return {token_id: score} dict."""
+    embeddings, _, _ = model.embed_batch([text])
+    if not embeddings:
+        return {}
+    indices, values = embeddings[0]
+    return dict(zip(indices, values))
