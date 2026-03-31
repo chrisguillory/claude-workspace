@@ -551,6 +551,7 @@ class AnnotationChecker(ast.NodeVisitor):
         self._inspector = inspector
         self._class_name_stack: list[str] = []  # Track enclosing class names for private-class detection
         self._skip_any = False  # When True, _check_annotation uses _find_forbidden_type_no_any
+        self._classvar_depth = 0  # When > 0, mutable-type violations suppressed (ClassVar is class state, not a field)
         self.matched_directive_lines: set[tuple[int, str]] = (
             set()
         )  # (line, code) pairs of directives that suppressed violations
@@ -598,7 +599,12 @@ class AnnotationChecker(ast.NodeVisitor):
         # Check all annotated assignments at module/class level (not in functions)
         # Skip if we're in a non-frozen dataclass
         if self._function_depth == 0 and not self._skip_class_fields:
+            is_cv = self._is_classvar(node.annotation)
+            if is_cv:
+                self._classvar_depth += 1
             self._check_annotation(node.annotation, node.lineno, 'field')
+            if is_cv:
+                self._classvar_depth -= 1
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -777,6 +783,9 @@ class AnnotationChecker(ast.NodeVisitor):
         bad_type = self._find_forbidden_type_no_any(node) if self._skip_any else self._find_forbidden_type(node)
         if bad_type:
             kind: TypeViolationKind = 'loose' if bad_type in LOOSE_TYPES else 'mutable'
+            # ClassVar is class-level state, not a Pydantic field — mutable types are appropriate
+            if kind == 'mutable' and self._classvar_depth > 0:
+                return
             self.raw_violations.append((lineno, self._DIRECTIVE_CODES[kind]))
 
             if self._has_directive(lineno, kind, scope_start=scope_start, scope_end=scope_end):

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,7 @@ from claude_session.schemas.session import (
 )
 
 
-def export_schema(output_path: str = 'session-schema.json') -> dict[str, Any]:
+def export_schema(output_path: str = 'session-schema.json') -> Mapping[str, Any]:
     """Export complete JSON Schema for SessionRecord."""
 
     print('=' * 80)
