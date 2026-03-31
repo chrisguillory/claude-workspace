@@ -44,6 +44,29 @@ Patches:
                     Not publicly documented or mentioned in any changelog.
                     Flag introduced in 2.1.21 (last absent: 2.1.20).
 
+    sm-compact      Use session memory for auto-compaction instead of LLM
+                    summarization. When the context window fills, Claude
+                    normally calls the LLM to summarize the conversation
+                    (expensive, slow). With sm-compact enabled, auto-compact
+                    uses the existing session memory summary directly --
+                    no extra API call, faster, and more deterministic.
+                    Requires session-memory patch (gate checks both flags).
+                    Statsig gate ``tengu_sm_compact``, default false.
+                    Env var override: ``ENABLE_CLAUDE_CODE_SM_COMPACT=1``.
+                    Config: ``tengu_sm_compact_config`` (minTokens: 10000,
+                    minTextBlockMessages: 5, maxTokens: 40000).
+                    Present in all versions with session-memory (2.0.64+),
+                    verified in 2.1.45, 2.1.74, 2.1.80, 2.1.81.
+
+    scratchpad      Enable session-scoped scratchpad directory. Creates
+                    ``<data_dir>/<project>/<session>/scratchpad`` with auto-
+                    permissions for reading and writing. Claude uses this
+                    instead of ``/tmp`` for intermediate files.
+                    Statsig gate ``tengu_scratch``, default false.
+                    Uses different gate mechanism (no default arg) — patched
+                    by replacing call ``("tengu_scratch")`` with ``||!0``.
+                    Flag introduced in 2.1.45 (last absent: 2.1.44).
+
 Version-Agnostic Patterns:
     Gate function names (``Tq``, ``lT``, ``Jq``) change per build. Patches
     match the stable argument list instead: ``("flag_name",!1)`` → ``!0``.
@@ -59,19 +82,22 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN)::
     statusLine?.padding       2.0.0           never absent
     tengu_session_memory      2.0.64          2.0.62
     tengu_coral_fern          2.1.21          2.1.20
+    tengu_sm_compact          2.0.64          2.0.62 (co-introduced with session-memory)
+    tengu_scratch             2.1.45          2.1.44
 
 Site Count Evolution::
 
-    Version   statusline   session-memory   remember-skill
-    2.0.64    0            6                0
-    2.0.70    0            9                0
-    2.1.0     0            9                0
-    2.1.21    0            —                3
-    2.1.40    0            18               3
-    2.1.51    2            18               9
-    2.1.74    2            18               3
-    2.1.80    2            18               3
-    2.1.81    2            18               3
+    Version   statusline   session-memory   remember-skill   sm-compact
+    2.0.64    0            6                0                —
+    2.0.70    0            9                0                —
+    2.1.0     0            9                0                —
+    2.1.21    0            —                3                —
+    2.1.40    0            18               3                —
+    2.1.45    —            —                —                2
+    2.1.51    2            18               9                —
+    2.1.74    2            18               3                2
+    2.1.80    2            18               3                2
+    2.1.81    2            18               3                2
 
 Version Log::
 
@@ -79,6 +105,7 @@ Version Log::
         statusline: 2 sites, applied
         session-memory: 4 sites, unpatched (gate: lT)
         remember-skill: 2 sites, unpatched (gate: lT)
+        sm-compact: 2 sites, unpatched (gate: lT)
 
     2.1.80 (2026-03-24)
         statusline: 2 sites, applied
@@ -155,6 +182,24 @@ PATCHES: Sequence[PatchDef] = (
         new=b'("tengu_coral_fern",!0)',
         window=50,
         min_version='2.1.21',
+    ),
+    PatchDef(
+        name='sm-compact',
+        description='Use session memory for auto-compaction (no LLM summary call)',
+        anchor=b'tengu_sm_compact',
+        old=b'("tengu_sm_compact",!1)',
+        new=b'("tengu_sm_compact",!0)',
+        window=50,
+        min_version='2.0.64',
+    ),
+    PatchDef(
+        name='scratchpad',
+        description='Enable session-scoped scratchpad directory with auto-permissions',
+        anchor=b'tengu_scratch',
+        old=b'("tengu_scratch")',
+        new=b'||!0/*_scratch_*/',
+        window=50,
+        min_version='2.1.45',
     ),
 )
 

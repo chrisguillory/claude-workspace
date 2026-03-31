@@ -127,81 +127,6 @@ class SessionDeleteService:
         self.parser_service = SessionParserService()
         self._session_folder: Path | None = session_folder
 
-    def _get_session_dir(self) -> Path:
-        """
-        Get the session directory in ~/.claude/projects/.
-
-        If session_folder was provided directly, returns it.
-        Otherwise, computes from project_path via encoding.
-        """
-        if self._session_folder is not None:
-            return self._session_folder
-
-        assert self.project_path is not None  # Ensured by __init__ validation
-        encoded_path = encode_project_path(self.project_path)
-        return self.claude_sessions_dir / encoded_path
-
-    @asynccontextmanager
-    async def _atomic_deletion(self, backup_path: Path) -> AsyncGenerator[None]:
-        """
-        Error boundary ensuring atomic deletion with rollback on any failure.
-
-        This context manager provides strong exception safety:
-        - On ANY exception within the context, rollback is performed
-        - The original exception is always re-raised after cleanup
-        - Calling code decides how to handle specific exception types
-
-        The pattern separates error containment (this context manager) from
-        error handling (the calling code's try/except).
-
-        If backup cleanup fails after rollback, Python's exception chaining
-        preserves the original exception in __context__, visible in traceback.
-
-        Args:
-            backup_path: Path to backup file for rollback
-
-        Yields:
-            Nothing - just provides the error boundary
-
-        Raises:
-            Re-raises any exception after performing rollback
-        """
-        try:
-            yield
-        except asyncio.CancelledError:
-            # Task cancellation - still perform cleanup, then propagate
-            # Separate handling for clarity and potential future customization
-            logger.warning('Deletion cancelled, performing rollback...', exc_info=True)
-            try:
-                await self._rollback_from_backup(backup_path)
-                logger.info('Rollback completed after cancellation')
-            except Exception as rollback_error:
-                logger.error(f'Rollback failed during cancellation: {rollback_error}', exc_info=True)
-                # Keep backup for manual recovery
-            else:
-                # Rollback succeeded - remove backup
-                # No try/except: if unlink fails, original exception preserved via __context__
-                backup_path.unlink(missing_ok=True)
-            raise
-
-        except BaseException as original_exc:
-            # All other exceptions (including KeyboardInterrupt, SystemExit)
-            logger.error(f'Deletion failed: {original_exc}, performing rollback...', exc_info=True)
-            try:
-                await self._rollback_from_backup(backup_path)
-                logger.info('Rollback completed successfully')
-            except Exception as rollback_error:
-                logger.error(f'Rollback failed: {rollback_error}', exc_info=True)
-                # Keep backup for manual recovery
-                original_exc.add_note(f'Rollback failed: {rollback_error}')
-                original_exc.add_note(f'Backup preserved at: {backup_path}')
-            else:
-                # Rollback succeeded - remove backup
-                # No try/except: if unlink fails, original exception preserved via __context__
-                backup_path.unlink(missing_ok=True)
-                original_exc.add_note('Rollback completed successfully')
-            raise
-
     async def discover_artifacts(self, session_id: str) -> DeleteManifest:
         """
         Find all artifacts for a session with explicit file enumeration.
@@ -676,6 +601,81 @@ class SessionDeleteService:
             duration_ms=(end_time - start_time).total_seconds() * 1000,
             deleted_at=end_time,
         )
+
+    def _get_session_dir(self) -> Path:
+        """
+        Get the session directory in ~/.claude/projects/.
+
+        If session_folder was provided directly, returns it.
+        Otherwise, computes from project_path via encoding.
+        """
+        if self._session_folder is not None:
+            return self._session_folder
+
+        assert self.project_path is not None  # Ensured by __init__ validation
+        encoded_path = encode_project_path(self.project_path)
+        return self.claude_sessions_dir / encoded_path
+
+    @asynccontextmanager
+    async def _atomic_deletion(self, backup_path: Path) -> AsyncGenerator[None]:
+        """
+        Error boundary ensuring atomic deletion with rollback on any failure.
+
+        This context manager provides strong exception safety:
+        - On ANY exception within the context, rollback is performed
+        - The original exception is always re-raised after cleanup
+        - Calling code decides how to handle specific exception types
+
+        The pattern separates error containment (this context manager) from
+        error handling (the calling code's try/except).
+
+        If backup cleanup fails after rollback, Python's exception chaining
+        preserves the original exception in __context__, visible in traceback.
+
+        Args:
+            backup_path: Path to backup file for rollback
+
+        Yields:
+            Nothing - just provides the error boundary
+
+        Raises:
+            Re-raises any exception after performing rollback
+        """
+        try:
+            yield
+        except asyncio.CancelledError:
+            # Task cancellation - still perform cleanup, then propagate
+            # Separate handling for clarity and potential future customization
+            logger.warning('Deletion cancelled, performing rollback...', exc_info=True)
+            try:
+                await self._rollback_from_backup(backup_path)
+                logger.info('Rollback completed after cancellation')
+            except Exception as rollback_error:
+                logger.error(f'Rollback failed during cancellation: {rollback_error}', exc_info=True)
+                # Keep backup for manual recovery
+            else:
+                # Rollback succeeded - remove backup
+                # No try/except: if unlink fails, original exception preserved via __context__
+                backup_path.unlink(missing_ok=True)
+            raise
+
+        except BaseException as original_exc:
+            # All other exceptions (including KeyboardInterrupt, SystemExit)
+            logger.error(f'Deletion failed: {original_exc}, performing rollback...', exc_info=True)
+            try:
+                await self._rollback_from_backup(backup_path)
+                logger.info('Rollback completed successfully')
+            except Exception as rollback_error:
+                logger.error(f'Rollback failed: {rollback_error}', exc_info=True)
+                # Keep backup for manual recovery
+                original_exc.add_note(f'Rollback failed: {rollback_error}')
+                original_exc.add_note(f'Backup preserved at: {backup_path}')
+            else:
+                # Rollback succeeded - remove backup
+                # No try/except: if unlink fails, original exception preserved via __context__
+                backup_path.unlink(missing_ok=True)
+                original_exc.add_note('Rollback completed successfully')
+            raise
 
     async def _create_backup(self, session_id: str) -> str:
         """

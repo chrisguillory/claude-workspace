@@ -216,17 +216,6 @@ def discover_tool_results(project_folder: Path, session_id: str) -> DiscoveryRes
     return DiscoveryResult(files=files, directories=directories, unknown_files=unknown_files)
 
 
-def _raise_on_unknown(discovery: DiscoveryResult) -> None:
-    """Raise FileNotFoundError if any unknown files in discovery result."""
-    if discovery.unknown_files:
-        file_list = '\n  '.join(str(p) for p in discovery.unknown_files)
-        raise FileNotFoundError(
-            f'Found {len(discovery.unknown_files)} tool result file(s) with unknown extensions:\n  {file_list}\n\n'
-            f'Known extensions: {sorted(TOOL_RESULT_EXTENSIONS)}\n'
-            f'Claude Code may have changed. Update TOOL_RESULT_EXTENSIONS to handle new file types.'
-        )
-
-
 def collect_tool_results(project_folder: Path, session_id: str) -> ToolResultCollection:
     """
     Collect tool result files and directories for a session.
@@ -332,3 +321,14 @@ def write_tool_results(
             file_path.write_bytes(f.content)
 
     return collection.total_file_count
+
+
+def _raise_on_unknown(discovery: DiscoveryResult) -> None:
+    """Raise FileNotFoundError if any unknown files in discovery result."""
+    if discovery.unknown_files:
+        file_list = '\n  '.join(str(p) for p in discovery.unknown_files)
+        raise FileNotFoundError(
+            f'Found {len(discovery.unknown_files)} tool result file(s) with unknown extensions:\n  {file_list}\n\n'
+            f'Known extensions: {sorted(TOOL_RESULT_EXTENSIONS)}\n'
+            f'Claude Code may have changed. Update TOOL_RESULT_EXTENSIONS to handle new file types.'
+        )
