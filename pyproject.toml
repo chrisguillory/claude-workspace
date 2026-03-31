@@ -127,49 +127,13 @@ filterwarnings = [
 [tool.strict-typing-linter.per-file-ignores]
 # Test infrastructure
 "tests/**" = ["mutable-type", "loose-typing", "missing-all", "class-ordering"]
-"tests/hooks/test_approve_compound_bash.py" = ["ordering"]
-"tests/cc_lib/fake_lib.py" = ["ordering"]
-"tests/linters/test_suppression_rationale_linter.py" = ["ordering"]
 "tests/linters/edge_cases/**" = ["skip-file"]
-
-# Standalone scripts (no __all__, main() before classes, private helpers interleave)
-# Note: 'ordering' is a superset of class-ordering/missing-all/trailing-comma.
-# Listed explicitly for readability.
-"linters/**" = ["missing-all", "class-ordering", "ordering"]
-"hooks/**" = ["missing-all"]
-"scripts/**" = ["missing-all", "class-ordering", "ordering"]
-"plugins/**" = ["missing-all", "class-ordering"]
-
-# Standalone root scripts
-"uv-wrapper.py" = ["missing-all"]
 
 # MCP servers
 "mcp/document-search/bm25-rs/tests/**" = ["missing-all", "ordering"]
 
 # claude-session
-"mcp/claude-session/claude_session/cli/main.py" = ["missing-all", "ordering"]
-"mcp/claude-session/scripts/**" = ["missing-all", "class-ordering", "ordering", "mutable-type", "loose-typing"]
-"mcp/claude-session/claude_session/domain/models.py" = ["mutable-type"]
-"mcp/claude-session/claude_session/introspection.py" = ["mutable-type", "loose-typing"]
-"mcp/claude-session/claude_session/migrations.py" = ["mutable-type"]
-# Linter AST crash on complex annotations (task #63 — fix linter, not code)
-"mcp/claude-session/claude_session/schemas/cc_internal_api/feature_flags.py" = ["skip-file"]
-"mcp/claude-session/claude_session/schemas/cc_internal_api/statsig.py" = ["skip-file"]
-"mcp/claude-session/claude_session/schemas/cc_internal_api/telemetry.py" = ["mutable-type", "loose-typing"]
-"mcp/claude-session/claude_session/schemas/session/models.py" = ["skip-file"]  # linter AST crash
-"mcp/claude-session/scripts/validate_captures.py" = ["skip-file"]  # linter AST crash
-"mcp/claude-session/scripts/validate_models.py" = ["skip-file"]  # linter AST crash
-# claude-session: ordering — composite-first, call-graph order, private helpers near callers
-"mcp/claude-session/claude_session/mcp/server.py" = ["ordering"]
-"mcp/claude-session/claude_session/schemas/captures/base.py" = ["ordering"]
-"mcp/claude-session/claude_session/schemas/captures/datadog.py" = ["ordering"]
-"mcp/claude-session/claude_session/schemas/captures/loader.py" = ["ordering"]
-"mcp/claude-session/claude_session/services/archive.py" = ["ordering"]
-"mcp/claude-session/claude_session/services/artifacts/tool_results.py" = ["ordering"]
-"mcp/claude-session/claude_session/services/delete.py" = ["ordering"]
-"mcp/claude-session/claude_session/services/info.py" = ["ordering"]
-"mcp/claude-session/claude_session/services/restore.py" = ["ordering"]
-"mcp/claude-session/claude_session/storage/gist.py" = ["ordering"]
+"mcp/claude-session/scripts/**" = ["mutable-type", "loose-typing", "tuple-field"]
 
 [tool.exception-safety-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
@@ -178,6 +142,9 @@ filterwarnings = [
 "tests/linters/edge_cases/**" = ["skip-file"]
 
 [tool.suppression-rationale-linter.per-file-ignores]
+"tests/linters/edge_cases/**" = ["skip-file"]
+
+[tool.shebang-check.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
 # -- Development Dependencies -------------------------------------------------

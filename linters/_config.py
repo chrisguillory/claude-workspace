@@ -11,6 +11,14 @@ matching pre-commit hook IDs, while filenames use underscores
 
 from __future__ import annotations
 
+__all__ = [
+    'find_config',
+    'find_python_files',
+    'get_git_ignored_files',
+    'get_per_file_ignored_codes',
+    'load_per_file_ignores',
+]
+
 import subprocess
 import tomllib
 from collections.abc import Mapping, Sequence, Set

@@ -193,35 +193,6 @@ class SessionArchiveService:
         # Otherwise, computed lazily from project_path
         self._project_folder: Path | None = session_folder
 
-    def _get_project_folder(self) -> Path:
-        """
-        Get the project folder in ~/.claude/projects/.
-
-        Computes and caches the encoded project path. This is the directory
-        containing session JSONL files for this project.
-
-        Returns:
-            Path to project folder
-
-        Raises:
-            FileNotFoundError: If project folder not found
-        """
-        if self._project_folder is not None:
-            return self._project_folder
-
-        assert self.project_path is not None  # Ensured by __init__ validation
-        encoded_project = encode_path(self.project_path)
-        project_folders = list(self.claude_sessions_dir.glob('*'))
-
-        for folder in project_folders:
-            if folder.name.startswith(encoded_project):
-                self._project_folder = folder
-                return folder
-
-        raise FileNotFoundError(
-            f'Could not find session folder for project {self.project_path} in {self.claude_sessions_dir}'
-        )
-
     async def create_archive(
         self,
         storage: StorageBackend,
@@ -451,6 +422,35 @@ class SessionArchiveService:
             file_count=len(session_files),
             files=file_metadata,
             custom_title=custom_title,
+        )
+
+    def _get_project_folder(self) -> Path:
+        """
+        Get the project folder in ~/.claude/projects/.
+
+        Computes and caches the encoded project path. This is the directory
+        containing session JSONL files for this project.
+
+        Returns:
+            Path to project folder
+
+        Raises:
+            FileNotFoundError: If project folder not found
+        """
+        if self._project_folder is not None:
+            return self._project_folder
+
+        assert self.project_path is not None  # Ensured by __init__ validation
+        encoded_project = encode_path(self.project_path)
+        project_folders = list(self.claude_sessions_dir.glob('*'))
+
+        for folder in project_folders:
+            if folder.name.startswith(encoded_project):
+                self._project_folder = folder
+                return folder
+
+        raise FileNotFoundError(
+            f'Could not find session folder for project {self.project_path} in {self.claude_sessions_dir}'
         )
 
     async def _discover_session_files(self, project_folder: Path) -> Sequence[Path]:

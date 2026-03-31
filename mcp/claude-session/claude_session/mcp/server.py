@@ -802,6 +802,14 @@ def register_tools(state: ServerState) -> None:
         )
 
 
+# -- Server Entry Point --------------------------------------------------------
+
+
+def main() -> None:
+    """Run the MCP server."""
+    server.run()
+
+
 # -- Private Helpers -----------------------------------------------------------
 
 
@@ -913,14 +921,6 @@ def _get_github_token() -> str | None:
         return result.stdout.strip()
 
     return None
-
-
-# -- Server Entry Point --------------------------------------------------------
-
-
-def main() -> None:
-    """Run the MCP server."""
-    server.run()
 
 
 if __name__ == '__main__':
