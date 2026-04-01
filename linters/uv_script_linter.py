@@ -3,26 +3,26 @@
 # requires-python = ">=3.13"
 # dependencies = []
 # ///
-"""Enforce uv run shebangs and PEP 723 dependency formatting.
+"""Lint uv script shebangs and PEP 723 inline metadata.
 
 Checks shebangs and inline script metadata for common misconfigurations.
-Only flags files that HAVE shebangs (SHB001/SHB002) or PEP 723 blocks (SHB003).
+Only flags files that HAVE shebangs (UVS001/UVS002) or PEP 723 blocks (UVS003).
 
 Rules:
-    SHB001 bare-python-shebang    Shebang uses python directly instead of uv run
-    SHB002 missing-script-flag    Shebang has uv run with PEP 723 metadata but no --script
-    SHB003 deps-format            PEP 723 dependencies not in canonical format
+    UVS001 bare-python-shebang    Shebang uses python directly instead of uv run
+    UVS002 missing-script-flag    Shebang has uv run with PEP 723 metadata but no --script
+    UVS003 deps-format            PEP 723 dependencies not in canonical format
                                   (one-per-line, trailing comma, alphabetically sorted)
 
 Escape hatches:
     Per-file-ignores in pyproject.toml:
-        [tool.shebang-check.per-file-ignores]
+        [tool.uv-script-linter.per-file-ignores]
         "tests/linters/edge_cases/**" = ["skip-file"]
 
 Usage:
-    ./linters/shebang_check.py                    # Check current directory
-    ./linters/shebang_check.py <files>            # Check specific files
-    ./linters/shebang_check.py src/               # Check specific directory
+    ./linters/uv_script_linter.py                    # Check current directory
+    ./linters/uv_script_linter.py <files>            # Check specific files
+    ./linters/uv_script_linter.py src/               # Check specific directory
 
 Exit codes:
     0 - No violations found
@@ -40,7 +40,7 @@ from pathlib import Path
 
 from _config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
 
-TOOL_NAME = 'shebang-check'
+TOOL_NAME = 'uv-script-linter'
 
 # Package name extraction from a dependency string (strips version specifiers, extras, markers).
 PACKAGE_NAME_RE = re.compile(r'([A-Za-z0-9][-A-Za-z0-9_.]*)')
@@ -129,14 +129,14 @@ def main() -> int:
                 total_violations += 1
 
     if total_violations:
-        print(f'\nFound {total_violations} shebang violation(s).')
+        print(f'\nFound {total_violations} violation(s).')
     return 1 if total_violations else 0
 
 
 def parse_args() -> argparse.Namespace:
     """Build and parse CLI arguments."""
     parser = argparse.ArgumentParser(
-        description='Check that shebangs use uv run instead of bare python.',
+        description='Lint uv script shebangs and PEP 723 inline metadata.',
     )
     parser.add_argument(
         'paths',
@@ -176,19 +176,19 @@ def parse_args() -> argparse.Namespace:
 def check_file(path: Path, content: str) -> Sequence[Violation]:
     """Check a single file for shebang and PEP 723 violations.
 
-    SHB001/SHB002 are gated on shebang presence.
-    SHB003 runs on any file with a PEP 723 block.
+    UVS001/UVS002 are gated on shebang presence.
+    UVS003 runs on any file with a PEP 723 block.
     """
     first_line = content.split('\n', 1)[0]
     has_shebang = first_line.startswith('#!')
     violations: list[Violation] = []
 
     if has_shebang:
-        # SHB001: bare python shebang
+        # UVS001: bare python shebang
         if 'python' in first_line and 'uv run' not in first_line:
             violations.append(
                 Violation(
-                    code='SHB001',
+                    code='UVS001',
                     path=path,
                     line=1,
                     source_line=first_line,
@@ -197,12 +197,12 @@ def check_file(path: Path, content: str) -> Sequence[Violation]:
                 )
             )
 
-        # SHB002: uv run with PEP 723 metadata but missing --script
-        if 'uv run' in first_line and '--script' not in first_line:
+        # UVS002: uv run with PEP 723 metadata but missing --script
+        if 'uv run' in first_line and '--script' not in first_line.split():
             if extract_pep723_block(content) is not None:
                 violations.append(
                     Violation(
-                        code='SHB002',
+                        code='UVS002',
                         path=path,
                         line=1,
                         source_line=first_line,
@@ -211,7 +211,7 @@ def check_file(path: Path, content: str) -> Sequence[Violation]:
                     )
                 )
 
-    # SHB003: dependency formatting (not gated on shebang)
+    # UVS003: dependency formatting (not gated on shebang)
     block = extract_pep723_block(content)
     if block is not None:
         dep_violation = check_deps_format(path, block)
@@ -253,7 +253,7 @@ def extract_pep723_block(content: str) -> Sequence[tuple[int, str]] | None:
     return None
 
 
-# -- SHB003: Dependency Format Checking ---------------------------------------
+# -- UVS003: Dependency Format ------------------------------------------------
 
 
 def dep_sort_key(dep: str) -> str:
@@ -263,7 +263,7 @@ def dep_sort_key(dep: str) -> str:
 
 
 def check_deps_format(path: Path, block_lines: Sequence[tuple[int, str]]) -> Violation | None:
-    """Check SHB003: dependency formatting within a PEP 723 block.
+    """Check UVS003: dependency formatting within a PEP 723 block.
 
     Checks three sub-concerns (reports the most fundamental violation):
     1. One dep per line (not single-line array)
@@ -279,7 +279,7 @@ def check_deps_format(path: Path, block_lines: Sequence[tuple[int, str]]) -> Vio
             if re.match(r'^#\s*dependencies\s*=\s*\[\s*\]\s*$', stripped):
                 return None  # Empty deps, fine
             return Violation(
-                code='SHB003',
+                code='UVS003',
                 path=path,
                 line=line_num,
                 source_line=raw_line.rstrip(),
@@ -320,7 +320,7 @@ def check_deps_format(path: Path, block_lines: Sequence[tuple[int, str]]) -> Vio
     last_dep_stripped = dep_lines[-1][1].strip()
     if not last_dep_stripped.rstrip().endswith(','):
         return Violation(
-            code='SHB003',
+            code='UVS003',
             path=path,
             line=dep_lines[-1][0],
             source_line=dep_lines[-1][1].rstrip(),
@@ -334,7 +334,7 @@ def check_deps_format(path: Path, block_lines: Sequence[tuple[int, str]]) -> Vio
         for i, (actual, expected) in enumerate(zip(dep_strings, sorted_deps)):
             if actual != expected:
                 return Violation(
-                    code='SHB003',
+                    code='UVS003',
                     path=path,
                     line=dep_lines[i][0],
                     source_line=dep_lines[i][1].rstrip(),

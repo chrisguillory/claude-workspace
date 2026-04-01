@@ -141,7 +141,7 @@ filterwarnings = [
 [tool.suppression-rationale-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
-[tool.shebang-check.per-file-ignores]
+[tool.uv-script-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
 # -- Development Dependencies -------------------------------------------------
