@@ -19,9 +19,9 @@ from typing import Any
 
 import uuid6
 import zstandard
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.introspection import get_path_fields
-from claude_session.paths import encode_path
 from claude_session.schemas.operations.archive import (
     SessionArchiveV1,
     SessionArchiveV2,
@@ -31,8 +31,6 @@ from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.artifacts import (
-    TASKS_DIR,
-    TODOS_DIR,
     ToolResultCollection,
     ToolResultDirectory,
     ToolResultDirectoryFile,
@@ -41,6 +39,8 @@ from claude_session.services.artifacts import (
     generate_agent_id_mapping,
     generate_clone_custom_title,
     generate_clone_slug,
+    get_tasks_dir,
+    get_todos_dir,
     write_jsonl,
     write_plan_files,
     write_task_metadata,
@@ -141,7 +141,7 @@ class SessionRestoreService:
             project_path: Current project directory for restoration
         """
         self.project_path = project_path.resolve()
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
     async def restore_archive(
         self,
@@ -221,7 +221,7 @@ class SessionRestoreService:
 
         # Get target directory and plans directory
         target_dir = self._get_session_directory()
-        plans_dir = Path.home() / '.claude' / 'plans'
+        plans_dir = get_claude_config_home_dir() / 'plans'
 
         # =========================================================================
         # FAIL-FAST: Pre-compute ALL output paths and check for existence
@@ -262,11 +262,11 @@ class SessionRestoreService:
             for todo in archive.todos:
                 if in_place:
                     old_filename = f'{archive.session_id}-agent-{todo.agent_id}.json'
-                    all_output_paths.append(TODOS_DIR / old_filename)
+                    all_output_paths.append(get_todos_dir() / old_filename)
                 else:
                     new_agent_id = agent_id_mapping.get(todo.agent_id, todo.agent_id)
                     new_filename = f'{new_session_id}-agent-{new_agent_id}.json'
-                    all_output_paths.append(TODOS_DIR / new_filename)
+                    all_output_paths.append(get_todos_dir() / new_filename)
 
         # 5. Plan files
         if archive.plan_files:
@@ -277,9 +277,9 @@ class SessionRestoreService:
 
         # 6. Tasks
         if archive.tasks:
-            all_output_paths.extend(TASKS_DIR / new_session_id / f'{task.id}.json' for task in archive.tasks)
+            all_output_paths.extend(get_tasks_dir() / new_session_id / f'{task.id}.json' for task in archive.tasks)
         if archive.task_metadata:
-            all_output_paths.extend(TASKS_DIR / new_session_id / filename for filename in archive.task_metadata)
+            all_output_paths.extend(get_tasks_dir() / new_session_id / filename for filename in archive.task_metadata)
 
         # Check ALL paths before writing ANYTHING
         existing_files = [p for p in all_output_paths if p.exists()]
@@ -547,7 +547,7 @@ class SessionRestoreService:
 
     def _get_session_directory(self) -> Path:
         """Get the session directory for the current project."""
-        encoded = encode_path(self.project_path)
+        encoded = encode_project_path(self.project_path)
         return self.claude_sessions_dir / encoded
 
 

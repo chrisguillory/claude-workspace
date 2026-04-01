@@ -19,7 +19,8 @@ When cloning a clone, we extract the base slug first to avoid accumulation:
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence, Set
-from pathlib import Path
+
+from cc_lib.utils import get_claude_config_home_dir
 
 from claude_session.schemas.session import (
     ApiErrorSystemRecord,
@@ -110,7 +111,7 @@ def collect_plan_files(slugs: Set[str]) -> Mapping[str, str]:
     Returns:
         Mapping of slug -> file content (only for existing files)
     """
-    plans_dir = Path.home() / '.claude' / 'plans'
+    plans_dir = get_claude_config_home_dir() / 'plans'
     plan_files: dict[str, str] = {}
     for slug in slugs:
         plan_path = plans_dir / f'{slug}.md'
@@ -158,7 +159,7 @@ def write_plan_files(plans: Iterable[tuple[str, str]], *, exist_ok: bool = False
     Returns:
         Number of files written
     """
-    plans_dir = Path.home() / '.claude' / 'plans'
+    plans_dir = get_claude_config_home_dir() / 'plans'
     count = 0
     for slug, content in plans:
         if count == 0:

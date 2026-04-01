@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from cc_lib.utils import get_claude_config_home_dir
 from filelock import FileLock
 
 from claude_session.config.base import ensure_data_dir
@@ -339,7 +340,7 @@ class LineageService:
         Returns:
             Mapping of session_id -> Path for files found locally.
         """
-        claude_projects = Path.home() / '.claude' / 'projects'
+        claude_projects = get_claude_config_home_dir() / 'projects'
         if not claude_projects.exists():
             return {}
 

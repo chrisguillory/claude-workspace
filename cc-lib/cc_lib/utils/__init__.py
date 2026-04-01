@@ -5,12 +5,14 @@ from __future__ import annotations
 __all__ = [
     'Timer',
     'encode_project_path',
+    'get_claude_config_home_dir',
     'humanize_seconds',
     'load_module_from_path',
     'temporary_module',
 ]
 
 import importlib.util
+import os
 import sys
 import time
 import unittest.mock
@@ -65,6 +67,23 @@ def encode_project_path(path: Path | str) -> str:
     for char in ['/', '.', ' ', '~', '_']:
         result = result.replace(char, '-')
     return result
+
+
+def get_claude_config_home_dir() -> Path:
+    """Return Claude Code's config/data root directory.
+
+    Mirrors Claude Code's getClaudeConfigHomeDir() (src/utils/envUtils.ts).
+    When CLAUDE_CONFIG_DIR is set, ALL subdirectories (projects/, plans/,
+    todos/, tasks/, debug/, session-env/) live under it instead of ~/.claude.
+
+    Resolves custom paths to catch relative paths and typos early — we're
+    downstream from Claude Code, so fail-fast on bad input here rather
+    than producing cryptic "session not found" errors later.
+    """
+    config_dir = os.environ.get('CLAUDE_CONFIG_DIR')
+    if config_dir:
+        return Path(config_dir).resolve()
+    return Path.home() / '.claude'
 
 
 def humanize_seconds(seconds: float) -> str:

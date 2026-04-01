@@ -15,14 +15,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cc_lib.utils import get_claude_config_home_dir
+
 __all__ = [
-    'SESSION_ENV_DIR',
     'create_session_env_dir',
+    'get_session_env_dir',
     'validate_session_env_empty',
 ]
 
 
-SESSION_ENV_DIR = Path.home() / '.claude' / 'session-env'
+def get_session_env_dir() -> Path:
+    """Return session-env directory, respecting CLAUDE_CONFIG_DIR."""
+    return get_claude_config_home_dir() / 'session-env'
 
 
 def validate_session_env_empty(session_id: str) -> None:
@@ -45,7 +49,7 @@ def validate_session_env_empty(session_id: str) -> None:
             This error indicates Claude Code has started using this
             directory and collection/restoration logic must be implemented.
     """
-    session_env_path = SESSION_ENV_DIR / session_id
+    session_env_path = get_session_env_dir() / session_id
 
     if not session_env_path.exists():
         return
@@ -75,6 +79,6 @@ def create_session_env_dir(session_id: str) -> Path:
     Returns:
         Path to created (or existing) directory
     """
-    session_env_path = SESSION_ENV_DIR / session_id
+    session_env_path = get_session_env_dir() / session_id
     session_env_path.mkdir(parents=True, exist_ok=True)
     return session_env_path

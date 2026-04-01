@@ -30,9 +30,10 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
+
 from claude_session.config.base import DATA_DIR
 from claude_session.exceptions import NativeSessionMoveError, SameProjectMoveError
-from claude_session.paths import encode_path
 from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.schemas.operations.move import MoveResult
 from claude_session.schemas.session import SessionRecord
@@ -86,7 +87,7 @@ class SessionMoveService:
         self.target_project_path = target_project_path.resolve()
         self.discovery_service = discovery_service or SessionDiscoveryService()
         self.parser_service = parser_service or SessionParserService()
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
     async def move_session(
         self,
@@ -386,7 +387,7 @@ class SessionMoveService:
 
     def _get_target_directory(self) -> Path:
         """Compute the target project directory under ~/.claude/projects/."""
-        encoded = encode_path(self.target_project_path)
+        encoded = encode_project_path(self.target_project_path)
         return self.claude_sessions_dir / encoded
 
     async def _resolve_session(self, session_id_or_prefix: str) -> SessionInfo:
