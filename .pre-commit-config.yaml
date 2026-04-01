@@ -68,10 +68,10 @@ repos:
         pass_filenames: false
         always_run: true
 
-      - id: shebang-check
-        name: shebang-check
-        description: Ensure shebangs use uv run, not bare python
-        entry: ./linters/shebang_check.py .
+      - id: uv-script-linter
+        name: uv-script-linter
+        description: Lint uv script shebangs and PEP 723 inline metadata
+        entry: ./linters/uv_script_linter.py .
         language: system
         pass_filenames: false
         always_run: true
