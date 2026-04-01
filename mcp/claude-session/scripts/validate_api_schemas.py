@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --no-project
+#!/usr/bin/env -S uv run --no-project --script
 # /// script
 # dependencies = ["pydantic>=2.0.0", "anthropic>=0.40.0", "lazy-object-proxy>=1.10.0"]
 # ///

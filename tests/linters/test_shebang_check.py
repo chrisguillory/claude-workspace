@@ -36,7 +36,7 @@ def run_linter(*paths: Path, no_config: bool = False) -> subprocess.CompletedPro
     )
 
 
-# -- Should pass (exit 0) ----------------------------------------------------
+# -- SHB001: Should pass (exit 0) ---------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -49,13 +49,13 @@ def run_linter(*paths: Path, no_config: bool = False) -> subprocess.CompletedPro
     ],
     ids=lambda f: f.removesuffix('.py'),
 )
-def test_good_shebangs(fixture: str) -> None:
+def test_shb001_good(fixture: str) -> None:
     """Files with valid shebangs (or no shebang) should pass."""
     result = run_linter(EDGE_CASES_DIR / fixture, no_config=True)
     assert result.returncode == 0, f'Expected pass, got:\n{result.stdout}'
 
 
-# -- Should fail (exit 1) ----------------------------------------------------
+# -- SHB001: Should fail (exit 1) ---------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -67,11 +67,51 @@ def test_good_shebangs(fixture: str) -> None:
     ],
     ids=lambda f: f.removesuffix('.py'),
 )
-def test_bad_shebangs(fixture: str) -> None:
-    """Files with bare python shebangs should flag."""
+def test_shb001_bad(fixture: str) -> None:
+    """Files with bare python shebangs should flag SHB001."""
     result = run_linter(EDGE_CASES_DIR / fixture, no_config=True)
     assert result.returncode == 1, f'Expected failure, got:\n{result.stdout}'
+    assert 'SHB001' in result.stdout
     assert 'should use uv run' in result.stdout
+
+
+# -- SHB002: Should pass (exit 0) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'fixture',
+    [
+        'shebang_good_script_flag.py',
+        'shebang_good_no_project_script.py',
+        'shebang_good_uv_no_metadata.py',
+        'shebang_good_non_script_block.py',
+    ],
+    ids=lambda f: f.removesuffix('.py'),
+)
+def test_shb002_good(fixture: str) -> None:
+    """Files with --script or no PEP 723 block should pass."""
+    result = run_linter(EDGE_CASES_DIR / fixture, no_config=True)
+    assert result.returncode == 0, f'Expected pass, got:\n{result.stdout}'
+
+
+# -- SHB002: Should fail (exit 1) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'fixture',
+    [
+        'shebang_bad_no_script_with_metadata.py',
+        'shebang_bad_bare_uv_with_metadata.py',
+        'shebang_bad_quiet_no_script.py',
+    ],
+    ids=lambda f: f.removesuffix('.py'),
+)
+def test_shb002_bad(fixture: str) -> None:
+    """Files with uv run + PEP 723 metadata but no --script should flag SHB002."""
+    result = run_linter(EDGE_CASES_DIR / fixture, no_config=True)
+    assert result.returncode == 1, f'Expected failure, got:\n{result.stdout}'
+    assert 'SHB002' in result.stdout
+    assert '--script' in result.stdout
 
 
 # -- Whole-repo scan ----------------------------------------------------------

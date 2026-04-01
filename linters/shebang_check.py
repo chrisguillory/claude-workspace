@@ -11,6 +11,7 @@ without shebangs are not entry points and are not checked.
 
 Rules:
     SHB001 bare-python-shebang  Shebang uses python directly instead of uv run
+    SHB002 missing-script-flag  Shebang has uv run with PEP 723 metadata but no --script
 
 Escape hatches:
     Per-file-ignores in pyproject.toml:
@@ -30,28 +31,93 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import re
 import sys
-from collections.abc import Set
+from collections.abc import Sequence, Set
 from pathlib import Path
 
 from _config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
 
 TOOL_NAME = 'shebang-check'
 
+# PEP 723 detection: opening marker must be exactly "# /// script" on its own line.
+_SCRIPT_BLOCK_OPEN = re.compile(r'^# /// script\s*$', re.MULTILINE)
 
-def check_file(path: Path) -> bool:
-    """Check a single file. Returns True if violation found."""
-    try:
-        first_line = path.read_text(encoding='utf-8').split('\n', 1)[0]
-    except (OSError, UnicodeDecodeError):
-        return False
-    if not first_line.startswith('#!'):
-        return False
-    if 'python' in first_line and 'uv run' not in first_line:
-        print(f'{path}:1: shebang uses python directly, should use uv run')
-        print(f'    {first_line}')
-        return True
+
+@dataclasses.dataclass(frozen=True)
+class Violation:
+    """Structured violation for per-file-ignore filtering in main()."""
+
+    code: str
+    path: Path
+    shebang: str
+    message: str
+    fix: str
+
+
+def has_pep723_script_block(content: str) -> bool:
+    """Check if file contains a valid PEP 723 script metadata block.
+
+    Per the spec, the block opens with ``# /// script``, continues with
+    comment lines (``#`` prefix), and closes with ``# ///``.
+    """
+    for match in _SCRIPT_BLOCK_OPEN.finditer(content):
+        rest = content[match.end() :]
+        for line in rest.split('\n'):
+            stripped = line.strip()
+            if stripped == '# ///':
+                return True
+            if stripped == '' or stripped.startswith('#'):
+                continue
+            break  # Non-comment, non-empty line: block is unclosed/invalid
     return False
+
+
+def check_file(path: Path, content: str) -> Sequence[Violation]:
+    """Check a single file for shebang violations.
+
+    Returns structured violations so main() can filter by per-file-ignores.
+    """
+    first_line = content.split('\n', 1)[0]
+    if not first_line.startswith('#!'):
+        return []
+
+    violations: list[Violation] = []
+
+    # SHB001: bare python shebang
+    if 'python' in first_line and 'uv run' not in first_line:
+        violations.append(
+            Violation(
+                code='SHB001',
+                path=path,
+                shebang=first_line,
+                message='shebang uses python directly, should use uv run',
+                fix="Use '#!/usr/bin/env -S uv run --script' or similar",
+            )
+        )
+
+    # SHB002: uv run with PEP 723 metadata but missing --script
+    if 'uv run' in first_line and '--script' not in first_line:
+        if has_pep723_script_block(content):
+            violations.append(
+                Violation(
+                    code='SHB002',
+                    path=path,
+                    shebang=first_line,
+                    message='shebang has `uv run` with PEP 723 metadata but missing `--script` flag',
+                    fix='Add `--script` to the shebang',
+                )
+            )
+
+    return violations
+
+
+def print_violation(v: Violation) -> None:
+    """Print a violation in the standard linter output format."""
+    print(f'{v.path}:1: {v.code} {v.message}')
+    print(f'    {v.shebang}')
+    print(f'    Fix: {v.fix}')
 
 
 def main() -> int:
@@ -76,7 +142,7 @@ def main() -> int:
     explicit_config = Path(args.config) if args.config else None
 
     # Check all files
-    violations = 0
+    total_violations = 0
     for filepath in files:
         # Per-file-ignores from pyproject.toml
         per_file_codes: Set[str] = set()
@@ -102,11 +168,22 @@ def main() -> int:
         if skip_file_via_config:
             continue
 
-        violations += check_file(filepath)
+        try:
+            content = filepath.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError):
+            continue
 
-    if violations:
-        print(f'\nFound {violations} shebang violation(s).')
-    return 1 if violations else 0
+        violations = check_file(filepath, content)
+
+        # Filter by per-file-ignores
+        for v in violations:
+            if v.code not in per_file_codes:
+                print_violation(v)
+                total_violations += 1
+
+    if total_violations:
+        print(f'\nFound {total_violations} shebang violation(s).')
+    return 1 if total_violations else 0
 
 
 def parse_args() -> argparse.Namespace:
