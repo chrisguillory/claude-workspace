@@ -1,6 +1,10 @@
-#!/usr/bin/env -S uv run --no-project
+#!/usr/bin/env -S uv run --no-project --script
 # /// script
-# dependencies = ["pydantic"]
+# requires-python = ">=3.13"
+# dependencies = ["pydantic", "cc_lib"]
+#
+# [tool.uv.sources]
+# cc_lib = { path = "../../../cc-lib/", editable = true }
 # ///
 
 """
@@ -46,6 +50,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pydantic
+from cc_lib.utils import get_claude_config_home_dir
 
 # -- Terminal Colors -----------------------------------------------------------
 
@@ -122,7 +127,7 @@ class DaemonContext(StrictModel):
 
 def find_session(session_id_or_prefix: str) -> Path:
     """Find a session JSONL by ID or prefix using rg."""
-    claude_dir = Path.home() / '.claude' / 'projects'
+    claude_dir = get_claude_config_home_dir() / 'projects'
 
     if not claude_dir.exists():
         print(f'{Colors.RED}Error:{Colors.RESET} {claude_dir} does not exist')

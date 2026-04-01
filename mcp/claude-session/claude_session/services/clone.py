@@ -14,15 +14,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import uuid6
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
-from claude_session.paths import encode_path
 from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.artifacts import (
-    TASKS_DIR,
-    TODOS_DIR,
     collect_agent_file_info,
     collect_plan_files,
     collect_task_metadata,
@@ -36,6 +34,8 @@ from claude_session.services.artifacts import (
     generate_agent_id_mapping,
     generate_clone_custom_title,
     generate_clone_slug,
+    get_tasks_dir,
+    get_todos_dir,
     iter_tasks,
     transform_todo_filename,
     validate_session_env_empty,
@@ -86,7 +86,7 @@ class SessionCloneService:
         self.target_project_path = target_project_path.resolve()
         self.discovery_service = discovery_service or SessionDiscoveryService()
         self.parser_service = parser_service or SessionParserService()
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
     async def clone(self, source_session_id: str, translate_paths: bool = True) -> RestoreResult:
         """
@@ -191,7 +191,7 @@ class SessionCloneService:
 
         # Get target directory and plans directory
         target_dir = self._get_session_directory()
-        plans_dir = Path.home() / '.claude' / 'plans'
+        plans_dir = get_claude_config_home_dir() / 'plans'
 
         # =========================================================================
         # FAIL-FAST: Pre-compute ALL output paths and check for existence
@@ -226,7 +226,7 @@ class SessionCloneService:
         if todos:
             for old_filename in todos:
                 new_filename = transform_todo_filename(old_filename, session_info.session_id, new_session_id)
-                all_output_paths.append(TODOS_DIR / new_filename)
+                all_output_paths.append(get_todos_dir() / new_filename)
 
         # 5. Plan files
         if plan_files:
@@ -234,9 +234,9 @@ class SessionCloneService:
 
         # 6. Tasks
         if tasks:
-            all_output_paths.extend(TASKS_DIR / new_session_id / f'{task.id}.json' for task in tasks)
+            all_output_paths.extend(get_tasks_dir() / new_session_id / f'{task.id}.json' for task in tasks)
         if task_metadata:
-            all_output_paths.extend(TASKS_DIR / new_session_id / filename for filename in task_metadata)
+            all_output_paths.extend(get_tasks_dir() / new_session_id / filename for filename in task_metadata)
 
         # Check ALL paths before writing ANYTHING
         existing_files = [p for p in all_output_paths if p.exists()]
@@ -483,5 +483,5 @@ class SessionCloneService:
 
     def _get_session_directory(self) -> Path:
         """Get the session directory for the target project."""
-        encoded = encode_path(self.target_project_path)
+        encoded = encode_project_path(self.target_project_path)
         return self.claude_sessions_dir / encoded

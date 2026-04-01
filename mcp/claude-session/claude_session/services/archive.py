@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 import zstandard as zstd
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.config.mcp import settings
-from claude_session.paths import encode_path
 from claude_session.schemas.operations.archive import (
     ARCHIVE_FORMAT_VERSION,
     AgentFileEntry,
@@ -187,7 +187,7 @@ class SessionArchiveService:
         self.claude_pid = claude_pid
 
         # Claude stores sessions here
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
         # If session_folder provided, use it directly (no encoding needed)
         # Otherwise, computed lazily from project_path
@@ -441,7 +441,7 @@ class SessionArchiveService:
             return self._project_folder
 
         assert self.project_path is not None  # Ensured by __init__ validation
-        encoded_project = encode_path(self.project_path)
+        encoded_project = encode_project_path(self.project_path)
         project_folders = list(self.claude_sessions_dir.glob('*'))
 
         for folder in project_folders:

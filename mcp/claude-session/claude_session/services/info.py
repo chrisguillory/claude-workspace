@@ -18,6 +18,7 @@ from pathlib import Path
 import psutil
 import pydantic
 from cc_lib.session_tracker import Session, SessionDatabase
+from cc_lib.utils import get_claude_config_home_dir
 
 from claude_session.schemas.operations.context import SessionContext
 from claude_session.schemas.operations.discovery import SessionInfo
@@ -28,18 +29,14 @@ from claude_session.services.lineage import LineageService, get_machine_id
 from claude_session.services.version import get_version_from_process
 
 __all__ = [
-    'CLAUDE_DEBUG_DIR',
     'CLAUDE_WORKSPACE_SESSIONS',
     'CurrentSessionContext',
     'SessionInfoService',
 ]
 
 
-# Claude workspace sessions.json location
+# Claude workspace sessions.json location (our own data, NOT affected by CLAUDE_CONFIG_DIR)
 CLAUDE_WORKSPACE_SESSIONS = Path.home() / '.claude-workspace' / 'sessions.json'
-
-# Claude debug files location
-CLAUDE_DEBUG_DIR = Path.home() / '.claude' / 'debug'
 
 
 @dataclass
@@ -97,7 +94,7 @@ class SessionInfoService:
 
         # Construct paths
         session_file = session_folder / f'{full_session_id}.jsonl'
-        debug_file = CLAUDE_DEBUG_DIR / f'{full_session_id}.txt'
+        debug_file = get_claude_config_home_dir() / 'debug' / f'{full_session_id}.txt'
 
         # Get project path - need to extract from session file or use current context
         project_path = await self._get_project_path(session_file, full_session_id, current_context)

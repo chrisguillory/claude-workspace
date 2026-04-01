@@ -14,22 +14,22 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from cc_lib.utils import get_claude_config_home_dir
+
 from claude_session.schemas.session.models import Task
 
 __all__ = [
-    'TASKS_DIR',
     'TASK_METADATA_FILES',
     'TaskDirectoryContents',
     'classify_task_directory',
     'collect_task_metadata',
+    'get_tasks_dir',
     'iter_task_paths',
     'iter_tasks',
     'write_task_metadata',
     'write_tasks',
 ]
 
-
-TASKS_DIR = Path.home() / '.claude' / 'tasks'
 
 # Known metadata files in task directories (not task data)
 # .lock: process coordination file
@@ -50,6 +50,11 @@ class TaskDirectoryContents:
     unexpected_files: Sequence[Path]
 
 
+def get_tasks_dir() -> Path:
+    """Return tasks directory, respecting CLAUDE_CONFIG_DIR."""
+    return get_claude_config_home_dir() / 'tasks'
+
+
 def classify_task_directory(session_id: str) -> TaskDirectoryContents | None:
     """Classify all files in a task directory in a single pass.
 
@@ -64,7 +69,7 @@ def classify_task_directory(session_id: str) -> TaskDirectoryContents | None:
         Directory with task-old.json (unexpected):
             unexpected_files = [task-old.json]
     """
-    tasks_dir = TASKS_DIR / session_id
+    tasks_dir = get_tasks_dir() / session_id
     if not tasks_dir.exists():
         return None
 
@@ -138,7 +143,7 @@ def write_task_metadata(session_id: str, metadata: Mapping[str, str], *, exist_o
     if not metadata:
         return 0
 
-    tasks_dir = TASKS_DIR / session_id
+    tasks_dir = get_tasks_dir() / session_id
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
     for filename, content in metadata.items():
@@ -164,7 +169,7 @@ def write_tasks(session_id: str, tasks: Sequence[Task], *, exist_ok: bool = Fals
     if not tasks:
         return 0
 
-    tasks_dir = TASKS_DIR / session_id
+    tasks_dir = get_tasks_dir() / session_id
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
     for task in tasks:

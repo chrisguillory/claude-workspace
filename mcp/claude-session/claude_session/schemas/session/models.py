@@ -285,6 +285,8 @@ __all__ = [
     'WebSearchResultWrapper',
     'WebSearchToolInput',
     'WebSearchToolResult',
+    'WorktreeSessionData',
+    'WorktreeStateRecord',
     'WriteToolInput',
     'WriteToolResult',
     'validate_session_record',

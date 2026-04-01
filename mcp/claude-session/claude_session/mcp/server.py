@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from cc_lib.utils import get_claude_config_home_dir
 from mcp.server.fastmcp import Context, FastMCP
 
 from claude_session.exceptions import RunningSessionDeletionError, RunningSessionMoveError
@@ -848,12 +849,13 @@ def _find_claude_context() -> ClaudeContext:
     if not cwd:
         raise RuntimeError(f'Found Claude process (PID {pid}) but could not determine CWD')
 
-    # Verify by checking if Claude has .claude/ files open
+    # Verify by checking if Claude has config dir files open
     result = subprocess.run(['lsof', '-p', str(pid)], check=False, capture_output=True, text=True)
 
+    config_dir = str(get_claude_config_home_dir())
     claude_files = []
     for line in result.stdout.split('\n'):
-        if '.claude' in line:
+        if config_dir in line:
             parts = line.split()
             if len(parts) >= 9:
                 file_path = ' '.join(parts[8:])
@@ -862,7 +864,7 @@ def _find_claude_context() -> ClaudeContext:
     if not claude_files:
         raise RuntimeError(
             f'Found Claude process (PID {pid}) with CWD {cwd}, '
-            f'but no .claude/ files are open - may not be a Claude project'
+            f'but no {config_dir}/ files are open - may not be a Claude project'
         )
 
     return ClaudeContext(claude_pid=pid, project_dir=cwd)

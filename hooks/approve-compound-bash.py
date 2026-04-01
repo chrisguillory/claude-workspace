@@ -54,6 +54,7 @@ from cc_lib.schemas.hooks import (
     PreToolUseHookInput,
     PreToolUseHookOutput,
 )
+from cc_lib.utils import get_claude_config_home_dir
 
 
 class ApproveCompoundBashException(Exception):
@@ -184,7 +185,7 @@ def load_bash_prefixes(cwd: str) -> Set[str]:
     prefixes = set[str]()
 
     settings_paths = [
-        Path.home() / '.claude' / 'settings.json',
+        get_claude_config_home_dir() / 'settings.json',
         Path(cwd) / '.claude' / 'settings.json',
         Path(cwd) / '.claude' / 'settings.local.json',
     ]

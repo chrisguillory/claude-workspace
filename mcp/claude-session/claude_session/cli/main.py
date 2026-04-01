@@ -22,7 +22,7 @@ import httpx
 import typer
 from cc_lib.cli import add_completion_command, create_app, run_app
 from cc_lib.session_tracker import load_sessions
-from cc_lib.utils import encode_project_path
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.exceptions import ClaudeSessionError
 from claude_session.launcher import launch_claude_with_session
@@ -54,10 +54,18 @@ add_completion_command(app)
 def _configure_logging(
     ctx: typer.Context,
     verbose: bool = typer.Option(False, '--verbose', '-v', help='Show detailed progress'),
+    claude_dir: Path | None = typer.Option(
+        None,
+        '--claude-dir',
+        help='Claude Code config directory (default: ~/.claude)',
+        envvar='CLAUDE_CONFIG_DIR',
+    ),
 ) -> None:
     """Configure logging and show help when no command given."""
     level = logging.INFO if verbose else logging.WARNING
     logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
+    if claude_dir is not None:
+        os.environ['CLAUDE_CONFIG_DIR'] = str(claude_dir)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
 
@@ -762,7 +770,7 @@ async def _delete_async(
         info_service = SessionInfoService()
         project_filter: Path | None = None
         if project:
-            project_filter = Path.home() / '.claude' / 'projects' / encode_project_path(project.resolve())
+            project_filter = get_claude_config_home_dir() / 'projects' / encode_project_path(project.resolve())
         session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
         full_session_id = session_info.session_id
 

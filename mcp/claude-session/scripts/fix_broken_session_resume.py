@@ -1,6 +1,10 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
+# dependencies = ["cc_lib"]
+#
+# [tool.uv.sources]
+# cc_lib = { path = "../../../cc-lib/", editable = true }
 # ///
 """Fix broken `claude --resume` caused by orphan parentUuid pointers.
 
@@ -61,6 +65,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from cc_lib.utils import get_claude_config_home_dir
 
 # Must match DATA_DIR in claude_session/config/base.py.
 # Run any claude-session command first to trigger auto-migration from legacy path.
@@ -143,7 +149,7 @@ class AnalysisResult:
 
 def find_all_session_files() -> list[Path]:
     """Find all session JSONL files under ~/.claude/projects/."""
-    projects_dir = Path.home() / '.claude' / 'projects'
+    projects_dir = get_claude_config_home_dir() / 'projects'
     if not projects_dir.exists():
         return []
     results: list[Path] = []

@@ -38,7 +38,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
-from cc_lib.utils import encode_project_path
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.config.base import DATA_DIR
 from claude_session.exceptions import NativeSessionDeletionError
@@ -51,9 +51,6 @@ from claude_session.schemas.operations.delete import ArtifactFile, DeleteManifes
 from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts import (
-    SESSION_ENV_DIR,
-    TASKS_DIR,
-    TODOS_DIR,
     ToolResultCollection,
     ToolResultDirectory,
     ToolResultDirectoryFile,
@@ -62,6 +59,9 @@ from claude_session.services.artifacts import (
     create_session_env_dir,
     discover_tool_results,
     extract_slugs_from_records,
+    get_session_env_dir,
+    get_tasks_dir,
+    get_todos_dir,
     get_tool_results_dir,
     write_jsonl,
     write_plan_files,
@@ -123,7 +123,7 @@ class SessionDeleteService:
             raise ValueError('Either project_path or session_folder must be provided')
 
         self.project_path = project_path.resolve() if project_path else None
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
         self.parser_service = SessionParserService()
         self._session_folder: Path | None = session_folder
 
@@ -231,7 +231,7 @@ class SessionDeleteService:
         files_data = await self.parser_service.load_session_files(session_files)
         slugs = extract_slugs_from_records(files_data)
 
-        plans_dir = Path.home() / '.claude' / 'plans'
+        plans_dir = get_claude_config_home_dir() / 'plans'
         for slug in slugs:
             plan_path = plans_dir / f'{slug}.md'
             if plan_path.exists():
@@ -282,8 +282,8 @@ class SessionDeleteService:
             logger.info('Found %d tool result files', len(tool_result_paths))
 
         # 5. Todo files
-        if TODOS_DIR.exists():
-            for path in TODOS_DIR.glob(f'{session_id}-agent-*.json'):
+        if get_todos_dir().exists():
+            for path in get_todos_dir().glob(f'{session_id}-agent-*.json'):
                 size = path.stat().st_size
                 artifacts.append(
                     ArtifactFile(
@@ -327,14 +327,14 @@ class SessionDeleteService:
             unexpected_files.extend(str(path) for path in task_contents.unexpected_files)
 
             # Track directory for cleanup
-            tasks_session_dir = TASKS_DIR / session_id
+            tasks_session_dir = get_tasks_dir() / session_id
             directories_to_cleanup.append(str(tasks_session_dir))
 
         if task_file_paths:
             logger.info('Found %d task files and metadata', len(task_file_paths))
 
         # 7. Session-env - expected to be empty, any file is unexpected
-        session_env_dir = SESSION_ENV_DIR / session_id
+        session_env_dir = get_session_env_dir() / session_id
         if session_env_dir.exists():
             for path in session_env_dir.rglob('*'):
                 if path.is_file():
