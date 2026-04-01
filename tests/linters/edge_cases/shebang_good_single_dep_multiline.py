@@ -4,4 +4,4 @@
 #   "pydantic",
 # ]
 # ///
-"""Good shebang — has --no-project --script with PEP 723 metadata."""
+"""Good — single dep on its own line with trailing comma."""

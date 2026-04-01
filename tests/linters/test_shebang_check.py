@@ -114,6 +114,45 @@ def test_shb002_bad(fixture: str) -> None:
     assert '--script' in result.stdout
 
 
+# -- SHB003: Should pass (exit 0) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'fixture',
+    [
+        'shebang_good_empty_deps.py',
+        'shebang_good_multiline_deps.py',
+        'shebang_good_single_dep_multiline.py',
+        'shebang_good_no_deps_key.py',
+    ],
+    ids=lambda f: f.removesuffix('.py'),
+)
+def test_shb003_good(fixture: str) -> None:
+    """Files with properly formatted deps should pass."""
+    result = run_linter(EDGE_CASES_DIR / fixture, no_config=True)
+    assert result.returncode == 0, f'Expected pass, got:\n{result.stdout}'
+
+
+# -- SHB003: Should fail (exit 1) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'fixture',
+    [
+        'shebang_bad_single_line_deps.py',
+        'shebang_bad_multi_deps_one_line.py',
+        'shebang_bad_unsorted_deps.py',
+        'shebang_bad_no_trailing_comma.py',
+    ],
+    ids=lambda f: f.removesuffix('.py'),
+)
+def test_shb003_bad(fixture: str) -> None:
+    """Files with improperly formatted deps should flag SHB003."""
+    result = run_linter(EDGE_CASES_DIR / fixture, no_config=True)
+    assert result.returncode == 1, f'Expected failure, got:\n{result.stdout}'
+    assert 'SHB003' in result.stdout
+
+
 # -- Whole-repo scan ----------------------------------------------------------
 
 

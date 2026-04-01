@@ -1,7 +1,12 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["pydantic>=2.0", "psutil>=5.9", "typer>=0.9.0", "cc_lib"]
+# dependencies = [
+#   "cc_lib",
+#   "psutil>=5.9",
+#   "pydantic>=2.0",
+#   "typer>=0.9.0",
+# ]
 #
 # [tool.uv.sources]
 # cc_lib = { path = "../cc-lib/", editable = true }

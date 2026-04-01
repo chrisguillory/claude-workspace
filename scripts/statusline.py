@@ -2,9 +2,9 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#     "cc_lib",
 #     "psutil>=5.9",
 #     "pydantic>=2.0",
-#     "cc_lib",
 # ]
 #
 # [tool.uv.sources]

@@ -2,10 +2,10 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#     "cc_lib",
 #     "httpx",
 #     "pydantic>=2.0",
 #     "typer>=0.9.0",
-#     "cc_lib",
 # ]
 #
 # [tool.uv.sources]

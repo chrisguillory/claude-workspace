@@ -15,8 +15,8 @@ clean for the report. Progress messages go to stderr.
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
-#   "lazy-object-proxy",
 #   "cc_lib",
+#   "lazy-object-proxy",
 # ]
 #
 # [tool.uv.sources]

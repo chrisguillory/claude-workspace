@@ -6,9 +6,9 @@ See: https://code.claude.com/docs/en/hooks#sessionstart
 
 # /// script
 # dependencies = [
-#   "pydantic>=2.0.0",
-#   "packaging",
 #   "cc_lib",
+#   "packaging",
+#   "pydantic>=2.0.0",
 # ]
 #
 # [tool.uv.sources]
