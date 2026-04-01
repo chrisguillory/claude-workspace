@@ -277,6 +277,7 @@ __all__ = [
     'TurnDurationSystemRecord',
     'UserQuestion',
     'UserRecord',
+    'UserRecordOrigin',
     'WaitingForTaskData',
     'WebFetchToolInput',
     'WebFetchToolResult',
@@ -1076,6 +1077,7 @@ class Message(StrictModel):
     stop_sequence: str | None = pydantic.Field(
         None, description='The actual stop sequence string that triggered stopping'
     )
+    stop_details: None = pydantic.Field(None, description='Stop details (Claude Code 2.1.81+, always null)')
     usage: TokenUsage | None = pydantic.Field(
         None, description='Token usage information (present in nested API responses)'
     )
@@ -1970,6 +1972,12 @@ class BaseRecord(StrictModel):
 # -- User Record ---------------------------------------------------------------
 
 
+class UserRecordOrigin(StrictModel):
+    """Origin metadata for user records (Claude Code 2.1.87+)."""
+
+    kind: str  # e.g., "task-notification"
+
+
 class UserRecord(BaseRecord):
     """User message record."""
 
@@ -1981,6 +1989,7 @@ class UserRecord(BaseRecord):
     version: str
     gitBranch: str
     message: Message
+    origin: UserRecordOrigin | None = None  # Message origin metadata (Claude Code 2.1.87+)
     projectPaths: PathListField | None = pydantic.Field(
         None, description='Additional project paths beyond cwd (each path will be translated)'
     )
@@ -2246,6 +2255,7 @@ class TurnDurationSystemRecord(BaseRecord):
     parentUuid: str | None
     subtype: Literal['turn_duration']
     durationMs: int  # Duration of the turn in milliseconds
+    messageCount: int | None = None  # Number of messages in the turn (Claude Code 2.1.87+)
     isMeta: bool
     isSidechain: bool
     userType: str
@@ -2298,6 +2308,7 @@ class BridgeStatusSystemRecord(BaseRecord):
     subtype: Literal['bridge_status']
     content: str  # e.g., "/remote-control is active. Code in CLI or at https://claude.ai/code/..."
     url: str  # claude.ai/code session URL
+    upgradeNudge: str | None = None  # Mobile app upgrade prompt (Claude Code 2.1.87+)
     isMeta: bool
     isSidechain: bool
     userType: str
