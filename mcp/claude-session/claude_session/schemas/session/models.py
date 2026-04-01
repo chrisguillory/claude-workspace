@@ -296,11 +296,11 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.19'
+SCHEMA_VERSION = '0.2.20'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.80'
-LAST_VALIDATED = '2026-03-21'
-VALIDATION_RECORD_COUNT = 315_107
+CLAUDE_CODE_MAX_VERSION = '2.1.89'
+LAST_VALIDATED = '2026-04-01'
+VALIDATION_RECORD_COUNT = 64_011
 
 
 # -- Base Configuration --------------------------------------------------------
