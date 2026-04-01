@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hooks/run-linter.py linters/exception_safety_linter.py"
+          },
+          {
+            "type": "command",
+            "command": "hooks/run-linter.py linters/reexport_linter.py"
+          },
+          {
+            "type": "command",
+            "command": "hooks/run-linter.py linters/strict_typing_linter.py"
+          },
+          {
+            "type": "command",
+            "command": "hooks/run-linter.py linters/suppression_rationale_linter.py"
+          }
+        ]
+      }
+    ]
+  }
+}
