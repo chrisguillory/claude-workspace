@@ -1,6 +1,10 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
-# dependencies = ["pydantic>=2.0.0", "anthropic>=0.40.0", "lazy-object-proxy>=1.10.0"]
+# dependencies = [
+#   "anthropic>=0.40.0",
+#   "lazy-object-proxy>=1.10.0",
+#   "pydantic>=2.0.0",
+# ]
 # ///
 
 """

@@ -1,7 +1,8 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # dependencies = [
-#   "pydantic",
+#   "cc_lib",
+#   "pydantic>=2.0.0",
 # ]
 # ///
-"""Good shebang — has --no-project --script with PEP 723 metadata."""
+"""Good — multi-line, sorted, trailing comma."""

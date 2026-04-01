@@ -1,8 +1,8 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # dependencies = [
-#   "pydantic>=2.0.0",
 #   "psutil",
+#   "pydantic>=2.0.0",
 # ]
 # ///
 """Session lifecycle tracking utility for Claude Code sessions."""

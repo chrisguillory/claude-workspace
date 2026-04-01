@@ -9,8 +9,8 @@ See: https://code.claude.com/docs/en/hooks#pretooluse
 
 # /// script
 # dependencies = [
-#   "pydantic>=2.0.0",
 #   "cc_lib",
+#   "pydantic>=2.0.0",
 # ]
 #
 # [tool.uv.sources]
