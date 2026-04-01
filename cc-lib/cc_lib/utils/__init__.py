@@ -13,6 +13,7 @@ __all__ = [
 
 import importlib.util
 import os
+import re
 import sys
 import time
 import unittest.mock
@@ -37,14 +38,25 @@ class Timer:
         return int(self.elapsed() * 1000)
 
 
+# Most filesystems cap component names at 255 bytes. Truncate at 200 to
+# leave room for the hash suffix.  Mirrors MAX_SANITIZED_LENGTH in
+# Claude Code's src/utils/sessionStoragePortable.ts.
+MAX_SANITIZED_PATH_LENGTH = 200
+
+
 def encode_project_path(path: Path | str) -> str:
     """Encode filesystem path for Claude Code's directory naming convention.
 
-    Claude Code stores project data in ~/.claude/projects/{encoded_path}/ where
-    the path is encoded by replacing certain characters with hyphens.
+    Claude Code stores project data in ``~/.claude/projects/{encoded}/``
+    where ``encoded = sanitizePath(cwd)``.  The encoding replaces **every
+    non-alphanumeric character** with a hyphen, then truncates long
+    results and appends a hash suffix for uniqueness.
 
-    This encoding is LOSSY and non-reversible (5 different chars -> 1 char).
-    To recover the original path, read the 'cwd' field from session records.
+    Source of truth: ``sanitizePath()`` in Claude Code's
+    ``src/utils/sessionStoragePortable.ts``.
+
+    This encoding is LOSSY and non-reversible.  To recover the original
+    path, read the ``cwd`` field from session JSONL records.
 
     Args:
         path: Filesystem path to encode (e.g., /Users/chris/My Project)
@@ -62,11 +74,26 @@ def encode_project_path(path: Path | str) -> str:
         >>> encode_project_path("/Users/chris/my_project.app")
         '-Users-chris-my-project-app'
     """
-    result = str(path) if isinstance(path, Path) else path
-    # Claude Code encodes paths by replacing these characters with hyphens:
-    for char in ['/', '.', ' ', '~', '_']:
-        result = result.replace(char, '-')
-    return result
+    name = str(path) if isinstance(path, Path) else path
+    sanitized = re.sub(r'[^a-zA-Z0-9]', '-', name)
+    if len(sanitized) <= MAX_SANITIZED_PATH_LENGTH:
+        return sanitized
+    # For long paths, truncate and append a hash for uniqueness.
+    # Claude Code uses Bun.hash (wyhash) when running under Bun, falling
+    # back to djb2Hash under Node.  We use djb2 unconditionally since we
+    # are Python, matching the Node/SDK fallback path.
+    h = abs(_djb2_hash(name))
+    # Base-36 encode (matches JavaScript's ``Math.abs(n).toString(36)``)
+    if h == 0:
+        hash_str = '0'
+    else:
+        digits = '0123456789abcdefghijklmnopqrstuvwxyz'
+        parts: list[str] = []
+        while h > 0:
+            parts.append(digits[h % 36])
+            h //= 36
+        hash_str = ''.join(reversed(parts))
+    return f'{sanitized[:MAX_SANITIZED_PATH_LENGTH]}-{hash_str}'
 
 
 def get_claude_config_home_dir() -> Path:
@@ -158,3 +185,18 @@ def temporary_module(
     mod = load_module_from_path(path, module_name)
     with unittest.mock.patch.dict(sys.modules, {mod.__name__: mod}):
         yield mod
+
+
+def _djb2_hash(s: str) -> int:
+    """DJB2 string hash returning a signed 32-bit integer.
+
+    Mirrors ``djb2Hash`` in Claude Code's ``src/utils/hash.ts``.
+    Used as the Node.js fallback when ``Bun.hash`` is unavailable.
+    """
+    h = 0
+    for ch in s:
+        h = ((h << 5) - h + ord(ch)) & 0xFFFFFFFF
+        # Replicate JavaScript's signed 32-bit ``| 0`` semantics
+        if h >= 0x80000000:
+            h -= 0x100000000
+    return h
