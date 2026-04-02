@@ -161,7 +161,7 @@ class TotalStats(TypedDict):
 # -- Path Manipulation Utilities -----------------------------------------------
 
 
-def normalize_path(loc: tuple[str | int, ...]) -> str:
+def normalize_path(loc: Sequence[str | int]) -> str:
     """
     Normalize a Pydantic error location path.
 
@@ -197,7 +197,7 @@ def normalize_path(loc: tuple[str | int, ...]) -> str:
     return '.'.join(parts)
 
 
-def generalize_path(loc: tuple[str | int, ...]) -> str:
+def generalize_path(loc: Sequence[str | int]) -> str:
     """
     Generalize a path by replacing numeric indices with *.
 
