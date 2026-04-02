@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import git
+import pydantic
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -396,7 +397,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="stat"><div class="stat-label">Cache Hits</div><div class="stat-value">${p.embed_cache_hits.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Cache Misses</div><div class="stat-value">${p.embed_cache_misses.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Errored</div><div class="stat-value">${p.files_errored}</div></div>
-                    ${Object.entries(p.transient_errors || {}).map(([k, v]) => `<div class="stat"><div class="stat-label">${k}</div><div class="stat-value">${v}</div></div>`).join('')}
+                    ${(() => { const te = Object.entries(p.transient_errors || {}); const total = te.reduce((s, [, v]) => s + v, 0); return total === 0 ? '<div class="stat"><div class="stat-label">Transient Errors</div><div class="stat-value">0</div></div>' : te.map(([k, v]) => `<div class="stat"><div class="stat-label">${k}</div><div class="stat-value">${v}</div></div>`).join(''); })()}
                     <div class="stat"><div class="stat-label">Redis HWM</div><div class="stat-value">${p.redis_hwm_total || 0}</div></div>
                     <div class="stat"><div class="stat-label">Loop Lag HWM</div><div class="stat-value">${(p.event_loop_lag_hwm_ms || 0).toFixed(1)} ms</div></div>
                     <div class="stat"><div class="stat-label">RSS HWM</div><div class="stat-value">${(p.rss_hwm_mb || 0).toFixed(0)} MB</div></div>
@@ -2119,7 +2120,26 @@ def _read_operations() -> Sequence[OperationState]:
         if file_path.stem.endswith('-timing'):
             continue
         data = json.loads(file_path.read_text())
-        ops.append(OperationState.model_validate(data))
+        try:
+            ops.append(OperationState.model_validate(data))
+        except pydantic.ValidationError as exc:
+            # Load error — construct a minimal entry with the error visible.
+            # Top-level scalars are safe to extract; nested models (progress, result)
+            # are where validation fails, so we null them out.
+            ops.append(
+                OperationState(
+                    operation_id=data.get('operation_id', file_path.stem),
+                    mcp_server_pid=data.get('mcp_server_pid', 0),
+                    collection_name=data.get('collection_name', '?'),
+                    directory=data.get('directory', '?'),
+                    created_at=data.get('created_at', data.get('updated_at', '1970-01-01T00:00:00Z')),
+                    updated_at=data.get('updated_at', '1970-01-01T00:00:00Z'),
+                    ended_at=data.get('ended_at'),
+                    progress=None,
+                    result=None,
+                    error=f'Load error: {exc.error_count()} validation errors in {file_path.name}',
+                )
+            )
 
     return sorted(ops, key=lambda o: o.created_at, reverse=True)
 
