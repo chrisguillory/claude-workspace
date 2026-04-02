@@ -149,7 +149,7 @@ class ProgressWriter:
         prior = self._state.progress
         final_progress = OperationProgress.from_result(
             result,
-            errors_429=prior.errors_429 if prior else 0,
+            transient_errors=dict(prior.transient_errors) if prior else {},
             prior_progress=prior,
             redis_conn_stats=redis_conn_stats,
         )

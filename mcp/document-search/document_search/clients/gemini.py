@@ -10,6 +10,7 @@ Rate limiting via pyrate_limiter to respect API quotas.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
@@ -23,6 +24,7 @@ from google.genai.types import EmbedContentConfig, HttpOptions
 from vertexai.preview import tokenization
 
 from document_search.clients import _retry
+from document_search.clients._retry.gemini import GeminiTransientErrorCategory
 from document_search.schemas.embeddings import TaskIntent
 
 __all__ = [
@@ -123,7 +125,7 @@ class GeminiClient:
 
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._tracker = ConcurrencyTracker('GEMINI')
-        self.errors_429 = 0
+        self.transient_errors: Counter[GeminiTransientErrorCategory] = Counter()
 
     # Gemini task type mapping from generic intent
     INTENT_TO_GEMINI_TASK: Mapping[TaskIntent, GeminiTaskType] = {
