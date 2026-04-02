@@ -17,7 +17,7 @@ import tempfile
 import typing
 from collections.abc import Mapping, Sequence
 
-from cc_lib.utils import encode_project_path, humanize_seconds
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir, humanize_seconds
 
 from python_interpreter.discovery import discover_session_id, find_claude_context
 from python_interpreter.jetbrains import discover_run_configs, discover_sdk_entries
@@ -82,7 +82,7 @@ class ServerState:
         # Compute transcript path using Claude Code's path encoding convention
         encoded_project_path = encode_project_path(claude_context.project_dir)
         transcript_path = (
-            pathlib.Path.home() / '.claude' / 'projects' / encoded_project_path / f'{session_id}.jsonl'
+            get_claude_config_home_dir() / 'projects' / encoded_project_path / f'{session_id}.jsonl'
         ).resolve(strict=False)
 
         # Initialize temp directory for large outputs

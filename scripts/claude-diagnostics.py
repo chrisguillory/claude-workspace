@@ -1,7 +1,10 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["pydantic>=2.0", "cc_lib"]
+# dependencies = [
+#   "cc_lib",
+#   "pydantic>=2.0",
+# ]
 #
 # [tool.uv.sources]
 # cc_lib = { path = "../cc-lib/", editable = true }
@@ -60,6 +63,7 @@ from typing import Any, Literal, TypedDict
 import pydantic
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import JsonDatetime, JsonObject, StrictJsonObject
+from cc_lib.utils import get_claude_config_home_dir
 
 # Diagnostic sections produce heterogeneous data (TypedDict, Pydantic model, dict, None).
 # No common base type exists — this alias encapsulates the suppression in one place.
@@ -68,7 +72,7 @@ type DiagnosticData = Any  # heterogeneous diagnostic payload with no common bas
 # -- Configuration -------------------------------------------------------------
 
 CLAUDE_CONFIG_PATH = Path.home() / '.claude.json'
-CLAUDE_DIR = Path.home() / '.claude'
+CLAUDE_DIR = get_claude_config_home_dir()
 STATSIG_DIR = CLAUDE_DIR / 'statsig'
 PROJECTS_DIR = CLAUDE_DIR / 'projects'
 SESSIONS_JSON = Path.home() / '.claude-workspace' / 'sessions.json'

@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -18,10 +19,9 @@ from typing import Any
 
 import uuid6
 import zstandard
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.introspection import get_path_fields
-from claude_session.paths import encode_path
-from claude_session.protocols import LoggerProtocol
 from claude_session.schemas.operations.archive import (
     SessionArchiveV1,
     SessionArchiveV2,
@@ -31,8 +31,6 @@ from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.artifacts import (
-    TASKS_DIR,
-    TODOS_DIR,
     ToolResultCollection,
     ToolResultDirectory,
     ToolResultDirectoryFile,
@@ -41,6 +39,8 @@ from claude_session.services.artifacts import (
     generate_agent_id_mapping,
     generate_clone_custom_title,
     generate_clone_slug,
+    get_tasks_dir,
+    get_todos_dir,
     write_jsonl,
     write_plan_files,
     write_task_metadata,
@@ -49,6 +49,17 @@ from claude_session.services.artifacts import (
     write_tool_results,
 )
 from claude_session.services.lineage import LineageService
+
+__all__ = [
+    'PathTranslator',
+    'SessionRestoreService',
+    'get_restoration_timestamp',
+    'is_restored_session',
+    'logger',
+]
+
+
+logger = logging.getLogger(__name__)
 
 # -- Path Translation Service --------------------------------------------------
 
@@ -112,48 +123,6 @@ class PathTranslator:
         return path
 
 
-# -- Utility Functions ---------------------------------------------------------
-
-
-def is_restored_session(session_id: str) -> bool:
-    """
-    Check if a session ID is from a restored session.
-
-    Restored sessions use UUIDv7 (time-ordered) while Claude uses UUIDv4 (random).
-
-    Args:
-        session_id: Session ID to check
-
-    Returns:
-        True if this is a restored session (UUIDv7), False otherwise
-    """
-    uid = uuid.UUID(session_id)
-    return uid.version == 7
-
-
-def get_restoration_timestamp(session_id: str) -> datetime | None:
-    """
-    Extract the restoration timestamp from a restored session ID.
-
-    UUIDv7 embeds a Unix timestamp in the first 48 bits.
-
-    Args:
-        session_id: Session ID (must be UUIDv7)
-
-    Returns:
-        Restoration datetime or None if not a UUIDv7
-    """
-    uid = uuid.UUID(session_id)
-
-    if uid.version != 7:
-        return None
-
-    # Extract timestamp from first 48 bits (in milliseconds)
-    timestamp_ms = int.from_bytes(uid.bytes[:6], 'big')
-    timestamp_s = timestamp_ms / 1000
-    return datetime.fromtimestamp(timestamp_s, tz=UTC)
-
-
 # -- Session Restore Service ---------------------------------------------------
 
 
@@ -172,14 +141,13 @@ class SessionRestoreService:
             project_path: Current project directory for restoration
         """
         self.project_path = project_path.resolve()
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
     async def restore_archive(
         self,
         archive_path: str,
         translate_paths: bool = True,
         in_place: bool = False,
-        logger: LoggerProtocol | None = None,
     ) -> RestoreResult:
         """
         Restore a session archive.
@@ -189,7 +157,6 @@ class SessionRestoreService:
             translate_paths: Whether to translate paths to current project
             in_place: If True, restore to original paths with original IDs (undo delete).
                       Fails if any artifact already exists.
-            logger: Optional logger instance
 
         Returns:
             RestoreResult with details of restoration
@@ -204,26 +171,24 @@ class SessionRestoreService:
         if not archive_file.exists():
             raise FileNotFoundError(f'Archive not found: {archive_path}')
 
-        if logger:
-            await logger.info(f'Loading archive: {archive_path}')
-            if in_place:
-                await logger.info('In-place mode: restoring to original paths with original IDs')
+        logger.info('Loading archive: %s', archive_path)
+        if in_place:
+            logger.info('In-place mode: restoring to original paths with original IDs')
 
         # Detect format and load (strip .b64 suffix for format detection)
         logical_path = archive_path[:-4] if archive_path.endswith('.b64') else archive_path
         is_base64 = archive_path.endswith('.b64')
         if logical_path.endswith('.zst'):
-            archive = await self._load_zst_archive(archive_file, is_base64, logger)
+            archive = await self._load_zst_archive(archive_file, is_base64)
         else:
-            archive = await self._load_json_archive(archive_file, is_base64, logger)
+            archive = await self._load_json_archive(archive_file, is_base64)
 
         # Path translation is independent of in_place mode - paths should be
         # translated if they differ, regardless of whether IDs are preserved
         translator = None
         if translate_paths and archive.original_project_path != str(self.project_path):
             translator = PathTranslator(archive.original_project_path, str(self.project_path))
-            if logger:
-                await logger.info(f'Path translation: {archive.original_project_path} -> {self.project_path}')
+            logger.info('Path translation: %s -> %s', archive.original_project_path, self.project_path)
 
         # Determine session ID and mappings based on mode
         if in_place:
@@ -232,22 +197,20 @@ class SessionRestoreService:
             new_session_id = archive.session_id
             slug_mapping: Mapping[str, str] = {}
             agent_id_mapping: Mapping[str, str] = {}
-            if logger:
-                await logger.info(f'Using original session ID: {new_session_id}')
+            logger.info('Using original session ID: %s', new_session_id)
         else:
             # Normal mode: generate new IDs for forking
             new_session_id = str(uuid6.uuid7())
-            if logger:
-                await logger.info(f'Generated new session ID (UUIDv7): {new_session_id}')
-                await logger.info(f'Original session ID: {archive.session_id}')
+            logger.info('Generated new session ID (UUIDv7): %s', new_session_id)
+            logger.info('Original session ID: %s', archive.session_id)
 
             # Generate agent ID mapping for fork safety (from v2 agent_files)
             agent_ids = {agent.agent_id for agent in archive.agent_files}
             agent_id_mapping = generate_agent_id_mapping(agent_ids, new_session_id)
-            if logger and agent_id_mapping:
-                await logger.info(f'Generated {len(agent_id_mapping)} agent ID mappings')
+            if agent_id_mapping:
+                logger.info('Generated %d agent ID mappings', len(agent_id_mapping))
                 for old_id, new_id in agent_id_mapping.items():
-                    await logger.info(f'  {old_id} -> {new_id}')
+                    logger.info('  %s -> %s', old_id, new_id)
 
             # Pre-compute slug mapping (but don't write yet!)
             slug_mapping = {}
@@ -258,7 +221,7 @@ class SessionRestoreService:
 
         # Get target directory and plans directory
         target_dir = self._get_session_directory()
-        plans_dir = Path.home() / '.claude' / 'plans'
+        plans_dir = get_claude_config_home_dir() / 'plans'
 
         # =========================================================================
         # FAIL-FAST: Pre-compute ALL output paths and check for existence
@@ -299,11 +262,11 @@ class SessionRestoreService:
             for todo in archive.todos:
                 if in_place:
                     old_filename = f'{archive.session_id}-agent-{todo.agent_id}.json'
-                    all_output_paths.append(TODOS_DIR / old_filename)
+                    all_output_paths.append(get_todos_dir() / old_filename)
                 else:
                     new_agent_id = agent_id_mapping.get(todo.agent_id, todo.agent_id)
                     new_filename = f'{new_session_id}-agent-{new_agent_id}.json'
-                    all_output_paths.append(TODOS_DIR / new_filename)
+                    all_output_paths.append(get_todos_dir() / new_filename)
 
         # 5. Plan files
         if archive.plan_files:
@@ -314,9 +277,9 @@ class SessionRestoreService:
 
         # 6. Tasks
         if archive.tasks:
-            all_output_paths.extend(TASKS_DIR / new_session_id / f'{task.id}.json' for task in archive.tasks)
+            all_output_paths.extend(get_tasks_dir() / new_session_id / f'{task.id}.json' for task in archive.tasks)
         if archive.task_metadata:
-            all_output_paths.extend(TASKS_DIR / new_session_id / filename for filename in archive.task_metadata)
+            all_output_paths.extend(get_tasks_dir() / new_session_id / filename for filename in archive.task_metadata)
 
         # Check ALL paths before writing ANYTHING
         existing_files = [p for p in all_output_paths if p.exists()]
@@ -334,8 +297,7 @@ class SessionRestoreService:
 
         # Create target directory
         target_dir.mkdir(parents=True, exist_ok=True)
-        if logger:
-            await logger.info(f'Target directory: {target_dir}')
+        logger.info('Target directory: %s', target_dir)
 
         # Track artifact counts for result
         plan_files_restored = 0
@@ -347,16 +309,14 @@ class SessionRestoreService:
         if archive.plan_files:
             if in_place:
                 plan_files_restored = write_plan_files((plan.slug, plan.content) for plan in archive.plan_files)
-                if logger:
-                    await logger.info(f'Restored {plan_files_restored} plan files (in-place)')
+                logger.info('Restored %d plan files (in-place)', plan_files_restored)
             else:
                 plan_files_restored = write_plan_files(
                     (slug_mapping[plan.slug], plan.content) for plan in archive.plan_files
                 )
-                if logger:
-                    await logger.info(f'Restored {plan_files_restored} plan files')
-                    for old_slug, new_slug in slug_mapping.items():
-                        await logger.info(f'  {old_slug} -> {new_slug}')
+                logger.info('Restored %d plan files', plan_files_restored)
+                for old_slug, new_slug in slug_mapping.items():
+                    logger.info('  %s -> %s', old_slug, new_slug)
 
         # Write tool results (flat files + directories)
         if archive.tool_results or archive.tool_result_dirs:
@@ -377,8 +337,7 @@ class SessionRestoreService:
                 ],
             )
             tool_results_restored = write_tool_results(collection, target_dir, new_session_id)
-            if logger:
-                await logger.info(f'Restored {tool_results_restored} tool result files')
+            logger.info('Restored %d tool result files', tool_results_restored)
 
         # Write todos (shared function handles mkdir)
         if archive.todos:
@@ -391,8 +350,7 @@ class SessionRestoreService:
                     (f'{new_session_id}-agent-{agent_id_mapping.get(todo.agent_id, todo.agent_id)}.json', todo.content)
                     for todo in archive.todos
                 )
-            if logger:
-                await logger.info(f'Restored {todos_restored} todo files')
+            logger.info('Restored %d todo files', todos_restored)
 
         # Create session-env directory
         create_session_env_dir(new_session_id)
@@ -400,14 +358,12 @@ class SessionRestoreService:
         # Restore tasks
         if archive.tasks:
             tasks_restored = write_tasks(new_session_id, archive.tasks)
-            if logger:
-                await logger.info(f'Restored {tasks_restored} tasks')
+            logger.info('Restored %d tasks', tasks_restored)
 
         # Restore task metadata
         if archive.task_metadata:
             metadata_restored = write_task_metadata(new_session_id, archive.task_metadata)
-            if logger:
-                await logger.info(f'Restored {metadata_restored} task metadata files')
+            logger.info('Restored %d task metadata files', metadata_restored)
 
         # Restore main session file
         main_file_path = str(target_dir / f'{new_session_id}.jsonl')
@@ -420,8 +376,7 @@ class SessionRestoreService:
             )
         )
         write_jsonl(target_dir / f'{new_session_id}.jsonl', main_records, slug_mapping, agent_id_mapping)
-        if logger:
-            await logger.info(f'Restored main session: {len(main_records)} records')
+        logger.info('Restored main session: %d records', len(main_records))
 
         # Restore agent files (with nested structure)
         agent_file_paths: list[str] = []
@@ -459,8 +414,7 @@ class SessionRestoreService:
             agent_file_paths.append(str(output_path))
             total_agent_records += len(updated_records)
 
-            if logger:
-                await logger.info(f'Restored {new_filename}: {len(updated_records)} records')
+            logger.info('Restored %s: %d records', new_filename, len(updated_records))
 
         # Record lineage (only for non-in-place restores)
         if not in_place:
@@ -476,10 +430,9 @@ class SessionRestoreService:
                 paths_translated=translator is not None,
                 archive_path=archive_path,
             )
-            if logger:
-                await logger.info(f'Recorded lineage: {archive.session_id} -> {new_session_id}')
-                if archive.machine_id:
-                    await logger.info(f'Source machine: {archive.machine_id}')
+            logger.info('Recorded lineage: %s -> %s', archive.session_id, new_session_id)
+            if archive.machine_id:
+                logger.info('Source machine: %s', archive.machine_id)
 
         return RestoreResult(
             new_session_id=new_session_id,
@@ -502,9 +455,7 @@ class SessionRestoreService:
             custom_title=archive.custom_title,
         )
 
-    async def _load_json_archive(
-        self, archive_file: Path, is_base64: bool, logger: LoggerProtocol | None
-    ) -> SessionArchiveV2:
+    async def _load_json_archive(self, archive_file: Path, is_base64: bool) -> SessionArchiveV2:
         """Load archive from JSON file (optionally base64-encoded).
 
         Handles both v1 and v2 formats - v1 is migrated to v2 in memory.
@@ -522,9 +473,7 @@ class SessionRestoreService:
 
         return self._parse_archive_data(data)
 
-    async def _load_zst_archive(
-        self, archive_file: Path, is_base64: bool, logger: LoggerProtocol | None
-    ) -> SessionArchiveV2:
+    async def _load_zst_archive(self, archive_file: Path, is_base64: bool) -> SessionArchiveV2:
         """Load archive from Zstandard compressed file (optionally base64-encoded).
 
         Handles both v1 and v2 formats - v1 is migrated to v2 in memory.
@@ -546,7 +495,7 @@ class SessionRestoreService:
 
         return self._parse_archive_data(data)
 
-    def _parse_archive_data(self, data: dict[str, Any]) -> SessionArchiveV2:
+    def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchiveV2:
         """Parse archive data with version detection.
 
         V1 archives are migrated to V2 in memory for unified processing.
@@ -598,5 +547,47 @@ class SessionRestoreService:
 
     def _get_session_directory(self) -> Path:
         """Get the session directory for the current project."""
-        encoded = encode_path(self.project_path)
+        encoded = encode_project_path(self.project_path)
         return self.claude_sessions_dir / encoded
+
+
+# -- Utility Functions ---------------------------------------------------------
+
+
+def is_restored_session(session_id: str) -> bool:
+    """
+    Check if a session ID is from a restored session.
+
+    Restored sessions use UUIDv7 (time-ordered) while Claude uses UUIDv4 (random).
+
+    Args:
+        session_id: Session ID to check
+
+    Returns:
+        True if this is a restored session (UUIDv7), False otherwise
+    """
+    uid = uuid.UUID(session_id)
+    return uid.version == 7
+
+
+def get_restoration_timestamp(session_id: str) -> datetime | None:
+    """
+    Extract the restoration timestamp from a restored session ID.
+
+    UUIDv7 embeds a Unix timestamp in the first 48 bits.
+
+    Args:
+        session_id: Session ID (must be UUIDv7)
+
+    Returns:
+        Restoration datetime or None if not a UUIDv7
+    """
+    uid = uuid.UUID(session_id)
+
+    if uid.version != 7:
+        return None
+
+    # Extract timestamp from first 48 bits (in milliseconds)
+    timestamp_ms = int.from_bytes(uid.bytes[:6], 'big')
+    timestamp_s = timestamp_ms / 1000
+    return datetime.fromtimestamp(timestamp_s, tz=UTC)

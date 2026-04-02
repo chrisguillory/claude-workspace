@@ -11,6 +11,13 @@ from typing import Literal
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.types import JsonDatetime
 
+__all__ = [
+    'SessionContext',
+    'SessionSource',
+    'SessionState',
+]
+
+
 # Type aliases for session origin tracking (from claude-workspace sessions.json)
 SessionSource = Literal['startup', 'resume', 'compact', 'clear', 'unknown']
 SessionState = Literal['active', 'exited', 'completed', 'crashed', 'unknown']

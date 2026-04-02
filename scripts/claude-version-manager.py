@@ -2,10 +2,10 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#     "cc_lib",
 #     "httpx",
 #     "pydantic>=2.0",
 #     "typer>=0.9.0",
-#     "cc_lib",
 # ]
 #
 # [tool.uv.sources]
@@ -163,9 +163,7 @@ def cli_list(
 
 @app.command('fetch')
 @error_boundary
-def cli_fetch(
-    version: str = typer.Argument(..., help='Version number, "latest", or "stable"'),
-) -> None:
+def cli_fetch(version: str = typer.Argument(..., help='Version number, "latest", or "stable"')) -> None:
     """Fetch a version from CDN (with SHA-256 verification)."""
     store = VersionStore()
     cdn = CDNClient()
@@ -186,9 +184,7 @@ def cli_fetch(
 
 @app.command('clean')
 @error_boundary
-def cli_clean(
-    dry_run: bool = typer.Option(False, '--dry-run', help='Show what would be removed'),
-) -> None:
+def cli_clean(dry_run: bool = typer.Option(False, '--dry-run', help='Show what would be removed')) -> None:
     """Remove .bak files and 0-byte ghost files."""
     store = VersionStore()
     removed = store.clean(dry_run=dry_run)

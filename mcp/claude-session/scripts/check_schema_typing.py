@@ -38,7 +38,7 @@ import sys
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 # -- Configuration - What to check (not WHERE to check - that's the caller's job) ---
 
@@ -124,7 +124,7 @@ class Violation:
 class SchemaTypeChecker(ast.NodeVisitor):
     """AST visitor that checks for mutable types, loose types, and defaults in model annotations."""
 
-    SUGGESTIONS: dict[str, str] = {
+    SUGGESTIONS: ClassVar[dict[str, str]] = {
         # Mutable type suggestions
         'list': 'Sequence[T] or tuple[T, ...]',
         'List': 'Sequence[T] or tuple[T, ...]',

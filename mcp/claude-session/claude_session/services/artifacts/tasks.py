@@ -14,9 +14,22 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from cc_lib.utils import get_claude_config_home_dir
+
 from claude_session.schemas.session.models import Task
 
-TASKS_DIR = Path.home() / '.claude' / 'tasks'
+__all__ = [
+    'TASK_METADATA_FILES',
+    'TaskDirectoryContents',
+    'classify_task_directory',
+    'collect_task_metadata',
+    'get_tasks_dir',
+    'iter_task_paths',
+    'iter_tasks',
+    'write_task_metadata',
+    'write_tasks',
+]
+
 
 # Known metadata files in task directories (not task data)
 # .lock: process coordination file
@@ -32,9 +45,14 @@ class TaskDirectoryContents:
     metadata files and flags anything unexpected for fail-fast behavior.
     """
 
-    task_files: list[Path]  # {id}.json data files
-    metadata_files: list[Path]  # .lock, .highwatermark
-    unexpected_files: list[Path]  # Anything else (signals bug in task system)
+    task_files: Sequence[Path]
+    metadata_files: Sequence[Path]
+    unexpected_files: Sequence[Path]
+
+
+def get_tasks_dir() -> Path:
+    """Return tasks directory, respecting CLAUDE_CONFIG_DIR."""
+    return get_claude_config_home_dir() / 'tasks'
 
 
 def classify_task_directory(session_id: str) -> TaskDirectoryContents | None:
@@ -51,21 +69,27 @@ def classify_task_directory(session_id: str) -> TaskDirectoryContents | None:
         Directory with task-old.json (unexpected):
             unexpected_files = [task-old.json]
     """
-    tasks_dir = TASKS_DIR / session_id
+    tasks_dir = get_tasks_dir() / session_id
     if not tasks_dir.exists():
         return None
 
-    result = TaskDirectoryContents(task_files=[], metadata_files=[], unexpected_files=[])
+    task_files: list[Path] = []
+    metadata_files: list[Path] = []
+    unexpected_files: list[Path] = []
     for path in tasks_dir.iterdir():
         if not path.is_file():
             continue
         if path.name in TASK_METADATA_FILES:
-            result.metadata_files.append(path)
+            metadata_files.append(path)
         elif path.suffix == '.json' and path.stem.isdigit():
-            result.task_files.append(path)
+            task_files.append(path)
         else:
-            result.unexpected_files.append(path)
-    return result
+            unexpected_files.append(path)
+    return TaskDirectoryContents(
+        task_files=task_files,
+        metadata_files=metadata_files,
+        unexpected_files=unexpected_files,
+    )
 
 
 def iter_task_paths(session_id: str) -> Iterator[Path]:
@@ -105,12 +129,7 @@ def collect_task_metadata(session_id: str) -> Mapping[str, str]:
     return result
 
 
-def write_task_metadata(
-    session_id: str,
-    metadata: Mapping[str, str],
-    *,
-    exist_ok: bool = False,
-) -> int:
+def write_task_metadata(session_id: str, metadata: Mapping[str, str], *, exist_ok: bool = False) -> int:
     """Write task metadata files (.highwatermark, etc.) for a session.
 
     Used during restore, clone, and delete rollback.
@@ -124,7 +143,7 @@ def write_task_metadata(
     if not metadata:
         return 0
 
-    tasks_dir = TASKS_DIR / session_id
+    tasks_dir = get_tasks_dir() / session_id
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
     for filename, content in metadata.items():
@@ -136,12 +155,7 @@ def write_task_metadata(
     return len(metadata)
 
 
-def write_tasks(
-    session_id: str,
-    tasks: Sequence[Task],
-    *,
-    exist_ok: bool = False,
-) -> int:
+def write_tasks(session_id: str, tasks: Sequence[Task], *, exist_ok: bool = False) -> int:
     """Write task data files ({id}.json) for a session.
 
     Used during restore, clone, and delete rollback.
@@ -155,7 +169,7 @@ def write_tasks(
     if not tasks:
         return 0
 
-    tasks_dir = TASKS_DIR / session_id
+    tasks_dir = get_tasks_dir() / session_id
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
     for task in tasks:

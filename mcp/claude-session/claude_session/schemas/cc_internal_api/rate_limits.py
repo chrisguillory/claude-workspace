@@ -10,9 +10,19 @@ Headers follow the pattern: anthropic-ratelimit-unified-{component}
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal
+from typing import Literal, cast
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
+
+__all__ = [
+    'FallbackStatus',
+    'OverageStatus',
+    'RateLimitStatus',
+    'RateLimitWindow',
+    'RepresentativeClaim',
+    'UnifiedRateLimit',
+]
+
 
 # -- Rate Limit Status Types ---------------------------------------------------
 
@@ -105,22 +115,22 @@ class UnifiedRateLimit(StrictModel):
             return h.get(f'{prefix}{key}')
 
         return cls(
-            status=get('status'),  # type: ignore[arg-type]
+            status=cast(RateLimitStatus, get('status')),
             reset=int(get('reset')),
             h5=RateLimitWindow(
-                status=get('5h-status'),  # type: ignore[arg-type]
+                status=cast(RateLimitStatus, get('5h-status')),
                 reset=int(get('5h-reset')),
                 utilization=float(get('5h-utilization')),
             ),
             d7=RateLimitWindow(
-                status=get('7d-status'),  # type: ignore[arg-type]
+                status=cast(RateLimitStatus, get('7d-status')),
                 reset=int(get('7d-reset')),
                 utilization=float(get('7d-utilization')),
             ),
-            representative_claim=get('representative-claim'),  # type: ignore[arg-type]
-            fallback=get('fallback'),  # type: ignore[arg-type]
+            representative_claim=cast(RepresentativeClaim, get('representative-claim')),
+            fallback=cast(FallbackStatus, get('fallback')),
             fallback_percentage=float(get('fallback-percentage')),
-            overage_status=get('overage-status'),  # type: ignore[arg-type]
+            overage_status=cast(OverageStatus, get('overage-status')),
             overage_disabled_reason=get_optional('overage-disabled-reason'),
         )
 

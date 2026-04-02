@@ -116,13 +116,191 @@ import pydantic
 from claude_session.schemas.session.markers import PathField, PathListField
 from claude_session.schemas.types import BaseStrictModel, EmptyDict, EmptySequence, ModelId, PermissiveModel
 
+__all__ = [
+    'CLAUDE_CODE_MAX_VERSION',
+    'CLAUDE_CODE_MIN_VERSION',
+    'LAST_VALIDATED',
+    'SCHEMA_VERSION',
+    'VALIDATION_RECORD_COUNT',
+    'AgentNameRecord',
+    'AgentOutputToolInput',
+    'AgentProgressData',
+    'AgentState',
+    'AgentTeammateSpawnedResult',
+    'AgentsRetrievalResult',
+    'ApiError',
+    'ApiErrorDetail',
+    'ApiErrorResponse',
+    'ApiErrorSystemRecord',
+    'AppliedEdit',
+    'AskUserQuestionToolInput',
+    'AskUserQuestionToolResult',
+    'AssistantRecord',
+    'AsyncTaskLaunchResult',
+    'BackgroundTask',
+    'BaseRecord',
+    'BashOutputToolInput',
+    'BashOutputToolResult',
+    'BashProgressData',
+    'BashToolInput',
+    'BashToolResult',
+    'BridgeStatusSystemRecord',
+    'CacheCreation',
+    'ClearThinkingEdit',
+    'CompactBoundarySystemRecord',
+    'CompactMetadata',
+    'ConnectionError',
+    'ContextManagement',
+    'CustomTitleRecord',
+    'DocumentContent',
+    'DocumentSource',
+    'EditToolInput',
+    'EditToolResult',
+    'EmptyError',
+    'EnterPlanModeToolInput',
+    'EnterPlanModeToolResult',
+    'EnterWorktreeToolInput',
+    'EnterWorktreeToolResult',
+    'ExitPlanModeToolInput',
+    'ExitPlanModeToolResult',
+    'FileBackupInfo',
+    'FileHistorySnapshot',
+    'FileHistorySnapshotRecord',
+    'FileInfo',
+    'GlobToolInput',
+    'GlobToolResult',
+    'GrepToolInput',
+    'GrepToolResult',
+    'HandoffCommandResult',
+    'HookInfo',
+    'HookProgressData',
+    'ImageContent',
+    'ImageDimensions',
+    'ImageFileInfo',
+    'ImageSource',
+    'InformationalSystemRecord',
+    'KillShellMessageResult',
+    'KillShellToolInput',
+    'KillShellToolResult',
+    'LSPOperation',
+    'LSPToolInput',
+    'LSPToolResult',
+    'LastPromptRecord',
+    'ListMcpResourcesToolInput',
+    'LocalCommandSystemRecord',
+    'MCPSearchToolInput',
+    'MCPStructuredContent',
+    'MCPToolInput',
+    'MCPToolResult',
+    'MalformedWriteToolInput',
+    'McpMeta',
+    'McpProgressCompletedData',
+    'McpProgressFailedData',
+    'McpProgressStartedData',
+    'McpResource',
+    'McpResourceContent',
+    'Message',
+    'MessageContent',
+    'MicrocompactBoundarySystemRecord',
+    'MicrocompactMetadata',
+    'NetworkError',
+    'NotebookEditToolInput',
+    'PatchHunk',
+    'PdfFileInfo',
+    'PrLinkRecord',
+    'ProgressData',
+    'ProgressRecord',
+    'PromptPermission',
+    'QueryUpdateData',
+    'QuestionAnnotation',
+    'QuestionOption',
+    'QueueOperationRecord',
+    'ReadImageToolResult',
+    'ReadMcpResourceToolInput',
+    'ReadMcpResourceToolResult',
+    'ReadPdfToolResult',
+    'ReadTextToolResult',
+    'ReadToolInput',
+    'SavedHookContextRecord',
+    'SearchResultsReceivedData',
+    'SendMessageRouting',
+    'SendMessageToolInput',
+    'SendMessageToolResult',
+    'ServerToolUse',
+    'SessionAnalysis',
+    'SessionMetadata',
+    'SessionRecord',
+    'SessionRecordAdapter',
+    'SimpleThinkingMetadata',
+    'SkillToolInput',
+    'SkillToolResult',
+    'StatusChange',
+    'StopHookSummarySystemRecord',
+    'StrictModel',
+    'SummaryRecord',
+    'SystemRecord',
+    'SystemSubtypeRecord',
+    'Task',
+    'TaskCreateToolInput',
+    'TaskGetItem',
+    'TaskGetToolResult',
+    'TaskListItem',
+    'TaskListToolInput',
+    'TaskListToolResult',
+    'TaskOutputPollingResult',
+    'TaskOutputToolInput',
+    'TaskSingleItem',
+    'TaskSingleToolResult',
+    'TaskStopToolResult',
+    'TaskToolInput',
+    'TaskToolResult',
+    'TaskUpdateSuccessResult',
+    'TaskUpdateToolInput',
+    'TeamCreateToolInput',
+    'TeamCreateToolResult',
+    'TextContent',
+    'ThinkingContent',
+    'ThinkingMetadata',
+    'ThinkingTrigger',
+    'TodoItem',
+    'TodoToolResult',
+    'TodoWriteToolInput',
+    'TokenUsage',
+    'ToolInput',
+    'ToolReferenceContent',
+    'ToolResult',
+    'ToolResultContent',
+    'ToolResultContentBlock',
+    'ToolSearchToolResult',
+    'ToolUseCaller',
+    'ToolUseContent',
+    'TurnDurationSystemRecord',
+    'UserQuestion',
+    'UserRecord',
+    'UserRecordOrigin',
+    'WaitingForTaskData',
+    'WebFetchToolInput',
+    'WebFetchToolResult',
+    'WebSearchNestedResult',
+    'WebSearchResult',
+    'WebSearchResultWrapper',
+    'WebSearchToolInput',
+    'WebSearchToolResult',
+    'WorktreeSessionData',
+    'WorktreeStateRecord',
+    'WriteToolInput',
+    'WriteToolResult',
+    'validate_session_record',
+    'validated_copy',
+]
+
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.19'
+SCHEMA_VERSION = '0.2.20'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.80'
-LAST_VALIDATED = '2026-03-21'
-VALIDATION_RECORD_COUNT = 315_107
+CLAUDE_CODE_MAX_VERSION = '2.1.89'
+LAST_VALIDATED = '2026-04-01'
+VALIDATION_RECORD_COUNT = 64_011
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -136,30 +314,6 @@ class StrictModel(BaseStrictModel):
     """
 
     pass
-
-
-# noinspection PyNewStyleGenericSyntax
-def validated_copy[T: pydantic.BaseModel](model: T, update: Mapping[str, Any]) -> T:
-    """
-    Create a validated copy of a model with updates.
-
-    This is the type-safe way to modify frozen Pydantic models.
-    The returned instance is validated through the model's __init__.
-
-    Args:
-        model: The source model instance
-        update: Fields to update (keys must be valid field names)
-
-    Returns:
-        A new validated instance of the same type with updates applied
-
-    Example:
-        updated_record = validated_copy(record, {'sessionId': new_session_id})
-    """
-    model_class = type(model)
-    new_data = model.model_dump()
-    new_data.update(update)
-    return model_class(**new_data)
 
 
 # -- Message Content Types (Discriminated Union) -------------------------------
@@ -344,13 +498,6 @@ class GrepToolInput(StrictModel):
         grep: Alternative flag format (e.g., "-n")
         Hyphenated flags: -n (line numbers), -A/-B/-C (context), -i (case insensitive)
     """
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-        populate_by_name=True,  # Allow both alias and field name
-    )
 
     pattern: str
     path: PathField | None = None
@@ -930,6 +1077,7 @@ class Message(StrictModel):
     stop_sequence: str | None = pydantic.Field(
         None, description='The actual stop sequence string that triggered stopping'
     )
+    stop_details: None = pydantic.Field(None, description='Stop details (Claude Code 2.1.81+, always null)')
     usage: TokenUsage | None = pydantic.Field(
         None, description='Token usage information (present in nested API responses)'
     )
@@ -1070,7 +1218,7 @@ class ApiError(StrictModel):
     """Complete API error information."""
 
     status: int
-    headers: Mapping[str, str]
+    headers: Mapping[str, str | Sequence[str]]
     requestID: str | None = None  # Can be null for some errors
     error: ApiErrorResponse | None = None  # Can be missing for some errors (e.g., 503)
 
@@ -1135,13 +1283,6 @@ class McpMeta(StrictModel):
     Only populated for MCP tools returning JSON - tools returning plain text
     (like Perplexity) do not populate this field.
     """
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',
-        strict=True,
-        frozen=True,
-        populate_by_name=True,  # Allow field access by both name and alias
-    )
 
     meta: EmptyDict | None = pydantic.Field(None, alias='_meta')  # Always {} when present
     structuredContent: MCPStructuredContent | None = None
@@ -1831,6 +1972,12 @@ class BaseRecord(StrictModel):
 # -- User Record ---------------------------------------------------------------
 
 
+class UserRecordOrigin(StrictModel):
+    """Origin metadata for user records (Claude Code 2.1.87+)."""
+
+    kind: str  # e.g., "task-notification"
+
+
 class UserRecord(BaseRecord):
     """User message record."""
 
@@ -1842,6 +1989,7 @@ class UserRecord(BaseRecord):
     version: str
     gitBranch: str
     message: Message
+    origin: UserRecordOrigin | None = None  # Message origin metadata (Claude Code 2.1.87+)
     projectPaths: PathListField | None = pydantic.Field(
         None, description='Additional project paths beyond cwd (each path will be translated)'
     )
@@ -1953,6 +2101,7 @@ class AssistantRecord(BaseRecord):
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
     teamName: str | None = pydantic.Field(None, description='Team name when running in multi-agent team mode')
     agentName: str | None = pydantic.Field(None, description='Agent name within team')
+    errorDetails: str | None = pydantic.Field(None, description='API error details string (e.g., prompt too long)')
 
 
 # -- Summary Record (does NOT inherit from BaseRecord - different schema) ------
@@ -2106,6 +2255,7 @@ class TurnDurationSystemRecord(BaseRecord):
     parentUuid: str | None
     subtype: Literal['turn_duration']
     durationMs: int  # Duration of the turn in milliseconds
+    messageCount: int | None = None  # Number of messages in the turn (Claude Code 2.1.87+)
     isMeta: bool
     isSidechain: bool
     userType: str
@@ -2158,6 +2308,7 @@ class BridgeStatusSystemRecord(BaseRecord):
     subtype: Literal['bridge_status']
     content: str  # e.g., "/remote-control is active. Code in CLI or at https://claude.ai/code/..."
     url: str  # claude.ai/code session URL
+    upgradeNudge: str | None = None  # Mobile app upgrade prompt (Claude Code 2.1.87+)
     isMeta: bool
     isSidechain: bool
     userType: str
@@ -2321,11 +2472,10 @@ class AgentProgressData(StrictModel):
     type: Literal['agent_progress']
     agentId: str
     prompt: str
-    # TODO: Remove "loose" typing below
-    message: Mapping[str, Any]  # check_schema_typing.py: loose-typing
-    # TODO: Remove "loose" typing below
-    # TODO: Remove "loose" typing below
-    normalizedMessages: Sequence[Mapping[str, Any]] | None = None  # check_schema_typing.py: loose-typing
+    message: Mapping[str, Any]  # strict_typing_linter.py: loose-typing — API error body is unstructured JSON
+    normalizedMessages: Sequence[Mapping[str, Any]] | None = (
+        None  # strict_typing_linter.py: loose-typing — API error body is unstructured JSON
+    )
     resume: str | None = None  # Agent resume ID (Claude Code 2.1.15+)
 
 
@@ -2430,6 +2580,32 @@ class LastPromptRecord(StrictModel):
     sessionId: str
 
 
+# -- Worktree State Record (Claude Code 2.1.81+) ------------------------------
+
+
+class WorktreeSessionData(StrictModel):
+    """Worktree session metadata embedded in WorktreeStateRecord."""
+
+    originalCwd: str
+    worktreePath: str
+    worktreeName: str
+    worktreeBranch: str
+    originalBranch: str
+    originalHeadCommit: str
+    sessionId: str
+
+
+class WorktreeStateRecord(StrictModel):
+    """Records worktree state at the start of a worktree session (line 1 only).
+
+    Does NOT inherit from BaseRecord -- minimal schema with no uuid/timestamp.
+    """
+
+    type: Literal['worktree-state']
+    worktreeSession: WorktreeSessionData
+    sessionId: str
+
+
 # -- Session Record (Discriminated Union) --------------------------------------
 
 # Union of all record types (validated left-to-right)
@@ -2455,12 +2631,79 @@ SessionRecord = Annotated[
     | PrLinkRecord
     | SavedHookContextRecord
     | AgentNameRecord
-    | LastPromptRecord,
+    | LastPromptRecord
+    | WorktreeStateRecord,
     pydantic.Field(union_mode='left_to_right'),
 ]
 
 # Type adapter for validating session records (required for union types)
 SessionRecordAdapter: pydantic.TypeAdapter[SessionRecord] = pydantic.TypeAdapter(SessionRecord)
+
+
+# -- Session Metadata ----------------------------------------------------------
+
+
+class SessionMetadata(StrictModel):
+    """Metadata extracted from a session."""
+
+    session_id: str
+    record_count: int
+    first_timestamp: str
+    last_timestamp: str
+    unique_cwds: Sequence[str]
+    unique_project_paths: Sequence[str]
+    user_message_count: int
+    assistant_message_count: int
+    summary_count: int
+    system_message_count: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_creation_tokens: int
+    total_cache_read_tokens: int
+    models_used: Sequence[str]
+    tools_used: Sequence[str]
+    files_touched: Sequence[str]
+    git_branches: Sequence[str]
+
+
+# -- Analysis Results ----------------------------------------------------------
+
+
+class SessionAnalysis(StrictModel):
+    """Complete analysis of a session."""
+
+    metadata: SessionMetadata
+    summary_text: str | None = None
+    cost_estimate_usd: float | None = None
+    duration_seconds: float | None = None
+
+
+# -- Utility Functions ---------------------------------------------------------
+
+
+# noinspection PyNewStyleGenericSyntax
+def validated_copy[T: pydantic.BaseModel](
+    model: T, update: Mapping[str, Any]
+) -> T:  # strict_typing_linter.py: loose-typing — generic copy accepts any field values
+    """Create a validated copy of a model with updates.
+
+    This is the type-safe way to modify frozen Pydantic models.
+    The returned instance is validated through the model's __init__.
+
+    Args:
+        model: The source model instance
+        update: Fields to update (keys must be valid field names)
+
+    Returns:
+        A new validated instance of the same type with updates applied
+
+    Example:
+        updated_record = validated_copy(record, {'sessionId': new_session_id})
+    """
+    model_class = type(model)
+    new_data = model.model_dump()
+    new_data.update(update)
+    return model_class(**new_data)
 
 
 # -- Fast Dispatch Validation --------------------------------------------------
@@ -2481,9 +2724,12 @@ _pr_link_adapter = pydantic.TypeAdapter(PrLinkRecord)
 _saved_hook_context_adapter = pydantic.TypeAdapter(SavedHookContextRecord)
 _agent_name_adapter = pydantic.TypeAdapter(AgentNameRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
+_worktree_state_adapter = pydantic.TypeAdapter(WorktreeStateRecord)
 
 
-def validate_session_record(data: dict[str, Any]) -> SessionRecord:
+def validate_session_record(
+    data: Mapping[str, Any],
+) -> SessionRecord:  # strict_typing_linter.py: loose-typing — raw JSON-parsed session record
     """Validate a session record dict using type-dispatch for performance.
 
     Dispatches to per-type TypeAdapters based on the 'type' field, avoiding
@@ -2530,43 +2776,7 @@ def validate_session_record(data: dict[str, Any]) -> SessionRecord:
         return _agent_name_adapter.validate_python(data)
     elif record_type == 'last-prompt':
         return _last_prompt_adapter.validate_python(data)
+    elif record_type == 'worktree-state':
+        return _worktree_state_adapter.validate_python(data)
     else:
         return SessionRecordAdapter.validate_python(data)
-
-
-# -- Session Metadata ----------------------------------------------------------
-
-
-class SessionMetadata(StrictModel):
-    """Metadata extracted from a session."""
-
-    session_id: str
-    record_count: int
-    first_timestamp: str
-    last_timestamp: str
-    unique_cwds: Sequence[str]
-    unique_project_paths: Sequence[str]
-    user_message_count: int
-    assistant_message_count: int
-    summary_count: int
-    system_message_count: int
-    total_input_tokens: int
-    total_output_tokens: int
-    total_cache_creation_tokens: int
-    total_cache_read_tokens: int
-    models_used: Sequence[str]
-    tools_used: Sequence[str]
-    files_touched: Sequence[str]
-    git_branches: Sequence[str]
-
-
-# -- Analysis Results ----------------------------------------------------------
-
-
-class SessionAnalysis(StrictModel):
-    """Complete analysis of a session."""
-
-    metadata: SessionMetadata
-    summary_text: str | None = None
-    cost_estimate_usd: float | None = None
-    duration_seconds: float | None = None

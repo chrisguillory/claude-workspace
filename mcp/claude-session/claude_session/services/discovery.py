@@ -11,8 +11,14 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cc_lib.utils import get_claude_config_home_dir
+
 from claude_session.exceptions import AmbiguousSessionError
 from claude_session.schemas.operations.discovery import SessionInfo
+
+__all__ = [
+    'SessionDiscoveryService',
+]
 
 
 class SessionDiscoveryService:
@@ -25,7 +31,7 @@ class SessionDiscoveryService:
 
     def __init__(self) -> None:
         """Initialize discovery service."""
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
     async def find_session_by_id(
         self, session_id_or_prefix: str, *, project_filter: Path | None = None

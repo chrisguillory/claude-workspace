@@ -12,10 +12,12 @@ import json
 import mmap
 import socket
 import subprocess
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from cc_lib.utils import get_claude_config_home_dir
 from filelock import FileLock
 
 from claude_session.config.base import ensure_data_dir
@@ -31,15 +33,6 @@ __all__ = [
     'LineageService',
     'get_machine_id',
 ]
-
-
-def get_machine_id() -> str:
-    """Get current machine identifier as 'user@hostname'.
-
-    This is human-readable, cross-platform, and captures both
-    user context and machine identity.
-    """
-    return f'{getpass.getuser()}@{socket.gethostname()}'
 
 
 class LineageService:
@@ -143,7 +136,7 @@ class LineageService:
         entry = self.get_entry(session_id)
         return entry.parent_session_id if entry else None
 
-    def get_children(self, parent_id: str) -> list[str]:
+    def get_children(self, parent_id: str) -> Sequence[str]:
         """Get all sessions cloned from this parent.
 
         Args:
@@ -165,7 +158,7 @@ class LineageService:
 
         return children
 
-    def get_ancestry(self, session_id: str, max_depth: int = 10) -> list[str]:
+    def get_ancestry(self, session_id: str, max_depth: int = 10) -> Sequence[str]:
         """Get full ancestry chain [root, ..., parent, self].
 
         Follows parent links recursively until:
@@ -289,6 +282,19 @@ class LineageService:
             nodes=nodes,
         )
 
+    def is_cross_machine(self, session_id: str) -> bool | None:
+        """Check if session was restored from a different machine.
+
+        Returns:
+            True - Restore from different machine
+            False - Clone or restore on same machine
+            None - Session not found or parent_machine_id not available
+        """
+        entry = self.get_entry(session_id)
+        if not entry or entry.parent_machine_id is None:
+            return None
+        return entry.target_machine_id != entry.parent_machine_id
+
     def _resolve_in_lineage(self, session_id: str, lineage: LineageFile) -> str | None:
         """Resolve a session ID prefix within the lineage file.
 
@@ -326,7 +332,7 @@ class LineageService:
         return None
 
     @staticmethod
-    def _find_session_files(session_ids: list[str]) -> dict[str, Path]:
+    def _find_session_files(session_ids: Sequence[str]) -> Mapping[str, Path]:
         """Find JSONL session files for the given session IDs.
 
         Uses a single rg call to find all files efficiently.
@@ -334,7 +340,7 @@ class LineageService:
         Returns:
             Mapping of session_id -> Path for files found locally.
         """
-        claude_projects = Path.home() / '.claude' / 'projects'
+        claude_projects = get_claude_config_home_dir() / 'projects'
         if not claude_projects.exists():
             return {}
 
@@ -372,22 +378,10 @@ class LineageService:
                 line_end = mm.find(b'\n', pos)
                 if line_end == -1:
                     line_end = len(mm)
-                return json.loads(mm[line_start:line_end]).get('customTitle')  # type: ignore[no-any-return]
+                result: str | None = json.loads(mm[line_start:line_end]).get('customTitle')
+                return result
         except (OSError, json.JSONDecodeError, ValueError):
             return None
-
-    def is_cross_machine(self, session_id: str) -> bool | None:
-        """Check if session was restored from a different machine.
-
-        Returns:
-            True - Restore from different machine
-            False - Clone or restore on same machine
-            None - Session not found or parent_machine_id not available
-        """
-        entry = self.get_entry(session_id)
-        if not entry or entry.parent_machine_id is None:
-            return None
-        return entry.target_machine_id != entry.parent_machine_id
 
     def _read_lineage_file(self) -> LineageFile:
         """Read and parse lineage.json (creates empty if missing)."""
@@ -410,3 +404,12 @@ class LineageService:
 
         # Atomic rename
         tmp_file.rename(self.lineage_file)
+
+
+def get_machine_id() -> str:
+    """Get current machine identifier as 'user@hostname'.
+
+    This is human-readable, cross-platform, and captures both
+    user context and machine identity.
+    """
+    return f'{getpass.getuser()}@{socket.gethostname()}'

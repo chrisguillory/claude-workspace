@@ -1,7 +1,4 @@
-#!/usr/bin/env -S uv run --no-project
-# /// script
-# dependencies = ["pydantic>=2.0.0", "lazy-object-proxy>=1.10.0", "orjson>=3.10.0"]
-# ///
+#!/usr/bin/env -S uv run
 
 """
 Validate Pydantic models against all Claude Code session files.
@@ -44,6 +41,7 @@ from typing import Any, TypedDict
 
 import orjson
 import pydantic
+from cc_lib.utils import get_claude_config_home_dir
 from claude_session.schemas.session.models import (
     AssistantRecord,
     ToolResultContent,
@@ -545,7 +543,7 @@ def resolve_tool_name_for_result(
 
 def find_all_session_files() -> list[Path]:
     """Find all .jsonl session files in ~/.claude/projects/ (recursive)."""
-    claude_dir = Path.home() / '.claude' / 'projects'
+    claude_dir = get_claude_config_home_dir() / 'projects'
     if not claude_dir.exists():
         return []
 
@@ -669,7 +667,9 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                             }
                         )
 
-            except Exception as e:
+            except (
+                Exception
+            ) as e:  # exception_safety_linter.py: swallowed-exception — collects error for validation report
                 results['invalid_records'] += 1
                 error_msg = f'Line {line_num} ({record_type}): {str(e)[:500]}'
                 results['errors'].append(error_msg)
@@ -716,8 +716,10 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                         # Track missing fields
                         if 'Validation error' in str(e) or 'Field required' in str(e):
                             results['missing_fields'][record_type].append(str(e)[:150])
-                    except Exception:
-                        pass  # Ignore errors in error handling
+                    except (
+                        Exception
+                    ):  # exception_safety_linter.py: swallowed-exception — error enrichment is best-effort
+                        pass
 
     return results
 

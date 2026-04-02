@@ -18,6 +18,7 @@ from pathlib import Path
 import psutil
 import pydantic
 from cc_lib.session_tracker import Session, SessionDatabase
+from cc_lib.utils import get_claude_config_home_dir
 
 from claude_session.schemas.operations.context import SessionContext
 from claude_session.schemas.operations.discovery import SessionInfo
@@ -27,11 +28,15 @@ from claude_session.services.discovery import SessionDiscoveryService
 from claude_session.services.lineage import LineageService, get_machine_id
 from claude_session.services.version import get_version_from_process
 
-# Claude workspace sessions.json location
-CLAUDE_WORKSPACE_SESSIONS = Path.home() / '.claude-workspace' / 'sessions.json'
+__all__ = [
+    'CLAUDE_WORKSPACE_SESSIONS',
+    'CurrentSessionContext',
+    'SessionInfoService',
+]
 
-# Claude debug files location
-CLAUDE_DEBUG_DIR = Path.home() / '.claude' / 'debug'
+
+# Claude workspace sessions.json location (our own data, NOT affected by CLAUDE_CONFIG_DIR)
+CLAUDE_WORKSPACE_SESSIONS = Path.home() / '.claude-workspace' / 'sessions.json'
 
 
 @dataclass
@@ -66,11 +71,7 @@ class SessionInfoService:
         self.discovery = SessionDiscoveryService()
         self.lineage = LineageService()
 
-    async def get_info(
-        self,
-        session_id: str,
-        current_context: CurrentSessionContext | None = None,
-    ) -> SessionContext:
+    async def get_info(self, session_id: str, current_context: CurrentSessionContext | None = None) -> SessionContext:
         """
         Get comprehensive context for a session.
 
@@ -93,7 +94,7 @@ class SessionInfoService:
 
         # Construct paths
         session_file = session_folder / f'{full_session_id}.jsonl'
-        debug_file = CLAUDE_DEBUG_DIR / f'{full_session_id}.txt'
+        debug_file = get_claude_config_home_dir() / 'debug' / f'{full_session_id}.txt'
 
         # Get project path - need to extract from session file or use current context
         project_path = await self._get_project_path(session_file, full_session_id, current_context)
@@ -171,6 +172,70 @@ class SessionInfoService:
             is_native=native,
             has_lineage=has_lineage,
         )
+
+    def is_session_running(self, session_id: str) -> tuple[bool, int | None]:
+        """
+        Check if a session's Claude process is still running.
+
+        Uses sessions.json to find the session's PID, then verifies:
+        1. Session state is 'active'
+        2. Process with that PID exists
+        3. Process creation time matches (guards against PID recycling)
+
+        Args:
+            session_id: Full session ID to check
+
+        Returns:
+            (is_running, pid) - pid is the Claude process ID if running, None otherwise
+        """
+        workspace_session = self._load_workspace_session(session_id)
+        if workspace_session is None:
+            return False, None  # Not in sessions.json
+
+        if workspace_session.state != 'active':
+            return False, None  # Already exited/completed/crashed
+
+        pid = workspace_session.metadata.claude_pid
+        expected_created_at = workspace_session.metadata.process_created_at
+
+        try:
+            proc = psutil.Process(pid)
+            actual_created_at = datetime.fromtimestamp(proc.create_time(), UTC)
+
+            # Verify creation time matches (guards against PID recycling)
+            if expected_created_at is not None:
+                # Allow 1 second tolerance for timestamp precision differences
+                time_diff = abs((actual_created_at - expected_created_at).total_seconds())
+                if time_diff > 1.0:
+                    # PID was recycled - different process
+                    return False, None
+
+            return (True, pid)
+        except psutil.NoSuchProcess:
+            return False, None  # Process is gone
+
+    async def resolve_session(self, session_id_or_prefix: str, *, project_filter: Path | None = None) -> SessionInfo:
+        """
+        Resolve a session ID or prefix to a full session.
+
+        Delegates to SessionDiscoveryService which handles both exact matches
+        and prefix matching.
+
+        Args:
+            session_id_or_prefix: Full session ID or prefix
+            project_filter: If set, restrict search to this project folder
+
+        Returns:
+            SessionInfo for the matched session
+
+        Raises:
+            FileNotFoundError: If no sessions match
+            AmbiguousSessionError: If multiple sessions match (from discovery service)
+        """
+        match = await self.discovery.find_session_by_id(session_id_or_prefix, project_filter=project_filter)
+        if not match:
+            raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
+        return match
 
     async def _get_project_path(
         self,
@@ -278,11 +343,7 @@ class SessionInfoService:
 
         return None
 
-    def _get_process_created_at(
-        self,
-        pid: int | None,
-        fallback: datetime | None,
-    ) -> datetime | None:
+    def _get_process_created_at(self, pid: int | None, fallback: datetime | None) -> datetime | None:
         """
         Get process creation time from OS (authoritative).
 
@@ -331,67 +392,3 @@ class SessionInfoService:
                 return session
 
         return None
-
-    def is_session_running(self, session_id: str) -> tuple[bool, int | None]:
-        """
-        Check if a session's Claude process is still running.
-
-        Uses sessions.json to find the session's PID, then verifies:
-        1. Session state is 'active'
-        2. Process with that PID exists
-        3. Process creation time matches (guards against PID recycling)
-
-        Args:
-            session_id: Full session ID to check
-
-        Returns:
-            (is_running, pid) - pid is the Claude process ID if running, None otherwise
-        """
-        workspace_session = self._load_workspace_session(session_id)
-        if workspace_session is None:
-            return False, None  # Not in sessions.json
-
-        if workspace_session.state != 'active':
-            return False, None  # Already exited/completed/crashed
-
-        pid = workspace_session.metadata.claude_pid
-        expected_created_at = workspace_session.metadata.process_created_at
-
-        try:
-            proc = psutil.Process(pid)
-            actual_created_at = datetime.fromtimestamp(proc.create_time(), UTC)
-
-            # Verify creation time matches (guards against PID recycling)
-            if expected_created_at is not None:
-                # Allow 1 second tolerance for timestamp precision differences
-                time_diff = abs((actual_created_at - expected_created_at).total_seconds())
-                if time_diff > 1.0:
-                    # PID was recycled - different process
-                    return False, None
-
-            return (True, pid)
-        except psutil.NoSuchProcess:
-            return False, None  # Process is gone
-
-    async def resolve_session(self, session_id_or_prefix: str, *, project_filter: Path | None = None) -> SessionInfo:
-        """
-        Resolve a session ID or prefix to a full session.
-
-        Delegates to SessionDiscoveryService which handles both exact matches
-        and prefix matching.
-
-        Args:
-            session_id_or_prefix: Full session ID or prefix
-            project_filter: If set, restrict search to this project folder
-
-        Returns:
-            SessionInfo for the matched session
-
-        Raises:
-            FileNotFoundError: If no sessions match
-            AmbiguousSessionError: If multiple sessions match (from discovery service)
-        """
-        match = await self.discovery.find_session_by_id(session_id_or_prefix, project_filter=project_filter)
-        if not match:
-            raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
-        return match

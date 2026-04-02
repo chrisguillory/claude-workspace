@@ -24,6 +24,24 @@ from typing import NamedTuple, cast, get_args
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.types import Base64JsonBytes, ToolResultExtension
 
+__all__ = [
+    'KNOWN_DIR_PREFIXES',
+    'TOOL_RESULT_EXTENSIONS',
+    'DiscoveredDirectory',
+    'DiscoveredFile',
+    'DiscoveryResult',
+    'ToolResultCollection',
+    'ToolResultDirectory',
+    'ToolResultDirectoryFile',
+    'ToolResultFile',
+    'collect_tool_results',
+    'discover_tool_results',
+    'get_tool_results_dir',
+    'logger',
+    'write_tool_results',
+]
+
+
 logger = logging.getLogger(__name__)
 
 TOOL_RESULT_EXTENSIONS: Set[str] = set(get_args(ToolResultExtension))
@@ -131,10 +149,7 @@ def get_tool_results_dir(project_folder: Path, session_id: str) -> Path:
     return project_folder / session_id / 'tool-results'
 
 
-def discover_tool_results(
-    project_folder: Path,
-    session_id: str,
-) -> DiscoveryResult:
+def discover_tool_results(project_folder: Path, session_id: str) -> DiscoveryResult:
     """Discover and validate all tool result artifacts without reading content.
 
     Scans the tool-results/ directory one level deep. For flat files, validates
@@ -201,21 +216,7 @@ def discover_tool_results(
     return DiscoveryResult(files=files, directories=directories, unknown_files=unknown_files)
 
 
-def _raise_on_unknown(discovery: DiscoveryResult) -> None:
-    """Raise FileNotFoundError if any unknown files in discovery result."""
-    if discovery.unknown_files:
-        file_list = '\n  '.join(str(p) for p in discovery.unknown_files)
-        raise FileNotFoundError(
-            f'Found {len(discovery.unknown_files)} tool result file(s) with unknown extensions:\n  {file_list}\n\n'
-            f'Known extensions: {sorted(TOOL_RESULT_EXTENSIONS)}\n'
-            f'Claude Code may have changed. Update TOOL_RESULT_EXTENSIONS to handle new file types.'
-        )
-
-
-def collect_tool_results(
-    project_folder: Path,
-    session_id: str,
-) -> ToolResultCollection:
+def collect_tool_results(project_folder: Path, session_id: str) -> ToolResultCollection:
     """
     Collect tool result files and directories for a session.
 
@@ -320,3 +321,14 @@ def write_tool_results(
             file_path.write_bytes(f.content)
 
     return collection.total_file_count
+
+
+def _raise_on_unknown(discovery: DiscoveryResult) -> None:
+    """Raise FileNotFoundError if any unknown files in discovery result."""
+    if discovery.unknown_files:
+        file_list = '\n  '.join(str(p) for p in discovery.unknown_files)
+        raise FileNotFoundError(
+            f'Found {len(discovery.unknown_files)} tool result file(s) with unknown extensions:\n  {file_list}\n\n'
+            f'Known extensions: {sorted(TOOL_RESULT_EXTENSIONS)}\n'
+            f'Claude Code may have changed. Update TOOL_RESULT_EXTENSIONS to handle new file types.'
+        )

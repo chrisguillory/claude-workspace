@@ -1,6 +1,13 @@
-#!/usr/bin/env -S uv run --no-project
+#!/usr/bin/env -S uv run --no-project --script
 # /// script
-# dependencies = ["pydantic>=2.0.0"]
+# requires-python = ">=3.13"
+# dependencies = [
+#   "cc_lib",
+#   "pydantic>=2.0.0",
+# ]
+#
+# [tool.uv.sources]
+# cc_lib = { path = "../../../cc-lib/", editable = true }
 # ///
 
 """
@@ -19,6 +26,8 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
+
+from cc_lib.utils import get_claude_config_home_dir
 
 
 def analyze_actual_values(
@@ -187,7 +196,9 @@ def analyze_actual_values(
                         for p in record_data['projectPaths']:
                             path_fields['projectPaths'].add(p)
 
-                except Exception:
+                except (
+                    Exception
+                ):  # exception_safety_linter.py: swallowed-exception — skip unparseable JSONL lines during analysis
                     pass
 
     return analysis, path_fields
@@ -206,7 +217,7 @@ def main() -> None:
     print('=' * 80)
 
     # Find session files
-    claude_dir = Path.home() / '.claude' / 'projects'
+    claude_dir = get_claude_config_home_dir() / 'projects'
     session_files: list[Path] = []
     for project_dir in claude_dir.iterdir():
         if project_dir.is_dir():

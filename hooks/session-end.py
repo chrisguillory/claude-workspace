@@ -5,9 +5,10 @@ See: https://code.claude.com/docs/en/hooks#sessionend
 """
 
 # /// script
+# requires-python = ">=3.13"
 # dependencies = [
-#   "pydantic>=2.0.0",
 #   "cc_lib",
+#   "pydantic>=2.0.0",
 # ]
 #
 # [tool.uv.sources]

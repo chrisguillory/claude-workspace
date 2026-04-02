@@ -19,6 +19,25 @@ from claude_session.schemas.base import StrictModel
 from claude_session.schemas.session.models import SessionRecord, Task
 from claude_session.schemas.types import Base64JsonBytes, JsonDatetime, ToolResultExtension
 
+__all__ = [
+    'ARCHIVE_FORMAT_VERSION',
+    'AgentFileEntry',
+    'ArchiveMetadata',
+    'FileMetadata',
+    'MainSessionFileEntry',
+    'PlanFileEntry',
+    'SessionArchive',
+    'SessionArchiveV1',
+    'SessionArchiveV2',
+    'TodoFileEntry',
+    'ToolResultDirectoryEntry',
+    'ToolResultDirectoryFileEntry',
+    'ToolResultEntry',
+    'migrate_v1_to_v2',
+    'parse_agent_metadata',
+]
+
+
 # -- Archive Format Version ----------------------------------------------------
 
 ARCHIVE_FORMAT_VERSION = '2.1'

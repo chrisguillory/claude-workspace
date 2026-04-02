@@ -30,10 +30,10 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
+
 from claude_session.config.base import DATA_DIR
 from claude_session.exceptions import NativeSessionMoveError, SameProjectMoveError
-from claude_session.paths import encode_path
-from claude_session.protocols import LoggerProtocol
 from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.schemas.operations.move import MoveResult
 from claude_session.schemas.session import SessionRecord
@@ -55,6 +55,13 @@ from claude_session.services.discovery import SessionDiscoveryService
 from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import PathTranslator
 from claude_session.storage.local import LocalFileSystemStorage
+
+__all__ = [
+    'DELETED_SESSIONS_DIR',
+    'SessionMoveService',
+    'logger',
+]
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +87,7 @@ class SessionMoveService:
         self.target_project_path = target_project_path.resolve()
         self.discovery_service = discovery_service or SessionDiscoveryService()
         self.parser_service = parser_service or SessionParserService()
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
     async def move_session(
         self,
@@ -89,7 +96,6 @@ class SessionMoveService:
         no_backup: bool = False,
         dry_run: bool = False,
         terminate_pid: int | None = None,
-        log: LoggerProtocol | None = None,
     ) -> MoveResult:
         """
         Move a session from its current project to the target project.
@@ -117,17 +123,16 @@ class SessionMoveService:
         # =====================================================================
         # Phase 1: Resolve & Collect
         # =====================================================================
-        session_info = await self._resolve_session(session_id, log)
+        session_info = await self._resolve_session(session_id)
         source_session_dir = session_info.session_folder
 
-        if log:
-            await log.info(f'Moving session: {session_info.session_id}')
+        logger.info('Moving session: %s', session_info.session_id)
 
         # Discover session files (main + agents)
-        session_files, agent_structure = await self._discover_session_files(session_info, log)
+        session_files, agent_structure = await self._discover_session_files(session_info)
 
         # Load all records
-        files_data = await self.parser_service.load_session_files(session_files, log)
+        files_data = await self.parser_service.load_session_files(session_files)
 
         # Determine source project path from record cwd fields
         source_project_path = extract_source_project_path(files_data)
@@ -140,9 +145,8 @@ class SessionMoveService:
         if is_native_session(session_info.session_id) and not force:
             raise NativeSessionMoveError(session_info.session_id)
 
-        if log:
-            await log.info(f'Source project: {source_project_path}')
-            await log.info(f'Target project: {self.target_project_path}')
+        logger.info('Source project: %s', source_project_path)
+        logger.info('Target project: %s', self.target_project_path)
 
         # Collect agent file info
         agent_infos = collect_agent_file_info(files_data, agent_structure)
@@ -156,10 +160,9 @@ class SessionMoveService:
         # Extract custom title
         custom_title = extract_custom_title_from_records(files_data)
 
-        if log:
-            await log.info(f'Found {len(agent_infos)} agent files, {tool_results.total_file_count} tool results')
-            if session_memory:
-                await log.info('Found session-memory/summary.md')
+        logger.info('Found %d agent files, %d tool results', len(agent_infos), tool_results.total_file_count)
+        if session_memory:
+            logger.info('Found session-memory/summary.md')
 
         # =====================================================================
         # Phase 2: Compute Target Paths & Pre-check
@@ -201,8 +204,7 @@ class SessionMoveService:
                 f'Cannot move: {len(existing_files)} file(s) already exist at target:\n  {existing_list}{more}'
             )
 
-        if log:
-            await log.info(f'Verified {len(all_output_paths)} target paths are available')
+        logger.info('Verified %d target paths are available', len(all_output_paths))
 
         # =====================================================================
         # Dry-run exit point
@@ -241,8 +243,7 @@ class SessionMoveService:
         translated_main = self._translate_records(main_records, translator)
         write_jsonl(target_dir / main_filename, translated_main, {}, {})
 
-        if log:
-            await log.info(f'Wrote main session: {len(translated_main)} records')
+        logger.info('Wrote main session: %d records', len(translated_main))
 
         # Write agent files (preserving structure)
         for info in agent_infos:
@@ -258,25 +259,21 @@ class SessionMoveService:
             translated = self._translate_records(records, translator)
             write_jsonl(output_path, translated, {}, {})
 
-            if log:
-                await log.info(f'Wrote agent {filename}: {len(translated)} records')
+            logger.info('Wrote agent %s: %d records', filename, len(translated))
 
         # Write tool results (raw copy, no translation)
         if tool_results:
             write_tool_results(tool_results, target_dir, sid)
-            if log:
-                await log.info(f'Wrote {tool_results.total_file_count} tool result files')
+            logger.info('Wrote %d tool result files', tool_results.total_file_count)
 
         # Write session memory (raw copy)
         if session_memory:
             write_session_memory(target_dir, sid, session_memory)
-            if log:
-                await log.info('Wrote session-memory/summary.md')
+            logger.info('Wrote session-memory/summary.md')
 
         files_written = len(all_output_paths)
 
-        if log:
-            await log.info(f'Phase 3 complete: {files_written} files written to target')
+        logger.info('Phase 3 complete: %d files written to target', files_written)
 
         # =====================================================================
         # Phase 4: Terminate & Delete Source
@@ -286,8 +283,7 @@ class SessionMoveService:
         # write new records while backup is being created)
         was_terminated = False
         if terminate_pid is not None:
-            if log:
-                await log.info(f'Terminating PID {terminate_pid}')
+            logger.info('Terminating PID %d', terminate_pid)
             os.kill(terminate_pid, signal.SIGKILL)
             time.sleep(0.2)
             was_terminated = True
@@ -295,7 +291,7 @@ class SessionMoveService:
         # Create backup before deleting source (skip if --no-backup)
         backup_path: Path | None = None
         if not no_backup:
-            backup_path = await self._create_backup(session_info, files_data, agent_infos, log)
+            backup_path = await self._create_backup(session_info, files_data, agent_infos)
 
         # Delete source files
         files_deleted = 0
@@ -354,15 +350,13 @@ class SessionMoveService:
                 if dir_path.exists() and not any(dir_path.iterdir()):
                     dir_path.rmdir()
 
-        except Exception as e:
+        except Exception as e:  # exception_safety_linter.py: swallowed-exception — partial source deletion adds warning; target already written successfully
             backup_note = f' Backup at: {backup_path}' if backup_path else ''
             msg = f'Source deletion partially failed: {e}. Session may exist in both projects.{backup_note}'
             warnings.append(msg)
-            if log:
-                await log.error(msg)
+            logger.error(msg, exc_info=True)
 
-        if log:
-            await log.info(f'Phase 4 complete: {files_deleted} source files deleted')
+        logger.info('Phase 4 complete: %d source files deleted', files_deleted)
 
         # =====================================================================
         # Phase 5: Result
@@ -393,25 +387,17 @@ class SessionMoveService:
 
     def _get_target_directory(self) -> Path:
         """Compute the target project directory under ~/.claude/projects/."""
-        encoded = encode_path(self.target_project_path)
+        encoded = encode_project_path(self.target_project_path)
         return self.claude_sessions_dir / encoded
 
-    async def _resolve_session(
-        self,
-        session_id_or_prefix: str,
-        log: LoggerProtocol | None,
-    ) -> SessionInfo:
+    async def _resolve_session(self, session_id_or_prefix: str) -> SessionInfo:
         """Resolve a session ID or prefix to a full session."""
         match = await self.discovery_service.find_session_by_id(session_id_or_prefix)
         if not match:
             raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
         return match
 
-    async def _discover_session_files(
-        self,
-        session_info: SessionInfo,
-        log: LoggerProtocol | None,
-    ) -> tuple[list[Path], dict[str, bool]]:
+    async def _discover_session_files(self, session_info: SessionInfo) -> tuple[Sequence[Path], Mapping[str, bool]]:
         """Discover all JSONL files for a session with structure detection.
 
         Returns:
@@ -452,8 +438,7 @@ class SessionMoveService:
                 agent_structure[agent_path.name] = is_nested
             session_files.extend(agent_files)
 
-        if log:
-            await log.info(f'Found {len(session_files)} session files ({len(agent_structure)} agents)')
+        logger.info('Found %d session files (%d agents)', len(session_files), len(agent_structure))
 
         return session_files, agent_structure
 
@@ -461,16 +446,15 @@ class SessionMoveService:
         self,
         records: Sequence[SessionRecord],
         translator: PathTranslator,
-    ) -> list[SessionRecord]:
+    ) -> Sequence[SessionRecord]:
         """Translate paths in records without changing session ID or other identifiers."""
         return [translator.translate_record(r) for r in records]
 
     async def _create_backup(
         self,
         session_info: SessionInfo,
-        files_data: Mapping[str, list[SessionRecord]],
+        files_data: Mapping[str, Sequence[SessionRecord]],
         agent_infos: Sequence[AgentFileInfo],
-        log: LoggerProtocol | None,
     ) -> Path:
         """Create a backup archive of the session before deleting source."""
         DELETED_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -488,11 +472,9 @@ class SessionMoveService:
                 storage=storage,
                 output_path=None,
                 format_param='json',
-                logger=log,
             )
 
             backup_path = Path(metadata.file_path)
-            if log:
-                await log.info(f'Backup created: {backup_path}')
+            logger.info('Backup created: %s', backup_path)
 
             return backup_path

@@ -15,8 +15,8 @@ clean for the report. Progress messages go to stderr.
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
-#   "lazy-object-proxy",
 #   "cc_lib",
+#   "lazy-object-proxy",
 # ]
 #
 # [tool.uv.sources]
@@ -40,7 +40,7 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import ClosedModel, SubsetModel
 from cc_lib.schemas.hooks import BashToolInput
 from cc_lib.types import JsonDatetime, JsonObject
-from cc_lib.utils import load_module_from_path
+from cc_lib.utils import get_claude_config_home_dir, load_module_from_path
 
 
 class CommandRecord(ClosedModel):
@@ -74,6 +74,8 @@ boundary = ErrorBoundary(exit_code=1)
 def main() -> None:
     """Parse args, extract commands, analyze, and print report."""
     args = parse_args()
+    if args.sessions is None:
+        args.sessions = get_claude_config_home_dir() / 'projects'
 
     prefixes: Set[str] = hook.load_bash_prefixes(args.cwd)
     if not prefixes:
@@ -99,8 +101,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--sessions',
         type=Path,
-        default=Path.home() / '.claude' / 'projects',
-        help='Directory containing session JSONL files (default: ~/.claude/projects)',
+        default=None,
+        help='Directory containing session JSONL files (default: $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)',
     )
     parser.add_argument(
         '--cwd',
@@ -360,7 +362,8 @@ class HookModule:
             raise HookModule.LoadError(str(e)) from e
 
 
-hook: HookModule.Interface = lazy_object_proxy.Proxy(HookModule.load)  # type: ignore[assignment]  # Proxy[Interface] not assignable but behaves identically at runtime
+# Proxy[Interface] acts as Interface at runtime — cast to satisfy mypy
+hook: HookModule.Interface = cast(HookModule.Interface, lazy_object_proxy.Proxy(HookModule.load))
 
 
 # Boundary handlers — registered after main, dispatched when main raises

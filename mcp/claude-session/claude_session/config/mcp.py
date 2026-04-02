@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from claude_session.config.base import BaseSessionSettings, lazy_settings
 
+__all__ = [
+    'McpServerSettings',
+    'settings',
+]
+
 
 class McpServerSettings(BaseSessionSettings):
     """MCP server-specific configuration."""

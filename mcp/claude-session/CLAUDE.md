@@ -4,8 +4,6 @@
 
 Session files are JSONL at `~/.claude/projects/<encoded-path>/<session-id>.jsonl`.
 
-> **Implementation Gap**: `_encode_path()` in `claude_session/services/archive.py` only handles `/` and `.` encoding. Claude Code itself encodes all four characters (`/`, `.`, ` `, `~` → `-`). Paths with spaces or tildes may cause session discovery issues.
-
 ### Quick Reference: Record Types
 
 Record types found in session files (schema v0.2.9):

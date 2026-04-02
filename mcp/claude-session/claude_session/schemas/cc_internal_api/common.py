@@ -14,6 +14,13 @@ import anthropic.types
 from claude_session.schemas import session
 from claude_session.schemas.cc_internal_api.base import FromSdk, FromSession, StrictModel
 
+__all__ = [
+    'ApiCacheCreation',
+    'ApiUsage',
+    'CacheControl',
+]
+
+
 # -- Cache Control (API-only, not persisted to session files) ------------------
 
 

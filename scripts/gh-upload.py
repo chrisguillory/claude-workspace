@@ -1,10 +1,10 @@
-#!/usr/bin/env -S uv run --no-project
+#!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#   "cc_lib",
 #   "httpx",
 #   "pydantic>=2.0.0",
-#   "cc_lib",
 # ]
 #
 # [tool.uv.sources]
@@ -34,7 +34,7 @@ from pathlib import Path
 
 import httpx
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas.base import OpenModel
+from cc_lib.schemas.base import SubsetModel
 from cc_lib.types import JsonDatetime
 
 # Hardcoded for personal use with mainstay-io/monorepo
@@ -63,7 +63,7 @@ class SessionExpiredError(UploadError):
     """GitHub session cookies are expired or invalid."""
 
 
-class BrowserCookie(OpenModel):
+class BrowserCookie(SubsetModel):
     """Cookie from saved browser profile state."""
 
     name: str
@@ -71,20 +71,20 @@ class BrowserCookie(OpenModel):
     domain: str = ''
 
 
-class BrowserState(OpenModel):
+class BrowserState(SubsetModel):
     """Saved browser session state from Selenium save_profile_state."""
 
     cookies: Sequence[BrowserCookie]
     saved_at: JsonDatetime | None = None
 
 
-class UploadAsset(OpenModel):
+class UploadAsset(SubsetModel):
     """GitHub upload asset metadata."""
 
     href: str
 
 
-class UploadPolicy(OpenModel):
+class UploadPolicy(SubsetModel):
     """GitHub upload policy response."""
 
     upload_url: str

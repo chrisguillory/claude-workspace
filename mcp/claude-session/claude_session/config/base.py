@@ -21,6 +21,16 @@ import lazy_object_proxy
 import pydantic
 import pydantic_settings
 
+__all__ = [
+    'DATA_DIR',
+    'BaseSessionSettings',
+    'T',
+    'ensure_data_dir',
+    'get_settings',
+    'lazy_settings',
+    'logger',
+]
+
 T = TypeVar('T', bound='BaseSessionSettings')
 
 logger = logging.getLogger(__name__)
@@ -29,60 +39,7 @@ logger = logging.getLogger(__name__)
 DATA_DIR = pathlib.Path.home() / '.claude-workspace' / 'claude-session'
 
 # Legacy data directory (pre-migration)
-_LEGACY_DATA_DIR = pathlib.Path.home() / '.claude-session-mcp'
-
-
-@functools.lru_cache(maxsize=1)
-def ensure_data_dir() -> pathlib.Path:
-    """Return the data directory, creating it and migrating legacy data if needed.
-
-    On first call per process, if the legacy directory (~/.claude-session-mcp/)
-    exists and the new directory (~/.claude-workspace/claude-session/) does not,
-    moves contents to the new location.
-
-    Cached: migration and mkdir run once per process. Call at point of use,
-    not at import time — importing a module should not have filesystem side effects.
-    """
-    _migrate_legacy_data_dir()
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return DATA_DIR
-
-
-def _migrate_legacy_data_dir() -> None:
-    """Move data from ~/.claude-session-mcp/ to ~/.claude-workspace/claude-session/.
-
-    Only runs if the old directory exists and the new one does not.
-    """
-    if not _LEGACY_DATA_DIR.exists():
-        return
-    if DATA_DIR.exists():
-        if _LEGACY_DATA_DIR.exists():
-            logger.warning('Legacy data directory still exists: %s (can be removed)', _LEGACY_DATA_DIR)
-        return
-
-    logger.warning(
-        'Migrating data directory: %s -> %s',
-        _LEGACY_DATA_DIR,
-        DATA_DIR,
-    )
-
-    DATA_DIR.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        shutil.move(_LEGACY_DATA_DIR, DATA_DIR)
-    except FileNotFoundError:
-        # Another process completed the migration first
-        if DATA_DIR.exists():
-            logger.info('Migration completed by another process')
-        else:
-            logger.error('Migration failed: source disappeared but target does not exist')
-    except OSError:
-        # Partial move (e.g., cross-device, disk full) — clean up so next attempt retries
-        if DATA_DIR.exists() and not any(DATA_DIR.iterdir()):
-            DATA_DIR.rmdir()
-        raise
-    else:
-        logger.warning('Data directory migration complete')
+LEGACY_DATA_DIR = pathlib.Path.home() / '.claude-session-mcp'
 
 
 class BaseSessionSettings(pydantic_settings.BaseSettings):
@@ -109,6 +66,22 @@ class BaseSessionSettings(pydantic_settings.BaseSettings):
         if not 0 <= v <= 9:
             raise ValueError('COMPRESSION_LEVEL must be between 0-9')
         return v
+
+
+@functools.lru_cache(maxsize=1)
+def ensure_data_dir() -> pathlib.Path:
+    """Return the data directory, creating it and migrating legacy data if needed.
+
+    On first call per process, if the legacy directory (~/.claude-session-mcp/)
+    exists and the new directory (~/.claude-workspace/claude-session/) does not,
+    moves contents to the new location.
+
+    Cached: migration and mkdir run once per process. Call at point of use,
+    not at import time — importing a module should not have filesystem side effects.
+    """
+    _migrate_legacy_data_dir()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return DATA_DIR
 
 
 def get_settings[T: 'BaseSessionSettings'](settings_class: type[T], env_file: str | None = None) -> T:
@@ -150,3 +123,40 @@ def lazy_settings[T: 'BaseSessionSettings'](settings_class: type[T]) -> T:
     """
     # Proxy[T] acts as T at runtime - cast to satisfy mypy
     return cast(T, lazy_object_proxy.Proxy(lambda: get_settings(settings_class)))
+
+
+def _migrate_legacy_data_dir() -> None:
+    """Move data from ~/.claude-session-mcp/ to ~/.claude-workspace/claude-session/.
+
+    Only runs if the old directory exists and the new one does not.
+    """
+    if not LEGACY_DATA_DIR.exists():
+        return
+    if DATA_DIR.exists():
+        if LEGACY_DATA_DIR.exists():
+            logger.warning('Legacy data directory still exists: %s (can be removed)', LEGACY_DATA_DIR)
+        return
+
+    logger.warning(
+        'Migrating data directory: %s -> %s',
+        LEGACY_DATA_DIR,
+        DATA_DIR,
+    )
+
+    DATA_DIR.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        shutil.move(LEGACY_DATA_DIR, DATA_DIR)
+    except FileNotFoundError:
+        # Another process completed the migration first
+        if DATA_DIR.exists():
+            logger.info('Migration completed by another process')
+        else:
+            logger.error('Migration failed: source disappeared but target does not exist', exc_info=True)
+    except OSError:
+        # Partial move (e.g., cross-device, disk full) — clean up so next attempt retries
+        if DATA_DIR.exists() and not any(DATA_DIR.iterdir()):
+            DATA_DIR.rmdir()
+        raise
+    else:
+        logger.warning('Data directory migration complete')

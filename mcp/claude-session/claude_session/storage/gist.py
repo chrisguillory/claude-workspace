@@ -15,6 +15,10 @@ from typing import Literal
 
 import httpx
 
+__all__ = [
+    'GistStorage',
+]
+
 
 class GistStorage:
     """
@@ -94,47 +98,6 @@ class GistStorage:
             return await self._update_gist(filename, content)
         else:
             return await self._create_gist(filename, content)
-
-    async def _create_gist(self, filename: str, content: str) -> str:
-        """Create new gist."""
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f'{self.base_url}/gists',
-                headers={
-                    'Authorization': f'Bearer {self.token}',
-                    'Accept': 'application/vnd.github.v3+json',
-                    'X-GitHub-Api-Version': '2022-11-28',
-                },
-                json={
-                    'description': self.description,
-                    'public': self.visibility == 'public',
-                    'files': {filename: {'content': content}},
-                },
-            )
-            response.raise_for_status()
-
-            gist_data = response.json()
-            self.gist_id = gist_data['id']  # Store for future updates
-            html_url: str = gist_data['html_url']
-            return html_url  # Return web URL
-
-    async def _update_gist(self, filename: str, content: str) -> str:
-        """Update existing gist."""
-        async with httpx.AsyncClient() as client:
-            response = await client.patch(
-                f'{self.base_url}/gists/{self.gist_id}',
-                headers={
-                    'Authorization': f'Bearer {self.token}',
-                    'Accept': 'application/vnd.github.v3+json',
-                    'X-GitHub-Api-Version': '2022-11-28',
-                },
-                json={'files': {filename: {'content': content}}},
-            )
-            response.raise_for_status()
-
-            gist_data = response.json()
-            html_url: str = gist_data['html_url']
-            return html_url
 
     async def exists(self, filename: str) -> bool:
         """
@@ -226,3 +189,44 @@ class GistStorage:
                 except binascii.Error as e:
                     raise ValueError(f"Failed to decode base64 content from '{filename}': {e}") from e
             return content.encode('utf-8')
+
+    async def _create_gist(self, filename: str, content: str) -> str:
+        """Create new gist."""
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f'{self.base_url}/gists',
+                headers={
+                    'Authorization': f'Bearer {self.token}',
+                    'Accept': 'application/vnd.github.v3+json',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                },
+                json={
+                    'description': self.description,
+                    'public': self.visibility == 'public',
+                    'files': {filename: {'content': content}},
+                },
+            )
+            response.raise_for_status()
+
+            gist_data = response.json()
+            self.gist_id = gist_data['id']  # Store for future updates
+            html_url: str = gist_data['html_url']
+            return html_url  # Return web URL
+
+    async def _update_gist(self, filename: str, content: str) -> str:
+        """Update existing gist."""
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                f'{self.base_url}/gists/{self.gist_id}',
+                headers={
+                    'Authorization': f'Bearer {self.token}',
+                    'Accept': 'application/vnd.github.v3+json',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                },
+                json={'files': {filename: {'content': content}}},
+            )
+            response.raise_for_status()
+
+            gist_data = response.json()
+            html_url: str = gist_data['html_url']
+            return html_url
