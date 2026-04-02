@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -82,7 +83,9 @@ def get_endpoint_pattern(filename: str) -> str:
     return name
 
 
-def load_capture_body(filepath: Path, is_request: bool) -> dict[str, Any] | None:
+def load_capture_body(
+    filepath: Path, is_request: bool
+) -> Mapping[str, Any] | None:  # strict_typing_linter.py: loose-typing — raw JSON capture
     """Load and extract body from capture file."""
     with open(filepath) as f:
         data = json.load(f)
@@ -204,7 +207,9 @@ def get_schema_for_endpoint(pattern: str, is_request: bool) -> tuple[str | None,
     return None, None
 
 
-def validate_sse_events(body: dict[str, Any]) -> tuple[int, int, list[str]]:
+def validate_sse_events(
+    body: Mapping[str, Any],
+) -> tuple[int, int, Sequence[str]]:  # strict_typing_linter.py: loose-typing — raw JSON capture
     """Validate SSE events in a streaming response."""
     adapter: TypeAdapter[SSEEvent] = TypeAdapter(SSEEvent)
     events = body.get('events', [])

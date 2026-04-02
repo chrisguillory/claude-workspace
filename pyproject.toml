@@ -129,8 +129,6 @@ filterwarnings = [
 "**/tests/**" = ["mutable-type", "loose-typing", "missing-all", "class-ordering"]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
-# claude-session
-"mcp/claude-session/scripts/**" = ["mutable-type", "loose-typing", "tuple-field"]
 
 [tool.exception-safety-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
