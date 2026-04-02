@@ -19,14 +19,18 @@ Originals (pre-patch binaries) are stored in our workspace directory:
     ~/.claude-workspace/binary-patcher/originals/{version}
 
 Usage:
-    claude-binary-patcher apply [NAMES...]    Apply patches (all if none given)
-    claude-binary-patcher check [NAMES...]    Dry run — show per-patch status
-    claude-binary-patcher list                Show available patches
+    claude-binary-patcher apply               Apply fix patches (safe default)
+    claude-binary-patcher apply --all         Apply all patches (fixes + features)
+    claude-binary-patcher apply --features    Apply feature patches only
+    claude-binary-patcher apply NAME...       Apply specific patches by name
+    claude-binary-patcher check --all         Dry run — show all patch status
+    claude-binary-patcher list                Show available patches by kind
     claude-binary-patcher restore             Restore original binary from backup
     claude-binary-patcher install             Install to PATH with completions
 
 References:
     https://github.com/anthropics/claude-code/issues/28750  (statusline)
+    https://github.com/anthropics/claude-code/issues/41361  (mcp-tool-results)
 """
 
 from __future__ import annotations
@@ -40,8 +44,10 @@ from pathlib import Path
 import typer
 from cc_lib.claude_binary_patching import (
     PATCHES,
+    PATCHES_BY_KIND,
     PATCHES_BY_NAME,
     PatchDef,
+    PatchKind,
     PatchScanResult,
     scan_binary,
 )
@@ -70,18 +76,43 @@ app = create_app(help='Claude Code binary patcher.')
 error_boundary = ErrorBoundary(exit_code=1)
 
 
-def resolve_patches(names: Sequence[str] | None) -> Sequence[PatchDef]:
-    """Resolve CLI names to PatchDefs. None means all patches."""
-    if not names:
+def resolve_patches(
+    names: Sequence[str] | None,
+    *,
+    fixes: bool = False,
+    features: bool = False,
+    tweaks: bool = False,
+    all_: bool = False,
+) -> Sequence[PatchDef]:
+    """Resolve CLI names/flags to PatchDefs.
+
+    Priority: explicit names > kind flags > default (fixes only).
+    """
+    if names:
+        unknown = [n for n in names if n not in PATCHES_BY_NAME]
+        if unknown:
+            available = ', '.join(PATCHES_BY_NAME)
+            raise PatchError(f'Unknown patch(es): {", ".join(unknown)}\nAvailable: {available}')
+        seen: dict[str, None] = {}
+        for n in names:
+            seen[n] = None
+        return tuple(PATCHES_BY_NAME[n] for n in seen)
+
+    if all_:
         return PATCHES
-    unknown = [n for n in names if n not in PATCHES_BY_NAME]
-    if unknown:
-        available = ', '.join(PATCHES_BY_NAME)
-        raise PatchError(f'Unknown patch(es): {", ".join(unknown)}\nAvailable: {available}')
-    seen: dict[str, None] = {}
-    for n in names:
-        seen[n] = None
-    return tuple(PATCHES_BY_NAME[n] for n in seen)
+
+    kinds: list[PatchKind] = []
+    if fixes:
+        kinds.append(PatchKind.FIX)
+    if features:
+        kinds.append(PatchKind.FEATURE)
+    if tweaks:
+        kinds.append(PatchKind.TWEAK)
+
+    if not kinds:
+        kinds = [PatchKind.FIX]  # safe default
+
+    return tuple(p for p in PATCHES if p.kind in kinds)
 
 
 @app.command()
@@ -89,13 +120,25 @@ def resolve_patches(names: Sequence[str] | None) -> Sequence[PatchDef]:
 def apply(
     names: list[str] | None = typer.Argument(  # strict_typing_linter.py: mutable-type — typer requires list
         None,
-        help='Patch names to apply (all if omitted)',
+        help='Patch names to apply',
         autocompletion=lambda incomplete: _complete_patch_names(incomplete),
     ),
     path: Path | None = typer.Option(None, '--path', help='Explicit binary path (default: auto-detect)'),
+    fixes: bool = typer.Option(False, '--fixes', help='Apply fix patches'),
+    features: bool = typer.Option(False, '--features', help='Apply feature patches'),
+    tweaks: bool = typer.Option(False, '--tweaks', help='Apply tweak patches'),
+    all_: bool = typer.Option(False, '--all', help='Apply all patches'),
 ) -> None:
-    """Apply patches (all if none specified)."""
-    patches = resolve_patches(names)
+    """Apply patches. Default (no names/flags): fixes only.
+
+    \b
+    Examples:
+        apply                Apply all fix patches (safe default)
+        apply --all          Apply everything (fixes + features + tweaks)
+        apply --features     Apply feature patches only
+        apply statusline     Apply a specific patch by name
+    """
+    patches = resolve_patches(names, fixes=fixes, features=features, tweaks=tweaks, all_=all_)
     patcher = BinaryPatcher(path) if path else BinaryPatcher.detect()
     print(f'Target: {patcher.path} (version {patcher.version})')
     print(f'Size: {patcher.size_mb:.1f} MB')
@@ -107,36 +150,69 @@ def apply(
 def check(
     names: list[str] | None = typer.Argument(  # strict_typing_linter.py: mutable-type — typer requires list
         None,
-        help='Patch names to check (all if omitted)',
+        help='Patch names to check',
         autocompletion=lambda incomplete: _complete_patch_names(incomplete),
     ),
     path: Path | None = typer.Option(None, '--path', help='Explicit binary path (default: auto-detect)'),
+    fixes: bool = typer.Option(False, '--fixes', help='Check fix patches only'),
+    features: bool = typer.Option(False, '--features', help='Check feature patches only'),
+    tweaks: bool = typer.Option(False, '--tweaks', help='Check tweak patches only'),
+    all_: bool = typer.Option(False, '--all', help='Check all patches'),
 ) -> None:
-    """Dry run — show per-patch status."""
-    patches = resolve_patches(names)
+    """Dry run — show per-patch status. Default: fixes only.
+
+    \b
+    Examples:
+        check                Check fix patches (safe default)
+        check --all          Check all patches
+        check --features     Check feature patches only
+    """
+    patches = resolve_patches(names, fixes=fixes, features=features, tweaks=tweaks, all_=all_)
     patcher = BinaryPatcher(path) if path else BinaryPatcher.detect()
     print(f'Target: {patcher.path} (version {patcher.version})')
     print(f'Size: {patcher.size_mb:.1f} MB\n')
     results = patcher.scan(patches)
-    for name, result in results.items():
-        if result.status == 'unpatched':
-            print(f'  {name:<20} unpatched  ({len(result.sites)} sites)')
-        elif result.status == 'applied':
-            print(f'  {name:<20} applied')
-        elif result.status == 'changed':
-            print(f'  {name:<20} changed    (anchor found, code different)')
-        elif result.status == 'missing':
-            print(f'  {name:<20} missing    (anchor not found)')
+    _print_results_by_kind(results)
     print('\nDry run — no changes made.')
+
+
+def _print_results_by_kind(results: Mapping[str, PatchScanResult]) -> None:
+    """Print scan results grouped by patch kind."""
+    by_kind: dict[PatchKind, list[tuple[str, PatchScanResult]]] = {}
+    for name, result in results.items():
+        by_kind.setdefault(result.patch.kind, []).append((name, result))
+
+    for kind in PatchKind:
+        entries = by_kind.get(kind)
+        if not entries:
+            continue
+        print(f'  {kind.value.title()}:')
+        for name, result in entries:
+            print(f'    {name:<20} {_format_status(result)}')
+
+
+def _format_status(result: PatchScanResult) -> str:
+    if result.status == 'unpatched':
+        return f'unpatched  ({len(result.sites)} sites)'
+    if result.status == 'applied':
+        return 'applied'
+    if result.status == 'changed':
+        return 'changed    (anchor found, code different)'
+    return 'missing    (anchor not found)'
 
 
 @app.command(name='list')
 @error_boundary
 def list_patches() -> None:
-    """Show all available patches."""
-    print('Available patches:\n')
-    for patch in PATCHES:
-        print(f'  {patch.name:<20} {patch.description}')
+    """Show all available patches grouped by kind."""
+    for kind in PatchKind:
+        patches = PATCHES_BY_KIND.get(kind, ())
+        if not patches:
+            continue
+        print(f'{kind.value.title()}:')
+        for patch in patches:
+            print(f'  {patch.name:<20} {patch.description}')
+        print()
 
 
 @app.command()
