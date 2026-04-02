@@ -99,7 +99,7 @@ class OpenRouterClient:
             encoding_format: Response format. 'base64' (default) is ~47%% smaller on the wire.
         """
         if requests_per_minute is not None:
-            logger.info(f'requests_per_minute={requests_per_minute} accepted but not yet enforced')
+            logger.info('requests_per_minute=%s accepted but not yet enforced', requests_per_minute)
         self._model = model
         self._total_tokens = 0
         self._dimensions = dimensions

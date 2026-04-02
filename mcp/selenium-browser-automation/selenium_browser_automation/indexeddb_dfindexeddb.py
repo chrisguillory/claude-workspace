@@ -122,7 +122,7 @@ def export_indexeddb_with_schema(
             dfindexeddb.errors.DecoderError,
         ) as e:
             # Log but continue with other origins
-            logger.warning(f'Failed to parse {origin_dir}: {e}', exc_info=True)
+            logger.warning('Failed to parse %s: %s', origin_dir, e, exc_info=True)
 
     return result
 

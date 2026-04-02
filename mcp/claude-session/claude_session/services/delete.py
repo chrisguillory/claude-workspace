@@ -537,7 +537,7 @@ class SessionDeleteService:
 
         except self.EXPECTED_DELETION_ERRORS as e:
             # Expected filesystem error - rollback already happened
-            logger.error('Deletion failed (rolled back): %s', e, exc_info=True)
+            logger.exception('Deletion failed (rolled back): %s', e)
 
             return DeleteResult(
                 session_id=session_id,
@@ -651,7 +651,7 @@ class SessionDeleteService:
                 await self._rollback_from_backup(backup_path)
                 logger.info('Rollback completed after cancellation')
             except Exception as rollback_error:
-                logger.error(f'Rollback failed during cancellation: {rollback_error}', exc_info=True)
+                logger.exception('Rollback failed during cancellation: %s', rollback_error)
                 # Keep backup for manual recovery
             else:
                 # Rollback succeeded - remove backup
@@ -661,12 +661,12 @@ class SessionDeleteService:
 
         except BaseException as original_exc:
             # All other exceptions (including KeyboardInterrupt, SystemExit)
-            logger.error(f'Deletion failed: {original_exc}, performing rollback...', exc_info=True)
+            logger.exception('Deletion failed: %s, performing rollback...', original_exc)
             try:
                 await self._rollback_from_backup(backup_path)
                 logger.info('Rollback completed successfully')
             except Exception as rollback_error:
-                logger.error(f'Rollback failed: {rollback_error}', exc_info=True)
+                logger.exception('Rollback failed: %s', rollback_error)
                 # Keep backup for manual recovery
                 original_exc.add_note(f'Rollback failed: {rollback_error}')
                 original_exc.add_note(f'Backup preserved at: {backup_path}')
@@ -742,7 +742,7 @@ class SessionDeleteService:
 
         Uses SessionArchiveV2 structure (v1 backups are migrated).
         """
-        logger.info(f'Rolling back from backup: {backup_path}')
+        logger.info('Rolling back from backup: %s', backup_path)
 
         # Parse backup using version detection
         backup_data = json.loads(backup_path.read_text(encoding='utf-8'))
@@ -758,7 +758,7 @@ class SessionDeleteService:
         # Empty mappings ({}, {}) = identity (no slug/agent ID remapping for rollback)
         main_file_path = target_dir / f'{archive.session_id}.jsonl'
         write_jsonl(main_file_path, archive.main_session.records, {}, {})
-        logger.info(f'Restored: {main_file_path}')
+        logger.info('Restored: %s', main_file_path)
 
         # Restore agent files (with nested structure support)
         for agent in archive.agent_files:
@@ -772,7 +772,7 @@ class SessionDeleteService:
             agent_dir.mkdir(parents=True, exist_ok=True)
             agent_path = agent_dir / agent_filename
             write_jsonl(agent_path, agent.records, {}, {})
-            logger.info(f'Restored: {agent_path}')
+            logger.info('Restored: %s', agent_path)
 
         # Restore tool results (exist_ok=True: files may survive partial deletion)
         if archive.tool_results or archive.tool_result_dirs:
@@ -793,7 +793,7 @@ class SessionDeleteService:
                 ],
             )
             write_tool_results(collection, target_dir, archive.session_id, exist_ok=True)
-            logger.info(f'Restored {collection.total_file_count} tool result files')
+            logger.info('Restored %s tool result files', collection.total_file_count)
 
         # Restore todo files (exist_ok=True: files may survive partial deletion)
         if archive.todos:
@@ -801,17 +801,17 @@ class SessionDeleteService:
                 ((f'{archive.session_id}-agent-{todo.agent_id}.json', todo.content) for todo in archive.todos),
                 exist_ok=True,
             )
-            logger.info(f'Restored {len(archive.todos)} todo files')
+            logger.info('Restored %s todo files', len(archive.todos))
 
         # Restore task files (exist_ok=True: files may survive partial deletion)
         if archive.tasks:
             tasks_restored = write_tasks(archive.session_id, archive.tasks, exist_ok=True)
-            logger.info(f'Restored {tasks_restored} task files')
+            logger.info('Restored %s task files', tasks_restored)
 
         # Restore task metadata (exist_ok=True: files may survive partial deletion)
         if archive.task_metadata:
             metadata_restored = write_task_metadata(archive.session_id, archive.task_metadata, exist_ok=True)
-            logger.info(f'Restored {metadata_restored} task metadata files')
+            logger.info('Restored %s task metadata files', metadata_restored)
 
         # Restore plan files (exist_ok=True: files may survive partial deletion)
         if archive.plan_files:
@@ -819,7 +819,7 @@ class SessionDeleteService:
                 ((plan.slug, plan.content) for plan in archive.plan_files),
                 exist_ok=True,
             )
-            logger.info(f'Restored {len(archive.plan_files)} plan files')
+            logger.info('Restored %s plan files', len(archive.plan_files))
 
         # Recreate session-env directory
         create_session_env_dir(archive.session_id)

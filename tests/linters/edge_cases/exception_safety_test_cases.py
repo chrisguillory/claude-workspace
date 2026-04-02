@@ -116,7 +116,7 @@ def exc002_correct_specific() -> None:
     try:
         risky_operation()
     except ValueError as e:
-        logger.exception(f'Invalid value: {e}')  # Proper logging with traceback
+        logger.exception('Invalid value: %s', e)  # Proper logging with traceback
         return None  # OK - specific exception handled
 
 
@@ -418,7 +418,7 @@ def exc005_correct_use_variable() -> None:
     try:
         risky_operation()
     except ValueError as e:
-        logger.exception(f'Failed: {e}')  # Using e with proper traceback (EXC006 compliant)
+        logger.exception('Failed: %s', e)  # Using e with proper traceback (EXC006 compliant)
         return None
 
 
@@ -430,7 +430,7 @@ def exc006_violation_basic() -> None:
     try:
         risky_operation()
     except Exception as e:
-        logger.error(f'Failed: {e}')  # EXC006: no exc_info - traceback lost!
+        logger.error('Failed: %s', e)  # EXC006: no exc_info - traceback lost!
         raise
 
 
@@ -457,7 +457,7 @@ def exc006_correct_exc_info() -> None:
     try:
         risky_operation()
     except Exception as e:
-        logger.error('Failed: %s', e, exc_info=True)  # Includes traceback
+        logger.exception('Failed: %s', e)  # Includes traceback
         raise
 
 
@@ -687,13 +687,13 @@ async def error_boundary_example() -> ErrorResult | SuccessResult:
 
     except ValueError as e:
         # Expected error - handle gracefully
-        logger.error('Invalid data: %s', e, exc_info=True)
+        logger.exception('Invalid data: %s', e)
         await rollback_async(backup_path)
         return ErrorResult(str(e))
 
     except BaseException as exc:
         # Unexpected error - cleanup and propagate
-        logger.error('Unexpected error, rolling back', exc_info=True)
+        logger.exception('Unexpected error, rolling back')
         try:
             await rollback_async(backup_path)
             exc.add_note('Rollback completed successfully')
