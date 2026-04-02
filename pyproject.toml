@@ -113,6 +113,7 @@ asyncio_mode = "auto"
 # pythonpath: repo root on sys.path so unit tests can `from plugins... import`
 pythonpath = ["."]
 testpaths = ["tests"]
+norecursedirs = ["scratch", ".venv", "node_modules", "__pycache__"]
 # Default-deny: all warnings are errors. Third-party noise gets targeted ignores.
 # Fix root cause; never blindly suppress with filters.
 filterwarnings = [

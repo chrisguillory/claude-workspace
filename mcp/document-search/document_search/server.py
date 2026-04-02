@@ -12,7 +12,6 @@ Tools:
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import atexit
 import contextlib
@@ -49,6 +48,7 @@ from document_search.schemas.config import (
 from document_search.schemas.dashboard import OperationProgress
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import IndexingResult, StopAfterStage
+from document_search.schemas.pipeline_config import PipelineConfig
 from document_search.schemas.vectors import (
     ClearResult,
     CollectionMetadata,
@@ -863,9 +863,9 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     # Configure logging with timestamps to stderr.
     # force=True overrides any prior configuration (e.g., from FastMCP)
     # so that our format and level take effect.
-    log_level = os.environ.get('DOCUMENT_SEARCH_LOG_LEVEL', 'INFO')
+    pipeline_config = PipelineConfig()
     logging.basicConfig(
-        level=getattr(logging, log_level, logging.INFO),
+        level=pipeline_config.log_level,
         format='%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s',
         datefmt='%H:%M:%S',
         stream=sys.stderr,
@@ -937,19 +937,6 @@ server = mcp.server.fastmcp.FastMCP('document-search', lifespan=lifespan)
 # Create FastMCP server with lifespan
 def main() -> None:
     """Entry point for the MCP server."""
-    parser = argparse.ArgumentParser(description='Document Search MCP Server')
-    parser.add_argument(
-        '--log-level',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        default=None,
-        help='Server log level (default: INFO, env: DOCUMENT_SEARCH_LOG_LEVEL)',
-    )
-    args = parser.parse_args()
-
-    # Store in env so lifespan() picks it up (CLI arg wins over env var)
-    if args.log_level:
-        os.environ['DOCUMENT_SEARCH_LOG_LEVEL'] = args.log_level
-
     server.run()
 
 

@@ -101,7 +101,7 @@ def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCat
         if exc.code == 404:
             if exc.message == 'No successful provider responses.':
                 return 'provider_unavailable'
-            logger.debug(f'Non-retryable 404: {exc.message!r}')
+            logger.debug('Non-retryable 404: %r', exc.message)
             return None
         if exc.code == 502:
             return 'bad_gateway'
