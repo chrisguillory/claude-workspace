@@ -137,6 +137,8 @@ __all__ = [
     'AskUserQuestionToolResult',
     'AssistantRecord',
     'AsyncTaskLaunchResult',
+    'AttachmentData',
+    'AttachmentRecord',
     'BackgroundTask',
     'BaseRecord',
     'BashOutputToolInput',
@@ -149,6 +151,7 @@ __all__ = [
     'ClearThinkingEdit',
     'CompactBoundarySystemRecord',
     'CompactMetadata',
+    'CompanionIntroAttachment',
     'ConnectionError',
     'ContextManagement',
     'CustomTitleRecord',
@@ -193,6 +196,7 @@ __all__ = [
     'MCPToolInput',
     'MCPToolResult',
     'MalformedWriteToolInput',
+    'McpInstructionsDeltaAttachment',
     'McpMeta',
     'McpProgressCompletedData',
     'McpProgressFailedData',
@@ -207,6 +211,7 @@ __all__ = [
     'NotebookEditToolInput',
     'PatchHunk',
     'PdfFileInfo',
+    'PermissionModeRecord',
     'PrLinkRecord',
     'ProgressData',
     'ProgressRecord',
@@ -298,9 +303,9 @@ __all__ = [
 
 SCHEMA_VERSION = '0.2.20'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.89'
+CLAUDE_CODE_MAX_VERSION = '2.1.90'
 LAST_VALIDATED = '2026-04-01'
-VALIDATION_RECORD_COUNT = 64_011
+VALIDATION_RECORD_COUNT = 68_085
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -2606,6 +2611,65 @@ class WorktreeStateRecord(StrictModel):
     sessionId: str
 
 
+# -- Permission Mode Record (Claude Code 2.1.90+) -----------------------------
+
+
+class PermissionModeRecord(StrictModel):
+    """Records the active permission mode for a session.
+
+    Does NOT inherit from BaseRecord -- minimal schema with no uuid/timestamp.
+    """
+
+    type: Literal['permission-mode']
+    permissionMode: Literal['default']
+    sessionId: str
+
+
+# -- Attachment Record (Claude Code 2.1.90+) -----------------------------------
+
+
+class CompanionIntroAttachment(StrictModel):
+    """Companion creature introduction (/buddy feature)."""
+
+    type: Literal['companion_intro']
+    name: str
+    species: str
+
+
+class McpInstructionsDeltaAttachment(StrictModel):
+    """MCP server instruction changes (added/removed tool descriptions)."""
+
+    type: Literal['mcp_instructions_delta']
+    addedNames: Sequence[str]
+    addedBlocks: Sequence[str]
+    removedNames: Sequence[str]
+
+
+AttachmentData = Annotated[
+    CompanionIntroAttachment | McpInstructionsDeltaAttachment,
+    pydantic.Field(discriminator='type'),
+]
+
+
+class AttachmentRecord(BaseRecord):
+    """Attachment record for non-message content injected into sessions.
+
+    Shares BaseRecord fields plus UserRecord metadata fields. Distinguished
+    from UserRecord by having an 'attachment' field instead of 'message'.
+    """
+
+    type: Literal['attachment']
+    cwd: PathField
+    parentUuid: str
+    isSidechain: bool
+    userType: Literal['external']
+    version: str
+    gitBranch: str
+    slug: str | None = None
+    entrypoint: str | None = None
+    attachment: AttachmentData
+
+
 # -- Session Record (Discriminated Union) --------------------------------------
 
 # Union of all record types (validated left-to-right)
@@ -2632,7 +2696,9 @@ SessionRecord = Annotated[
     | SavedHookContextRecord
     | AgentNameRecord
     | LastPromptRecord
-    | WorktreeStateRecord,
+    | WorktreeStateRecord
+    | PermissionModeRecord
+    | AttachmentRecord,
     pydantic.Field(union_mode='left_to_right'),
 ]
 
@@ -2725,6 +2791,8 @@ _saved_hook_context_adapter = pydantic.TypeAdapter(SavedHookContextRecord)
 _agent_name_adapter = pydantic.TypeAdapter(AgentNameRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
 _worktree_state_adapter = pydantic.TypeAdapter(WorktreeStateRecord)
+_permission_mode_adapter = pydantic.TypeAdapter(PermissionModeRecord)
+_attachment_adapter = pydantic.TypeAdapter(AttachmentRecord)
 
 
 def validate_session_record(
@@ -2778,5 +2846,9 @@ def validate_session_record(
         return _last_prompt_adapter.validate_python(data)
     elif record_type == 'worktree-state':
         return _worktree_state_adapter.validate_python(data)
+    elif record_type == 'permission-mode':
+        return _permission_mode_adapter.validate_python(data)
+    elif record_type == 'attachment':
+        return _attachment_adapter.validate_python(data)
     else:
         return SessionRecordAdapter.validate_python(data)
