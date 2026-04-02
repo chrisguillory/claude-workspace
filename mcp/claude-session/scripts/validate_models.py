@@ -37,7 +37,7 @@ import math
 import os
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence, Set
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, TypedDict
@@ -97,14 +97,14 @@ class EnrichedFieldError(TypedDict):
     file_path: Path  # Full path for reference
     line: int  # Line number in JSONL
     record_type: str  # Record type (user, assistant, etc.)
-    loc: tuple[str | int, ...]  # Original location tuple
+    loc: Sequence[str | int]  # Original location from Pydantic validation
     loc_str: str  # Dot-separated path
     normalized_loc: str  # Path with Union[X,Y] patterns stripped
     generalized_loc: str  # Path with numeric indices replaced by *
     msg: str  # Error message
     error_type: str  # Error type like "extra_forbidden"
-    value: Any  # The actual value at that path
-    value_keys: list[str] | None  # Keys if value is a dict
+    value: Any  # The actual value at that path  # strict_typing_linter.py: loose-typing — heterogeneous
+    value_keys: Sequence[str] | None  # Keys if value is a dict
     value_type: str  # Type name of the value
 
 
@@ -115,7 +115,7 @@ class ErrorGroup(TypedDict):
     generalized_path: str
     value_shape: str  # "object with keys [a, b, c]" or "string" etc.
     count: int
-    errors: list[EnrichedFieldError]
+    errors: Sequence[EnrichedFieldError]
 
 
 class FallbackUsage(TypedDict):
@@ -126,7 +126,7 @@ class FallbackUsage(TypedDict):
     path: str  # Dot-separated path to the fallback
     fallback_type: str  # Class name (e.g., MCPToolInput, MCPToolResult)
     tool_name: str | None  # MCP tool name if available
-    extra_fields: dict[str, str]  # Field name -> type name
+    extra_fields: Mapping[str, str]  # Field name -> type name
 
 
 class FileValidationResult(TypedDict):
@@ -137,12 +137,12 @@ class FileValidationResult(TypedDict):
     valid_records: int
     invalid_records: int
     record_types: Counter[str]
-    errors: list[str]
-    enriched_errors: list[EnrichedFieldError]
-    unknown_types: set[str]
-    unknown_content_types: set[str]
-    missing_fields: defaultdict[str, list[str]]
-    fallbacks: list[FallbackUsage]
+    errors: Sequence[str]
+    enriched_errors: Sequence[EnrichedFieldError]
+    unknown_types: Set[str]
+    unknown_content_types: Set[str]
+    missing_fields: Mapping[str, Sequence[str]]
+    fallbacks: Sequence[FallbackUsage]
 
 
 class TotalStats(TypedDict):
@@ -153,9 +153,9 @@ class TotalStats(TypedDict):
     valid_records: int
     invalid_records: int
     record_types: Counter[str]
-    unknown_types: set[str]
-    unknown_content_types: set[str]
-    fallbacks: list[FallbackUsage]
+    unknown_types: Set[str]
+    unknown_content_types: Set[str]
+    fallbacks: Sequence[FallbackUsage]
 
 
 # -- Path Manipulation Utilities -----------------------------------------------
@@ -217,7 +217,9 @@ def generalize_path(loc: tuple[str | int, ...]) -> str:
 # -- Value Extraction and Formatting -------------------------------------------
 
 
-def extract_value_at_path(data: dict[str, Any], loc: tuple[str | int, ...]) -> Any:
+def extract_value_at_path(
+    data: Mapping[str, Any], loc: Sequence[str | int]
+) -> Any:  # strict_typing_linter.py: loose-typing — heterogeneous validation error values
     """
     Extract the value at a given path in a nested structure.
 
@@ -279,7 +281,9 @@ def extract_value_at_path(data: dict[str, Any], loc: tuple[str | int, ...]) -> A
     return current
 
 
-def format_value_shape(value: Any) -> str:
+def format_value_shape(
+    value: Any,
+) -> str:  # strict_typing_linter.py: loose-typing — heterogeneous validation error values
     """
     Describe the shape of a value for grouping and display.
 
@@ -315,7 +319,9 @@ def format_value_shape(value: Any) -> str:
         return type(value).__name__
 
 
-def truncate_value(value: Any, full: bool = False) -> str:
+def truncate_value(
+    value: Any, full: bool = False
+) -> str:  # strict_typing_linter.py: loose-typing — heterogeneous validation error values
     """
     Format a value for display, with optional truncation.
 
@@ -391,7 +397,7 @@ def compute_grouping_key(error: EnrichedFieldError) -> tuple[str, str, str]:
     )
 
 
-def group_errors(errors: list[EnrichedFieldError]) -> list[ErrorGroup]:
+def group_errors(errors: Sequence[EnrichedFieldError]) -> Sequence[ErrorGroup]:
     """
     Group errors by their pattern.
 
@@ -449,10 +455,10 @@ def _may_contain_fallbacks(record: Any) -> bool:
 
 
 def find_fallbacks(
-    obj: Any,
+    obj: Any,  # strict_typing_linter.py: loose-typing — walks arbitrary Pydantic model tree
     path: str = '',
     tool_name: str | None = None,
-) -> list[tuple[str, str, str | None, dict[str, str]]]:
+) -> Sequence[tuple[str, str, str | None, Mapping[str, str]]]:
     """
     Recursively find all PermissiveModel instances in a validated record.
 
@@ -467,7 +473,7 @@ def find_fallbacks(
     Returns:
         List of tuples: (path, fallback_type, tool_name, extra_fields)
     """
-    fallbacks: list[tuple[str, str, str | None, dict[str, str]]] = []
+    fallbacks: list[tuple[str, str, str | None, Mapping[str, str]]] = []
 
     if isinstance(obj, PermissiveModel):
         # Found a fallback! Record it with its extra fields
@@ -543,7 +549,7 @@ def resolve_tool_name_for_result(
 # -- File Validation -----------------------------------------------------------
 
 
-def find_all_session_files() -> list[Path]:
+def find_all_session_files() -> Sequence[Path]:
     """Find all .jsonl session files in ~/.claude/projects/ (recursive)."""
     claude_dir = Path.home() / '.claude' / 'projects'
     if not claude_dir.exists():
@@ -560,21 +566,17 @@ def find_all_session_files() -> list[Path]:
 
 def validate_session_file(session_file: Path, *, fast: bool = False) -> FileValidationResult:
     """Validate a single session file and return statistics."""
-    results: FileValidationResult = {
-        'file': str(session_file),
-        'total_records': 0,
-        'valid_records': 0,
-        'invalid_records': 0,
-        'record_types': Counter(),
-        'errors': [],
-        'enriched_errors': [],
-        'unknown_types': set(),
-        'unknown_content_types': set(),
-        'missing_fields': defaultdict(list),
-        'fallbacks': [],
-    }
-
     session_filename = Path(session_file).name
+    total_records = 0
+    valid_records = 0
+    invalid_records = 0
+    record_types: Counter[str] = Counter()
+    errors: list[str] = []
+    enriched_errors: list[EnrichedFieldError] = []
+    unknown_types: set[str] = set()
+    unknown_content_types: set[str] = set()
+    missing_fields: defaultdict[str, list[str]] = defaultdict(list)
+    fallbacks: list[FallbackUsage] = []
 
     # Track tool_use_id -> tool_name for cross-record correlation
     tool_use_map: dict[str, str] = {}
@@ -584,17 +586,17 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
             if not line or line == b'\n':
                 continue
 
-            results['total_records'] += 1
+            total_records += 1
             record_type = 'UNKNOWN'
 
             try:
                 record_data = orjson.loads(line)
                 record_type = record_data.get('type', 'UNKNOWN')
-                results['record_types'][record_type] += 1
+                record_types[record_type] += 1
 
                 # Validate using type-dispatch (avoids 17-member union scan)
                 record = validate_session_record(record_data)
-                results['valid_records'] += 1
+                valid_records += 1
 
                 if not fast:
                     # Extract tool uses from AssistantRecords for correlation
@@ -614,18 +616,18 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                                 if actual_tool_name and not actual_tool_name.startswith('mcp__'):
                                     if not reclassified_as_invalid:
                                         # Claude Code tool fell through - reclassify once
-                                        results['invalid_records'] += 1
-                                        results['valid_records'] -= 1
+                                        invalid_records += 1
+                                        valid_records -= 1
                                         reclassified_as_invalid = True
                                     error_msg = (
                                         f'Line {line_num} ({record_type}): ⚠️  Claude Code tool '
                                         f"'{actual_tool_name}' result fell through to MCPToolResult. "
                                         f'Fields: {list(extra_fields.keys())}'
                                     )
-                                    results['errors'].append(error_msg)
+                                    errors.append(error_msg)
                                     continue  # Don't also add to fallbacks
 
-                            results['fallbacks'].append(
+                            fallbacks.append(
                                 {
                                     'file': session_filename,
                                     'line': line_num,
@@ -637,19 +639,19 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                             )
 
             except ValidationError as e:
-                results['invalid_records'] += 1
+                invalid_records += 1
 
                 if fast:
-                    results['errors'].append(f'Line {line_num} ({record_type}): {len(e.errors())} validation errors')
+                    errors.append(f'Line {line_num} ({record_type}): {len(e.errors())} validation errors')
                 else:
                     error_msg = f'Line {line_num} ({record_type}): {len(e.errors())} validation errors'
-                    results['errors'].append(error_msg)
+                    errors.append(error_msg)
 
                     for err in e.errors():
                         loc = err['loc']
                         value = extract_value_at_path(record_data, loc)
 
-                        results['enriched_errors'].append(
+                        enriched_errors.append(
                             {
                                 'file': session_filename,
                                 'file_path': session_file,
@@ -672,9 +674,9 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
             except (
                 Exception
             ) as e:  # exception_safety_linter.py: swallowed-exception — collects error for validation report
-                results['invalid_records'] += 1
+                invalid_records += 1
                 error_msg = f'Line {line_num} ({record_type}): {str(e)[:500]}'
-                results['errors'].append(error_msg)
+                errors.append(error_msg)
 
                 if not fast:
                     # Track unknown types and fields
@@ -693,7 +695,7 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                                 'saved_hook_context',
                             ]
                             if record_data['type'] not in known_types:
-                                results['unknown_types'].add(record_data['type'])
+                                unknown_types.add(record_data['type'])
 
                         # Track unknown content types
                         if record_type in ['user', 'assistant']:
@@ -713,17 +715,29 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                                             'document',
                                         ]
                                         if item_type not in known_content_types:
-                                            results['unknown_content_types'].add(item_type)
+                                            unknown_content_types.add(item_type)
 
                         # Track missing fields
                         if 'Validation error' in str(e) or 'Field required' in str(e):
-                            results['missing_fields'][record_type].append(str(e)[:150])
+                            missing_fields[record_type].append(str(e)[:150])
                     except (
                         Exception
                     ):  # exception_safety_linter.py: swallowed-exception — error enrichment is best-effort
                         pass
 
-    return results
+    return {
+        'file': str(session_file),
+        'total_records': total_records,
+        'valid_records': valid_records,
+        'invalid_records': invalid_records,
+        'record_types': record_types,
+        'errors': errors,
+        'enriched_errors': enriched_errors,
+        'unknown_types': unknown_types,
+        'unknown_content_types': unknown_content_types,
+        'missing_fields': missing_fields,
+        'fallbacks': fallbacks,
+    }
 
 
 # -- Output Formatting ---------------------------------------------------------
@@ -773,7 +787,7 @@ def format_error_group(group: ErrorGroup, full: bool = False) -> str:
     return '\n'.join(lines)
 
 
-def print_errors_mode(all_results: list[FileValidationResult], full: bool = False) -> None:
+def print_errors_mode(all_results: Sequence[FileValidationResult], full: bool = False) -> None:
     """Print output in --errors mode: grouped errors first, summary at end."""
 
     # Collect all enriched errors
@@ -821,7 +835,7 @@ def print_errors_mode(all_results: list[FileValidationResult], full: bool = Fals
 
 
 def print_summary_mode(
-    all_results: list[FileValidationResult],
+    all_results: Sequence[FileValidationResult],
     total_stats: TotalStats,
 ) -> None:
     """Print output in summary mode (default): stats first, brief error list."""
@@ -970,16 +984,35 @@ Examples:
 # -- Main ----------------------------------------------------------------------
 
 
-def _aggregate_result(total_stats: TotalStats, results: FileValidationResult) -> None:
-    """Aggregate a single file's results into total stats."""
-    total_stats['files'] += 1
-    total_stats['total_records'] += results['total_records']
-    total_stats['valid_records'] += results['valid_records']
-    total_stats['invalid_records'] += results['invalid_records']
-    total_stats['record_types'].update(results['record_types'])
-    total_stats['unknown_types'].update(results['unknown_types'])
-    total_stats['unknown_content_types'].update(results['unknown_content_types'])
-    total_stats['fallbacks'].extend(results['fallbacks'])
+def _aggregate_results(all_results: Sequence[FileValidationResult]) -> TotalStats:
+    """Aggregate all file results into total stats."""
+    record_types: Counter[str] = Counter()
+    unknown_types: set[str] = set()
+    unknown_content_types: set[str] = set()
+    all_fallbacks: list[FallbackUsage] = []
+    total_records = 0
+    valid_records = 0
+    invalid_records = 0
+
+    for results in all_results:
+        total_records += results['total_records']
+        valid_records += results['valid_records']
+        invalid_records += results['invalid_records']
+        record_types.update(results['record_types'])
+        unknown_types.update(results['unknown_types'])
+        unknown_content_types.update(results['unknown_content_types'])
+        all_fallbacks.extend(results['fallbacks'])
+
+    return {
+        'files': len(all_results),
+        'total_records': total_records,
+        'valid_records': valid_records,
+        'invalid_records': invalid_records,
+        'record_types': record_types,
+        'unknown_types': unknown_types,
+        'unknown_content_types': unknown_content_types,
+        'fallbacks': all_fallbacks,
+    }
 
 
 def main() -> None:
@@ -999,7 +1032,7 @@ def main() -> None:
         if not args.file.exists():
             print(f'Error: File not found: {args.file}')
             sys.exit(1)
-        session_files = [args.file]
+        session_files: Sequence[Path] = [args.file]
         print(f'Validating single file: {args.file}')
     else:
         session_files = find_all_session_files()
@@ -1011,16 +1044,6 @@ def main() -> None:
 
     # Validate all files
     all_results: list[FileValidationResult] = []
-    total_stats: TotalStats = {
-        'files': 0,
-        'total_records': 0,
-        'valid_records': 0,
-        'invalid_records': 0,
-        'record_types': Counter(),
-        'unknown_types': set(),
-        'unknown_content_types': set(),
-        'fallbacks': [],
-    }
 
     max_workers = args.workers if args.workers is not None else min(os.cpu_count() or 4, 8)
 
@@ -1029,7 +1052,6 @@ def main() -> None:
         for session_file in session_files:
             results = validate_session_file(session_file, fast=args.fast)
             all_results.append(results)
-            _aggregate_result(total_stats, results)
     else:
         # Parallel validation across files
         completed = 0
@@ -1040,7 +1062,6 @@ def main() -> None:
             for future in as_completed(future_to_file):
                 results = future.result()
                 all_results.append(results)
-                _aggregate_result(total_stats, results)
 
                 completed += 1
                 if sys.stdout.isatty():
@@ -1055,6 +1076,8 @@ def main() -> None:
 
         # Sort for deterministic output (as_completed returns in completion order)
         all_results.sort(key=lambda r: r['file'])
+
+    total_stats = _aggregate_results(all_results)
 
     # Output based on mode
     if args.fast:

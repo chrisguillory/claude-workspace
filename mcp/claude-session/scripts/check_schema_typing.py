@@ -518,7 +518,7 @@ def format_violation(v: Violation) -> str:
 
 
 # Map from directive codes to violation kinds for --ignore flag
-_CODE_TO_KIND: dict[str, ViolationKind] = {
+CODE_TO_KIND: Mapping[str, ViolationKind] = {
     'mutable-type': 'mutable',
     'loose-typing': 'loose',
     'default-value': 'default',
@@ -554,7 +554,7 @@ def main() -> int:
 
     args = parser.parse_args()
     exclude_dirs = set(args.exclude)
-    ignored_kinds: set[ViolationKind] = {_CODE_TO_KIND[code] for code in args.ignore}
+    ignored_kinds: set[ViolationKind] = {CODE_TO_KIND[code] for code in args.ignore}
 
     # Collect files to check
     files: list[Path] = []
