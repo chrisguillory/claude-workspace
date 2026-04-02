@@ -1,0 +1,725 @@
+/*
+ * Adapted from Typora's Night (dark) theme for md-to-pdf / markdown-kit.js
+ * Original: ~/Library/Application Support/abnerworks.Typora/themes/night.css
+ * A dark theme by Typora — MIT License
+ *
+ * DARK THEME — best for screen viewing. Dark backgrounds consume ink when
+ * printed physically. Requires printBackground:true in the PDF generator
+ * (already set in markdown-kit.js).
+ *
+ * Changes from original:
+ *   - @include-when-export / @import removed (no CDN, no editor sub-CSS)
+ *   - #write selectors -> body
+ *   - .md-fences -> pre, pre > code
+ *   - .md-task-list-item -> li:has(> input[type="checkbox"])
+ *   - Stripped editor-only selectors (sidebar, focus mode, tooltips, etc.)
+ *   - @media breakpoints -> hardcoded sizes for fixed PDF viewport
+ *   - Cursor images excluded (editor-only)
+ *   - Added: image centering, definition lists, nested list bullets, kbd,
+ *     mark, footnotes, GFM alerts, front matter blocks
+ *   - Code syntax highlighting: github-dark colors via hljs overrides
+ */
+
+/* === BASE === */
+
+html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+}
+
+body {
+    font-family: "Helvetica Neue", Helvetica, Arial, 'Segoe UI Emoji', 'SF Pro', sans-serif;
+    color: #b8bfc6;
+    background: #363B40;
+    line-height: 1.625rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 20px 0 20px;
+    box-sizing: border-box;
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+    fill: currentColor;
+}
+
+img {
+    width: auto;
+    max-width: 100%;
+}
+
+/* Center standalone images (match Typora base.css) */
+p > img:only-child {
+    display: block;
+    margin: auto;
+}
+
+/* Definition list styling */
+dt { font-weight: bold; margin-top: 0.5em; color: #DEDEDE; }
+dd { margin-left: 2em; margin-bottom: 0.5em; }
+
+/* === HEADINGS === */
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Lucida Grande", "Corbel", sans-serif;
+    font-weight: normal;
+    clear: both;
+    word-wrap: break-word;
+    margin: 0;
+    padding: 0;
+    color: #DEDEDE;
+}
+
+h1 {
+    font-size: 2.5rem;
+    line-height: 2.75rem;
+    margin-bottom: 1.5rem;
+    margin-top: 2em;
+    letter-spacing: -1.5px;
+}
+
+h2 {
+    font-size: 1.63rem;
+    line-height: 1.875rem;
+    margin-bottom: 1.5rem;
+    letter-spacing: -1px;
+    font-weight: bold;
+}
+
+h3 {
+    font-size: 1.17rem;
+    line-height: 1.5rem;
+    margin-bottom: 1.5rem;
+    letter-spacing: -1px;
+    font-weight: bold;
+}
+
+h4 {
+    font-size: 1.12rem;
+    line-height: 1.375rem;
+    margin-bottom: 1.5rem;
+    color: white;
+}
+
+h5 {
+    font-size: 0.97rem;
+    line-height: 1.25rem;
+    margin-bottom: 1.5rem;
+    font-weight: bold;
+}
+
+h6 {
+    font-size: 0.93rem;
+    line-height: 1rem;
+    margin-bottom: 0.75rem;
+    color: white;
+}
+
+/* === PARAGRAPHS === */
+
+p {
+    word-wrap: break-word;
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+}
+
+/* === LINKS === */
+
+a {
+    color: #e0e0e0;
+    text-decoration: underline;
+}
+
+a:hover {
+    color: #fff;
+}
+
+/* === KBD === */
+
+kbd {
+    display: inline-block;
+    padding: 2px 4px;
+    font-size: 90%;
+    color: #fff;
+    background-color: #555;
+    border: 1px solid #666;
+    border-bottom-color: #555;
+    border-radius: 3px;
+    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+    font-family: Monaco, Consolas, "Andale Mono", "DejaVu Sans Mono", monospace;
+}
+
+/* === MARK / HIGHLIGHT === */
+
+mark {
+    background: #D3D40E;
+    color: #222;
+    padding: 0.1em 0.3em;
+    border-radius: 2px;
+}
+
+/* === LISTS === */
+
+ul, ol {
+    padding: 0 0 0 1.875rem;
+}
+
+ul {
+    list-style: square;
+}
+
+ol {
+    list-style: decimal;
+}
+
+ul ul, ol ol, ul ol, ol ul {
+    margin: 0;
+}
+
+/* Nested list bullet progression */
+ul ul { list-style-type: circle; }
+ul ul ul { list-style-type: disc; }
+
+li {
+    margin-bottom: 0.25rem;
+}
+
+li > *:last-child {
+    margin-bottom: 0;
+}
+
+/* === BOLD / STRONG === */
+
+b, th, dt, strong {
+    font-weight: bold;
+    color: #DEDEDE;
+}
+
+i, em, dfn, cite {
+    font-style: italic;
+}
+
+/* === TABLES === */
+
+table {
+    max-width: 100%;
+    width: 100%;
+    border-collapse: collapse;
+    border-spacing: 0;
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+}
+
+th, td {
+    padding: 5px 10px;
+    vertical-align: top;
+    border: solid 1px #474d54;
+}
+
+table a {
+    color: #DEDEDE;
+}
+
+/* === CODE === */
+
+pre, code, kbd, tt, var {
+    font-size: 0.875em;
+    font-family: Monaco, Consolas, "Andale Mono", "DejaVu Sans Mono", monospace;
+}
+
+code, tt, var {
+    background: rgba(0, 0, 0, 0.25);
+    padding: 2px 5px;
+    border-radius: 3px;
+}
+
+/* Code blocks — mapped from .md-fences / pre.md-fences */
+pre {
+    padding: 10px 10px 10px 30px;
+    margin-bottom: 20px;
+    background: #2b2b2b;
+    border: 1px solid #474d54;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    border-radius: 4px;
+}
+
+pre > code {
+    color: inherit;
+    font-size: inherit;
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+
+/* === BLOCKQUOTES === */
+
+blockquote {
+    padding-left: 30px;
+    margin: 35px 0 1.875rem 1.875rem;
+    border-left: solid 2px #474d54;
+    color: #9DA2A6;
+}
+
+blockquote em {
+    color: #c0c4c8;
+}
+
+/* === ABBREVIATIONS === */
+
+abbr {
+    border-bottom: 1px #888 dotted;
+    cursor: help;
+}
+
+/* === HORIZONTAL RULES === */
+
+hr {
+    height: 2px;
+    border: 0;
+    background: #474d54;
+    margin: 24px 0;
+}
+
+/* === TASK LISTS === */
+
+/* marked v15 outputs bare <li><input type="checkbox"> with no classes.
+ * Use :has() to target the actual DOM structure (Chromium 105+). */
+li:has(> input[type="checkbox"]) {
+    position: relative;
+    list-style-type: none;
+    padding-left: 34px;
+}
+
+li > input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    display: block;
+    -webkit-appearance: initial;
+    appearance: none;
+    position: absolute;
+    top: -0.2rem;
+    left: 0;
+    margin-left: 0;
+    margin-top: calc(1rem - 7px);
+    border: none;
+}
+
+li > input[type="checkbox"]:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Unchecked state: square border matching Night theme */
+li > input[type="checkbox"]::before {
+    border: 1px solid #b8bfc6;
+    border-radius: 3px;
+    width: 0.875rem;
+    height: 0.875rem;
+    background-color: #363B40;
+    content: ' ';
+    display: block;
+}
+
+/* Checked state: filled with theme accent */
+li > input[type="checkbox"]:checked::before {
+    background: #6dc1e7;
+    border-color: #6dc1e7;
+    display: inline-block;
+}
+
+/* Checkmark (hidden by default, visible when checked) */
+li > input[type="checkbox"]::after {
+    -webkit-transform: rotate(-45deg);
+    transform: rotate(-45deg);
+    position: absolute;
+    top: 0.3rem;
+    left: 0.15rem;
+    width: 0.55rem;
+    height: 0.3rem;
+    border: 2px solid #1a1a1a;
+    border-top: 0;
+    border-right: 0;
+    content: ' ';
+    opacity: 0;
+}
+
+li > input[type="checkbox"]:checked::after {
+    opacity: 1;
+}
+
+/* === FOOTNOTES === */
+
+.footnotes {
+    margin-top: 2em;
+    font-size: 1rem;
+    color: #9DA2A6;
+}
+
+.footnotes h2.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.footnotes ol {
+    padding-left: 1.5em;
+}
+
+.footnotes li {
+    font-size: 1rem;
+    line-height: 1.6;
+    margin: 0.4em 0;
+}
+
+.footnotes li p {
+    font-size: 1rem;
+    margin: 0.3em 0;
+}
+
+/* Footnote back-reference arrow */
+.footnotes a[data-footnote-backref] {
+    text-decoration: none;
+    font-size: 0.85em;
+    margin-left: 0.25em;
+    color: #6dc1e7;
+}
+
+/* Footnote reference superscript in body text */
+sup a[data-footnote-ref] {
+    text-decoration: none;
+    color: #6dc1e7;
+    font-weight: bold;
+}
+
+/* Footnote divider */
+hr[data-footnotes] {
+    border: 0;
+    border-top: 1px solid #474d54;
+    margin: 2em 0 1em;
+    background: none;
+    height: 0;
+}
+
+/* === GFM ALERTS (GitHub Admonitions) === */
+/* Colors tuned for dark background — lighter/more vibrant borders and fills */
+
+.markdown-alert {
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+}
+
+.markdown-alert > :first-child {
+    margin-top: 0;
+}
+
+.markdown-alert > :last-child {
+    margin-bottom: 0;
+}
+
+.markdown-alert p {
+    font-size: 1rem;
+}
+
+.markdown-alert-title {
+    display: flex;
+    align-items: center;
+    font-weight: bold;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 1rem;
+    margin-bottom: 0.25em;
+}
+
+.markdown-alert-title svg {
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+/* NOTE — blue */
+.markdown-alert-note {
+    border-left-color: #58a6ff;
+    background-color: rgba(56, 139, 253, 0.1);
+}
+
+.markdown-alert-note .markdown-alert-title {
+    color: #58a6ff;
+}
+
+.markdown-alert-note .markdown-alert-title svg {
+    fill: #58a6ff;
+}
+
+/* TIP — green */
+.markdown-alert-tip {
+    border-left-color: #3fb950;
+    background-color: rgba(46, 160, 67, 0.1);
+}
+
+.markdown-alert-tip .markdown-alert-title {
+    color: #3fb950;
+}
+
+.markdown-alert-tip .markdown-alert-title svg {
+    fill: #3fb950;
+}
+
+/* WARNING — yellow/orange */
+.markdown-alert-warning {
+    border-left-color: #d29922;
+    background-color: rgba(187, 128, 9, 0.1);
+}
+
+.markdown-alert-warning .markdown-alert-title {
+    color: #d29922;
+}
+
+.markdown-alert-warning .markdown-alert-title svg {
+    fill: #d29922;
+}
+
+/* CAUTION — red */
+.markdown-alert-caution {
+    border-left-color: #f85149;
+    background-color: rgba(248, 81, 73, 0.1);
+}
+
+.markdown-alert-caution .markdown-alert-title {
+    color: #f85149;
+}
+
+.markdown-alert-caution .markdown-alert-title svg {
+    fill: #f85149;
+}
+
+/* IMPORTANT — purple */
+.markdown-alert-important {
+    border-left-color: #a371f7;
+    background-color: rgba(163, 113, 247, 0.1);
+}
+
+.markdown-alert-important .markdown-alert-title {
+    color: #a371f7;
+}
+
+.markdown-alert-important .markdown-alert-title svg {
+    fill: #a371f7;
+}
+
+/* === CUSTOM CONTAINERS (:::type ... :::) === */
+
+.custom-container {
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+}
+
+.custom-container > :first-child { margin-top: 0; }
+.custom-container > :last-child { margin-bottom: 0; }
+
+.custom-container-title {
+    font-weight: bold;
+    font-size: 1em;
+    margin-bottom: 0.25em;
+}
+
+/* Dark theme: muted backgrounds that work on dark gray */
+.custom-container.info { border-left-color: #64B5F6; background-color: #1a2a3a; }
+.custom-container.info .custom-container-title { color: #90CAF9; }
+.custom-container.success { border-left-color: #81C784; background-color: #1a2e1a; }
+.custom-container.success .custom-container-title { color: #A5D6A7; }
+.custom-container.warning { border-left-color: #FFB74D; background-color: #3a2a1a; }
+.custom-container.warning .custom-container-title { color: #FFCC80; }
+.custom-container.danger { border-left-color: #E57373; background-color: #3a1a1a; }
+.custom-container.danger .custom-container-title { color: #EF9A9A; }
+.custom-container.tip { border-left-color: #4DB6AC; background-color: #1a2e2a; }
+.custom-container.tip .custom-container-title { color: #80CBC4; }
+
+/* === FRONT MATTER === */
+
+/* Render mode: styled metadata header */
+.front-matter-header {
+    border-bottom: 2px solid #474d54;
+    padding-bottom: 1em;
+    margin-bottom: 2em;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 1.1rem;
+    line-height: 1.8;
+}
+
+.front-matter-header dl {
+    margin: 0;
+}
+
+.front-matter-header .front-matter-field {
+    margin: 0.2em 0;
+}
+
+.front-matter-header dt {
+    font-weight: bold;
+    display: inline;
+    color: #DEDEDE;
+}
+
+.front-matter-header dt::after {
+    content: ':';
+}
+
+.front-matter-header dd {
+    display: inline;
+    margin-left: 0.5em;
+    color: #9DA2A6;
+}
+
+/* Raw mode: YAML code block with label */
+.front-matter-raw {
+    margin-bottom: 2em;
+}
+
+.front-matter-raw .front-matter-label {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 0.85rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #666;
+    margin-bottom: 0.25em;
+}
+
+.front-matter-raw pre {
+    margin-top: 0;
+}
+
+/* === SYNTAX HIGHLIGHTING OVERRIDES ===
+ * markdown-kit.js injects highlight.js github.css (light theme) after the
+ * theme CSS. These rules use higher specificity to override it with GitHub
+ * Dark colors that match the Night theme's dark background. */
+
+pre code.hljs,
+pre .hljs {
+    color: #c9d1d9;
+    background: #2b2b2b;
+}
+
+pre .hljs-doctag,
+pre .hljs-keyword,
+pre .hljs-meta .hljs-keyword,
+pre .hljs-template-tag,
+pre .hljs-template-variable,
+pre .hljs-type,
+pre .hljs-variable.language_ {
+    color: #ff7b72;
+}
+
+pre .hljs-title,
+pre .hljs-title.class_,
+pre .hljs-title.class_.inherited__,
+pre .hljs-title.function_ {
+    color: #d2a8ff;
+}
+
+pre .hljs-attr,
+pre .hljs-attribute,
+pre .hljs-literal,
+pre .hljs-meta,
+pre .hljs-number,
+pre .hljs-operator,
+pre .hljs-variable,
+pre .hljs-selector-attr,
+pre .hljs-selector-class,
+pre .hljs-selector-id {
+    color: #79c0ff;
+}
+
+pre .hljs-regexp,
+pre .hljs-string,
+pre .hljs-meta .hljs-string {
+    color: #a5d6ff;
+}
+
+pre .hljs-built_in,
+pre .hljs-symbol {
+    color: #ffa657;
+}
+
+pre .hljs-comment,
+pre .hljs-code,
+pre .hljs-formula {
+    color: #8b949e;
+}
+
+pre .hljs-name,
+pre .hljs-quote,
+pre .hljs-selector-tag,
+pre .hljs-selector-pseudo {
+    color: #7ee787;
+}
+
+pre .hljs-subst {
+    color: #c9d1d9;
+}
+
+pre .hljs-section {
+    color: #58a6ff;
+    font-weight: bold;
+}
+
+pre .hljs-bullet {
+    color: #f2cc60;
+}
+
+pre .hljs-emphasis {
+    color: #c9d1d9;
+    font-style: italic;
+}
+
+pre .hljs-strong {
+    color: #c9d1d9;
+    font-weight: bold;
+}
+
+pre .hljs-addition {
+    color: #aff5b4;
+    background-color: #033a16;
+}
+
+pre .hljs-deletion {
+    color: #ffdcd7;
+    background-color: #67060c;
+}
+
+/* === TOC (dark overrides) === */
+/* markdown-kit.js inline <style> loads AFTER theme CSS and sets light TOC
+ * and mark colors. Use !important to override with dark-appropriate values. */
+
+.md-toc {
+    border-color: #474d54 !important;
+    background: #2b2b2b !important;
+}
+
+.md-toc a {
+    color: #6dc1e7 !important;
+}
+
+mark {
+    background-color: #D3D40E !important;
+    color: #222 !important;
+}
+
+/* === PRINT === */
+
+@media print {
+    html {
+        font-size: 16px;
+    }
+    body {
+        background: #363B40;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}

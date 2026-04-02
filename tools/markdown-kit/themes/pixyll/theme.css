@@ -1,0 +1,606 @@
+/*
+ * Adapted from Typora's Pixyll theme for md-to-pdf / markdown-kit.js
+ * Original: ~/Library/Application Support/abnerworks.Typora/themes/pixyll.css
+ * Forked from pixyll.com by John Otander (@4lpine) — MIT License
+ *
+ * Changes from original:
+ *   - @include-when-export removed (fonts loaded from local .woff files, no CDN needed)
+ *   - #write selectors → body
+ *   - .md-fences → pre, pre > code
+ *   - Stripped editor-only selectors (sidebar, focus mode, etc.)
+ *   - @media screen breakpoints → hardcoded sizes for fixed PDF viewport
+ */
+
+/* Local font faces — no @import from Google CDN needed since .woff files
+ * are bundled alongside this CSS. Avoids 200-500ms network latency and
+ * enables offline operation. */
+@font-face {
+    font-family: 'Merriweather';
+    font-style: normal;
+    font-weight: normal;
+    src: local('Merriweather Light'), local('Merriweather-Light'), url('./merriweather-v19-latin-300.woff') format('woff');
+}
+@font-face {
+    font-family: 'Merriweather';
+    font-style: normal;
+    font-weight: bold;
+    src: local('Merriweather Heavy'), local('Merriweather-Heavy'), url('./merriweather-v19-latin-700.woff') format('woff');
+}
+@font-face {
+    font-family: 'Merriweather';
+    font-style: italic;
+    font-weight: normal;
+    src: local('Merriweather Light Italic'), local('Merriweather-LightItalic'), url('./merriweather-v19-latin-300italic.woff') format('woff');
+}
+@font-face {
+    font-family: 'Merriweather';
+    font-style: italic;
+    font-weight: bold;
+    src: local('Merriweather Heavy Italic'), local('Merriweather-HeavyItalic'), url('./merriweather-v19-latin-700italic.woff') format('woff');
+}
+@font-face {
+    font-family: 'Lato';
+    font-style: normal;
+    font-weight: normal;
+    src: local('Lato Light'), local('Lato-Light'), url('./lato-v14-latin-300.woff') format('woff');
+}
+@font-face {
+    font-family: 'Lato';
+    font-style: normal;
+    font-weight: bold;
+    src: local('Lato Black'), local('Lato-Black'), url('./lato-v14-latin-900.woff') format('woff');
+}
+@font-face {
+    font-family: 'Lato';
+    font-style: italic;
+    font-weight: normal;
+    src: local('Lato LightItalic'), local('Lato-LightItalic'), url('./lato-v14-latin-300italic.woff') format('woff');
+}
+@font-face {
+    font-family: 'Lato';
+    font-style: italic;
+    font-weight: bold;
+    src: local('Lato BlackItalic'), local('Lato-BlackItalic'), url('./lato-v14-latin-900italic.woff') format('woff');
+}
+
+/* === BASE === */
+
+html {
+    -webkit-font-smoothing: antialiased;
+}
+
+body {
+    font-family: "Merriweather", "PT Serif", Georgia, "Times New Roman", Serif;
+    font-size: 1.5rem;
+    font-weight: 400;
+    line-height: 1.5rem;
+    color: #333;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem 20px 0 20px;
+    box-sizing: border-box;
+}
+
+img {
+    width: auto;
+    max-width: 100%;
+}
+
+/* Center standalone images (match Typora base.css) */
+p > img:only-child {
+    display: block;
+    margin: auto;
+}
+
+/* Definition list styling */
+dt { font-weight: bold; margin-top: 0.5em; }
+dd { margin-left: 2em; margin-bottom: 0.5em; }
+
+/* === HEADINGS === */
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Lato", 'Helvetica Neue', Helvetica, sans-serif;
+    font-weight: bold;
+    line-height: 1.2;
+    margin: 1em 0 0.5em;
+}
+
+/* Matched to Typora's Pixyll 48em-tier heading sizes. At 1320px content
+ * width (1400px page - 80px padding), these produce proportions identical
+ * to Typora at a ~1400px window with body text at 1.25rem. */
+h1 { font-size: 3.250rem; }
+h2 { font-size: 2.298rem; }
+h3 { font-size: 1.625rem; }
+h4 { font-size: 1.300rem; }
+h5 { font-size: 1.1rem; }
+h6 { font-size: 1rem; color: #777; }
+
+/* === PARAGRAPHS === */
+
+p {
+    font-weight: 300;
+    font-size: 1.25rem;
+    line-height: 1.8;
+}
+
+/* === LINKS === */
+
+a {
+    color: #463F5C;
+    text-decoration: underline;
+}
+
+kbd {
+    display: inline-block;
+    padding: 3px 5px;
+    font-size: 0.85em;
+    color: #333;
+    background-color: #f7f7f7;
+    border: 1px solid #ccc;
+    border-bottom-color: #bbb;
+    border-radius: 3px;
+    box-shadow: inset 0 -1px 0 #bbb;
+    font-family: "Lato", sans-serif;
+}
+
+mark {
+    background-color: #fff3cd;
+    padding: 0.1em 0.3em;
+    border-radius: 2px;
+}
+
+/* === LISTS === */
+
+li {
+    margin: 0.5rem 0;
+    font-size: 1.25rem;
+    line-height: 1.8;
+}
+
+/* Nested list bullet progression to match Typora */
+ul ul { list-style-type: circle; }
+ul ul ul { list-style-type: square; }
+
+/* Typora's original Pixyll uses body { line-height: 1.5rem } (fixed 24px) and
+ * at 48em+ breakpoint overrides p, li to { line-height: 1.8 }. Since we render
+ * at 1400px (> 48em), p and li use 1.8 while body stays at 1.5rem. */
+
+li > *:last-child {
+    margin-bottom: 0;
+}
+
+/* === TABLES === */
+
+table {
+    width: 100%;
+    font-size: 1.25rem;
+    border-collapse: collapse;
+}
+
+table th, table td {
+    padding: 12px;
+    line-height: 1.2;
+    vertical-align: top;
+    border-top: 1px solid #333;
+}
+
+table th {
+    vertical-align: bottom;
+    border-bottom: 2px solid #333;
+}
+
+table thead:first-child tr:first-child th,
+table thead:first-child tr:first-child td {
+    border-top: 0;
+}
+
+table tbody + tbody {
+    border-top: 2px solid #333;
+}
+
+/* === CODE === */
+
+pre, code {
+    font-family: Menlo, Monaco, "Courier New", monospace;
+}
+
+code {
+    color: #7a7a7a;
+    font-size: 0.9em;
+}
+
+/* Code blocks — mapped from .md-fences */
+pre {
+    padding: 0.5rem 1.125em;
+    margin-bottom: 0.88em;
+    font-size: 1rem;
+    border: 1px solid #7a7a7a;
+    color: #7a7a7a;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+pre > code {
+    color: inherit;
+    font-size: inherit;
+    border: none;
+    padding: 0;
+}
+
+/* === BLOCKQUOTES === */
+
+blockquote {
+    padding: 1.33em;
+    font-style: italic;
+    border-left: 5px solid #7a7a7a;
+    color: #555;
+}
+
+blockquote em {
+    color: #000;
+}
+
+/* === ABBREVIATIONS === */
+
+abbr {
+    border-bottom: 1px black dotted;
+    cursor: help;
+}
+
+/* === TASK LISTS === */
+
+/* marked v15 outputs bare <li><input type="checkbox"> with no classes.
+ * Use :has() to target the actual DOM structure (Chromium 105+). */
+li:has(> input[type="checkbox"]) {
+    position: relative;
+    list-style-type: none;
+    padding-left: 34px;
+}
+
+li > input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    display: block;
+    -webkit-appearance: initial;
+    appearance: none;
+    position: absolute;
+    top: -0.2rem;
+    left: 0;
+    margin-left: 0;
+    margin-top: calc(1rem - 7px);
+    border: none;
+}
+
+li > input[type="checkbox"]:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Unchecked state: empty circle */
+li > input[type="checkbox"]::before {
+    border: 1px solid #555;
+    border-radius: 1.5rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    background: #fff;
+    content: ' ';
+    display: block;
+}
+
+/* Checked state: filled dark circle */
+li > input[type="checkbox"]:checked::before {
+    background: #333;
+    border-width: 2px;
+    display: inline-block;
+}
+
+/* Checkmark (hidden by default, visible when checked) */
+li > input[type="checkbox"]::after {
+    -webkit-transform: rotate(-45deg);
+    transform: rotate(-45deg);
+    position: absolute;
+    top: 0.4375rem;
+    left: 0.28125rem;
+    width: 0.9375rem;
+    height: 0.5rem;
+    border: 3px solid #fff;
+    border-top: 0;
+    border-right: 0;
+    content: ' ';
+    opacity: 0;
+}
+
+li > input[type="checkbox"]:checked::after {
+    opacity: 1;
+}
+
+/* === HORIZONTAL RULES === */
+
+hr {
+    border: 0;
+    border-top: 1px solid #ccc;
+    margin: 1em 0;
+}
+
+/* === FOOTNOTES === */
+
+.footnotes {
+    margin-top: 2em;
+    font-size: 1rem;
+    color: #555;
+}
+
+.footnotes h2.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.footnotes ol {
+    padding-left: 1.5em;
+}
+
+.footnotes li {
+    font-size: 1rem;
+    line-height: 1.6;
+    margin: 0.4em 0;
+}
+
+.footnotes li p {
+    font-size: 1rem;
+    margin: 0.3em 0;
+}
+
+/* Footnote back-reference arrow */
+.footnotes a[data-footnote-backref] {
+    text-decoration: none;
+    font-size: 0.85em;
+    margin-left: 0.25em;
+}
+
+/* Footnote reference superscript in body text */
+sup a[data-footnote-ref] {
+    text-decoration: none;
+    color: #463F5C;
+    font-weight: bold;
+}
+
+/* Footnote divider */
+hr[data-footnotes] {
+    border: 0;
+    border-top: 1px solid #ccc;
+    margin: 2em 0 1em;
+}
+
+/* === GFM ALERTS (GitHub Admonitions) === */
+
+.markdown-alert {
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+}
+
+.markdown-alert > :first-child {
+    margin-top: 0;
+}
+
+.markdown-alert > :last-child {
+    margin-bottom: 0;
+}
+
+.markdown-alert p {
+    font-size: 1.1rem;
+}
+
+.markdown-alert-title {
+    display: flex;
+    align-items: center;
+    font-weight: bold;
+    font-family: "Lato", 'Helvetica Neue', Helvetica, sans-serif;
+    font-size: 1.1rem;
+    margin-bottom: 0.25em;
+}
+
+.markdown-alert-title svg {
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+/* NOTE — blue */
+.markdown-alert-note {
+    border-left-color: #0969da;
+    background-color: #ddf4ff;
+}
+
+.markdown-alert-note .markdown-alert-title {
+    color: #0969da;
+}
+
+.markdown-alert-note .markdown-alert-title svg {
+    fill: #0969da;
+}
+
+/* TIP — green */
+.markdown-alert-tip {
+    border-left-color: #1a7f37;
+    background-color: #dafbe1;
+}
+
+.markdown-alert-tip .markdown-alert-title {
+    color: #1a7f37;
+}
+
+.markdown-alert-tip .markdown-alert-title svg {
+    fill: #1a7f37;
+}
+
+/* WARNING — yellow/orange */
+.markdown-alert-warning {
+    border-left-color: #9a6700;
+    background-color: #fff8c5;
+}
+
+.markdown-alert-warning .markdown-alert-title {
+    color: #9a6700;
+}
+
+.markdown-alert-warning .markdown-alert-title svg {
+    fill: #9a6700;
+}
+
+/* CAUTION — red */
+.markdown-alert-caution {
+    border-left-color: #cf222e;
+    background-color: #ffebe9;
+}
+
+.markdown-alert-caution .markdown-alert-title {
+    color: #cf222e;
+}
+
+.markdown-alert-caution .markdown-alert-title svg {
+    fill: #cf222e;
+}
+
+/* IMPORTANT — purple */
+.markdown-alert-important {
+    border-left-color: #8250df;
+    background-color: #fbefff;
+}
+
+.markdown-alert-important .markdown-alert-title {
+    color: #8250df;
+}
+
+.markdown-alert-important .markdown-alert-title svg {
+    fill: #8250df;
+}
+
+/* === CUSTOM CONTAINERS (:::type ... :::) === */
+
+.custom-container {
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+}
+
+.custom-container > :first-child {
+    margin-top: 0;
+}
+
+.custom-container > :last-child {
+    margin-bottom: 0;
+}
+
+.custom-container p {
+    font-size: 1.1rem;
+}
+
+.custom-container-title {
+    font-weight: bold;
+    font-family: "Lato", 'Helvetica Neue', Helvetica, sans-serif;
+    font-size: 1.1rem;
+    margin-bottom: 0.25em;
+}
+
+.custom-container.info {
+    border-left-color: #2196F3;
+    background-color: #e3f2fd;
+}
+.custom-container.info .custom-container-title { color: #1565C0; }
+
+.custom-container.success {
+    border-left-color: #4CAF50;
+    background-color: #e8f5e9;
+}
+.custom-container.success .custom-container-title { color: #2E7D32; }
+
+.custom-container.warning {
+    border-left-color: #FF9800;
+    background-color: #fff3e0;
+}
+.custom-container.warning .custom-container-title { color: #E65100; }
+
+.custom-container.danger {
+    border-left-color: #F44336;
+    background-color: #ffebee;
+}
+.custom-container.danger .custom-container-title { color: #C62828; }
+
+.custom-container.tip {
+    border-left-color: #009688;
+    background-color: #e0f2f1;
+}
+.custom-container.tip .custom-container-title { color: #00695C; }
+
+/* === FRONT MATTER === */
+
+/* Render mode: styled metadata header */
+.front-matter-header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1em;
+    margin-bottom: 2em;
+    font-family: "Lato", 'Helvetica Neue', Helvetica, sans-serif;
+    font-size: 1.1rem;
+    line-height: 1.8;
+}
+
+.front-matter-header dl {
+    margin: 0;
+}
+
+.front-matter-header .front-matter-field {
+    margin: 0.2em 0;
+}
+
+.front-matter-header dt {
+    font-weight: bold;
+    display: inline;
+    color: #333;
+}
+
+.front-matter-header dt::after {
+    content: ':';
+}
+
+.front-matter-header dd {
+    display: inline;
+    margin-left: 0.5em;
+    color: #555;
+}
+
+/* Raw mode: YAML code block with label */
+.front-matter-raw {
+    margin-bottom: 2em;
+}
+
+.front-matter-raw .front-matter-label {
+    font-family: "Lato", 'Helvetica Neue', Helvetica, sans-serif;
+    font-size: 0.85rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #999;
+    margin-bottom: 0.25em;
+}
+
+.front-matter-raw pre {
+    margin-top: 0;
+}
+
+/* Print context adjustment. 16px rem base matches Typora's screen rendering.
+ * Body text at 1.25rem (20px) and headings from Typora's Pixyll 48em-tier
+ * produce identical proportions to Typora at a ~1400px window. H1 at 3.25rem
+ * (52px) fits titles on one line across 1320px content (1400px - 80px padding). */
+@media print {
+    html {
+        font-size: 16px;
+    }
+}

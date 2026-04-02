@@ -1,0 +1,246 @@
+/*
+ * hljs-typora.css — highlight.js theme inspired by Typora's CodeMirror coloring
+ *
+ * Designed to give each semantic token type its own distinct color, matching
+ * the rich syntax coloring that Typora (CodeMirror) produces. The stock
+ * highlight.js github.css theme collapses many distinct tokens into the same
+ * color (e.g., numbers, literals, decorators, operators all get #005cc5).
+ *
+ * This theme uses the Atom One Light palette as a base, which is close to
+ * Typora's default light CodeMirror theme, with adjustments for better
+ * differentiation between Python/JS token types.
+ *
+ * Color palette (12 distinct semantic colors):
+ *   base text:   #383a42  (dark gray — default, unstyled tokens)
+ *   keywords:    #a626a4  (purple — import, class, def, if, return, for, in)
+ *   strings:     #50a14f  (green — string literals, docstrings, regex)
+ *   numbers:     #986801  (dark orange — numeric literals, constants)
+ *   built-ins:   #c18401  (gold — print, sum, len, str, int, float, dict)
+ *   literals:    #0184bb  (teal — None, True, False)
+ *   types:       #986801  (dark orange — Optional, List, type annotations)
+ *   functions:   #4078f2  (blue — function/method names at definition)
+ *   classes:     #c18401  (gold — class names at definition)
+ *   decorators:  #4078f2  (blue — @dataclass, @property, preprocessor)
+ *   self/this:   #a626a4  (purple — language-level variables: self, this, cls)
+ *   comments:    #a0a1a7  (gray italic — comments, documentation tags)
+ *   f-str interp:#e45649  (red — f-string {interpolation}, template vars)
+ *   operators:   #383a42  (base — +, -, ==, is, not — intentionally subtle)
+ *   attrs:       #986801  (dark orange — HTML/XML attributes, JSON keys)
+ *
+ * Comparison: github.css uses 7 colors; this theme uses 12 distinct colors.
+ */
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+
+pre code.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 1em;
+}
+code.hljs {
+  padding: 3px 5px;
+}
+.hljs {
+  color: #383a42;
+  background: #fafafa;
+}
+
+/* ── Keywords ──────────────────────────────────────────────────────────────── */
+/* import, from, class, def, if, elif, else, return, for, in, is, not, and,
+   or, while, try, except, finally, with, as, yield, raise, pass, break,
+   continue, lambda, del, global, nonlocal, assert */
+.hljs-keyword {
+  color: #a626a4;
+}
+.hljs-doctag {
+  color: #a626a4;
+}
+
+/* ── Strings ───────────────────────────────────────────────────────────────── */
+/* String literals, docstrings, raw strings, byte strings */
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string {
+  color: #50a14f;
+}
+
+/* ── Numbers ───────────────────────────────────────────────────────────────── */
+/* Integer, float, hex, octal, binary, complex literals */
+.hljs-number {
+  color: #986801;
+}
+
+/* ── Built-in functions & types ────────────────────────────────────────────── */
+/* print, len, range, sum, int, str, float, list, dict, set, tuple, type,
+   isinstance, hasattr, getattr, sorted, map, filter, zip, enumerate, etc. */
+.hljs-built_in {
+  color: #c18401;
+}
+
+/* ── Literals ──────────────────────────────────────────────────────────────── */
+/* None, True, False (Python); null, true, false (JS/JSON); nil (Ruby) */
+.hljs-literal {
+  color: #0184bb;
+}
+
+/* ── Type annotations ──────────────────────────────────────────────────────── */
+/* Optional, List, Dict, Tuple, Union, Any (Python typing module) */
+.hljs-type {
+  color: #986801;
+}
+
+/* ── Functions & methods (at definition) ───────────────────────────────────── */
+/* def savings(...), def __repr__(...), def analyze_package(...) */
+.hljs-title.function_,
+.hljs-title.function_.invoke {
+  color: #4078f2;
+}
+
+/* ── Class names (at definition) ───────────────────────────────────────────── */
+/* class Appliance, class MyError(Exception) */
+.hljs-title.class_,
+.hljs-title.class_.inherited__ {
+  color: #c18401;
+}
+
+/* ── Generic titles (fallback) ─────────────────────────────────────────────── */
+.hljs-title {
+  color: #4078f2;
+}
+
+/* ── Decorators & meta ─────────────────────────────────────────────────────── */
+/* @dataclass, @property, @staticmethod, @app.route, #include, #pragma */
+.hljs-meta {
+  color: #4078f2;
+}
+.hljs-meta .hljs-keyword {
+  color: #a626a4;
+}
+
+/* ── Language-level variables ──────────────────────────────────────────────── */
+/* self (Python), this (JS/Java), cls (Python classmethods) */
+.hljs-variable.language_ {
+  color: #a626a4;
+}
+
+/* ── Template/f-string interpolation ───────────────────────────────────────── */
+/* {self.name} in f"...", ${var} in template literals */
+.hljs-subst {
+  color: #e45649;
+}
+.hljs-template-variable {
+  color: #e45649;
+}
+.hljs-template-tag {
+  color: #a626a4;
+}
+
+/* ── Parameters ────────────────────────────────────────────────────────────── */
+/* Function parameter names: def foo(self, name, value) */
+.hljs-params {
+  color: #383a42;
+}
+
+/* ── Variables ─────────────────────────────────────────────────────────────── */
+.hljs-variable {
+  color: #e45649;
+}
+.hljs-variable.constant_ {
+  color: #986801;
+}
+
+/* ── Operators & punctuation ───────────────────────────────────────────────── */
+/* +, -, *, /, ==, !=, ->, :, (, ), {, }, [, ] */
+.hljs-operator {
+  color: #a626a4;
+}
+.hljs-punctuation {
+  color: #383a42;
+}
+
+/* ── Attributes ────────────────────────────────────────────────────────────── */
+/* HTML/XML attributes, JSON keys, YAML keys */
+.hljs-attr,
+.hljs-attribute {
+  color: #986801;
+}
+
+/* ── Comments ──────────────────────────────────────────────────────────────── */
+.hljs-comment,
+.hljs-quote {
+  color: #a0a1a7;
+  font-style: italic;
+}
+
+/* ── Symbols & bullets ─────────────────────────────────────────────────────── */
+.hljs-symbol,
+.hljs-bullet {
+  color: #4078f2;
+}
+
+/* ── Links ─────────────────────────────────────────────────────────────────── */
+.hljs-link {
+  color: #4078f2;
+  text-decoration: underline;
+}
+
+/* ── Selector scopes (CSS) ─────────────────────────────────────────────────── */
+.hljs-selector-tag {
+  color: #e45649;
+}
+.hljs-selector-class {
+  color: #986801;
+}
+.hljs-selector-id {
+  color: #4078f2;
+}
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: #986801;
+}
+
+/* ── Property names (CSS, object literals) ─────────────────────────────────── */
+.hljs-property {
+  color: #e45649;
+}
+
+/* ── Names (HTML/XML tag names) ────────────────────────────────────────────── */
+.hljs-name {
+  color: #e45649;
+}
+
+/* ── Section headings ──────────────────────────────────────────────────────── */
+.hljs-section {
+  color: #4078f2;
+  font-weight: bold;
+}
+
+/* ── Diff markers ──────────────────────────────────────────────────────────── */
+.hljs-addition {
+  color: #50a14f;
+  background-color: #f0fff4;
+}
+.hljs-deletion {
+  color: #e45649;
+  background-color: #ffeef0;
+}
+
+/* ── Escape sequences ──────────────────────────────────────────────────────── */
+.hljs-char.escape_ {
+  color: #0184bb;
+}
+
+/* ── Emphasis ──────────────────────────────────────────────────────────────── */
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: bold;
+}
+
+/* ── Code/formula ──────────────────────────────────────────────────────────── */
+.hljs-code,
+.hljs-formula {
+  color: #a0a1a7;
+}
