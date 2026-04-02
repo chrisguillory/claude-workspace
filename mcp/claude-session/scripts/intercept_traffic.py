@@ -88,6 +88,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -109,12 +110,12 @@ SESSIONS_PATH = Path.home() / '.claude-workspace' / 'sessions.json'
 LOG_FILE = CAPTURES_BASE / 'traffic.log'
 
 # Track sessions that have had manifests written (in-memory, resets on proxy restart)
-_SESSIONS_SEEN: set[str] = set()
+_SESSIONS_SEEN: set[str] = set()  # strict_typing_linter.py: mutable-type — runtime state guarded by lock
 _SESSIONS_SEEN_LOCK = threading.Lock()
 
 # Store session info per connection, keyed by connection ID (mitmproxy's Client.id)
 # mitmproxy's Client object does NOT have a metadata attribute, so we use our own storage
-_CONNECTION_SESSIONS: dict[str, Session] = {}
+_CONNECTION_SESSIONS: dict[str, Session] = {}  # strict_typing_linter.py: mutable-type — runtime state guarded by lock
 _CONNECTION_SESSIONS_LOCK = threading.Lock()
 
 # TypeAdapter for parsing sessions.json with Pydantic validation
@@ -134,7 +135,7 @@ _RETRY_DELAY_SECONDS = 0.3  # 300ms between attempts = 3s max total
 
 # Session cache: maps PID → Session for active sessions
 # Invalidated when sessions.json mtime changes (handles /clear correctly)
-_SESSION_CACHE: dict[int, Session] = {}
+_SESSION_CACHE: dict[int, Session] = {}  # strict_typing_linter.py: mutable-type — runtime cache guarded by lock
 _SESSION_CACHE_MTIME: float = 0.0
 _SESSION_CACHE_LOCK = threading.Lock()
 
@@ -433,7 +434,7 @@ def _safe_filename(host: str, path: str) -> str:
     return combined.replace('/', '_').replace('?', '_').replace('=', '_').replace('.', '_')[:80]
 
 
-def _headers_to_dict(headers: http.Headers) -> dict[str, str]:
+def _headers_to_dict(headers: http.Headers) -> Mapping[str, str]:
     """Convert mitmproxy headers to dict, preserving all headers."""
     result: dict[str, str] = {}
     for key, value in headers.items():
@@ -458,7 +459,7 @@ def _safe_decode(content: bytes) -> str:
     return content.decode('utf-8', errors='replace')
 
 
-def _save_json_atomic(filename: Path, data: dict[str, Any]) -> bool:
+def _save_json_atomic(filename: Path, data: Mapping[str, Any]) -> bool:
     """Write JSON atomically via temp file + rename."""
     try:
         fd, temp_path = tempfile.mkstemp(dir=filename.parent, prefix=f'.tmp_{filename.stem}_', suffix='.json')
@@ -488,7 +489,7 @@ def _save_json_atomic(filename: Path, data: dict[str, Any]) -> bool:
 # -- SSE Parsing (WHATWG HTML § 9.2.5 compliant) -------------------------------
 
 
-def _parse_sse_events(content: bytes) -> list[dict[str, Any]]:
+def _parse_sse_events(content: bytes) -> Sequence[Mapping[str, Any]]:
     """
     Parse Server-Sent Events into structured data.
 
@@ -546,7 +547,7 @@ def _parse_sse_events(content: bytes) -> list[dict[str, Any]]:
 # -- Body Parsing --------------------------------------------------------------
 
 
-def _parse_body(content: bytes | None, content_type: str) -> dict[str, Any]:
+def _parse_body(content: bytes | None, content_type: str) -> Mapping[str, Any]:
     """Parse body content, preserving all data."""
     if not content:
         return {'empty': True, 'size': 0}
@@ -667,7 +668,7 @@ def _parse_body(content: bytes | None, content_type: str) -> dict[str, Any]:
 
 def _extract_connection_timing(
     conn: connection.Client | connection.Server,
-) -> dict[str, float] | None:
+) -> Mapping[str, float] | None:
     """Extract granular timing from connection object."""
     timing: dict[str, float] = {}
     for attr in ['timestamp_start', 'timestamp_tcp_setup', 'timestamp_tls_setup', 'timestamp_end']:

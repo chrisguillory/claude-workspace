@@ -290,7 +290,7 @@ Returns:
         collection = state.get_collection(collection_name)
         indexing_service = await state.get_indexing_service(collection_name)
 
-        logger.info(f'Using collection: {collection_name} ({collection.provider})')
+        logger.info('Using collection: %s (%s)', collection_name, collection.provider)
 
         # Default to current working directory
         if path is None:
@@ -304,13 +304,13 @@ Returns:
 
         # Auto-detect file vs directory
         if resolved_path.is_file():
-            logger.info(f'Indexing file: {resolved_path}')
+            logger.info('Indexing file: %s', resolved_path)
             try:
                 result = await indexing_service.index_file(resolved_path)
                 await indexing_service.drain_writes()
             finally:
                 indexing_service.cancel_writes()
-            logger.info(f'Indexed: {result.chunks_created} chunks')
+            logger.info('Indexed: %s chunks', result.chunks_created)
             if not include_timing:
                 result = result.__replace__(timing=None)
             return result
@@ -318,15 +318,15 @@ Returns:
         if not resolved_path.is_dir():
             raise ValueError(f'Path not found: {resolved_path}')
 
-        # Capture baseline 429 count for delta calculation
+        # Capture baseline transient error counts for delta calculation
         embedding_client = state.get_embedding_client(collection)
-        errors_429_start = embedding_client.errors_429
+        transient_errors_start = dict(embedding_client.transient_errors)
 
         # Setup progress writer (attaches FileHandler to root logger)
         progress_writer = ProgressWriter(mcp_server_pid=os.getpid())
         operation_id = progress_writer.start_operation(collection_name, str(resolved_path))
-        logger.debug(f'Operation: {operation_id}')
-        logger.info(f'Indexing directory: {resolved_path}')
+        logger.debug('Operation: %s', operation_id)
+        logger.info('Indexing directory: %s', resolved_path)
 
         # Reset connection high-water marks for this operation
         state.redis_client.reset_hwm()
@@ -347,7 +347,13 @@ Returns:
             while not indexing_task.done():
                 snapshot = indexing_service.get_pipeline_snapshot()
                 if snapshot:
-                    errors_429_delta = embedding_client.errors_429 - errors_429_start
+                    # Compute delta: current counts minus baseline
+                    current = embedding_client.transient_errors
+                    transient_errors_delta = {
+                        k: current[k] - transient_errors_start.get(k, 0)
+                        for k in current
+                        if current[k] - transient_errors_start.get(k, 0) > 0
+                    }
 
                     # Build partial timing report every 5s (10 ticks x 500ms)
                     tick += 1
@@ -359,7 +365,7 @@ Returns:
                     progress = OperationProgress.from_snapshot(
                         snapshot,
                         status='running',
-                        errors_429=errors_429_delta,
+                        transient_errors=transient_errors_delta,
                         redis_conn_stats=state.redis_client.connection_stats,
                         http_p50_ms=getattr(embedding_client, 'http_p50_ms', 0.0),
                         http_p99_ms=getattr(embedding_client, 'http_p99_ms', 0.0),
@@ -374,11 +380,13 @@ Returns:
             await indexing_service.drain_writes()
             conn_stats = state.redis_client.connection_stats
             logger.info(
-                f'Indexing complete: {result.files_indexed} indexed, '
-                f'{result.files_cached} cached, {result.chunks_created} chunks, '
-                f'{len(result.errors)} errors',
+                'Indexing complete: %s indexed, %s cached, %s chunks, %s errors',
+                result.files_indexed,
+                result.files_cached,
+                result.chunks_created,
+                len(result.errors),
             )
-            logger.info(f'Redis connections: {conn_stats}')
+            logger.info('Redis connections: %s', conn_stats)
             progress_writer.complete_with_success(result, redis_conn_stats=conn_stats)
             if not include_timing:
                 result = result.__replace__(timing=None)
@@ -523,7 +531,7 @@ Returns:
             top_k=effective_limit,
         )
 
-        logger.info(f'Found {result.total} results (reranked top {effective_limit})')
+        logger.info('Found %s results (reranked top %s)', result.total, effective_limit)
 
         return result
 
@@ -565,7 +573,7 @@ Returns:
         collection = state.get_collection(collection_name)
         indexing_service = await state.get_indexing_service(collection_name)
 
-        logger.info(f'Clearing from collection: {collection_name} ({collection.provider})')
+        logger.info('Clearing from collection: %s (%s)', collection_name, collection.provider)
 
         # Resolve path (defaults to CWD)
         if path == '**':
@@ -573,17 +581,17 @@ Returns:
             logger.info('Clearing entire collection')
         elif path:
             resolved_path = str(Path(path).expanduser().resolve())
-            logger.info(f'Clearing documents: {resolved_path}')
+            logger.info('Clearing documents: %s', resolved_path)
         else:
             resolved_path = str(Path.cwd())
-            logger.info(f'Clearing documents under: {resolved_path}')
+            logger.info('Clearing documents under: %s', resolved_path)
 
         if clear_cache:
             logger.info('Clearing embedding cache via reverse index')
 
         result = await indexing_service.clear_documents(resolved_path, clear_cache=clear_cache)
 
-        logger.info(f'Cleared: {result.files_removed} files, {result.chunks_removed} chunks')
+        logger.info('Cleared: %s files, %s chunks', result.files_removed, result.chunks_removed)
 
         return result
 
@@ -626,7 +634,7 @@ Returns:
         state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
 
-        logger.debug(f'Listing documents in collection: {collection_name}')
+        logger.debug('Listing documents in collection: %s', collection_name)
 
         # Resolve path (defaults to CWD, "**" for global)
         if path == '**':
@@ -642,7 +650,7 @@ Returns:
             limit=limit,
         )
 
-        logger.debug(f'Listed {len(files)} indexed documents')
+        logger.debug('Listed %s indexed documents', len(files))
 
         return files
 
@@ -680,7 +688,7 @@ Returns:
         collection = state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
 
-        logger.debug(f'Getting info for collection: {collection_name}')
+        logger.debug('Getting info for collection: %s', collection_name)
 
         # Resolve path (defaults to CWD, "**" for global)
         if path == '**':
@@ -688,10 +696,10 @@ Returns:
             logger.debug('Getting global collection info')
         elif path is None:
             resolved_path = str(Path.cwd())
-            logger.debug(f'Getting info for: {resolved_path}')
+            logger.debug('Getting info for: %s', resolved_path)
         else:
             resolved_path = str(Path(path).expanduser().resolve())
-            logger.debug(f'Getting info for: {resolved_path}')
+            logger.debug('Getting info for: %s', resolved_path)
 
         # Build embedding info from collection
         embedding_info = EmbeddingInfo.from_collection(collection)
@@ -718,7 +726,9 @@ Returns:
             path=resolved_path,
         )
 
-        logger.info(f'Collection: {content.total_chunks} chunks, {content.unique_files} files, status={storage.status}')
+        logger.info(
+            'Collection: %s chunks, %s files, status=%s', content.total_chunks, content.unique_files, storage.status
+        )
 
         return info
 
@@ -771,7 +781,7 @@ Returns:
             dimensions=dimensions,
         )
 
-        logger.info(f'Created collection: {name} ({provider}, {collection.model}, {collection.dimensions}d)')
+        logger.info('Created collection: %s (%s, %s, %sd)', name, provider, collection.model, collection.dimensions)
 
         return collection
 
@@ -840,7 +850,7 @@ Returns:
         if name in state._repositories:
             del state._repositories[name]
 
-        logger.info(f'Deleted collection: {name}')
+        logger.info('Deleted collection: %s', name)
 
         return True
 
@@ -876,7 +886,7 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     redis_port = discover_redis_port(PROJECT_ROOT)
     redis_client = RedisClient(host='127.0.0.1', port=redis_port)
     await redis_client.ping()
-    logger.info(f'Redis connected on port {redis_port}')
+    logger.info('Redis connected on port %s', redis_port)
 
     # Initialize state with shared services (async for semaphore binding)
     state = await ServerState.create(redis_client=redis_client)
@@ -889,7 +899,7 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     warmup_t0 = time.perf_counter()
     await state.sparse_embedding_service.embed_batch(['warmup text'])
     warmup_elapsed = time.perf_counter() - warmup_t0
-    logger.debug(f'[SPARSE-WARMUP] bm25-rs ready in {warmup_elapsed:.3f}s')
+    logger.debug('[SPARSE-WARMUP] bm25-rs ready in %.3fs', warmup_elapsed)
 
     # Migrate legacy collection if needed
     await _migrate_legacy_collection(state)

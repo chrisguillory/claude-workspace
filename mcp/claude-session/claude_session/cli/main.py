@@ -537,7 +537,7 @@ async def _archive_async(
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        logger.error('Failed to create archive: %s', e, exc_info=True)
+        logger.exception('Failed to create archive: %s', e)
         raise typer.Exit(1) from None
 
 
@@ -684,7 +684,7 @@ async def _restore_async(
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        logger.error('Failed to restore session: %s', e, exc_info=True)
+        logger.exception('Failed to restore session: %s', e)
         raise typer.Exit(1) from None
 
 
@@ -750,7 +750,7 @@ async def _clone_async(
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        logger.error('Failed to clone session: %s', e, exc_info=True)
+        logger.exception('Failed to clone session: %s', e)
         raise typer.Exit(1) from None
 
 
@@ -861,7 +861,7 @@ async def _delete_async(
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        logger.error('Failed to delete session: %s', e, exc_info=True)
+        logger.exception('Failed to delete session: %s', e)
         raise typer.Exit(1) from None
 
 
@@ -963,7 +963,7 @@ async def _move_async(
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        logger.error('Failed to move session: %s', e, exc_info=True)
+        logger.exception('Failed to move session: %s', e)
         raise typer.Exit(1) from None
 
 

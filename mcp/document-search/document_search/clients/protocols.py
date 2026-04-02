@@ -6,6 +6,7 @@ All embedding clients implement this protocol.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -23,6 +24,13 @@ class EmbeddingClient(Protocol):
     Used by EmbeddingService for type-safe client injection.
     """
 
+    transient_errors: Counter[str]
+    """Categorized transient error counts (rate_limit, provider_error, timeout, etc.).
+
+    Each client defines its own Literal type for categories.
+    Used for dashboard monitoring. Resets only on client recreation.
+    """
+
     async def embed(self, texts: Sequence[str], *, intent: TaskIntent) -> Sequence[EmbeddingVector]:
         """Embed texts into vectors.
 
@@ -38,12 +46,4 @@ class EmbeddingClient(Protocol):
 
     async def close(self) -> None:
         """Release resources. No-op for clients without external connections."""
-        ...
-
-    @property
-    def errors_429(self) -> int:
-        """Cumulative count of 429 rate limit errors encountered.
-
-        Used for dashboard monitoring. Resets only on client recreation.
-        """
         ...

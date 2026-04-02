@@ -47,7 +47,7 @@ import tempfile
 import threading
 import time
 import webbrowser
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from html import escape as html_escape
 from pathlib import Path
 from typing import Any, cast
@@ -279,7 +279,9 @@ class TailState:
         self.byte_offset = self.jsonl_path.stat().st_size
         self.partial_line = b''
 
-    def read_new_records(self) -> list[dict[str, Any]]:
+    def read_new_records(
+        self,
+    ) -> Sequence[Mapping[str, Any]]:  # strict_typing_linter.py: loose-typing — raw JSON records
         """Read new complete JSONL lines since last offset. Returns parsed dicts."""
         try:
             size = self.jsonl_path.stat().st_size
@@ -326,7 +328,7 @@ class TailState:
 LONG_CONTENT_THRESHOLD = 2000
 
 
-def _next_id(counter: list[int]) -> str:
+def _next_id(counter: list[int]) -> str:  # strict_typing_linter.py: mutable-type — single-element mutable int ref
     counter[0] += 1
     return f't-{counter[0]}'
 
@@ -340,7 +342,7 @@ def _format_timestamp(iso_ts: str) -> str:
         return str(iso_ts)
 
 
-def _render_usage(usage: dict[str, Any]) -> str:
+def _render_usage(usage: Mapping[str, Any]) -> str:
     if not usage:
         return ''
     parts = [f'Input: {usage.get("input_tokens", 0)}', f'Output: {usage.get("output_tokens", 0)}']
@@ -392,7 +394,7 @@ def _render_long_text(text: str) -> str:
     return f'<pre>{html_escape(text)}</pre>'
 
 
-def _render_tool_params(tool_input: dict[str, Any]) -> str:
+def _render_tool_params(tool_input: Mapping[str, Any]) -> str:
     if not isinstance(tool_input, dict) or not tool_input:
         return ''
     rows = []
@@ -406,7 +408,9 @@ def _render_tool_params(tool_input: dict[str, Any]) -> str:
     return f"<table class='tool-params-table'>{''.join(rows)}</table>"
 
 
-def _render_user(record: dict[str, Any], counter: list[int], ts: str, dt: str) -> list[str]:
+def _render_user(
+    record: Mapping[str, Any], counter: list[int], ts: str, dt: str
+) -> Sequence[str]:  # strict_typing_linter.py: mutable-type (counter) — mutable int ref
     message = record.get('message', {})
     content = message.get('content')
     if content is None:
@@ -458,7 +462,9 @@ def _render_user(record: dict[str, Any], counter: list[int], ts: str, dt: str) -
     return fragments
 
 
-def _render_assistant(record: dict[str, Any], counter: list[int], ts: str, dt: str) -> list[str]:
+def _render_assistant(
+    record: Mapping[str, Any], counter: list[int], ts: str, dt: str
+) -> Sequence[str]:  # strict_typing_linter.py: mutable-type (counter) — mutable int ref
     message = record.get('message', {})
     content = message.get('content')
     if not isinstance(content, list):
@@ -530,7 +536,9 @@ def _render_assistant(record: dict[str, Any], counter: list[int], ts: str, dt: s
     return fragments
 
 
-def _render_system(record: dict[str, Any], counter: list[int], ts: str, dt: str) -> list[str]:
+def _render_system(
+    record: Mapping[str, Any], counter: list[int], ts: str, dt: str
+) -> Sequence[str]:  # strict_typing_linter.py: mutable-type (counter) — mutable int ref
     subtype = record.get('subtype', '')
     if subtype not in ('local_command', 'informational', 'api_error', 'compact_boundary'):
         return []
@@ -562,7 +570,9 @@ def _render_system(record: dict[str, Any], counter: list[int], ts: str, dt: str)
     return [_wrap_message(mid, f'system {level_class}', icon, label, ts, dt, body)]
 
 
-def render_record(record: dict[str, Any], counter: list[int]) -> list[str]:
+def render_record(
+    record: Mapping[str, Any], counter: list[int]
+) -> Sequence[str]:  # strict_typing_linter.py: mutable-type,loose-typing — mutable int ref, raw JSON
     """Render a JSONL record as HTML fragment(s) matching claude-code-log CSS."""
     rec_type = record.get('type', '')
     timestamp = record.get('timestamp', '')
@@ -583,11 +593,13 @@ def render_record(record: dict[str, Any], counter: list[int]) -> list[str]:
 class SSEHTTPServer(http.server.ThreadingHTTPServer):
     """ThreadingHTTPServer with typed SSE state attributes."""
 
-    sse_clients: list[queue.Queue[tuple[str, str]]]
+    sse_clients: list[
+        queue.Queue[tuple[str, str]]
+    ]  # strict_typing_linter.py: mutable-type — runtime client list, mutated by connect/disconnect
     sse_lock: threading.Lock
     refresh_flag: threading.Event
     jsonl_path: Path
-    msg_counter: list[int]
+    msg_counter: list[int]  # strict_typing_linter.py: mutable-type — mutable int ref shared across threads
 
 
 # -- SSE Broadcasting ----------------------------------------------------------
@@ -742,7 +754,7 @@ class _WatchHandler(http.server.SimpleHTTPRequestHandler):
 def start_http_server(
     directory: Path,
     jsonl_path: Path,
-    msg_counter: list[int],
+    msg_counter: list[int],  # strict_typing_linter.py: mutable-type — mutable int ref shared across threads
     port: int = 0,
 ) -> tuple[SSEHTTPServer, int]:
     """Start threaded HTTP server with SSE support. Returns (server, port)."""

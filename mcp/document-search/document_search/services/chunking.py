@@ -246,16 +246,18 @@ class ChunkingService:
         """
         # Run CPU-heavy extraction in subprocess
         start = time.perf_counter()
-        logger.debug(f'[PDF] Starting: {path.name}')
+        logger.debug('[PDF] Starting: %s', path.name)
         loop = asyncio.get_running_loop()
         extraction = await loop.run_in_executor(self._pool, extract_pdf, str(path))
         elapsed = time.perf_counter() - start
 
         if extraction.page_count == 0:
-            logger.warning(f'PDF has no pages: {path}')
+            logger.warning('PDF has no pages: %s', path)
             return []
 
-        logger.debug(f'[PDF] {path.name}: {extraction.page_count} pages, type={extraction.pdf_type}, {elapsed:.2f}s')
+        logger.debug(
+            '[PDF] %s: %s pages, type=%s, %.2fs', path.name, extraction.page_count, extraction.pdf_type, elapsed
+        )
 
         # Build chunks from extracted pages (lightweight, main process)
         chunks: list[Chunk] = []
@@ -326,11 +328,11 @@ class ChunkingService:
                 continue
 
         if df is None:
-            logger.error(f'Could not parse CSV with any encoding: {path}')
+            logger.error('Could not parse CSV with any encoding: %s', path)
             return chunks
 
         if df.empty:
-            logger.warning(f'Empty CSV: {path}')
+            logger.warning('Empty CSV: %s', path)
             return chunks
 
         # Prepare data

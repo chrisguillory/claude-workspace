@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 __all__ = [
     'OpenRouterAPIError',
@@ -12,7 +13,7 @@ class OpenRouterAPIError(Exception):
     """Known error from OpenRouter API (has message, code).
 
     May arrive with any HTTP status, including 200.
-    Retryable if code is in RETRYABLE_STATUS_CODES.
+    Retryable if classified as transient by _retry.openrouter.
     """
 
     def __init__(
@@ -23,19 +24,25 @@ class OpenRouterAPIError(Exception):
         error_type: str | None,
         status_code: int,
         model: str,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         self.message = message
         self.code = code
         self.error_type = error_type
         self.status_code = status_code
         self.model = model
+        self.metadata = metadata
 
         parts = [f'HTTP {status_code}']
         if code is not None:
             parts.append(f'code={code}')
+        parts.append(f'model={model}')
         if error_type is not None:
             parts.append(f'type={error_type}')
-        super().__init__(f'OpenRouter API error ({", ".join(parts)}): {message}')
+        line = f'OpenRouter API error ({", ".join(parts)}): {message}'
+        if metadata:
+            line += f'\n  metadata: {dict(metadata)}'
+        super().__init__(line)
 
 
 class OpenRouterUnexpectedResponse(Exception):

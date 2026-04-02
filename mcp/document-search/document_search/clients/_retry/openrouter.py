@@ -6,6 +6,7 @@ Private module - import from _retry package.
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import circuitbreaker
 import httpx
@@ -15,6 +16,7 @@ from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
 from document_search.clients.openrouter_errors import OpenRouterAPIError
 
 __all__ = [
+    'OpenRouterTransientErrorCategory',
     'is_retryable_openrouter_error',
     'log_openrouter_retry',
     'openrouter_breaker',
@@ -22,80 +24,117 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# HTTP status codes that are transient and worth retrying
-# 429: Rate limit exceeded
-# 500: Internal server error
-# 502: Bad gateway (provider failure)
-# 503: Service unavailable
-# 504: Gateway timeout
-RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
-
 # Circuit breaker - opens after consecutive failures, hard fails until recovery
 OPENROUTER_FAILURE_THRESHOLD = 10
 OPENROUTER_RECOVERY_TIMEOUT = 60
+
+type OpenRouterTransientErrorCategory = Literal[
+    'rate_limit',  # 429 — upstream provider or OpenRouter rate limit
+    'provider_unavailable',  # 404 "No successful provider responses." — all providers failed
+    'bad_gateway',  # 502 — upstream provider down or returned invalid response
+    'timeout',  # 408 — provider cold start or slow inference
+    'server_error',  # 500, 503, 504 — OpenRouter infrastructure issues
+]
 
 
 def is_retryable_openrouter_error(exc: BaseException) -> bool:
     """Check if exception is a retryable transient error from OpenRouter.
 
-    Retries on:
-    - httpx transport errors (timeout, network issues)
-    - HTTP 429 (rate limit)
-    - HTTP 500/502/503/504 (server/provider errors)
-    - OpenRouterAPIError with transient code (HTTP 200 with error body)
-
-    Does NOT retry:
-    - OpenRouterUnexpectedResponse (unknown format won't change on retry)
+    Delegates to _classify_transient_error — an error is retryable
+    if and only if it has a transient category.
     """
-    if is_retryable_httpx_error(exc):
-        return True
-
-    # HTTP status errors with transient codes
-    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in RETRYABLE_STATUS_CODES:
-        return True
-
-    # HTTP 200 with known error body — retry if transient code
-    if isinstance(exc, OpenRouterAPIError) and exc.code in RETRYABLE_STATUS_CODES:
-        return True
-
-    return False
+    return _classify_transient_error(exc) is not None
 
 
 def log_openrouter_retry(retry_state: tenacity.RetryCallState) -> None:
-    """Log OpenRouter retry attempt and track 429 errors."""
+    """Log retry attempt and track categorized transient errors."""
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     if exc is None:
         return
 
-    # Track 429s on client instance (args[0] is self for instance methods)
-    if retry_state.args and _is_429_error(exc):
-        client = retry_state.args[0]
-        client.errors_429 += 1
+    # Track categorized transient errors on client instance (args[0] is self)
+    if retry_state.args:
+        category = _classify_transient_error(exc)
+        if category is not None:
+            client = retry_state.args[0]
+            client.transient_errors[category] += 1
 
     exc_name = type(exc).__name__
     exc_msg = str(exc)
 
-    # Include status code for HTTP errors
     if isinstance(exc, httpx.HTTPStatusError):
         exc_msg = f'HTTP {exc.response.status_code}: {exc_msg}'
 
-    logger.warning(f'[RETRY] OpenRouter embed attempt {retry_state.attempt_number} failed: {exc_name}: {exc_msg}')
+    logger.warning('[RETRY] OpenRouter embed attempt %s failed: %s: %s', retry_state.attempt_number, exc_name, exc_msg)
 
 
-def _is_429_error(exc: BaseException | None) -> bool:
-    """Check if exception is a 429 rate limit error (HTTP or API body)."""
-    if exc is None:
-        return False
-    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
-        return True
-    if isinstance(exc, OpenRouterAPIError) and exc.code == 429:
-        return True
-    return False
+def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCategory | None:
+    """Classify an error into a transient category.
+
+    Returns None if the error is not transient (permanent failures, unknown formats).
+    Single source of truth for retryability — an error is retryable if and only if
+    it has a transient category.
+
+    Transient codes (can appear as HTTP status OR error.code inside HTTP 200 bodies):
+
+    408 - Request timeout. Provider cold start or slow inference. Retry lets
+          OpenRouter route to a warmer provider.
+    429 - Rate limit exceeded. May include provider_name in error metadata
+          identifying which upstream provider rate-limited.
+    500 - Internal server error. Transient infrastructure issue.
+    502 - Bad gateway. Upstream provider returned invalid response or is down.
+          OpenRouter already attempted internal fallback before surfacing this.
+    503 - Service unavailable. No provider currently meets routing requirements.
+    504 - Gateway timeout. Provider didn't respond within OpenRouter's window.
+    404 - Conditional. "No successful provider responses." only. OpenRouter
+          exhausted its provider fallback chain — all providers were tried and
+          all returned errors. Functionally a 503 but reported as 404 because
+          providers exist in the routing table.
+
+    Does NOT classify:
+    - OpenRouterUnexpectedResponse (unknown format won't change on retry)
+    - 404 with other messages ("No endpoints found for model") — permanent
+    """
+    if isinstance(exc, OpenRouterAPIError):
+        if exc.code == 429:
+            return 'rate_limit'
+        if exc.code == 404:
+            if exc.message == 'No successful provider responses.':
+                return 'provider_unavailable'
+            logger.debug(f'Non-retryable 404: {exc.message!r}')
+            return None
+        if exc.code == 502:
+            return 'bad_gateway'
+        if exc.code == 408:
+            return 'timeout'
+        if isinstance(exc.code, int) and exc.code in {500, 503, 504}:
+            return 'server_error'
+        return None
+
+    # Note: 404 is intentionally excluded here. OpenRouter's "No successful provider
+    # responses" arrives as an error-in-body (HTTP 200 with code=404), not as an
+    # HTTP 404 status. An actual HTTP 404 would mean the endpoint doesn't exist.
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code == 429:
+            return 'rate_limit'
+        if code == 502:
+            return 'bad_gateway'
+        if code == 408:
+            return 'timeout'
+        if code in {500, 503, 504}:
+            return 'server_error'
+        return None
+
+    if is_retryable_httpx_error(exc):
+        return 'timeout'
+
+    return None
 
 
 def _openrouter_circuit_filter(thrown_type: type, thrown_value: BaseException) -> bool:
     """Only count retryable errors toward circuit breaker."""
-    return is_retryable_openrouter_error(thrown_value)
+    return _classify_transient_error(thrown_value) is not None
 
 
 openrouter_breaker = circuitbreaker.CircuitBreaker(
