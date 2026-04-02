@@ -1357,7 +1357,10 @@ def _get_session_age_ms(transcript_path: str) -> float | None:
         return None
     with open(transcript_path) as f:
         first_line = f.readline()
-    start = datetime.fromisoformat(json.loads(first_line)['timestamp'])
+    ts = json.loads(first_line).get('timestamp')
+    if not ts:
+        return None
+    start = datetime.fromisoformat(ts)
     return (datetime.now(UTC) - start).total_seconds() * 1000
 
 
