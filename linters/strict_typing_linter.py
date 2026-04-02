@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import ast
 import builtins
+import enum
 import io
 import sys
 import tokenize
@@ -64,13 +65,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from _config import (
+from _lib.config import (
     find_config,
     find_python_files,
     get_per_file_ignored_codes,
     load_per_file_ignores,
 )
-from hashability_inspector import HashabilityInspector, QualifiedName
+from _lib.hashability_inspector import HashabilityInspector, QualifiedName
 
 # -- Configuration ------------------------------------------------------------
 
@@ -178,6 +179,19 @@ type DirectiveCode = Literal[
 type TypeViolationKind = Literal['mutable', 'loose', 'tuple-field', 'hashable-field']
 type OrderingViolationKind = Literal['ordering', 'class-ordering', 'missing-all', 'trailing-comma', 'unused-directive']
 type ViolationKind = TypeViolationKind | OrderingViolationKind
+
+
+class SubscriptKind(enum.Enum):
+    """Classification of subscript type forms in annotations.
+
+    Literal: contains values, not types — skip entirely
+    Annotated: first arg is type, rest is metadata — recurse first arg only
+    Generic: regular parameterized type (including Union) — recurse all args
+    """
+
+    LITERAL = 'literal'
+    ANNOTATED = 'annotated'
+    GENERIC = 'generic'
 
 
 @dataclass(frozen=True)
@@ -474,9 +488,9 @@ def check_file(
     violations.extend(type_checker.violations)
 
     # Module ordering (always enabled, suppress per-area via per-file-ignores)
-    # Skip __main__.py (entry point, never exports)
+    # Skip entry points (__main__.py, main.py, shebang scripts)
     raw_ordering: list[tuple[int, str]] = []
-    if filepath.name != '__main__.py':
+    if not _is_entry_point(filepath, source_lines):
         # Skip __init__.py only if it has no definitions (just boilerplate)
         if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
             violations.extend(check_all_defined(filepath, tree, source_lines, raw_ordering))
@@ -810,6 +824,26 @@ class AnnotationChecker(ast.NodeVisitor):
         else:
             return f'ensure {unhashable} fields use hashable types (tuple instead of Sequence/list)'
 
+    def _classify_subscript(self, node: ast.Subscript) -> tuple[SubscriptKind, str]:
+        """Classify a subscript node by its type form.
+
+        Returns (kind, resolved_name). The resolved name is used by
+        _find_forbidden_type for the ANY_ALLOWED_POSITIONS check.
+        """
+        resolved = resolve_qualified_name(node.value, self.import_map)
+        if resolved in ('typing.Literal', 'typing_extensions.Literal'):
+            return SubscriptKind.LITERAL, resolved
+        if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
+            return SubscriptKind.ANNOTATED, resolved
+        return SubscriptKind.GENERIC, resolved
+
+    @staticmethod
+    def _get_annotated_type_arg(node: ast.Subscript) -> ast.expr:
+        """Extract the type argument from Annotated[Type, ...metadata]."""
+        if isinstance(node.slice, ast.Tuple) and node.slice.elts:
+            return node.slice.elts[0]
+        return node.slice
+
     def _find_tuple_field(self, node: ast.expr) -> bool:
         """Recursively check if annotation contains tuple[X, ...] (variable-length).
 
@@ -819,13 +853,11 @@ class AnnotationChecker(ast.NodeVisitor):
             return True
 
         if isinstance(node, ast.Subscript):
-            resolved = resolve_qualified_name(node.value, self.import_map)
-            # Annotated: check first type arg only (rest is metadata)
-            if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
-                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
-                    return self._find_tuple_field(node.slice.elts[0])
-                return self._find_tuple_field(node.slice)
-            # Recurse into all type parameters
+            kind, _ = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return False
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_tuple_field(self._get_annotated_type_arg(node))
             return self._find_tuple_field_in_slice(node.slice)
 
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -867,18 +899,16 @@ class AnnotationChecker(ast.NodeVisitor):
                 return result
 
         if isinstance(node, ast.Subscript):
-            # Check the container itself
+            kind, _ = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return None
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_unhashable_field(self._get_annotated_type_arg(node))
+
+            # Container-level check (Sequence/Mapping are unhashable)
             container_class = self._classify_by_qualified_name(node.value)
             if container_class == 'transparent':
                 return self._get_type_name(node.value)
-
-            resolved = resolve_qualified_name(node.value, self.import_map)
-            # Annotated: check first type arg only
-            if resolved in ('typing.Annotated', 'typing_extensions.Annotated'):
-                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
-                    return self._find_unhashable_field(node.slice.elts[0])
-                return self._find_unhashable_field(node.slice)
-            # Recurse into type parameters
             return self._find_unhashable_in_slice(node.slice)
 
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -951,9 +981,14 @@ class AnnotationChecker(ast.NodeVisitor):
             return None
 
         elif isinstance(node, ast.Subscript):
-            container_name = self._get_type_name(node.value)
+            kind, resolved_name = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return None
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_forbidden_type(self._get_annotated_type_arg(node))
 
-            # Resolve and classify the container
+            # Container-level checks (mutable, transparent, allowed)
+            container_name = self._get_type_name(node.value)
             classification = self._classify_by_qualified_name(node.value)
             if classification == 'mutable':
                 return container_name
@@ -965,32 +1000,8 @@ class AnnotationChecker(ast.NodeVisitor):
             # Fall back to short name checks for builtins
             if container_name in FORBIDDEN_TYPES:
                 return container_name
-
-            # Immutable containers that don't need content checking
             if container_name in ALLOWED_CONTAINERS:
                 return None
-
-            # Resolve qualified name for remaining checks
-            resolved_name = resolve_qualified_name(node.value, self.import_map)
-
-            # Union, Optional - check all components
-            if resolved_name in (
-                'typing.Union',
-                'typing.Optional',
-                'typing_extensions.Union',
-                'typing_extensions.Optional',
-            ):
-                return self._find_forbidden_in_slice(node.slice)
-
-            # Literal types contain values, not type annotations - skip entirely
-            if resolved_name in ('typing.Literal', 'typing_extensions.Literal'):
-                return None
-
-            # Annotated types: only check the first argument (the actual type), skip metadata
-            if resolved_name in ('typing.Annotated', 'typing_extensions.Annotated'):
-                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
-                    return self._find_forbidden_type(node.slice.elts[0])
-                return self._find_forbidden_type(node.slice)
 
             # Position-aware Any allowances for library types
             if resolved_name in ANY_ALLOWED_POSITIONS:
@@ -1118,9 +1129,14 @@ class AnnotationChecker(ast.NodeVisitor):
             return None
 
         elif isinstance(node, ast.Subscript):
-            container_name = self._get_type_name(node.value)
+            kind, _ = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return None
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_forbidden_type_no_any(self._get_annotated_type_arg(node))
 
-            # Use qualified resolution first
+            # Container-level checks (mutable, transparent, allowed)
+            container_name = self._get_type_name(node.value)
             classification = self._classify_by_qualified_name(node.value)
             if classification == 'mutable':
                 return container_name
@@ -1132,32 +1148,8 @@ class AnnotationChecker(ast.NodeVisitor):
             # Fall back to short name for builtins
             if container_name in MUTABLE_TYPES:
                 return container_name
-
-            # Immutable containers
             if container_name in ALLOWED_CONTAINERS:
                 return None
-
-            # Resolve qualified name for remaining checks
-            resolved_name = resolve_qualified_name(node.value, self.import_map)
-
-            # Union, Optional - check all components
-            if resolved_name in (
-                'typing.Union',
-                'typing.Optional',
-                'typing_extensions.Union',
-                'typing_extensions.Optional',
-            ):
-                return self._find_forbidden_in_slice_no_any(node.slice)
-
-            # Literal types contain values, not type annotations - skip entirely
-            if resolved_name in ('typing.Literal', 'typing_extensions.Literal'):
-                return None
-
-            # Annotated types: only check the first argument (the actual type), skip metadata
-            if resolved_name in ('typing.Annotated', 'typing_extensions.Annotated'):
-                if isinstance(node.slice, ast.Tuple) and node.slice.elts:
-                    return self._find_forbidden_type_no_any(node.slice.elts[0])
-                return self._find_forbidden_type_no_any(node.slice)
 
             # Recurse into slice for unknown containers
             return self._find_forbidden_in_slice_no_any(node.slice)
@@ -1484,10 +1476,46 @@ class Definition:
         return (all_group, private_group, type_group)
 
 
+def _collect_import_time_refs(tree: ast.Module) -> Set[str]:
+    """Collect private function names referenced in module-level non-definition statements.
+
+    These are functions used in type aliases, Annotated[..., BeforeValidator(fn)],
+    Discriminator(fn), decorator arguments, etc. They must be defined before the
+    classes/aliases that reference them — exempt from "private after public" ordering.
+    """
+    # Collect all private function names first
+    private_fns = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith('_')
+    }
+    if not private_fns:
+        return set()
+
+    # Scan module-level statements for references to private functions.
+    # Includes: type alias assignments, class body annotations, and function/class decorators.
+    # Excludes: function/method bodies (those are runtime-only, no import-time dependency).
+    refs: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Skip body but scan decorators (evaluated at definition time)
+            for decorator in node.decorator_list:
+                for child in ast.walk(decorator):
+                    if isinstance(child, ast.Name) and child.id in private_fns:
+                        refs.add(child.id)
+            continue
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and child.id in private_fns:
+                refs.add(child.id)
+
+    return refs
+
+
 def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequence[Definition]:
     """Extract top-level class and function definitions."""
     definitions = []
     all_names = all_names or set()
+    import_time_refs = _collect_import_time_refs(tree)
 
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -1501,6 +1529,9 @@ def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequenc
                 ),
             )
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Skip private functions referenced at import time (BeforeValidator, Discriminator, etc.)
+            if node.name in import_time_refs:
+                continue
             definitions.append(
                 Definition(
                     name=node.name,
@@ -1585,6 +1616,19 @@ def check_module_ordering(
             break  # Report first violation only
 
     return violations
+
+
+def _is_entry_point(filepath: Path, source_lines: Sequence[str]) -> bool:
+    """Detect entry point files that don't need __all__.
+
+    Returns True if ANY of these signals match:
+    - __main__.py: package entry point (python -m)
+    - main.py: CLI entry point by convention (pyproject.toml entry points)
+    - Shebang on line 1: directly executable script
+    """
+    if filepath.name in ('__main__.py', 'main.py'):
+        return True
+    return bool(source_lines) and source_lines[0].startswith('#!')
 
 
 def check_all_defined(

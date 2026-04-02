@@ -15,6 +15,13 @@ import pydantic
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.types import JsonDatetime
 
+__all__ = [
+    'LineageEntry',
+    'LineageFile',
+    'LineageTree',
+    'LineageTreeNode',
+]
+
 
 class LineageEntry(StrictModel):
     """Lineage entry for a cloned/restored session.
@@ -105,8 +112,10 @@ class LineageFile(StrictModel):
     This model is NOT frozen to allow mutable sessions dict.
     """
 
-    model_config = {'extra': 'forbid', 'strict': True, 'frozen': False}
+    model_config = pydantic.ConfigDict(extra='forbid', strict=True, frozen=False)
 
     schema_version: str = '1.0'
     # Intentionally mutable - this model is frozen=False to allow dict mutation
-    sessions: dict[str, LineageEntry] = pydantic.Field(default_factory=dict)  # check_schema_typing.py: mutable-type
+    sessions: dict[str, LineageEntry] = pydantic.Field(
+        default_factory=dict
+    )  # strict_typing_linter.py: mutable-type — intentionally mutable (frozen=False model)

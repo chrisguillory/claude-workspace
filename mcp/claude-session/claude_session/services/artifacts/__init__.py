@@ -44,8 +44,8 @@ from .plan_files import (
     write_plan_files,
 )
 from .session_env import (
-    SESSION_ENV_DIR,
     create_session_env_dir,
+    get_session_env_dir,
     validate_session_env_empty,
 )
 from .session_memory import (
@@ -55,18 +55,18 @@ from .session_memory import (
 )
 from .tasks import (
     TASK_METADATA_FILES,
-    TASKS_DIR,
     TaskDirectoryContents,
     classify_task_directory,
     collect_task_metadata,
+    get_tasks_dir,
     iter_task_paths,
     iter_tasks,
     write_task_metadata,
     write_tasks,
 )
 from .todos import (
-    TODOS_DIR,
     collect_todos,
+    get_todos_dir,
     transform_todo_filename,
     write_todos,
 )
@@ -112,11 +112,11 @@ __all__ = [
     'write_plan_files',
     'apply_slug_mapping',
     # session_env
-    'SESSION_ENV_DIR',
+    'get_session_env_dir',
     'validate_session_env_empty',
     'create_session_env_dir',
     # todos
-    'TODOS_DIR',
+    'get_todos_dir',
     'collect_todos',
     'transform_todo_filename',
     'write_todos',
@@ -135,7 +135,7 @@ __all__ = [
     'collect_tool_results',
     'write_tool_results',
     # tasks
-    'TASKS_DIR',
+    'get_tasks_dir',
     'TASK_METADATA_FILES',
     'TaskDirectoryContents',
     'classify_task_directory',

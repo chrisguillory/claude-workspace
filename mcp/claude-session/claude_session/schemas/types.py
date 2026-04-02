@@ -1,5 +1,4 @@
-"""
-Shared type definitions for schemas.
+"""Shared type definitions for schemas.
 
 Centralizes common type annotations used across session and API schemas.
 
@@ -12,40 +11,49 @@ Layering:
 from __future__ import annotations
 
 import base64
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
 import pydantic
+from cc_lib.schemas.base import StrictModel
+
+__all__ = [
+    'Base64JsonBytes',
+    'BaseStrictModel',
+    'EmptyDict',
+    'EmptySequence',
+    'JsonDatetime',
+    'ModelId',
+    'PathStr',
+    'PermissiveModel',
+    'ToolResultExtension',
+]
+
 
 # -- Base Strict Model (Foundation) --------------------------------------------
 
 
-class BaseStrictModel(pydantic.BaseModel):
+class BaseStrictModel(StrictModel):
+    """Foundation strict model - domain packages inherit from this.
+
+    Inherits cc-lib's StrictModel (extra='allow' default, extra='forbid' via
+    CC_STRICT_MODEL_EXTRA_FORBID=1, frozen=True, strict=True,
+    validate_default=True, use_attribute_docstrings=True, serialize_by_alias=True).
+
+    Domain packages (session/, cc_internal_api/) define their own StrictModel
+    that inherits from this, enabling domain-specific customization while
+    sharing the core validation config.
     """
-    Foundation strict model - domain packages inherit from this.
-
-    Uses extra='forbid' to reject unknown fields - any field not modeled
-    causes immediate validation failure (fail-fast).
-
-    Domain packages (session/, cc_internal_api/) should define their own
-    StrictModel that inherits from this, enabling domain-specific customization
-    while sharing the core validation config.
-    """
-
-    model_config = pydantic.ConfigDict(
-        extra='forbid',  # Reject unknown fields (fail-fast)
-        strict=True,  # Strict type coercion
-        frozen=True,  # Immutable after creation
-    )
 
 
 # -- Permissive Model (Foundation) ---------------------------------------------
 
 
-class PermissiveModel(pydantic.BaseModel):
-    """
-    Foundation permissive model for typed fallbacks in unions.
+class PermissiveModel(StrictModel):
+    """Foundation permissive model for typed fallbacks in unions.
+
+    Inherits cc-lib's StrictModel but overrides extra='allow' unconditionally.
 
     Symmetry with BaseStrictModel:
     - BaseStrictModel: extra='forbid' (rejects unknown fields)
@@ -65,13 +73,9 @@ class PermissiveModel(pydantic.BaseModel):
     enabling validation scripts to report untyped structures.
     """
 
-    model_config = pydantic.ConfigDict(
-        extra='allow',  # Accept unknown fields (graceful fallback)
-        strict=True,  # Strict type coercion for known fields
-        frozen=True,  # Immutable after creation
-    )
+    model_config = pydantic.ConfigDict(extra='allow')
 
-    def get_extra_fields(self) -> dict[str, object]:
+    def get_extra_fields(self) -> Mapping[str, object]:
         """Get extra fields captured by this permissive model.
 
         Returns only the unknown fields, not defined model fields.

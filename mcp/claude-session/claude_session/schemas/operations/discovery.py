@@ -11,6 +11,10 @@ from pathlib import Path
 
 from claude_session.schemas.base import StrictModel
 
+__all__ = [
+    'SessionInfo',
+]
+
 
 class SessionInfo(StrictModel):
     """

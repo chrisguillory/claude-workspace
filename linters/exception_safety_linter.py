@@ -60,7 +60,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from _config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
+from _lib.config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
 
 # Name resolution (import map usage)
 type QualifiedName = str  # Fully qualified dotted name (e.g., 'builtins.Exception', 'asyncio.CancelledError')

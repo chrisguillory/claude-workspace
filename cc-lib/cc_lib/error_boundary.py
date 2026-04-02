@@ -172,12 +172,7 @@ class ErrorBoundary:
           Execution continues.
     """
 
-    def __init__(
-        self,
-        *,
-        handler: ErrorHandler | None = None,
-        exit_code: int | None = None,
-    ) -> None:
+    def __init__(self, *, handler: ErrorHandler | None = None, exit_code: int | None = None) -> None:
         self._dispatch = singledispatch(_default_handler)
         if handler is not None:
             self._dispatch.register(Exception, handler)

@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from claude_session.schemas.base import StrictModel
 
+__all__ = [
+    'GistArchiveResult',
+]
+
 
 class GistArchiveResult(StrictModel):
     """Result of saving a session to GitHub Gist."""

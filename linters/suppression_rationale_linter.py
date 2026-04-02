@@ -110,7 +110,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from _config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
+from _lib.config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
 
 # -- Configuration ------------------------------------------------------------
 
@@ -662,13 +662,7 @@ class SuppressionScanner:
         codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
         return kind in codes
 
-    def _add_violation(
-        self,
-        lineno: int,
-        line: str,
-        kind: ViolationKind,
-        directive_text: str = '',
-    ) -> None:
+    def _add_violation(self, lineno: int, line: str, kind: ViolationKind, directive_text: str = '') -> None:
         """Add a violation if not suppressed by our own directive."""
         if self._has_self_directive(line, kind):
             return

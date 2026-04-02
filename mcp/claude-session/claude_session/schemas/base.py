@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from claude_session.schemas.types import BaseStrictModel
 
+__all__ = [
+    'StrictModel',
+]
+
 
 class StrictModel(BaseStrictModel):
     """Operations-layer strict model.

@@ -209,13 +209,7 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
     Intent is always 'document' since only embed_texts() uses this path.
     """
 
-    def __init__(
-        self,
-        redis: RedisClient,
-        model: str,
-        dimensions: int,
-        embed_loader: _EmbedLoader,
-    ) -> None:
+    def __init__(self, redis: RedisClient, model: str, dimensions: int, embed_loader: _EmbedLoader) -> None:
         self._redis = redis
         self._model = model
         self._dimensions = dimensions

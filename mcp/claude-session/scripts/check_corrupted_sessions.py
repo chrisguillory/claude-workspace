@@ -1,6 +1,12 @@
-#!/usr/bin/env -S uv run --no-project
+#!/usr/bin/env -S uv run --no-project --script
 # /// script
-# dependencies = []
+# requires-python = ">=3.13"
+# dependencies = [
+#   "cc_lib",
+# ]
+#
+# [tool.uv.sources]
+# cc_lib = { path = "../../../cc-lib/", editable = true }
 # ///
 
 """
@@ -15,6 +21,8 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+
+from cc_lib.utils import get_claude_config_home_dir
 
 
 def check_file(jsonl_file: Path) -> tuple[bool, int, str | None]:
@@ -41,7 +49,9 @@ def check_file(jsonl_file: Path) -> tuple[bool, int, str | None]:
 
         return (True, total_lines, None)
 
-    except Exception as e:
+    except (
+        Exception
+    ) as e:  # exception_safety_linter.py: swallowed-exception — returns error tuple to caller for aggregation
         return (False, 0, f'Failed to read file: {e}')
 
 
@@ -51,7 +61,7 @@ def main() -> None:
     print('=' * 80)
     print()
 
-    claude_dir = Path.home() / '.claude' / 'projects'
+    claude_dir = get_claude_config_home_dir() / 'projects'
 
     if not claude_dir.exists():
         print(f'Directory not found: {claude_dir}')

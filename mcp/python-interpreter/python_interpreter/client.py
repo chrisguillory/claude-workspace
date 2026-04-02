@@ -1,6 +1,9 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# dependencies = ["httpx"]
+# requires-python = ">=3.13"
+# dependencies = [
+#   "httpx",
+# ]
 # ///
 """
 HTTP client for python-interpreter MCP server.

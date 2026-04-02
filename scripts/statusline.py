@@ -2,9 +2,9 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#     "cc_lib",
 #     "psutil>=5.9",
 #     "pydantic>=2.0",
-#     "cc_lib",
 # ]
 #
 # [tool.uv.sources]
@@ -1149,11 +1149,7 @@ def _collect_health_sample(claude_pid: int) -> HealthSample | None:
     )
 
 
-def _update_health_sidecar(
-    session_id: str,
-    claude_pid: int,
-    sample: HealthSample,
-) -> HealthSidecar:
+def _update_health_sidecar(session_id: str, claude_pid: int, sample: HealthSample) -> HealthSidecar:
     """Conditionally persist sample to sidecar, decoupling display from history.
 
     The statusline fires multiple times per assistant turn (streaming start,
@@ -1380,7 +1376,8 @@ def _get_session_title(transcript_path: str) -> str | None:
             line_end = mm.find(b'\n', pos)
             if line_end == -1:
                 line_end = len(mm)
-            return json.loads(mm[line_start:line_end]).get('customTitle')  # type: ignore[no-any-return]  # .get() returns Any from untyped JSON, value is always str | None
+            record: dict[str, str] = json.loads(mm[line_start:line_end])
+            return record.get('customTitle')
     except (OSError, json.JSONDecodeError, ValueError):
         return None
 

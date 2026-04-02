@@ -27,7 +27,19 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-TODOS_DIR = Path.home() / '.claude' / 'todos'
+from cc_lib.utils import get_claude_config_home_dir
+
+__all__ = [
+    'collect_todos',
+    'get_todos_dir',
+    'transform_todo_filename',
+    'write_todos',
+]
+
+
+def get_todos_dir() -> Path:
+    """Return todos directory, respecting CLAUDE_CONFIG_DIR."""
+    return get_claude_config_home_dir() / 'todos'
 
 
 def collect_todos(session_id: str) -> Mapping[str, str]:
@@ -50,23 +62,19 @@ def collect_todos(session_id: str) -> Mapping[str, str]:
     Returns:
         Mapping of original_filename -> JSON content string
     """
-    if not TODOS_DIR.exists():
+    if not get_todos_dir().exists():
         return {}
 
     results: dict[str, str] = {}
     pattern = f'{session_id}-agent-*.json'
 
-    for path in TODOS_DIR.glob(pattern):
+    for path in get_todos_dir().glob(pattern):
         results[path.name] = path.read_text(encoding='utf-8')
 
     return results
 
 
-def transform_todo_filename(
-    old_filename: str,
-    old_session_id: str,
-    new_session_id: str,
-) -> str:
+def transform_todo_filename(old_filename: str, old_session_id: str, new_session_id: str) -> str:
     """
     Transform a todo filename to use the new session ID.
 
@@ -94,11 +102,7 @@ def transform_todo_filename(
     return old_filename.replace(old_session_id, new_session_id, 1)
 
 
-def write_todos(
-    todos: Iterable[tuple[str, str]],
-    *,
-    exist_ok: bool = False,
-) -> int:
+def write_todos(todos: Iterable[tuple[str, str]], *, exist_ok: bool = False) -> int:
     """Write todo files to ~/.claude/todos/.
 
     Mode-agnostic writer — caller computes target filenames.
@@ -125,8 +129,8 @@ def write_todos(
     count = 0
     for filename, content in todos:
         if count == 0:
-            TODOS_DIR.mkdir(parents=True, exist_ok=True)
-        todo_path = TODOS_DIR / filename
+            get_todos_dir().mkdir(parents=True, exist_ok=True)
+        todo_path = get_todos_dir() / filename
         if not exist_ok and todo_path.exists():
             raise FileExistsError(f'Todo file already exists: {todo_path}\nThis indicates a session ID collision.')
         todo_path.write_text(content, encoding='utf-8')

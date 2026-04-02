@@ -308,7 +308,7 @@ def _get_pid_for_port(source_port: int) -> int | None:
                 raise RuntimeError(
                     f'Unexpected AccessDenied for process with matching effective UID: '
                     f'PID {proc_pid} ({proc_name}) uids={proc_uids}'
-                )
+                ) from None
             # Expected - process has elevated/different effective UID, skip
         except psutil.ZombieProcess:
             # Zombie processes can't own active connections, skip
@@ -478,7 +478,9 @@ def _save_json_atomic(filename: Path, data: dict[str, Any]) -> bool:
 
         os.replace(temp_path, filename)
         return True
-    except Exception as e:
+    except (
+        Exception
+    ) as e:  # exception_safety_linter.py: swallowed-exception — mitmproxy addon: log and continue capturing
         _log(f'ERROR: Failed to save {filename}: {e}\n')
         return False
 

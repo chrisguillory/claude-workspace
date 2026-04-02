@@ -13,9 +13,35 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
+import pydantic
+
 from claude_session.schemas.captures.base import RequestCapture, ResponseCapture
 from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.types import PermissiveModel
+
+__all__ = [
+    'ClaudeCodeIdentifyTraits',
+    'SegmentAliasEvent',
+    'SegmentBatchRequest',
+    'SegmentBatchRequestCapture',
+    'SegmentBatchResponse',
+    'SegmentBatchResponseCapture',
+    'SegmentContext',
+    'SegmentEvent',
+    'SegmentEventBase',
+    'SegmentGroupEvent',
+    'SegmentIdentifyEvent',
+    'SegmentLibraryContext',
+    'SegmentMetadata',
+    'SegmentPageEvent',
+    'SegmentRequestCapture',
+    'SegmentResponseCapture',
+    'SegmentScreenEvent',
+    'SegmentTrackEvent',
+    'UnknownSegmentProperties',
+    'UnknownSegmentTraits',
+]
+
 
 # -- Context and Metadata ------------------------------------------------------
 
@@ -32,7 +58,7 @@ class SegmentContext(StrictModel):
 
     library: SegmentLibraryContext | None = None
     # Context can have many optional SDK-specific fields
-    model_config = {'extra': 'allow'}
+    model_config = pydantic.ConfigDict(extra='allow')
 
 
 class SegmentMetadata(StrictModel):
@@ -41,7 +67,7 @@ class SegmentMetadata(StrictModel):
     nodeVersion: str | None = None
     jsRuntime: str | None = None
     # Allow other runtime-specific fields
-    model_config = {'extra': 'allow'}
+    model_config = pydantic.ConfigDict(extra='allow')
 
 
 # -- Event Base ----------------------------------------------------------------
@@ -61,15 +87,17 @@ class SegmentEventBase(StrictModel):
     anonymousId: str | None = None
     # Optional common fields
     context: SegmentContext | None = None
-    integrations: Mapping[str, Any] | None = None  # check_schema_typing.py: loose-typing
+    integrations: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — Segment API sends arbitrary integration config
+    )
     # SDK metadata (uses underscore prefix in JSON)
     segment_metadata: SegmentMetadata | None = None
 
-    model_config = {
-        'extra': 'forbid',
-        'populate_by_name': True,
-        'alias_generator': lambda s: '_metadata' if s == 'segment_metadata' else s,
-    }
+    model_config = pydantic.ConfigDict(
+        extra='forbid',
+        populate_by_name=True,
+        alias_generator=lambda s: '_metadata' if s == 'segment_metadata' else s,
+    )
 
 
 # -- Claude Code-Specific Traits -----------------------------------------------

@@ -7,22 +7,20 @@ Faster than archive+restore for local cloning operations.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 import uuid6
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
-from claude_session.paths import encode_path
-from claude_session.protocols import LoggerProtocol
 from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.artifacts import (
-    TASKS_DIR,
-    TODOS_DIR,
     collect_agent_file_info,
     collect_plan_files,
     collect_task_metadata,
@@ -36,6 +34,8 @@ from claude_session.services.artifacts import (
     generate_agent_id_mapping,
     generate_clone_custom_title,
     generate_clone_slug,
+    get_tasks_dir,
+    get_todos_dir,
     iter_tasks,
     transform_todo_filename,
     validate_session_env_empty,
@@ -50,6 +50,14 @@ from claude_session.services.discovery import SessionDiscoveryService
 from claude_session.services.lineage import LineageService
 from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import PathTranslator
+
+__all__ = [
+    'SessionCloneService',
+    'logger',
+]
+
+
+logger = logging.getLogger(__name__)
 
 
 class SessionCloneService:
@@ -78,21 +86,15 @@ class SessionCloneService:
         self.target_project_path = target_project_path.resolve()
         self.discovery_service = discovery_service or SessionDiscoveryService()
         self.parser_service = parser_service or SessionParserService()
-        self.claude_sessions_dir = Path.home() / '.claude' / 'projects'
+        self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
-    async def clone(
-        self,
-        source_session_id: str,
-        translate_paths: bool = True,
-        logger: LoggerProtocol | None = None,
-    ) -> RestoreResult:
+    async def clone(self, source_session_id: str, translate_paths: bool = True) -> RestoreResult:
         """
         Clone a session directly without creating an archive file.
 
         Args:
             source_session_id: Session ID to clone (full UUID or prefix)
             translate_paths: Whether to translate paths to target project
-            logger: Optional logger instance
 
         Returns:
             RestoreResult with new session ID and details
@@ -103,74 +105,67 @@ class SessionCloneService:
             AmbiguousSessionError: If session ID prefix matches multiple sessions
         """
         # Resolve session ID (handle prefix matching)
-        session_info = await self._resolve_session(source_session_id, logger)
+        session_info = await self._resolve_session(source_session_id)
 
-        if logger:
-            await logger.info(f'Cloning session: {session_info.session_id}')
-            await logger.info(f'Source session folder: {session_info.session_folder}')
+        logger.info('Cloning session: %s', session_info.session_id)
+        logger.info('Source session folder: %s', session_info.session_folder)
 
         # Source session directory (we have it directly from discovery, no encoding needed)
         source_session_dir = session_info.session_folder
 
         # Discover all session files (main + agents) with structure detection
-        session_files, agent_structure = await self._discover_session_files(session_info, logger)
+        session_files, agent_structure = await self._discover_session_files(session_info)
 
-        if logger:
-            await logger.info(f'Found {len(session_files)} session files')
-            nested_count = sum(1 for is_nested in agent_structure.values() if is_nested)
-            if nested_count:
-                await logger.info(f'  {nested_count} nested agents (in subagents/)')
+        logger.info('Found %d session files', len(session_files))
+        nested_count = sum(1 for is_nested in agent_structure.values() if is_nested)
+        if nested_count:
+            logger.info('  %d nested agents (in subagents/)', nested_count)
 
         # Load all records
-        files_data = await self.parser_service.load_session_files(session_files, logger)
+        files_data = await self.parser_service.load_session_files(session_files)
 
         # Collect agent file info (combines filename parsing + structure detection)
         agent_infos = collect_agent_file_info(files_data, agent_structure)
-        if logger:
-            await logger.info(f'Identified {len(agent_infos)} agent files')
-            nested_count = sum(1 for info in agent_infos if info.nested)
-            if nested_count:
-                await logger.info(f'  {nested_count} nested agents (in subagents/)')
+        logger.info('Identified %d agent files', len(agent_infos))
+        nested_count = sum(1 for info in agent_infos if info.nested)
+        if nested_count:
+            logger.info('  %d nested agents (in subagents/)', nested_count)
 
         # Collect tool results from source session
         tool_results = collect_tool_results(source_session_dir, session_info.session_id)
-        if logger:
-            await logger.info(f'Found {tool_results.total_file_count} tool result files')
+        logger.info('Found %d tool result files', tool_results.total_file_count)
 
         # Collect todos from source session
         todos = collect_todos(session_info.session_id)
-        if logger:
-            await logger.info(f'Found {len(todos)} todo files')
+        logger.info('Found %d todo files', len(todos))
 
         # Validate session-env is empty (fail fast if Claude starts using it)
         validate_session_env_empty(session_info.session_id)
 
         # Collect tasks from source session
         tasks = list(iter_tasks(session_info.session_id))
-        if logger and tasks:
-            await logger.info(f'Found {len(tasks)} tasks')
+        if tasks:
+            logger.info('Found %d tasks', len(tasks))
 
         # Collect task metadata (.highwatermark, etc.)
         task_metadata = collect_task_metadata(session_info.session_id)
-        if logger and task_metadata:
-            await logger.info(f'Found {len(task_metadata)} task metadata files')
+        if task_metadata:
+            logger.info('Found %d task metadata files', len(task_metadata))
 
         # Extract slugs and collect plan files from source session
         slugs = extract_slugs_from_records(files_data)
         plan_files = collect_plan_files(slugs)
-        if logger:
-            await logger.info(f'Found {len(slugs)} slugs, {len(plan_files)} plan files')
+        logger.info('Found %d slugs, %d plan files', len(slugs), len(plan_files))
 
         # Extract custom title from source session
         source_custom_title = extract_custom_title_from_records(files_data)
-        if logger and source_custom_title:
-            await logger.info(f'Found custom title: {source_custom_title}')
+        if source_custom_title:
+            logger.info('Found custom title: %s', source_custom_title)
 
         # Generate new session ID (UUIDv7 for identification)
         new_session_id = str(uuid6.uuid7())
-        if logger:
-            await logger.info(f'Generated new session ID (UUIDv7): {new_session_id}')
-            await logger.info(f'Original session ID: {session_info.session_id}')
+        logger.info('Generated new session ID (UUIDv7): %s', new_session_id)
+        logger.info('Original session ID: %s', session_info.session_id)
 
         # Pre-compute slug mapping (but don't write yet - fail-fast check first!)
         slug_mapping: Mapping[str, str] = {}
@@ -180,24 +175,23 @@ class SessionCloneService:
         # Generate agent ID mapping (CRITICAL for same-project forking)
         agent_ids = {info.agent_id for info in agent_infos}
         agent_id_mapping = generate_agent_id_mapping(agent_ids, new_session_id)
-        if logger and agent_id_mapping:
-            await logger.info(f'Generated {len(agent_id_mapping)} agent ID mappings')
+        if agent_id_mapping:
+            logger.info('Generated %d agent ID mappings', len(agent_id_mapping))
             for old_id, new_id in agent_id_mapping.items():
-                await logger.info(f'  {old_id} -> {new_id}')
+                logger.info('  %s -> %s', old_id, new_id)
 
         # Create path translator if needed
         # Note: We use the actual cwd from records, not the decoded path from discovery,
-        # because the path encoding is lossy (multiple chars → '-') and decoding is unreliable.
+        # because the path encoding is lossy (multiple chars -> '-') and decoding is unreliable.
         source_path = extract_source_project_path(files_data)
         translator = None
         if translate_paths and source_path != self.target_project_path:
             translator = PathTranslator(str(source_path), str(self.target_project_path))
-            if logger:
-                await logger.info(f'Path translation: {source_path} -> {self.target_project_path}')
+            logger.info('Path translation: %s -> %s', source_path, self.target_project_path)
 
         # Get target directory and plans directory
         target_dir = self._get_session_directory()
-        plans_dir = Path.home() / '.claude' / 'plans'
+        plans_dir = get_claude_config_home_dir() / 'plans'
 
         # =========================================================================
         # FAIL-FAST: Pre-compute ALL output paths and check for existence
@@ -232,7 +226,7 @@ class SessionCloneService:
         if todos:
             for old_filename in todos:
                 new_filename = transform_todo_filename(old_filename, session_info.session_id, new_session_id)
-                all_output_paths.append(TODOS_DIR / new_filename)
+                all_output_paths.append(get_todos_dir() / new_filename)
 
         # 5. Plan files
         if plan_files:
@@ -240,9 +234,9 @@ class SessionCloneService:
 
         # 6. Tasks
         if tasks:
-            all_output_paths.extend(TASKS_DIR / new_session_id / f'{task.id}.json' for task in tasks)
+            all_output_paths.extend(get_tasks_dir() / new_session_id / f'{task.id}.json' for task in tasks)
         if task_metadata:
-            all_output_paths.extend(TASKS_DIR / new_session_id / filename for filename in task_metadata)
+            all_output_paths.extend(get_tasks_dir() / new_session_id / filename for filename in task_metadata)
 
         # Check ALL paths before writing ANYTHING
         existing_files = [p for p in all_output_paths if p.exists()]
@@ -254,8 +248,7 @@ class SessionCloneService:
                 'This may indicate cloning into an existing session or a previous failed clone.'
             )
 
-        if logger:
-            await logger.info(f'Verified {len(all_output_paths)} output paths are available')
+        logger.info('Verified %d output paths are available', len(all_output_paths))
 
         # =========================================================================
         # Now safe to write - no files will be overwritten
@@ -263,8 +256,7 @@ class SessionCloneService:
 
         # Create target directory
         target_dir.mkdir(parents=True, exist_ok=True)
-        if logger:
-            await logger.info(f'Target directory: {target_dir}')
+        logger.info('Target directory: %s', target_dir)
 
         # Write plan files (shared function handles mkdir)
         plan_files_cloned = 0
@@ -272,16 +264,14 @@ class SessionCloneService:
             plan_files_cloned = write_plan_files(
                 (slug_mapping[old_slug], content) for old_slug, content in plan_files.items()
             )
-            if logger:
-                await logger.info(f'Wrote {plan_files_cloned} plan files with new slugs')
-                for old_slug, new_slug in slug_mapping.items():
-                    await logger.info(f'  {old_slug} -> {new_slug}')
+            logger.info('Wrote %d plan files with new slugs', plan_files_cloned)
+            for old_slug, new_slug in slug_mapping.items():
+                logger.info('  %s -> %s', old_slug, new_slug)
 
         # Write tool results
         if tool_results:
             tool_results_count = write_tool_results(tool_results, target_dir, new_session_id)
-            if logger:
-                await logger.info(f'Wrote {tool_results_count} tool result files')
+            logger.info('Wrote %d tool result files', tool_results_count)
 
         # Write todos (shared function handles mkdir + filename is pre-computed by caller)
         todos_cloned = 0
@@ -290,21 +280,18 @@ class SessionCloneService:
                 (transform_todo_filename(f, session_info.session_id, new_session_id), content)
                 for f, content in todos.items()
             )
-            if logger:
-                await logger.info(f'Wrote {todos_cloned} todo files')
+            logger.info('Wrote %d todo files', todos_cloned)
 
         # Write tasks
         tasks_cloned = 0
         if tasks:
             tasks_cloned = write_tasks(new_session_id, tasks)
-            if logger:
-                await logger.info(f'Cloned {tasks_cloned} tasks')
+            logger.info('Cloned %d tasks', tasks_cloned)
 
         # Write task metadata (.highwatermark, etc.)
         if task_metadata:
             metadata_written = write_task_metadata(new_session_id, task_metadata)
-            if logger:
-                await logger.info(f'Cloned {metadata_written} task metadata files')
+            logger.info('Cloned %d task metadata files', metadata_written)
 
         # Create session-env directory
         create_session_env_dir(new_session_id)
@@ -323,8 +310,7 @@ class SessionCloneService:
         )
         main_records_cloned = len(updated_main_records)
 
-        if logger:
-            await logger.info(f'Cloned main session: {main_records_cloned} records')
+        logger.info('Cloned main session: %d records', main_records_cloned)
 
         # Clone agent files (with nested structure preservation)
         agent_file_paths: list[str] = []
@@ -350,8 +336,7 @@ class SessionCloneService:
             agent_file_paths.append(str(output_path))
             agent_records_cloned += len(updated_records)
 
-            if logger:
-                await logger.info(f'Cloned {new_filename}: {len(updated_records)} records')
+            logger.info('Cloned %s: %d records', new_filename, len(updated_records))
 
         # Record lineage (source_path already extracted above)
         lineage_service = LineageService()
@@ -366,8 +351,7 @@ class SessionCloneService:
             paths_translated=translator is not None,
             archive_path=None,
         )
-        if logger:
-            await logger.info(f'Recorded lineage: {session_info.session_id} -> {new_session_id}')
+        logger.info('Recorded lineage: %s -> %s', session_info.session_id, new_session_id)
 
         return RestoreResult(
             new_session_id=new_session_id,
@@ -390,11 +374,7 @@ class SessionCloneService:
             custom_title=source_custom_title,  # Source title for provenance
         )
 
-    async def _resolve_session(
-        self,
-        session_id_or_prefix: str,
-        logger: LoggerProtocol | None,
-    ) -> SessionInfo:
+    async def _resolve_session(self, session_id_or_prefix: str) -> SessionInfo:
         """
         Resolve a session ID or prefix to a full session.
 
@@ -403,7 +383,6 @@ class SessionCloneService:
 
         Args:
             session_id_or_prefix: Full session ID or prefix
-            logger: Optional logger
 
         Returns:
             SessionInfo for the matched session
@@ -417,11 +396,7 @@ class SessionCloneService:
             raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
         return match
 
-    async def _discover_session_files(
-        self,
-        session_info: SessionInfo,
-        logger: LoggerProtocol | None,
-    ) -> tuple[list[Path], dict[str, bool]]:
+    async def _discover_session_files(self, session_info: SessionInfo) -> tuple[Sequence[Path], Mapping[str, bool]]:
         """Discover all JSONL files for a session with structure detection.
 
         Returns:
@@ -476,7 +451,7 @@ class SessionCloneService:
         records: Sequence[SessionRecord],
         new_session_id: str,
         translator: PathTranslator | None,
-    ) -> list[SessionRecord]:
+    ) -> Sequence[SessionRecord]:
         """Transform records for cloning.
 
         Updates session IDs, translates paths, and generates clone custom titles.
@@ -508,5 +483,5 @@ class SessionCloneService:
 
     def _get_session_directory(self) -> Path:
         """Get the session directory for the target project."""
-        encoded = encode_path(self.target_project_path)
+        encoded = encode_project_path(self.target_project_path)
         return self.claude_sessions_dir / encoded

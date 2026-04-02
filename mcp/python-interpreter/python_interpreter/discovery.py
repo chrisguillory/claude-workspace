@@ -15,6 +15,7 @@ import subprocess
 import time
 
 from cc_lib.session_tracker import SESSIONS_PATH, SessionDatabase
+from cc_lib.utils import get_claude_config_home_dir
 
 __all__ = [
     'ClaudeContext',
@@ -132,7 +133,7 @@ def find_claude_context() -> ClaudeContext:
             if not cwd:
                 raise RuntimeError(f'Found Claude process (PID {current}) but could not determine CWD')
 
-            # Verify by checking if Claude has .claude/ files open
+            # Verify by checking if Claude has config dir files open
             result = subprocess.run(
                 ['lsof', '-p', str(current), '-F', 'n'],
                 check=False,
@@ -140,26 +141,27 @@ def find_claude_context() -> ClaudeContext:
                 text=True,
             )
 
+            claude_dir = get_claude_config_home_dir()
+            claude_dir_name = claude_dir.name
             claude_files = [
                 pathlib.Path(line[1:])
                 for line in result.stdout.splitlines()
-                if line.startswith('n') and '.claude' in line
+                if line.startswith('n') and claude_dir_name in line
             ]
 
             if not claude_files:
                 raise RuntimeError(
                     f'Found Claude process (PID {current}) with CWD {cwd}, '
-                    f'but no .claude/ files are open - may not be a Claude project',
+                    f'but no {claude_dir_name}/ files are open - may not be a Claude project',
                 )
 
-            # Verify at least one .claude file is in ~/.claude/ directory
-            claude_dir = pathlib.Path('~/.claude').expanduser()
+            # Verify at least one file is in the Claude config directory
             matching_files = [f for f in claude_files if f.is_relative_to(claude_dir)]
 
             if not matching_files:
                 raise RuntimeError(
                     f'Found Claude process (PID {current}) with CWD {cwd}, '
-                    f'but .claude/ files open are not in ~/.claude/ directory:\n'
+                    f'but {claude_dir_name}/ files open are not in {claude_dir}/ directory:\n'
                     f'  Open files: {claude_files}\n'
                     f'  Expected to find files in: {claude_dir}',
                 )

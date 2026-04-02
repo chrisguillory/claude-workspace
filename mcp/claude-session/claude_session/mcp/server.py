@@ -28,10 +28,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from cc_lib.utils import get_claude_config_home_dir
 from mcp.server.fastmcp import Context, FastMCP
 
 from claude_session.exceptions import RunningSessionDeletionError, RunningSessionMoveError
-from claude_session.mcp.utils import DualLogger
 from claude_session.schemas.operations.archive import ArchiveMetadata
 from claude_session.schemas.operations.context import SessionContext
 from claude_session.schemas.operations.delete import DeleteResult
@@ -50,6 +50,17 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
+
+__all__ = [
+    'ClaudeContext',
+    'ServerState',
+    'lifespan',
+    'logger',
+    'main',
+    'register_tools',
+    'server',
+]
+
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +205,6 @@ def register_tools(state: ServerState) -> None:
         """
         if ctx is None:
             raise RuntimeError('Context is required - must be called via FastMCP')
-        logger = DualLogger(ctx)
 
         # Create storage backend
         if storage_backend == 'local':
@@ -209,7 +219,7 @@ def register_tools(state: ServerState) -> None:
 
         # Create archive
         metadata = await state.archive_service.create_archive(
-            storage=storage, output_path=output_path, format_param=format, logger=logger
+            storage=storage, output_path=output_path, format_param=format
         )
 
         return metadata
@@ -251,7 +261,6 @@ def register_tools(state: ServerState) -> None:
         """
         if ctx is None:
             raise RuntimeError('Context is required - must be called via FastMCP')
-        logger = DualLogger(ctx)
 
         # Create restore service for current project
         restore_service = SessionRestoreService(state.project_path)
@@ -260,11 +269,10 @@ def register_tools(state: ServerState) -> None:
         result = await restore_service.restore_archive(
             archive_path=archive_path,
             translate_paths=translate_paths,
-            logger=logger,
         )
 
-        await logger.info(f'Session restored with new ID: {result.new_session_id}')
-        await logger.info(f'Use: claude --resume {result.new_session_id}')
+        logger.info('Session restored with new ID: %s', result.new_session_id)
+        logger.info('Use: claude --resume %s', result.new_session_id)
 
         return result
 
@@ -311,7 +319,6 @@ def register_tools(state: ServerState) -> None:
         """
         if ctx is None:
             raise RuntimeError('Context is required - must be called via FastMCP')
-        logger = DualLogger(ctx)
 
         # Default to current session if not specified
         target_id = source_session_id or state.session_id
@@ -323,11 +330,10 @@ def register_tools(state: ServerState) -> None:
         result = await clone_service.clone(
             source_session_id=target_id,
             translate_paths=translate_paths,
-            logger=logger,
         )
 
-        await logger.info(f'Session cloned with new ID: {result.new_session_id}')
-        await logger.info(f'Use: claude --resume {result.new_session_id}')
+        logger.info('Session cloned with new ID: %s', result.new_session_id)
+        logger.info('Use: claude --resume %s', result.new_session_id)
 
         return result
 
@@ -389,7 +395,6 @@ def register_tools(state: ServerState) -> None:
         """
         if ctx is None:
             raise RuntimeError('Context is required - must be called via FastMCP')
-        logger = DualLogger(ctx)
 
         # Resolve prefix to full session ID
         info_service = SessionInfoService()
@@ -410,15 +415,16 @@ def register_tools(state: ServerState) -> None:
             is_running, running_pid = info_service.is_session_running(full_session_id)
             if is_running:
                 if dry_run:
-                    await logger.info(f'Warning: Session is currently running (PID {running_pid})')
+                    logger.info('Warning: Session is currently running (PID %s)', running_pid)
                     terminate_pid = None
                 elif not terminate_running:
                     # Running without terminate_running: raise exception
-                    assert running_pid is not None  # is_running=True guarantees this
+                    if running_pid is None:
+                        raise RuntimeError(f'is_session_running returned True but pid is None for {full_session_id}')
                     raise RunningSessionDeletionError(full_session_id, running_pid)
                 else:
                     # Running with terminate_running: will terminate
-                    await logger.info(f'Session is running (PID {running_pid}), will terminate before deletion')
+                    logger.info('Session is running (PID %s), will terminate before deletion', running_pid)
                     terminate_pid = running_pid
             else:
                 terminate_pid = None
@@ -429,26 +435,29 @@ def register_tools(state: ServerState) -> None:
             force=force,
             no_backup=no_backup,
             dry_run=dry_run,
-            logger=logger,
             terminate_pid_before_delete=terminate_pid,
         )
 
         if result.success:
             if dry_run:
-                await logger.info(
-                    f'Dry run: would delete {result.files_deleted} files, '
-                    f'{len(result.directories_removed)} directories ({result.size_freed_bytes:,} bytes)'
+                logger.info(
+                    'Dry run: would delete %d files, %d directories (%s bytes)',
+                    result.files_deleted,
+                    len(result.directories_removed),
+                    f'{result.size_freed_bytes:,}',
                 )
             else:
-                await logger.info(
-                    f'Deleted {result.files_deleted} files, '
-                    f'{len(result.directories_removed)} directories ({result.size_freed_bytes:,} bytes)'
+                logger.info(
+                    'Deleted %d files, %d directories (%s bytes)',
+                    result.files_deleted,
+                    len(result.directories_removed),
+                    f'{result.size_freed_bytes:,}',
                 )
                 if result.backup_path:
-                    await logger.info(f'Backup: {result.backup_path}')
-                    await logger.info(f'To undo: claude-session restore --in-place {result.backup_path}')
+                    logger.info('Backup: %s', result.backup_path)
+                    logger.info('To undo: claude-session restore --in-place %s', result.backup_path)
         else:
-            await logger.error(f'Delete failed: {result.error_message}')
+            logger.error('Delete failed: %s', result.error_message)
 
         return result
 
@@ -509,7 +518,6 @@ def register_tools(state: ServerState) -> None:
         """
         if ctx is None:
             raise RuntimeError('Context is required - must be called via FastMCP')
-        logger = DualLogger(ctx)
 
         # Default target to current project
         target_path = Path(target_project) if target_project else state.project_path
@@ -528,13 +536,14 @@ def register_tools(state: ServerState) -> None:
             is_running, running_pid = info_service.is_session_running(full_session_id)
             if is_running:
                 if dry_run:
-                    await logger.info(f'Warning: Session is currently running (PID {running_pid})')
+                    logger.info('Warning: Session is currently running (PID %s)', running_pid)
                     terminate_pid = None
                 elif not terminate_running:
-                    assert running_pid is not None
+                    if running_pid is None:
+                        raise RuntimeError(f'is_session_running returned True but pid is None for {full_session_id}')
                     raise RunningSessionMoveError(full_session_id, running_pid)
                 else:
-                    await logger.info(f'Session is running (PID {running_pid}), will terminate before move')
+                    logger.info('Session is running (PID %s), will terminate before move', running_pid)
                     terminate_pid = running_pid
             else:
                 terminate_pid = None
@@ -547,22 +556,23 @@ def register_tools(state: ServerState) -> None:
             no_backup=no_backup,
             dry_run=dry_run,
             terminate_pid=terminate_pid,
-            log=logger,
         )
 
         if dry_run:
-            await logger.info(
-                f'Dry run: would move {result.files_moved} files '
-                f'from {result.source_project} to {result.target_project}'
+            logger.info(
+                'Dry run: would move %d files from %s to %s',
+                result.files_moved,
+                result.source_project,
+                result.target_project,
             )
         else:
-            await logger.info(f'Moved {result.files_moved} files, deleted {result.files_deleted} from source')
+            logger.info('Moved %d files, deleted %d from source', result.files_moved, result.files_deleted)
             if result.backup_path:
-                await logger.info(f'Backup: {result.backup_path}')
-            await logger.info(f'Resume: {result.resume_command}')
+                logger.info('Backup: %s', result.backup_path)
+            logger.info('Resume: %s', result.resume_command)
 
         for warning in result.warnings:
-            await logger.error(f'Warning: {warning}')
+            logger.error('Warning: %s', warning)
 
         return result
 
@@ -595,7 +605,6 @@ def register_tools(state: ServerState) -> None:
         """
         if ctx is None:
             raise RuntimeError('Context is required - must be called via FastMCP')
-        logger = DualLogger(ctx)
 
         target_id_or_prefix = session_id or state.session_id
 
@@ -604,16 +613,16 @@ def register_tools(state: ServerState) -> None:
         session_info = await info_service.resolve_session(target_id_or_prefix)
         target_id = session_info.session_id
 
-        await logger.info(f'Looking up lineage for session: {target_id[:12]}...')
+        logger.info('Looking up lineage for session: %s...', target_id[:12])
 
         lineage_service = LineageService()
         tree = lineage_service.get_full_tree(target_id)
 
         if tree is None:
-            await logger.info('No lineage found (native session, no clones)')
+            logger.info('No lineage found (native session, no clones)')
             return None
 
-        await logger.info(f'Lineage tree: {len(tree.nodes)} nodes, root={tree.root_session_id[:12]}...')
+        logger.info('Lineage tree: %d nodes, root=%s...', len(tree.nodes), tree.root_session_id[:12])
         return tree
 
     @server.tool()
@@ -714,7 +723,6 @@ def register_tools(state: ServerState) -> None:
         """
         if ctx is None:
             raise RuntimeError('Context is required - must be called via FastMCP')
-        logger = DualLogger(ctx)
 
         # Get GitHub token
         token = _get_github_token()
@@ -739,7 +747,7 @@ def register_tools(state: ServerState) -> None:
         session_info = await info_service.resolve_session(target_id_or_prefix)
         target_id = session_info.session_id
 
-        await logger.info(f'Saving session to Gist: {target_id[:12]}...')
+        logger.info('Saving session to Gist: %s...', target_id[:12])
 
         # Determine correct PID for version detection:
         # - If archiving current session: use live PID from state
@@ -773,15 +781,14 @@ def register_tools(state: ServerState) -> None:
             storage=storage,
             output_path=None,  # Let storage generate path
             format_param='zst',  # Zstd compression (6x smaller than JSON)
-            logger=logger,
         )
 
         # Get gist ID from storage (set after creation)
         final_gist_id = storage.gist_id or ''
 
-        await logger.info(f'Session uploaded to Gist: {metadata.file_path}')
-        await logger.info(f'Gist ID: {final_gist_id}')
-        await logger.info(f'To restore: claude-session restore gist://{final_gist_id}')
+        logger.info('Session uploaded to Gist: %s', metadata.file_path)
+        logger.info('Gist ID: %s', final_gist_id)
+        logger.info('To restore: claude-session restore gist://%s', final_gist_id)
 
         return GistArchiveResult(
             gist_url=metadata.file_path,  # GistStorage returns html_url as file_path
@@ -794,6 +801,14 @@ def register_tools(state: ServerState) -> None:
             file_count=metadata.file_count,
             restore_command=f'claude-session restore gist://{final_gist_id}',
         )
+
+
+# -- Server Entry Point --------------------------------------------------------
+
+
+def main() -> None:
+    """Run the MCP server."""
+    server.run()
 
 
 # -- Private Helpers -----------------------------------------------------------
@@ -834,12 +849,13 @@ def _find_claude_context() -> ClaudeContext:
     if not cwd:
         raise RuntimeError(f'Found Claude process (PID {pid}) but could not determine CWD')
 
-    # Verify by checking if Claude has .claude/ files open
+    # Verify by checking if Claude has config dir files open
     result = subprocess.run(['lsof', '-p', str(pid)], check=False, capture_output=True, text=True)
 
+    config_dir = str(get_claude_config_home_dir())
     claude_files = []
     for line in result.stdout.split('\n'):
-        if '.claude' in line:
+        if config_dir in line:
             parts = line.split()
             if len(parts) >= 9:
                 file_path = ' '.join(parts[8:])
@@ -848,7 +864,7 @@ def _find_claude_context() -> ClaudeContext:
     if not claude_files:
         raise RuntimeError(
             f'Found Claude process (PID {pid}) with CWD {cwd}, '
-            f'but no .claude/ files are open - may not be a Claude project'
+            f'but no {config_dir}/ files are open - may not be a Claude project'
         )
 
     return ClaudeContext(claude_pid=pid, project_dir=cwd)
@@ -907,14 +923,6 @@ def _get_github_token() -> str | None:
         return result.stdout.strip()
 
     return None
-
-
-# -- Server Entry Point --------------------------------------------------------
-
-
-def main() -> None:
-    """Run the MCP server."""
-    server.run()
 
 
 if __name__ == '__main__':
