@@ -1,18 +1,21 @@
 #!/usr/bin/env -S uv run --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = []
+# dependencies = [
+#   "packaging>=24.0",
+# ]
 # ///
 """Lint uv script shebangs and PEP 723 inline metadata.
 
 Checks shebangs and inline script metadata for common misconfigurations.
-Only flags files that HAVE shebangs (UVS001/UVS002) or PEP 723 blocks (UVS003).
+Only flags files that HAVE shebangs (UVS001/UVS002) or PEP 723 blocks (UVS003/UVS004).
 
 Rules:
     UVS001 bare-python-shebang    Shebang uses python directly instead of uv run
     UVS002 missing-script-flag    Shebang has uv run with PEP 723 metadata but no --script
     UVS003 deps-format            PEP 723 dependencies not in canonical format
                                   (one-per-line, trailing comma, alphabetically sorted)
+    UVS004 missing-requires-py    PEP 723 block with deps but missing requires-python >= 3.13
 
 Escape hatches:
     Per-file-ignores in pyproject.toml:
@@ -35,36 +38,15 @@ import argparse
 import dataclasses
 import re
 import sys
-from collections.abc import Sequence, Set
+import tomllib
+from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
 
-from _config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
+from _lib.config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import Version
 
 TOOL_NAME = 'uv-script-linter'
-
-# Package name extraction from a dependency string (strips version specifiers, extras, markers).
-PACKAGE_NAME_RE = re.compile(r'([A-Za-z0-9][-A-Za-z0-9_.]*)')
-
-# Single-line non-empty dependencies: # dependencies = ["something", ...]
-SINGLE_LINE_DEPS_RE = re.compile(r'^#\s*dependencies\s*=\s*\[.+\]\s*$')
-
-# Dependency line inside a multi-line block: #   "package>=1.0",
-DEP_LINE_RE = re.compile(r'^#\s+"([^"]+)"\s*,?\s*$')
-
-
-@dataclasses.dataclass(frozen=True)
-class Violation:
-    """A detected shebang or PEP 723 violation."""
-
-    code: str
-    path: Path
-    line: int
-    source_line: str
-    message: str
-    fix: str
-
-
-# -- Main Entry Point ---------------------------------------------------------
 
 
 def main() -> int:
@@ -170,17 +152,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# -- File Checking ------------------------------------------------------------
-
-
 def check_file(path: Path, content: str) -> Sequence[Violation]:
     """Check a single file for shebang and PEP 723 violations.
 
     UVS001/UVS002 are gated on shebang presence.
-    UVS003 runs on any file with a PEP 723 block.
+    UVS003/UVS004 run on any file with a PEP 723 block.
     """
     first_line = content.split('\n', 1)[0]
     has_shebang = first_line.startswith('#!')
+    block = Pep723Block.from_script(content)
     violations: list[Violation] = []
 
     if has_shebang:
@@ -198,25 +178,27 @@ def check_file(path: Path, content: str) -> Sequence[Violation]:
             )
 
         # UVS002: uv run with PEP 723 metadata but missing --script
-        if 'uv run' in first_line and '--script' not in first_line.split():
-            if extract_pep723_block(content) is not None:
-                violations.append(
-                    Violation(
-                        code='UVS002',
-                        path=path,
-                        line=1,
-                        source_line=first_line,
-                        message='shebang has `uv run` with PEP 723 metadata but missing `--script` flag',
-                        fix='Add `--script` to the shebang',
-                    )
+        if 'uv run' in first_line and '--script' not in first_line.split() and block is not None:
+            violations.append(
+                Violation(
+                    code='UVS002',
+                    path=path,
+                    line=1,
+                    source_line=first_line,
+                    message='shebang has `uv run` with PEP 723 metadata but missing `--script` flag',
+                    fix='Add `--script` to the shebang',
                 )
+            )
 
-    # UVS003: dependency formatting (not gated on shebang)
-    block = extract_pep723_block(content)
+    # UVS003/UVS004: PEP 723 checks (not gated on shebang)
     if block is not None:
-        dep_violation = check_deps_format(path, block)
+        dep_violation = block.check_deps_format(path)
         if dep_violation is not None:
             violations.append(dep_violation)
+
+        py_violation = block.check_requires_python(path)
+        if py_violation is not None:
+            violations.append(py_violation)
 
     return violations
 
@@ -228,121 +210,231 @@ def print_violation(v: Violation) -> None:
     print(f'    Fix: {v.fix}')
 
 
-# -- PEP 723 Block Extraction ------------------------------------------------
+@dataclasses.dataclass(frozen=True)
+class Violation:
+    """A detected shebang or PEP 723 violation."""
+
+    code: str
+    path: Path
+    line: int
+    source_line: str
+    message: str
+    fix: str
 
 
-def extract_pep723_block(content: str) -> Sequence[tuple[int, str]] | None:
-    """Extract PEP 723 script metadata block lines with line numbers.
+class Pep723Block:
+    """Parsed PEP 723 script metadata block.
 
-    Returns (1-indexed line number, raw line text) pairs for all lines
-    between ``# /// script`` (exclusive) and ``# ///`` (exclusive).
-    Returns None if no valid block exists.
+    Encapsulates block extraction (PEP 723 reference regex + tomllib),
+    structured access to metadata fields, and all PEP 723 lint checks
+    (UVS003 dep formatting, UVS004 requires-python).
     """
-    lines = content.split('\n')
-    for i, line in enumerate(lines):
-        if line.strip() == '# /// script':
-            block_lines: list[tuple[int, str]] = []
-            for j in range(i + 1, len(lines)):
-                stripped = lines[j].strip()
-                if stripped == '# ///':
-                    return block_lines
-                if stripped == '' or stripped.startswith('#'):
-                    block_lines.append((j + 1, lines[j]))  # 1-indexed
-                    continue
-                break  # Non-comment, non-empty line: block is unclosed/invalid
-    return None
 
+    # PEP 723 reference regex (from the PEP itself).
+    BLOCK_RE = re.compile(r'(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$')
 
-# -- UVS003: Dependency Format ------------------------------------------------
+    # Package name extraction for sort-key comparison.
+    PACKAGE_NAME_RE = re.compile(r'([A-Za-z0-9][-A-Za-z0-9_.]*)')
 
+    # Probe versions below 3.13 for UVS004.
+    # If any satisfy a specifier, it allows Python below the project minimum.
+    PROBES_BELOW_313: Sequence[Version] = tuple(
+        Version(f'3.{minor}.{micro}') for minor in range(0, 13) for micro in (0, 5, 99)
+    )
 
-def dep_sort_key(dep: str) -> str:
-    """Extract lowercase package name from a dependency string for sorting."""
-    m = PACKAGE_NAME_RE.match(dep.strip())
-    return m.group(1).lower() if m else dep.lower()
+    def __init__(
+        self,
+        metadata: Mapping[str, object],
+        raw_content: str,
+        start_line: int,
+        source_lines: Sequence[str],
+    ) -> None:
+        self.metadata = metadata
+        self.raw_content = raw_content
+        self.start_line = start_line
+        self.source_lines = source_lines
 
-
-def check_deps_format(path: Path, block_lines: Sequence[tuple[int, str]]) -> Violation | None:
-    """Check UVS003: dependency formatting within a PEP 723 block.
-
-    Checks three sub-concerns (reports the most fundamental violation):
-    1. One dep per line (not single-line array)
-    2. Trailing comma on last dep
-    3. Alphabetical sort order (case-insensitive, by package name)
-    """
-    deps_start_idx: int | None = None
-    for idx, (line_num, raw_line) in enumerate(block_lines):
-        stripped = raw_line.strip()
-
-        # Single-line deps: # dependencies = ["pydantic", "cc_lib"]
-        if SINGLE_LINE_DEPS_RE.match(stripped):
-            if re.match(r'^#\s*dependencies\s*=\s*\[\s*\]\s*$', stripped):
-                return None  # Empty deps, fine
-            return Violation(
-                code='UVS003',
-                path=path,
-                line=line_num,
-                source_line=raw_line.rstrip(),
-                message='PEP 723 dependencies should use one-per-line format',
-                fix='Expand to multi-line with one dep per line, trailing commas, sorted alphabetically',
-            )
-
-        # Multi-line deps start: # dependencies = [
-        if re.match(r'^#\s*dependencies\s*=\s*\[\s*$', stripped):
-            deps_start_idx = idx
-            break
-
-    if deps_start_idx is None:
-        return None  # No dependencies key found
-
-    # Collect deps from multi-line block
-    dep_strings: list[str] = []
-    dep_lines: list[tuple[int, str]] = []
-    deps_end_idx: int | None = None
-
-    for idx in range(deps_start_idx + 1, len(block_lines)):
-        line_num, raw_line = block_lines[idx]
-        stripped = raw_line.strip()
-
-        if re.match(r'^#\s*\]\s*$', stripped):
-            deps_end_idx = idx
-            break
-
-        m = DEP_LINE_RE.match(stripped)
-        if m:
-            dep_strings.append(m.group(1))
-            dep_lines.append((line_num, raw_line))
-
-    if deps_end_idx is None or not dep_strings:
-        return None  # Malformed or empty multi-line block
-
-    # Check trailing comma on last dep line
-    last_dep_stripped = dep_lines[-1][1].strip()
-    if not last_dep_stripped.rstrip().endswith(','):
-        return Violation(
-            code='UVS003',
-            path=path,
-            line=dep_lines[-1][0],
-            source_line=dep_lines[-1][1].rstrip(),
-            message='PEP 723 dependency missing trailing comma',
-            fix='Add trailing comma after the last dependency',
+    @classmethod
+    def from_script(cls, content: str) -> Pep723Block | None:
+        """Extract and parse PEP 723 block using the canonical regex + tomllib."""
+        matches = [m for m in cls.BLOCK_RE.finditer(content) if m.group('type') == 'script']
+        if len(matches) != 1:
+            return None
+        match = matches[0]
+        raw_content = match.group('content')
+        start_line = content[: match.start()].count('\n') + 1
+        # Strip comment prefixes (PEP 723 reference algorithm)
+        toml_str = ''.join(
+            line[2:] if line.startswith('# ') else line[1:] for line in raw_content.splitlines(keepends=True)
+        )
+        try:
+            metadata = tomllib.loads(toml_str)
+        except tomllib.TOMLDecodeError:
+            return None
+        return cls(
+            metadata=metadata,
+            raw_content=raw_content,
+            start_line=start_line,
+            source_lines=content.split('\n'),
         )
 
-    # Check sort order
-    sorted_deps = sorted(dep_strings, key=dep_sort_key)
-    if dep_strings != sorted_deps:
-        for i, (actual, expected) in enumerate(zip(dep_strings, sorted_deps)):
-            if actual != expected:
+    @property
+    def dependencies(self) -> Sequence[str]:
+        """Parsed dependency list from TOML metadata."""
+        deps = self.metadata.get('dependencies', [])
+        if not isinstance(deps, list):
+            return []
+        return deps
+
+    @property
+    def requires_python(self) -> str | None:
+        """Raw requires-python specifier string."""
+        value = self.metadata.get('requires-python')
+        if not isinstance(value, str):
+            return None
+        return value
+
+    # -- UVS003: Dependency Format Checking -----------------------------------
+
+    def check_deps_format(self, path: Path) -> Violation | None:
+        """Check UVS003: one-per-line, trailing comma, alphabetically sorted.
+
+        Inspects raw source text because TOML parsing discards formatting.
+        """
+        if not self.dependencies:
+            return None
+
+        lines = self.source_lines
+        for i in range(self.start_line, len(lines)):
+            stripped = lines[i].strip()
+            if stripped == '# ///':
+                break
+
+            # Single-line non-empty deps
+            if re.match(r'^#\s*dependencies\s*=\s*\[.+\]', stripped):
+                if re.match(r'^#\s*dependencies\s*=\s*\[\s*\]', stripped):
+                    return None
                 return Violation(
                     code='UVS003',
                     path=path,
-                    line=dep_lines[i][0],
-                    source_line=dep_lines[i][1].rstrip(),
-                    message=f'PEP 723 dependencies not sorted alphabetically (expected {expected!r} here)',
-                    fix='Sort dependencies alphabetically by package name',
+                    line=i + 1,
+                    source_line=lines[i].rstrip(),
+                    message='PEP 723 dependencies should use one-per-line format',
+                    fix='Expand to multi-line with one dep per line, trailing commas, sorted alphabetically',
                 )
 
-    return None
+            # Multi-line start
+            if re.match(r'^#\s*dependencies\s*=\s*\[$', stripped):
+                return self._check_multiline_deps(path, lines, i)
+
+        return None
+
+    def _check_multiline_deps(self, path: Path, lines: Sequence[str], deps_start: int) -> Violation | None:
+        """Check trailing comma and sort order on multi-line dependency block."""
+        dep_entries: list[tuple[int, str, str]] = []  # (line_num, raw_line, dep_string)
+
+        for i in range(deps_start + 1, len(lines)):
+            stripped = lines[i].strip()
+            if re.match(r'^#\s*\]', stripped):
+                break
+            m = re.match(r'^#\s+"([^"]+)"\s*,?\s*$', stripped)
+            if m:
+                dep_entries.append((i + 1, lines[i], m.group(1)))
+
+        if not dep_entries:
+            return None
+
+        # Trailing comma
+        if not dep_entries[-1][1].strip().endswith(','):
+            return Violation(
+                code='UVS003',
+                path=path,
+                line=dep_entries[-1][0],
+                source_line=dep_entries[-1][1].rstrip(),
+                message='PEP 723 dependency missing trailing comma',
+                fix='Add trailing comma after the last dependency',
+            )
+
+        # Sort order
+        dep_strings = [d[2] for d in dep_entries]
+        sorted_deps = sorted(dep_strings, key=self._dep_sort_key)
+        if dep_strings != sorted_deps:
+            for (line_num, raw_line, actual), expected in zip(dep_entries, sorted_deps):
+                if actual != expected:
+                    return Violation(
+                        code='UVS003',
+                        path=path,
+                        line=line_num,
+                        source_line=raw_line.rstrip(),
+                        message=f'PEP 723 dependencies not sorted alphabetically (expected {expected!r} here)',
+                        fix='Sort dependencies alphabetically by package name',
+                    )
+
+        return None
+
+    def _dep_sort_key(self, dep: str) -> str:
+        """Extract lowercase package name from a dependency string for sorting."""
+        m = self.PACKAGE_NAME_RE.match(dep.strip())
+        return m.group(1).lower() if m else dep.lower()
+
+    # -- UVS004: Requires-Python Check ----------------------------------------
+
+    def check_requires_python(self, path: Path) -> Violation | None:
+        """Check UVS004: requires-python >= 3.13 when dependencies exist."""
+        if not self.dependencies:
+            return None
+
+        spec_str = self.requires_python
+
+        if spec_str is None:
+            line_num, source_line = self._find_line('dependencies')
+            return Violation(
+                code='UVS004',
+                path=path,
+                line=line_num,
+                source_line=source_line,
+                message='PEP 723 block with dependencies missing requires-python',
+                fix='Add: # requires-python = ">=3.13"',
+            )
+
+        line_num, source_line = self._find_line('requires-python')
+
+        try:
+            if self._allows_python_below_313(spec_str):
+                return Violation(
+                    code='UVS004',
+                    path=path,
+                    line=line_num,
+                    source_line=source_line,
+                    message=f'requires-python = "{spec_str}" allows Python below 3.13',
+                    fix='Update to: # requires-python = ">=3.13"',
+                )
+        except InvalidSpecifier:
+            return Violation(
+                code='UVS004',
+                path=path,
+                line=line_num,
+                source_line=source_line,
+                message=f'requires-python = "{spec_str}" is not a valid PEP 440 specifier',
+                fix='Use a valid specifier, e.g.: # requires-python = ">=3.13"',
+            )
+
+        return None
+
+    def _allows_python_below_313(self, spec_str: str) -> bool:
+        """Check if a PEP 440 specifier allows any Python version below 3.13."""
+        ss = SpecifierSet(spec_str)
+        return any(probe in ss for probe in self.PROBES_BELOW_313)
+
+    def _find_line(self, keyword: str) -> tuple[int, str]:
+        """Find a source line containing keyword within the block for error reporting."""
+        for i in range(self.start_line, len(self.source_lines)):
+            line = self.source_lines[i]
+            if line.strip() == '# ///':
+                break
+            if keyword in line:
+                return (i + 1, line.rstrip())
+        return (self.start_line, '(PEP 723 block)')
 
 
 if __name__ == '__main__':

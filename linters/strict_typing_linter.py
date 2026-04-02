@@ -65,13 +65,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from _config import (
+from _lib.config import (
     find_config,
     find_python_files,
     get_per_file_ignored_codes,
     load_per_file_ignores,
 )
-from hashability_inspector import HashabilityInspector, QualifiedName
+from _lib.hashability_inspector import HashabilityInspector, QualifiedName
 
 # -- Configuration ------------------------------------------------------------
 

@@ -153,6 +153,44 @@ def test_uvs003_bad(fixture: str) -> None:
     assert 'UVS003' in result.stdout
 
 
+# -- UVS004: Should pass (exit 0) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'fixture',
+    [
+        'good_no_deps_key.py',
+        'good_multiline_deps.py',
+        'good_python314.py',
+        'good_exact_python.py',
+        'good_empty_deps.py',
+    ],
+    ids=lambda f: f.removesuffix('.py'),
+)
+def test_uvs004_good(fixture: str) -> None:
+    """Files with proper requires-python or no deps should pass."""
+    result = run_linter(EDGE_CASES_DIR / fixture, no_config=True)
+    assert result.returncode == 0, f'Expected pass, got:\n{result.stdout}'
+
+
+# -- UVS004: Should fail (exit 1) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'fixture',
+    [
+        'bad_old_python.py',
+        'bad_missing_requires_python.py',
+    ],
+    ids=lambda f: f.removesuffix('.py'),
+)
+def test_uvs004_bad(fixture: str) -> None:
+    """Files with old or missing requires-python should flag UVS004."""
+    result = run_linter(EDGE_CASES_DIR / fixture, no_config=True)
+    assert result.returncode == 1, f'Expected failure, got:\n{result.stdout}'
+    assert 'UVS004' in result.stdout
+
+
 # -- Whole-repo scan ----------------------------------------------------------
 
 

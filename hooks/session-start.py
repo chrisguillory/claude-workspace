@@ -5,6 +5,7 @@ See: https://code.claude.com/docs/en/hooks#sessionstart
 """
 
 # /// script
+# requires-python = ">=3.13"
 # dependencies = [
 #   "cc_lib",
 #   "packaging",
