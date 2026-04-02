@@ -79,7 +79,7 @@ def log_openrouter_retry(retry_state: tenacity.RetryCallState) -> None:
     if isinstance(exc, httpx.HTTPStatusError):
         exc_msg = f'HTTP {exc.response.status_code}: {exc_msg}'
 
-    logger.warning(f'[RETRY] OpenRouter embed attempt {retry_state.attempt_number} failed: {exc_name}: {exc_msg}')
+    logger.warning('[RETRY] OpenRouter embed attempt %s failed: %s: %s', retry_state.attempt_number, exc_name, exc_msg)
 
 
 def _is_429_error(exc: BaseException | None) -> bool:

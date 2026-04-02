@@ -41,6 +41,7 @@ select = [
     "E",    # pycodestyle errors
     "F",    # pyflakes
     "FLY",  # flynt (f-string conversion)
+    "G",    # flake8-logging-format (lazy % formatting in logging)
     "I",    # isort
     "PERF", # perflint (performance)
     "PL",   # pylint

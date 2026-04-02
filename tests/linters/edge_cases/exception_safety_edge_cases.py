@@ -166,7 +166,7 @@ def edge_logger_warn() -> None:
     try:
         risky()
     except Exception:
-        logger.warn('Deprecated warning method')  # EXC006
+        logger.warning('Deprecated warning method')  # EXC006
         raise
 
 

@@ -466,7 +466,7 @@ class IndexingService:
         self._operation.files_found = files_total
         self._operation.files_ignored = files_ignored
         ignored_text = f' ({files_ignored:,} ignored)' if files_ignored else ''
-        logger.info(f'[SCAN] Discovered {files_total:,} files{ignored_text}')
+        logger.info('[SCAN] Discovered %s files%s', f'{files_total:,}', ignored_text)
 
         # Pre-load lightweight summaries (no chunk_ids) for scan-phase classification.
         # Saves ~240 MB by skipping UUID deserialization for ~2M chunk IDs.
@@ -474,7 +474,7 @@ class IndexingService:
 
         # Classify files: determine which need indexing vs cached (single pass).
         # Yields to event loop periodically so the monitor can capture scan progress.
-        logger.debug(f'[SCAN] Classifying {files_total:,} files...')
+        logger.debug('[SCAN] Classifying %s files...', f'{files_total:,}')
         scanned_by_type = self._operation.scanned_by_type
         cached_by_type = self._operation.cached_by_type
         files_to_index: list[Path] = []
@@ -507,8 +507,10 @@ class IndexingService:
         self._operation.scan_complete = True
         files_cached_count = sum(cached_by_type.values())
         logger.info(
-            f'[PIPELINE] Scan complete in {timer.elapsed():.1f}s: '
-            f'{len(files_to_index)} to index, {files_cached_count} cached',
+            '[PIPELINE] Scan complete in %.1fs: %s to index, %s cached',
+            timer.elapsed(),
+            len(files_to_index),
+            files_cached_count,
         )
 
         if stop_after == 'scan':
@@ -577,9 +579,11 @@ class IndexingService:
             await file_queue.put(path)
 
         logger.debug(
-            f'[PIPELINE] Starting workers: {NUM_CHUNK_WORKERS} chunk, '
-            f'{embed_workers} embed, {NUM_UPSERT_WORKERS} upsert '
-            f'for {len(files_to_index)} files',
+            '[PIPELINE] Starting workers: %s chunk, %s embed, %s upsert for %s files',
+            NUM_CHUNK_WORKERS,
+            embed_workers,
+            NUM_UPSERT_WORKERS,
+            len(files_to_index),
         )
 
         # Disable HNSW indexing during bulk upsert to free CPU for embedding workers.
@@ -727,7 +731,9 @@ class IndexingService:
             await self._repo.delete(orphan_chunk_ids)
             chunks_deleted += len(orphan_chunk_ids)
             logger.debug(
-                f'[SWEEP] Deleted {len(orphan_chunk_ids)} orphan chunks from {len(orphan_paths)} removed files',
+                '[SWEEP] Deleted %s orphan chunks from %s removed files',
+                len(orphan_chunk_ids),
+                len(orphan_paths),
             )
         for p in orphan_paths:
             await self._state_store.delete_file_state(p)
@@ -836,8 +842,10 @@ class IndexingService:
         # Split into sub-batches and embed concurrently
         sub_batches = [texts[i : i + DENSE_SUB_BATCH_SIZE] for i in range(0, len(texts), DENSE_SUB_BATCH_SIZE)]
         logger.debug(
-            f'[EMBED-DENSE] sub-batching {len(texts)} texts into {len(sub_batches)} '
-            f'batches of <={DENSE_SUB_BATCH_SIZE}',
+            '[EMBED-DENSE] sub-batching %s texts into %s batches of <=%s',
+            len(texts),
+            len(sub_batches),
+            DENSE_SUB_BATCH_SIZE,
         )
 
         sub_results = await asyncio.gather(
@@ -958,7 +966,7 @@ class IndexingService:
                         async with results_lock:
                             results[file_key] = 0
                     counters.bytes_chunked += file_size
-                    logger.debug(f'[CHUNK] {file_path.name}: 0 chunks (content too short)')
+                    logger.debug('[CHUNK] %s: 0 chunks (content too short)', file_path.name)
 
                 elif not deleted_ids and chunks_skipped == len(all_chunk_ids):
                     # Path B: All chunk IDs unchanged, no deletions.
@@ -983,7 +991,7 @@ class IndexingService:
                     await self._embedding.refresh_file_cache_index_ttl(file_key)
                     async with results_lock:
                         results[file_key] = _CHUNK_CACHED
-                    logger.debug(f'[CHUNK] {file_path.name}: all {chunks_skipped} chunks unchanged')
+                    logger.debug('[CHUNK] %s: all %s chunks unchanged', file_path.name, chunks_skipped)
 
                 else:
                     # Path C: Has changed or deleted chunks — filter to changed only.
@@ -1014,8 +1022,11 @@ class IndexingService:
                     counters.bytes_chunked += file_size
                     counters.files_chunked += 1
                     logger.debug(
-                        f'[CHUNK] {file_path.name}: {len(changed_chunks)} changed, '
-                        f'{chunks_skipped} skipped, {len(deleted_ids)} deleted',
+                        '[CHUNK] %s: %s changed, %s skipped, %s deleted',
+                        file_path.name,
+                        len(changed_chunks),
+                        chunks_skipped,
+                        len(deleted_ids),
                     )
 
             except (TimeoutError, OSError, UnicodeDecodeError) as e:
@@ -1034,7 +1045,7 @@ class IndexingService:
                         message=str(e),
                         recoverable=True,
                     )
-                logger.warning(f'[CHUNK] Skipping {file_path.name}: {type(e).__name__}: {e}', exc_info=True)
+                logger.warning('[CHUNK] Skipping %s: %s: %s', file_path.name, type(e).__name__, e, exc_info=True)
 
             # Mark done whether success or known error (unknown errors propagate)
             file_queue.task_done()
@@ -1208,7 +1219,7 @@ class IndexingService:
             async with results_lock:
                 results[file_key] = len(embedded.chunks)
 
-            logger.debug(f'[UPSERT] {embedded.file_path.name}: {len(embedded.chunks)} chunks')
+            logger.debug('[UPSERT] %s: %s chunks', embedded.file_path.name, len(embedded.chunks))
 
             # Only mark done on success
             upsert_queue.task_done()

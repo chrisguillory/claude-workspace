@@ -64,7 +64,7 @@ def log_gemini_retry(retry_state: tenacity.RetryCallState) -> None:
     exc_name = type(exc).__name__
     exc_msg = str(exc)
 
-    logger.warning(f'[RETRY] Gemini embed attempt {retry_state.attempt_number} failed: {exc_name}: {exc_msg}')
+    logger.warning('[RETRY] Gemini embed attempt %s failed: %s: %s', retry_state.attempt_number, exc_name, exc_msg)
 
 
 def _is_429_error(exc: BaseException | None) -> bool:

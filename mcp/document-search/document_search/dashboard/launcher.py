@@ -26,7 +26,7 @@ def ensure_dashboard() -> int:
     with state_manager.hold_lock():
         port = state_manager.get_dashboard_port()
         if port is not None:
-            logger.debug(f'Dashboard already running on port {port}')
+            logger.debug('Dashboard already running on port %s', port)
             return port
 
         _spawn_dashboard()

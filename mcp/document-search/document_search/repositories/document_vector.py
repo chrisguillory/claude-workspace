@@ -392,7 +392,7 @@ class UpsertLoader(GenericBatchLoader['UpsertLoader.Request', int]):
         ]
 
         total_chars = sum(len(req.point.text) for req in requests)
-        logger.debug(f'[BATCH] Upserting {len(requests)} points ({total_chars:,} chars)')
+        logger.debug('[BATCH] Upserting %s points (%s chars)', len(requests), f'{total_chars:,}')
 
         await self._client.upsert(self._collection_name, raw_points)
         return [1] * len(requests)
