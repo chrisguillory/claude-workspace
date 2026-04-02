@@ -8,6 +8,7 @@ See: https://code.claude.com/docs/en/hooks#pretooluse
 """
 
 # /// script
+# requires-python = ">=3.13"
 # dependencies = [
 #   "cc_lib",
 #   "pydantic>=2.0.0",

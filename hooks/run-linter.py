@@ -68,7 +68,7 @@ def main() -> int:
     if not Path(file_path).is_file():
         return 0
 
-    # Ensure sibling modules (hashability_inspector) are importable.
+    # Ensure _lib subpackage (config, hashability_inspector) is importable.
     linter_dir = str(Path(linter).resolve().parent)
     env = dict(os.environ)
     existing = env.get('PYTHONPATH', '')
