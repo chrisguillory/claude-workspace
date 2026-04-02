@@ -23,11 +23,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Status codes that are transient and worth retrying
-# 429: Rate limit exceeded (RESOURCE_EXHAUSTED)
-# 500/502/503/504: Server errors
-RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
-
 # Circuit breaker - opens after consecutive failures, hard fails until recovery
 GEMINI_FAILURE_THRESHOLD = 10
 GEMINI_RECOVERY_TIMEOUT = 60

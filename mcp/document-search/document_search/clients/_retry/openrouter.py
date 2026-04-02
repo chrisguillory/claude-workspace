@@ -24,20 +24,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# HTTP status codes that indicate transient provider issues worth retrying.
-# These can appear as HTTP status codes OR as `error.code` inside HTTP 200 bodies.
-#
-# 408: Request timeout. Provider cold start or slow inference. Retry lets
-#      OpenRouter route to a warmer provider.
-# 429: Rate limit exceeded. Back off and retry. May include provider_name
-#      in error metadata identifying which upstream provider rate-limited.
-# 500: Internal server error. Transient infrastructure issue.
-# 502: Bad gateway. Upstream provider returned invalid response or is down.
-#      OpenRouter already attempted internal fallback before surfacing this.
-# 503: Service unavailable. No provider currently meets routing requirements.
-# 504: Gateway timeout. Provider didn't respond within OpenRouter's window.
-RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
-
 # Circuit breaker - opens after consecutive failures, hard fails until recovery
 OPENROUTER_FAILURE_THRESHOLD = 10
 OPENROUTER_RECOVERY_TIMEOUT = 60
@@ -89,6 +75,22 @@ def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCat
     Single source of truth for retryability — an error is retryable if and only if
     it has a transient category.
 
+    Transient codes (can appear as HTTP status OR error.code inside HTTP 200 bodies):
+
+    408 - Request timeout. Provider cold start or slow inference. Retry lets
+          OpenRouter route to a warmer provider.
+    429 - Rate limit exceeded. May include provider_name in error metadata
+          identifying which upstream provider rate-limited.
+    500 - Internal server error. Transient infrastructure issue.
+    502 - Bad gateway. Upstream provider returned invalid response or is down.
+          OpenRouter already attempted internal fallback before surfacing this.
+    503 - Service unavailable. No provider currently meets routing requirements.
+    504 - Gateway timeout. Provider didn't respond within OpenRouter's window.
+    404 - Conditional. "No successful provider responses." only. OpenRouter
+          exhausted its provider fallback chain — all providers were tried and
+          all returned errors. Functionally a 503 but reported as 404 because
+          providers exist in the routing table.
+
     Does NOT classify:
     - OpenRouterUnexpectedResponse (unknown format won't change on retry)
     - 404 with other messages ("No endpoints found for model") — permanent
@@ -96,12 +98,11 @@ def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCat
     if isinstance(exc, OpenRouterAPIError):
         if exc.code == 429:
             return 'rate_limit'
-        # 404 with this exact message = OpenRouter exhausted its provider fallback chain.
-        # All providers were tried and all returned errors. This is functionally a 503
-        # (transient provider unavailability) but reported as 404 because providers exist
-        # in the routing table — they just all failed this request.
-        if exc.code == 404 and exc.message == 'No successful provider responses.':
-            return 'provider_unavailable'
+        if exc.code == 404:
+            if exc.message == 'No successful provider responses.':
+                return 'provider_unavailable'
+            logger.debug(f'Non-retryable 404: {exc.message!r}')
+            return None
         if exc.code == 502:
             return 'provider_error'
         if exc.code == 408:
@@ -110,6 +111,9 @@ def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCat
             return 'server_error'
         return None
 
+    # Note: 404 is intentionally excluded here. OpenRouter's "No successful provider
+    # responses" arrives as an error-in-body (HTTP 200 with code=404), not as an
+    # HTTP 404 status. An actual HTTP 404 would mean the endpoint doesn't exist.
     if isinstance(exc, httpx.HTTPStatusError):
         code = exc.response.status_code
         if code == 429:

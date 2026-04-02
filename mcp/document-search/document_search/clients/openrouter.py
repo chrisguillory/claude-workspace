@@ -146,7 +146,7 @@ class OpenRouterClient:
 
         Uses native async httpx for concurrent requests.
         Concurrency controlled via semaphore.
-        Retries on transient network errors and 429/502/503 responses.
+        Retries on transient errors as classified by _retry.openrouter.
 
         For Qwen3-Embedding models, applies instruction prefix for query embeddings
         to enable asymmetric retrieval (queries treated differently from documents).
