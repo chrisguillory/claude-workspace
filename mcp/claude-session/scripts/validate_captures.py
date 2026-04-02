@@ -425,8 +425,10 @@ def group_errors(errors: Sequence[EnrichedFieldError]) -> Sequence[ErrorGroup]:
 
 
 def find_fallbacks(
-    obj: Any, path: str = ''
-) -> Sequence[FallbackUsage]:  # strict_typing_linter.py: loose-typing — walks arbitrary Pydantic model tree
+    obj: Any,
+    path: str = '',
+    file: str = '',  # strict_typing_linter.py: loose-typing — walks arbitrary Pydantic model tree
+) -> Sequence[FallbackUsage]:
     """
     Recursively find all PermissiveModel instances in a validated capture.
 
@@ -436,6 +438,7 @@ def find_fallbacks(
     Args:
         obj: The object to search (typically a validated capture)
         path: Current dot-separated path for reporting
+        file: Filename for attribution (set once by caller)
 
     Returns:
         List of FallbackUsage dicts describing each fallback found
@@ -447,7 +450,7 @@ def find_fallbacks(
         extra = obj.get_extra_fields()
         fallbacks.append(
             {
-                'file': '',  # Will be filled in by caller
+                'file': file,
                 'path': path or '(root)',
                 'fallback_type': type(obj).__name__,
                 'extra_fields': {k: type(v).__name__ for k, v in extra.items()},
@@ -460,19 +463,19 @@ def find_fallbacks(
             value = getattr(obj, field_name, None)
             if value is not None:
                 child_path = f'{path}.{field_name}' if path else field_name
-                fallbacks.extend(find_fallbacks(value, child_path))
+                fallbacks.extend(find_fallbacks(value, child_path, file))
 
     elif isinstance(obj, dict):
         # Recurse into dict values
         for key, value in obj.items():
             child_path = f'{path}.{key}' if path else str(key)
-            fallbacks.extend(find_fallbacks(value, child_path))
+            fallbacks.extend(find_fallbacks(value, child_path, file))
 
     elif isinstance(obj, (list, tuple)):
         # Recurse into sequence elements
         for i, item in enumerate(obj):
             child_path = f'{path}[{i}]' if path else f'[{i}]'
-            fallbacks.extend(find_fallbacks(item, child_path))
+            fallbacks.extend(find_fallbacks(item, child_path, file))
 
     return fallbacks
 
@@ -574,10 +577,7 @@ def validate_session_captures(session_dir: Path) -> CaptureValidationResult:
             capture_types[type(result).__name__] += 1
 
             # Check for PermissiveModel fallbacks in the validated capture
-            fallbacks = find_fallbacks(result)
-            for fb in fallbacks:
-                fb['file'] = capture_file.name
-            all_fallbacks.extend(fallbacks)
+            all_fallbacks.extend(find_fallbacks(result, file=capture_file.name))
 
         elif status == 'unknown':
             unknown_captures += 1
