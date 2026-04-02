@@ -54,7 +54,7 @@ class DashboardState(StrictModel):
 
 
 # Operation status type
-type OperationStatus = Literal['running', 'complete', 'failed']
+type OperationStatus = Literal['running', 'stalled', 'complete', 'failed']
 
 
 class OperationProgress(StrictModel):
@@ -134,6 +134,9 @@ class OperationProgress(StrictModel):
     # Diagnostic counters
     asyncio_task_hwm: int = 0
     gc_gen2_total: int = 0
+
+    # Staleness detection (set by ProgressWriter when no progress for >5 min)
+    stalled_since: JsonDatetime | None = None
 
     @classmethod
     def from_snapshot(

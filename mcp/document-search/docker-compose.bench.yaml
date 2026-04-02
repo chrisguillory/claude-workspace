@@ -1,0 +1,38 @@
+volumes:
+  bench-qdrant-data:
+  bench-redis-data:
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.16.2
+    platform: linux/arm64
+    container_name: document-search-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    tmpfs:
+      - /qdrant/storage
+    environment:
+      - QDRANT__LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/arm64
+    container_name: document-search-redis
+    ports:
+      - "6379"
+    tmpfs:
+      - /data
+    command: redis-server --save "" --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

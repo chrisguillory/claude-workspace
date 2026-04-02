@@ -20,7 +20,7 @@ from typing import TypedDict, cast
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from document_search.schemas.chunking import Chunk, ChunkMetadata, FileType
+from document_search.schemas.chunking import Chunk, ChunkMetadata, FileType, chunk_metadata_asdict
 
 __all__ = [
     'ChunkData',
@@ -102,7 +102,7 @@ def chunk_jsonl(
             source_path=c.source_path,
             chunk_index=c.chunk_index,
             file_type=c.file_type,
-            metadata=cast(ChunkMetadataDict, c.metadata.model_dump()),
+            metadata=cast(ChunkMetadataDict, chunk_metadata_asdict(c.metadata)),
         )
         for c in chunks
     )
