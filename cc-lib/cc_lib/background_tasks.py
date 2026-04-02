@@ -82,4 +82,4 @@ class BackgroundTaskGroup:
         exc = task.exception()
         if exc is not None and self._first_error is None:
             self._first_error = exc
-            logger.error(f'[{self._name}] Background task failed: {exc}')
+            logger.error('[%s] Background task failed: %s', self._name, exc)

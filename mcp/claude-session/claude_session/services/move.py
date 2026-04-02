@@ -354,7 +354,7 @@ class SessionMoveService:
             backup_note = f' Backup at: {backup_path}' if backup_path else ''
             msg = f'Source deletion partially failed: {e}. Session may exist in both projects.{backup_note}'
             warnings.append(msg)
-            logger.error(msg, exc_info=True)
+            logger.exception('%s', msg)
 
         logger.info('Phase 4 complete: %d source files deleted', files_deleted)
 

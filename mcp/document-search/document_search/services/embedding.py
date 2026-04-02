@@ -374,12 +374,14 @@ class CacheLoader(GenericBatchLoader[str, EmbedResponse]):
         if logger.isEnabledFor(logging.DEBUG):
             task_count = len(asyncio.all_tasks())
             logger.debug(
-                f'[CACHE-DETAIL] n={len(texts)} hits={hits} '
-                f'keys={(t_keys - t0) * 1000:.1f}ms '
-                f'mget={(t_mget - t_keys) * 1000:.1f}ms '
-                f'deser={(t_deser - t_mget) * 1000:.1f}ms '
-                f'total={(t_end - t0) * 1000:.1f}ms '
-                f'tasks={task_count}',
+                '[CACHE-DETAIL] n=%s hits=%s keys=%.1fms mget=%.1fms deser=%.1fms total=%.1fms tasks=%s',
+                len(texts),
+                hits,
+                (t_keys - t0) * 1000,
+                (t_mget - t_keys) * 1000,
+                (t_deser - t_mget) * 1000,
+                (t_end - t0) * 1000,
+                task_count,
             )
 
         # All None slots filled after miss resolution — cast narrows the type.
@@ -430,7 +432,7 @@ class _EmbedLoader(GenericBatchLoader[str, EmbedResponse]):
     async def _bulk_embed(self, texts: Sequence[str]) -> Sequence[EmbedResponse]:
         """Embed a batch of texts."""
         total_chars = sum(len(t) for t in texts)
-        logger.debug(f'[BATCH] Embedding {len(texts)} texts ({total_chars:,} chars)')
+        logger.debug('[BATCH] Embedding %s texts (%s chars)', len(texts), f'{total_chars:,}')
         request = EmbedBatchRequest(texts=texts, intent='document')
         response = await self._service.embed_batch(request)
         return response.embeddings

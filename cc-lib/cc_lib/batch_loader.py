@@ -275,9 +275,11 @@ class GenericBatchLoader[TRequest: Hashable, TResponse]:
             # Capture for fire-and-forget callers
             if submitted and self._first_error is None:
                 self._first_error = e
-                logger.error(
-                    f'{self!r}: bulk_load failed: {e}',
-                )  # exception_safety_linter.py: logger-no-exc-info — traceback delivered via future, log is summary only
+                logger.error(  # exception_safety_linter.py: logger-no-exc-info — traceback delivered via future
+                    '%r: bulk_load failed: %s',
+                    self,
+                    e,
+                )
 
             # Schedule next batch if more requests arrived
             async with self._lock:

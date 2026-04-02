@@ -94,7 +94,7 @@ class ConcurrencyTracker:
 
     def log_summary(self) -> None:
         """Log final statistics summary."""
-        self._logger.debug(f'[{self.name}] FINAL {self.stats}')
+        self._logger.debug('[%s] FINAL %s', self.name, self.stats)
 
     def stop(self) -> None:
         """Stop background monitor and log final stats."""
@@ -123,5 +123,5 @@ class ConcurrencyTracker:
             await asyncio.sleep(self._log_interval or 5.0)
             # Only log if there's been activity since last log
             if self._total_calls > self._last_logged_calls:
-                self._logger.debug(f'[{self.name}] {self.stats}')
+                self._logger.debug('[%s] %s', self.name, self.stats)
                 self._last_logged_calls = self._total_calls
