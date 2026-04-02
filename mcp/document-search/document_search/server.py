@@ -319,9 +319,9 @@ Returns:
         if not resolved_path.is_dir():
             raise ValueError(f'Path not found: {resolved_path}')
 
-        # Capture baseline 429 count for delta calculation
+        # Capture baseline transient error counts for delta calculation
         embedding_client = state.get_embedding_client(collection)
-        errors_429_start = embedding_client.errors_429
+        transient_errors_start = dict(embedding_client.transient_errors)
 
         # Setup progress writer (attaches FileHandler to root logger)
         progress_writer = ProgressWriter(mcp_server_pid=os.getpid())
@@ -348,7 +348,13 @@ Returns:
             while not indexing_task.done():
                 snapshot = indexing_service.get_pipeline_snapshot()
                 if snapshot:
-                    errors_429_delta = embedding_client.errors_429 - errors_429_start
+                    # Compute delta: current counts minus baseline
+                    current = embedding_client.transient_errors
+                    transient_errors_delta = {
+                        k: current[k] - transient_errors_start.get(k, 0)
+                        for k in current
+                        if current[k] - transient_errors_start.get(k, 0) > 0
+                    }
 
                     # Build partial timing report every 5s (10 ticks x 500ms)
                     tick += 1
@@ -360,7 +366,7 @@ Returns:
                     progress = OperationProgress.from_snapshot(
                         snapshot,
                         status='running',
-                        errors_429=errors_429_delta,
+                        transient_errors=transient_errors_delta,
                         redis_conn_stats=state.redis_client.connection_stats,
                         http_p50_ms=getattr(embedding_client, 'http_p50_ms', 0.0),
                         http_p99_ms=getattr(embedding_client, 'http_p99_ms', 0.0),
