@@ -31,7 +31,7 @@ OPENROUTER_RECOVERY_TIMEOUT = 60
 type OpenRouterTransientErrorCategory = Literal[
     'rate_limit',  # 429 — upstream provider or OpenRouter rate limit
     'provider_unavailable',  # 404 "No successful provider responses." — all providers failed
-    'provider_error',  # 502 — upstream provider down or returned invalid response
+    'bad_gateway',  # 502 — upstream provider down or returned invalid response
     'timeout',  # 408 — provider cold start or slow inference
     'server_error',  # 500, 503, 504 — OpenRouter infrastructure issues
 ]
@@ -104,7 +104,7 @@ def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCat
             logger.debug(f'Non-retryable 404: {exc.message!r}')
             return None
         if exc.code == 502:
-            return 'provider_error'
+            return 'bad_gateway'
         if exc.code == 408:
             return 'timeout'
         if isinstance(exc.code, int) and exc.code in {500, 503, 504}:
@@ -119,7 +119,7 @@ def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCat
         if code == 429:
             return 'rate_limit'
         if code == 502:
-            return 'provider_error'
+            return 'bad_gateway'
         if code == 408:
             return 'timeout'
         if code in {500, 503, 504}:

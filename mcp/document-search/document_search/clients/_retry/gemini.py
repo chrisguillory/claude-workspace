@@ -29,7 +29,7 @@ GEMINI_RECOVERY_TIMEOUT = 60
 
 type GeminiTransientErrorCategory = Literal[
     'rate_limit',  # 429 — RESOURCE_EXHAUSTED
-    'provider_error',  # 502 — Gemini backend returned invalid response
+    'bad_gateway',  # 502 — Gemini backend returned invalid response
     'timeout',  # httpx transport errors — network/timeout issues
     'server_error',  # 500, 503, 504 — Gemini infrastructure issues
 ]
@@ -72,7 +72,7 @@ def _classify_transient_error(exc: BaseException) -> GeminiTransientErrorCategor
         if exc.code == 429:
             return 'rate_limit'
         if exc.code == 502:
-            return 'provider_error'
+            return 'bad_gateway'
         if isinstance(exc.code, int) and exc.code in {500, 503, 504}:
             return 'server_error'
         return None
