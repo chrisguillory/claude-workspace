@@ -6,6 +6,11 @@ Called by server.py during indexing operations.
 Each operation gets:
 - {operation_id}.json: State snapshots (progress, result, error)
 - {operation_id}.log: Full debug logs from the operation's lifetime
+
+Staleness detection: tracks a composite progress fingerprint across
+consecutive updates. If the fingerprint is unchanged for >5 minutes,
+the operation status is set to 'stalled'. The fingerprint covers all
+pipeline counters so that progress in any stage clears the stall.
 """
 
 from __future__ import annotations
@@ -26,6 +31,11 @@ __all__ = [
     'ProgressWriter',
 ]
 
+logger = logging.getLogger(__name__)
+
+# How long progress must be unchanged before marking stalled (seconds).
+STALL_THRESHOLD_SECONDS = 300
+
 
 class ProgressWriter:
     """Writes operation progress and logs to files for dashboard consumption.
@@ -33,6 +43,11 @@ class ProgressWriter:
     Files: ~/.claude-workspace/document_search/operations/{operation_id}.{json,log}
     JSON updates written on-demand (called by server.py monitoring loop).
     Log file captures all logger output during the operation's lifetime.
+
+    Staleness detection: on each update, a fingerprint of progress counters
+    is compared to the last-changed fingerprint. If unchanged for longer
+    than STALL_THRESHOLD_SECONDS, the status is set to 'stalled' and
+    stalled_since is recorded. Progress resuming clears the stall.
     """
 
     def __init__(self, mcp_server_pid: int) -> None:
@@ -40,6 +55,11 @@ class ProgressWriter:
         self._operation_id: str | None = None
         self._state: OperationState | None = None
         self._log_handler: logging.FileHandler | None = None
+
+        # Staleness tracking: composite fingerprint of progress counters
+        self._last_fingerprint: tuple[int, ...] | None = None
+        self._last_progress_time: datetime | None = None
+        self._stalled_since: datetime | None = None
 
     def start_operation(
         self,
@@ -62,6 +82,9 @@ class ProgressWriter:
         now = _now()
 
         self._operation_id = op_id
+        self._last_fingerprint = None
+        self._last_progress_time = None
+        self._stalled_since = None
         self._state = OperationState(
             operation_id=op_id,
             mcp_server_pid=self._pid,
@@ -103,9 +126,18 @@ class ProgressWriter:
         temp_path.rename(file_path)
 
     def update_progress(self, progress: OperationProgress) -> None:
-        """Update operation progress.
+        """Update operation progress with staleness detection.
 
-        Called from server.py monitoring loop.
+        Compares a composite fingerprint of pipeline counters against the
+        last-changed snapshot. If unchanged for >STALL_THRESHOLD_SECONDS,
+        the progress status is changed to 'stalled' and stalled_since is set.
+
+        The fingerprint covers all counters that could indicate forward
+        movement in any pipeline stage, so legitimate pauses in one stage
+        (e.g. chunks_stored flat while embed is working) are not flagged
+        as long as some counter is advancing.
+
+        Called from server.py monitoring loop (~500ms).
 
         Args:
             progress: Current progress snapshot.
@@ -113,13 +145,37 @@ class ProgressWriter:
         if self._state is None:
             return
 
+        now = _now()
+        fingerprint = _progress_fingerprint(progress)
+
+        if self._last_fingerprint is None or fingerprint != self._last_fingerprint:
+            # Progress is advancing — reset staleness tracking
+            self._last_fingerprint = fingerprint
+            self._last_progress_time = now
+            self._stalled_since = None
+        elif self._last_progress_time is not None:
+            elapsed = (now - self._last_progress_time).total_seconds()
+            if elapsed >= STALL_THRESHOLD_SECONDS and self._stalled_since is None:
+                self._stalled_since = now
+                logger.warning(
+                    'Operation %s stalled: no progress for %.0fs',
+                    self._operation_id,
+                    elapsed,
+                )
+
+        # Apply stalled status if detected
+        if self._stalled_since is not None:
+            progress = progress.model_copy(
+                update={'status': 'stalled', 'stalled_since': self._stalled_since},
+            )
+
         self._state = OperationState(
             operation_id=self._state.operation_id,
             mcp_server_pid=self._state.mcp_server_pid,
             collection_name=self._state.collection_name,
             directory=self._state.directory,
             created_at=self._state.created_at,
-            updated_at=_now(),
+            updated_at=now,
             ended_at=None,
             progress=progress,
             result=None,
@@ -241,3 +297,25 @@ def _now() -> datetime:
     Uses local tz (not UTC) so dashboard timestamps match the user's clock.
     """
     return datetime.now().astimezone()
+
+
+def _progress_fingerprint(progress: OperationProgress) -> tuple[int, ...]:
+    """Composite fingerprint of all counters that indicate pipeline movement.
+
+    Covers every stage so that progress in any single stage resets the
+    stall timer. Includes both chunk-level and file-level counters.
+    """
+    return (
+        progress.files_found,
+        progress.files_done,
+        progress.files_cached,
+        progress.files_errored,
+        progress.files_chunked,
+        progress.files_embedded,
+        progress.files_stored,
+        progress.chunks_ingested,
+        progress.chunks_embedded,
+        progress.chunks_stored,
+        progress.embed_cache_hits,
+        progress.embed_cache_misses,
+    )

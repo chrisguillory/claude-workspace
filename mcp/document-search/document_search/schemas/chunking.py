@@ -2,6 +2,11 @@
 
 Typed models for document chunking. Defines supported file types and chunk structure.
 
+Chunk and ChunkMetadata use frozen slots dataclasses instead of Pydantic models
+for memory efficiency on the hot path. At 264K chunks, this saves ~1KB per object
+(~280MB total). These are internal data created by ChunkingService -- no external
+input validation needed.
+
 Future support (TODOs preserved for context):
 - HTML: Saved web pages with corollary assets. Parse main content, ignore JS/CSS.
 - Video (.mp4, .mov): Construction walkthroughs. Would need transcription or frame extraction.
@@ -11,10 +16,10 @@ Future support (TODOs preserved for context):
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
-import pydantic
 from cc_lib.schemas import StrictModel
 
 __all__ = [
@@ -23,6 +28,7 @@ __all__ = [
     'ChunkMetadata',
     'ChunkResult',
     'FileType',
+    'chunk_metadata_asdict',
     'get_file_type',
 ]
 
@@ -75,7 +81,8 @@ EXTENSION_MAP: Mapping[str, FileType] = {
 }
 
 
-class ChunkMetadata(StrictModel):
+@dataclass(frozen=True, slots=True)
+class ChunkMetadata:
     """Position and context info for chunk provenance."""
 
     start_char: int
@@ -93,14 +100,15 @@ class ChunkMetadata(StrictModel):
     jsonl_schema_hint: str | None = None  # Common fields: "timestamp, level, message"
 
 
-class Chunk(StrictModel):
+@dataclass(frozen=True, slots=True)
+class Chunk:
     """Document chunk ready for embedding.
 
     Immutable after creation. Contains text content and full provenance
     for citation and retrieval.
     """
 
-    text: Annotated[str, pydantic.Field(min_length=1)]
+    text: str
     source_path: str
     chunk_index: int
     file_type: FileType
@@ -108,10 +116,19 @@ class Chunk(StrictModel):
 
 
 class ChunkResult(StrictModel):
-    """Chunk paired with its embedding vector."""
+    """Chunk paired with its embedding vector.
+
+    Note: Chunk is a frozen slots dataclass. Pydantic v2 handles
+    stdlib dataclasses as model fields natively.
+    """
 
     chunk: Chunk
     embedding: Sequence[float]
+
+
+def chunk_metadata_asdict(meta: ChunkMetadata) -> Mapping[str, object]:
+    """Convert ChunkMetadata to dict for IPC serialization."""
+    return asdict(meta)
 
 
 def get_file_type(path: Path) -> FileType | None:
