@@ -25,6 +25,7 @@ import argparse
 import json
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -77,14 +78,14 @@ class EnrichedFieldError(TypedDict):
 
     file: str  # Filename (not full path)
     file_path: Path  # Full path for reference
-    loc: tuple[str | int, ...]  # Original location tuple
+    loc: Sequence[str | int]  # Original location from Pydantic validation
     loc_str: str  # Dot-separated path
     normalized_loc: str  # Path with Union[X,Y] patterns stripped
     generalized_loc: str  # Path with numeric indices replaced by *
     msg: str  # Error message
     error_type: str  # Error type like "extra_forbidden"
-    value: Any  # The actual value at that path
-    value_keys: list[str] | None  # Keys if value is a dict
+    value: Any  # The actual value at that path  # strict_typing_linter.py: loose-typing — heterogeneous
+    value_keys: Sequence[str] | None  # Keys if value is a dict
     value_type: str  # Type name of the value
 
 
@@ -95,7 +96,7 @@ class ErrorGroup(TypedDict):
     generalized_path: str
     value_shape: str  # "object with keys [a, b, c]" or "string" etc.
     count: int
-    errors: list[EnrichedFieldError]
+    errors: Sequence[EnrichedFieldError]
 
 
 class FallbackUsage(TypedDict):
@@ -104,7 +105,7 @@ class FallbackUsage(TypedDict):
     file: str  # Filename
     path: str  # Dot-separated path to the fallback
     fallback_type: str  # Class name (e.g., UnknownConfigValue)
-    extra_fields: dict[str, str]  # Field name -> type name
+    extra_fields: Mapping[str, str]  # Field name -> type name
 
 
 class CaptureValidationResult(TypedDict):
@@ -116,9 +117,9 @@ class CaptureValidationResult(TypedDict):
     unknown_captures: int
     error_captures: int
     capture_types: Counter[str]
-    errors: list[str]  # Simple error messages for summary mode
-    enriched_errors: list[EnrichedFieldError]  # Detailed errors for --errors mode
-    fallbacks: list[FallbackUsage]  # PermissiveModel instances found in captures
+    errors: Sequence[str]  # Simple error messages for summary mode
+    enriched_errors: Sequence[EnrichedFieldError]  # Detailed errors for --errors mode
+    fallbacks: Sequence[FallbackUsage]  # PermissiveModel instances found in captures
 
 
 class TotalStats(TypedDict):
@@ -130,13 +131,13 @@ class TotalStats(TypedDict):
     unknown_captures: int
     error_captures: int
     capture_types: Counter[str]
-    fallbacks: list[FallbackUsage]  # All PermissiveModel fallbacks found
+    fallbacks: Sequence[FallbackUsage]  # All PermissiveModel fallbacks found
 
 
 # -- Path Manipulation Utilities -----------------------------------------------
 
 
-def normalize_path(loc: tuple[str | int, ...]) -> str:
+def normalize_path(loc: Sequence[str | int]) -> str:
     """
     Normalize a Pydantic error location path.
 
@@ -172,7 +173,7 @@ def normalize_path(loc: tuple[str | int, ...]) -> str:
     return '.'.join(parts)
 
 
-def generalize_path(loc: tuple[str | int, ...]) -> str:
+def generalize_path(loc: Sequence[str | int]) -> str:
     """
     Generalize a path by replacing numeric indices with *.
 
@@ -192,7 +193,9 @@ def generalize_path(loc: tuple[str | int, ...]) -> str:
 # -- Value Extraction and Formatting -------------------------------------------
 
 
-def extract_value_at_path(data: dict[str, Any], loc: tuple[str | int, ...]) -> Any:
+def extract_value_at_path(
+    data: Mapping[str, Any], loc: Sequence[str | int]
+) -> Any:  # strict_typing_linter.py: loose-typing — returns heterogeneous validation error values
     """
     Extract the value at a given path in a nested structure.
 
@@ -268,7 +271,9 @@ def extract_value_at_path(data: dict[str, Any], loc: tuple[str | int, ...]) -> A
     return current
 
 
-def format_value_shape(value: Any) -> str:
+def format_value_shape(
+    value: Any,
+) -> str:  # strict_typing_linter.py: loose-typing — inspects heterogeneous validation error values
     """
     Describe the shape of a value for grouping and display.
 
@@ -304,7 +309,9 @@ def format_value_shape(value: Any) -> str:
         return type(value).__name__
 
 
-def truncate_value(value: Any, full: bool = False) -> str:
+def truncate_value(
+    value: Any, full: bool = False
+) -> str:  # strict_typing_linter.py: loose-typing — formats heterogeneous validation error values
     """
     Format a value for display, with optional truncation.
 
@@ -385,7 +392,7 @@ def compute_grouping_key(error: EnrichedFieldError) -> tuple[str, str, str]:
     )
 
 
-def group_errors(errors: list[EnrichedFieldError]) -> list[ErrorGroup]:
+def group_errors(errors: Sequence[EnrichedFieldError]) -> Sequence[ErrorGroup]:
     """
     Group errors by their pattern.
 
@@ -417,7 +424,11 @@ def group_errors(errors: list[EnrichedFieldError]) -> list[ErrorGroup]:
 # -- Fallback Detection --------------------------------------------------------
 
 
-def find_fallbacks(obj: Any, path: str = '') -> list[FallbackUsage]:
+def find_fallbacks(
+    obj: Any,
+    path: str = '',
+    file: str = '',  # strict_typing_linter.py: loose-typing — walks arbitrary Pydantic model tree
+) -> Sequence[FallbackUsage]:
     """
     Recursively find all PermissiveModel instances in a validated capture.
 
@@ -427,6 +438,7 @@ def find_fallbacks(obj: Any, path: str = '') -> list[FallbackUsage]:
     Args:
         obj: The object to search (typically a validated capture)
         path: Current dot-separated path for reporting
+        file: Filename for attribution (set once by caller)
 
     Returns:
         List of FallbackUsage dicts describing each fallback found
@@ -438,7 +450,7 @@ def find_fallbacks(obj: Any, path: str = '') -> list[FallbackUsage]:
         extra = obj.get_extra_fields()
         fallbacks.append(
             {
-                'file': '',  # Will be filled in by caller
+                'file': file,
                 'path': path or '(root)',
                 'fallback_type': type(obj).__name__,
                 'extra_fields': {k: type(v).__name__ for k, v in extra.items()},
@@ -451,19 +463,19 @@ def find_fallbacks(obj: Any, path: str = '') -> list[FallbackUsage]:
             value = getattr(obj, field_name, None)
             if value is not None:
                 child_path = f'{path}.{field_name}' if path else field_name
-                fallbacks.extend(find_fallbacks(value, child_path))
+                fallbacks.extend(find_fallbacks(value, child_path, file))
 
     elif isinstance(obj, dict):
         # Recurse into dict values
         for key, value in obj.items():
             child_path = f'{path}.{key}' if path else str(key)
-            fallbacks.extend(find_fallbacks(value, child_path))
+            fallbacks.extend(find_fallbacks(value, child_path, file))
 
     elif isinstance(obj, (list, tuple)):
         # Recurse into sequence elements
         for i, item in enumerate(obj):
             child_path = f'{path}[{i}]' if path else f'[{i}]'
-            fallbacks.extend(find_fallbacks(item, child_path))
+            fallbacks.extend(find_fallbacks(item, child_path, file))
 
     return fallbacks
 
@@ -473,7 +485,9 @@ def find_fallbacks(obj: Any, path: str = '') -> list[FallbackUsage]:
 
 def validate_capture_with_values(
     capture_file: Path,
-) -> tuple[str, Any, list[EnrichedFieldError]]:
+) -> tuple[
+    str, Any, Sequence[EnrichedFieldError]
+]:  # strict_typing_linter.py: loose-typing — second element is status-dependent (model | error | None)
     """
     Validate a capture file and extract values for any errors.
 
@@ -530,7 +544,7 @@ def validate_capture_with_values(
 # -- Session Validation --------------------------------------------------------
 
 
-def find_capture_sessions(captures_dir: Path) -> list[Path]:
+def find_capture_sessions(captures_dir: Path) -> Sequence[Path]:
     """Find all session directories in captures/"""
     if not captures_dir.exists():
         return []
@@ -540,54 +554,58 @@ def find_capture_sessions(captures_dir: Path) -> list[Path]:
 
 def validate_session_captures(session_dir: Path) -> CaptureValidationResult:
     """Validate all captures in a session directory."""
-    results: CaptureValidationResult = {
-        'session_id': session_dir.name,
-        'total_captures': 0,
-        'typed_captures': 0,
-        'unknown_captures': 0,
-        'error_captures': 0,
-        'capture_types': Counter(),
-        'errors': [],
-        'enriched_errors': [],
-        'fallbacks': [],
-    }
+    total_captures = 0
+    typed_captures = 0
+    unknown_captures = 0
+    error_captures = 0
+    capture_types: Counter[str] = Counter()
+    errors: list[str] = []
+    enriched_errors: list[EnrichedFieldError] = []
+    all_fallbacks: list[FallbackUsage] = []
 
     for capture_file in sorted(session_dir.glob('*.json')):
         # Skip manifest files
         if 'manifest' in capture_file.name:
             continue
 
-        results['total_captures'] += 1
+        total_captures += 1
 
         status, result, enriched = validate_capture_with_values(capture_file)
 
         if status == 'success':
-            results['typed_captures'] += 1
-            results['capture_types'][type(result).__name__] += 1
+            typed_captures += 1
+            capture_types[type(result).__name__] += 1
 
             # Check for PermissiveModel fallbacks in the validated capture
-            fallbacks = find_fallbacks(result)
-            for fb in fallbacks:
-                fb['file'] = capture_file.name
-            results['fallbacks'].extend(fallbacks)
+            all_fallbacks.extend(find_fallbacks(result, file=capture_file.name))
 
         elif status == 'unknown':
-            results['unknown_captures'] += 1
+            unknown_captures += 1
             host = getattr(result, 'host', 'unknown')
             path = getattr(result, 'path', 'unknown')
             direction = getattr(result, 'direction', 'unknown')
-            results['capture_types'][f'unknown:{direction}:{host}{path[:50]}'] += 1
+            capture_types[f'unknown:{direction}:{host}{path[:50]}'] += 1
 
         elif status == 'error':
-            results['error_captures'] += 1
-            results['errors'].append(f'{capture_file.name}: {len(enriched)} errors')
-            results['enriched_errors'].extend(enriched)
+            error_captures += 1
+            errors.append(f'{capture_file.name}: {len(enriched)} errors')
+            enriched_errors.extend(enriched)
 
         elif status == 'exception':
-            results['error_captures'] += 1
-            results['errors'].append(f'{capture_file.name}: {result}')
+            error_captures += 1
+            errors.append(f'{capture_file.name}: {result}')
 
-    return results
+    return {
+        'session_id': session_dir.name,
+        'total_captures': total_captures,
+        'typed_captures': typed_captures,
+        'unknown_captures': unknown_captures,
+        'error_captures': error_captures,
+        'capture_types': capture_types,
+        'errors': errors,
+        'enriched_errors': enriched_errors,
+        'fallbacks': all_fallbacks,
+    }
 
 
 # -- Output Formatting ---------------------------------------------------------
@@ -635,7 +653,7 @@ def format_error_group(group: ErrorGroup, full: bool = False) -> str:
     return '\n'.join(lines)
 
 
-def print_errors_mode(all_results: list[CaptureValidationResult], full: bool = False) -> None:
+def print_errors_mode(all_results: Sequence[CaptureValidationResult], full: bool = False) -> None:
     """Print output in --errors mode: grouped errors first, summary at end."""
 
     # Collect all enriched errors
@@ -683,7 +701,7 @@ def print_errors_mode(all_results: list[CaptureValidationResult], full: bool = F
 
 
 def print_summary_mode(
-    all_results: list[CaptureValidationResult],
+    all_results: Sequence[CaptureValidationResult],
     total_stats: TotalStats,
 ) -> None:
     """Print output in summary mode (default): stats first, brief error list."""
@@ -842,27 +860,35 @@ def main() -> None:
 
     # Validate all sessions
     all_results: list[CaptureValidationResult] = []
-    total_stats: TotalStats = {
-        'sessions': 0,
-        'total_captures': 0,
-        'typed_captures': 0,
-        'unknown_captures': 0,
-        'error_captures': 0,
-        'capture_types': Counter(),
-        'fallbacks': [],
-    }
+    sessions = 0
+    total_captures = 0
+    typed_captures = 0
+    unknown_captures = 0
+    error_captures = 0
+    capture_types: Counter[str] = Counter()
+    all_fallbacks: list[FallbackUsage] = []
 
     for session_dir in session_dirs:
         results = validate_session_captures(session_dir)
         all_results.append(results)
 
-        total_stats['sessions'] += 1
-        total_stats['total_captures'] += results['total_captures']
-        total_stats['typed_captures'] += results['typed_captures']
-        total_stats['unknown_captures'] += results['unknown_captures']
-        total_stats['error_captures'] += results['error_captures']
-        total_stats['capture_types'].update(results['capture_types'])
-        total_stats['fallbacks'].extend(results['fallbacks'])
+        sessions += 1
+        total_captures += results['total_captures']
+        typed_captures += results['typed_captures']
+        unknown_captures += results['unknown_captures']
+        error_captures += results['error_captures']
+        capture_types.update(results['capture_types'])
+        all_fallbacks.extend(results['fallbacks'])
+
+    total_stats: TotalStats = {
+        'sessions': sessions,
+        'total_captures': total_captures,
+        'typed_captures': typed_captures,
+        'unknown_captures': unknown_captures,
+        'error_captures': error_captures,
+        'capture_types': capture_types,
+        'fallbacks': all_fallbacks,
+    }
 
     # Output based on mode
     if args.errors:
