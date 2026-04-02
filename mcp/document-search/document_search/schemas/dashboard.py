@@ -100,7 +100,7 @@ class OperationProgress(StrictModel):
 
     # Completion
     files_done: int
-    errors_429: int
+    transient_errors: Mapping[str, int]
 
     # File type breakdown (enriched with per-type outcomes during pipeline)
     by_file_type: Mapping[FileType, str]
@@ -144,7 +144,7 @@ class OperationProgress(StrictModel):
         snapshot: PipelineSnapshot,
         *,
         status: OperationStatus,
-        errors_429: int,
+        transient_errors: Mapping[str, int],
         redis_conn_stats: ConnectionStats | None = None,
         http_p50_ms: float = 0.0,
         http_p99_ms: float = 0.0,
@@ -154,7 +154,7 @@ class OperationProgress(StrictModel):
         Args:
             snapshot: PipelineSnapshot from IndexingService.
             status: Lifecycle status ('running', 'complete', 'failed').
-            errors_429: Count of rate limit errors (tracked by embedding client).
+            transient_errors: Categorized transient error counts (rate_limit, provider_error, etc.).
             redis_conn_stats: Redis connection diagnostics (HWM tracking).
             http_p50_ms: Median HTTP round-trip time (from embedding client).
             http_p99_ms: 99th percentile HTTP round-trip time.
@@ -186,7 +186,7 @@ class OperationProgress(StrictModel):
             files_embedded=snapshot.files_embedded,
             files_stored=snapshot.files_stored,
             files_done=snapshot.files_done,
-            errors_429=errors_429,
+            transient_errors=transient_errors,
             by_file_type=snapshot.by_file_type,
             queue_depth_series=snapshot.queue_depth_series,
             files_ignored=snapshot.files_ignored,
@@ -211,7 +211,7 @@ class OperationProgress(StrictModel):
         cls,
         result: IndexingResult,
         *,
-        errors_429: int,
+        transient_errors: Mapping[str, int],
         prior_progress: OperationProgress | None = None,
         redis_conn_stats: ConnectionStats | None = None,
     ) -> OperationProgress:
@@ -227,7 +227,7 @@ class OperationProgress(StrictModel):
 
         Args:
             result: Completed IndexingResult from IndexingService.
-            errors_429: Count of rate limit errors from prior progress snapshots.
+            transient_errors: Categorized transient error counts from prior progress snapshots.
             prior_progress: Last live snapshot (carries accurate stage counters).
             redis_conn_stats: Final Redis connection diagnostics (post-drain HWM).
 
@@ -260,7 +260,7 @@ class OperationProgress(StrictModel):
             files_stored=prior_progress.files_stored if prior_progress else files_done,
             files_chunk_cached=prior_progress.files_chunk_cached if prior_progress else 0,
             files_done=files_done,
-            errors_429=errors_429,
+            transient_errors=transient_errors,
             by_file_type=result.by_file_type,
             queue_depth_series=prior_progress.queue_depth_series if prior_progress else (),
             files_ignored=result.files_ignored,

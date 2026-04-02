@@ -63,6 +63,7 @@ import argparse
 import json
 import shutil
 import sys
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -149,7 +150,7 @@ class AnalysisResult:
 # -- Session discovery ---------------------------------------------------------
 
 
-def find_all_session_files() -> list[Path]:
+def find_all_session_files() -> Sequence[Path]:
     """Find all session JSONL files under ~/.claude/projects/."""
     projects_dir = get_claude_config_home_dir() / 'projects'
     if not projects_dir.exists():
@@ -182,7 +183,7 @@ def find_session_file(session_id: str) -> Path | None:
 # -- Analysis engine -----------------------------------------------------------
 
 
-def attribute_orphans(file_path: Path, orphan_uuids: set[str]) -> dict[str, str]:
+def attribute_orphans(file_path: Path, orphan_uuids: Set[str]) -> Mapping[str, str]:
     """Search sidechain agent files for orphan UUIDs. Returns uuid -> agent filename."""
     if not orphan_uuids:
         return {}
@@ -502,7 +503,7 @@ def print_check(r: AnalysisResult) -> None:
 # -- Fix engine ----------------------------------------------------------------
 
 
-def apply_fix(file_path: Path, orphans: list[Orphan]) -> Path:
+def apply_fix(file_path: Path, orphans: Sequence[Orphan]) -> Path:
     """Apply orphan rewiring to a session file. Returns backup path.
 
     Raises:

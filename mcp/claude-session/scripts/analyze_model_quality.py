@@ -25,14 +25,15 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
 
 from cc_lib.utils import get_claude_config_home_dir
 
 
 def analyze_actual_values(
-    session_files: list[Path],
-) -> tuple[dict[str, Counter[str]], dict[str, set[str]]]:
+    session_files: Sequence[Path],
+) -> tuple[Mapping[str, Counter[str]], Mapping[str, Set[str]]]:
     """Analyze actual values from real session data."""
 
     analysis: dict[str, Counter[str]] = {

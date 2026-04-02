@@ -23,13 +23,29 @@ Same-Length Constraint:
     via Python ``lief`` (pull JS from Mach-O, modify freely, rebuild with
     corrected segment offsets).
 
+Patch Kinds:
+    fix       Restores broken functionality (regression, rendering bug).
+    feature   Enables gated/disabled functionality (Statsig gate flip).
+    tweak     Behavioral adjustment (telemetry, config, UX change).
+
 Patches:
-    statusline      Fix multi-line truncation (Ink wrap prop regression).
+    statusline      [fix] Multi-line truncation (Ink wrap prop regression).
                     Anchor: ``statusLine?.padding`` (stable since 2.0.0).
                     Regression introduced in 2.1.51 (last clean: 2.1.50).
                     https://github.com/anthropics/claude-code/issues/28750
 
-    session-memory  Enable background session memory extraction. Claude
+    mcp-tool-results [fix] MCP tool result rendering. outputSchema safeParse
+                    guard returns null on schema mismatch, killing the React
+                    component. Patch nullifies the safeParse result instead
+                    of returning null, allowing fallthrough to raw toolUseResult.
+                    Anchor: ``outputSchema?.safeParse`` (stable property chain).
+                    Regression introduced in 2.1.89 (last clean: 2.1.87).
+                    No 2.1.88 was published.
+                    Minified vars (M, P, H) may change per build — framework
+                    reports ``changed`` status when they do.
+                    https://github.com/anthropics/claude-code/issues/41361
+
+    session-memory  [feature] Enable background session memory extraction. Claude
                     writes summaries to session-memory/summary.md, loaded
                     at the start of future sessions for cross-session context.
                     Statsig gate ``tengu_session_memory``, default false.
@@ -39,12 +55,12 @@ Patches:
                     https://claudefa.st/blog/guide/mechanics/session-memory
                     https://giuseppegurgone.com/claude-memory
 
-    remember-skill  Enable /remember skill for session memory search.
+    remember-skill  [feature] Enable /remember skill for session memory search.
                     Statsig gate ``tengu_coral_fern``, default false.
                     Not publicly documented or mentioned in any changelog.
                     Flag introduced in 2.1.21 (last absent: 2.1.20).
 
-    sm-compact      Use session memory for auto-compaction instead of LLM
+    sm-compact      [feature] Use session memory for auto-compaction instead of LLM
                     summarization. When the context window fills, Claude
                     normally calls the LLM to summarize the conversation
                     (expensive, slow). With sm-compact enabled, auto-compact
@@ -58,7 +74,7 @@ Patches:
                     Present in all versions with session-memory (2.0.64+),
                     verified in 2.1.45, 2.1.74, 2.1.80, 2.1.81.
 
-    scratchpad      Enable session-scoped scratchpad directory. Creates
+    scratchpad      [feature] Enable session-scoped scratchpad directory. Creates
                     ``<data_dir>/<project>/<session>/scratchpad`` with auto-
                     permissions for reading and writing. Claude uses this
                     instead of ``/tmp`` for intermediate files.
@@ -80,6 +96,7 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN)::
 
     Anchor                    First version   Last absent
     statusLine?.padding       2.0.0           never absent
+    outputSchema?.safeParse   2.1.87          2.1.86 (anchor exists in 2.1.87 but bug absent)
     tengu_session_memory      2.0.64          2.0.62
     tengu_coral_fern          2.1.21          2.1.20
     tengu_sm_compact          2.0.64          2.0.62 (co-introduced with session-memory)
@@ -87,19 +104,28 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN)::
 
 Site Count Evolution::
 
-    Version   statusline   session-memory   remember-skill   sm-compact
-    2.0.64    0            6                0                —
-    2.0.70    0            9                0                —
-    2.1.0     0            9                0                —
-    2.1.21    0            —                3                —
-    2.1.40    0            18               3                —
-    2.1.45    —            —                —                2
-    2.1.51    2            18               9                —
-    2.1.74    2            18               3                2
-    2.1.80    2            18               3                2
-    2.1.81    2            18               3                2
+    Version   statusline   mcp-tool-results   session-memory   remember-skill   sm-compact
+    2.0.64    0            —                  6                0                —
+    2.0.70    0            —                  9                0                —
+    2.1.0     0            —                  9                0                —
+    2.1.21    0            —                  —                3                —
+    2.1.40    0            —                  18               3                —
+    2.1.45    —            —                  —                —                2
+    2.1.51    2            —                  18               9                —
+    2.1.74    2            —                  18               3                2
+    2.1.80    2            —                  18               3                2
+    2.1.81    2            —                  18               3                2
+    2.1.89    —            2                  —                —                —
+    2.1.90    —            2                  —                —                —
 
 Version Log::
+
+    2.1.90 (2026-04-02)
+        mcp-tool-results: 2 sites, unpatched (vars: M, P, H)
+        statusline: 2 sites, applied
+
+    2.1.89 (2026-04-02)
+        mcp-tool-results: 2 sites, unpatched (vars: M, P, H)
 
     2.1.81 (2026-03-24)
         statusline: 2 sites, applied
@@ -122,17 +148,36 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Literal
 
 from cc_lib.types import CCVersion
 
 __all__ = [
     'PATCHES',
+    'PATCHES_BY_KIND',
     'PATCHES_BY_NAME',
     'PatchDef',
+    'PatchKind',
     'PatchScanResult',
     'scan_binary',
 ]
+
+
+class PatchKind(str, Enum):
+    """Classification of what a patch does.
+
+    FIX:     Restores broken functionality (regression, rendering bug).
+             Low risk — returns to known-good behavior.
+    FEATURE: Enables gated/disabled functionality (Statsig gate flip).
+             Medium risk — may have unknown side effects.
+    TWEAK:   Behavioral adjustment (telemetry, config, UX change).
+             Variable risk — neither a fix nor a feature unlock.
+    """
+
+    FIX = 'fix'
+    FEATURE = 'feature'
+    TWEAK = 'tweak'
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +186,7 @@ class PatchDef:
 
     name: str
     description: str
+    kind: PatchKind
     anchor: bytes
     old: bytes
     new: bytes
@@ -160,14 +206,26 @@ PATCHES: Sequence[PatchDef] = (
     PatchDef(
         name='statusline',
         description='Restore multi-line statusline wrapping (fix truncation)',
+        kind=PatchKind.FIX,
         anchor=b'statusLine?.padding',
         old=b'wrap:"truncate"',
         new=b'wrap:"wrap"    ',
         min_version='2.1.51',
     ),
     PatchDef(
+        name='mcp-tool-results',
+        description='Fix MCP tool result rendering (outputSchema safeParse regression)',
+        kind=PatchKind.FIX,
+        anchor=b'outputSchema?.safeParse',
+        old=b'if(M&&!M.success)return null;let P=M?.data??H.toolUseResult',
+        new=b'if(M&&!M.success)M=null;     let P=M?.data??H.toolUseResult',
+        window=100,
+        min_version='2.1.89',
+    ),
+    PatchDef(
         name='session-memory',
         description='Enable background session memory extraction',
+        kind=PatchKind.FEATURE,
         anchor=b'tengu_session_memory',
         old=b'("tengu_session_memory",!1)',
         new=b'("tengu_session_memory",!0)',
@@ -177,6 +235,7 @@ PATCHES: Sequence[PatchDef] = (
     PatchDef(
         name='remember-skill',
         description='Enable /remember skill for session memory search',
+        kind=PatchKind.FEATURE,
         anchor=b'tengu_coral_fern',
         old=b'("tengu_coral_fern",!1)',
         new=b'("tengu_coral_fern",!0)',
@@ -186,6 +245,7 @@ PATCHES: Sequence[PatchDef] = (
     PatchDef(
         name='sm-compact',
         description='Use session memory for auto-compaction (no LLM summary call)',
+        kind=PatchKind.FEATURE,
         anchor=b'tengu_sm_compact',
         old=b'("tengu_sm_compact",!1)',
         new=b'("tengu_sm_compact",!0)',
@@ -195,6 +255,7 @@ PATCHES: Sequence[PatchDef] = (
     PatchDef(
         name='scratchpad',
         description='Enable session-scoped scratchpad directory with auto-permissions',
+        kind=PatchKind.FEATURE,
         anchor=b'tengu_scratch',
         old=b'("tengu_scratch")',
         new=b'||!0/*_scratch_*/',
@@ -204,6 +265,9 @@ PATCHES: Sequence[PatchDef] = (
 )
 
 PATCHES_BY_NAME: Mapping[str, PatchDef] = {p.name: p for p in PATCHES}
+PATCHES_BY_KIND: Mapping[PatchKind, Sequence[PatchDef]] = {
+    kind: tuple(p for p in PATCHES if p.kind == kind) for kind in PatchKind
+}
 
 
 @dataclass(frozen=True, slots=True)
