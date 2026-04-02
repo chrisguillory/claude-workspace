@@ -1841,7 +1841,7 @@ class DashboardServer:
             mcp_servers=existing_servers,
         )
         self._state_manager.save(state)
-        logger.info(f'Dashboard starting on http://127.0.0.1:{port}')
+        logger.info('Dashboard starting on http://127.0.0.1:%s', port)
 
         monitor_task = asyncio.create_task(self._monitor_mcp_servers())
 

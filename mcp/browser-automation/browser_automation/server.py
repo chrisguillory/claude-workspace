@@ -241,9 +241,10 @@ async def navigate(
         raise fastmcp.exceptions.ValidationError('URL must start with http:// or https://')
 
     logger.info(
-        f'Navigating to {url}'
-        + (' with resource capture' if capture_resources else '')
-        + (' (fresh browser)' if fresh_browser else ''),
+        'Navigating to %s%s%s',
+        url,
+        ' with resource capture' if capture_resources else '',
+        ' (fresh browser)' if fresh_browser else '',
     )
 
     if fresh_browser:
@@ -307,7 +308,7 @@ async def navigate(
     if capture_resources:
         await asyncio.sleep(2)
 
-    logger.info(f'Successfully navigated to {page.url}')
+    logger.info('Successfully navigated to %s', page.url)
 
     resources: ResourceCapture | None = None
 
@@ -342,7 +343,7 @@ async def navigate(
             errors=errors,
         )
 
-        logger.info(f'[navigate] Captured {len(captured_list)} resources ({resources.total_size_mb}MB)')
+        logger.info('[navigate] Captured %s resources (%sMB)', len(captured_list), resources.total_size_mb)
 
     return NavigationResult(current_url=page.url, title=await page.title(), resources=resources)
 
@@ -371,7 +372,7 @@ async def get_page_content(
     """
     _, _, page = await get_browser()
 
-    logger.info(f'Extracting as {format}' + (f' with selector "{selector}"' if selector else ''))
+    logger.info('Extracting as %s%s', format, f' with selector "{selector}"' if selector else '')
 
     if selector:
         # Extract specific elements
@@ -385,7 +386,7 @@ async def get_page_content(
             html = await locator.nth(i).evaluate('el => el.outerHTML')
             html_parts.append(html)
 
-        logger.info(f'Matched {len(html_parts)} elements')
+        logger.info('Matched %s elements', len(html_parts))
         return '\n'.join(html_parts)
 
     # Full page extraction
@@ -415,12 +416,12 @@ async def screenshot(filename: str, ctx: Context[Any, Any, Any]) -> str:
     """
     _, _, page = await get_browser()
 
-    logger.info(f'Taking screenshot: {filename}')
+    logger.info('Taking screenshot: %s', filename)
 
     screenshot_path = _screenshot_dir / filename
     await page.screenshot(path=str(screenshot_path), full_page=True)
 
-    logger.info(f'Screenshot saved to {screenshot_path}')
+    logger.info('Screenshot saved to %s', screenshot_path)
     return str(screenshot_path)
 
 
@@ -453,7 +454,7 @@ async def download_resource(url: str, output_filename: str) -> DownloadResourceR
             'Browser not initialized. Call navigate() first to establish browser session.',
         )
 
-    logger.info(f'Downloading: {url}')
+    logger.info('Downloading: %s', url)
 
     # Use page context to maintain session/cookies
     response = await page.request.get(url)
@@ -474,7 +475,7 @@ async def download_resource(url: str, output_filename: str) -> DownloadResourceR
     save_path = _screenshot_dir / safe_filename
     save_path.write_bytes(body)
 
-    logger.info(f'Downloaded {len(body)} bytes to {save_path}')
+    logger.info('Downloaded %s bytes to %s', len(body), save_path)
 
     return DownloadResourceResult(
         path=str(save_path),
@@ -535,7 +536,7 @@ async def get_interactive_elements(
     """
     _, _, page = await get_browser()
 
-    logger.info(f'Finding interactive elements in scope: {selector_scope}')
+    logger.info('Finding interactive elements in scope: %s', selector_scope)
 
     # Prepare filter values for JS
     text_filter_lower = text_contains.lower() if text_contains else None
@@ -600,7 +601,7 @@ async def get_interactive_elements(
         },
     )
 
-    logger.info(f'Found {len(elements)} interactive elements (filtered)')
+    logger.info('Found %s interactive elements (filtered)', len(elements))
     return [InteractiveElement(**el) for el in elements]
 
 
@@ -618,7 +619,7 @@ async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any
     """
     _, _, page = await get_browser()
 
-    logger.info(f'Finding focusable elements (only_tabbable={only_tabbable})')
+    logger.info('Finding focusable elements (only_tabbable=%s)', only_tabbable)
 
     min_tab_index = 0 if only_tabbable else -1
 
@@ -663,7 +664,7 @@ async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any
         {'minTabIndex': min_tab_index},
     )
 
-    logger.info(f'Found {len(elements)} focusable elements')
+    logger.info('Found %s focusable elements', len(elements))
     return [FocusableElement(**el) for el in elements]
 
 
@@ -687,12 +688,12 @@ async def click(
     """
     _, _, page = await get_browser()
 
-    logger.info(f'Clicking element: {selector}' + (' (with network wait)' if wait_for_network else ''))
+    logger.info('Clicking element: %s%s', selector, ' (with network wait)' if wait_for_network else '')
 
     await page.click(selector)
 
     if wait_for_network:
-        logger.info(f'Waiting for network idle (timeout={network_timeout}ms)')
+        logger.info('Waiting for network idle (timeout=%sms)', network_timeout)
         await page.wait_for_load_state('networkidle', timeout=network_timeout)
         logger.info('Network idle')
 
@@ -711,7 +712,7 @@ async def wait_for_network_idle(ctx: Context[Any, Any, Any], timeout: int = 1000
     """
     _, _, page = await get_browser()
 
-    logger.info(f'Waiting for network idle (timeout={timeout}ms)')
+    logger.info('Waiting for network idle (timeout=%sms)', timeout)
 
     await page.wait_for_load_state('networkidle', timeout=timeout)
 
@@ -741,7 +742,7 @@ async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
     """
     _, _, page = await get_browser()
 
-    logger.info(f'Pressing key: {key}')
+    logger.info('Pressing key: %s', key)
 
     await page.keyboard.press(key)
 
@@ -766,7 +767,7 @@ async def type_text(text: str, ctx: Context[Any, Any, Any], delay_ms: int = 0) -
     """
     _, _, page = await get_browser()
 
-    logger.info(f'Typing text: "{text}"' + (f' with {delay_ms}ms delay' if delay_ms > 0 else ''))
+    logger.info('Typing text: "%s"%s', text, f' with {delay_ms}ms delay' if delay_ms > 0 else '')
 
     await page.keyboard.type(text, delay=delay_ms)
 

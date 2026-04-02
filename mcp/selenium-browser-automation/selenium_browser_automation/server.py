@@ -234,7 +234,7 @@ class BrowserState:
         capture_temp_dir = tempfile.TemporaryDirectory()
         capture_dir = Path(capture_temp_dir.name)
 
-        logger.info(f'Temp directories initialized (screenshots: {screenshot_dir}, captures: {capture_dir})')
+        logger.info('Temp directories initialized (screenshots: %s, captures: %s)', screenshot_dir, capture_dir)
 
         return cls(
             driver=None,
@@ -338,7 +338,7 @@ class BrowserService:
                     f'Chromium not found at {chromium_path}. Install with: brew install --cask chromium',
                 )
             opts.binary_location = chromium_path
-            logger.info(f'Using Chromium: {chromium_path}')
+            logger.info('Using Chromium: %s', chromium_path)
 
         opts.add_argument('--disable-blink-features=AutomationControlled')
         opts.add_argument('--window-size=1920,1080')
@@ -369,7 +369,9 @@ class BrowserService:
         if self.state.proxy_config and self.state.mitmproxy_process:
             opts.add_argument('--proxy-server=http://127.0.0.1:8080')
             opts.add_argument('--ignore-certificate-errors')  # mitmproxy uses self-signed certs
-            logger.info(f'Using local mitmproxy -> {self.state.proxy_config["host"]}:{self.state.proxy_config["port"]}')
+            logger.info(
+                'Using local mitmproxy -> %s:%s', self.state.proxy_config['host'], self.state.proxy_config['port']
+            )
 
         # Initialize driver in thread pool (blocking operation)
         self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
@@ -496,10 +498,11 @@ def register_tools(service: BrowserService) -> None:
             )
 
         logger.info(
-            f'Navigating to {url}'
-            + (' (fresh browser)' if fresh_browser else '')
-            + (' (HAR capture enabled)' if enable_har_capture else '')
-            + (f' ({len(init_scripts)} init scripts)' if init_scripts else ''),
+            'Navigating to %s%s%s%s',
+            url,
+            ' (fresh browser)' if fresh_browser else '',
+            ' (HAR capture enabled)' if enable_har_capture else '',
+            f' ({len(init_scripts)} init scripts)' if init_scripts else '',
         )
 
         if fresh_browser:
@@ -532,7 +535,7 @@ def register_tools(service: BrowserService) -> None:
         final_url = driver.current_url
         service.state.origin_tracker.add_origin(final_url)
 
-        logger.info(f'Successfully navigated to {final_url} (tracked origins: {len(service.state.origin_tracker)})')
+        logger.info('Successfully navigated to %s (tracked origins: %s)', final_url, len(service.state.origin_tracker))
 
         # Lazy restore: if navigate_with_profile_state() was called previously, restore
         # storage for current origin. This handles multi-origin sessions where the user
@@ -639,17 +642,21 @@ def register_tools(service: BrowserService) -> None:
         # Log what we're doing
         if has_chrome:
             logger.info(
-                f"Importing profile state from Chrome profile '{chrome_profile}' and navigating to {url}"
-                + (f' (filtering: {origins_filter})' if origins_filter else '')
-                + (' (HAR capture enabled)' if enable_har_capture else '')
-                + (f' ({len(init_scripts)} init scripts)' if init_scripts else ''),
+                "Importing profile state from Chrome profile '%s' and navigating to %s%s%s%s",
+                chrome_profile,
+                url,
+                f' (filtering: {origins_filter})' if origins_filter else '',
+                ' (HAR capture enabled)' if enable_har_capture else '',
+                f' ({len(init_scripts)} init scripts)' if init_scripts else '',
             )
         else:
             logger.info(
-                f'Loading profile state from {profile_state_file} and navigating to {url}'
-                + (f' (filtering: {origins_filter})' if origins_filter else '')
-                + (' (HAR capture enabled)' if enable_har_capture else '')
-                + (f' ({len(init_scripts)} init scripts)' if init_scripts else ''),
+                'Loading profile state from %s and navigating to %s%s%s%s',
+                profile_state_file,
+                url,
+                f' (filtering: {origins_filter})' if origins_filter else '',
+                ' (HAR capture enabled)' if enable_har_capture else '',
+                f' ({len(init_scripts)} init scripts)' if init_scripts else '',
             )
 
         # Load profile state from the appropriate source
@@ -678,13 +685,13 @@ def register_tools(service: BrowserService) -> None:
                 await asyncio.to_thread(_export_with_stdout_captured)
                 profile_state = await _load_profile_state_from_file(str(temp_file_path))
 
-            logger.info(f"Exported {len(profile_state.cookies)} cookies from Chrome profile '{chrome_profile}'")
+            logger.info("Exported %s cookies from Chrome profile '%s'", len(profile_state.cookies), chrome_profile)
 
         elif profile_state_file:
             # Load from file directly
             profile_state = await _load_profile_state_from_file(profile_state_file)
 
-            logger.info(f'Loaded {len(profile_state.cookies)} cookies from {profile_state_file}')
+            logger.info('Loaded %s cookies from %s', len(profile_state.cookies), profile_state_file)
 
         else:
             # This should not happen due to earlier validation
@@ -725,7 +732,10 @@ def register_tools(service: BrowserService) -> None:
             )
 
             logger.info(
-                f'Filtered to {len(filtered_cookies)} cookies and {len(filtered_origins)} origins matching {origins_filter}',
+                'Filtered to %s cookies and %s origins matching %s',
+                len(filtered_cookies),
+                len(filtered_origins),
+                origins_filter,
             )
 
         # Resolve browser before close_browser() clears current_browser
@@ -753,7 +763,9 @@ def register_tools(service: BrowserService) -> None:
                 for origin_data in profile_state.origins.values()
             )
             logger.info(
-                f'Registered storage init script ({storage_entry_count} entries across {len(profile_state.origins)} origins)',
+                'Registered storage init script (%s entries across %s origins)',
+                storage_entry_count,
+                len(profile_state.origins),
             )
 
         # Install user init scripts (after storage script, before navigation)
@@ -777,7 +789,7 @@ def register_tools(service: BrowserService) -> None:
         # Inject cookies via CDP BEFORE navigation
         cookies_injected = await _inject_cookies_via_cdp(driver, profile_state.cookies)
 
-        logger.info(f'Injected {cookies_injected} cookies via CDP')
+        logger.info('Injected %s cookies via CDP', cookies_injected)
 
         # PRE-ACTION: Capture localStorage before navigating away
         await _capture_current_origin_storage(service, driver)
@@ -789,7 +801,7 @@ def register_tools(service: BrowserService) -> None:
         final_url = driver.current_url
         service.state.origin_tracker.add_origin(final_url)
 
-        logger.info(f'Successfully navigated to {final_url} (tracked origins: {len(service.state.origin_tracker)})')
+        logger.info('Successfully navigated to %s (tracked origins: %s)', final_url, len(service.state.origin_tracker))
 
         # Setup lazy restore for localStorage/sessionStorage/IndexedDB
         await _setup_pending_profile_state(service, profile_state)
@@ -875,7 +887,7 @@ def register_tools(service: BrowserService) -> None:
         """
         driver = await service.get_browser()
 
-        logger.info(f"Extracting text from '{selector}'")
+        logger.info("Extracting text from '%s'", selector)
 
         # Execute the extraction script (loaded from scripts/)
         try:
@@ -921,7 +933,7 @@ def register_tools(service: BrowserService) -> None:
                 body_character_count=result.get('bodyCharacterCount', 0),
             )
 
-        logger.info(f'Extracted {char_count:,} characters from <{source_element}>')
+        logger.info('Extracted %s characters from <%s>', f'{char_count:,}', source_element)
 
         # Save large text to file to preserve line structure
         saved_to_file = False
@@ -986,7 +998,7 @@ def register_tools(service: BrowserService) -> None:
         driver = await service.get_browser()
 
         if selector:
-            logger.info(f"Extracting HTML for '{selector}'" + (f' (limit: {limit})' if limit else ''))
+            logger.info("Extracting HTML for '%s'%s", selector, f' (limit: {limit})' if limit else '')
 
             try:
                 elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, selector)
@@ -1012,8 +1024,10 @@ def register_tools(service: BrowserService) -> None:
                     continue  # Element may have become stale
 
             logger.info(
-                f'Extracted {len(html_parts)} of {count} elements'
-                + (f' (limited to {limit})' if limit and count > limit else ''),
+                'Extracted %s of %s elements%s',
+                len(html_parts),
+                count,
+                f' (limited to {limit})' if limit and count > limit else '',
             )
 
             html_output = '\n'.join(html_parts)
@@ -1036,7 +1050,7 @@ def register_tools(service: BrowserService) -> None:
             except WebDriverException as e:
                 raise fastmcp.exceptions.ToolError(f'Failed to get page source: {e}') from e
 
-            logger.info(f'Extracted {len(page_html):,} characters of HTML')
+            logger.info('Extracted %s characters of HTML', f'{len(page_html):,}')
 
             if len(page_html) > LARGE_OUTPUT_THRESHOLD:
                 return _save_large_output_to_file(
@@ -1073,7 +1087,7 @@ def register_tools(service: BrowserService) -> None:
         screenshot_path = service.state.screenshot_dir / filename
 
         if full_page:
-            logger.info(f'Taking full-page screenshot: {filename}')
+            logger.info('Taking full-page screenshot: %s', filename)
             # Use CDP to capture full page
             result = await asyncio.to_thread(
                 driver.execute_cdp_cmd,
@@ -1088,13 +1102,13 @@ def register_tools(service: BrowserService) -> None:
 
             screenshot_data = base64.b64decode(result['data'])
             screenshot_path.write_bytes(screenshot_data)
-            logger.info(f'Full-page screenshot saved to {screenshot_path}')
+            logger.info('Full-page screenshot saved to %s', screenshot_path)
             return str(screenshot_path)
 
         # Viewport screenshot
-        logger.info(f'Taking viewport screenshot: {filename}')
+        logger.info('Taking viewport screenshot: %s', filename)
         await asyncio.to_thread(driver.save_screenshot, str(screenshot_path))
-        logger.info(f'Screenshot saved to {screenshot_path}')
+        logger.info('Screenshot saved to %s', screenshot_path)
         return str(screenshot_path)
 
     async def _download_with_browser_context(driver: webdriver.Chrome, url: str) -> tuple[bytes, int, str]:
@@ -1441,7 +1455,7 @@ def register_tools(service: BrowserService) -> None:
         """
         driver = await service.get_browser()
 
-        logger.info(f'Finding interactive elements in scope: {selector_scope}')
+        logger.info('Finding interactive elements in scope: %s', selector_scope)
 
         # Prepare filter values for JS
         text_filter_lower = text_contains.lower() if text_contains else None
@@ -1516,7 +1530,7 @@ def register_tools(service: BrowserService) -> None:
             },
         )
 
-        logger.info(f'Found {len(elements)} interactive elements (filtered)')
+        logger.info('Found %s interactive elements (filtered)', len(elements))
         return [InteractiveElement(**el) for el in elements]
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
@@ -1533,7 +1547,7 @@ def register_tools(service: BrowserService) -> None:
         """
         driver = await service.get_browser()
 
-        logger.info(f'Finding focusable elements (only_tabbable={only_tabbable})')
+        logger.info('Finding focusable elements (only_tabbable=%s)', only_tabbable)
 
         min_tab_index = 0 if only_tabbable else -1
 
@@ -1580,7 +1594,7 @@ def register_tools(service: BrowserService) -> None:
             {'minTabIndex': min_tab_index},
         )
 
-        logger.info(f'Found {len(elements)} focusable elements')
+        logger.info('Found %s focusable elements', len(elements))
         return [FocusableElement(**el) for el in elements]
 
     @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))
@@ -1612,7 +1626,7 @@ def register_tools(service: BrowserService) -> None:
         await _capture_current_origin_storage(service, driver)
         url_before = driver.current_url
 
-        logger.info(f'Clicking element: {css_selector}' + (' (with delay)' if wait_for_network else ''))
+        logger.info('Clicking element: %s%s', css_selector, ' (with delay)' if wait_for_network else '')
 
         _validate_css_selector(css_selector)
 
@@ -1643,7 +1657,7 @@ def register_tools(service: BrowserService) -> None:
 
         if wait_for_network:
             delay_sec = network_timeout / 1000
-            logger.info(f'Waiting {delay_sec}s for content to load')
+            logger.info('Waiting %ss for content to load', delay_sec)
             await asyncio.sleep(delay_sec)
             logger.info('Delay complete')
 
@@ -1651,7 +1665,7 @@ def register_tools(service: BrowserService) -> None:
         url_after = driver.current_url
         if url_after != url_before:
             service.state.origin_tracker.add_origin(url_after)
-            logger.info(f'Navigation detected: {url_before} -> {url_after}')
+            logger.info('Navigation detected: %s -> %s', url_before, url_after)
             # Lazy restore: if we navigated to a new origin with pending storage state
             await _restore_pending_profile_state_for_current_origin(service, driver)
 
@@ -1696,12 +1710,12 @@ def register_tools(service: BrowserService) -> None:
                     # Check time since last request completed
                     elapsed_since_last = status['currentTime'] - status['lastRequestTime']
                     if elapsed_since_last >= idle_threshold_ms:
-                        logger.info(f'Network idle after {elapsed_since_last / 1000:.2f}s')
+                        logger.info('Network idle after %.2fs', elapsed_since_last / 1000)
                         return
 
             await asyncio.sleep(0.05)  # Poll every 50ms
 
-        logger.info(f'Network idle timeout after {timeout_s}s')
+        logger.info('Network idle timeout after %ss', timeout_s)
 
     @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
     async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
@@ -1730,7 +1744,7 @@ def register_tools(service: BrowserService) -> None:
         await _capture_current_origin_storage(service, driver)
         url_before = driver.current_url
 
-        logger.info(f'Pressing key: {key}')
+        logger.info('Pressing key: %s', key)
 
         # Map common key names to Selenium Keys
         # Handle key combinations (e.g., "CONTROL+A")
@@ -1762,7 +1776,7 @@ def register_tools(service: BrowserService) -> None:
         url_after = driver.current_url
         if url_after != url_before:
             service.state.origin_tracker.add_origin(url_after)
-            logger.info(f'Navigation detected: {url_before} -> {url_after}')
+            logger.info('Navigation detected: %s -> %s', url_before, url_after)
             # Lazy restore: if we navigated to a new origin with pending storage state
             await _restore_pending_profile_state_for_current_origin(service, driver)
 
@@ -1786,7 +1800,7 @@ def register_tools(service: BrowserService) -> None:
         """
         driver = await service.get_browser()
 
-        logger.info(f'Typing text: "{text}"' + (f' with {delay_ms}ms delay' if delay_ms > 0 else ''))
+        logger.info('Typing text: "%s"%s', text, f' with {delay_ms}ms delay' if delay_ms > 0 else '')
 
         active_element = await asyncio.to_thread(lambda: driver.switch_to.active_element)
 
@@ -1836,7 +1850,7 @@ def register_tools(service: BrowserService) -> None:
         if duration_ms > 30000:
             raise ValueError('duration_ms exceeds maximum of 30000ms (30 seconds)')
 
-        logger.info(f'Hovering over element: {css_selector}')
+        logger.info('Hovering over element: %s', css_selector)
 
         _validate_css_selector(css_selector)
 
@@ -1879,13 +1893,15 @@ def register_tools(service: BrowserService) -> None:
         if not stability_result.get('stable'):
             if stability_result.get('runningAnimations', 0) > 0:
                 logger.info(
-                    f'Element has {stability_result["runningAnimations"]} running animation(s), '
-                    f'proceeding after {stability_result["framesChecked"]} frame checks',
+                    'Element has %s running animation(s), proceeding after %s frame checks',
+                    stability_result['runningAnimations'],
+                    stability_result['framesChecked'],
                 )
             else:
                 logger.info(
-                    f'Element did not stabilize after {stability_result["framesChecked"]} frames '
-                    f'(final distance: {stability_result.get("finalDistance", 0):.1f}px)',
+                    'Element did not stabilize after %s frames (final distance: %.1fpx)',
+                    stability_result['framesChecked'],
+                    stability_result.get('finalDistance', 0),
                 )
 
         # Verify element receives pointer events (not obscured by overlay/modal)
@@ -1906,7 +1922,7 @@ def register_tools(service: BrowserService) -> None:
 
         # Hold if duration specified (for menus that need sustained hover)
         if duration_ms > 0:
-            logger.info(f'Holding hover for {duration_ms}ms')
+            logger.info('Holding hover for %sms', duration_ms)
             await asyncio.sleep(duration_ms / 1000)
 
         logger.info('Hover successful')
@@ -1982,8 +1998,12 @@ def register_tools(service: BrowserService) -> None:
         """
         driver = await service.get_browser()
         logger.info(
-            f'Scroll: direction={direction}, position={position}, '
-            f'selector={css_selector}, amount={scroll_amount}, behavior={behavior}',
+            'Scroll: direction=%s, position=%s, selector=%s, amount=%s, behavior=%s',
+            direction,
+            position,
+            css_selector,
+            scroll_amount,
+            behavior,
         )
         try:
             result = await asyncio.to_thread(
@@ -1997,7 +2017,7 @@ def register_tools(service: BrowserService) -> None:
             )
         except ValueError as e:
             raise fastmcp.exceptions.ToolError(str(e)) from None
-        logger.info(f'Scroll complete: {result.get("mode")}, scrolled={result.get("scrolled")}')
+        logger.info('Scroll complete: %s, scrolled=%s', result.get('mode'), result.get('scrolled'))
         return result
 
     @mcp.tool(
@@ -2042,14 +2062,15 @@ def register_tools(service: BrowserService) -> None:
         # Graduated warnings for AI agents
         if duration_ms > 10000:
             logger.info(
-                f'Warning: Long sleep({duration_ms}ms) requested. '
+                'Warning: Long sleep(%sms) requested. '
                 'Consider wait_for_selector() or wait_for_network_idle() for dynamic content.',
+                duration_ms,
             )
 
         if reason:
-            logger.info(f'Sleeping {duration_ms}ms: {reason}')
+            logger.info('Sleeping %sms: %s', duration_ms, reason)
         else:
-            logger.info(f'Sleeping {duration_ms}ms')
+            logger.info('Sleeping %sms', duration_ms)
 
         await asyncio.sleep(duration_ms / 1000)
 
@@ -2107,7 +2128,7 @@ def register_tools(service: BrowserService) -> None:
         if timeout > 300000:
             raise ValueError('timeout exceeds maximum of 300000ms (5 minutes)')
 
-        logger.info(f"Waiting for selector '{css_selector}' to be {state}")
+        logger.info("Waiting for selector '%s' to be %s", css_selector, state)
 
         _validate_css_selector(css_selector)
 
@@ -2134,7 +2155,7 @@ def register_tools(service: BrowserService) -> None:
                     # Element exists in DOM
                     if elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info(f"Selector '{css_selector}' attached after {elapsed_ms}ms")
+                        logger.info("Selector '%s' attached after %sms", css_selector, elapsed_ms)
                         return WaitForSelectorResult(
                             selector=css_selector,
                             state='attached',
@@ -2146,7 +2167,7 @@ def register_tools(service: BrowserService) -> None:
                     # Element removed from DOM
                     if not elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info(f"Selector '{css_selector}' detached after {elapsed_ms}ms")
+                        logger.info("Selector '%s' detached after %sms", css_selector, elapsed_ms)
                         return WaitForSelectorResult(
                             selector=css_selector,
                             state='detached',
@@ -2159,7 +2180,7 @@ def register_tools(service: BrowserService) -> None:
                         is_displayed = await asyncio.to_thread(element.is_displayed)
                         if is_displayed:
                             elapsed_ms = int((time.time() - start_time) * 1000)
-                            logger.info(f"Selector '{css_selector}' visible after {elapsed_ms}ms")
+                            logger.info("Selector '%s' visible after %sms", css_selector, elapsed_ms)
                             return WaitForSelectorResult(
                                 selector=css_selector,
                                 state='visible',
@@ -2171,7 +2192,7 @@ def register_tools(service: BrowserService) -> None:
                     # Element not in DOM OR not displayed
                     if not elements:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info(f"Selector '{css_selector}' hidden (not in DOM) after {elapsed_ms}ms")
+                        logger.info("Selector '%s' hidden (not in DOM) after %sms", css_selector, elapsed_ms)
                         return WaitForSelectorResult(
                             selector=css_selector,
                             state='hidden',
@@ -2187,7 +2208,7 @@ def register_tools(service: BrowserService) -> None:
                             break
                     if all_hidden:
                         elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info(f"Selector '{css_selector}' hidden (not displayed) after {elapsed_ms}ms")
+                        logger.info("Selector '%s' hidden (not displayed) after %sms", css_selector, elapsed_ms)
                         return WaitForSelectorResult(
                             selector=css_selector,
                             state='hidden',
@@ -2248,12 +2269,12 @@ def register_tools(service: BrowserService) -> None:
         Example (verbose):
             Returns all fields including avatar settings, creation time, etc.
         """
-        logger.info(f'Listing Chrome profiles (verbose={verbose})')
+        logger.info('Listing Chrome profiles (verbose=%s)', verbose)
 
         # Call module function
         result = await asyncio.to_thread(list_all_profiles, verbose=verbose)
 
-        logger.info(f'Found {result.total_count} profiles')
+        logger.info('Found %s profiles', result.total_count)
 
         return result
 
@@ -2297,14 +2318,14 @@ def register_tools(service: BrowserService) -> None:
         if width <= 0 or height <= 0:
             raise ValueError(f'Width and height must be positive integers. Got: {width}x{height}')
 
-        logger.info(f'Resizing window to {width}x{height}')
+        logger.info('Resizing window to %sx%s', width, height)
 
         await asyncio.to_thread(driver.set_window_size, width, height)
 
         # Get actual size (may differ due to OS constraints)
         size = await asyncio.to_thread(driver.get_window_size)
 
-        logger.info(f'Window resized to {size["width"]}x{size["height"]}')
+        logger.info('Window resized to %sx%s', size['width'], size['height'])
 
         return ResizeWindowResult(width=size['width'], height=size['height'])
 
@@ -2345,7 +2366,7 @@ def register_tools(service: BrowserService) -> None:
         start_time = time.time()
         current_url = driver.current_url
 
-        logger.info(f'Capturing Core Web Vitals for {current_url}')
+        logger.info('Capturing Core Web Vitals for %s', current_url)
 
         errors: list[str] = []
 
@@ -2394,7 +2415,7 @@ def register_tools(service: BrowserService) -> None:
         if vitals.inp:
             metrics_found.append(f'INP={vitals.inp.value:.0f}ms ({vitals.inp.rating})')
 
-        logger.info(f'Web Vitals captured in {collection_duration:.0f}ms: {", ".join(metrics_found) or "none"}')
+        logger.info('Web Vitals captured in %.0fms: %s', collection_duration, ', '.join(metrics_found) or 'none')
 
         return vitals
 
@@ -2429,7 +2450,7 @@ Note:
         start_time = time.time()
         current_url = driver.current_url
 
-        logger.info(f'Getting resource timings for {current_url}')
+        logger.info('Getting resource timings for %s', current_url)
 
         # Collect resource timing via JavaScript Performance API (script from scripts/)
         raw_entries = await asyncio.to_thread(driver.execute_script, RESOURCE_TIMING_SCRIPT)
@@ -2514,11 +2535,14 @@ Note:
             if len(slowest_url) > 60:
                 slowest_url = slowest_url[:57] + '...'
             logger.info(
-                f'Captured {len(requests)} requests in {collection_duration:.0f}ms, '
-                f'slowest: {slowest[0].duration_ms or 0:.0f}ms ({slowest_url})',
+                'Captured %s requests in %.0fms, slowest: %.0fms (%s)',
+                len(requests),
+                collection_duration,
+                slowest[0].duration_ms or 0,
+                slowest_url,
             )
         else:
-            logger.info(f'Captured {len(requests)} requests in {collection_duration:.0f}ms')
+            logger.info('Captured %s requests in %.0fms', len(requests), collection_duration)
 
         return result
 
@@ -2622,7 +2646,7 @@ Workflow:
     ) -> HARExportResult:
         driver = await service.get_browser()
 
-        logger.info(f'Exporting HAR to {filename}')
+        logger.info('Exporting HAR to %s', filename)
         errors: list[str] = []
 
         # Get performance logs (clears buffer - subsequent calls return only newer entries)
@@ -2863,7 +2887,7 @@ Workflow:
         har_json = json.dumps(har, indent=2)
         har_path.write_text(har_json)
 
-        logger.info(f'Exported {len(har_entries)} entries to {har_path}')
+        logger.info('Exported %s entries to %s', len(har_entries), har_path)
 
         return HARExportResult(
             path=str(har_path),
@@ -2925,7 +2949,7 @@ Workflow:
         try:
             raw_logs = await asyncio.to_thread(driver.get_log, 'browser')
         except WebDriverException as e:
-            logger.exception(f'Failed to get console logs: {e}')
+            logger.exception('Failed to get console logs: %s', e)
             return ConsoleLogsResult(
                 logs=[],
                 total_count=0,
@@ -2984,9 +3008,11 @@ Workflow:
         # Log summary
         if result.total_count > 0:
             logger.info(
-                f'Console logs: {result.severe_count} errors, '
-                f'{result.warning_count} warnings, {result.info_count} info '
-                f'({len(entries)} returned after filtering)',
+                'Console logs: %s errors, %s warnings, %s info (%s returned after filtering)',
+                result.severe_count,
+                result.warning_count,
+                result.info_count,
+                len(entries),
             )
         else:
             logger.info('No console logs captured')
@@ -3048,7 +3074,7 @@ Workflow:
             navigate("https://api.ipify.org")  # Shows proxy IP, not your real IP
             navigate(url, fresh_browser=True)  # Gets NEW IP from proxy pool
         """
-        logger.info(f'Configuring proxy via mitmproxy: {host}:{port}')
+        logger.info('Configuring proxy via mitmproxy: %s:%s', host, port)
 
         # Close existing browser and mitmproxy
         await service.close_browser()
@@ -3194,7 +3220,7 @@ Workflow:
         await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.setBlockedURLs', {'urls': list(urls)})
 
         if urls:
-            logger.info(f'Blocked {len(urls)} URL pattern(s): {urls}')
+            logger.info('Blocked %s URL pattern(s): %s', len(urls), urls)
         else:
             logger.info('Cleared all URL blocks')
 
@@ -3273,7 +3299,7 @@ Workflow:
         """
         driver = await service.get_browser()
 
-        logger.info(f'Executing JavaScript ({len(code)} chars)')
+        logger.info('Executing JavaScript (%s chars)', len(code))
 
         # Escape user code as JSON string to prevent injection
         # json.dumps handles quotes, backslashes, newlines, etc.
@@ -3299,16 +3325,17 @@ Workflow:
             success = result.get('success', False) if isinstance(result, dict) else False
 
             if success:
-                logger.info(f'JS execution successful: {result_type}')
+                logger.info('JS execution successful: %s', result_type)
             else:
                 error = result.get('error', 'Unknown error') if isinstance(result, dict) else 'Unknown error'
-                logger.warning(f'JS execution failed: {error}')
+                logger.warning('JS execution failed: %s', error)
 
             return JavaScriptResult(**result)
 
         except TimeoutError:
             logger.warning(
-                f'JS execution timed out after {timeout_ms}ms',
+                'JS execution timed out after %sms',
+                timeout_ms,
             )  # exception_safety_linter.py: logger-no-exc-info — TimeoutError has no useful traceback
             return JavaScriptResult(
                 success=False,
@@ -3317,7 +3344,7 @@ Workflow:
                 error_type='timeout',
             )
         except WebDriverException as e:
-            logger.exception(f'JS execution WebDriver error: {e}')
+            logger.exception('JS execution WebDriver error: %s', e)
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -3325,7 +3352,7 @@ Workflow:
                 error_type='execution',
             )
         except Exception as e:  # exception_safety_linter.py: swallowed-exception — error captured in JavaScriptResult
-            logger.warning(f'JS execution unexpected error: {e}', exc_info=True)
+            logger.warning('JS execution unexpected error: %s', e, exc_info=True)
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
@@ -3399,7 +3426,7 @@ Workflow:
         if driver is None:
             raise fastmcp.exceptions.ToolError('Browser not initialized. Call navigate() first to establish a session.')
 
-        logger.info(f'Exporting storage state to {filename}')
+        logger.info('Exporting storage state to %s', filename)
 
         # Get all cookies via CDP Network.getCookies
         cookies_result = await asyncio.to_thread(
@@ -3530,8 +3557,10 @@ Workflow:
             log_storage_parts.append(f'{indexeddb_databases_count} IndexedDB databases')
 
         logger.info(
-            f'Captured storage: {" + ".join(log_storage_parts)} '
-            f'across {len(origins_data)} origins (of {len(tracked_origins)} tracked)',
+            'Captured storage: %s across %s origins (of %s tracked)',
+            ' + '.join(log_storage_parts),
+            len(origins_data),
+            len(tracked_origins),
         )
 
         # Build ProfileState with typed models
@@ -3569,7 +3598,7 @@ Workflow:
         if include_indexeddb and indexeddb_databases_count > 0:
             log_parts.append(f'{indexeddb_databases_count} IndexedDB databases ({indexeddb_records_count} records)')
 
-        logger.info(f'{" + ".join(log_parts)} for {current_origin} to {file_path} ({result.size_bytes} bytes)')
+        logger.info('%s for %s to %s (%s bytes)', ' + '.join(log_parts), current_origin, file_path, result.size_bytes)
 
         return result
 
@@ -3638,7 +3667,7 @@ Workflow:
             Contains sensitive auth tokens - treat as credentials.
         """
 
-        logger.info(f"Exporting Chrome profile state from profile '{chrome_profile}' to {output_file}")
+        logger.info("Exporting Chrome profile state from profile '%s' to %s", chrome_profile, output_file)
 
         # Convert Sequence to list for the export function
         filter_list = list(origins_filter) if origins_filter else None
@@ -3664,7 +3693,7 @@ Workflow:
         if result.indexeddb_origins > 0:
             parts.append(f'{result.indexeddb_origins} IndexedDB origins')
 
-        logger.info(f'Exported {", ".join(parts)} across {result.origin_count} origins to {result.path}')
+        logger.info('Exported %s across %s origins to %s', ', '.join(parts), result.origin_count, result.path)
 
         if result.warnings:
             for warning in result.warnings:
@@ -3706,7 +3735,7 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    logger.info(f'Browser service initialized (screenshots: {state.screenshot_dir}, captures: {state.capture_dir})')
+    logger.info('Browser service initialized (screenshots: %s, captures: %s)', state.screenshot_dir, state.capture_dir)
 
     yield
 
@@ -3975,7 +4004,7 @@ async def _capture_current_origin_storage(service: BrowserService, driver: webdr
             parts.append(f'{len(session_storage_items)} sessionStorage')
         if indexeddb_count > 0:
             parts.append(f'{indexeddb_count} IndexedDB databases')
-        logger.info(f'Cached {" + ".join(parts)} for {current_origin}')
+        logger.info('Cached %s for %s', ' + '.join(parts), current_origin)
 
 
 async def _restore_pending_profile_state_for_current_origin(service: BrowserService, driver: webdriver.Chrome) -> None:
@@ -4049,7 +4078,7 @@ async def _restore_pending_profile_state_for_current_origin(service: BrowserServ
     service.state.restored_origins.add(current_origin)
 
     if indexeddb_count > 0:
-        logger.info(f'Restored {indexeddb_count} IndexedDB databases for {current_origin}')
+        logger.info('Restored %s IndexedDB databases for %s', indexeddb_count, current_origin)
 
 
 # -- Profile State Import Helpers ----------------------------------------------

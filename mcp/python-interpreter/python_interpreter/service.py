@@ -198,7 +198,7 @@ class PythonInterpreterService:
         Returns:
             Plain string output (stdout + stderr + result + truncation notice)
         """
-        logger.info(f"Executing in '{interpreter}' ({len(code)} chars)")
+        logger.info("Executing in '%s' (%s chars)", interpreter, len(code))
 
         # Auto-start if not running (with per-interpreter lock to prevent races)
         if not await asyncio.to_thread(self.state.interpreter_manager.is_running, interpreter):
@@ -214,7 +214,7 @@ class PythonInterpreterService:
             # Handle auto-install for builtin
             if response.error_type == 'ModuleNotFoundError' and response.module_name and interpreter == 'builtin':
                 if attempt < max_attempts - 1:
-                    logger.info(f"Auto-installing '{response.module_name}'")
+                    logger.info("Auto-installing '%s'", response.module_name)
                     install_msg = await asyncio.to_thread(_install_package, response.module_name)
                     logger.info(install_msg)
                     continue
@@ -233,7 +233,7 @@ class PythonInterpreterService:
                 file_path = self.state.output_dir / f'output_{timestamp}.txt'
                 file_path.write_text(output, encoding='utf-8')
                 separator = '=' * 50
-                logger.warning(f'Output truncated: {len(output)} chars')
+                logger.warning('Output truncated: %s chars', len(output))
                 return f'{output[:CHARACTER_LIMIT]}\n\n{separator}\n# OUTPUT TRUNCATED\n# Original size: {len(output):,} chars\n# Full output: {file_path}\n{separator}'
 
             return output
@@ -257,7 +257,7 @@ class PythonInterpreterService:
         if name == 'builtin':
             raise ValueError("Cannot register 'builtin' — it uses the server's Python automatically")
 
-        logger.info(f"Registering interpreter '{name}' ({python_path})")
+        logger.info("Registering interpreter '%s' (%s)", name, python_path)
 
         saved_config = SavedInterpreterConfig(
             python_path=str(python_path),
@@ -267,7 +267,7 @@ class PythonInterpreterService:
             description=description,
         )
         self.state.interpreter_registry.save_interpreter(name, saved_config)
-        logger.info(f"Saved interpreter '{name}' to registry")
+        logger.info("Saved interpreter '%s' to registry", name)
 
         # Single atomic call — avoids TOCTOU race between is_running and get_interpreters
         running = await asyncio.to_thread(self.state.interpreter_manager.get_interpreters)
@@ -307,7 +307,7 @@ class PythonInterpreterService:
         Stopped interpreters auto-restart on next execute() call.
         If remove=True, also deletes the saved config permanently.
         """
-        logger.info(f"Stopping interpreter '{name}'")
+        logger.info("Stopping interpreter '%s'", name)
         await asyncio.to_thread(self.state.interpreter_manager.stop_interpreter, name)
         self._interpreter_sources.pop(name, None)
 
@@ -490,7 +490,7 @@ class PythonInterpreterService:
                             f'or list_interpreters to see available options.',
                         )
 
-        logger.info(f"Auto-starting '{name}' ({source}, {config.python_path})")
+        logger.info("Auto-starting '%s' (%s, %s)", name, source, config.python_path)
         await asyncio.to_thread(self.state.interpreter_manager.add_interpreter, config)
         self._interpreter_sources[name] = source
 
