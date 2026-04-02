@@ -396,7 +396,7 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="stat"><div class="stat-label">Cache Hits</div><div class="stat-value">${p.embed_cache_hits.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Cache Misses</div><div class="stat-value">${p.embed_cache_misses.toLocaleString()}</div></div>
                     <div class="stat"><div class="stat-label">Errored</div><div class="stat-value">${p.files_errored}</div></div>
-                    <div class="stat"><div class="stat-label">429 Errors</div><div class="stat-value">${p.errors_429}</div></div>
+                    ${Object.entries(p.transient_errors || {}).map(([k, v]) => `<div class="stat"><div class="stat-label">${k}</div><div class="stat-value">${v}</div></div>`).join('')}
                     <div class="stat"><div class="stat-label">Redis HWM</div><div class="stat-value">${p.redis_hwm_total || 0}</div></div>
                     <div class="stat"><div class="stat-label">Loop Lag HWM</div><div class="stat-value">${(p.event_loop_lag_hwm_ms || 0).toFixed(1)} ms</div></div>
                     <div class="stat"><div class="stat-label">RSS HWM</div><div class="stat-value">${(p.rss_hwm_mb || 0).toFixed(0)} MB</div></div>

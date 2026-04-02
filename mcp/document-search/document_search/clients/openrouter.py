@@ -16,7 +16,7 @@ import base64
 import json
 import logging
 import time
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
@@ -31,6 +31,7 @@ from cc_lib.types import JsonObject
 from numpy.typing import NDArray
 
 from document_search.clients import _retry
+from document_search.clients._retry.openrouter import OpenRouterTransientErrorCategory
 from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterUnexpectedResponse
 from document_search.schemas.embeddings import EmbeddingVector, TaskIntent
 
@@ -131,7 +132,7 @@ class OpenRouterClient:
 
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._tracker = ConcurrencyTracker('OPENROUTER')
-        self.errors_429 = 0
+        self.transient_errors: Counter[OpenRouterTransientErrorCategory] = Counter()
 
     @_retry.openrouter_breaker
     @tenacity.retry(
@@ -343,6 +344,7 @@ def _parse_embedding_response(
             error_type=result.error.type,
             status_code=status_code,
             model=model,
+            metadata=result.error.metadata,
         )
 
     return result
@@ -369,6 +371,7 @@ def _parse_models_response(body: Mapping[str, Any], *, status_code: int, model: 
             error_type=result.error.type,
             status_code=status_code,
             model=model,
+            metadata=result.error.metadata,
         )
 
     return result
