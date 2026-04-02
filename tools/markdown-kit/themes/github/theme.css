@@ -1,0 +1,706 @@
+/*
+ * Adapted from Typora's GitHub theme for md-to-pdf (headless Chromium)
+ * Original: ~/Library/Application Support/abnerworks.Typora/themes/github.css
+ *
+ * Changes from original:
+ *   - @include-when-export removed (fonts loaded from local .woff2 files, no CDN needed)
+ *   - #write selectors → body (Typora's content wrapper → standard)
+ *   - .md-fences → pre, pre > code (Typora code blocks → standard)
+ *   - Task list selectors → li:has(> input[type="checkbox"]) for marked v15
+ *   - Stripped editor-only selectors (sidebar, focus mode, quick-open, etc.)
+ *   - Added base.css print rules and foundational styles
+ */
+
+:root {
+    --bg-color: #ffffff;
+    --text-color: #333333;
+    --select-text-bg-color: #B5D6FC;
+    --monospace: "Lucida Console", Consolas, "Courier", monospace;
+}
+
+/* Local font faces — no @import from Google CDN needed since .woff2 files
+ * are bundled alongside this CSS. Avoids 200-500ms network latency and
+ * enables offline operation. */
+@font-face {
+    font-family: 'Open Sans';
+    font-style: normal;
+    font-weight: normal;
+    src: local('Open Sans Regular'), local('OpenSans-Regular'), url('./open-sans-v17-latin-ext_latin-regular.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Open Sans';
+    font-style: italic;
+    font-weight: normal;
+    src: local('Open Sans Italic'), local('OpenSans-Italic'), url('./open-sans-v17-latin-ext_latin-italic.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Open Sans';
+    font-style: normal;
+    font-weight: bold;
+    src: local('Open Sans Bold'), local('OpenSans-Bold'), url('./open-sans-v17-latin-ext_latin-700.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Open Sans';
+    font-style: italic;
+    font-weight: bold;
+    src: local('Open Sans Bold Italic'), local('OpenSans-BoldItalic'), url('./open-sans-v17-latin-ext_latin-700italic.woff2') format('woff2');
+}
+
+/* === BASE STYLES (from Typora base.css) === */
+
+html {
+    font-size: 16px;
+    background-color: #fff;
+    color: #333;
+    -webkit-font-smoothing: antialiased;
+}
+
+body {
+    font-family: "Open Sans", "Clear Sans", "Helvetica Neue", Helvetica, Arial, 'Segoe UI Emoji', 'SF Pro', sans-serif;
+    color: rgb(51, 51, 51);
+    line-height: 1.6;
+    max-width: 1024px;
+    margin: 0 auto;
+    padding: 30px;
+    padding-bottom: 100px;
+    word-break: normal;
+    word-wrap: break-word;
+}
+
+img {
+    max-width: 100%;
+    vertical-align: middle;
+}
+
+*, *:after, *:before {
+    box-sizing: border-box;
+}
+
+/* === LINKS === */
+
+a {
+    color: #4183C4;
+    cursor: pointer;
+}
+
+a:active, a:hover {
+    outline: 0;
+}
+
+a.url {
+    word-break: break-all;
+}
+
+kbd {
+    display: inline-block;
+    padding: 3px 5px;
+    font-size: 0.85em;
+    color: #444d56;
+    background-color: #fafbfc;
+    border: 1px solid #d1d5da;
+    border-bottom-color: #c6cbd1;
+    border-radius: 3px;
+    box-shadow: inset 0 -1px 0 #c6cbd1;
+    font-family: inherit;
+}
+
+mark {
+    background-color: #fff8c5;
+    padding: 0.1em 0.3em;
+    border-radius: 2px;
+}
+
+/* === HEADINGS === */
+
+h1, h2, h3, h4, h5, h6 {
+    position: relative;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    font-weight: bold;
+    line-height: 1.4;
+    page-break-after: avoid;
+    break-after: avoid-page;
+    page-break-inside: avoid;
+    orphans: 4;
+    white-space: pre-wrap;
+}
+
+h1 tt, h1 code,
+h2 tt, h2 code,
+h3 tt, h3 code,
+h4 tt, h4 code,
+h5 tt, h5 code,
+h6 tt, h6 code {
+    font-size: inherit;
+}
+
+h1 {
+    font-size: 2.25em;
+    line-height: 1.2;
+    border-bottom: 1px solid #eee;
+}
+
+h2 {
+    font-size: 1.75em;
+    line-height: 1.225;
+    border-bottom: 1px solid #eee;
+}
+
+h3 {
+    font-size: 1.5em;
+    line-height: 1.43;
+}
+
+h4 {
+    font-size: 1.25em;
+}
+
+h5 {
+    font-size: 1em;
+}
+
+h6 {
+    font-size: 1em;
+    color: #777;
+}
+
+/* === BLOCK ELEMENTS === */
+
+p, blockquote, ul, ol, dl, table {
+    margin: 0.8em 0;
+}
+
+p {
+    line-height: inherit;
+    orphans: 4;
+}
+
+li > ol, li > ul {
+    margin: 0 0;
+}
+
+hr {
+    height: 2px;
+    padding: 0;
+    margin: 16px 0;
+    background-color: #e7e7e7;
+    border: 0 none;
+    overflow: hidden;
+    box-sizing: content-box;
+}
+
+/* === LISTS === */
+
+ul, ol {
+    padding-left: 30px;
+}
+
+ul:first-child, ol:first-child {
+    margin-top: 0;
+}
+
+ul:last-child, ol:last-child {
+    margin-bottom: 0;
+}
+
+li {
+    margin: 0;
+    position: relative;
+}
+
+li p {
+    margin: 0.5rem 0;
+    orphans: 1;
+}
+
+li div {
+    padding-top: 0;
+}
+
+li > figure:last-child {
+    margin-bottom: 0.5rem;
+}
+
+/* Definition list styling */
+dt { font-weight: bold; margin-top: 0.5em; }
+dd { margin-left: 2em; margin-bottom: 0.5em; }
+
+/* Nested list bullet progression to match Typora */
+ul ul { list-style-type: circle; }
+ul ul ul { list-style-type: square; }
+
+/* === BLOCKQUOTES === */
+
+blockquote {
+    border-left: 4px solid #dfe2e5;
+    padding: 0 15px;
+    color: #777777;
+    margin: 1rem 0;
+}
+
+blockquote blockquote {
+    padding-right: 0;
+}
+
+blockquote > :last-child {
+    margin-bottom: 0;
+}
+
+blockquote > :first-child {
+    margin-top: 0;
+}
+
+/* === TABLES === */
+
+table {
+    padding: 0;
+    word-break: initial;
+    border-collapse: collapse;
+    border-spacing: 0;
+    width: 100%;
+    overflow: auto;
+    page-break-inside: auto;
+    text-align: left;
+}
+
+table tr {
+    border: 1px solid #dfe2e5;
+    margin: 0;
+    padding: 0;
+    page-break-inside: avoid;
+    page-break-after: auto;
+}
+
+table tr:nth-child(2n), thead {
+    background-color: #f8f8f8;
+}
+
+thead {
+    display: table-header-group;
+}
+
+table th {
+    font-weight: bold;
+    border: 1px solid #dfe2e5;
+    border-bottom: 0;
+    margin: 0;
+    padding: 6px 13px;
+}
+
+table td {
+    border: 1px solid #dfe2e5;
+    margin: 0;
+    padding: 6px 13px;
+}
+
+table th:first-child, table td:first-child {
+    margin-top: 0;
+}
+
+table th:last-child, table td:last-child {
+    margin-bottom: 0;
+}
+
+figure {
+    overflow-x: auto;
+    margin: 0;
+    max-width: 100%;
+    padding: 0;
+    margin-top: 1.2em;
+    margin-bottom: 1.2em;
+}
+
+figure > table {
+    margin: 0;
+}
+
+/* === CODE === */
+
+code, tt {
+    border: 1px solid #e7eaed;
+    background-color: #f3f4f4;
+    border-radius: 3px;
+    padding: 0 2px 0 2px;
+    font-size: 0.9em;
+    font-family: var(--monospace);
+}
+
+/* Code blocks — map .md-fences to standard pre > code */
+pre {
+    margin-bottom: 15px;
+    margin-top: 15px;
+    padding: 8px 6px;
+    border: 1px solid #e7eaed;
+    background-color: #f8f8f8;
+    border-radius: 3px;
+    font-size: 0.9rem;
+    page-break-inside: avoid;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow: visible;
+    display: block;
+    text-align: left;
+    position: relative;
+}
+
+pre > code, pre > tt {
+    border: none;
+    background-color: transparent;
+    padding: 0;
+    font-size: inherit;
+    border-radius: 0;
+}
+
+/* === TASK LISTS === */
+
+/* marked v15 outputs bare <li><input type="checkbox"> with no classes.
+ * Use :has() to target the actual DOM structure (Chromium 105+). */
+li:has(> input[type="checkbox"]) {
+    position: relative;
+    list-style-type: none;
+}
+
+li > input[type="checkbox"] {
+    width: 1em;
+    height: 1em;
+    display: block;
+    -webkit-appearance: initial;
+    appearance: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin-left: -1.4em;
+    margin-top: calc(1em - 8px);
+    border: none;
+}
+
+li > input[type="checkbox"]:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Unchecked state: rounded square (GitHub style) */
+li > input[type="checkbox"]::before {
+    border: 1.5px solid #d1d5da;
+    border-radius: 3px;
+    width: 1.1em;
+    height: 1.1em;
+    background: #fff;
+    content: ' ';
+    display: block;
+}
+
+/* Checked state: filled blue square (GitHub style) */
+li > input[type="checkbox"]:checked::before {
+    background: #0969da;
+    border-color: #0969da;
+    display: inline-block;
+}
+
+/* Checkmark (hidden by default, visible when checked) */
+li > input[type="checkbox"]::after {
+    -webkit-transform: rotate(-45deg);
+    transform: rotate(-45deg);
+    position: absolute;
+    top: 0.25em;
+    left: 0.18em;
+    width: 0.7em;
+    height: 0.38em;
+    border: 2px solid #fff;
+    border-top: 0;
+    border-right: 0;
+    content: ' ';
+    opacity: 0;
+}
+
+li > input[type="checkbox"]:checked::after {
+    opacity: 1;
+}
+
+/* === CUSTOM CONTAINERS (:::type ... :::) === */
+
+.custom-container {
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+}
+
+.custom-container > :first-child { margin-top: 0; }
+.custom-container > :last-child { margin-bottom: 0; }
+
+.custom-container-title {
+    font-weight: bold;
+    font-size: 1em;
+    margin-bottom: 0.25em;
+}
+
+.custom-container.info { border-left-color: #2196F3; background-color: #e3f2fd; }
+.custom-container.info .custom-container-title { color: #1565C0; }
+.custom-container.success { border-left-color: #4CAF50; background-color: #e8f5e9; }
+.custom-container.success .custom-container-title { color: #2E7D32; }
+.custom-container.warning { border-left-color: #FF9800; background-color: #fff3e0; }
+.custom-container.warning .custom-container-title { color: #E65100; }
+.custom-container.danger { border-left-color: #F44336; background-color: #ffebee; }
+.custom-container.danger .custom-container-title { color: #C62828; }
+.custom-container.tip { border-left-color: #009688; background-color: #e0f2f1; }
+.custom-container.tip .custom-container-title { color: #00695C; }
+
+/* === YAML FRONT MATTER === */
+
+pre.front-matter, pre.metadata {
+    padding: 1rem;
+    font-size: 85%;
+    line-height: 1.45;
+    background-color: #f7f7f7;
+    border: 0;
+    border-radius: 3px;
+    color: #777777;
+    margin-top: 0 !important;
+}
+
+/* Render mode: styled metadata header */
+.front-matter-header {
+    border-bottom: 1px solid #eee;
+    padding-bottom: 1em;
+    margin-bottom: 2em;
+    font-size: 0.95em;
+    line-height: 1.6;
+}
+
+.front-matter-header dl {
+    margin: 0;
+}
+
+.front-matter-header .front-matter-field {
+    margin: 0.2em 0;
+}
+
+.front-matter-header dt {
+    font-weight: bold;
+    display: inline;
+    color: #333;
+}
+
+.front-matter-header dt::after {
+    content: ':';
+}
+
+.front-matter-header dd {
+    display: inline;
+    margin-left: 0.5em;
+    color: #586069;
+}
+
+/* Raw mode: YAML code block with label */
+.front-matter-raw {
+    margin-bottom: 2em;
+}
+
+.front-matter-raw .front-matter-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #959da5;
+    margin-bottom: 0.25em;
+}
+
+.front-matter-raw pre {
+    margin-top: 0;
+}
+
+/* === IMAGES === */
+
+p > img:only-child {
+    display: block;
+    margin: auto;
+}
+
+/* === FOOTNOTES === */
+
+.footnotes {
+    margin-top: 2em;
+    font-size: 0.9em;
+    color: #586069;
+}
+
+.footnotes h2.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.footnotes ol {
+    padding-left: 1.5em;
+}
+
+.footnotes li {
+    margin: 0.3em 0;
+    line-height: 1.6;
+}
+
+.footnotes li p {
+    margin: 0.3em 0;
+}
+
+/* Footnote back-reference arrow */
+.footnotes a[data-footnote-backref] {
+    text-decoration: none;
+    font-size: 0.85em;
+    margin-left: 0.25em;
+}
+
+/* Footnote reference superscript in body text */
+sup a[data-footnote-ref] {
+    text-decoration: none;
+    color: #4183C4;
+    font-weight: bold;
+}
+
+/* Footnote divider */
+hr[data-footnotes] {
+    border: 0;
+    border-top: 1px solid #e7e7e7;
+    margin: 2em 0 1em;
+}
+
+/* === GFM ALERTS (GitHub Admonitions) === */
+
+.markdown-alert {
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    border-radius: 6px;
+}
+
+.markdown-alert > :first-child {
+    margin-top: 0;
+}
+
+.markdown-alert > :last-child {
+    margin-bottom: 0;
+}
+
+.markdown-alert-title {
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    font-size: 0.95em;
+    margin-bottom: 0.25em;
+}
+
+.markdown-alert-title svg {
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+/* NOTE — blue */
+.markdown-alert-note {
+    border-left-color: #0969da;
+    background-color: #ddf4ff;
+}
+
+.markdown-alert-note .markdown-alert-title {
+    color: #0969da;
+}
+
+.markdown-alert-note .markdown-alert-title svg {
+    fill: #0969da;
+}
+
+/* TIP — green */
+.markdown-alert-tip {
+    border-left-color: #1a7f37;
+    background-color: #dafbe1;
+}
+
+.markdown-alert-tip .markdown-alert-title {
+    color: #1a7f37;
+}
+
+.markdown-alert-tip .markdown-alert-title svg {
+    fill: #1a7f37;
+}
+
+/* WARNING — yellow/orange */
+.markdown-alert-warning {
+    border-left-color: #9a6700;
+    background-color: #fff8c5;
+}
+
+.markdown-alert-warning .markdown-alert-title {
+    color: #9a6700;
+}
+
+.markdown-alert-warning .markdown-alert-title svg {
+    fill: #9a6700;
+}
+
+/* CAUTION — red */
+.markdown-alert-caution {
+    border-left-color: #cf222e;
+    background-color: #ffebe9;
+}
+
+.markdown-alert-caution .markdown-alert-title {
+    color: #cf222e;
+}
+
+.markdown-alert-caution .markdown-alert-title svg {
+    fill: #cf222e;
+}
+
+/* IMPORTANT — purple */
+.markdown-alert-important {
+    border-left-color: #8250df;
+    background-color: #fbefff;
+}
+
+.markdown-alert-important .markdown-alert-title {
+    color: #8250df;
+}
+
+.markdown-alert-important .markdown-alert-title svg {
+    fill: #8250df;
+}
+
+/* === PRINT / PDF === */
+
+@media print {
+    html {
+        font-size: 13px;
+    }
+
+    body {
+        padding: 30px;
+    }
+
+    pre {
+        page-break-inside: avoid;
+        word-wrap: break-word;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        page-break-after: avoid;
+        page-break-inside: avoid;
+    }
+
+    table {
+        page-break-inside: auto;
+    }
+
+    thead, tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+    }
+
+    p {
+        orphans: 4;
+    }
+}

@@ -1,0 +1,583 @@
+/*
+ * Adapted from Typora's Whitey theme for md-to-pdf / markdown-kit.js
+ * Original: ~/Library/Application Support/abnerworks.Typora/themes/whitey.css
+ *
+ * Changes from original:
+ *   - #write selectors → body
+ *   - .md-fences → pre, pre > code
+ *   - .md-task-list-item → li:has(> input[type="checkbox"]) with custom checkbox styling
+ *   - Stripped editor-only selectors (sidebar, source mode, CodeMirror, etc.)
+ *   - @media screen breakpoints → hardcoded sizes for fixed PDF viewport
+ *   - No @font-face needed — Whitey uses system fonts only (Vollkorn, Palatino, Times)
+ *   - Added: image centering, definition lists, nested list bullets, kbd, mark,
+ *     footnotes, GFM alerts, front matter blocks
+ */
+
+/* === BASE === */
+
+html {
+    font-size: 19px;
+    -webkit-font-smoothing: antialiased;
+}
+
+html, body {
+    margin: auto;
+    background: #fefefe;
+}
+
+body {
+    font-family: "Vollkorn", Palatino, Times;
+    color: #333;
+    line-height: 1.53;
+    text-align: justify;
+    max-width: 960px;
+    margin: 0 auto;
+    margin-bottom: 2em;
+    padding-top: 40px;
+    padding-left: 20px;
+    padding-right: 20px;
+    box-sizing: border-box;
+}
+
+img {
+    width: auto;
+    max-width: 100%;
+}
+
+/* Center standalone images (match Typora base.css) */
+p > img:only-child {
+    display: block;
+    margin: auto;
+}
+
+/* Definition list styling */
+dt { font-weight: bold; margin-top: 0.5em; }
+dd { margin-left: 2em; margin-bottom: 0.5em; }
+
+/* === TYPOGRAPHY / HEADINGS === */
+
+h1, h2, h3 {
+    text-align: center;
+}
+
+h1 {
+    font-size: 3em;
+    margin-top: 1.6em;
+    font-weight: normal;
+}
+
+h2 {
+    font-size: 1.8em;
+    margin-top: 2em;
+    font-weight: normal;
+}
+
+h2:after {
+    border-bottom: 1px solid #2f2f2f;
+    content: '';
+    width: 100px;
+    display: block;
+    margin: 0 auto;
+    height: 1px;
+}
+
+h3 {
+    font-size: 1.4em;
+    font-weight: normal;
+    font-style: italic;
+    margin-top: 3em;
+}
+
+h4 {
+    font-size: 1.2em;
+    margin-top: 1.5em;
+}
+
+h5 {
+    font-size: 1.1em;
+    margin-top: 1.2em;
+}
+
+h6 {
+    font-size: 1em;
+    color: #777;
+    margin-top: 1.2em;
+}
+
+h1 + h2, h2 + h3 {
+    margin-top: 0.83em;
+}
+
+/* === PARAGRAPHS === */
+
+p {
+    margin-top: 0;
+    -webkit-hyphens: auto;
+    -moz-hyphens: auto;
+    hyphens: auto;
+}
+
+/* === LINKS === */
+
+a {
+    color: #2484c1;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+a img {
+    border: none;
+}
+
+h1 a, h1 a:hover {
+    color: #333;
+    text-decoration: none;
+}
+
+kbd {
+    display: inline-block;
+    padding: 3px 5px;
+    font-size: 0.85em;
+    color: #333;
+    background-color: #f7f7f7;
+    border: 1px solid #ccc;
+    border-bottom-color: #bbb;
+    border-radius: 3px;
+    box-shadow: inset 0 -1px 0 #bbb;
+    font-family: "Consolas", "Menlo", "Monaco", monospace;
+}
+
+mark {
+    background-color: #fff3cd;
+    padding: 0.1em 0.3em;
+    border-radius: 2px;
+}
+
+/* === LISTS === */
+
+ul {
+    list-style: square;
+    padding-left: 1.2em;
+}
+
+ol {
+    padding-left: 1.2em;
+}
+
+/* Nested list bullet progression to match Typora */
+ul ul { list-style-type: disc; }
+ul ul ul { list-style-type: circle; }
+
+/* === BLOCKQUOTES === */
+
+blockquote {
+    margin-left: 1em;
+    padding-left: 1em;
+    border-left: 1px solid #ddd;
+}
+
+/* === CODE === */
+
+code, pre {
+    font-family: "Consolas", "Menlo", "Monaco", monospace, serif;
+    font-size: .9em;
+    background: white;
+}
+
+/* Code blocks — mapped from .md-fences */
+pre {
+    margin-left: 1em;
+    padding: 6px 1em 8px 1em;
+    border: 1px solid #ddd;
+    margin-bottom: 1.5em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    page-break-inside: avoid;
+}
+
+pre > code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+}
+
+/* === HORIZONTAL RULES === */
+
+hr {
+    color: #ddd;
+    height: 1px;
+    margin: 2em 0;
+    border-top: solid 1px #ddd;
+    border-bottom: none;
+    border-left: 0;
+    border-right: 0;
+}
+
+/* === TABLES === */
+
+table {
+    margin-bottom: 1.333333rem;
+    border-collapse: collapse;
+    width: 100%;
+    page-break-inside: auto;
+}
+
+table th, table td {
+    padding: 8px;
+    line-height: 1.333333rem;
+    vertical-align: top;
+    border-top: 1px solid #ddd;
+}
+
+table th {
+    font-weight: bold;
+}
+
+table thead th {
+    vertical-align: bottom;
+}
+
+table thead:first-child tr:first-child th,
+table thead:first-child tr:first-child td {
+    border-top: 0;
+}
+
+table tbody + tbody {
+    border-top: 2px solid #ddd;
+}
+
+/* === TASK LISTS === */
+
+/* marked v15 outputs bare <li><input type="checkbox"> with no classes.
+ * Use :has() to target the actual DOM structure (Chromium 105+). */
+li:has(> input[type="checkbox"]) {
+    position: relative;
+    list-style-type: none;
+    padding-left: 1.6rem;
+}
+
+li > input[type="checkbox"] {
+    width: 1.33333333rem;
+    height: 1.6rem;
+    display: block;
+    -webkit-appearance: initial;
+    appearance: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin-left: -0.2em;
+    margin-top: calc(1rem - 10px);
+    border: none;
+}
+
+li > input[type="checkbox"]:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Unchecked state: checkmark character, muted */
+li > input[type="checkbox"]::before {
+    content: '\2713';
+    display: inline-block;
+    width: 1.33333333rem;
+    height: 1.6rem;
+    vertical-align: middle;
+    text-align: center;
+    color: #ddd;
+    background-color: #fefefe;
+    font-size: 1.1em;
+}
+
+/* Checked state: checkmark in text color */
+li > input[type="checkbox"]:checked::before {
+    color: inherit;
+}
+
+/* === ABBREVIATIONS === */
+
+abbr {
+    border-bottom: 1px black dotted;
+    cursor: help;
+}
+
+/* === CUSTOM CONTAINERS (:::type ... :::) === */
+
+.custom-container {
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+}
+
+.custom-container > :first-child { margin-top: 0; }
+.custom-container > :last-child { margin-bottom: 0; }
+
+.custom-container-title {
+    font-weight: bold;
+    font-family: 'Vollkorn', Palatino, Times, serif;
+    font-size: 1em;
+    margin-bottom: 0.25em;
+}
+
+.custom-container.info { border-left-color: #2196F3; background-color: #e3f2fd; }
+.custom-container.info .custom-container-title { color: #1565C0; }
+.custom-container.success { border-left-color: #4CAF50; background-color: #e8f5e9; }
+.custom-container.success .custom-container-title { color: #2E7D32; }
+.custom-container.warning { border-left-color: #FF9800; background-color: #fff3e0; }
+.custom-container.warning .custom-container-title { color: #E65100; }
+.custom-container.danger { border-left-color: #F44336; background-color: #ffebee; }
+.custom-container.danger .custom-container-title { color: #C62828; }
+.custom-container.tip { border-left-color: #009688; background-color: #e0f2f1; }
+.custom-container.tip .custom-container-title { color: #00695C; }
+
+/* === FRONT MATTER === */
+
+/* Render mode: styled metadata header */
+.front-matter-header {
+    border-bottom: 1px solid #2f2f2f;
+    padding-bottom: 1em;
+    margin-bottom: 2em;
+    font-size: 0.95em;
+    line-height: 1.8;
+}
+
+.front-matter-header dl {
+    margin: 0;
+}
+
+.front-matter-header .front-matter-field {
+    margin: 0.2em 0;
+}
+
+.front-matter-header dt {
+    font-weight: bold;
+    display: inline;
+    color: #333;
+}
+
+.front-matter-header dt::after {
+    content: ':';
+}
+
+.front-matter-header dd {
+    display: inline;
+    margin-left: 0.5em;
+    color: #555;
+}
+
+/* Raw mode: YAML code block with label */
+.front-matter-raw {
+    margin-bottom: 2em;
+}
+
+.front-matter-raw .front-matter-label {
+    font-size: 0.85rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #999;
+    margin-bottom: 0.25em;
+}
+
+.front-matter-raw pre {
+    margin-top: 0;
+}
+
+/* === IMAGES === */
+
+p > img:only-child {
+    display: block;
+    margin: auto;
+}
+
+/* === FOOTNOTES === */
+
+.footnotes {
+    margin-top: 2em;
+    font-size: 0.9em;
+    color: #555;
+}
+
+.footnotes h2.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.footnotes ol {
+    padding-left: 1.5em;
+}
+
+.footnotes li {
+    margin: 0.4em 0;
+    line-height: 1.6;
+}
+
+.footnotes li p {
+    margin: 0.3em 0;
+}
+
+/* Footnote back-reference arrow */
+.footnotes a[data-footnote-backref] {
+    text-decoration: none;
+    font-size: 0.85em;
+    margin-left: 0.25em;
+}
+
+/* Footnote reference superscript in body text */
+sup a[data-footnote-ref] {
+    text-decoration: none;
+    color: #2484c1;
+    font-weight: bold;
+}
+
+/* Footnote divider */
+hr[data-footnotes] {
+    border: 0;
+    border-top: 1px solid #ddd;
+    margin: 2em 0 1em;
+}
+
+/* === GFM ALERTS (GitHub Admonitions) === */
+
+.markdown-alert {
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+}
+
+.markdown-alert > :first-child {
+    margin-top: 0;
+}
+
+.markdown-alert > :last-child {
+    margin-bottom: 0;
+}
+
+.markdown-alert-title {
+    display: flex;
+    align-items: center;
+    font-weight: bold;
+    font-size: 0.95em;
+    margin-bottom: 0.25em;
+}
+
+.markdown-alert-title svg {
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+/* NOTE — blue */
+.markdown-alert-note {
+    border-left-color: #0969da;
+    background-color: #ddf4ff;
+}
+
+.markdown-alert-note .markdown-alert-title {
+    color: #0969da;
+}
+
+.markdown-alert-note .markdown-alert-title svg {
+    fill: #0969da;
+}
+
+/* TIP — green */
+.markdown-alert-tip {
+    border-left-color: #1a7f37;
+    background-color: #dafbe1;
+}
+
+.markdown-alert-tip .markdown-alert-title {
+    color: #1a7f37;
+}
+
+.markdown-alert-tip .markdown-alert-title svg {
+    fill: #1a7f37;
+}
+
+/* WARNING — yellow/orange */
+.markdown-alert-warning {
+    border-left-color: #9a6700;
+    background-color: #fff8c5;
+}
+
+.markdown-alert-warning .markdown-alert-title {
+    color: #9a6700;
+}
+
+.markdown-alert-warning .markdown-alert-title svg {
+    fill: #9a6700;
+}
+
+/* CAUTION — red */
+.markdown-alert-caution {
+    border-left-color: #cf222e;
+    background-color: #ffebe9;
+}
+
+.markdown-alert-caution .markdown-alert-title {
+    color: #cf222e;
+}
+
+.markdown-alert-caution .markdown-alert-title svg {
+    fill: #cf222e;
+}
+
+/* IMPORTANT — purple */
+.markdown-alert-important {
+    border-left-color: #8250df;
+    background-color: #fbefff;
+}
+
+.markdown-alert-important .markdown-alert-title {
+    color: #8250df;
+}
+
+.markdown-alert-important .markdown-alert-title svg {
+    fill: #8250df;
+}
+
+/* === PRINT / PDF === */
+
+@media print {
+    html {
+        font-size: 13px;
+    }
+
+    ol {
+        padding-left: 40px;
+    }
+
+    pre {
+        page-break-inside: avoid;
+        word-wrap: break-word;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        page-break-after: avoid;
+        page-break-inside: avoid;
+    }
+
+    table {
+        page-break-inside: auto;
+    }
+
+    thead, tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+    }
+
+    p {
+        orphans: 4;
+    }
+}

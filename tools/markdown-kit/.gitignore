@@ -1,0 +1,10 @@
+# Compiled Swift binaries (recompile from .swift source with xcrun swiftc)
+webkit-pdf
+add-links
+verify-links
+
+# Generated PDFs (regenerate with node markdown-kit.js)
+*.pdf
+
+# npm dependency cache (auto-installed on first run)
+node_modules/
