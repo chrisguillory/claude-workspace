@@ -101,7 +101,18 @@ import { createServer } from 'node:http';
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
+// Preprocess argv: --launch accepts an optional browser name (string flag).
+// Node's parseArgs requires a value for string types, so inject 'default'
+// when --launch is bare (followed by another flag or is the last arg).
+const rawArgs = process.argv.slice(2);
+for (let i = 0; i < rawArgs.length; i++) {
+  if (rawArgs[i] === '--launch' && (i + 1 >= rawArgs.length || rawArgs[i + 1].startsWith('-'))) {
+    rawArgs.splice(i + 1, 0, 'default');
+  }
+}
+
 const { values: opts, positionals } = parseArgs({
+  args: rawArgs,
   allowPositionals: true,
   allowNegative: true,
   options: {
@@ -120,6 +131,9 @@ const { values: opts, positionals } = parseArgs({
     output:     { type: 'string', short: 'o' },
     mobile:     { type: 'boolean', short: 'm', default: false },
     'rich-highlighting': { type: 'boolean', default: false },
+    'toc-nav':  { type: 'string', default: '' },
+    'macos-spoken-content': { type: 'boolean', default: false },
+    launch:     { type: 'string' },
     help:       { type: 'boolean', short: 'h', default: false },
   },
 });
@@ -143,6 +157,9 @@ Options:
   --html                    Output self-contained HTML instead of PDF
   -m, --mobile              Optimize for phone reading (430px, smaller fonts)
   --rich-highlighting       Color built-ins and types distinctly (print, Optional, List, etc.)
+  --toc-nav <features>      TOC navigation: inject, backlinks, smooth, float, all (comma-separated)
+  --macos-spoken-content    TTS-safe code blocks (fullwidth angle brackets for macOS Spoken Content)
+  --launch [browser]        Open browser in serve mode (safari, chrome, chromium, firefox; default: system)
   --help, -h                Show this help
 
 Front matter modes:
@@ -187,6 +204,18 @@ if (engine !== 'chromium' && engine !== 'webkit') {
 const frontMatterMode = opts['front-matter'];
 if (!['strip', 'render', 'raw'].includes(frontMatterMode)) {
   console.error(`Error: --front-matter must be 'strip', 'render', or 'raw', got '${frontMatterMode}'`);
+  process.exit(1);
+}
+
+// Parse --toc-nav features into a Set
+const tocNavFeatures = new Set(
+  opts['toc-nav'] === 'all' ? ['inject', 'backlinks', 'smooth', 'float']
+    : opts['toc-nav'].split(',').map(s => s.trim()).filter(Boolean)
+);
+
+// --launch requires --serve
+if (opts.launch !== undefined && !opts.serve) {
+  console.error('Error: --launch requires --serve.');
   process.exit(1);
 }
 
@@ -426,9 +455,9 @@ function generateTocHtml(headings) {
   if (!headings || headings.length === 0) return '';
   const items = headings.map(({ id, raw, level }) => {
     const indent = (level - 1) * 20;
-    return `<li style="margin-left:${indent}px"><a href="#${id}">${raw}</a></li>`;
+    return `<li id="toc-${id}" style="margin-left:${indent}px"><a href="#${id}">${raw}</a></li>`;
   });
-  return `<div class="md-toc"><ul>\n${items.join('\n')}\n</ul></div>`;
+  return `<div class="md-toc" id="md-toc-top"><ul>\n${items.join('\n')}\n</ul></div>`;
 }
 
 function generateFrontMatterHtml(mode, data, yaml, hasFM) {
@@ -701,10 +730,39 @@ async function buildHtml({ forServe = false } = {}) {
   // Parse markdown to HTML
   const htmlBody = marked.parse(mdContent);
 
-  // TOC generation: replace [toc] placeholders
+  // TOC generation: replace [toc] placeholders and track presence
   let processedBody = htmlBody;
   const tocHtml = generateTocHtml(getHeadingList());
-  processedBody = processedBody.replace(/<p>\s*\[toc\]\s*<\/p>/gi, tocHtml);
+  let hasToc = false;
+  processedBody = processedBody.replace(/<p>\s*\[toc\]\s*<\/p>/gi, () => {
+    hasToc = true;
+    return tocHtml;
+  });
+
+  // --toc-nav inject: generate TOC if document doesn't have [toc]
+  if (!hasToc && tocNavFeatures.has('inject')) {
+    if (!tocHtml) {
+      console.error('Error: --toc-nav inject failed — document has no headings.');
+      process.exit(1);
+    }
+    processedBody = processedBody.replace(/(<h[1-6]\s)/i, tocHtml + '\n$1');
+    hasToc = true;
+  }
+
+  // Fail-fast: backlinks/float require a TOC
+  if (!hasToc && (tocNavFeatures.has('backlinks') || tocNavFeatures.has('float'))) {
+    console.error('Error: --toc-nav backlinks/float requires [toc] in document (or use inject). No TOC found.');
+    process.exit(1);
+  }
+
+  // --toc-nav backlinks: wrap heading text in links back to their TOC entry
+  if (hasToc && tocNavFeatures.has('backlinks')) {
+    processedBody = processedBody.replace(
+      /<(h[1-6])\s+id="([^"]+)">([\s\S]*?)<\/\1>/gi,
+      (match, tag, id, content) =>
+        `<${tag} id="${id}"><a class="heading-backlink" href="#toc-${id}">${content}</a></${tag}>`
+    );
+  }
 
   // ── Server-side diagram/chart rendering ────────────────────────────────────
   // Graphviz DOT and Vega-Lite code blocks are rendered to SVG server-side
@@ -768,6 +826,52 @@ async function buildHtml({ forServe = false } = {}) {
     );
   }
 
+  // --macos-spoken-content: replace angle brackets in code blocks with fullwidth Unicode
+  // to prevent macOS Spoken Content from stripping content between < and >
+  if (opts['macos-spoken-content']) {
+    // Skip diagram/chart languages — these are parsed by Mermaid/Graphviz/Vega-Lite, not displayed as text
+    const diagramLangs = /language-(?:mermaid|dot|graphviz|vega-lite|chart)/i;
+    resolvedBody = resolvedBody.replace(
+      /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/gi,
+      (match, attrs, inner) => {
+        if (diagramLangs.test(attrs)) return match; // leave diagram blocks untouched
+        let result = inner;
+        // Replace HTML entities with styled fullwidth chars
+        result = result.replace(/&lt;/g, '<span class="tts-bracket">\uFF1C</span>');
+        result = result.replace(/&gt;/g, '<span class="tts-bracket">\uFF1E</span>');
+        // sr-only pronunciation for comparison operators (space-delimited context)
+        result = result.replace(
+          / <span class="tts-bracket">\uFF1E<\/span> /g,
+          ' <span class="tts-bracket">\uFF1E</span><span class="sr-only"> greater than </span> '
+        );
+        result = result.replace(
+          / <span class="tts-bracket">\uFF1C<\/span> /g,
+          ' <span class="tts-bracket">\uFF1C</span><span class="sr-only"> less than </span> '
+        );
+        // sr-only pronunciation for arrow functions (=＞)
+        result = result.replace(
+          /=<span class="tts-bracket">\uFF1E<\/span>/g,
+          '=<span class="tts-bracket">\uFF1E</span><span class="sr-only"> arrow </span>'
+        );
+        return `<pre><code${attrs}>${result}</code></pre>`;
+      }
+    );
+
+    // Also process inline <code> elements (backtick code, not inside <pre>).
+    // Inline <code> from marked has no class attribute; fenced blocks have class="hljs ...".
+    // Fenced blocks are already processed above, so their &lt;/&gt; are gone — no double-processing.
+    resolvedBody = resolvedBody.replace(
+      /<code>([\s\S]*?)<\/code>/gi,
+      (match, inner) => {
+        if (!inner.includes('&lt;') && !inner.includes('&gt;')) return match;
+        let result = inner;
+        result = result.replace(/&lt;/g, '<span class="tts-bracket">\uFF1C</span>');
+        result = result.replace(/&gt;/g, '<span class="tts-bracket">\uFF1E</span>');
+        return `<code>${result}</code>`;
+      }
+    );
+  }
+
   // Extract title
   const titleMatch = mdContent.match(/^#\s+(.+)$/m);
   const rawTitle = (hasFM && fm.title)
@@ -784,6 +888,38 @@ async function buildHtml({ forServe = false } = {}) {
   const kCss = loadKatexCss(forServe);
 
   // Serve mode extras: client-side mermaid + SSE live-reload
+  // Floating "↑ TOC" button — serve + HTML export only (needs JS for IntersectionObserver)
+  const showFloat = hasToc && tocNavFeatures.has('float') && (forServe || opts.html);
+  const floatButtonHtml = showFloat
+    ? `<a id="back-to-toc-btn" href="#md-toc-top" aria-label="Back to Table of Contents">\u2191 TOC</a>`
+    : '';
+  const floatButtonScript = showFloat ? `
+  <script>
+    (function() {
+      var toc = document.getElementById('md-toc-top');
+      var btn = document.getElementById('back-to-toc-btn');
+      if (!toc || !btn) return;
+      new IntersectionObserver(function(entries) {
+        btn.classList.toggle('visible', !entries[0].isIntersecting);
+      }, { threshold: 0 }).observe(toc);
+    })();
+  </script>` : '';
+
+  // Copy handler: restore ASCII angle brackets and strip sr-only text on clipboard
+  // Document-level copy handler: restore ASCII angle brackets and strip sr-only text.
+  // Fires on any copy, not just code blocks, since inline <code> is also processed.
+  const spokenContentCopyScript = (opts['macos-spoken-content'] && (forServe || opts.html)) ? `
+  <script>
+    document.addEventListener('copy', function(e) {
+      var sel = window.getSelection().toString();
+      if (sel.indexOf('\uFF1C') === -1 && sel.indexOf('\uFF1E') === -1) return; // no fullwidth chars, don't interfere
+      sel = sel.replace(/\uFF1C/g, '<').replace(/\uFF1E/g, '>');
+      sel = sel.replace(/ (?:greater than|less than|arrow) /g, '');
+      e.clipboardData.setData('text/plain', sel);
+      e.preventDefault();
+    });
+  </script>` : '';
+
   const serveScripts = forServe ? `
   <script src="/mermaid.min.js"></script>
   <script>
@@ -834,6 +970,9 @@ async function buildHtml({ forServe = false } = {}) {
       max-width: 100%;
       height: auto;
     }
+    ${tocNavFeatures.has('smooth') ? `
+    /* Smooth scrolling for TOC navigation (--toc-nav smooth) */
+    html { scroll-behavior: smooth; }` : ''}
     ${forServe ? `
     /* Mobile responsive overrides for serve mode */
     @media (max-width: 767px) {
@@ -883,6 +1022,65 @@ async function buildHtml({ forServe = false } = {}) {
     }
     .md-toc a:hover {
       text-decoration: underline;
+    }
+    /* Heading back-links (--toc-nav backlinks) */
+    a.heading-backlink {
+      color: inherit;
+      text-decoration: none;
+    }
+    a.heading-backlink:hover::after {
+      content: ' \\2191';
+      font-size: 0.6em;
+      vertical-align: super;
+      opacity: 0.4;
+    }
+    /* TOC entry highlight on arrival via heading back-link */
+    .md-toc li:target {
+      animation: toc-flash 1.5s ease-out;
+    }
+    @keyframes toc-flash {
+      from { background-color: rgba(65, 131, 196, 0.25); }
+      to { background-color: transparent; }
+    }
+    /* Floating "↑ TOC" button (--toc-nav float) */
+    #back-to-toc-btn {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #4183c4;
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      z-index: 1000;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    #back-to-toc-btn.visible { opacity: 1; pointer-events: auto; }
+    #back-to-toc-btn:hover { background: #3572a5; text-decoration: none; color: #fff; }
+    @media print { #back-to-toc-btn { display: none !important; } }
+    /* macOS Spoken Content: fullwidth angle bracket sizing (--macos-spoken-content) */
+    .tts-bracket {
+      display: inline-block;
+      transform: scaleX(0.85);
+      margin-left: -0.15em;
+      margin-right: -0.15em;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
     /* Highlight (==text==) */
     mark {
@@ -934,8 +1132,11 @@ async function buildHtml({ forServe = false } = {}) {
 </head>
 <body>
 ${resolvedBody}
+${floatButtonHtml}
 </body>
 ${serveScripts}
+${floatButtonScript}
+${spokenContentCopyScript}
 </html>`;
 }
 
@@ -1690,9 +1891,26 @@ async function startServer() {
       if (localIp) {
         console.log(`  Network: http://${localIp}:${port}`);
       }
+      // Bonjour/mDNS hostname — any Apple device (or Linux with Avahi) on the same WiFi can resolve this
+      const hostname = require('os').hostname();
+      const bonjourName = hostname.endsWith('.local') ? hostname : hostname + '.local';
+      console.log(`  Bonjour: http://${bonjourName}:${port}`);
     } else {
       console.log('  Network: use --host 0.0.0.0 to expose');
     }
+    // Auto-launch browser if --launch was passed (undefined = not passed, any string = passed)
+    if (opts.launch !== undefined) {
+      const url = `http://localhost:${port}`;
+      const appMap = {
+        safari: 'Safari', chrome: 'Google Chrome',
+        chromium: 'Chromium', firefox: 'Firefox',
+      };
+      const app = appMap[opts.launch.toLowerCase()];
+      const cmd = app ? `open -a "${app}" "${url}"` : `open "${url}"`;
+      try { execSync(cmd, { stdio: 'ignore' }); }
+      catch { console.error(`Error: could not launch browser '${opts.launch}'.`); }
+    }
+
     console.log('Watching for changes... (Ctrl+C to stop)');
   });
 
