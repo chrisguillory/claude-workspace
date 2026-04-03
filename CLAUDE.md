@@ -303,6 +303,23 @@ PY
 
 ## Tooling & Workflow
 
+### Markdown Kit
+
+Render markdown documents as PDF or serve with live preview. Located at `tools/markdown-kit/markdown-kit.js`.
+
+```bash
+# Live preview (preferred — user clicks the localhost link)
+node tools/markdown-kit/markdown-kit.js document.md --serve --theme pixyll --front-matter render
+
+# Generate PDF
+node tools/markdown-kit/markdown-kit.js document.md --theme pixyll --front-matter render
+
+# Generate self-contained HTML
+node tools/markdown-kit/markdown-kit.js document.md --html --theme pixyll --front-matter render
+```
+
+User prefers the **pixyll** theme. Use `--front-matter render` for documents with YAML frontmatter. Dependencies auto-install on first run. When the user says "serve with markdown-kit", use `--serve` and report the localhost URL.
+
 ### Dependency Management
 
 Use `uv` CLI for all dependency operations. Never edit `pyproject.toml` directly for add/remove:
