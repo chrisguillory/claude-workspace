@@ -91,8 +91,8 @@
 //
 
 import { createRequire } from 'node:module';
-import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, watch as fsWatch } from 'node:fs';
+import { execSync, execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, copyFileSync, watch as fsWatch } from 'node:fs';
 import { resolve, dirname, basename, extname, join, relative } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -133,6 +133,12 @@ const { values: opts, positionals } = parseArgs({
     'rich-highlighting': { type: 'boolean', default: false },
     'toc-nav':  { type: 'string', default: '' },
     'macos-spoken-content': { type: 'boolean', default: false },
+    'embed-images': { type: 'boolean', default: false },
+    'copy-assets': { type: 'boolean', default: false },
+    'absolute-paths': { type: 'boolean', default: false },
+    'accept-broken-images': { type: 'boolean', default: false },
+    'secret-gist': { type: 'boolean', default: false },
+    'gist-id':  { type: 'string' },
     launch:     { type: 'string' },
     help:       { type: 'boolean', short: 'h', default: false },
   },
@@ -159,7 +165,13 @@ Options:
   --rich-highlighting       Color built-ins and types distinctly (print, Optional, List, etc.)
   --toc-nav <features>      TOC navigation: inject, backlinks, smooth, float, all (comma-separated)
   --macos-spoken-content    TTS-safe code blocks (fullwidth angle brackets for macOS Spoken Content)
-  --launch [browser]        Open browser in serve mode (safari, chrome, chromium, firefox; default: system)
+  --embed-images            Embed images as base64 data URIs (HTML only)
+  --copy-assets             Copy local images alongside output HTML
+  --absolute-paths          Rewrite image paths to absolute (local machine only)
+  --accept-broken-images    Proceed when local images won't resolve
+  --secret-gist             Upload HTML to secret GitHub gist (implies --html)
+  --gist-id <id|url>        Update existing gist instead of creating new
+  --launch [browser]        Open browser in serve/gist mode (safari, chrome, chromium, firefox)
   --help, -h                Show this help
 
 Front matter modes:
@@ -208,14 +220,92 @@ if (!['strip', 'render', 'raw'].includes(frontMatterMode)) {
 }
 
 // Parse --toc-nav features into a Set
+const validTocFeatures = new Set(['inject', 'backlinks', 'smooth', 'float']);
 const tocNavFeatures = new Set(
   opts['toc-nav'] === 'all' ? ['inject', 'backlinks', 'smooth', 'float']
     : opts['toc-nav'].split(',').map(s => s.trim()).filter(Boolean)
 );
+for (const f of tocNavFeatures) {
+  if (!validTocFeatures.has(f)) {
+    console.error(`Error: unknown --toc-nav feature '${f}'. Valid: inject, backlinks, smooth, float, all`);
+    process.exit(1);
+  }
+}
 
-// --launch requires --serve
-if (opts.launch !== undefined && !opts.serve) {
-  console.error('Error: --launch requires --serve.');
+// --secret-gist implies --html
+if (opts['secret-gist']) {
+  opts.html = true;
+}
+
+// --secret-gist and --serve are mutually exclusive
+if (opts['secret-gist'] && opts.serve) {
+  console.error('Error: --serve and --secret-gist are mutually exclusive.');
+  process.exit(1);
+}
+
+// --launch requires --serve or --secret-gist
+if (opts.launch !== undefined && !opts.serve && !opts['secret-gist']) {
+  console.error('Error: --launch requires --serve or --secret-gist.');
+  process.exit(1);
+}
+
+// --embed-images validation (serve check first for specificity)
+if (opts['embed-images'] && opts.serve) {
+  console.error('Error: --embed-images has no effect in serve mode (images served via /static/).');
+  process.exit(1);
+}
+if (opts['embed-images'] && !opts.html) {
+  console.error('Error: --embed-images only applies to HTML output. PDF embeds images via the browser engine. Use --html or --secret-gist.');
+  process.exit(1);
+}
+
+// Image resolution flags are mutually exclusive
+const imageFlags = ['embed-images', 'copy-assets', 'absolute-paths', 'accept-broken-images'].filter(f => opts[f]);
+if (imageFlags.length > 1) {
+  console.error(`Error: --${imageFlags.join(', --')} are mutually exclusive. Choose one.`);
+  process.exit(1);
+}
+
+// --copy-assets validation
+if (opts['copy-assets']) {
+  if (opts.serve) { console.error('Error: --copy-assets has no effect in serve mode.'); process.exit(1); }
+  if (opts['secret-gist']) { console.error('Error: --copy-assets cannot be used with --secret-gist. Use --embed-images.'); process.exit(1); }
+  if (!opts.html) { console.error('Error: --copy-assets only applies to HTML output.'); process.exit(1); }
+}
+
+// --absolute-paths validation
+if (opts['absolute-paths']) {
+  if (opts.serve) { console.error('Error: --absolute-paths has no effect in serve mode.'); process.exit(1); }
+  if (opts['secret-gist']) { console.error('Error: --absolute-paths cannot be used with --secret-gist. Use --embed-images.'); process.exit(1); }
+  if (!opts.html) { console.error('Error: --absolute-paths only applies to HTML output.'); process.exit(1); }
+}
+
+// --accept-broken-images validation
+if (opts['accept-broken-images']) {
+  if (opts.serve) { console.error('Error: --accept-broken-images has no effect in serve mode.'); process.exit(1); }
+  if (!opts.html) { console.error('Error: --accept-broken-images only applies to HTML output.'); process.exit(1); }
+}
+
+// --gist-id requires --secret-gist
+if (opts['gist-id'] && !opts['secret-gist']) {
+  console.warn('Warning: --gist-id requires --secret-gist. Ignoring --gist-id.');
+}
+
+// --secret-gist requires gh CLI authenticated
+if (opts['secret-gist']) {
+  try {
+    execSync('gh auth status', { stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch {
+    console.error('Error: --secret-gist requires the GitHub CLI (gh) to be installed and authenticated.');
+    console.error('  Install: brew install gh');
+    console.error('  Login:   gh auth login');
+    process.exit(1);
+  }
+}
+
+// --launch with empty string should fail fast
+if (opts.launch !== undefined && opts.launch === '') {
+  console.error('Error: --launch requires a browser name or omit value for system default.');
   process.exit(1);
 }
 
@@ -281,8 +371,43 @@ const { markedEmoji } = require('marked-emoji');
 const nodeEmoji = require('node-emoji');
 const markedFootnote = require('marked-footnote');
 const markedAlert = require('marked-alert');
-const matter = require('gray-matter');
+const grayMatter = require('gray-matter');
 const { PDFDocument } = require('pdf-lib');
+
+// Resilient frontmatter parsing — handles malformed YAML (e.g., Claude Code agent files
+// with unquoted colons, angle brackets, escape sequences in description fields).
+// Mirrors Claude Code's own two-pass strategy from src/utils/frontmatterParser.ts.
+const YAML_SPECIAL_CHARS = /[{}[\]*&#!|>%@`]|: /;
+
+function quoteProblematicValues(yamlText) {
+  return yamlText.split('\n').map(line => {
+    const match = line.match(/^([a-zA-Z_-]+):\s+(.+)$/);
+    if (!match) return line;
+    const [, key, value] = match;
+    if (!key || !value) return line;
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) return line;
+    if (YAML_SPECIAL_CHARS.test(value)) {
+      const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      return `${key}: "${escaped}"`;
+    }
+    return line;
+  }).join('\n');
+}
+
+const jsYaml = require('js-yaml');
+const matterOptions = {
+  engines: {
+    yaml: {
+      parse: (str) => {
+        try { return jsYaml.load(str); }
+        catch { return jsYaml.load(quoteProblematicValues(str)); }
+      },
+      stringify: (obj) => jsYaml.dump(obj),
+    },
+  },
+};
+function matter(source) { return grayMatter(source, matterOptions); }
 
 // Load mhchem extension for KaTeX — enables \ce{} chemical formula notation.
 // Must be loaded after katex is available; it registers itself automatically.
@@ -514,6 +639,106 @@ ${items.join('\n')}
   return '';
 }
 
+// MIME type lookup for image embedding
+const IMAGE_MIME = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
+  '.ico': 'image/x-icon', '.avif': 'image/avif',
+};
+
+// Detect MIME type from binary magic bytes (fallback when URL has no extension)
+function detectMimeFromBytes(buf) {
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46) return 'image/webp';
+  if (buf[0] === 0x3C) return 'image/svg+xml'; // starts with <
+  return null;
+}
+
+// Embed images as base64 data URIs (--embed-images)
+// Handles local files, remote URLs, and GitHub-authenticated URLs.
+// Deduplicates repeated references. Skips images exceeding 5MB.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+async function embedImages(html, baseDir) {
+  const cache = new Map();
+  let count = 0, totalOrigBytes = 0;
+  const imgRegex = /(<img\s[^>]*src=")([^"]+)(")/gi;
+
+  // Collect all matches first (can't use async in replace callback)
+  const matches = [];
+  let m;
+  while ((m = imgRegex.exec(html)) !== null) {
+    matches.push({ full: m[0], pre: m[1], src: m[2], post: m[3], index: m.index });
+  }
+
+  // Process each match, building replacements
+  const replacements = [];
+  for (const { full, pre, src, post } of matches) {
+    if (/^data:/i.test(src)) { replacements.push(full); continue; }
+    if (cache.has(src)) { replacements.push(`${pre}${cache.get(src)}${post}`); count++; continue; }
+
+    try {
+      let data, mime;
+
+      if (/^https?:\/\//i.test(src)) {
+        // Remote URL — check if GitHub-hosted (needs auth)
+        const isGitHub = /github\.com|githubusercontent\.com|user-attachments/i.test(src);
+        if (isGitHub) {
+          // Use gh CLI for authenticated GitHub fetches
+          const result = execSync(`gh api "${src}" --method GET`, {
+            stdio: ['pipe', 'pipe', 'pipe'], timeout: 15000, maxBuffer: MAX_IMAGE_BYTES,
+            encoding: 'buffer',
+          });
+          data = result;
+        } else {
+          // Fetch via Node fetch with timeout
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 10000);
+          try {
+            const resp = await fetch(src, { signal: controller.signal });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            data = Buffer.from(await resp.arrayBuffer());
+          } finally { clearTimeout(timer); }
+        }
+        const ext = extname(new URL(src).pathname).toLowerCase();
+        mime = IMAGE_MIME[ext] || detectMimeFromBytes(data) || 'application/octet-stream';
+      } else {
+        // Local file — resolve against baseDir
+        const absPath = resolve(baseDir, src);
+        if (!existsSync(absPath)) { console.warn(`Warning: image not found, skipping: ${src}`); replacements.push(full); continue; }
+        data = readFileSync(absPath);
+        mime = IMAGE_MIME[extname(absPath).toLowerCase()] || detectMimeFromBytes(data) || 'application/octet-stream';
+      }
+
+      if (data.length > MAX_IMAGE_BYTES) {
+        const sizeMB = (data.length / 1048576).toFixed(1);
+        console.warn(`Warning: image exceeds 5 MB (${sizeMB} MB), skipping: ${src}`);
+        replacements.push(full);
+        continue;
+      }
+
+      totalOrigBytes += data.length;
+      const dataUri = `data:${mime};base64,${data.toString('base64')}`;
+      cache.set(src, dataUri);
+      replacements.push(`${pre}${dataUri}${post}`);
+      count++;
+    } catch (e) {
+      console.warn(`Warning: failed to embed image, skipping: ${src} (${e.message})`);
+      replacements.push(full);
+    }
+  }
+
+  // Rebuild HTML with replacements
+  let result = html;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    result = result.slice(0, matches[i].index) + replacements[i] + result.slice(matches[i].index + matches[i].full.length);
+  }
+
+  return { html: result, count, totalOrigBytes };
+}
+
 // Resolve image paths: convert relative src to file:// URLs (for PDF mode)
 function resolveImagePaths(html, baseDir) {
   return html.replace(
@@ -539,6 +764,83 @@ function resolveImagePathsForServe(html) {
   );
 }
 
+// Detect local image references in HTML (not data:, not http/https)
+function detectLocalImages(html) {
+  const localImages = [];
+  const imgRegex = /<img\s[^>]*src="([^"]+)"/gi;
+  let m;
+  while ((m = imgRegex.exec(html)) !== null) {
+    const src = m[1];
+    if (!/^(data:|https?:\/\/)/i.test(src)) {
+      localImages.push(src);
+    }
+  }
+  return localImages;
+}
+
+// Rewrite local image paths to file:// absolute paths (--absolute-paths)
+function rewriteToAbsolutePaths(html, baseDir) {
+  return html.replace(
+    /(<img\s[^>]*src=")([^"]+)(")/gi,
+    (match, pre, src, post) => {
+      if (/^(data:|https?:\/\/|file:)/i.test(src)) return match;
+      const absPath = resolve(baseDir, src);
+      const encoded = absPath.split('/').map(s => encodeURIComponent(s)).join('/');
+      return `${pre}file://${encoded}${post}`;
+    }
+  );
+}
+
+// Copy local images alongside output HTML (--copy-assets)
+// Preserves relative directory structure inside {stem}_files/
+function copyLocalAssets(html, baseDir, outputPath) {
+  const outputDir = dirname(outputPath);
+  const stem = basename(outputPath, extname(outputPath));
+  const assetsDir = join(outputDir, `${stem}_files`);
+  const imgRegex = /<img\s[^>]*src="([^"]+)"/gi;
+
+  // Collect all local image references
+  const matches = [];
+  let m;
+  while ((m = imgRegex.exec(html)) !== null) {
+    const src = m[1];
+    if (!/^(data:|https?:\/\/|file:)/i.test(src)) {
+      matches.push({ full: m[0], src });
+    }
+  }
+
+  if (matches.length === 0) return { html, count: 0, assetsDir: null };
+
+  const copied = new Set(); // dedup: same src referenced multiple times
+  let count = 0;
+
+  for (const { full, src } of matches) {
+    const absPath = resolve(baseDir, src);
+    if (!existsSync(absPath)) {
+      console.warn(`Warning: image not found, skipping copy: ${src}`);
+      continue;
+    }
+
+    // Preserve relative path structure: ./images/foo.png → {stem}_files/images/foo.png
+    // For parent refs (../assets/logo.svg), use just the filename to avoid escaping the assets dir
+    const relPath = relative(baseDir, absPath);
+    const destRel = relPath.startsWith('..') ? basename(absPath) : relPath;
+    const destPath = join(assetsDir, destRel);
+
+    if (!copied.has(absPath)) {
+      mkdirSync(dirname(destPath), { recursive: true });
+      copyFileSync(absPath, destPath);
+      copied.add(absPath);
+      count++;
+    }
+
+    const newSrc = `${stem}_files/${destRel}`;
+    html = html.split(full).join(full.replace(src, newSrc));
+  }
+
+  return { html, count, assetsDir };
+}
+
 // Load highlight.js CSS theme — custom theme with richer semantic coloring
 // The stock github.css collapses many token types into the same color (only 7 colors
 // for 20+ token classes). Our hljs-typora.css assigns 12 distinct colors, matching
@@ -556,12 +858,18 @@ if (!opts['rich-highlighting']) {
 // Load KaTeX CSS from the cached package
 const katexCssPath = join(CACHE_DIR, 'node_modules', 'katex', 'dist', 'katex.css');
 const katexFontsDir = join(CACHE_DIR, 'node_modules', 'katex', 'dist', 'fonts');
-function loadKatexCss(forServe) {
+function loadKatexCss(forServe, forStandalone = false) {
   if (!existsSync(katexCssPath)) return '';
   let css = readFileSync(katexCssPath, 'utf-8');
   if (forServe) {
     // Route font URLs through our HTTP server
     css = css.replace(/url\(fonts\//g, 'url(/katex-fonts/');
+  } else if (forStandalone) {
+    // Use jsDelivr CDN for KaTeX fonts — semver range pins to latest 0.16.x
+    css = css.replace(
+      /url\(fonts\//g,
+      'url(https://cdn.jsdelivr.net/npm/katex@0.16/dist/fonts/'
+    );
   } else {
     // Use file:// URLs for Puppeteer/PDF mode
     css = css.replace(
@@ -576,7 +884,7 @@ function loadKatexCss(forServe) {
 }
 
 // Load theme stylesheet
-function loadThemeCss(forServe) {
+function loadThemeCss(forServe, forStandalone = false) {
   if (!existsSync(stylesheetPath)) {
     console.warn('Warning: stylesheet not found:', stylesheetPath);
     return '';
@@ -589,6 +897,27 @@ function loadThemeCss(forServe) {
       /url\(['"]?(\.\/?[^'")]+)['"]?\)/g,
       (match, relPath) => {
         return `url('/theme-assets/${encodeURI(relPath)}')`;
+      }
+    );
+  } else if (forStandalone) {
+    // Replace local .woff font URLs with jsDelivr CDN serving fontsource packages.
+    // fontsource provides stable, versioned URLs for Google Fonts (no hash churn).
+    // Pattern: @fontsource/<family>/files/<family>-latin-<weight>-<style>.<format>
+    const FONT_CDN_MAP = {
+      'merriweather-v19-latin-300.woff':        'https://cdn.jsdelivr.net/npm/@fontsource/merriweather/files/merriweather-latin-300-normal.woff',
+      'merriweather-v19-latin-700.woff':        'https://cdn.jsdelivr.net/npm/@fontsource/merriweather/files/merriweather-latin-700-normal.woff',
+      'merriweather-v19-latin-300italic.woff':  'https://cdn.jsdelivr.net/npm/@fontsource/merriweather/files/merriweather-latin-300-italic.woff',
+      'merriweather-v19-latin-700italic.woff':  'https://cdn.jsdelivr.net/npm/@fontsource/merriweather/files/merriweather-latin-700-italic.woff',
+      'lato-v14-latin-300.woff':                'https://cdn.jsdelivr.net/npm/@fontsource/lato/files/lato-latin-300-normal.woff',
+      'lato-v14-latin-900.woff':                'https://cdn.jsdelivr.net/npm/@fontsource/lato/files/lato-latin-900-normal.woff',
+      'lato-v14-latin-300italic.woff':          'https://cdn.jsdelivr.net/npm/@fontsource/lato/files/lato-latin-300-italic.woff',
+      'lato-v14-latin-900italic.woff':          'https://cdn.jsdelivr.net/npm/@fontsource/lato/files/lato-latin-900-italic.woff',
+    };
+    css = css.replace(
+      /url\(['"]?(\.\/?([^'")]+))['"]?\)/g,
+      (match, relPath, filename) => {
+        const cdnUrl = FONT_CDN_MAP[filename];
+        return cdnUrl ? `url('${cdnUrl}')` : match;
       }
     );
   } else {
@@ -708,7 +1037,7 @@ function resolveHeaderFooterTemplates(frontMatter, themeName) {
  * @param {boolean} options.forServe - If true, use HTTP-served asset paths instead of file:// URLs
  * @returns {Promise<string>} Complete HTML document
  */
-async function buildHtml({ forServe = false } = {}) {
+async function buildHtml({ forServe = false, forStandalone = false } = {}) {
   const mdSource = readFileSync(inputPath, 'utf-8');
 
   // Parse front matter
@@ -809,9 +1138,27 @@ async function buildHtml({ forServe = false } = {}) {
   }
 
   // Resolve image paths
-  let resolvedBody = forServe
-    ? resolveImagePathsForServe(processedBody)
-    : resolveImagePaths(processedBody, inputDir);
+  // forServe: rewrite to /static/ for live server
+  // forStandalone: leave as-is (relative paths from markdown; embedImages() resolves them)
+  // default (PDF): rewrite to file:// for Puppeteer/WebKit
+  let resolvedBody;
+  if (forServe) {
+    resolvedBody = resolveImagePathsForServe(processedBody);
+  } else if (forStandalone) {
+    resolvedBody = processedBody;
+  } else {
+    resolvedBody = resolveImagePaths(processedBody, inputDir);
+  }
+
+  // Embed images as base64 data URIs (--embed-images, standalone mode only)
+  if (opts['embed-images'] && forStandalone) {
+    const result = await embedImages(resolvedBody, inputDir);
+    resolvedBody = result.html;
+    if (result.count > 0) {
+      const origMB = (result.totalOrigBytes / 1048576).toFixed(1);
+      console.error(`Embedded:   ${result.count} image${result.count !== 1 ? 's' : ''} (${origMB} MB)`);
+    }
+  }
 
   // Strip inline page-break styles in pageless mode (only inside style= attributes,
   // NOT inside <code> tags where they might be documentation text)
@@ -828,9 +1175,9 @@ async function buildHtml({ forServe = false } = {}) {
 
   // --macos-spoken-content: replace angle brackets in code blocks with fullwidth Unicode
   // (U+FF1C/U+FF1E) to prevent macOS Spoken Content from stripping content between < and >.
-  // Known issue: Chrome uses a clipboard-based TTS pathway that applies NFKC normalization,
-  // converting fullwidth back to ASCII. Works in Safari and Chromium. See research-chrome-
-  // chromium-accessibility-tts.md for details.
+  // Known issue: Chrome uses a clipboard-based TTS pathway (evidenced by Maccy issue #968)
+  // that applies NFKC normalization, converting fullwidth back to ASCII. Works in Safari
+  // and Chromium. No fix available — Chrome's accessibility text extraction is proprietary.
   if (opts['macos-spoken-content']) {
     // Skip diagram/chart languages — these are parsed by Mermaid/Graphviz/Vega-Lite, not displayed as text
     const diagramLangs = /language-(?:mermaid|dot|graphviz|vega-lite|chart)/i;
@@ -887,12 +1234,12 @@ async function buildHtml({ forServe = false } = {}) {
   if (fmHtml) resolvedBody = fmHtml + resolvedBody;
 
   // Load CSS with appropriate URL resolution
-  const themeCss = loadThemeCss(forServe);
-  const kCss = loadKatexCss(forServe);
+  const themeCss = loadThemeCss(forServe, forStandalone);
+  const kCss = loadKatexCss(forServe, forStandalone);
 
   // Serve mode extras: client-side mermaid + SSE live-reload
   // Floating "↑ TOC" button — serve + HTML export only (needs JS for IntersectionObserver)
-  const showFloat = hasToc && tocNavFeatures.has('float') && (forServe || opts.html);
+  const showFloat = hasToc && tocNavFeatures.has('float') && (forServe || forStandalone);
   const floatButtonHtml = showFloat
     ? `<a id="back-to-toc-btn" href="#md-toc-top" aria-label="Back to Table of Contents">\u2191 TOC</a>`
     : '';
@@ -911,23 +1258,24 @@ async function buildHtml({ forServe = false } = {}) {
   // Copy handler: restore ASCII angle brackets and strip sr-only text on clipboard
   // Document-level copy handler: restore ASCII angle brackets and strip sr-only text.
   // Fires on any copy, not just code blocks, since inline <code> is also processed.
-  const spokenContentCopyScript = (opts['macos-spoken-content'] && (forServe || opts.html)) ? `
+  const spokenContentCopyScript = (opts['macos-spoken-content'] && (forServe || forStandalone)) ? `
   <script>
     document.addEventListener('copy', function(e) {
       var sel = window.getSelection().toString();
       if (sel.indexOf('\uFF1C') === -1 && sel.indexOf('\uFF1E') === -1) return; // no fullwidth chars, don't interfere
       sel = sel.replace(/\uFF1C/g, '<').replace(/\uFF1E/g, '>');
-      sel = sel.replace(/ (?:greater than|less than|arrow) /g, '');
+      // Strip sr-only pronunciation text only when adjacent to operators (avoids false positives on prose)
+      sel = sel.replace(/> greater than /g, '> ').replace(/< less than /g, '< ').replace(/=> arrow /g, '=>');
       e.clipboardData.setData('text/plain', sel);
       e.preventDefault();
     });
   </script>` : '';
 
-  const serveScripts = forServe ? `
-  <script src="/mermaid.min.js"></script>
+  // Mermaid client-side rendering: needed for serve mode (via HTTP) and standalone HTML (inlined)
+  const hasMermaidBlocks = /language-mermaid/.test(resolvedBody);
+  const mermaidInitScript = `
   <script>
     mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
-    // Convert highlighted mermaid code blocks to renderable divs
     document.querySelectorAll('pre > code.language-mermaid').forEach(code => {
       const pre = code.parentElement;
       const div = document.createElement('div');
@@ -936,7 +1284,18 @@ async function buildHtml({ forServe = false } = {}) {
       pre.replaceWith(div);
     });
     mermaid.run({ querySelector: '.mermaid' });
-  </script>
+  </script>`;
+
+  let mermaidScripts = '';
+  if (hasMermaidBlocks && forServe) {
+    // Serve mode: load mermaid via HTTP
+    mermaidScripts = `<script src="/mermaid.min.js"></script>${mermaidInitScript}`;
+  } else if (hasMermaidBlocks && forStandalone) {
+    // Standalone HTML: load mermaid from CDN
+    mermaidScripts = `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>${mermaidInitScript}`;
+  }
+
+  const sseScript = forServe ? `
   <script>
     const evtSource = new EventSource('/events');
     evtSource.addEventListener('reload', () => location.reload());
@@ -946,7 +1305,7 @@ async function buildHtml({ forServe = false } = {}) {
 <html>
 <head>
   <meta charset="utf-8">
-  ${forServe ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : ''}
+  ${(forServe || forStandalone) ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : ''}
   <title>${docTitle}</title>
   <style>${themeCss}</style>
   <style>${hljsCss}</style>
@@ -962,9 +1321,9 @@ async function buildHtml({ forServe = false } = {}) {
       break-inside: auto !important;
     }
     body {
-      ${forServe ? `width: 100%; max-width: ${pageWidth}px;` : `width: ${pageWidth}px; max-width: ${pageWidth}px;`}
+      ${(forServe || forStandalone) ? `width: 100%; max-width: ${pageWidth}px;` : `width: ${pageWidth}px; max-width: ${pageWidth}px;`}
       margin: 0 auto;
-      padding: ${forServe ? '20px' : '40px 40px 0px 40px'};
+      padding: ${(forServe || forStandalone) ? '20px' : '40px 40px 0px 40px'};
       padding-bottom: 0px !important;
       margin-bottom: 0px !important;
       box-sizing: border-box;
@@ -976,8 +1335,8 @@ async function buildHtml({ forServe = false } = {}) {
     ${tocNavFeatures.has('smooth') ? `
     /* Smooth scrolling for TOC navigation (--toc-nav smooth) */
     html { scroll-behavior: smooth; }` : ''}
-    ${forServe ? `
-    /* Mobile responsive overrides for serve mode */
+    ${(forServe || forStandalone) ? `
+    /* Mobile responsive overrides for serve/standalone mode */
     @media (max-width: 767px) {
       html { font-size: 14px; }
       body { padding: 16px; font-size: 1.1rem; }
@@ -1137,7 +1496,8 @@ async function buildHtml({ forServe = false } = {}) {
 ${resolvedBody}
 ${floatButtonHtml}
 </body>
-${serveScripts}
+${mermaidScripts}
+${sseScript}
 ${floatButtonScript}
 ${spokenContentCopyScript}
 </html>`;
@@ -1909,8 +2269,8 @@ async function startServer() {
         chromium: 'Chromium', firefox: 'Firefox',
       };
       const app = appMap[opts.launch.toLowerCase()];
-      const cmd = app ? `open -a "${app}" "${url}"` : `open "${url}"`;
-      try { execSync(cmd, { stdio: 'ignore' }); }
+      const args = app ? ['-a', app, url] : [url];
+      try { execFileSync('open', args, { stdio: 'ignore' }); }
       catch { console.error(`Error: could not launch browser '${opts.launch}'.`); }
     }
 
@@ -1966,12 +2326,126 @@ if (opts.serve) {
   console.log(`Input:      ${inputPath}`);
   console.log(`Stylesheet: ${stylesheetPath}`);
   console.log(`Width:      ${pageWidth}px`);
-  const htmlContent = await buildHtml({ forServe: true });
-  writeFileSync(outputPath, htmlContent);
-  const sizeKB = (readFileSync(outputPath).length / 1024).toFixed(1);
-  console.log(`Output:     ${outputPath}`);
-  console.log(`Format:     HTML (self-contained, responsive)`);
-  console.log(`Size:       ${sizeKB} KB`);
+  let htmlContent = await buildHtml({ forStandalone: true });
+
+  // Fail-fast: detect local images that will break in the output
+  const hasImageResolution = opts['embed-images'] || opts['copy-assets'] || opts['absolute-paths'] || opts['accept-broken-images'];
+  if (!hasImageResolution) {
+    const localImages = detectLocalImages(htmlContent);
+    if (localImages.length > 0) {
+      const outputDirDiffers = dirname(resolve(outputPath)) !== dirname(resolve(inputPath));
+      if (opts['secret-gist']) {
+        console.error('Error: Local images detected but gist HTML cannot reference local files.');
+        console.error(`  Found: ${localImages.join(', ')}`);
+        console.error('');
+        console.error('Resolve with one of:');
+        console.error('  --embed-images            Embed images as base64 data URIs (self-contained)');
+        console.error('  --accept-broken-images    Proceed anyway (images will not resolve)');
+        process.exit(1);
+      } else if (outputDirDiffers) {
+        console.error('Error: Output directory differs from source. Local images will not resolve.');
+        console.error(`  Source: ${dirname(resolve(inputPath))}/`);
+        console.error(`  Output: ${dirname(resolve(outputPath))}/`);
+        console.error(`  Found:  ${localImages.join(', ')}`);
+        console.error('');
+        console.error('Resolve with one of:');
+        console.error('  --embed-images            Embed images as base64 data URIs (single portable file)');
+        console.error('  --copy-assets             Copy images alongside output HTML');
+        console.error('  --absolute-paths          Rewrite image paths to absolute (works locally, not portable)');
+        console.error('  --accept-broken-images    Proceed anyway (images will not resolve)');
+        process.exit(1);
+      }
+    }
+  }
+
+  // Apply image resolution strategy (if not already embedded inside buildHtml)
+  if (opts['copy-assets']) {
+    const result = copyLocalAssets(htmlContent, inputDir, outputPath);
+    htmlContent = result.html;
+    if (result.count > 0) {
+      console.log(`Copied:     ${result.count} image${result.count !== 1 ? 's' : ''} to ${basename(result.assetsDir)}/`);
+    }
+  } else if (opts['absolute-paths']) {
+    htmlContent = rewriteToAbsolutePaths(htmlContent, inputDir);
+  }
+
+  // Upload to secret gist if requested
+  if (opts['secret-gist']) {
+    const gistFilename = basename(inputPath, extname(inputPath)) + '.html';
+    const tmpFile = join(tmpdir(), gistFilename);
+    writeFileSync(tmpFile, htmlContent);
+
+    try {
+      let gistUrl, gistId, username;
+
+      if (opts['gist-id']) {
+        // Update existing gist
+        gistId = opts['gist-id'].includes('/')
+          ? opts['gist-id'].split('/').filter(Boolean).pop()
+          : opts['gist-id'];
+        execSync(`gh gist edit ${gistId} -a "${tmpFile}"`, {
+          stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000,
+        });
+        username = execSync(`gh api gists/${gistId} --jq '.owner.login'`, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).toString().trim();
+        gistUrl = `https://gist.github.com/${username}/${gistId}`;
+      } else {
+        // Create new secret gist
+        const result = execSync(
+          `gh gist create --desc "markdown-kit: ${gistFilename}" "${tmpFile}"`,
+          { stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000 },
+        ).toString().trim();
+        gistUrl = result;
+        const parts = gistUrl.replace(/\/$/, '').split('/');
+        gistId = parts.pop();
+        username = parts.pop();
+      }
+
+      // Viewer: gisthost.github.io — client-side gist renderer, no CORS proxy
+      // Scripts execute natively via document.write(). No data sent to non-GitHub servers.
+      // Source: https://github.com/gisthost/gisthost.github.io (MIT, Simon Willison + Leon Huang)
+      // Alt: htmlpreview.github.io routes content through third-party CORS proxy (api.codetabs.com)
+      const viewUrl = `https://gisthost.github.io/?${gistId}/${gistFilename}`;
+
+      // Copy to clipboard (platform-aware, non-fatal)
+      try {
+        if (process.platform === 'darwin') {
+          execSync('pbcopy', { input: viewUrl, stdio: ['pipe', 'pipe', 'pipe'] });
+        } else if (process.platform === 'win32') {
+          execSync('clip', { input: viewUrl, stdio: ['pipe', 'pipe', 'pipe'] });
+        }
+      } catch { /* clipboard unavailable */ }
+
+      // Output
+      const action = opts['gist-id'] ? 'Updated' : 'Shared (secret gist)';
+      console.log(`${action}:`);
+      console.log(`  View:  ${viewUrl}`);
+      console.log(`  Gist:  ${gistUrl}`);
+      if (process.platform === 'darwin' || process.platform === 'win32') {
+        console.log('URL copied to clipboard.');
+      }
+
+      // Open in browser if --launch
+      if (opts.launch !== undefined) {
+        const appMap = { safari: 'Safari', chrome: 'Google Chrome', chromium: 'Chromium', firefox: 'Firefox' };
+        const app = appMap[opts.launch.toLowerCase()];
+        const args = app ? ['-a', app, viewUrl] : [viewUrl];
+        try { execFileSync('open', args, { stdio: 'ignore' }); } catch {}
+      }
+    } finally {
+      unlinkSync(tmpFile);
+    }
+  }
+
+  // Write local file only if -o was explicitly specified (or no --secret-gist)
+  if (opts.output || !opts['secret-gist']) {
+    writeFileSync(outputPath, htmlContent);
+    const sizeKB = (readFileSync(outputPath).length / 1024).toFixed(1);
+    console.log(`Output:     ${outputPath}`);
+    console.log(`Format:     HTML (self-contained, responsive)`);
+    console.log(`Size:       ${sizeKB} KB`);
+  }
 } else {
   // PDF generation mode
   console.log(`Input:      ${inputPath}`);
