@@ -45,6 +45,7 @@ SESSION_FILE = Path.home() / '.claude-workspace' / 'scripts' / 'gh_upload_sessio
 # MIME type mapping for common file extensions
 MIME_TYPES: Mapping[str, str] = {
     '.csv': 'text/csv',
+    '.html': 'text/html',
     '.json': 'application/json',
     '.txt': 'text/plain',
     '.md': 'text/markdown',
