@@ -25,6 +25,7 @@ class BM25Model:
         Raises:
             ValueError: If k < 0 or avg_doc_len <= 0.
         """
+        ...
     def embed_batch(
         self,
         texts: Sequence[str],
@@ -37,9 +38,11 @@ class BM25Model:
             - wall_secs: Wall-clock time for the parallel section
             - cpu_secs: Sum of per-task durations (total CPU across all cores)
         """
+        ...
     @staticmethod
     def thread_count() -> int:
         """Number of rayon worker threads in the global thread pool."""
+        ...
     def embed_batch_bytes(
         self,
         texts: Sequence[str],
@@ -58,8 +61,10 @@ class BM25Model:
             - Add per-task timing instrumentation (wall_secs, cpu_secs)
               matching embed_batch, if this API is adopted for production use.
         """
+        ...
     def query_embed(self, text: str) -> tuple[list[int], list[float]]:
         """Embed a single query text (values are all 1.0, deduplicated tokens).
 
         Unlike embed_batch, no TF weighting — matches fastembed query_embed behavior.
         """
+        ...
