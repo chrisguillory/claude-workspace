@@ -49,6 +49,7 @@ select = [
     "PIE",  # flake8-pie (unnecessary pass, startswith/endswith tuple)
     "PL",   # pylint
     "PT",   # flake8-pytest-style
+    "RET",  # flake8-return
     "TRY",  # tryceratops (exception handling patterns)
     "RUF",  # ruff-specific
     "SIM",  # flake8-simplify
@@ -56,16 +57,30 @@ select = [
     "W",    # pycodestyle warnings
 ]
 ignore = [
+    # Evaluated and not enforced — rule sets
+    "A",       # flake8-builtins — all violations are API conventions (format, id) or upstream stubs
+    "ERA",     # eradicate — 100% false positives on linter directives and doc examples
+    "FBT",     # flake8-boolean-trap — too opinionated for this codebase
+    "N",       # pep8-naming — conflicts with camelCase Pydantic fields from JSON schemas
+    "PTH",     # flake8-use-pathlib — style preference, os.path is fine
+    "S",       # flake8-bandit — too many false positives (subprocess, exec in MCP servers)
+    "T20",     # flake8-print — scripts legitimately use print() for CLI output
+    "TC",      # type-checking imports — 484 violations, deferred (needs batch Pydantic testing)
+    # Evaluated and not enforced — individual rules from enabled sets
+    "PT011",   # pytest.raises too broad — our tests already assert on exc_info.value.args
+    "RET504",  # unnecessary assignment before return — intermediate assignments aid type narrowing and debugging
+    "RET505",  # unnecessary else/elif after return — explicit else communicates mutual exclusivity
+    "RET508",  # unnecessary else after break — same style preference as RET505
+    "TRY003",  # long exception messages — would require single-use exception classes for every error string
+    "TRY300",  # consider else block — code already works correctly, else adds nesting
+    "TRY301",  # abstract raise to inner function — reduces CLI error handling readability
+    "TRY400",  # use .exception() instead of .error() — already enforced by custom EXC006 rule
+    # Existing style preferences
     "DTZ011",  # date.today() without timezone is fine for date-only ops
     "E501",    # line length handled by formatter
     "PLR09",   # too-many-branches/arguments/statements/returns
     "PLR2004", # magic-value-comparison
     "PLW2901", # redefined-loop-name — line = line.strip() is idiomatic
-    "PT011",   # pytest.raises too broad — our tests already assert on exc_info.value.args
-    "TRY003",  # long exception messages — would require single-use exception classes for every error string
-    "TRY300",  # consider else block — code already works correctly, else adds nesting
-    "TRY301",  # abstract raise to inner function — reduces CLI error handling readability
-    "TRY400",  # use .exception() instead of .error() — already enforced by custom EXC006 rule
     "RUF100",  # unused-noqa — pre-emptive noqa for custom linters / future rules
     "SIM102",  # allow nested if statements
     "SIM103",  # allow explicit if-return-false for clarity

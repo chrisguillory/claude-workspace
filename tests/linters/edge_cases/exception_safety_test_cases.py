@@ -100,7 +100,7 @@ def exc002_violation_basic() -> None:
     try:
         risky_operation()
     except Exception:  # EXC002: broad catch without raise
-        return None  # Swallows exception!
+        return  # Swallows exception!
 
 
 def exc002_violation_base_exception() -> None:
@@ -117,7 +117,7 @@ def exc002_correct_specific() -> None:
         risky_operation()
     except ValueError:
         logger.exception('Invalid value')  # Proper logging with traceback
-        return None  # OK - specific exception handled
+        return  # OK - specific exception handled
 
 
 def exc002_correct_reraise() -> None:
@@ -402,7 +402,7 @@ def exc005_violation_basic() -> None:
     try:
         risky_operation()
     except ValueError as e:  # EXC005: e is captured but never used
-        return None
+        return
 
 
 def exc005_correct_no_capture() -> None:
@@ -410,7 +410,7 @@ def exc005_correct_no_capture() -> None:
     try:
         risky_operation()
     except ValueError:  # No 'as e' - clearer intent
-        return None
+        return
 
 
 def exc005_correct_use_variable() -> None:
@@ -419,7 +419,7 @@ def exc005_correct_use_variable() -> None:
         risky_operation()
     except ValueError:
         logger.exception('Failed')  # Proper traceback via .exception()
-        return None
+        return
 
 
 # -- EXC006: Logger without exc_info (loses traceback in logs) ----------------
