@@ -523,32 +523,26 @@ async def edge_multi_code_suppression() -> None:
 
 async def async_op() -> None:
     """Placeholder for async operation."""
-    pass
 
 
 def cleanup() -> None:
     """Placeholder for cleanup logic."""
-    pass
 
 
 def main_entrypoint() -> None:
     """Placeholder for main entry point."""
-    pass
 
 
 def process_items(items: object) -> None:
     """Placeholder for processing items."""
-    pass
 
 
 def risky() -> None:
     """Placeholder for operation that might raise."""
-    pass
 
 
 def some_function() -> None:
     """Placeholder for a function."""
-    pass
 
 
 def some_generator() -> Generator[int]:

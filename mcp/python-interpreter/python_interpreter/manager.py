@@ -40,8 +40,6 @@ class InterpreterConfig:
 class ExternalInterpreterError(Exception):
     """External interpreter operation failed."""
 
-    pass
-
 
 class ExternalInterpreterManager:
     """Manages external Python interpreter subprocesses."""

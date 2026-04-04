@@ -44,6 +44,7 @@ select = [
     "G",    # flake8-logging-format (lazy % formatting in logging)
     "I",    # isort
     "PERF", # perflint (performance)
+    "PIE",  # flake8-pie (unnecessary pass, startswith/endswith tuple)
     "PL",   # pylint
     "RUF",  # ruff-specific
     "SIM",  # flake8-simplify

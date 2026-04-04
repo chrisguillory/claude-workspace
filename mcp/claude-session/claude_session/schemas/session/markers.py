@@ -23,8 +23,6 @@ __all__ = [
 class PathMarker:
     """Mark field as filesystem path for translation."""
 
-    pass
-
 
 type PathField = Annotated[PathStr, PathMarker()]
 """A path that needs translation during cross-machine restore."""

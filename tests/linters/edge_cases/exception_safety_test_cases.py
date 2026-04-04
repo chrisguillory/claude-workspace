@@ -718,19 +718,13 @@ async def error_boundary_example() -> ErrorResult | SuccessResult:
 class CustomError(Exception):
     """Custom exception for examples."""
 
-    pass
-
 
 class InternalError(Exception):
     """Internal exception for examples."""
 
-    pass
-
 
 class PublicError(Exception):
     """Public exception for examples."""
-
-    pass
 
 
 # -- Result Classes -----------------------------------------------------------
@@ -746,8 +740,6 @@ class ErrorResult:
 class SuccessResult:
     """Placeholder for success result."""
 
-    pass
-
 
 # -- Stub Functions (alphabetical) --------------------------------------------
 
@@ -759,12 +751,10 @@ def acquire_resource() -> str:
 
 async def async_operation() -> None:
     """Placeholder for async operation."""
-    pass
 
 
 def cleanup() -> None:
     """Placeholder for cleanup logic."""
-    pass
 
 
 def compute() -> str:
@@ -779,72 +769,58 @@ def compute_with(resource: object) -> str:
 
 async def create_backup(path: Path) -> None:
     """Placeholder for backup creation."""
-    pass
 
 
 def handle_error() -> None:
     """Placeholder for error handling."""
-    pass
 
 
 def internal_detail() -> None:
     """Placeholder for internal operation."""
-    pass
 
 
 def main() -> None:
     """Placeholder for main entry point."""
-    pass
 
 
 async def modify_data() -> None:
     """Placeholder for data modification."""
-    pass
 
 
 def optional_feature() -> None:
     """Placeholder for optional feature."""
-    pass
 
 
 def process(item: object) -> None:
     """Placeholder for sync item processing."""
-    pass
 
 
 async def process_async(item: object) -> None:
     """Placeholder for async item processing."""
-    pass
 
 
 def release_resource(resource: object) -> None:
     """Placeholder for resource release."""
-    pass
 
 
 def risky_operation() -> None:
     """Placeholder for operation that might raise."""
-    pass
 
 
 def rollback() -> None:
     """Placeholder for rollback logic."""
-    pass
 
 
 async def rollback_async(backup_path: Path | None = None) -> None:
     """Placeholder for async rollback logic."""
-    pass
 
 
 async def task_a() -> None:
     """Placeholder for async task."""
-    pass
 
 
 async def task_b() -> None:
     """Placeholder for async task."""
-    pass
 
 
 def validate(item: str) -> bool:

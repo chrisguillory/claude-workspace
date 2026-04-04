@@ -239,7 +239,7 @@ class Pep723Block:
     # Probe versions below 3.13 for UVS004.
     # If any satisfy a specifier, it allows Python below the project minimum.
     PROBES_BELOW_313: Sequence[Version] = tuple(
-        Version(f'3.{minor}.{micro}') for minor in range(0, 13) for micro in (0, 5, 99)
+        Version(f'3.{minor}.{micro}') for minor in range(13) for micro in (0, 5, 99)
     )
 
     def __init__(

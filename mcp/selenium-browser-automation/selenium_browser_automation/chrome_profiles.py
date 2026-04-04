@@ -35,25 +35,17 @@ from .models import (
 class ChromeProfileError(Exception):
     """Base exception for Chrome profile operations."""
 
-    pass
-
 
 class ChromeNotFoundError(ChromeProfileError):
     """Chrome installation not found."""
-
-    pass
 
 
 class ProfileNotFoundError(ChromeProfileError):
     """Specified profile directory not found."""
 
-    pass
-
 
 class MetadataParseError(ChromeProfileError):
     """Error parsing Chrome metadata JSON."""
-
-    pass
 
 
 def get_chrome_base_path() -> Path:

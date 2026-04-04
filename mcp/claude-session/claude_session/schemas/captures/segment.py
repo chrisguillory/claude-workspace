@@ -121,8 +121,6 @@ class UnknownSegmentTraits(PermissiveModel):
     Detection: isinstance(x, UnknownSegmentTraits) or isinstance(x, PermissiveModel)
     """
 
-    pass
-
 
 class UnknownSegmentProperties(PermissiveModel):
     """Fallback for unknown Segment event properties.
@@ -130,8 +128,6 @@ class UnknownSegmentProperties(PermissiveModel):
     Uses PermissiveModel to accept any fields while remaining a proper type.
     Detection: isinstance(x, UnknownSegmentProperties) or isinstance(x, PermissiveModel)
     """
-
-    pass
 
 
 # -- Event Types (Discriminated by `type` field) -------------------------------
