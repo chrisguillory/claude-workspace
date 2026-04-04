@@ -713,6 +713,10 @@ Returns:
         # Get content stats (scoped by path)
         content = await repository.get_content_stats(resolved_path)
 
+        # Dashboard URL (live check — dashboard can restart on different port)
+        dashboard_port = DashboardStateManager().get_dashboard_port()
+        dashboard_url = f'http://127.0.0.1:{dashboard_port}' if dashboard_port else None
+
         # Build comprehensive response
         info = IndexInfo(
             collection=CollectionMetadata(
@@ -725,6 +729,7 @@ Returns:
             storage=storage,
             content=content,
             path=resolved_path,
+            dashboard_url=dashboard_url,
         )
 
         logger.info(
