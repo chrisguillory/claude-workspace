@@ -92,7 +92,7 @@
 
 import { createRequire } from 'node:module';
 import { execSync, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, copyFileSync, watch as fsWatch } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, copyFileSync, statSync, watch as fsWatch } from 'node:fs';
 import { resolve, dirname, basename, extname, join, relative } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -1295,6 +1295,34 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     mermaidScripts = `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>${mermaidInitScript}`;
   }
 
+  // "Last updated" timestamp — serve mode only, based on file mtime, live-updating relative time
+  const fileMtime = forServe ? statSync(inputPath).mtime.toISOString() : '';
+  const lastUpdatedHtml = forServe ? `<div id="last-updated"></div>` : '';
+  const lastUpdatedScript = forServe ? `
+  <script>
+    (function() {
+      var el = document.getElementById('last-updated');
+      if (!el) return;
+      var mtime = new Date('${fileMtime}');
+      function fmt(d) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      }
+      function relative(ms) {
+        var s = Math.floor(ms / 1000);
+        if (s < 5) return 'just now';
+        if (s < 60) return s + 's ago';
+        var m = Math.floor(s / 60);
+        if (m < 60) return m + 'm ' + (s % 60) + 's ago';
+        return Math.floor(m / 60) + 'h ' + (m % 60) + 'm ago';
+      }
+      function update() {
+        el.textContent = 'Updated ' + fmt(mtime) + ' (' + relative(Date.now() - mtime.getTime()) + ')';
+      }
+      update();
+      setInterval(update, 5000);
+    })();
+  </script>` : '';
+
   const sseScript = forServe ? `
   <script>
     const evtSource = new EventSource('/events');
@@ -1426,6 +1454,18 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     #back-to-toc-btn.visible { opacity: 1; pointer-events: auto; }
     #back-to-toc-btn:hover { background: #3572a5; text-decoration: none; color: #fff; }
     @media print { #back-to-toc-btn { display: none !important; } }
+    /* Last updated timestamp (serve mode only) */
+    #last-updated {
+      position: fixed;
+      bottom: 8px;
+      left: 12px;
+      font-size: 11px;
+      color: #999;
+      font-family: system-ui, -apple-system, sans-serif;
+      z-index: 999;
+      pointer-events: none;
+      opacity: 0.7;
+    }
     /* macOS Spoken Content: fullwidth angle bracket sizing (--macos-spoken-content) */
     .tts-bracket {
       display: inline-block;
@@ -1495,9 +1535,11 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
 <body>
 ${resolvedBody}
 ${floatButtonHtml}
+${lastUpdatedHtml}
 </body>
 ${mermaidScripts}
 ${sseScript}
+${lastUpdatedScript}
 ${floatButtonScript}
 ${spokenContentCopyScript}
 </html>`;
