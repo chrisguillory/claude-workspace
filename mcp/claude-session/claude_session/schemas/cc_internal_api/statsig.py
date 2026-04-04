@@ -279,8 +279,6 @@ class StatsigEvaluatedKeys(StrictModel):
 class AutoCaptureDisabledEvents(StrictModel):
     """Disabled events configuration. Always {} in observed captures."""
 
-    pass
-
 
 class AutoCaptureSettings(StrictModel):
     """Auto-capture settings for session recording."""
@@ -329,8 +327,6 @@ class EmptyConfigValue(StrictModel):
 
     Used by 23 configs: 1250065512, 1392718930, 1658713715, etc.
     """
-
-    pass
 
 
 class EnabledConfigValue(StrictModel):
@@ -506,8 +502,6 @@ class UnknownConfigValue(PermissiveModel):
     Uses PermissiveModel to accept any fields while remaining a proper type.
     Detection: isinstance(x, UnknownConfigValue) or isinstance(x, PermissiveModel)
     """
-
-    pass
 
 
 # Discriminated union of all known config value types with fallback.
@@ -877,8 +871,6 @@ class StatsigOptionsEnvironment(StrictModel):
 class StatsigOptionsStorageProviderCache(StrictModel):
     """Storage provider cache. Always {} in observed captures."""
 
-    pass
-
 
 class StatsigOptionsStorageProvider(StrictModel):
     """Storage provider in Statsig options."""
@@ -1008,7 +1000,7 @@ class TenguApiQueryMainMetadata(TenguApiQueryMetadataBase):
 class TenguApiQueryTerminalMetadata(TenguApiQueryMetadataBase):
     """Metadata for tengu_api_query from terminal (querySource='terminal_update_title')."""
 
-    pass  # No additional fields
+    # No additional fields
 
 
 TenguApiQueryMetadata = TenguApiQueryAgentMetadata | TenguApiQueryMainMetadata | TenguApiQueryTerminalMetadata
@@ -1264,7 +1256,7 @@ class TenguVersionLockFailedMetadata(TenguEventMetadataBase):
 class TenguNativeAutoUpdaterStartMetadata(TenguEventMetadataBase):
     """Metadata for tengu_native_auto_updater_start (1 instance)."""
 
-    pass  # Just base fields
+    # Just base fields
 
 
 class TenguNativeAutoUpdaterSuccessMetadata(TenguEventMetadataBase):
@@ -1354,7 +1346,7 @@ class TenguMcpCliStatusMetadata(TenguEventMetadataBase):
 class TenguMcpServerConnectionSucceededMetadata(TenguEventMetadataBase):
     """Metadata for tengu_mcp_server_connection_succeeded (1 instance)."""
 
-    pass  # Just base fields
+    # Just base fields
 
 
 class TenguMcpIdeServerConnectionSucceededMetadata(TenguEventMetadataBase):

@@ -21,8 +21,6 @@ __all__ = [
 class MissingCwdError(Exception):
     """Raised when no cwd field is found in session records."""
 
-    pass
-
 
 def extract_source_project_path(files_data: Mapping[str, Sequence[SessionRecord]]) -> Path:
     """

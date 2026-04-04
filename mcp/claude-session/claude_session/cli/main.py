@@ -591,7 +591,7 @@ async def _restore_async(
                 for filename in files:
                     # Strip .b64 suffix for format detection
                     base_name = filename[:-4] if filename.endswith('.b64') else filename
-                    if base_name.endswith('.json') or base_name.endswith('.json.zst'):
+                    if base_name.endswith(('.json', '.json.zst')):
                         archive_file = filename
                         break
 

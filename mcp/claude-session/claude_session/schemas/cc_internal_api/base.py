@@ -35,8 +35,6 @@ class StrictModel(BaseStrictModel):
     Domain-specific customization can be added here if needed.
     """
 
-    pass
-
 
 # -- Empty HTTP Body Type (Capture-layer specific) -----------------------------
 

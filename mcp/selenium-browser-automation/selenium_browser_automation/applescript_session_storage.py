@@ -36,8 +36,6 @@ from urllib.parse import urlparse
 class SeleniumChromeConflictError(Exception):
     """Raised when Selenium Chrome is running and would conflict with AppleScript targeting."""
 
-    pass
-
 
 class AppleScriptTabTimeoutError(Exception):
     """Raised when AppleScript JS execution times out on a specific tab.

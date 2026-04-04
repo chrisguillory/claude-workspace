@@ -113,8 +113,6 @@ class EmptyDict(BaseStrictModel):
         sdk_params: EmptyDict  # Always {} in API traffic
     """
 
-    pass
-
 
 EmptySequence = Annotated[Sequence[Any], pydantic.Field(max_length=0)]
 """
