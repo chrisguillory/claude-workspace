@@ -213,7 +213,7 @@ def extract_value_at_path(
     """
     current = data
 
-    for i, part in enumerate(loc):
+    for _i, part in enumerate(loc):
         part_str = str(part)
 
         # Skip Union[...] annotations

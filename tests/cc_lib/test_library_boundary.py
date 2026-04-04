@@ -248,7 +248,7 @@ class TestProxy:
     def test_missing_attribute_raises_attribute_error(self) -> None:
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
         with pytest.raises(AttributeError) as exc_info:
-            proxy.nonexistent
+            _ = proxy.nonexistent
         assert exc_info.value.args == ("module 'tests.cc_lib.fake_lib' has no attribute 'nonexistent'",)
 
     def test_hasattr_false_for_missing(self) -> None:
@@ -304,7 +304,7 @@ class TestProxy:
         """Wrapping None — getattr raises AttributeError for any access."""
         proxy = LibraryBoundary(AppError).wrap(None)
         with pytest.raises(AttributeError) as exc_info:
-            proxy.anything  # type: ignore[attr-defined]  # intentionally invalid attr
+            _ = proxy.anything  # type: ignore[attr-defined]  # intentionally invalid attr
         assert exc_info.value.args == ("'NoneType' object has no attribute 'anything'",)
 
 
@@ -354,7 +354,7 @@ class TestProxyProperties:
         wrap the getattr() call in a boundary."""
         proxy = LibraryBoundary(AppError).wrap(fake_lib.config)
         with pytest.raises(ValueError) as exc_info:
-            proxy.failing_property
+            _ = proxy.failing_property
         assert exc_info.value.args == ('property access failed',)
 
 
@@ -383,7 +383,7 @@ class TestProxyMagicMethods:
         """'in' operator falls back to __iter__ then __getitem__, both missing."""
         proxy = LibraryBoundary(AppError).wrap(fake_lib.data_store)
         with pytest.raises(TypeError) as exc_info:
-            10 in proxy
+            _ = 10 in proxy
         assert exc_info.value.args == ("argument of type '_TranslatingProxy' is not iterable",)
 
     def test_regular_method_still_works(self) -> None:

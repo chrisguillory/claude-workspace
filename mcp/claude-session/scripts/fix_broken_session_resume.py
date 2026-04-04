@@ -394,7 +394,7 @@ def analyze_session(file_path: Path) -> AnalysisResult:
 
     # Simulate fix
     parent_map: dict[str, str | None] = {}
-    for i, rec in enumerate(records):
+    for _i, rec in enumerate(records):
         if rec is None:  # Skip blank lines
             continue
         uuid = rec.get('uuid')

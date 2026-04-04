@@ -36,6 +36,7 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = [
+    "B",    # flake8-bugbear (common bugs: mutable defaults, zip strict, closures)
     "C4",   # flake8-comprehensions
     "DTZ",  # flake8-datetimez (timezone safety)
     "E",    # pycodestyle errors
@@ -73,6 +74,18 @@ ignore = [
 "mcp/claude-session/claude_session/**/__init__.py" = [
     "RUF022",  # __all__ sorting — intentionally grouped by category
 ]
+"tests/linters/edge_cases/**" = [
+    "B012",   # return/break in finally — intentional bad-code test inputs
+    "B015",   # pointless comparison — intentional bad-code test inputs
+    "B018",   # useless expression — intentional bad-code test inputs
+    "B904",   # raise without from — intentional bad-code test inputs
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# B008 flags function calls in default arguments (evaluated once, not per-call).
+# These framework calls are designed to be evaluated once at definition time —
+# typer uses them to register CLI parameters, fastapi for dependency injection.
+extend-immutable-calls = ["typer.Option", "typer.Argument", "fastapi.Depends"]
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]

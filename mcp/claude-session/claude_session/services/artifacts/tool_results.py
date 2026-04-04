@@ -257,7 +257,7 @@ def collect_tool_results(project_folder: Path, session_id: str) -> ToolResultCol
                     content=p.read_bytes(),
                     extension=ext,
                 )
-                for p, ext in zip(d.file_paths, d.file_extensions)
+                for p, ext in zip(d.file_paths, d.file_extensions, strict=True)
             ],
         )
         for d in discovery.directories

@@ -74,7 +74,7 @@ class IndexStateStore:
         results = await self._redis.execute_pipeline(pipe)
 
         states: dict[str, FileIndexState] = {}
-        for path, raw in zip(file_paths, results):
+        for path, raw in zip(file_paths, results, strict=True):
             if raw:
                 states[path] = _decode_file_state(path, raw)
         return states
@@ -101,7 +101,7 @@ class IndexStateStore:
         results = await self._redis.execute_pipeline(pipe)
 
         summaries: dict[str, FileIndexSummary] = {}
-        for path, fields in zip(file_paths, results):
+        for path, fields in zip(file_paths, results, strict=True):
             # hmget returns a list of values (None for missing keys)
             if fields and fields[0] is not None:
                 summaries[path] = _decode_file_summary(path, fields)
@@ -151,7 +151,7 @@ class IndexStateStore:
 
         prefix_len = len(self._prefix)
         entries: list[tuple[str, FileIndexState]] = []
-        for key, raw in zip(keys, results):
+        for key, raw in zip(keys, results, strict=True):
             if raw:
                 file_path = key[prefix_len:]
                 entries.append((file_path, _decode_file_state(file_path, raw)))

@@ -1,3 +1,4 @@
+# ruff: noqa: B904 — deliberately simulates buggy library that loses exception chains
 """A fake third-party library for testing LibraryBoundary.
 
 Designed to look like a real library: module-level functions, module-level
