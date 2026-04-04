@@ -48,6 +48,7 @@ select = [
     "PIE",  # flake8-pie (unnecessary pass, startswith/endswith tuple)
     "PL",   # pylint
     "PT",   # flake8-pytest-style
+    "TRY",  # tryceratops (exception handling patterns)
     "RUF",  # ruff-specific
     "SIM",  # flake8-simplify
     "UP",   # pyupgrade
@@ -60,6 +61,10 @@ ignore = [
     "PLR2004", # magic-value-comparison
     "PLW2901", # redefined-loop-name — line = line.strip() is idiomatic
     "PT011",   # pytest.raises too broad — our tests already assert on exc_info.value.args
+    "TRY003",  # long exception messages — would require single-use exception classes for every error string
+    "TRY300",  # consider else block — code already works correctly, else adds nesting
+    "TRY301",  # abstract raise to inner function — reduces CLI error handling readability
+    "TRY400",  # use .exception() instead of .error() — already enforced by custom EXC006 rule
     "RUF100",  # unused-noqa — pre-emptive noqa for custom linters / future rules
     "SIM102",  # allow nested if statements
     "SIM103",  # allow explicit if-return-false for clarity
@@ -76,6 +81,7 @@ ignore = [
 ]
 "tests/linters/edge_cases/**" = [
     "B012",   # return/break in finally — intentional bad-code test inputs
+    "TRY201", # verbose raise — intentional bad-code test inputs
     "B015",   # pointless comparison — intentional bad-code test inputs
     "B018",   # useless expression — intentional bad-code test inputs
     "B904",   # raise without from — intentional bad-code test inputs

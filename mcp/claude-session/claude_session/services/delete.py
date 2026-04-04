@@ -537,7 +537,7 @@ class SessionDeleteService:
 
         except self.EXPECTED_DELETION_ERRORS as e:
             # Expected filesystem error - rollback already happened
-            logger.exception('Deletion failed (rolled back): %s', e)
+            logger.exception('Deletion failed (rolled back)')
 
             return DeleteResult(
                 session_id=session_id,
@@ -650,8 +650,8 @@ class SessionDeleteService:
             try:
                 await self._rollback_from_backup(backup_path)
                 logger.info('Rollback completed after cancellation')
-            except Exception as rollback_error:
-                logger.exception('Rollback failed during cancellation: %s', rollback_error)
+            except Exception:
+                logger.exception('Rollback failed during cancellation')
                 # Keep backup for manual recovery
             else:
                 # Rollback succeeded - remove backup
@@ -661,12 +661,12 @@ class SessionDeleteService:
 
         except BaseException as original_exc:
             # All other exceptions (including KeyboardInterrupt, SystemExit)
-            logger.exception('Deletion failed: %s, performing rollback...', original_exc)
+            logger.exception('Deletion failed, performing rollback...')
             try:
                 await self._rollback_from_backup(backup_path)
                 logger.info('Rollback completed successfully')
             except Exception as rollback_error:
-                logger.exception('Rollback failed: %s', rollback_error)
+                logger.exception('Rollback failed')
                 # Keep backup for manual recovery
                 original_exc.add_note(f'Rollback failed: {rollback_error}')
                 original_exc.add_note(f'Backup preserved at: {backup_path}')
