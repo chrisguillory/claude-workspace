@@ -706,6 +706,15 @@ pre .hljs-deletion {
     color: #6dc1e7 !important;
 }
 
+/* TOC entry highlight flash for dark theme */
+.md-toc li:target {
+    animation: toc-flash-dark 1.5s ease-out !important;
+}
+@keyframes toc-flash-dark {
+    from { background-color: rgba(109, 193, 231, 0.2); }
+    to { background-color: transparent; }
+}
+
 mark {
     background-color: #D3D40E !important;
     color: #222 !important;
