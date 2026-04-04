@@ -827,7 +827,10 @@ async function buildHtml({ forServe = false } = {}) {
   }
 
   // --macos-spoken-content: replace angle brackets in code blocks with fullwidth Unicode
-  // to prevent macOS Spoken Content from stripping content between < and >
+  // (U+FF1C/U+FF1E) to prevent macOS Spoken Content from stripping content between < and >.
+  // Known issue: Chrome uses a clipboard-based TTS pathway that applies NFKC normalization,
+  // converting fullwidth back to ASCII. Works in Safari and Chromium. See research-chrome-
+  // chromium-accessibility-tts.md for details.
   if (opts['macos-spoken-content']) {
     // Skip diagram/chart languages — these are parsed by Mermaid/Graphviz/Vega-Lite, not displayed as text
     const diagramLangs = /language-(?:mermaid|dot|graphviz|vega-lite|chart)/i;
