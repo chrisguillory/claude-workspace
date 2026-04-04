@@ -40,6 +40,7 @@ select = [
     "C4",   # flake8-comprehensions
     "DTZ",  # flake8-datetimez (timezone safety)
     "E",    # pycodestyle errors
+    "EXE",  # flake8-executable (shebang/permission checks)
     "F",    # pyflakes
     "FLY",  # flynt (f-string conversion)
     "G",    # flake8-logging-format (lazy % formatting in logging)
@@ -81,10 +82,10 @@ ignore = [
 ]
 "tests/linters/edge_cases/**" = [
     "B012",   # return/break in finally — intentional bad-code test inputs
-    "TRY201", # verbose raise — intentional bad-code test inputs
     "B015",   # pointless comparison — intentional bad-code test inputs
     "B018",   # useless expression — intentional bad-code test inputs
     "B904",   # raise without from — intentional bad-code test inputs
+    "TRY201", # verbose raise — intentional bad-code test inputs
 ]
 
 [tool.ruff.lint.flake8-bugbear]
