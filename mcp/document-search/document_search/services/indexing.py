@@ -324,6 +324,7 @@ class IndexingService:
                 dense,
                 sparse_results,
                 chunk_ids,
+                strict=True,
             )
         ]
 
@@ -1002,7 +1003,7 @@ class IndexingService:
                     # Path C: Has changed or deleted chunks — filter to changed only.
                     changed_chunks = []
                     changed_ids = []
-                    for chunk, cid in zip(chunks, all_chunk_ids):
+                    for chunk, cid in zip(chunks, all_chunk_ids, strict=True):
                         if cid not in unchanged_ids:
                             changed_chunks.append(chunk)
                             changed_ids.append(cid)
@@ -1115,14 +1116,14 @@ class IndexingService:
             tracer.record(fk, 'embed_dense', 'started')
 
             # Run sparse and dense embeddings in parallel
-            async def sparse_embed() -> tuple[Sequence[SparseVector], float]:
+            async def sparse_embed(texts: Sequence[str] = texts, fk: str = fk) -> tuple[Sequence[SparseVector], float]:
                 results, wall_secs, cpu_secs = await self._sparse_embedding.embed_batch(texts)
                 tracer.record(fk, 'embed_sparse', 'completed')
                 tracer.record_cpu(fk, 'embed_sparse', cpu_secs)
                 tracer.record_wall(fk, 'embed_sparse', wall_secs)
                 return results, cpu_secs
 
-            async def dense_embed() -> Sequence[NDArray[np.float32]]:
+            async def dense_embed(texts: Sequence[str] = texts, fk: str = fk) -> Sequence[NDArray[np.float32]]:
                 results = await self._embed_dense_sub_batched(texts)
                 tracer.record(fk, 'embed_dense', 'completed')
                 return results
@@ -1201,6 +1202,7 @@ class IndexingService:
                         embedded.dense_embeddings,
                         embedded.sparse_embeddings,
                         embedded.chunk_ids,
+                        strict=True,
                     )
                 ]
                 await self._repo.upsert_raw(raw_points)

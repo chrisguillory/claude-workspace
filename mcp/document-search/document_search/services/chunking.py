@@ -370,7 +370,7 @@ class ChunkingService:
             ]
 
             for _, row in group_df.iterrows():
-                row_str = ' | '.join(f'{col}: {val}' for col, val in zip(headers, row))
+                row_str = ' | '.join(f'{col}: {val}' for col, val in zip(headers, row, strict=True))
                 chunk_lines.append(row_str)
 
             chunk_text = '\n'.join(chunk_lines)

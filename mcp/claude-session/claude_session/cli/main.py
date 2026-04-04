@@ -125,7 +125,7 @@ def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
     # zsh groups completions with identical descriptions onto one line.
     # Deduplicate by appending the 8-char session prefix to collisions.
     seen: dict[str, int] = {}
-    for sid, desc in results:
+    for _sid, desc in results:
         seen.setdefault(desc, 0)
         seen[desc] += 1
     duped = {desc for desc, count in seen.items() if count > 1}

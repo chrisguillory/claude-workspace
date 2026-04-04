@@ -380,7 +380,7 @@ def main() -> None:
     # Show unmatched
     if unmatched_endpoints:
         print('\n? UNMATCHED (no schema or empty):')
-        for pattern, result in unmatched_endpoints[:10]:
+        for pattern, _result in unmatched_endpoints[:10]:
             print(f'  {pattern[:60]}')
 
     print()

@@ -359,7 +359,7 @@ class Pep723Block:
         dep_strings = [d[2] for d in dep_entries]
         sorted_deps = sorted(dep_strings, key=self._dep_sort_key)
         if dep_strings != sorted_deps:
-            for (line_num, raw_line, actual), expected in zip(dep_entries, sorted_deps):
+            for (line_num, raw_line, actual), expected in zip(dep_entries, sorted_deps, strict=True):
                 if actual != expected:
                     return Violation(
                         code='UVS003',
