@@ -51,7 +51,7 @@ class TestContextManager:
         assert result == 2
 
     @pytest.mark.parametrize(
-        'exception, message',
+        ('exception', 'message'),
         [
             (ValueError, 'original'),
             (RuntimeError, 'the message'),

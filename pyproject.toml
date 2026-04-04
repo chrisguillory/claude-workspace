@@ -46,6 +46,7 @@ select = [
     "PERF", # perflint (performance)
     "PIE",  # flake8-pie (unnecessary pass, startswith/endswith tuple)
     "PL",   # pylint
+    "PT",   # flake8-pytest-style
     "RUF",  # ruff-specific
     "SIM",  # flake8-simplify
     "UP",   # pyupgrade
@@ -57,6 +58,7 @@ ignore = [
     "PLR09",   # too-many-branches/arguments/statements/returns
     "PLR2004", # magic-value-comparison
     "PLW2901", # redefined-loop-name — line = line.strip() is idiomatic
+    "PT011",   # pytest.raises too broad — our tests already assert on exc_info.value.args
     "RUF100",  # unused-noqa — pre-emptive noqa for custom linters / future rules
     "SIM102",  # allow nested if statements
     "SIM103",  # allow explicit if-return-false for clarity
