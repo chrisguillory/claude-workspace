@@ -89,6 +89,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"**/*.pyi" = ["PIE790"]  # stubs use ... as body convention, not docstring-only
 "mcp/claude-session/scripts/intercept_traffic.py" = [
     "PLW0603",  # global statement — mitmproxy addon caching pattern
 ]

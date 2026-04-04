@@ -246,7 +246,7 @@ def extract_value_at_path(
                     # Check if it looks like a model/type name (CamelCase or ends with known suffixes)
                     if (
                         (part_str and part_str[0].isupper())
-                        or part_str.endswith(('_request', '_response', 'Schema'))
+                        or part_str.endswith(('_request', '_response'))
                         or 'Schema' in part_str
                     ):
                         # Skip this - it's likely a type annotation
