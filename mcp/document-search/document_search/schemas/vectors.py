@@ -249,6 +249,7 @@ class IndexInfo(StrictModel):
     storage: StorageStats
     content: ContentStats
     path: str | None = None  # Scope used for content stats (None = CWD)
+    dashboard_url: str | None = None
 
 
 class ClearResult(StrictModel):
