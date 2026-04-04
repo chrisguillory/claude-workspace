@@ -96,8 +96,6 @@ class AppleScriptNotEnabledError(Exception):
     2. Explicitly opt out with live_session_storage_via_applescript=False
     """
 
-    pass
-
 
 # -- Chrome Profile Path Resolution --------------------------------------------
 

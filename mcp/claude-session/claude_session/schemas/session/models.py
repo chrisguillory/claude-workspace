@@ -318,8 +318,6 @@ class StrictModel(BaseStrictModel):
     Domain-specific customization can be added here if needed.
     """
 
-    pass
-
 
 # -- Message Content Types (Discriminated Union) -------------------------------
 
@@ -442,8 +440,6 @@ class EnterWorktreeToolInput(StrictModel):
 
 class EnterPlanModeToolInput(StrictModel):
     """Input for EnterPlanMode tool (no parameters)."""
-
-    pass
 
 
 class AgentOutputToolInput(StrictModel):
@@ -638,8 +634,6 @@ class TaskUpdateToolInput(StrictModel):
 
 class TaskListToolInput(StrictModel):
     """Input for TaskList tool - lists all tasks (no parameters)."""
-
-    pass
 
 
 # -- TodoWrite Tool Input (3,186x occurrences) ---------------------------------
@@ -878,8 +872,6 @@ class MCPToolInput(PermissiveModel):
 
     Uses PermissiveModel to accept any fields while maintaining type observability.
     """
-
-    pass
 
 
 # Union of tool inputs (typed models first, PermissiveModel fallback for MCP tools)
@@ -1246,8 +1238,6 @@ class NetworkError(StrictModel):
 class EmptyError(StrictModel):
     """Empty error object for unknown/unspecified API errors (Claude Code 2.0.76+)."""
 
-    pass
-
 
 # -- MCP Metadata (Claude Code 2.1.19+) ----------------------------------------
 
@@ -1267,8 +1257,6 @@ class MCPStructuredContent(PermissiveModel):
 
     Uses PermissiveModel to accept any fields while maintaining type observability.
     """
-
-    pass
 
 
 class McpMeta(StrictModel):
@@ -1910,8 +1898,6 @@ class MCPToolResult(PermissiveModel):
 
     Uses PermissiveModel to accept any fields while maintaining type observability.
     """
-
-    pass
 
 
 # Union of all tool result types (validated left-to-right, most specific first)

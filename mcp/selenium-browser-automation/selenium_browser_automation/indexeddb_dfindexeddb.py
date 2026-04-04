@@ -246,7 +246,7 @@ def _parse_indexeddb_folder(db_dir: Path) -> Sequence[JsonObject]:
             # Add indexes to store (matching ProfileStateIndexedDBIndex)
             store_indexes = []
             if db_id in indexes and store_id in indexes[db_id]:
-                for index_id, idx_data in sorted(indexes[db_id][store_id].items()):
+                for _index_id, idx_data in sorted(indexes[db_id][store_id].items()):
                     if idx_data.get('name'):
                         store_indexes.append(
                             {

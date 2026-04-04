@@ -75,7 +75,7 @@ def check_path_markers() -> bool:
 
     if issues:
         print('⚠ MISSING PATH MARKERS:')
-        for field, line_num, line in issues:
+        for _field, line_num, line in issues:
             print(f'  Line {line_num}: {line}')
             print('    → Should have: # PATH TO TRANSLATE comment')
         print()

@@ -2948,8 +2948,8 @@ Workflow:
         # Get browser logs (clears buffer after retrieval)
         try:
             raw_logs = await asyncio.to_thread(driver.get_log, 'browser')
-        except WebDriverException as e:
-            logger.exception('Failed to get console logs: %s', e)
+        except WebDriverException:
+            logger.exception('Failed to get console logs')
             return ConsoleLogsResult(
                 logs=[],
                 total_count=0,
@@ -3344,7 +3344,7 @@ Workflow:
                 error_type='timeout',
             )
         except WebDriverException as e:
-            logger.exception('JS execution WebDriver error: %s', e)
+            logger.exception('JS execution WebDriver error')
             return JavaScriptResult(
                 success=False,
                 result_type='unserializable',
