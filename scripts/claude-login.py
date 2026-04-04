@@ -278,7 +278,7 @@ def write_keychain_raw(data: JsonObject) -> None:
     """
     user = os.environ.get('USER', '')
     # Delete duplicates with different -a values (keep first occurrence)
-    for i in range(1, 5):
+    for _i in range(1, 5):
         del_result = subprocess.run(
             ['security', 'delete-generic-password', '-s', KEYCHAIN_SERVICE_CREDENTIALS],
             check=False,

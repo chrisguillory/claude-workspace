@@ -413,7 +413,6 @@ class ReferralRedemption(StrictModel):
     """
 
     # Placeholder - capture non-empty redemptions to validate fields
-    pass
 
 
 class ReferralRedemptionsResponse(StrictModel):

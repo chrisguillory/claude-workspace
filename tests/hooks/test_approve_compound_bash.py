@@ -521,7 +521,7 @@ class TestWrapperCommandsPreserved:
     """
 
     @pytest.mark.parametrize(
-        'command, expected_base',
+        ('command', 'expected_base'),
         [
             ('timeout 5s git log && echo done', 'timeout 5s git log'),
             ('nohup git log && echo done', 'nohup git log'),
@@ -537,7 +537,7 @@ class TestWrapperCommandsPreserved:
         assert result[0] == expected_base
 
     @pytest.mark.parametrize(
-        'command, expected_base',
+        ('command', 'expected_base'),
         [
             ('sudo git status && echo done', 'sudo git status'),
             ('command git status && echo done', 'command git status'),

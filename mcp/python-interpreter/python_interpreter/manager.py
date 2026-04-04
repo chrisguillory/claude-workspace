@@ -40,8 +40,6 @@ class InterpreterConfig:
 class ExternalInterpreterError(Exception):
     """External interpreter operation failed."""
 
-    pass
-
 
 class ExternalInterpreterManager:
     """Manages external Python interpreter subprocesses."""
@@ -155,7 +153,7 @@ class ExternalInterpreterManager:
 
     def shutdown_all(self) -> None:
         """Kill all interpreter subprocesses. Best effort."""
-        for name, (_, proc, _) in list(self._interpreters.items()):
+        for _name, (_, proc, _) in list(self._interpreters.items()):
             self._kill_subprocess(proc)
         self._interpreters.clear()
 

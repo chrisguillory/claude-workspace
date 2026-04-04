@@ -254,10 +254,7 @@ def extract_value_at_path(
                 else:
                     # Key doesn't exist - might be a Pydantic type annotation
                     if part_str and (
-                        part_str[0].isupper()
-                        or part_str.endswith('Record')
-                        or part_str.endswith('Content')
-                        or 'Tool' in part_str
+                        part_str[0].isupper() or part_str.endswith(('Record', 'Content')) or 'Tool' in part_str
                     ):
                         # Skip this - it's likely a type annotation
                         continue

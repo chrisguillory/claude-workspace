@@ -129,8 +129,8 @@ def test_parallel_deterministic(rust_model: bm25_rs.BM25Model) -> None:
     r2, _, _ = rust_model.embed_batch(texts)
     for i in range(len(texts)):
         assert sorted(r1[i][0]) == sorted(r2[i][0])
-        d1 = dict(zip(r1[i][0], r1[i][1]))
-        d2 = dict(zip(r2[i][0], r2[i][1]))
+        d1 = dict(zip(r1[i][0], r1[i][1], strict=True))
+        d2 = dict(zip(r2[i][0], r2[i][1], strict=True))
         for k, v in d1.items():
             assert v == d2[k]
 
@@ -141,7 +141,7 @@ def _fastembed_embed(model: SparseTextEmbedding, text: str) -> Mapping[int, floa
     if not results:
         return {}
     sparse = results[0]
-    return dict(zip(sparse.indices.tolist(), sparse.values.tolist()))
+    return dict(zip(sparse.indices.tolist(), sparse.values.tolist(), strict=True))
 
 
 def _rust_embed(model: bm25_rs.BM25Model, text: str) -> Mapping[int, float]:
@@ -150,4 +150,4 @@ def _rust_embed(model: bm25_rs.BM25Model, text: str) -> Mapping[int, float]:
     if not embeddings:
         return {}
     indices, values = embeddings[0]
-    return dict(zip(indices, values))
+    return dict(zip(indices, values, strict=True))

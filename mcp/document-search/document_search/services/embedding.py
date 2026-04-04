@@ -385,7 +385,7 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
 
             # Prepare cache writes for batching
             write_items: list[tuple[str, bytes, int]] = []
-            for idx, arr in zip(miss_indices, miss_arrays):
+            for idx, arr in zip(miss_indices, miss_arrays, strict=True):
                 results[idx] = arr
                 key = self.cache_key(texts[idx])
                 write_items.append((key, arr.tobytes(), CACHE_TTL_SECONDS))

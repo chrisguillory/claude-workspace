@@ -100,7 +100,7 @@ def exc002_violation_basic() -> None:
     try:
         risky_operation()
     except Exception:  # EXC002: broad catch without raise
-        return None  # Swallows exception!
+        return  # Swallows exception!
 
 
 def exc002_violation_base_exception() -> None:
@@ -115,9 +115,9 @@ def exc002_correct_specific() -> None:
     """CORRECT: Catch specific expected exceptions."""
     try:
         risky_operation()
-    except ValueError as e:
-        logger.exception('Invalid value: %s', e)  # Proper logging with traceback
-        return None  # OK - specific exception handled
+    except ValueError:
+        logger.exception('Invalid value')  # Proper logging with traceback
+        return  # OK - specific exception handled
 
 
 def exc002_correct_reraise() -> None:
@@ -402,7 +402,7 @@ def exc005_violation_basic() -> None:
     try:
         risky_operation()
     except ValueError as e:  # EXC005: e is captured but never used
-        return None
+        return
 
 
 def exc005_correct_no_capture() -> None:
@@ -410,16 +410,16 @@ def exc005_correct_no_capture() -> None:
     try:
         risky_operation()
     except ValueError:  # No 'as e' - clearer intent
-        return None
+        return
 
 
 def exc005_correct_use_variable() -> None:
     """CORRECT: Use the exception variable."""
     try:
         risky_operation()
-    except ValueError as e:
-        logger.exception('Failed: %s', e)  # Using e with proper traceback (EXC006 compliant)
-        return None
+    except ValueError:
+        logger.exception('Failed')  # Proper traceback via .exception()
+        return
 
 
 # -- EXC006: Logger without exc_info (loses traceback in logs) ----------------
@@ -456,8 +456,8 @@ def exc006_correct_exc_info() -> None:
     """CORRECT: Use exc_info=True explicitly."""
     try:
         risky_operation()
-    except Exception as e:
-        logger.exception('Failed: %s', e)  # Includes traceback
+    except Exception:
+        logger.exception('Failed')  # Includes traceback
         raise
 
 
@@ -687,7 +687,7 @@ async def error_boundary_example() -> ErrorResult | SuccessResult:
 
     except ValueError as e:
         # Expected error - handle gracefully
-        logger.exception('Invalid data: %s', e)
+        logger.exception('Invalid data')
         await rollback_async(backup_path)
         return ErrorResult(str(e))
 
@@ -718,19 +718,13 @@ async def error_boundary_example() -> ErrorResult | SuccessResult:
 class CustomError(Exception):
     """Custom exception for examples."""
 
-    pass
-
 
 class InternalError(Exception):
     """Internal exception for examples."""
 
-    pass
-
 
 class PublicError(Exception):
     """Public exception for examples."""
-
-    pass
 
 
 # -- Result Classes -----------------------------------------------------------
@@ -746,8 +740,6 @@ class ErrorResult:
 class SuccessResult:
     """Placeholder for success result."""
 
-    pass
-
 
 # -- Stub Functions (alphabetical) --------------------------------------------
 
@@ -759,12 +751,10 @@ def acquire_resource() -> str:
 
 async def async_operation() -> None:
     """Placeholder for async operation."""
-    pass
 
 
 def cleanup() -> None:
     """Placeholder for cleanup logic."""
-    pass
 
 
 def compute() -> str:
@@ -779,72 +769,58 @@ def compute_with(resource: object) -> str:
 
 async def create_backup(path: Path) -> None:
     """Placeholder for backup creation."""
-    pass
 
 
 def handle_error() -> None:
     """Placeholder for error handling."""
-    pass
 
 
 def internal_detail() -> None:
     """Placeholder for internal operation."""
-    pass
 
 
 def main() -> None:
     """Placeholder for main entry point."""
-    pass
 
 
 async def modify_data() -> None:
     """Placeholder for data modification."""
-    pass
 
 
 def optional_feature() -> None:
     """Placeholder for optional feature."""
-    pass
 
 
 def process(item: object) -> None:
     """Placeholder for sync item processing."""
-    pass
 
 
 async def process_async(item: object) -> None:
     """Placeholder for async item processing."""
-    pass
 
 
 def release_resource(resource: object) -> None:
     """Placeholder for resource release."""
-    pass
 
 
 def risky_operation() -> None:
     """Placeholder for operation that might raise."""
-    pass
 
 
 def rollback() -> None:
     """Placeholder for rollback logic."""
-    pass
 
 
 async def rollback_async(backup_path: Path | None = None) -> None:
     """Placeholder for async rollback logic."""
-    pass
 
 
 async def task_a() -> None:
     """Placeholder for async task."""
-    pass
 
 
 async def task_b() -> None:
     """Placeholder for async task."""
-    pass
 
 
 def validate(item: str) -> bool:

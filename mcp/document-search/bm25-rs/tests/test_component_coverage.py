@@ -678,7 +678,7 @@ def _fastembed_embed_dict(model: SparseTextEmbedding, text: str) -> Mapping[int,
     if not results:
         return {}
     sparse = results[0]
-    return dict(zip(sparse.indices.tolist(), sparse.values.tolist()))
+    return dict(zip(sparse.indices.tolist(), sparse.values.tolist(), strict=True))
 
 
 def _rust_embed_dict(model: bm25_rs.BM25Model, text: str) -> Mapping[int, float]:
@@ -687,7 +687,7 @@ def _rust_embed_dict(model: bm25_rs.BM25Model, text: str) -> Mapping[int, float]
     if not embeddings:
         return {}
     indices, values = embeddings[0]
-    return dict(zip(indices, values))
+    return dict(zip(indices, values, strict=True))
 
 
 def _compare_batch(

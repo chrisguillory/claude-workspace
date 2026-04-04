@@ -125,7 +125,7 @@ def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
     # zsh groups completions with identical descriptions onto one line.
     # Deduplicate by appending the 8-char session prefix to collisions.
     seen: dict[str, int] = {}
-    for sid, desc in results:
+    for _sid, desc in results:
         seen.setdefault(desc, 0)
         seen[desc] += 1
     duped = {desc for desc, count in seen.items() if count > 1}
@@ -536,8 +536,8 @@ async def _archive_async(
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    except Exception as e:
-        logger.exception('Failed to create archive: %s', e)
+    except Exception:
+        logger.exception('Failed to create archive')
         raise typer.Exit(1) from None
 
 
@@ -591,7 +591,7 @@ async def _restore_async(
                 for filename in files:
                     # Strip .b64 suffix for format detection
                     base_name = filename[:-4] if filename.endswith('.b64') else filename
-                    if base_name.endswith('.json') or base_name.endswith('.json.zst'):
+                    if base_name.endswith(('.json', '.json.zst')):
                         archive_file = filename
                         break
 
@@ -683,8 +683,8 @@ async def _restore_async(
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    except Exception as e:
-        logger.exception('Failed to restore session: %s', e)
+    except Exception:
+        logger.exception('Failed to restore session')
         raise typer.Exit(1) from None
 
 
@@ -749,8 +749,8 @@ async def _clone_async(
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    except Exception as e:
-        logger.exception('Failed to clone session: %s', e)
+    except Exception:
+        logger.exception('Failed to clone session')
         raise typer.Exit(1) from None
 
 
@@ -860,8 +860,8 @@ async def _delete_async(
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    except Exception as e:
-        logger.exception('Failed to delete session: %s', e)
+    except Exception:
+        logger.exception('Failed to delete session')
         raise typer.Exit(1) from None
 
 
@@ -962,8 +962,8 @@ async def _move_async(
     except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
         typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    except Exception as e:
-        logger.exception('Failed to move session: %s', e)
+    except Exception:
+        logger.exception('Failed to move session')
         raise typer.Exit(1) from None
 
 

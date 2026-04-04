@@ -17,7 +17,7 @@ __all__ = [
 class McpServerSettings(BaseSessionSettings):
     """MCP server-specific configuration."""
 
-    pass  # Empty for now, room for MCP-specific settings
+    # Empty for now, room for MCP-specific settings
 
 
 # Module-level singleton (lazy-loaded)

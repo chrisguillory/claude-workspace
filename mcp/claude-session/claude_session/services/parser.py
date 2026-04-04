@@ -65,7 +65,7 @@ class SessionParserService:
         records = []
 
         with open(file_path, encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
+            for _line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue

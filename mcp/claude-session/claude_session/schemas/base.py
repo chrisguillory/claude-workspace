@@ -20,5 +20,3 @@ class StrictModel(BaseStrictModel):
     Inherits from BaseStrictModel (extra='forbid', strict=True, frozen=True).
     Used by claude_session/schemas/operations/ package.
     """
-
-    pass
