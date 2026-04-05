@@ -85,6 +85,11 @@ def handle_session_end(session_id: str):
     mark_session_ended(session_id)  # Event fired = session ended
 ```
 
+**When TO handle exceptions** — only in these cases:
+1. You've **actually seen** the exception occur in practice
+2. The exception is **expected as part of normal flow** (e.g., file existence checks)
+3. The library documentation **explicitly requires** handling specific exceptions
+
 ## Python Specifics
 
 ### Strict Type Safety
