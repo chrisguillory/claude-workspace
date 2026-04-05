@@ -100,7 +100,7 @@ Four Statsig cache files exist on this system:
 ```
 Dec  9 14:45  First session-memory file created (underwriting-api)
 Dec  9 15:03  Second session-memory file created
-Dec 10 07:01  Third session-memory file (claude-session-mcp)
+Dec 10 07:01  Third session-memory file (claude-session)
 Dec 10 07:35  Fourth session-memory file
 Dec 10 08:09  Fifth session-memory file
 Dec 10 09:31  Sixth (last) session-memory file

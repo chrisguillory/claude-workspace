@@ -97,7 +97,7 @@ SETTINGS_PRECEDENCE: Sequence[tuple[str, Path | None]] = [
 # Known Environment Variables
 #
 # Grouped by category. Only non-default values are displayed.
-# Reference: https://github.com/chrisguillory/claude-session-mcp#readme
+# Reference: https://github.com/chrisguillory/claude-workspace/tree/main/mcp/claude-session#readme
 
 ENV_VAR_CATEGORIES: Sequence[tuple[str, Sequence[str]]] = [
     (

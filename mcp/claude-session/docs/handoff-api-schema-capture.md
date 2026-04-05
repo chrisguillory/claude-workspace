@@ -2,7 +2,7 @@
 
 **Session ID:** 019b46e3-6bee-7f31-a3cf-4f4abed8ab32
 **Date:** 2026-01-02
-**Project:** /Users/chris/claude-session-mcp
+**Project:** ~/claude-workspace/mcp/claude-session
 **Status:** Traffic capture script ready, needs critical fixes before re-capture
 
 ---
@@ -678,7 +678,7 @@ except ImportError:
 brew install mitmproxy
 
 # From the project root
-cd /Users/chris/claude-session-mcp
+cd ~/claude-workspace/mcp/claude-session
 ```
 
 ### Capture
@@ -903,7 +903,7 @@ class MessagesResponse(PermissiveModel):
 ## Current File Structure
 
 ```
-/Users/chris/claude-session-mcp/
+~/claude-workspace/mcp/claude-session/
 ├── scripts/
 │   └── intercept_traffic.py     # Capture script (NEEDS FIXES)
 ├── captures/                     # Traffic captures (gitignored)
@@ -992,7 +992,7 @@ class MessagesResponse(PermissiveModel):
 - `CLAUDE.md` - Full development guide with traffic capture section
 - `claude_session/schemas/cc_internal_api/README.md` - API schema documentation
 - `claude_session/schemas/session/README.md` - Session schema documentation
-- Plan file: `/Users/chris/.claude/plans/imperative-beaming-lecun.md`
+- Plan file: `~/.claude/plans/imperative-beaming-lecun.md`
 
 ---
 
