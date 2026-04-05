@@ -371,13 +371,6 @@ def main() -> None:
 # -- Private helpers (used by async implementations below) --
 
 
-def _resolve_redis_port() -> int:
-    port = int(os.environ.get('DOCUMENT_SEARCH_REDIS_PORT', '0'))
-    if port:
-        return port
-    return discover_redis_port(PROJECT_ROOT)
-
-
 def _resolve_path(path: str | None) -> str | None:
     """Resolve path argument: '**' for global, None for CWD, else expand."""
     if path == '**':
@@ -396,7 +389,7 @@ class InfraContext:
 
 @asynccontextmanager
 async def infrastructure() -> AsyncIterator[InfraContext]:
-    redis_port = _resolve_redis_port()
+    redis_port = discover_redis_port(PROJECT_ROOT)
     redis = RedisClient(host='127.0.0.1', port=redis_port)
     try:
         await redis.ping()
