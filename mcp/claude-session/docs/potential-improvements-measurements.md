@@ -1,6 +1,6 @@
 # Potential Improvements & Measurements
 
-Ideas for extending claude-session-mcp and the broader Claude Code tooling
+Ideas for extending claude-session and the broader Claude Code tooling
 ecosystem. Each item includes what to measure and how to know if it's working.
 
 ---
