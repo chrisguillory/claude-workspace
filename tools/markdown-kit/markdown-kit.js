@@ -72,7 +72,8 @@
 //                    mermaid.js library injected into the Chromium page.
 //                    Typora also renders Mermaid natively. Output is equivalent.
 //
-//   Emoji:           We convert :shortcode: to Unicode glyphs via node-emoji.
+//   Emoji:           We convert :shortcode: to Unicode glyphs via gemoji (GitHub)
+//                    + Slack/Discord aliases for cross-platform shortcode support.
 //                    Typora does this too. Equivalent behavior.
 //
 //   TOC:             We replace [toc] with a generated table of contents.
@@ -165,7 +166,7 @@ Options:
   --rich-highlighting       Color built-ins and types distinctly (print, Optional, List, etc.)
   --toc-nav <features>      TOC navigation: inject, backlinks, smooth, float, all (comma-separated)
   --macos-spoken-content    TTS-safe code blocks (fullwidth angle brackets for macOS Spoken Content)
-  --embed-images            Embed images as base64 data URIs (HTML only)
+  --embed-images            Embed images as base64 data URIs
   --copy-assets             Copy local images alongside output HTML
   --absolute-paths          Rewrite image paths to absolute (local machine only)
   --accept-broken-images    Proceed when local images won't resolve
@@ -249,13 +250,9 @@ if (opts.launch !== undefined && !opts.serve && !opts['secret-gist']) {
   process.exit(1);
 }
 
-// --embed-images validation (serve check first for specificity)
-if (opts['embed-images'] && opts.serve) {
-  console.error('Error: --embed-images has no effect in serve mode (images served via /static/).');
-  process.exit(1);
-}
-if (opts['embed-images'] && !opts.html) {
-  console.error('Error: --embed-images only applies to HTML output. PDF embeds images via the browser engine. Use --html or --secret-gist.');
+// --embed-images validation
+if (opts['embed-images'] && !opts.html && !opts.serve) {
+  console.error('Error: --embed-images only applies to HTML or serve output. PDF embeds images via the browser engine.');
   process.exit(1);
 }
 
@@ -282,8 +279,7 @@ if (opts['absolute-paths']) {
 
 // --accept-broken-images validation
 if (opts['accept-broken-images']) {
-  if (opts.serve) { console.error('Error: --accept-broken-images has no effect in serve mode.'); process.exit(1); }
-  if (!opts.html) { console.error('Error: --accept-broken-images only applies to HTML output.'); process.exit(1); }
+  if (!opts.html && !opts.serve) { console.error('Error: --accept-broken-images only applies to HTML or serve output.'); process.exit(1); }
 }
 
 // --gist-id requires --secret-gist
@@ -331,7 +327,7 @@ const DEPS = {
   'marked-katex-extension': '^5',
   'marked-gfm-heading-id': '^4',
   'marked-emoji': '^2',
-  'node-emoji': '^2',
+  gemoji: '^8',
   'marked-footnote': '^1',
   'marked-alert': '^2',
   'gray-matter': '^4',
@@ -368,7 +364,7 @@ const hljs = require('highlight.js');
 const markedKatex = require('marked-katex-extension');
 const { gfmHeadingId, getHeadingList } = require('marked-gfm-heading-id');
 const { markedEmoji } = require('marked-emoji');
-const nodeEmoji = require('node-emoji');
+const { nameToEmoji } = require('gemoji');
 const markedFootnote = require('marked-footnote');
 const markedAlert = require('marked-alert');
 const grayMatter = require('gray-matter');
@@ -554,25 +550,20 @@ const containerExtension = {
 marked.use({ extensions: [highlightExtension, subscriptExtension, superscriptExtension, containerExtension] });
 
 // :emoji_name: -> unicode emoji character
-// Build emoji map from node-emoji's search (covers all GitHub/Typora shortcodes)
-const emojiMap = {};
-for (const { name, emoji } of nodeEmoji.search('')) {
-  emojiMap[name] = emoji;
-}
-// Add common GitHub/Typora aliases missing from node-emoji
-const emojiAliases = {
-  thumbsup: '+1', thumbs_up: '+1', thumbsdown: '-1', thumbs_down: '-1',
-  shipit: 'ship', satisfied: 'laughing', hankey: 'poop', poop: 'hankey',
-};
-for (const [alias, canonical] of Object.entries(emojiAliases)) {
-  if (!emojiMap[alias] && emojiMap[canonical]) {
-    emojiMap[alias] = emojiMap[canonical];
-  } else if (!emojiMap[alias]) {
-    const found = nodeEmoji.get(canonical);
-    if (found) emojiMap[alias] = found;
+// Primary: gemoji (GitHub's official dictionary, 1913 shortcodes)
+// Supplementary: Slack/Discord aliases for shortcodes that differ from GitHub convention
+// (e.g., :robot_face: → 🤖 where GitHub uses :robot:)
+const slackAliasesData = JSON.parse(readFileSync(join(scriptDir, 'slack-emoji-aliases.json'), 'utf-8'));
+const emojiMap = { ...nameToEmoji, ...slackAliasesData.aliases };
+marked.use(markedEmoji({ emojis: emojiMap, renderer: (token) => token.emoji }));
+
+// Staleness nudge (6-month threshold) — emoji-datasource tracks annual Unicode releases
+if (slackAliasesData._generated_at && process.env.MARKDOWN_KIT_IGNORE_STALE_EMOJI !== '1') {
+  const monthsOld = (Date.now() - new Date(slackAliasesData._generated_at)) / (1000 * 60 * 60 * 24 * 30);
+  if (monthsOld >= 6) {
+    console.warn(`markdown-kit: emoji aliases are ${Math.floor(monthsOld)} months old. Run 'node tools/markdown-kit/scripts/regenerate-emoji-aliases.js' to refresh.`);
   }
 }
-marked.use(markedEmoji({ emojis: emojiMap, renderer: (token) => token.emoji }));
 
 // ── Reusable pipeline functions ────────────────────────────────────────────────
 
@@ -659,10 +650,11 @@ function detectMimeFromBytes(buf) {
 // Embed images as base64 data URIs (--embed-images)
 // Handles local files, remote URLs, and GitHub-authenticated URLs.
 // Deduplicates repeated references. Skips images exceeding 5MB.
+// Cache is module-scoped to persist across serve-mode rebuilds.
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const imageEmbedCache = new Map();
 
 async function embedImages(html, baseDir) {
-  const cache = new Map();
   let count = 0, totalOrigBytes = 0;
   const imgRegex = /(<img\s[^>]*src=")([^"]+)(")/gi;
 
@@ -677,7 +669,8 @@ async function embedImages(html, baseDir) {
   const replacements = [];
   for (const { full, pre, src, post } of matches) {
     if (/^data:/i.test(src)) { replacements.push(full); continue; }
-    if (cache.has(src)) { replacements.push(`${pre}${cache.get(src)}${post}`); count++; continue; }
+    if (/^\//i.test(src)) { replacements.push(full); continue; }  // serve-mode /static/ paths
+    if (imageEmbedCache.has(src)) { replacements.push(`${pre}${imageEmbedCache.get(src)}${post}`); count++; continue; }
 
     try {
       let data, mime;
@@ -721,7 +714,7 @@ async function embedImages(html, baseDir) {
 
       totalOrigBytes += data.length;
       const dataUri = `data:${mime};base64,${data.toString('base64')}`;
-      cache.set(src, dataUri);
+      imageEmbedCache.set(src, dataUri);
       replacements.push(`${pre}${dataUri}${post}`);
       count++;
     } catch (e) {
@@ -1150,13 +1143,17 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     resolvedBody = resolveImagePaths(processedBody, inputDir);
   }
 
-  // Embed images as base64 data URIs (--embed-images, standalone mode only)
-  if (opts['embed-images'] && forStandalone) {
+  // Embed images as base64 data URIs (--embed-images, standalone + serve mode)
+  if (opts['embed-images'] && (forStandalone || forServe)) {
     const result = await embedImages(resolvedBody, inputDir);
     resolvedBody = result.html;
     if (result.count > 0) {
       const origMB = (result.totalOrigBytes / 1048576).toFixed(1);
       console.error(`Embedded:   ${result.count} image${result.count !== 1 ? 's' : ''} (${origMB} MB)`);
+    } else if (!forServe) {
+      // Only warn in standalone mode — in serve mode, local images are served via /static/
+      // and are expected to be skipped by embedImages()
+      console.warn('Warning: --embed-images passed but no images found to embed.');
     }
   }
 
@@ -1424,8 +1421,9 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
       vertical-align: super;
       opacity: 0.4;
     }
-    /* TOC entry highlight on arrival via heading back-link */
-    .md-toc li:target {
+    /* Bidirectional TOC flash — highlight target on both TOC→heading and heading→TOC clicks */
+    .md-toc li:target,
+    h1:target, h2:target, h3:target, h4:target, h5:target, h6:target {
       animation: toc-flash 1.5s ease-out;
     }
     @keyframes toc-flash {
@@ -2198,9 +2196,9 @@ async function generatePdfWebKit() {
 
 // ── Live preview server ───────────────────────────────────────────────────────
 
-async function startServer() {
+async function startServer(initialHtml = null) {
   const host = opts.host;
-  let currentHtml = await buildHtml({ forServe: true });
+  let currentHtml = initialHtml || await buildHtml({ forServe: true });
   const sseClients = new Set();
 
   // MIME types for static file serving
@@ -2319,28 +2317,43 @@ async function startServer() {
     console.log('Watching for changes... (Ctrl+C to stop)');
   });
 
-  // File watcher with debounce
+  // File watcher with debounce.
+  // Watch parent DIRECTORIES (not file paths) to survive atomic-rename saves.
+  // Editors like VS Code and `touch` on some systems replace file inodes, which
+  // kills path-based watchers silently. Directory watchers observe entries and
+  // survive rename operations.
   let debounceTimer = null;
-  const watchedPaths = [inputPath];
-  if (existsSync(stylesheetPath)) watchedPaths.push(stylesheetPath);
+  const watchedDirs = new Map();  // dir → Set of filenames to watch
+  const addWatch = (path) => {
+    const d = dirname(path);
+    if (!watchedDirs.has(d)) watchedDirs.set(d, new Set());
+    watchedDirs.get(d).add(basename(path));
+  };
+  addWatch(inputPath);
+  if (existsSync(stylesheetPath)) addWatch(stylesheetPath);
 
-  const watchers = watchedPaths.map(p => {
-    return fsWatch(p, () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(async () => { // 500ms debounce for iCloud Drive's noisy fs events
-        try {
-          currentHtml = await buildHtml({ forServe: true });
-          for (const client of sseClients) {
-            client.write('event: reload\ndata: refresh\n\n');
-          }
-          const now = new Date().toLocaleTimeString();
-          console.log(`[${now}] Rebuilt — ${sseClients.size} client(s) notified`);
-        } catch (e) {
-          console.error(`[rebuild error] ${e.message}`);
+  const rebuild = () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => { // 500ms debounce for iCloud Drive's noisy fs events
+      try {
+        currentHtml = await buildHtml({ forServe: true });
+        for (const client of sseClients) {
+          client.write('event: reload\ndata: refresh\n\n');
         }
-      }, 500);
-    });
-  });
+        const now = new Date().toLocaleTimeString();
+        console.log(`[${now}] Rebuilt — ${sseClients.size} client(s) notified`);
+      } catch (e) {
+        console.error(`[rebuild error] ${e.message}`);
+      }
+    }, 500);
+  };
+
+  const watchers = [];
+  for (const [dir, names] of watchedDirs) {
+    watchers.push(fsWatch(dir, (eventType, changedFile) => {
+      if (changedFile && names.has(changedFile)) rebuild();
+    }));
+  }
 
   // Clean shutdown on Ctrl+C
   function shutdown() {
@@ -2358,11 +2371,31 @@ async function startServer() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 if (opts.serve) {
+  // Fail-fast: detect GitHub images that need auth in serve mode
+  // Reuse this initial build as startServer()'s first render to avoid building twice
+  let initialHtml = null;
+  if (!opts['embed-images'] && !opts['accept-broken-images']) {
+    initialHtml = await buildHtml({ forServe: true });
+    const githubImages = [];
+    const ghImgRe = /<img\s[^>]*src="(https:\/\/github\.com\/user-attachments\/[^"]+)"/gi;
+    let ghm;
+    while ((ghm = ghImgRe.exec(initialHtml)) !== null) githubImages.push(ghm[1]);
+    if (githubImages.length > 0) {
+      console.error('Error: Document references GitHub images that require authentication to view in the browser.');
+      console.error(`  Found: ${githubImages.slice(0, 3).join(', ')}${githubImages.length > 3 ? ` (+${githubImages.length - 3} more)` : ''}`);
+      console.error('');
+      console.error('Resolve with one of:');
+      console.error('  --embed-images            Embed remote images as base64 via gh auth');
+      console.error('  --accept-broken-images    Proceed anyway (images may not load)');
+      process.exit(1);
+    }
+  }
+
   // Serve mode: live preview with auto-reload
   console.log(`Input:      ${inputPath}`);
   console.log(`Stylesheet: ${stylesheetPath}`);
   console.log(`Width:      ${pageWidth}px`);
-  startServer();
+  startServer(initialHtml);
 } else if (opts.html) {
   // HTML output mode: write self-contained responsive HTML file
   console.log(`Input:      ${inputPath}`);

@@ -706,8 +706,9 @@ pre .hljs-deletion {
     color: #6dc1e7 !important;
 }
 
-/* TOC entry highlight flash for dark theme */
-.md-toc li:target {
+/* Bidirectional TOC flash for dark theme */
+.md-toc li:target,
+h1:target, h2:target, h3:target, h4:target, h5:target, h6:target {
     animation: toc-flash-dark 1.5s ease-out !important;
 }
 @keyframes toc-flash-dark {
