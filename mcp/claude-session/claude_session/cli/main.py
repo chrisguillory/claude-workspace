@@ -483,6 +483,86 @@ def main() -> None:
     run_app(app)
 
 
+# -- Private helpers --
+
+
+def _render_lineage_tree(tree: LineageTree) -> None:
+    """Render a LineageTree with proper box-drawing characters."""
+
+    def render_node(node_id: str, prefix: str, is_last: bool, is_root: bool) -> None:
+        if is_root:
+            connector = ''
+            child_prefix = ''
+        else:
+            connector = '└─ ' if is_last else '├─ '
+            child_prefix = prefix + ('   ' if is_last else '│  ')
+
+        node = tree.nodes[node_id]
+        title_suffix = f' ({node.custom_title})' if node.custom_title else ''
+        line = f'{prefix}{connector}{node_id}{title_suffix}'
+        if node_id == tree.queried_session_id:
+            typer.secho(line, fg=typer.colors.GREEN)
+        else:
+            typer.echo(line)
+
+        children = tree.nodes[node_id].children
+        for i, child_id in enumerate(children):
+            render_node(child_id, child_prefix, is_last=i == len(children) - 1, is_root=False)
+
+    render_node(tree.root_session_id, '', is_last=True, is_root=True)
+
+
+def _resolve_session_id(session_id: str | None) -> str:
+    """Resolve session_id, auto-detecting from Claude Code if not provided."""
+    if session_id is not None:
+        return session_id
+    detected = auto_detect_session_id()
+    if detected is None:
+        typer.secho('Error: Not running inside Claude Code.', fg=typer.colors.RED, err=True)
+        typer.echo('Provide a session ID: claude-session <command> <session-id>', err=True)
+        raise SystemExit(1)
+    return detected
+
+
+def _is_session_id(value: str) -> bool:
+    """Check if a string looks like a session ID (8+ hex digits/hyphens)."""
+    return len(value) >= 8 and bool(re.fullmatch(r'[0-9a-f][0-9a-f-]*', value))
+
+
+def _get_github_token_cli(gist_token: str | None) -> str | None:
+    """Resolve GitHub token from flag, environment, or gh CLI.
+
+    Checks in order:
+    1. --gist-token flag value
+    2. GITHUB_TOKEN environment variable
+    3. `gh auth token` command (GitHub CLI)
+    """
+    if gist_token:
+        return gist_token
+    token = os.environ.get('GITHUB_TOKEN')
+    if token:
+        return token
+    try:
+        result = subprocess.run(
+            ['gh', 'auth', 'token'],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except FileNotFoundError:
+        pass  # gh CLI not installed
+    return None
+
+
+@error_boundary.handler(ClaudeSessionError)
+@error_boundary.handler(FileNotFoundError)
+@error_boundary.handler(FileExistsError)
+def _handle_user_error(exc: Exception) -> None:
+    typer.secho(f'Error: {exc}', fg=typer.colors.RED, err=True)
+
+
 # -- Private async implementations --
 
 
@@ -1049,86 +1129,6 @@ async def _info_async(session_id: str, format: Literal['text', 'json']) -> None:
             typer.echo(f'  Claude Version: {context.claude_version}')
         if context.temp_dir:
             typer.echo(f'  Temp dir: {context.temp_dir}')
-
-
-# -- Private helpers --
-
-
-def _render_lineage_tree(tree: LineageTree) -> None:
-    """Render a LineageTree with proper box-drawing characters."""
-
-    def render_node(node_id: str, prefix: str, is_last: bool, is_root: bool) -> None:
-        if is_root:
-            connector = ''
-            child_prefix = ''
-        else:
-            connector = '└─ ' if is_last else '├─ '
-            child_prefix = prefix + ('   ' if is_last else '│  ')
-
-        node = tree.nodes[node_id]
-        title_suffix = f' ({node.custom_title})' if node.custom_title else ''
-        line = f'{prefix}{connector}{node_id}{title_suffix}'
-        if node_id == tree.queried_session_id:
-            typer.secho(line, fg=typer.colors.GREEN)
-        else:
-            typer.echo(line)
-
-        children = tree.nodes[node_id].children
-        for i, child_id in enumerate(children):
-            render_node(child_id, child_prefix, is_last=i == len(children) - 1, is_root=False)
-
-    render_node(tree.root_session_id, '', is_last=True, is_root=True)
-
-
-def _resolve_session_id(session_id: str | None) -> str:
-    """Resolve session_id, auto-detecting from Claude Code if not provided."""
-    if session_id is not None:
-        return session_id
-    detected = auto_detect_session_id()
-    if detected is None:
-        typer.secho('Error: Not running inside Claude Code.', fg=typer.colors.RED, err=True)
-        typer.echo('Provide a session ID: claude-session <command> <session-id>', err=True)
-        raise SystemExit(1)
-    return detected
-
-
-def _is_session_id(value: str) -> bool:
-    """Check if a string looks like a session ID (8+ hex digits/hyphens)."""
-    return len(value) >= 8 and bool(re.fullmatch(r'[0-9a-f][0-9a-f-]*', value))
-
-
-def _get_github_token_cli(gist_token: str | None) -> str | None:
-    """Resolve GitHub token from flag, environment, or gh CLI.
-
-    Checks in order:
-    1. --gist-token flag value
-    2. GITHUB_TOKEN environment variable
-    3. `gh auth token` command (GitHub CLI)
-    """
-    if gist_token:
-        return gist_token
-    token = os.environ.get('GITHUB_TOKEN')
-    if token:
-        return token
-    try:
-        result = subprocess.run(
-            ['gh', 'auth', 'token'],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except FileNotFoundError:
-        pass  # gh CLI not installed
-    return None
-
-
-@error_boundary.handler(ClaudeSessionError)
-@error_boundary.handler(FileNotFoundError)
-@error_boundary.handler(FileExistsError)
-def _handle_user_error(exc: Exception) -> None:
-    typer.secho(f'Error: {exc}', fg=typer.colors.RED, err=True)
 
 
 if __name__ == '__main__':
