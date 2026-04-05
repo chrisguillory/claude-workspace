@@ -16,7 +16,7 @@ import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, TypeGuard
+from typing import Annotated, Literal, TypeGuard
 
 import httpx
 import typer
@@ -55,13 +55,15 @@ error_boundary = ErrorBoundary(exit_code=1)
 @app.callback(invoke_without_command=True)
 def _configure_logging(
     ctx: typer.Context,
-    verbose: bool = typer.Option(False, '--verbose', '-v', help='Show detailed progress'),
-    claude_dir: Path | None = typer.Option(
-        None,
-        '--claude-dir',
-        help='Claude Code config directory (default: ~/.claude)',
-        envvar='CLAUDE_CONFIG_DIR',
-    ),
+    verbose: Annotated[bool, typer.Option('--verbose', '-v', help='Show detailed progress')] = False,
+    claude_dir: Annotated[
+        Path | None,
+        typer.Option(
+            '--claude-dir',
+            help='Claude Code config directory (default: ~/.claude)',
+            envvar='CLAUDE_CONFIG_DIR',
+        ),
+    ] = None,
 ) -> None:
     """Configure logging and show help when no command given."""
     level = logging.INFO if verbose else logging.WARNING
@@ -142,20 +144,40 @@ def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
 @app.command()
 @error_boundary
 def archive(
-    session_id: str | None = typer.Argument(
-        None, help='Session ID to archive (auto-detected inside Claude Code)', autocompletion=_complete_session_id
-    ),
-    output: str | None = typer.Argument(None, help='Output path or gist:// (default: gist://)'),
-    format: ArchiveFormat | None = typer.Option(
-        None, '--format', '-f', help='Archive format: json or zst', callback=_validate_archive_format
-    ),
-    gist_token: str | None = typer.Option(
-        None, '--gist-token', help='GitHub token (or use GITHUB_TOKEN env or gh CLI)'
-    ),
-    gist_visibility: Literal['public', 'secret'] = typer.Option(
-        'secret', '--gist-visibility', help='Gist visibility (public or secret)'
-    ),
-    gist_description: str = typer.Option('Claude Code Session Archive', '--gist-description', help='Gist description'),
+    session_id: Annotated[
+        str | None,
+        typer.Argument(
+            help='Session ID to archive (auto-detected inside Claude Code)',
+            autocompletion=_complete_session_id,
+        ),
+    ] = None,
+    output: Annotated[str | None, typer.Argument(help='Output path or gist:// (default: gist://)')] = None,
+    format: Annotated[
+        ArchiveFormat | None,
+        typer.Option(
+            '--format',
+            '-f',
+            help='Archive format: json or zst',
+            callback=_validate_archive_format,
+        ),
+    ] = None,
+    gist_token: Annotated[
+        str | None,
+        typer.Option(
+            '--gist-token',
+            help='GitHub token (or use GITHUB_TOKEN env or gh CLI)',
+        ),
+    ] = None,
+    gist_visibility: Annotated[
+        Literal['public', 'secret'],
+        typer.Option(
+            '--gist-visibility',
+            help='Gist visibility (public or secret)',
+        ),
+    ] = 'secret',
+    gist_description: Annotated[
+        str, typer.Option('--gist-description', help='Gist description')
+    ] = 'Claude Code Session Archive',
 ) -> None:
     """Archive a Claude Code session to local file or GitHub Gist.
 
@@ -189,12 +211,16 @@ def archive(
 @error_boundary
 def restore(
     ctx: typer.Context,
-    archive: str = typer.Argument(..., help='Archive path or Gist URL (gist://<gist-id> or file path)'),
-    project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
-    no_translate: bool = typer.Option(False, '--no-translate', help="Don't translate file paths"),
-    in_place: bool = typer.Option(False, '--in-place', help='Restore with original session ID (verbatim restore)'),
-    launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after restore'),
-    gist_token: str | None = typer.Option(None, '--gist-token', help='GitHub token for private gists'),
+    archive: Annotated[str, typer.Argument(help='Archive path or Gist URL (gist://<gist-id> or file path)')],
+    project: Annotated[
+        Path | None, typer.Option('--project', '-p', help='Target project directory (default: current)')
+    ] = None,
+    no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
+    in_place: Annotated[
+        bool, typer.Option('--in-place', help='Restore with original session ID (verbatim restore)')
+    ] = False,
+    launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after restore')] = False,
+    gist_token: Annotated[str | None, typer.Option('--gist-token', help='GitHub token for private gists')] = None,
 ) -> None:
     """Restore a Claude Code session from local file or GitHub Gist.
 
@@ -212,12 +238,18 @@ def restore(
 @error_boundary
 def clone(
     ctx: typer.Context,
-    session_id: str | None = typer.Argument(
-        None, help='Session ID to clone (auto-detected inside Claude Code)', autocompletion=_complete_session_id
-    ),
-    project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
-    no_translate: bool = typer.Option(False, '--no-translate', help="Don't translate file paths"),
-    launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code after clone'),
+    session_id: Annotated[
+        str | None,
+        typer.Argument(
+            help='Session ID to clone (auto-detected inside Claude Code)',
+            autocompletion=_complete_session_id,
+        ),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option('--project', '-p', help='Target project directory (default: current)')
+    ] = None,
+    no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
+    launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after clone')] = False,
 ) -> None:
     """Clone a session directly (no archive file needed).
 
@@ -245,16 +277,22 @@ def clone(
 @app.command()
 @error_boundary
 def delete(
-    session_id: str | None = typer.Argument(
-        None,
-        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
-        autocompletion=_complete_session_id,
-    ),
-    force: bool = typer.Option(False, '--force', '-f', help='Required to delete native (UUIDv4) sessions'),
-    terminate: bool = typer.Option(False, '--terminate', '-t', help='Terminate running Claude process before deletion'),
-    no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
-    dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be deleted'),
-    project: Path | None = typer.Option(None, '--project', '-p', help='Project directory (default: current)'),
+    session_id: Annotated[
+        str | None,
+        typer.Argument(
+            help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+            autocompletion=_complete_session_id,
+        ),
+    ] = None,
+    force: Annotated[bool, typer.Option('--force', '-f', help='Required to delete native (UUIDv4) sessions')] = False,
+    terminate: Annotated[
+        bool, typer.Option('--terminate', '-t', help='Terminate running Claude process before deletion')
+    ] = False,
+    no_backup: Annotated[bool, typer.Option('--no-backup', help="Don't keep a backup file for undo")] = False,
+    dry_run: Annotated[bool, typer.Option('--dry-run', help='Preview what would be deleted')] = False,
+    project: Annotated[
+        Path | None, typer.Option('--project', '-p', help='Project directory (default: current)')
+    ] = None,
 ) -> None:
     """Delete session artifacts with auto-backup.
 
@@ -283,17 +321,25 @@ def delete(
 @error_boundary
 def move(
     ctx: typer.Context,
-    session_id: str | None = typer.Argument(
-        None,
-        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
-        autocompletion=_complete_session_id,
-    ),
-    project: Path | None = typer.Option(None, '--project', '-p', help='Target project directory (default: current)'),
-    force: bool = typer.Option(False, '--force', '-f', help='Required to move native (UUIDv4) sessions'),
-    terminate: bool = typer.Option(False, '--terminate', '-t', help='Terminate running Claude process before move'),
-    no_backup: bool = typer.Option(False, '--no-backup', help="Don't keep a backup file for undo"),
-    dry_run: bool = typer.Option(False, '--dry-run', help='Preview what would be moved'),
-    launch: bool = typer.Option(False, '--launch', '-l', help='Launch Claude Code in target project after move'),
+    session_id: Annotated[
+        str | None,
+        typer.Argument(
+            help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+            autocompletion=_complete_session_id,
+        ),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option('--project', '-p', help='Target project directory (default: current)')
+    ] = None,
+    force: Annotated[bool, typer.Option('--force', '-f', help='Required to move native (UUIDv4) sessions')] = False,
+    terminate: Annotated[
+        bool, typer.Option('--terminate', '-t', help='Terminate running Claude process before move')
+    ] = False,
+    no_backup: Annotated[bool, typer.Option('--no-backup', help="Don't keep a backup file for undo")] = False,
+    dry_run: Annotated[bool, typer.Option('--dry-run', help='Preview what would be moved')] = False,
+    launch: Annotated[
+        bool, typer.Option('--launch', '-l', help='Launch Claude Code in target project after move')
+    ] = False,
 ) -> None:
     """Move a session from one project to another.
 
@@ -335,14 +381,16 @@ def move(
 @app.command()
 @error_boundary
 def lineage(
-    session_id: str | None = typer.Argument(
-        None,
-        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
-        autocompletion=_complete_session_id,
-    ),
-    format: Literal['text', 'tree', 'json'] = typer.Option(
-        'text', '--format', '-f', help='Output format: text, tree, or json'
-    ),
+    session_id: Annotated[
+        str | None,
+        typer.Argument(
+            help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+            autocompletion=_complete_session_id,
+        ),
+    ] = None,
+    format: Annotated[
+        Literal['text', 'tree', 'json'], typer.Option('--format', '-f', help='Output format: text, tree, or json')
+    ] = 'text',
 ) -> None:
     """Show the lineage (parent-child relationships) for a session.
 
@@ -403,12 +451,16 @@ def lineage(
 @app.command()
 @error_boundary
 def info(
-    session_id: str | None = typer.Argument(
-        None,
-        help='Session ID (full or prefix). Auto-detected inside Claude Code.',
-        autocompletion=_complete_session_id,
-    ),
-    format: Literal['text', 'json'] = typer.Option('text', '--format', '-f', help='Output format: text or json'),
+    session_id: Annotated[
+        str | None,
+        typer.Argument(
+            help='Session ID (full or prefix). Auto-detected inside Claude Code.',
+            autocompletion=_complete_session_id,
+        ),
+    ] = None,
+    format: Annotated[
+        Literal['text', 'json'], typer.Option('--format', '-f', help='Output format: text or json')
+    ] = 'text',
 ) -> None:
     """Display comprehensive information about a session.
 
@@ -431,7 +483,7 @@ def main() -> None:
     run_app(app)
 
 
-# -- Private implementations (called at runtime, not definition time) --
+# -- Private async implementations --
 
 
 async def _archive_async(
@@ -937,32 +989,6 @@ async def _move_async(
             typer.secho(f'  claude --resume {result.session_id}', fg=typer.colors.CYAN)
 
 
-def _render_lineage_tree(tree: LineageTree) -> None:
-    """Render a LineageTree with proper box-drawing characters."""
-
-    def render_node(node_id: str, prefix: str, is_last: bool, is_root: bool) -> None:
-        if is_root:
-            connector = ''
-            child_prefix = ''
-        else:
-            connector = '└─ ' if is_last else '├─ '
-            child_prefix = prefix + ('   ' if is_last else '│  ')
-
-        node = tree.nodes[node_id]
-        title_suffix = f' ({node.custom_title})' if node.custom_title else ''
-        line = f'{prefix}{connector}{node_id}{title_suffix}'
-        if node_id == tree.queried_session_id:
-            typer.secho(line, fg=typer.colors.GREEN)
-        else:
-            typer.echo(line)
-
-        children = tree.nodes[node_id].children
-        for i, child_id in enumerate(children):
-            render_node(child_id, child_prefix, is_last=i == len(children) - 1, is_root=False)
-
-    render_node(tree.root_session_id, '', is_last=True, is_root=True)
-
-
 async def _info_async(session_id: str, format: Literal['text', 'json']) -> None:
     """Async implementation of info command."""
     info_service = SessionInfoService()
@@ -1023,6 +1049,35 @@ async def _info_async(session_id: str, format: Literal['text', 'json']) -> None:
             typer.echo(f'  Claude Version: {context.claude_version}')
         if context.temp_dir:
             typer.echo(f'  Temp dir: {context.temp_dir}')
+
+
+# -- Private helpers --
+
+
+def _render_lineage_tree(tree: LineageTree) -> None:
+    """Render a LineageTree with proper box-drawing characters."""
+
+    def render_node(node_id: str, prefix: str, is_last: bool, is_root: bool) -> None:
+        if is_root:
+            connector = ''
+            child_prefix = ''
+        else:
+            connector = '└─ ' if is_last else '├─ '
+            child_prefix = prefix + ('   ' if is_last else '│  ')
+
+        node = tree.nodes[node_id]
+        title_suffix = f' ({node.custom_title})' if node.custom_title else ''
+        line = f'{prefix}{connector}{node_id}{title_suffix}'
+        if node_id == tree.queried_session_id:
+            typer.secho(line, fg=typer.colors.GREEN)
+        else:
+            typer.echo(line)
+
+        children = tree.nodes[node_id].children
+        for i, child_id in enumerate(children):
+            render_node(child_id, child_prefix, is_last=i == len(children) - 1, is_root=False)
+
+    render_node(tree.root_session_id, '', is_last=True, is_root=True)
 
 
 def _resolve_session_id(session_id: str | None) -> str:
