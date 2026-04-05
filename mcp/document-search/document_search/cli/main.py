@@ -782,3 +782,8 @@ async def _index_async(
             chunking_service.shutdown()
             sparse_service.shutdown()
             await embedding_client.close()
+
+
+@error_boundary.handler(RuntimeError)
+def _handle_infra_error(exc: RuntimeError) -> None:
+    typer.secho(f'Error: {exc}', fg=typer.colors.RED, err=True)
