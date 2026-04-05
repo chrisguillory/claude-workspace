@@ -21,6 +21,7 @@ from typing import Literal, TypeGuard
 import httpx
 import typer
 from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.session_tracker import load_sessions
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
@@ -45,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 app = create_app(help='Archive and restore Claude Code sessions.')
 add_completion_command(app)
+error_boundary = ErrorBoundary(exit_code=1)
 
 
 # -- Typer infrastructure (private, must precede commands that reference them) --
@@ -138,6 +140,7 @@ def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
 
 
 @app.command()
+@error_boundary
 def archive(
     session_id: str | None = typer.Argument(
         None, help='Session ID to archive (auto-detected inside Claude Code)', autocompletion=_complete_session_id
@@ -183,6 +186,7 @@ def archive(
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
+@error_boundary
 def restore(
     ctx: typer.Context,
     archive: str = typer.Argument(..., help='Archive path or Gist URL (gist://<gist-id> or file path)'),
@@ -197,14 +201,15 @@ def restore(
     By default, restore creates a new session ID (UUIDv7) for the restored session.
     Use --in-place to restore with the original session ID for verbatim restoration.
 
+    \b
     Extra arguments after -- are passed to claude CLI:
-
         claude-session restore ARCHIVE --launch -- --chrome
     """
     asyncio.run(_restore_async(archive, project, not no_translate, in_place, launch, gist_token, ctx.args))
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
+@error_boundary
 def clone(
     ctx: typer.Context,
     session_id: str | None = typer.Argument(
@@ -228,7 +233,7 @@ def clone(
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
         typer.echo('Use claude --resume <session-id> after cloning instead.', err=True)
-        raise typer.Exit(1)
+        raise SystemExit(1)
 
     # Use cached detection result to avoid a second process tree walk
     if session_id is None:
@@ -238,6 +243,7 @@ def clone(
 
 
 @app.command()
+@error_boundary
 def delete(
     session_id: str | None = typer.Argument(
         None,
@@ -261,11 +267,20 @@ def delete(
 
     A backup is saved to ~/.claude-workspace/claude-session/deleted/ for undo capability.
     Use 'restore --in-place' on the backup to undo.
+
+    \b
+    Examples:
+        claude-session delete                           # delete current session
+        claude-session delete SESSION_ID                # delete specific session
+        claude-session delete SESSION_ID --force        # delete native session
+        claude-session delete SESSION_ID --terminate    # kill running session first
+        claude-session delete SESSION_ID --dry-run      # preview without deleting
     """
     asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project))
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
+@error_boundary
 def move(
     ctx: typer.Context,
     session_id: str | None = typer.Argument(
@@ -307,7 +322,7 @@ def move(
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
         typer.echo('Use claude --resume <session-id> after moving instead.', err=True)
-        raise typer.Exit(1)
+        raise SystemExit(1)
 
     if session_id is None:
         session_id = detected
@@ -318,6 +333,7 @@ def move(
 
 
 @app.command()
+@error_boundary
 def lineage(
     session_id: str | None = typer.Argument(
         None,
@@ -339,57 +355,53 @@ def lineage(
         claude-session lineage c3bac5a6 --format tree
     """
     session_id = _resolve_session_id(session_id)
-    try:
-        lineage_service = LineageService()
-        tree = lineage_service.get_full_tree(session_id)
+    lineage_service = LineageService()
+    tree = lineage_service.get_full_tree(session_id)
 
-        if tree is None:
-            typer.secho(f'No lineage found for {session_id}', fg=typer.colors.YELLOW)
-            typer.echo('(This is either a native session or lineage tracking was not enabled)')
-            return
+    if tree is None:
+        typer.secho(f'No lineage found for {session_id}', fg=typer.colors.YELLOW)
+        typer.echo('(This is either a native session or lineage tracking was not enabled)')
+        return
 
-        if format == 'text':
-            node = tree.nodes[tree.queried_session_id]
-            typer.echo(f'Session: {node.session_id}')
-            if node.custom_title:
-                typer.echo(f'Title:   {node.custom_title}')
-            if node.cloned_at is not None:
-                # Child node — show operation metadata
-                typer.echo(f'Parent:  {node.parent_id}')
-                typer.echo(f'Cloned:  {node.cloned_at}')
-                typer.echo(f'Method:  {node.method}')
-                typer.echo(f'Source:  {node.parent_project_path}')
-                typer.echo(f'Target:  {node.target_project_path}')
-                typer.echo(f'Machine: {node.target_machine_id}')
-                if node.parent_machine_id:
-                    if node.is_cross_machine:
-                        typer.secho(f'Source Machine: {node.parent_machine_id} (cross-machine)', fg=typer.colors.YELLOW)
-                    else:
-                        typer.echo(f'Source Machine: {node.parent_machine_id} (same machine)')
-                if node.archive_path:
-                    typer.echo(f'Archive: {node.archive_path}')
-                if node.paths_translated:
-                    typer.secho('Paths translated: yes', fg=typer.colors.CYAN)
-            else:
-                # Root node — no operation metadata
-                typer.secho(f'Root session with {len(node.children)} clone(s)', fg=typer.colors.CYAN)
-                for child_id in node.children:
-                    child_node = tree.nodes[child_id]
-                    title_suffix = f' ({child_node.custom_title})' if child_node.custom_title else ''
-                    typer.echo(f'  └─ {child_id}{title_suffix}')
+    if format == 'text':
+        node = tree.nodes[tree.queried_session_id]
+        typer.echo(f'Session: {node.session_id}')
+        if node.custom_title:
+            typer.echo(f'Title:   {node.custom_title}')
+        if node.cloned_at is not None:
+            # Child node — show operation metadata
+            typer.echo(f'Parent:  {node.parent_id}')
+            typer.echo(f'Cloned:  {node.cloned_at}')
+            typer.echo(f'Method:  {node.method}')
+            typer.echo(f'Source:  {node.parent_project_path}')
+            typer.echo(f'Target:  {node.target_project_path}')
+            typer.echo(f'Machine: {node.target_machine_id}')
+            if node.parent_machine_id:
+                if node.is_cross_machine:
+                    typer.secho(f'Source Machine: {node.parent_machine_id} (cross-machine)', fg=typer.colors.YELLOW)
+                else:
+                    typer.echo(f'Source Machine: {node.parent_machine_id} (same machine)')
+            if node.archive_path:
+                typer.echo(f'Archive: {node.archive_path}')
+            if node.paths_translated:
+                typer.secho('Paths translated: yes', fg=typer.colors.CYAN)
+        else:
+            # Root node — no operation metadata
+            typer.secho(f'Root session with {len(node.children)} clone(s)', fg=typer.colors.CYAN)
+            for child_id in node.children:
+                child_node = tree.nodes[child_id]
+                title_suffix = f' ({child_node.custom_title})' if child_node.custom_title else ''
+                typer.echo(f'  └─ {child_id}{title_suffix}')
 
-        elif format == 'tree':
-            _render_lineage_tree(tree)
+    elif format == 'tree':
+        _render_lineage_tree(tree)
 
-        elif format == 'json':
-            typer.echo(tree.model_dump_json(indent=2))
-
-    except ClaudeSessionError as e:
-        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
+    elif format == 'json':
+        typer.echo(tree.model_dump_json(indent=2))
 
 
 @app.command()
+@error_boundary
 def info(
     session_id: str | None = typer.Argument(
         None,
@@ -432,113 +444,103 @@ async def _archive_async(
 ) -> None:
     """Async implementation of archive command."""
 
-    try:
-        # Find the session
-        discovery = SessionDiscoveryService()
-        session_info = await discovery.find_session_by_id(session_id)
+    # Find the session
+    discovery = SessionDiscoveryService()
+    session_info = await discovery.find_session_by_id(session_id)
 
-        if not session_info:
-            typer.secho(f'Error: Session not found: {session_id}', fg=typer.colors.RED, err=True)
-            typer.echo(f'Searched in: {discovery.claude_sessions_dir}', err=True)
-            raise typer.Exit(1)
+    if not session_info:
+        typer.secho(f'Error: Session not found: {session_id}', fg=typer.colors.RED, err=True)
+        typer.echo(f'Searched in: {discovery.claude_sessions_dir}', err=True)
+        raise SystemExit(1)
 
-        logger.info('Found session in folder: %s', session_info.session_folder)
+    logger.info('Found session in folder: %s', session_info.session_folder)
 
-        # Parse output parameter - check if it's a Gist URL
-        use_gist = output.startswith('gist://')
-        gist_id = None
+    # Parse output parameter - check if it's a Gist URL
+    use_gist = output.startswith('gist://')
+    gist_id = None
 
+    if use_gist:
+        # Extract gist ID if provided: gist://abc123 or just gist://
+        gist_id = output[7:] if len(output) > 7 else None
+
+        # Get token from CLI flag, environment, or gh CLI
+        token = _get_github_token_cli(gist_token)
+        if not token:
+            typer.secho('Error: GitHub token required for Gist storage.', fg=typer.colors.RED, err=True)
+            typer.echo('Provide via one of:')
+            typer.echo('  1. gh auth login (GitHub CLI - recommended)')
+            typer.echo('  2. Set GITHUB_TOKEN environment variable')
+            typer.echo('  3. Pass --gist-token flag')
+            typer.echo()
+            typer.echo('To create a token manually:')
+            typer.echo('  1. Go to https://github.com/settings/tokens')
+            typer.echo('  2. Generate new token (classic)')
+            typer.echo("  3. Select 'gist' scope")
+            typer.echo('  4. Copy the token')
+            raise SystemExit(1)
+
+    # Use the resolved full session ID (supports prefix matching)
+    resolved_session_id = session_info.session_id
+
+    # Initialize services
+    with tempfile.TemporaryDirectory(prefix='claude-session-') as temp_dir:
+        parser_service = SessionParserService()
+        archive_service = SessionArchiveService(
+            session_id=resolved_session_id,
+            temp_dir=Path(temp_dir),
+            parser_service=parser_service,
+            session_folder=session_info.session_folder,  # Use folder directly from discovery
+        )
+
+        # Create storage backend
+        storage: GistStorage | LocalFileSystemStorage
         if use_gist:
-            # Extract gist ID if provided: gist://abc123 or just gist://
-            gist_id = output[7:] if len(output) > 7 else None
+            # Generate filename for Gist with correct extension
+            timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S')
+            ext = '.json.zst' if format == 'zst' else '.json'
+            filename = f'session-{resolved_session_id[:8]}-{timestamp}{ext}'
 
-            # Get token from CLI flag, environment, or gh CLI
-            token = _get_github_token_cli(gist_token)
-            if not token:
-                typer.secho('Error: GitHub token required for Gist storage.', fg=typer.colors.RED, err=True)
-                typer.echo('Provide via one of:')
-                typer.echo('  1. gh auth login (GitHub CLI - recommended)')
-                typer.echo('  2. Set GITHUB_TOKEN environment variable')
-                typer.echo('  3. Pass --gist-token flag')
-                typer.echo()
-                typer.echo('To create a token manually:')
-                typer.echo('  1. Go to https://github.com/settings/tokens')
-                typer.echo('  2. Generate new token (classic)')
-                typer.echo("  3. Select 'gist' scope")
-                typer.echo('  4. Copy the token')
-                raise typer.Exit(1)
-
-        # Use the resolved full session ID (supports prefix matching)
-        resolved_session_id = session_info.session_id
-
-        # Initialize services
-        with tempfile.TemporaryDirectory(prefix='claude-session-') as temp_dir:
-            parser_service = SessionParserService()
-            archive_service = SessionArchiveService(
-                session_id=resolved_session_id,
-                temp_dir=Path(temp_dir),
-                parser_service=parser_service,
-                session_folder=session_info.session_folder,  # Use folder directly from discovery
+            if token is None:
+                raise typer.BadParameter('GitHub token required for Gist storage')
+            storage = GistStorage(
+                token=token,
+                gist_id=gist_id,
+                visibility=gist_visibility,
+                description=gist_description,
             )
+            output_path = None  # Don't pass to archive service
+            logger.info('Creating Gist archive: %s', filename)
+        else:
+            # Local filesystem
+            output_file = Path(output)
+            storage = LocalFileSystemStorage(output_file.parent.resolve())
+            output_path = str(output)
+            filename = output_file.name
+            logger.info('Creating archive: %s', output)
 
-            # Create storage backend
-            storage: GistStorage | LocalFileSystemStorage
-            if use_gist:
-                # Generate filename for Gist with correct extension
-                timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S')
-                ext = '.json.zst' if format == 'zst' else '.json'
-                filename = f'session-{resolved_session_id[:8]}-{timestamp}{ext}'
+        # Create archive
+        metadata = await archive_service.create_archive(storage=storage, output_path=output_path, format_param=format)
 
-                if token is None:
-                    raise typer.BadParameter('GitHub token required for Gist storage')
-                storage = GistStorage(
-                    token=token,
-                    gist_id=gist_id,
-                    visibility=gist_visibility,
-                    description=gist_description,
-                )
-                output_path = None  # Don't pass to archive service
-                logger.info('Creating Gist archive: %s', filename)
-            else:
-                # Local filesystem
-                output_file = Path(output)
-                storage = LocalFileSystemStorage(output_file.parent.resolve())
-                output_path = str(output)
-                filename = output_file.name
-                logger.info('Creating archive: %s', output)
-
-            # Create archive
-            metadata = await archive_service.create_archive(
-                storage=storage, output_path=output_path, format_param=format
-            )
-
-            # Print success
-            if use_gist and isinstance(storage, GistStorage):
-                typer.secho('✓ Archive uploaded to GitHub Gist!', fg=typer.colors.GREEN)
-                typer.echo(f'  URL: {metadata.file_path}')
-                typer.echo(f'  Gist ID: {storage.gist_id}')
-                typer.echo(f'  Format: {metadata.format}')
-                typer.echo(f'  Size: {metadata.size_mb} MB')
-                typer.echo(f'  Records: {metadata.session_records:,} session, {metadata.agent_records:,} agent')
-                typer.echo()
-                typer.echo('To restore, use:')
-                typer.secho(f'  claude-session restore gist://{storage.gist_id}', fg=typer.colors.CYAN)
-            else:
-                typer.secho('✓ Archive created successfully!', fg=typer.colors.GREEN)
-                typer.echo(f'  Path: {metadata.file_path}')
-                typer.echo(f'  Format: {metadata.format}')
-                typer.echo(f'  Size: {metadata.size_mb} MB')
-                typer.echo(f'  Records: {metadata.session_records:,} session, {metadata.agent_records:,} agent')
-                typer.echo(f'  Files: {metadata.file_count}')
-                for file_meta in metadata.files:
-                    logger.info('    - %s: %d records', file_meta.filename, file_meta.record_count)
-
-    except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
-        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
-    except Exception:
-        logger.exception('Failed to create archive')
-        raise typer.Exit(1) from None
+        # Print success
+        if use_gist and isinstance(storage, GistStorage):
+            typer.secho('✓ Archive uploaded to GitHub Gist!', fg=typer.colors.GREEN)
+            typer.echo(f'  URL: {metadata.file_path}')
+            typer.echo(f'  Gist ID: {storage.gist_id}')
+            typer.echo(f'  Format: {metadata.format}')
+            typer.echo(f'  Size: {metadata.size_mb} MB')
+            typer.echo(f'  Records: {metadata.session_records:,} session, {metadata.agent_records:,} agent')
+            typer.echo()
+            typer.echo('To restore, use:')
+            typer.secho(f'  claude-session restore gist://{storage.gist_id}', fg=typer.colors.CYAN)
+        else:
+            typer.secho('✓ Archive created successfully!', fg=typer.colors.GREEN)
+            typer.echo(f'  Path: {metadata.file_path}')
+            typer.echo(f'  Format: {metadata.format}')
+            typer.echo(f'  Size: {metadata.size_mb} MB')
+            typer.echo(f'  Records: {metadata.session_records:,} session, {metadata.agent_records:,} agent')
+            typer.echo(f'  Files: {metadata.file_count}')
+            for file_meta in metadata.files:
+                logger.info('    - %s: %d records', file_meta.filename, file_meta.record_count)
 
 
 async def _restore_async(
@@ -552,140 +554,132 @@ async def _restore_async(
 ) -> None:
     """Async implementation of restore command."""
 
-    try:
-        # Check if it's a Gist URL
-        if archive.startswith('gist://'):
-            gist_id = archive[7:]
+    # Check if it's a Gist URL
+    if archive.startswith('gist://'):
+        gist_id = archive[7:]
 
-            if not gist_id:
-                typer.secho('Error: Gist ID required in format gist://<gist-id>', fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
+        if not gist_id:
+            typer.secho('Error: Gist ID required in format gist://<gist-id>', fg=typer.colors.RED, err=True)
+            raise SystemExit(1)
 
-            # Get token (public gists don't need auth for reading, but use it if provided)
-            token = _get_github_token_cli(gist_token) or ''
+        # Get token (public gists don't need auth for reading, but use it if provided)
+        token = _get_github_token_cli(gist_token) or ''
 
-            logger.info('Downloading from Gist: %s', gist_id)
+        logger.info('Downloading from Gist: %s', gist_id)
 
-            # Create Gist storage
-            storage = GistStorage(token=token, gist_id=gist_id)
+        # Create Gist storage
+        storage = GistStorage(token=token, gist_id=gist_id)
 
-            # Find the archive file in the gist (look for .json or .json.zst)
-            async with httpx.AsyncClient() as client:
-                headers = {'Accept': 'application/vnd.github.v3+json', 'X-GitHub-Api-Version': '2022-11-28'}
-                if token:
-                    headers['Authorization'] = f'Bearer {token}'
+        # Find the archive file in the gist (look for .json or .json.zst)
+        async with httpx.AsyncClient() as client:
+            headers = {'Accept': 'application/vnd.github.v3+json', 'X-GitHub-Api-Version': '2022-11-28'}
+            if token:
+                headers['Authorization'] = f'Bearer {token}'
 
-                response = await client.get(f'https://api.github.com/gists/{gist_id}', headers=headers)
+            response = await client.get(f'https://api.github.com/gists/{gist_id}', headers=headers)
 
-                if response.status_code == 404:
-                    typer.secho(f'Error: Gist not found: {gist_id}', fg=typer.colors.RED, err=True)
-                    typer.echo('Check the gist ID and ensure it exists.')
-                    raise typer.Exit(1)
+            if response.status_code == 404:
+                typer.secho(f'Error: Gist not found: {gist_id}', fg=typer.colors.RED, err=True)
+                typer.echo('Check the gist ID and ensure it exists.')
+                raise SystemExit(1)
 
-                response.raise_for_status()
-                gist_data = response.json()
+            response.raise_for_status()
+            gist_data = response.json()
 
-                # Find archive file (including base64-encoded variants)
-                files = gist_data['files']
-                archive_file = None
-                for filename in files:
-                    # Strip .b64 suffix for format detection
-                    base_name = filename[:-4] if filename.endswith('.b64') else filename
-                    if base_name.endswith(('.json', '.json.zst')):
-                        archive_file = filename
-                        break
+            # Find archive file (including base64-encoded variants)
+            files = gist_data['files']
+            archive_file = None
+            for filename in files:
+                # Strip .b64 suffix for format detection
+                base_name = filename[:-4] if filename.endswith('.b64') else filename
+                if base_name.endswith(('.json', '.json.zst')):
+                    archive_file = filename
+                    break
 
-                if not archive_file:
-                    typer.secho(f'Error: No archive file found in gist {gist_id}', fg=typer.colors.RED, err=True)
-                    typer.echo(f'Available files: {", ".join(files.keys())}')
-                    raise typer.Exit(1)
+            if not archive_file:
+                typer.secho(f'Error: No archive file found in gist {gist_id}', fg=typer.colors.RED, err=True)
+                typer.echo(f'Available files: {", ".join(files.keys())}')
+                raise SystemExit(1)
 
-            # Download to temp file
-            logger.info('Downloading %s...', archive_file)
-            data = await storage.load(archive_file)
+        # Download to temp file
+        logger.info('Downloading %s...', archive_file)
+        data = await storage.load(archive_file)
 
-            # Use logical filename (without .b64) so restore service detects format correctly
-            logical_filename = archive_file[:-4] if archive_file.endswith('.b64') else archive_file
-            with tempfile.NamedTemporaryFile(suffix=f'-{logical_filename}', delete=False) as temp_file:
-                temp_file.write(data)
-                archive_path = Path(temp_file.name)
+        # Use logical filename (without .b64) so restore service detects format correctly
+        logical_filename = archive_file[:-4] if archive_file.endswith('.b64') else archive_file
+        with tempfile.NamedTemporaryFile(suffix=f'-{logical_filename}', delete=False) as temp_file:
+            temp_file.write(data)
+            archive_path = Path(temp_file.name)
 
-            logger.info('Downloaded %s bytes', f'{len(data):,}')
+        logger.info('Downloaded %s bytes', f'{len(data):,}')
 
-        else:
-            # Local file
-            archive_path = Path(archive)
+    else:
+        # Local file
+        archive_path = Path(archive)
 
-            # Validate archive exists
-            if not archive_path.exists():
-                typer.secho(f'Error: Archive not found: {archive_path}', fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
+        # Validate archive exists
+        if not archive_path.exists():
+            typer.secho(f'Error: Archive not found: {archive_path}', fg=typer.colors.RED, err=True)
+            raise SystemExit(1)
 
-        # Determine project path
-        if project:
-            project_path = project.resolve()
-            if not project_path.exists():
-                typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
-        else:
-            project_path = Path.cwd()
+    # Determine project path
+    if project:
+        project_path = project.resolve()
+        if not project_path.exists():
+            typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
+            raise SystemExit(1)
+    else:
+        project_path = Path.cwd()
 
-        logger.info('Restoring to project: %s', project_path)
+    logger.info('Restoring to project: %s', project_path)
 
-        # Initialize restore service
-        restore_service = SessionRestoreService(project_path)
+    # Initialize restore service
+    restore_service = SessionRestoreService(project_path)
 
-        # Restore the archive
-        logger.info('Loading archive: %s', archive_path)
-        if in_place:
-            logger.info('In-place mode: restoring with original session ID')
-        result = await restore_service.restore_archive(
-            archive_path=str(archive_path),
-            translate_paths=translate_paths,
-            in_place=in_place,
-        )
+    # Restore the archive
+    logger.info('Loading archive: %s', archive_path)
+    if in_place:
+        logger.info('In-place mode: restoring with original session ID')
+    result = await restore_service.restore_archive(
+        archive_path=str(archive_path),
+        translate_paths=translate_paths,
+        in_place=in_place,
+    )
 
-        # Clean up temp file if we downloaded from Gist
-        if archive.startswith('gist://'):
-            archive_path.unlink()
+    # Clean up temp file if we downloaded from Gist
+    if archive.startswith('gist://'):
+        archive_path.unlink()
 
-        # Print success
-        typer.secho('✓ Session restored successfully!', fg=typer.colors.GREEN)
-        typer.echo(f'  New session ID: {result.new_session_id}')
-        typer.echo(f'  Original session ID: {result.original_session_id}')
-        typer.echo(f'  Project: {result.project_path}')
-        typer.echo(f'  Mode: {"in-place" if result.was_in_place else "fork"}')
+    # Print success
+    typer.secho('✓ Session restored successfully!', fg=typer.colors.GREEN)
+    typer.echo(f'  New session ID: {result.new_session_id}')
+    typer.echo(f'  Original session ID: {result.original_session_id}')
+    typer.echo(f'  Project: {result.project_path}')
+    typer.echo(f'  Mode: {"in-place" if result.was_in_place else "fork"}')
+    typer.echo()
+    typer.echo('  Files restored:')
+    typer.echo(f'    - Session: 1 main + {len(result.agent_files)} agents')
+    if result.plan_files_restored:
+        typer.echo(f'    - Plans: {result.plan_files_restored}')
+    if result.tool_results_restored:
+        typer.echo(f'    - Tool results: {result.tool_results_restored}')
+    if result.todos_restored:
+        typer.echo(f'    - Todos: {result.todos_restored}')
+    if result.tasks_restored:
+        typer.echo(f'    - Tasks: {result.tasks_restored}')
+    typer.echo()
+    typer.echo(f'  Records: {result.main_records_restored:,} main + {result.agent_records_restored:,} agent')
+    typer.echo(f'  Paths translated: {result.paths_translated}')
+
+    if launch:
         typer.echo()
-        typer.echo('  Files restored:')
-        typer.echo(f'    - Session: 1 main + {len(result.agent_files)} agents')
-        if result.plan_files_restored:
-            typer.echo(f'    - Plans: {result.plan_files_restored}')
-        if result.tool_results_restored:
-            typer.echo(f'    - Tool results: {result.tool_results_restored}')
-        if result.todos_restored:
-            typer.echo(f'    - Todos: {result.todos_restored}')
-        if result.tasks_restored:
-            typer.echo(f'    - Tasks: {result.tasks_restored}')
+        typer.echo('Launching Claude Code...')
+        launch_claude_with_session(result.new_session_id, extra_args=extra_args)
+        # Note: launch_claude_with_session uses execvp, so we never reach here
+    else:
         typer.echo()
-        typer.echo(f'  Records: {result.main_records_restored:,} main + {result.agent_records_restored:,} agent')
-        typer.echo(f'  Paths translated: {result.paths_translated}')
-
-        if launch:
-            typer.echo()
-            typer.echo('Launching Claude Code...')
-            launch_claude_with_session(result.new_session_id, extra_args=extra_args)
-            # Note: launch_claude_with_session uses execvp, so we never reach here
-        else:
-            typer.echo()
-            typer.echo('To continue this session, run:')
-            typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
-
-    except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
-        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
-    except Exception:
-        logger.exception('Failed to restore session')
-        raise typer.Exit(1) from None
+        typer.echo('To continue this session, run:')
+        typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
 
 
 async def _clone_async(
@@ -697,61 +691,53 @@ async def _clone_async(
 ) -> None:
     """Async implementation of clone command."""
 
-    try:
-        # Determine project path
-        if project:
-            project_path = project.resolve()
-            if not project_path.exists():
-                typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
-        else:
-            project_path = Path.cwd()
+    # Determine project path
+    if project:
+        project_path = project.resolve()
+        if not project_path.exists():
+            typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
+            raise SystemExit(1)
+    else:
+        project_path = Path.cwd()
 
-        logger.info('Cloning to project: %s', project_path)
+    logger.info('Cloning to project: %s', project_path)
 
-        # Initialize clone service
-        clone_service = SessionCloneService(project_path)
+    # Initialize clone service
+    clone_service = SessionCloneService(project_path)
 
-        # Clone the session
-        result = await clone_service.clone(
-            source_session_id=session_id,
-            translate_paths=translate_paths,
-        )
+    # Clone the session
+    result = await clone_service.clone(
+        source_session_id=session_id,
+        translate_paths=translate_paths,
+    )
 
-        # Print success
-        typer.secho('✓ Session cloned successfully!', fg=typer.colors.GREEN)
-        typer.echo(f'  New session ID: {result.new_session_id}')
-        typer.echo(f'  Original session ID: {result.original_session_id}')
-        typer.echo(f'  Project: {result.project_path}')
+    # Print success
+    typer.secho('✓ Session cloned successfully!', fg=typer.colors.GREEN)
+    typer.echo(f'  New session ID: {result.new_session_id}')
+    typer.echo(f'  Original session ID: {result.original_session_id}')
+    typer.echo(f'  Project: {result.project_path}')
+    typer.echo()
+    typer.echo('  Files cloned:')
+    typer.echo(f'    - Session: 1 main + {len(result.agent_files)} agents')
+    if result.plan_files_restored:
+        typer.echo(f'    - Plans: {result.plan_files_restored}')
+    if result.tool_results_restored:
+        typer.echo(f'    - Tool results: {result.tool_results_restored}')
+    if result.todos_restored:
+        typer.echo(f'    - Todos: {result.todos_restored}')
+    typer.echo()
+    typer.echo(f'  Records: {result.main_records_restored:,} main + {result.agent_records_restored:,} agent')
+    typer.echo(f'  Paths translated: {result.paths_translated}')
+
+    if launch:
         typer.echo()
-        typer.echo('  Files cloned:')
-        typer.echo(f'    - Session: 1 main + {len(result.agent_files)} agents')
-        if result.plan_files_restored:
-            typer.echo(f'    - Plans: {result.plan_files_restored}')
-        if result.tool_results_restored:
-            typer.echo(f'    - Tool results: {result.tool_results_restored}')
-        if result.todos_restored:
-            typer.echo(f'    - Todos: {result.todos_restored}')
+        typer.echo('Launching Claude Code...')
+        launch_claude_with_session(result.new_session_id, extra_args=extra_args)
+        # Note: launch_claude_with_session uses execvp, so we never reach here
+    else:
         typer.echo()
-        typer.echo(f'  Records: {result.main_records_restored:,} main + {result.agent_records_restored:,} agent')
-        typer.echo(f'  Paths translated: {result.paths_translated}')
-
-        if launch:
-            typer.echo()
-            typer.echo('Launching Claude Code...')
-            launch_claude_with_session(result.new_session_id, extra_args=extra_args)
-            # Note: launch_claude_with_session uses execvp, so we never reach here
-        else:
-            typer.echo()
-            typer.echo('To continue this session, run:')
-            typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
-
-    except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
-        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
-    except Exception:
-        logger.exception('Failed to clone session')
-        raise typer.Exit(1) from None
+        typer.echo('To continue this session, run:')
+        typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
 
 
 async def _delete_async(
@@ -764,105 +750,97 @@ async def _delete_async(
 ) -> None:
     """Async implementation of delete command."""
 
-    try:
-        # Resolve session ID prefix to full ID
-        # When --project is provided, use it to disambiguate discovery
-        info_service = SessionInfoService()
-        project_filter: Path | None = None
-        if project:
-            project_filter = get_claude_config_home_dir() / 'projects' / encode_project_path(project.resolve())
-        session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
-        full_session_id = session_info.session_id
+    # Resolve session ID prefix to full ID
+    # When --project is provided, use it to disambiguate discovery
+    info_service = SessionInfoService()
+    project_filter: Path | None = None
+    if project:
+        project_filter = get_claude_config_home_dir() / 'projects' / encode_project_path(project.resolve())
+    session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
+    full_session_id = session_info.session_id
 
-        # Check if session is running
-        is_running, running_pid = info_service.is_session_running(full_session_id)
+    # Check if session is running
+    is_running, running_pid = info_service.is_session_running(full_session_id)
 
-        if is_running:
-            assert running_pid is not None  # is_running=True guarantees this
-            if dry_run:
-                # Dry-run: show warning but continue
-                typer.secho(f'Warning: Session is currently running (PID {running_pid})', fg=typer.colors.YELLOW)
-            elif not terminate:
-                # Running without --terminate: error
-                typer.secho(
-                    f'Error: Session {full_session_id[:12]}... is currently running (PID {running_pid}).',
-                    fg=typer.colors.RED,
-                    err=True,
-                )
-                typer.echo('Use --terminate to kill the process before deletion.', err=True)
-                raise typer.Exit(1)
-            else:
-                # Running with --terminate: will terminate
-                logger.info('Session is running (PID %s), will terminate before deletion', running_pid)
-
-        # Initialize delete service
-        # When --project is explicit, use it (user intent wins over discovery)
-        # Otherwise, use discovered session_folder (handles cross-directory correctly)
-        if project:
-            project_path = project.resolve()
-            if not project_path.exists():
-                typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
-            delete_service = SessionDeleteService(project_path=project_path)
-        else:
-            delete_service = SessionDeleteService(session_folder=session_info.session_folder)
-
-        # Pass PID to terminate if running and --terminate was specified
-        terminate_pid = running_pid if is_running and terminate and not dry_run else None
-
-        # Delete the session
-        result = await delete_service.delete_session(
-            session_id=full_session_id,
-            force=force,
-            no_backup=no_backup,
-            dry_run=dry_run,
-            terminate_pid_before_delete=terminate_pid,
-        )
-
-        if not result.success:
-            typer.secho(f'Error: {result.error_message}', fg=typer.colors.RED, err=True)
-            raise typer.Exit(1)
-
+    if is_running:
+        assert running_pid is not None  # is_running=True guarantees this
         if dry_run:
-            typer.secho('Dry run - would delete:', fg=typer.colors.YELLOW)
-            typer.echo(f'  Session ID: {result.session_id}')
-            typer.echo(f'  Files: {result.files_deleted}')
-            typer.echo(f'  Directories: {len(result.directories_removed)}')
-            typer.echo(f'  Size: {result.size_freed_bytes:,} bytes')
-            for path in result.deleted_files:
-                logger.info('    - %s', path)
-            for path in result.directories_removed:
-                logger.info('    dir: %s', path)
+            # Dry-run: show warning but continue
+            typer.secho(f'Warning: Session is currently running (PID {running_pid})', fg=typer.colors.YELLOW)
+        elif not terminate:
+            # Running without --terminate: error
+            typer.secho(
+                f'Error: Session {full_session_id[:12]}... is currently running (PID {running_pid}).',
+                fg=typer.colors.RED,
+                err=True,
+            )
+            typer.echo('Use --terminate to kill the process before deletion.', err=True)
+            raise SystemExit(1)
         else:
-            typer.secho('✓ Session deleted successfully!', fg=typer.colors.GREEN)
-            typer.echo(f'  Session ID: {result.session_id}')
-            typer.echo()
-            typer.echo('  Files deleted:')
-            typer.echo(f'    - Session: {result.session_files_deleted}')
-            if result.plan_files_deleted:
-                typer.echo(f'    - Plans: {result.plan_files_deleted}')
-            if result.tool_results_deleted:
-                typer.echo(f'    - Tool results: {result.tool_results_deleted}')
-            if result.todos_deleted:
-                typer.echo(f'    - Todos: {result.todos_deleted}')
-            if result.tasks_deleted:
-                typer.echo(f'    - Tasks: {result.tasks_deleted}')
-            typer.echo()
-            typer.echo(f'  Directories removed: {len(result.directories_removed)}')
-            typer.echo(f'  Size freed: {result.size_freed_bytes:,} bytes')
-            typer.echo(f'  Duration: {result.duration_ms:.0f}ms')
-            if result.backup_path:
-                typer.echo(f'  Backup: {result.backup_path}')
-                typer.echo()
-                typer.echo('To undo, run:')
-                typer.secho(f'  claude-session restore --in-place {result.backup_path}', fg=typer.colors.CYAN)
+            # Running with --terminate: will terminate
+            logger.info('Session is running (PID %s), will terminate before deletion', running_pid)
 
-    except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
-        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
-    except Exception:
-        logger.exception('Failed to delete session')
-        raise typer.Exit(1) from None
+    # Initialize delete service
+    # When --project is explicit, use it (user intent wins over discovery)
+    # Otherwise, use discovered session_folder (handles cross-directory correctly)
+    if project:
+        project_path = project.resolve()
+        if not project_path.exists():
+            typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
+            raise SystemExit(1)
+        delete_service = SessionDeleteService(project_path=project_path)
+    else:
+        delete_service = SessionDeleteService(session_folder=session_info.session_folder)
+
+    # Pass PID to terminate if running and --terminate was specified
+    terminate_pid = running_pid if is_running and terminate and not dry_run else None
+
+    # Delete the session
+    result = await delete_service.delete_session(
+        session_id=full_session_id,
+        force=force,
+        no_backup=no_backup,
+        dry_run=dry_run,
+        terminate_pid_before_delete=terminate_pid,
+    )
+
+    if not result.success:
+        typer.secho(f'Error: {result.error_message}', fg=typer.colors.RED, err=True)
+        raise SystemExit(1)
+
+    if dry_run:
+        typer.secho('Dry run - would delete:', fg=typer.colors.YELLOW)
+        typer.echo(f'  Session ID: {result.session_id}')
+        typer.echo(f'  Files: {result.files_deleted}')
+        typer.echo(f'  Directories: {len(result.directories_removed)}')
+        typer.echo(f'  Size: {result.size_freed_bytes:,} bytes')
+        for path in result.deleted_files:
+            logger.info('    - %s', path)
+        for path in result.directories_removed:
+            logger.info('    dir: %s', path)
+    else:
+        typer.secho('✓ Session deleted successfully!', fg=typer.colors.GREEN)
+        typer.echo(f'  Session ID: {result.session_id}')
+        typer.echo()
+        typer.echo('  Files deleted:')
+        typer.echo(f'    - Session: {result.session_files_deleted}')
+        if result.plan_files_deleted:
+            typer.echo(f'    - Plans: {result.plan_files_deleted}')
+        if result.tool_results_deleted:
+            typer.echo(f'    - Tool results: {result.tool_results_deleted}')
+        if result.todos_deleted:
+            typer.echo(f'    - Todos: {result.todos_deleted}')
+        if result.tasks_deleted:
+            typer.echo(f'    - Tasks: {result.tasks_deleted}')
+        typer.echo()
+        typer.echo(f'  Directories removed: {len(result.directories_removed)}')
+        typer.echo(f'  Size freed: {result.size_freed_bytes:,} bytes')
+        typer.echo(f'  Duration: {result.duration_ms:.0f}ms')
+        if result.backup_path:
+            typer.echo(f'  Backup: {result.backup_path}')
+            typer.echo()
+            typer.echo('To undo, run:')
+            typer.secho(f'  claude-session restore --in-place {result.backup_path}', fg=typer.colors.CYAN)
 
 
 async def _move_async(
@@ -877,94 +855,86 @@ async def _move_async(
 ) -> None:
     """Async implementation of move command."""
 
-    try:
-        # Resolve session ID prefix to full ID
-        info_service = SessionInfoService()
-        session_info = await info_service.resolve_session(session_id)
-        full_session_id = session_info.session_id
+    # Resolve session ID prefix to full ID
+    info_service = SessionInfoService()
+    session_info = await info_service.resolve_session(session_id)
+    full_session_id = session_info.session_id
 
-        # Check if session is running
-        is_running, running_pid = info_service.is_session_running(full_session_id)
+    # Check if session is running
+    is_running, running_pid = info_service.is_session_running(full_session_id)
 
-        if is_running:
-            assert running_pid is not None
-            if dry_run:
-                typer.secho(f'Warning: Session is currently running (PID {running_pid})', fg=typer.colors.YELLOW)
-            elif not terminate:
-                typer.secho(
-                    f'Error: Session {full_session_id[:12]}... is currently running (PID {running_pid}).',
-                    fg=typer.colors.RED,
-                    err=True,
-                )
-                typer.echo('Use --terminate to kill the process before moving.', err=True)
-                raise typer.Exit(1)
-            else:
-                logger.info('Session is running (PID %s), will terminate before move', running_pid)
-
-        # Determine target project path
-        if project:
-            project_path = project.resolve()
-            if not project_path.exists():
-                typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
-        else:
-            project_path = Path.cwd()
-
-        # Pass PID to terminate if running and --terminate was specified
-        terminate_pid = running_pid if is_running and terminate and not dry_run else None
-
-        # Move the session
-        move_service = SessionMoveService(project_path)
-        result = await move_service.move_session(
-            session_id=full_session_id,
-            force=force,
-            no_backup=no_backup,
-            dry_run=dry_run,
-            terminate_pid=terminate_pid,
-        )
-
+    if is_running:
+        assert running_pid is not None
         if dry_run:
-            typer.secho('Dry run - would move:', fg=typer.colors.YELLOW)
-            typer.echo(f'  Session ID: {result.session_id}')
-            typer.echo(f'  From: {result.source_project}')
-            typer.echo(f'  To: {result.target_project}')
-            typer.echo(f'  Files: {result.files_moved}')
-            typer.echo(f'  Paths translated: {result.paths_translated}')
+            typer.secho(f'Warning: Session is currently running (PID {running_pid})', fg=typer.colors.YELLOW)
+        elif not terminate:
+            typer.secho(
+                f'Error: Session {full_session_id[:12]}... is currently running (PID {running_pid}).',
+                fg=typer.colors.RED,
+                err=True,
+            )
+            typer.echo('Use --terminate to kill the process before moving.', err=True)
+            raise SystemExit(1)
         else:
-            typer.secho('✓ Session moved successfully!', fg=typer.colors.GREEN)
-            typer.echo(f'  Session ID: {result.session_id}')
-            typer.echo(f'  From: {result.source_project}')
-            typer.echo(f'  To: {result.target_project}')
+            logger.info('Session is running (PID %s), will terminate before move', running_pid)
+
+    # Determine target project path
+    if project:
+        project_path = project.resolve()
+        if not project_path.exists():
+            typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
+            raise SystemExit(1)
+    else:
+        project_path = Path.cwd()
+
+    # Pass PID to terminate if running and --terminate was specified
+    terminate_pid = running_pid if is_running and terminate and not dry_run else None
+
+    # Move the session
+    move_service = SessionMoveService(project_path)
+    result = await move_service.move_session(
+        session_id=full_session_id,
+        force=force,
+        no_backup=no_backup,
+        dry_run=dry_run,
+        terminate_pid=terminate_pid,
+    )
+
+    if dry_run:
+        typer.secho('Dry run - would move:', fg=typer.colors.YELLOW)
+        typer.echo(f'  Session ID: {result.session_id}')
+        typer.echo(f'  From: {result.source_project}')
+        typer.echo(f'  To: {result.target_project}')
+        typer.echo(f'  Files: {result.files_moved}')
+        typer.echo(f'  Paths translated: {result.paths_translated}')
+    else:
+        typer.secho('✓ Session moved successfully!', fg=typer.colors.GREEN)
+        typer.echo(f'  Session ID: {result.session_id}')
+        typer.echo(f'  From: {result.source_project}')
+        typer.echo(f'  To: {result.target_project}')
+        typer.echo()
+        typer.echo(f'  Files written: {result.files_moved}')
+        typer.echo(f'  Files deleted: {result.files_deleted}')
+        typer.echo(f'  Paths translated: {result.paths_translated}')
+        typer.echo(f'  Duration: {result.duration_ms:.0f}ms')
+        if result.backup_path:
+            typer.echo(f'  Backup: {result.backup_path}')
             typer.echo()
-            typer.echo(f'  Files written: {result.files_moved}')
-            typer.echo(f'  Files deleted: {result.files_deleted}')
-            typer.echo(f'  Paths translated: {result.paths_translated}')
-            typer.echo(f'  Duration: {result.duration_ms:.0f}ms')
-            if result.backup_path:
-                typer.echo(f'  Backup: {result.backup_path}')
-                typer.echo()
-                typer.echo('To undo, run:')
-                typer.secho(f'  claude-session restore --in-place {result.backup_path}', fg=typer.colors.CYAN)
+            typer.echo('To undo, run:')
+            typer.secho(f'  claude-session restore --in-place {result.backup_path}', fg=typer.colors.CYAN)
 
-            for warning in result.warnings:
-                typer.secho(f'  Warning: {warning}', fg=typer.colors.YELLOW)
+        for warning in result.warnings:
+            typer.secho(f'  Warning: {warning}', fg=typer.colors.YELLOW)
 
-            if launch:
-                typer.echo()
-                typer.echo('Launching Claude Code...')
-                launch_claude_with_session(result.session_id, extra_args=extra_args)
-                # Note: launch_claude_with_session uses execvp, so we never reach here
-            else:
-                typer.echo()
-                typer.echo('To continue this session, run:')
-                typer.secho(f'  claude --resume {result.session_id}', fg=typer.colors.CYAN)
-
-    except (ClaudeSessionError, FileNotFoundError, FileExistsError) as e:
-        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
-    except Exception:
-        logger.exception('Failed to move session')
-        raise typer.Exit(1) from None
+        if launch:
+            typer.echo()
+            typer.echo('Launching Claude Code...')
+            launch_claude_with_session(result.session_id, extra_args=extra_args)
+            # Note: launch_claude_with_session uses execvp, so we never reach here
+        else:
+            typer.echo()
+            typer.echo('To continue this session, run:')
+            typer.secho(f'  claude --resume {result.session_id}', fg=typer.colors.CYAN)
 
 
 def _render_lineage_tree(tree: LineageTree) -> None:
@@ -996,11 +966,7 @@ def _render_lineage_tree(tree: LineageTree) -> None:
 async def _info_async(session_id: str, format: Literal['text', 'json']) -> None:
     """Async implementation of info command."""
     info_service = SessionInfoService()
-    try:
-        context = await info_service.get_info(session_id)
-    except (ClaudeSessionError, FileNotFoundError) as e:
-        typer.secho(f'Error: {e}', fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
+    context = await info_service.get_info(session_id)
 
     if format == 'json':
         typer.echo(context.model_dump_json(indent=2))
@@ -1067,7 +1033,7 @@ def _resolve_session_id(session_id: str | None) -> str:
     if detected is None:
         typer.secho('Error: Not running inside Claude Code.', fg=typer.colors.RED, err=True)
         typer.echo('Provide a session ID: claude-session <command> <session-id>', err=True)
-        raise typer.Exit(1)
+        raise SystemExit(1)
     return detected
 
 
@@ -1101,6 +1067,13 @@ def _get_github_token_cli(gist_token: str | None) -> str | None:
     except FileNotFoundError:
         pass  # gh CLI not installed
     return None
+
+
+@error_boundary.handler(ClaudeSessionError)
+@error_boundary.handler(FileNotFoundError)
+@error_boundary.handler(FileExistsError)
+def _handle_user_error(exc: Exception) -> None:
+    typer.secho(f'Error: {exc}', fg=typer.colors.RED, err=True)
 
 
 if __name__ == '__main__':
