@@ -64,6 +64,7 @@ from . import chrome_profile_state_export
 
 # Local imports
 from .chrome_profiles import list_all_profiles
+from .helpers import build_page_metadata, build_storage_init_script, count_tree_nodes, save_large_output_to_file
 from .models import (
     # Browser selection
     Browser,
@@ -124,12 +125,11 @@ from .scripts import (
     build_execute_javascript_async_script,
 )
 from .scroll import execute_scroll
+from .state import BrowserState
 from .validators import validate_css_selector as _validate_css_selector_impl
 
 __all__ = [
     'BrowserService',
-    'BrowserState',
-    'OriginTracker',
     'lifespan',
     'main',
     'register_tools',
@@ -163,118 +163,6 @@ _VISUAL_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
     ('offscreen', 'offscreen'),
     ('other', 'other'),
 ]
-
-
-class OriginTracker:
-    """Tracks origins visited during browser session for multi-origin storage capture.
-
-    CDP storage APIs require explicit origin specification - they have no enumeration
-    API (security by design). This tracker maintains a set of all origins visited
-    via navigate() so save_profile_state() knows which origins to query.
-
-    Origin format: scheme://host:port (e.g., "https://example.com", "http://localhost:8080")
-    Port is included only if non-default (not 80 for http, not 443 for https).
-    """
-
-    def __init__(self) -> None:
-        self._origins: set[str] = set()
-
-    def add_origin(self, url: str) -> str:
-        """Extract and track origin from URL. Returns the origin.
-
-        Args:
-            url: Full URL (e.g., "https://example.com/path?query=1")
-
-        Returns:
-            The extracted origin (e.g., "https://example.com")
-        """
-        parsed = urlparse(url)
-        origin = f'{parsed.scheme}://{parsed.netloc}'
-        self._origins.add(origin)
-        return origin
-
-    def get_origins(self) -> Sequence[str]:
-        """Get sorted list of all tracked origins."""
-        return sorted(self._origins)
-
-    def clear(self) -> None:
-        """Clear all tracked origins. Called on fresh_browser=True."""
-        self._origins.clear()
-
-    def __len__(self) -> int:
-        return len(self._origins)
-
-
-"""
-Architecture: All tools operate on BrowserService (service pattern with shared state).
-Workflow: navigate(url) → get_page_text() → click() → screenshot()
-
-Critical: CDP stealth injection bypasses Cloudflare where Playwright fails.
-Browser Context: All requests share session/cookies - bypasses bot detection.
-Temp Files: Auto-cleanup on shutdown via state.temp_dir.
-
-Enhanced Features (v2):
-✅ ARIA Snapshot - JavaScript-based accessible name computation per WAI-ARIA spec
-✅ Network Idle - CDP Network domain monitoring with 500ms idle threshold
-✅ Full-Page Screenshots - CDP Page.captureScreenshot with captureBeyondViewport
-✅ Resource Capture - CDP Network interception with HAR export support
-"""
-
-
-class BrowserState:
-    """Container for all browser state - initialized once at startup, never Optional."""
-
-    @classmethod
-    async def create(cls) -> typing.Self:
-        """Factory method to create and initialize browser state."""
-        # Initialize temp directories
-        temp_dir = tempfile.TemporaryDirectory()
-        screenshot_dir = Path(temp_dir.name)
-
-        capture_temp_dir = tempfile.TemporaryDirectory()
-        capture_dir = Path(capture_temp_dir.name)
-
-        logger.info('Temp directories initialized (screenshots: %s, captures: %s)', screenshot_dir, capture_dir)
-
-        return cls(
-            driver=None,
-            temp_dir=temp_dir,
-            screenshot_dir=screenshot_dir,
-            capture_temp_dir=capture_temp_dir,
-            capture_dir=capture_dir,
-            capture_counter=0,
-        )
-
-    def __init__(
-        self,
-        driver: webdriver.Chrome | None,  # None = lazy initialization (created on first use)
-        temp_dir: tempfile.TemporaryDirectory[str],
-        screenshot_dir: Path,
-        capture_temp_dir: tempfile.TemporaryDirectory[str],
-        capture_dir: Path,
-        capture_counter: int,
-    ) -> None:
-        self.driver = driver  # Lazy-initialized: None until first navigation
-        self.current_browser: Browser | None = None  # Tracks which browser launched the current driver
-        self.temp_dir = temp_dir
-        self.screenshot_dir = screenshot_dir
-        self.capture_temp_dir = capture_temp_dir
-        self.capture_dir = capture_dir
-        self.capture_counter = capture_counter
-        # Proxy configuration for authenticated proxies
-        self.proxy_config: dict[str, str] | None = None  # {host, port, username, password}
-        self.mitmproxy_process: subprocess.Popen[bytes] | None = None  # Local mitmproxy for upstream auth
-        # Origin tracking for multi-origin storage capture
-        self.origin_tracker = OriginTracker()
-        # Storage caches - captured on navigate-away since CDP can't query departed origins
-        self.local_storage_cache: dict[str, list[dict[str, str]]] = {}
-        self.session_storage_cache: dict[str, list[dict[str, str]]] = {}
-        self.indexed_db_cache: dict[str, list[dict[str, Any]]] = {}  # origin -> list of database dicts
-        # Lazy restore: pending profile state and tracking of already-restored origins
-        self.pending_profile_state: ProfileState | None = None
-        self.restored_origins: set[str] = set()
-        # Response body capture: True when JS interceptor is installed for HAR export
-        self.response_body_capture_enabled: bool = False
 
 
 class BrowserService:
@@ -750,7 +638,7 @@ def register_tools(service: BrowserService) -> None:
 
         # Build and register storage init script for localStorage/sessionStorage
         # This runs BEFORE page JavaScript on every new document (Playwright-style)
-        storage_init_script = _build_storage_init_script(profile_state)
+        storage_init_script = build_storage_init_script(profile_state)
         if storage_init_script:
             await asyncio.to_thread(
                 driver.execute_cdp_cmd,
@@ -1033,7 +921,7 @@ def register_tools(service: BrowserService) -> None:
             html_output = '\n'.join(html_parts)
 
             if len(html_output) > LARGE_OUTPUT_THRESHOLD:
-                return _save_large_output_to_file(
+                return save_large_output_to_file(
                     html_output,
                     service.state.screenshot_dir,
                     'page_html',
@@ -1053,7 +941,7 @@ def register_tools(service: BrowserService) -> None:
             logger.info('Extracted %s characters of HTML', f'{len(page_html):,}')
 
             if len(page_html) > LARGE_OUTPUT_THRESHOLD:
-                return _save_large_output_to_file(
+                return save_large_output_to_file(
                     page_html,
                     service.state.screenshot_dir,
                     'page_html',
@@ -1281,7 +1169,7 @@ def register_tools(service: BrowserService) -> None:
             page_stats = result.get('stats', {})
 
         # Count nodes before compaction (for page metadata stats)
-        raw_node_count = _count_tree_nodes(snapshot_data)
+        raw_node_count = count_tree_nodes(snapshot_data)
 
         # Apply compaction if requested
         if compact_tree:
@@ -1291,20 +1179,20 @@ def register_tools(service: BrowserService) -> None:
         yaml_output = serialize_aria_snapshot(snapshot_data)
 
         # Append page metadata footer
-        metadata = _build_page_metadata(
+        metadata = build_page_metadata(
             page_stats=page_stats,
             include_page_info=include_page_info,
             include_urls=include_urls,
             compact_tree=compact_tree,
             raw_node_count=raw_node_count,
-            compacted_node_count=_count_tree_nodes(snapshot_data),
+            compacted_node_count=count_tree_nodes(snapshot_data),
             hidden_reason_keys=_ARIA_HIDDEN_REASON_KEYS,
         )
         if metadata:
             yaml_output += metadata
 
         if len(yaml_output) > LARGE_OUTPUT_THRESHOLD:
-            return _save_large_output_to_file(
+            return save_large_output_to_file(
                 yaml_output,
                 service.state.screenshot_dir,
                 'aria_snapshot',
@@ -1376,7 +1264,7 @@ def register_tools(service: BrowserService) -> None:
             return f'Selector not found: {selector}'
 
         # Count nodes before compaction (for page metadata stats)
-        raw_node_count = _count_tree_nodes(snapshot_data)
+        raw_node_count = count_tree_nodes(snapshot_data)
 
         if compact_tree:
             snapshot_data = compact_visual_tree(snapshot_data)
@@ -1387,20 +1275,20 @@ def register_tools(service: BrowserService) -> None:
         yaml_output = serialize_visual_tree(snapshot_data)
 
         # Append page metadata footer
-        metadata = _build_page_metadata(
+        metadata = build_page_metadata(
             page_stats=page_stats,
             include_page_info=include_page_info,
             include_urls=include_urls,
             compact_tree=compact_tree,
             raw_node_count=raw_node_count,
-            compacted_node_count=_count_tree_nodes(snapshot_data),
+            compacted_node_count=count_tree_nodes(snapshot_data),
             hidden_reason_keys=_VISUAL_HIDDEN_REASON_KEYS,
         )
         if metadata:
             yaml_output += metadata
 
         if len(yaml_output) > LARGE_OUTPUT_THRESHOLD:
-            return _save_large_output_to_file(
+            return save_large_output_to_file(
                 yaml_output,
                 service.state.screenshot_dir,
                 'visual_tree',
@@ -3770,113 +3658,6 @@ def _validate_css_selector(selector: str) -> None:
         raise fastmcp.exceptions.ToolError(str(e)) from None
 
 
-def _count_tree_nodes(node: Mapping[str, Any] | None) -> int:
-    """Count nodes in a tree for compaction stats."""
-    if node is None:
-        return 0
-    count = 1
-    for child in node.get('children', []):
-        count += _count_tree_nodes(child)
-    return count
-
-
-def _build_page_metadata(
-    page_stats: Mapping[str, Any],
-    include_page_info: bool,
-    include_urls: bool,
-    compact_tree: bool,
-    raw_node_count: int,
-    compacted_node_count: int,
-    hidden_reason_keys: Sequence[tuple[str, str]],
-) -> str:
-    """Build YAML comment metadata footer from JS page stats.
-
-    Tier 1 (always shown when > 0): hidden element count + iframe count.
-    Tier 2 (only with include_page_info): shadow DOM, images, links, compaction, depth.
-
-    raw_node_count and compacted_node_count both use _count_tree_nodes
-    for apples-to-apples comparison.
-    """
-    lines: list[str] = []
-
-    # Tier 1: Always shown when > 0
-    hidden = page_stats.get('hidden', {})
-    hidden_total = hidden.get('total', 0)
-    if hidden_total > 0:
-        reasons = []
-        for key, label in hidden_reason_keys:
-            count = hidden.get(key, 0)
-            if count > 0:
-                reasons.append(f'{label}: {count}')
-        lines.append(f'# hidden: {hidden_total} ({", ".join(reasons)})')
-
-    iframe_count = page_stats.get('iframes', 0)
-    if iframe_count > 0:
-        lines.append(f'# iframes: {iframe_count} (content not traversed)')
-
-    # Tier 2: Only with include_page_info=True
-    if include_page_info:
-        shadow_count = page_stats.get('shadowRoots', 0)
-        if shadow_count > 0:
-            lines.append(f'# shadow_roots: {shadow_count} (content not traversed)')
-
-        images = page_stats.get('images', {})
-        img_total = images.get('total', 0)
-        if img_total > 0:
-            lines.append(
-                f'# images: {img_total} '
-                f'(with_alt: {images.get("withAlt", 0)}, without_alt: {images.get("withoutAlt", 0)})',
-            )
-
-        link_count = page_stats.get('links', 0)
-        if link_count > 0 and not include_urls:
-            lines.append(f'# links: {link_count} (urls not included \u2014 use include_urls=True)')
-
-        if raw_node_count > 0 and compact_tree and raw_node_count != compacted_node_count:
-            lines.append(f'# tree: {raw_node_count} nodes \u2192 {compacted_node_count} after compaction')
-
-        depth_trunc = page_stats.get('depthTruncated', 0)
-        if depth_trunc > 0:
-            lines.append(f'# depth_truncated: {depth_trunc} subtrees cut at depth 50')
-
-    if not lines:
-        return ''
-    return '\n# --- page metadata ---\n' + '\n'.join(lines)
-
-
-def _save_large_output_to_file(content: str, output_dir: Path, prefix: str, extension: str) -> str:
-    """Save large output to file, return formatted response with path and preview.
-
-    Preserves natural line structure by writing directly to disk,
-    bypassing MCP JSON serialization that would escape newlines.
-
-    Args:
-        content: The full content to save
-        output_dir: Directory to save the file in
-        prefix: Filename prefix (e.g., "aria_snapshot")
-        extension: File extension without dot (e.g., "yaml")
-
-    Returns:
-        Formatted response string with file path, stats, and preview
-    """
-    timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')
-    filename = f'{prefix}_{timestamp}.{extension}'
-    file_path = output_dir / filename
-
-    file_path.write_text(content, encoding='utf-8')
-
-    line_count = content.count('\n') + 1
-    char_count = len(content)
-    preview = content[:2000]
-
-    return (
-        f'{prefix.replace("_", " ").title()} '
-        f'({char_count:,} chars, {line_count:,} lines) saved to:\n'
-        f'{file_path}\n\n'
-        f'Preview (first 2000 chars):\n{preview}'
-    )
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -4106,108 +3887,6 @@ async def _load_profile_state_from_file(file_path: str) -> ProfileState:
 
     profile_state_json = state_path.read_text()
     return ProfileState.model_validate_json(profile_state_json)
-
-
-def _build_storage_init_script(profile_state: ProfileState) -> str | None:
-    """Build JavaScript init script to restore localStorage/sessionStorage.
-
-    Creates a script that runs via Page.addScriptToEvaluateOnNewDocument BEFORE
-    any page JavaScript executes. This ensures storage is populated before apps
-    check for auth tokens, user preferences, or other initialization data.
-
-    The script:
-    - Checks window.location.origin against captured origins
-    - Restores matching localStorage and sessionStorage
-    - Logs errors to window.__storageRestoreState for debugging
-    - Handles quota errors and private browsing gracefully
-
-    This approach matches how Playwright's storageState option works internally.
-
-    Args:
-        profile_state: ProfileState containing origins with local_storage/session_storage.
-
-    Returns:
-        JavaScript source string, or None if no storage data to restore.
-    """
-    # Build storage data object keyed by origin
-    storage_data: dict[str, dict[str, dict[str, str]]] = {}
-
-    for origin_url, origin_data in profile_state.origins.items():
-        has_local = origin_data.local_storage and len(origin_data.local_storage) > 0
-        has_session = origin_data.session_storage and len(origin_data.session_storage) > 0
-
-        if has_local or has_session:
-            storage_data[origin_url] = {
-                'localStorage': dict(origin_data.local_storage) if origin_data.local_storage else {},
-                'sessionStorage': dict(origin_data.session_storage) if origin_data.session_storage else {},
-            }
-
-    if not storage_data:
-        return None
-
-    # Serialize to JSON for embedding in JavaScript
-    # json.dumps handles escaping of quotes, newlines, etc.
-    storage_json = json.dumps(storage_data, ensure_ascii=False)
-
-    # Build the init script
-    # This runs before any page JavaScript in every new document
-    return f"""
-(function() {{
-    'use strict';
-
-    // Storage restoration state for debugging
-    window.__storageRestoreState = {{
-        restored: {{ localStorage: [], sessionStorage: [] }},
-        errors: [],
-        origin: null,
-        timestamp: Date.now()
-    }};
-
-    var storageData = {storage_json};
-    var currentOrigin = window.location.origin;
-    window.__storageRestoreState.origin = currentOrigin;
-
-    var data = storageData[currentOrigin];
-    if (!data) {{
-        // No data for this origin - nothing to restore
-        return;
-    }}
-
-    // Restore localStorage
-    if (data.localStorage) {{
-        Object.keys(data.localStorage).forEach(function(key) {{
-            try {{
-                window.localStorage.setItem(key, data.localStorage[key]);
-                window.__storageRestoreState.restored.localStorage.push(key);
-            }} catch (e) {{
-                window.__storageRestoreState.errors.push({{
-                    type: 'localStorage',
-                    key: key,
-                    error: e.name,
-                    message: e.message
-                }});
-            }}
-        }});
-    }}
-
-    // Restore sessionStorage
-    if (data.sessionStorage) {{
-        Object.keys(data.sessionStorage).forEach(function(key) {{
-            try {{
-                window.sessionStorage.setItem(key, data.sessionStorage[key]);
-                window.__storageRestoreState.restored.sessionStorage.push(key);
-            }} catch (e) {{
-                window.__storageRestoreState.errors.push({{
-                    type: 'sessionStorage',
-                    key: key,
-                    error: e.name,
-                    message: e.message
-                }});
-            }}
-        }});
-    }}
-}})();
-"""
 
 
 async def _inject_cookies_via_cdp(driver: webdriver.Chrome, cookies: Sequence[ProfileStateCookie]) -> int:
