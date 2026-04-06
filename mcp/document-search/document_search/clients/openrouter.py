@@ -32,7 +32,12 @@ from numpy.typing import NDArray
 
 from document_search.clients import _retry
 from document_search.clients._retry.openrouter import OpenRouterTransientErrorCategory
-from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterUnexpectedResponse
+from document_search.clients.openrouter_errors import (
+    OpenRouterAPIError,
+    OpenRouterTruncatedResponse,
+    OpenRouterUnexpectedResponse,
+)
+from document_search.clients.protocols import TransientErrorCategory
 from document_search.schemas.embeddings import EmbeddingVector, TaskIntent
 
 __all__ = [
@@ -64,8 +69,8 @@ class OpenRouterClient:
     # Concurrency control - semaphore limits concurrent API calls
     DEFAULT_MAX_CONCURRENT = 200  # Match Gemini
 
-    # HTTP client configuration - match Gemini's tuned settings
-    DEFAULT_TIMEOUT_MS = 5000  # Request timeout in milliseconds
+    # HTTP client configuration
+    DEFAULT_TIMEOUT_MS = 30_000  # Read timeout in ms — per-chunk, not total. Large batches return ~4MB.
     DEFAULT_MAX_CONNECTIONS = 200
     DEFAULT_MAX_KEEPALIVE = 200
     DEFAULT_KEEPALIVE_EXPIRY = 30  # Seconds before idle close
@@ -122,7 +127,12 @@ class OpenRouterClient:
                 'Authorization': f'Bearer {self._api_key}',
                 'Content-Type': 'application/json',
             },
-            timeout=timeout_ms / 1000,  # Convert to seconds for httpx
+            timeout=httpx.Timeout(
+                connect=5.0,
+                read=timeout_ms / 1000,  # 30s per-chunk for large streaming responses
+                write=5.0,
+                pool=5.0,
+            ),
             limits=limits,
             event_hooks={
                 'request': [self._on_request],
@@ -179,7 +189,19 @@ class OpenRouterClient:
             response = await self._client.post('/embeddings', json=body)
 
             response.raise_for_status()
-            data = response.json()
+
+            try:
+                data = response.json()
+            except json.JSONDecodeError as exc:
+                truncation = OpenRouterTruncatedResponse.from_json_error(
+                    json_error=exc,
+                    response=response,
+                    model=self._model,
+                    batch_size=len(texts),
+                )
+                if truncation is not None:
+                    raise truncation from exc
+                raise
 
             result = _parse_embedding_response(
                 data,
@@ -235,6 +257,9 @@ class OpenRouterClient:
             model=self._model,
         )
         return result.data
+
+    def on_transient_error(self, category: TransientErrorCategory) -> None:
+        """Called from before_sleep on categorized transient errors. No-op by default."""
 
     async def close(self) -> None:
         """Close HTTP client and release resources."""

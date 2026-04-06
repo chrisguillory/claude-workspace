@@ -51,11 +51,11 @@ class RedisClient:
         host: str = '127.0.0.1',
         port: int = 6379,
         *,
-        max_connections: int = 500,
+        max_connections: int = 5000,  # Lazy ceiling. Semaphores (500+500) provide backpressure. Server maxclients: 65,536.
         max_concurrent: int = 500,
         max_concurrent_pipelines: int = 500,
         socket_timeout: float = 30.0,
-        socket_connect_timeout: float = 2.0,
+        socket_connect_timeout: float = 5.0,
     ) -> None:
         pool = aioredis.ConnectionPool(
             host=host,

@@ -13,7 +13,7 @@ import httpx
 import tenacity
 
 from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
-from document_search.clients.openrouter_errors import OpenRouterAPIError
+from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterTruncatedResponse
 
 __all__ = [
     'OpenRouterTransientErrorCategory',
@@ -29,11 +29,12 @@ OPENROUTER_FAILURE_THRESHOLD = 10
 OPENROUTER_RECOVERY_TIMEOUT = 60
 
 type OpenRouterTransientErrorCategory = Literal[
-    'rate_limit',  # 429 — upstream provider or OpenRouter rate limit
-    'provider_unavailable',  # 404 "No successful provider responses." — all providers failed
     'bad_gateway',  # 502 — upstream provider down or returned invalid response
-    'timeout',  # 408 — provider cold start or slow inference
+    'provider_unavailable',  # 404 "No successful provider responses." — all providers failed
+    'rate_limit',  # 429 — upstream provider or OpenRouter rate limit
     'server_error',  # 500, 503, 504 — OpenRouter infrastructure issues
+    'timeout',  # 408 — provider cold start or slow inference
+    'truncated_response',  # Cloudflare Worker CPU limit truncated JSON body
 ]
 
 
@@ -58,6 +59,7 @@ def log_openrouter_retry(retry_state: tenacity.RetryCallState) -> None:
         if category is not None:
             client = retry_state.args[0]
             client.transient_errors[category] += 1
+            client.on_transient_error(category)
 
     exc_name = type(exc).__name__
     exc_msg = str(exc)
@@ -95,6 +97,9 @@ def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCat
     - OpenRouterUnexpectedResponse (unknown format won't change on retry)
     - 404 with other messages ("No endpoints found for model") — permanent
     """
+    if isinstance(exc, OpenRouterTruncatedResponse):
+        return 'truncated_response'
+
     if isinstance(exc, OpenRouterAPIError):
         if exc.code == 429:
             return 'rate_limit'
