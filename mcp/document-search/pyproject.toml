@@ -5,6 +5,7 @@ description = "Document Search MCP Server - Semantic search over local documents
 requires-python = ">=3.13"
 dependencies = [
     "bm25-rs",
+    "jsonl-chunker-rs",
     "circuitbreaker>=2.1.3",
     "fastapi>=0.124.2",
     "fastmcp>=2.12.5",
@@ -28,6 +29,11 @@ dependencies = [
     "uvicorn>=0.38.0",
 ]
 
+[dependency-groups]
+dev = [
+    "maturin>=1.12.6",
+]
+
 [project.scripts]
 document-search = "document_search.cli.main:main"
 document-search-dashboard = "document_search.dashboard:main"
@@ -38,6 +44,7 @@ mcp-document-search-server = "document_search.server:main"
 # Remote uvx installations use the git URL; local development uses workspace (faster, sees live changes).
 cc-lib = { workspace = true }
 bm25-rs = { path = "./bm25-rs/", editable = true }
+jsonl-chunker-rs = { path = "./jsonl-chunker-rs/", editable = true }
 
 [tool.hatch.build]
 include = ["document_search/"]
