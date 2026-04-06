@@ -56,6 +56,7 @@ def log_gemini_retry(retry_state: tenacity.RetryCallState) -> None:
         if category is not None:
             client = retry_state.args[0]
             client.transient_errors[category] += 1
+            client.on_transient_error(category)
 
     exc_name = type(exc).__name__
     exc_msg = str(exc)

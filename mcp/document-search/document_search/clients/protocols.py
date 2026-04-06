@@ -8,12 +8,22 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Literal, Protocol
 
 from document_search.schemas.embeddings import EmbeddingVector, TaskIntent
 
 __all__ = [
     'EmbeddingClient',
+    'TransientErrorCategory',
+]
+
+type TransientErrorCategory = Literal[
+    'bad_gateway',
+    'provider_unavailable',
+    'rate_limit',
+    'server_error',
+    'timeout',
+    'truncated_response',
 ]
 
 
@@ -24,23 +34,21 @@ class EmbeddingClient(Protocol):
     Used by EmbeddingService for type-safe client injection.
     """
 
-    transient_errors: Counter[str]
-    """Categorized transient error counts (rate_limit, provider_error, timeout, etc.).
+    transient_errors: Counter[TransientErrorCategory]
+    """Categorized transient error counts.
 
-    Each client defines its own Literal type for categories.
     Used for dashboard monitoring. Resets only on client recreation.
     """
 
     async def embed(self, texts: Sequence[str], *, intent: TaskIntent) -> Sequence[EmbeddingVector]:
-        """Embed texts into vectors.
+        """Embed texts into vectors."""
+        ...
 
-        Args:
-            texts: Texts to embed.
-            intent: 'document' for indexing, 'query' for search.
-                Each provider translates to their specific format.
+    def on_transient_error(self, category: TransientErrorCategory) -> None:
+        """Called from before_sleep on any categorized transient error.
 
-        Returns:
-            List of embedding vectors, one per input text.
+        Fires inside the retry loop — before the retry sleep, not after
+        the call returns. Override to wire adaptive behavior.
         """
         ...
 

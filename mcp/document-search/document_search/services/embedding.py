@@ -13,6 +13,7 @@ wrapper overhead. Cold path (single embed requests) still uses typed EmbedRespon
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import logging
 import time
@@ -22,7 +23,7 @@ import numpy as np
 from cc_lib.batch_loader import GenericBatchLoader
 from numpy.typing import NDArray
 
-from document_search.clients.protocols import EmbeddingClient
+from document_search.clients.protocols import EmbeddingClient, TransientErrorCategory
 from document_search.clients.redis import RedisClient
 from document_search.schemas.embeddings import (
     EmbedBatchRequest,
@@ -36,11 +37,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-# Cache configuration
-CACHE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
-CACHE_BATCH_SIZE = 100
-CACHE_COALESCE_DELAY = 0.001  # 1ms - Redis is fast
 
 
 class EmbeddingService:
@@ -72,7 +68,6 @@ class EmbeddingService:
             dimensions: Embedding dimensions (for cache keys).
         """
         self._client = client
-        self._batch_size = batch_size
         self._embed_loader = _EmbedLoader(self, batch_size=batch_size, coalesce_delay=coalesce_delay)
         self._cache_loader = CacheLoader(
             redis=redis,
@@ -80,6 +75,11 @@ class EmbeddingService:
             dimensions=dimensions,
             embed_loader=self._embed_loader,
         )
+
+        # AIMD state — adaptive batch sizing via transient error callback
+        self._initial_batch_size = batch_size
+        self._consecutive_successes = 0
+        client.on_transient_error = self._on_transient_error
 
     @property
     def cache_hits(self) -> int:
@@ -120,18 +120,14 @@ class EmbeddingService:
         return EmbedResponse.from_numpy(v) if isinstance(v, np.ndarray) else EmbedResponse(values=v, dimensions=len(v))
 
     async def embed_batch(self, request: EmbedBatchRequest) -> EmbedBatchResponse:
-        """Embed batch of texts (cold path -- MCP tool requests).
-
-        Args:
-            request: Typed batch request.
-
-        Returns:
-            Typed batch response with Pydantic wrappers.
+        """Embed batch of texts. Called by _EmbedLoader._bulk_embed (hot path)
+        and directly by MCP tools (cold path).
         """
         vectors = await self._client.embed(
             texts=request.texts,
             intent=request.intent,
         )
+        self._aimd_increase()
         embeddings = [
             EmbedResponse.from_numpy(v) if isinstance(v, np.ndarray) else EmbedResponse(values=v, dimensions=len(v))
             for v in vectors
@@ -191,6 +187,62 @@ class EmbeddingService:
         """Cancel in-flight write batchers."""
         self._cache_loader.cancel_writes()
 
+    # ── Adaptive batch sizing (additive-increase / multiplicative-decrease) ──
+
+    def _on_transient_error(self, category: TransientErrorCategory) -> None:
+        """Callback from before_sleep — dispatches to category-specific handlers."""
+        if category == 'truncated_response':
+            self._aimd_decrease()
+
+    def _aimd_increase(self) -> None:
+        """Additive increase on sustained success."""
+        cfg = ADAPTIVE_BATCH_DEFAULTS
+        self._consecutive_successes += 1
+        if self._consecutive_successes >= cfg.success_window:
+            old = self._embed_loader.batch_size
+            new = min(self._initial_batch_size, old + cfg.increase_step)
+            if new > old:
+                self._embed_loader.batch_size = new
+                logger.info('[AIMD] Batch size increased: %d -> %d', old, new)
+            self._consecutive_successes = 0
+
+    def _aimd_decrease(self) -> None:
+        """Multiplicative decrease on truncation."""
+        cfg = ADAPTIVE_BATCH_DEFAULTS
+        old = self._embed_loader.batch_size
+        new = max(cfg.min_batch_size, int(old * cfg.decrease_factor))
+        if new < old:
+            self._embed_loader.batch_size = new
+            self._consecutive_successes = 0
+            logger.warning('[AIMD] Batch size decreased: %d -> %d', old, new)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CacheConfig:
+    """Embedding cache configuration for Redis-backed batch lookups."""
+
+    ttl_seconds: int = 30 * 24 * 60 * 60  # 30 days
+    batch_size: int = 100
+    coalesce_delay: float = 0.001  # 1ms — Redis is fast
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class AdaptiveBatchConfig:
+    """Additive-increase / multiplicative-decrease batch sizing.
+
+    Reduces batch size on truncation errors (Cloudflare Worker CPU limits)
+    and gradually recovers on sustained success.
+    """
+
+    min_batch_size: int = 50
+    decrease_factor: float = 0.5
+    increase_step: int = 50
+    success_window: int = 5
+
+
+CACHE_DEFAULTS = CacheConfig()
+ADAPTIVE_BATCH_DEFAULTS = AdaptiveBatchConfig()
+
 
 class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
     """Batch cache lookups with miss forwarding.
@@ -233,8 +285,8 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
 
         super().__init__(
             bulk_load=self._bulk_lookup,
-            batch_size=CACHE_BATCH_SIZE,
-            coalesce_delay=CACHE_COALESCE_DELAY,
+            batch_size=CACHE_DEFAULTS.batch_size,
+            coalesce_delay=CACHE_DEFAULTS.coalesce_delay,
         )
 
     @property
@@ -274,7 +326,7 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
     async def refresh_file_index_ttl(self, file_path: str) -> None:
         """Refresh TTL on an existing reverse index entry (no content change)."""
         index_key = self._index_key(file_path)
-        await self._redis.expire(index_key, CACHE_TTL_SECONDS)
+        await self._redis.expire(index_key, CACHE_DEFAULTS.ttl_seconds)
 
     async def update_file_index(self, file_path: str, texts: Sequence[str]) -> None:
         """Atomically replace reverse index mapping file → cache keys.
@@ -290,7 +342,7 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
         pipe = self._redis.transaction()
         pipe.unlink(index_key)
         pipe.sadd(index_key, *[k.encode() for k in cache_keys])
-        pipe.expire(index_key, CACHE_TTL_SECONDS)
+        pipe.expire(index_key, CACHE_DEFAULTS.ttl_seconds)
         await self._redis.execute_pipeline(pipe)
 
     async def invalidate_file_cache(self, file_path: str) -> int:
@@ -388,7 +440,7 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
             for idx, arr in zip(miss_indices, miss_arrays, strict=True):
                 results[idx] = arr
                 key = self.cache_key(texts[idx])
-                write_items.append((key, arr.tobytes(), CACHE_TTL_SECONDS))
+                write_items.append((key, arr.tobytes(), CACHE_DEFAULTS.ttl_seconds))
 
             # Fire-and-forget cache writes via batcher
             await self._cache_write_batcher.submit_many(write_items)
@@ -430,7 +482,7 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
             if cache_keys:
                 pipe.unlink(index_key)
                 pipe.sadd(index_key, *cache_keys)
-                pipe.expire(index_key, CACHE_TTL_SECONDS)
+                pipe.expire(index_key, CACHE_DEFAULTS.ttl_seconds)
             else:
                 pipe.unlink(index_key)
         await self._redis.execute_pipeline(pipe)
