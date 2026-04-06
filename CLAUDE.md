@@ -313,26 +313,22 @@ PY
 Render markdown documents as PDF or serve with live preview. Located at `tools/markdown-kit/markdown-kit.js`.
 
 ```bash
-# Live preview (preferred — user clicks the localhost link)
-node tools/markdown-kit/markdown-kit.js document.md --serve --theme pixyll --toc-nav all --macos-spoken-content --front-matter render
+# Live preview (preferred — auto-opens in Safari)
+node tools/markdown-kit/markdown-kit.js document.md --serve
 
 # Generate PDF
-node tools/markdown-kit/markdown-kit.js document.md --theme pixyll --toc-nav all --macos-spoken-content --front-matter render
+node tools/markdown-kit/markdown-kit.js document.md
 
 # Generate self-contained HTML
-node tools/markdown-kit/markdown-kit.js document.md --html --theme pixyll --toc-nav all --macos-spoken-content --front-matter render
+node tools/markdown-kit/markdown-kit.js document.md --html
 
 # Share via secret GitHub gist (with embedded images)
-node tools/markdown-kit/markdown-kit.js document.md --secret-gist --embed-images --theme pixyll --toc-nav all --macos-spoken-content --front-matter render
+node tools/markdown-kit/markdown-kit.js document.md --secret-gist --embed-images
 ```
 
-**Default flags to always include:**
-- `--theme pixyll` — user's preferred theme
-- `--toc-nav all` — TOC injection, heading backlinks, smooth scroll, floating button
-- `--macos-spoken-content` — TTS-safe code blocks (fullwidth angle brackets)
-- `--front-matter render` — for documents with YAML frontmatter
+**User config file:** `~/.claude-workspace/tools/markdown-kit/config.yaml` sets persistent defaults (theme, toc-nav, macos-spoken-content, launch, front-matter, show-timestamp, show-filepath). CLI flags override config. Use `--no-<flag>` to disable a config-enabled boolean for one run.
 
-Use `--launch` to auto-open the browser (works with `--serve` and `--secret-gist`). Dependencies auto-install on first run. When the user says "serve with markdown-kit", use `--serve` and report the localhost URL.
+Dependencies auto-install on first run. When the user says "serve with markdown-kit", use `--serve` and report the localhost URL.
 
 ### Dependency Management
 

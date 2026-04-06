@@ -112,40 +112,70 @@ for (let i = 0; i < rawArgs.length; i++) {
   }
 }
 
-const { values: opts, positionals } = parseArgs({
+// Hardcoded defaults — config file and CLI flags override these.
+// Boolean defaults are NOT set in parseArgs (which returns undefined for absent flags),
+// enabling three-state detection: undefined=not set, true=--flag, false=--no-flag.
+const DEFAULTS = {
+  theme: 'pixyll',
+  width: '1400',
+  engine: 'chromium',
+  'front-matter': 'strip',
+  host: 'localhost',
+  'toc-nav': '',
+  html: false,
+  pageless: true,
+  'page-numbers': true,
+  serve: false,
+  mobile: false,
+  'rich-highlighting': false,
+  'macos-spoken-content': false,
+  'embed-images': false,
+  'copy-assets': false,
+  'absolute-paths': false,
+  'accept-broken-images': false,
+  'secret-gist': false,
+  'show-timestamp': false,
+  'show-filepath': false,
+  help: false,
+};
+
+const { values: cliOpts, positionals } = parseArgs({
   args: rawArgs,
   allowPositionals: true,
   allowNegative: true,
   options: {
     stylesheet: { type: 'string', short: 's' },
-    theme:      { type: 'string', short: 't', default: 'pixyll' },
-    width:      { type: 'string', short: 'w', default: '1400' },
-    engine:     { type: 'string', short: 'e', default: 'chromium' },
-    'front-matter': { type: 'string', default: 'strip' },
-    html:       { type: 'boolean', default: false },
-    pageless:   { type: 'boolean', default: true },
-    'page-numbers': { type: 'boolean', default: true },
+    theme:      { type: 'string', short: 't' },
+    width:      { type: 'string', short: 'w' },
+    engine:     { type: 'string', short: 'e' },
+    'front-matter': { type: 'string' },
+    html:       { type: 'boolean' },
+    pageless:   { type: 'boolean' },
+    'page-numbers': { type: 'boolean' },
     header:     { type: 'string' },
     footer:     { type: 'string' },
-    serve:      { type: 'boolean', default: false },
-    host:       { type: 'string', default: 'localhost' },
+    serve:      { type: 'boolean' },
+    host:       { type: 'string' },
     output:     { type: 'string', short: 'o' },
-    mobile:     { type: 'boolean', short: 'm', default: false },
-    'rich-highlighting': { type: 'boolean', default: false },
-    'toc-nav':  { type: 'string', default: '' },
-    'macos-spoken-content': { type: 'boolean', default: false },
-    'embed-images': { type: 'boolean', default: false },
-    'copy-assets': { type: 'boolean', default: false },
-    'absolute-paths': { type: 'boolean', default: false },
-    'accept-broken-images': { type: 'boolean', default: false },
-    'secret-gist': { type: 'boolean', default: false },
+    mobile:     { type: 'boolean', short: 'm' },
+    'rich-highlighting': { type: 'boolean' },
+    'toc-nav':  { type: 'string' },
+    'macos-spoken-content': { type: 'boolean' },
+    'embed-images': { type: 'boolean' },
+    'copy-assets': { type: 'boolean' },
+    'absolute-paths': { type: 'boolean' },
+    'accept-broken-images': { type: 'boolean' },
+    'secret-gist': { type: 'boolean' },
     'gist-id':  { type: 'string' },
+    'show-timestamp': { type: 'boolean' },
+    'show-filepath': { type: 'boolean' },
     launch:     { type: 'string' },
-    help:       { type: 'boolean', short: 'h', default: false },
+    help:       { type: 'boolean', short: 'h' },
   },
 });
 
-if (opts.help || positionals.length === 0) {
+// Help check uses cliOpts directly (before config merge — help is always CLI-driven)
+if (cliOpts.help || positionals.length === 0) {
   console.log(`Usage: node markdown-kit.js <input.md> [options]
 
 Options:
@@ -173,6 +203,13 @@ Options:
   --secret-gist             Upload HTML to secret GitHub gist (implies --html)
   --gist-id <id|url>        Update existing gist instead of creating new
   --launch [browser]        Open browser in serve/gist mode (safari, chrome, chromium, firefox)
+
+Output metadata:
+  --show-timestamp          Show build timestamp in output
+  --show-filepath           Show source file path in output
+  --no-show-timestamp       Disable (override config)
+  --no-show-filepath        Disable (override config)
+
   --help, -h                Show this help
 
 Front matter modes:
@@ -191,7 +228,65 @@ Engines:
   webkit      macOS native WKWebView — same engine as Typora (macOS only)
 
 Output: <input>.pdf alongside the input file (or live preview with --serve).`);
-  process.exit(opts.help ? 0 : 1);
+  process.exit(cliOpts.help ? 0 : 1);
+}
+
+// ── Config file loading + three-layer merge ──────────────────────────────────
+// Precedence: CLI flags > config file > hardcoded DEFAULTS
+// Config file: ~/.claude-workspace/tools/markdown-kit/config.yaml
+// Loaded BEFORE npm deps are installed (can't use js-yaml here), so we parse
+// the simple flat key:value YAML subset inline. Supports comments (#) and
+// boolean/string/number values.
+
+const CONFIG_DIR = join(homedir(), '.claude-workspace', 'tools', 'markdown-kit');
+
+function loadUserConfig() {
+  const configPath = join(CONFIG_DIR, 'config.yaml');
+  if (!existsSync(configPath)) return {};
+  try {
+    const config = {};
+    for (const line of readFileSync(configPath, 'utf-8').split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const colonIdx = trimmed.indexOf(':');
+      if (colonIdx === -1) continue;
+      const key = trimmed.slice(0, colonIdx).trim();
+      let val = trimmed.slice(colonIdx + 1).trim();
+      // Strip surrounding quotes (handle YAML quoted strings)
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      } else {
+        // Strip inline comments only for unquoted values (quoted values may contain #)
+        const commentIdx = val.indexOf(' #');
+        if (commentIdx !== -1) val = val.slice(0, commentIdx).trim();
+      }
+      // Type coercion
+      if (val === 'true') config[key] = true;
+      else if (val === 'false') config[key] = false;
+      else if (/^\d+$/.test(val)) config[key] = val;  // keep as string (width, etc.)
+      else config[key] = val;
+    }
+    return config;
+  } catch (e) {
+    console.warn(`Warning: failed to parse config: ${e.message}`);
+    return {};
+  }
+}
+
+const userConfig = loadUserConfig();
+const opts = {};
+
+// Merge defaulted flags: CLI > config > DEFAULTS
+for (const key of Object.keys(DEFAULTS)) {
+  if (cliOpts[key] !== undefined) opts[key] = cliOpts[key];
+  else if (key in userConfig) opts[key] = userConfig[key];
+  else opts[key] = DEFAULTS[key];
+}
+
+// Pass through non-defaulted string flags (no hardcoded default — undefined if absent)
+for (const key of ['stylesheet', 'header', 'footer', 'output', 'gist-id', 'launch']) {
+  if (cliOpts[key] !== undefined) opts[key] = cliOpts[key];
+  else if (key in userConfig) opts[key] = userConfig[key];
 }
 
 const inputPath = resolve(positionals[0]);
@@ -204,8 +299,8 @@ if (isNaN(pageWidth) || pageWidth <= 0) {
   console.error(`Error: --width must be a positive integer, got '${opts.width}'`);
   process.exit(1);
 }
-// --mobile preset: override width to 430px (iPhone) unless --width was explicitly set
-if (opts.mobile && opts.width === '1400') {
+// --mobile preset: override width to 430px (iPhone) unless --width was explicitly set on CLI
+if (opts.mobile && cliOpts.width === undefined) {
   pageWidth = 430;
 }
 const engine = opts.engine;
@@ -245,9 +340,14 @@ if (opts['secret-gist'] && opts.serve) {
 }
 
 // --launch requires --serve or --secret-gist
+// Only error if explicitly passed via CLI; silently ignore if from config (config may set launch
+// globally but not every invocation uses serve/gist mode)
 if (opts.launch !== undefined && !opts.serve && !opts['secret-gist']) {
-  console.error('Error: --launch requires --serve or --secret-gist.');
-  process.exit(1);
+  if (cliOpts.launch !== undefined) {
+    console.error('Error: --launch requires --serve or --secret-gist.');
+    process.exit(1);
+  }
+  delete opts.launch;  // config-sourced launch, not applicable for this mode
 }
 
 // --embed-images validation
@@ -989,18 +1089,26 @@ function resolveHeaderFooterTemplates(frontMatter, themeName) {
   const fontFamily = THEME_FONTS[themeName] || THEME_FONTS.pixyll;
   const pageNumbersEnabled = opts['page-numbers'];
 
-  // Resolve header content: CLI > front matter > none
+  // Resolve header content: CLI > front matter > timestamp (if enabled) > none
   let headerContent = opts.header || null;
   if (!headerContent && frontMatter && frontMatter.header) {
     headerContent = String(frontMatter.header);
   }
+  if (!headerContent && opts['show-timestamp']) {
+    headerContent = `Generated ${new Date().toLocaleString()}`;
+  }
 
-  // Resolve footer content: CLI > front matter > default page numbers
+  // Resolve footer content: CLI > front matter > filepath+pages > default page numbers
   let footerContent = opts.footer || null;
   if (!footerContent && frontMatter && frontMatter.footer) {
     footerContent = String(frontMatter.footer);
   }
-  if (!footerContent && pageNumbersEnabled) {
+  if (!footerContent && opts['show-filepath'] && pageNumbersEnabled) {
+    const dp = inputPath.replace(homedir(), '~');
+    footerContent = `${dp} \u00B7 Page {{pageNumber}} of {{totalPages}}`;
+  } else if (!footerContent && opts['show-filepath']) {
+    footerContent = inputPath.replace(homedir(), '~');
+  } else if (!footerContent && pageNumbersEnabled) {
     footerContent = 'Page {{pageNumber}} of {{totalPages}}';
   }
 
@@ -1292,33 +1400,66 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     mermaidScripts = `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>${mermaidInitScript}`;
   }
 
-  // "Last updated" timestamp — serve mode only, based on file mtime, live-updating relative time
-  const fileMtime = forServe ? statSync(inputPath).mtime.toISOString() : '';
-  const lastUpdatedHtml = forServe ? `<div id="last-updated"></div>` : '';
-  const lastUpdatedScript = forServe ? `
-  <script>
-    (function() {
-      var el = document.getElementById('last-updated');
-      if (!el) return;
-      var mtime = new Date('${fileMtime}');
-      function fmt(d) {
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      }
-      function relative(ms) {
-        var s = Math.floor(ms / 1000);
-        if (s < 5) return 'just now';
-        if (s < 60) return s + 's ago';
-        var m = Math.floor(s / 60);
-        if (m < 60) return m + 'm ' + (s % 60) + 's ago';
-        return Math.floor(m / 60) + 'h ' + (m % 60) + 'm ago';
-      }
-      function update() {
-        el.textContent = 'Updated ' + fmt(mtime) + ' (' + relative(Date.now() - mtime.getTime()) + ')';
-      }
-      update();
-      setInterval(update, 5000);
-    })();
-  </script>` : '';
+  // Output metadata: timestamp (top-right) and filepath (bottom-left)
+  // Gated on --show-timestamp / --show-filepath flags (set via CLI or config)
+  const showTimestamp = opts['show-timestamp'];
+  const showFilepath = opts['show-filepath'];
+  const displayPath = inputPath.replace(homedir(), '~')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const fileMtime = showTimestamp ? statSync(inputPath).mtime.toISOString() : '';
+  const buildTimeStr = showTimestamp ? new Date().toLocaleString() : '';
+
+  // Timestamp element + script
+  let timestampHtml = '';
+  let timestampScript = '';
+  if (showTimestamp && forServe) {
+    // Serve mode: live-updating relative time
+    timestampHtml = '<div id="serve-timestamp"></div>';
+    timestampScript = `
+    <script>
+      (function() {
+        var el = document.getElementById('serve-timestamp');
+        if (!el) return;
+        var mtime = new Date('${fileMtime}');
+        function fmt(d) {
+          return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+        function relative(ms) {
+          var s = Math.floor(ms / 1000);
+          if (s < 5) return 'just now';
+          if (s < 60) return s + 's ago';
+          var m = Math.floor(s / 60);
+          if (m < 60) return m + 'm ' + (s % 60) + 's ago';
+          return Math.floor(m / 60) + 'h ' + (m % 60) + 'm ago';
+        }
+        function update() {
+          el.textContent = 'Updated ' + fmt(mtime) + ' (' + relative(Date.now() - mtime.getTime()) + ')';
+        }
+        update();
+        setInterval(update, 5000);
+      })();
+    </script>`;
+  } else if (showTimestamp && forStandalone) {
+    // Standalone/gist: static build time
+    timestampHtml = `<div id="serve-timestamp">Generated ${buildTimeStr}</div>`;
+  }
+
+  // Filepath — clickable to reveal in Finder in serve mode (via /reveal endpoint), plain text otherwise
+  // Safari blocks file:// links from all contexts (http AND local file), so /reveal is the only option
+  const filepathHtml = showFilepath
+    ? (forServe
+      ? `<div id="serve-filepath"><a href="#" onclick="fetch('/reveal').then(r=>{if(!r.ok)alert('Could not reveal file')});return false">${displayPath}</a></div>`
+      : `<div id="serve-filepath">${displayPath}</div>`)
+    : '';
+
+  // PDF pageless mode: inline metadata at the bottom of the document body
+  // (position:fixed doesn't work in Puppeteer PDF — it anchors to viewport, not document bottom)
+  if (!forServe && !forStandalone && (showTimestamp || showFilepath)) {
+    const parts = [];
+    if (showTimestamp) parts.push(`Generated ${buildTimeStr}`);
+    if (showFilepath) parts.push(displayPath);
+    resolvedBody += `<div style="margin-top: 40px; padding-top: 12px; border-top: 1px solid #e0e0e0; color: #999; font-size: 11px; font-family: system-ui, sans-serif;">${parts.join(' \u00B7 ')}</div>`;
+  }
 
   const sseScript = forServe ? `
   <script>
@@ -1452,17 +1593,30 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     #back-to-toc-btn.visible { opacity: 1; pointer-events: auto; }
     #back-to-toc-btn:hover { background: #3572a5; text-decoration: none; color: #fff; }
     @media print { #back-to-toc-btn { display: none !important; } }
-    /* Last updated timestamp (serve mode only) */
-    #last-updated {
-      position: fixed;
-      bottom: 8px;
-      left: 12px;
+    /* Output metadata: timestamp (top-right) and filepath (bottom-left) */
+    #serve-timestamp, #serve-filepath a {
       font-size: 11px;
       color: #999;
       font-family: system-ui, -apple-system, sans-serif;
-      z-index: 999;
-      pointer-events: none;
       opacity: 0.7;
+      transition: opacity 0.3s ease, color 0.3s ease;
+      text-decoration: none;
+    }
+    #serve-timestamp:hover, #serve-filepath a:hover {
+      opacity: 1;
+      color: #555;
+    }
+    #serve-timestamp {
+      position: fixed;
+      top: 8px;
+      right: 12px;
+      z-index: 999;
+    }
+    #serve-filepath {
+      position: fixed;
+      bottom: 8px;
+      left: 12px;
+      z-index: 999;
     }
     /* macOS Spoken Content: fullwidth angle bracket sizing (--macos-spoken-content) */
     .tts-bracket {
@@ -1533,11 +1687,12 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
 <body>
 ${resolvedBody}
 ${floatButtonHtml}
-${lastUpdatedHtml}
+${(forServe || forStandalone) ? timestampHtml : ''}
+${(forServe || forStandalone) ? filepathHtml : ''}
 </body>
 ${mermaidScripts}
 ${sseScript}
-${lastUpdatedScript}
+${timestampScript}
 ${floatButtonScript}
 ${spokenContentCopyScript}
 </html>`;
@@ -2261,6 +2416,26 @@ async function startServer(initialHtml = null) {
     if (pathname.startsWith('/katex-fonts/')) {
       const fontFile = pathname.slice('/katex-fonts/'.length);
       serveFile(res, join(katexFontsDir, fontFile));
+      return;
+    }
+
+    // GET /reveal — open the source file in Finder (localhost only, macOS)
+    if (pathname === '/reveal') {
+      const remoteAddr = req.socket.remoteAddress;
+      const isLocalhost = remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1';
+      if (!isLocalhost) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden: reveal only available from localhost');
+        return;
+      }
+      try {
+        execFileSync('open', ['-R', inputPath], { stdio: 'ignore' });
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
+      } catch {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Failed to reveal file');
+      }
       return;
     }
 
