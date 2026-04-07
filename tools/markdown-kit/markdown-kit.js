@@ -1360,6 +1360,18 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     })();
   </script>` : '';
 
+  // Hash scroll: after dynamic content loads, scroll to the fragment target.
+  // Browsers process hash fragments before JS runs, so dynamically-rendered
+  // content (gisthost.github.io, SPAs) misses the initial scroll.
+  const hashScrollScript = (forServe || forStandalone) ? `
+  <script>
+    (function() {
+      if (!location.hash) return;
+      var target = document.querySelector(location.hash);
+      if (target) target.scrollIntoView();
+    })();
+  </script>` : '';
+
   // Copy handler: restore ASCII angle brackets and strip sr-only text on clipboard
   // Document-level copy handler: restore ASCII angle brackets and strip sr-only text.
   // Fires on any copy, not just code blocks, since inline <code> is also processed.
@@ -1695,6 +1707,7 @@ ${sseScript}
 ${timestampScript}
 ${floatButtonScript}
 ${spokenContentCopyScript}
+${hashScrollScript}
 </html>`;
 }
 
