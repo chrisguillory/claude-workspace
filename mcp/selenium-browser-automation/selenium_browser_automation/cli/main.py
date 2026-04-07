@@ -32,97 +32,6 @@ add_completion_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
-# -- Socket discovery --
-
-
-def _get_socket_path() -> pathlib.Path:
-    """Find the Unix socket for the running MCP server's HTTP bridge.
-
-    Requires CLAUDECODE=1 env (set by Claude's Bash tool on all children).
-    Walks the process tree to find the Claude Code ancestor PID.
-    """
-    if not os.environ.get('CLAUDECODE'):
-        typer.secho(
-            'Error: selenium-browser-automation must be run inside Claude Code (CLAUDECODE env not set)',
-            fg=typer.colors.RED,
-            err=True,
-        )
-        raise SystemExit(1)
-
-    current = os.getppid()
-    for _ in range(20):
-        result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if not result.stdout.strip():
-            break
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-        if 'claude' in comm.lower():
-            sock = pathlib.Path(f'/tmp/selenium-browser-automation-{current}.sock')
-            if not sock.exists():
-                typer.secho(f'Error: Socket not found at {sock}', fg=typer.colors.RED, err=True)
-                typer.echo('Is the selenium-browser-automation MCP server running?', err=True)
-                raise SystemExit(1)
-            return sock
-        if ppid == 0:
-            break
-        current = ppid
-
-    typer.secho('Error: Claude Code not found in process tree', fg=typer.colors.RED, err=True)
-    raise SystemExit(1)
-
-
-def _call_tool(tool: str, **params: object) -> object:
-    """Call a single tool via the HTTP bridge."""
-    socket_path = _get_socket_path()
-    transport = httpx.HTTPTransport(uds=socket_path.as_posix())
-    with httpx.Client(transport=transport, timeout=120.0) as client:
-        response = client.post(
-            'http://localhost/tool',
-            json={'tool': tool, 'params': {k: v for k, v in params.items() if v is not None}},
-        )
-        response.raise_for_status()
-        return response.json()
-
-
-def _call_pipeline(steps: Sequence[Mapping[str, object]], on_error: str = 'stop') -> object:
-    """Call the pipeline endpoint via the HTTP bridge."""
-    socket_path = _get_socket_path()
-    transport = httpx.HTTPTransport(uds=socket_path.as_posix())
-    with httpx.Client(transport=transport, timeout=300.0) as client:
-        response = client.post(
-            'http://localhost/pipeline',
-            json={'steps': steps, 'on_error': on_error},
-        )
-        response.raise_for_status()
-        return response.json()
-
-
-def _print_result(result: object, format: str) -> None:
-    """Print tool result in requested format."""
-    if format == 'json':
-        typer.echo(json.dumps(result, indent=2, default=str))
-    elif isinstance(result, dict):
-        if result.get('status') == 'error':
-            error = result.get('error', {})
-            typer.secho(f'Error: {error.get("message", "Unknown error")}', fg=typer.colors.RED, err=True)
-            raise SystemExit(1)
-        # Text mode — print the result value
-        val = result.get('result')
-        if val is not None:
-            if isinstance(val, str):
-                typer.echo(val)
-            else:
-                typer.echo(json.dumps(val, indent=2, default=str))
-    elif result is not None:
-        typer.echo(str(result))
-
-
 # -- App callback --
 
 
@@ -403,3 +312,94 @@ def pipeline(
 def main() -> None:
     """Entry point for CLI."""
     run_app(app)
+
+
+# -- Private helpers --
+
+
+def _get_socket_path() -> pathlib.Path:
+    """Find the Unix socket for the running MCP server's HTTP bridge.
+
+    Requires CLAUDECODE=1 env (set by Claude's Bash tool on all children).
+    Walks the process tree to find the Claude Code ancestor PID.
+    """
+    if not os.environ.get('CLAUDECODE'):
+        typer.secho(
+            'Error: selenium-browser-automation must be run inside Claude Code (CLAUDECODE env not set)',
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise SystemExit(1)
+
+    current = os.getppid()
+    for _ in range(20):
+        result = subprocess.run(
+            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if not result.stdout.strip():
+            break
+        parts = result.stdout.strip().split(None, 1)
+        ppid = int(parts[0])
+        comm = parts[1] if len(parts) > 1 else ''
+        if 'claude' in comm.lower():
+            sock = pathlib.Path(f'/tmp/selenium-browser-automation-{current}.sock')
+            if not sock.exists():
+                typer.secho(f'Error: Socket not found at {sock}', fg=typer.colors.RED, err=True)
+                typer.echo('Is the selenium-browser-automation MCP server running?', err=True)
+                raise SystemExit(1)
+            return sock
+        if ppid == 0:
+            break
+        current = ppid
+
+    typer.secho('Error: Claude Code not found in process tree', fg=typer.colors.RED, err=True)
+    raise SystemExit(1)
+
+
+def _call_tool(tool: str, **params: object) -> object:
+    """Call a single tool via the HTTP bridge."""
+    socket_path = _get_socket_path()
+    transport = httpx.HTTPTransport(uds=socket_path.as_posix())
+    with httpx.Client(transport=transport, timeout=120.0) as client:
+        response = client.post(
+            'http://localhost/tool',
+            json={'tool': tool, 'params': {k: v for k, v in params.items() if v is not None}},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def _call_pipeline(steps: Sequence[Mapping[str, object]], on_error: str = 'stop') -> object:
+    """Call the pipeline endpoint via the HTTP bridge."""
+    socket_path = _get_socket_path()
+    transport = httpx.HTTPTransport(uds=socket_path.as_posix())
+    with httpx.Client(transport=transport, timeout=300.0) as client:
+        response = client.post(
+            'http://localhost/pipeline',
+            json={'steps': steps, 'on_error': on_error},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def _print_result(result: object, format: str) -> None:
+    """Print tool result in requested format."""
+    if format == 'json':
+        typer.echo(json.dumps(result, indent=2, default=str))
+    elif isinstance(result, dict):
+        if result.get('status') == 'error':
+            error = result.get('error', {})
+            typer.secho(f'Error: {error.get("message", "Unknown error")}', fg=typer.colors.RED, err=True)
+            raise SystemExit(1)
+        # Text mode — print the result value
+        val = result.get('result')
+        if val is not None:
+            if isinstance(val, str):
+                typer.echo(val)
+            else:
+                typer.echo(json.dumps(val, indent=2, default=str))
+    elif result is not None:
+        typer.echo(str(result))
