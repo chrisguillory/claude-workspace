@@ -28,7 +28,6 @@ import typing
 from mcp.server.fastmcp import FastMCP
 
 # Local
-# Local imports
 from .service import BrowserService
 from .state import BrowserState
 from .tools import register_all_tools

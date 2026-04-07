@@ -4,12 +4,15 @@ __all__ = [
     'register_extraction_tools',
 ]
 
+from collections.abc import Sequence
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
+    FocusableElement,
+    InteractiveElement,
     PageTextResult,
 )
 from ..service import BrowserService
@@ -227,3 +230,44 @@ def register_extraction_tools(service: BrowserService, mcp: FastMCP) -> None:
             include_hidden=include_hidden,
             include_page_info=include_page_info,
         )
+
+    @mcp.tool(annotations=ToolAnnotations(title='Get Interactive Elements', readOnlyHint=True))
+    async def get_interactive_elements(
+        selector_scope: str,
+        text_contains: str | None,
+        tag_filter: Sequence[str] | None,
+        limit: int | None,
+        ctx: Context[Any, Any, Any],
+    ) -> Sequence[InteractiveElement]:
+        """Find clickable elements by text or other filters. Returns CSS selectors for click().
+
+        This is the tool for finding elements by text content.
+        Example: get_interactive_elements(text_contains="Continue") → returns CSS selector for click()
+
+        Args:
+            selector_scope: CSS selector to limit search (e.g., ".wizard" or "body")
+            text_contains: Filter by text content (case-insensitive, None = no filter)
+            tag_filter: Only specific tags (e.g., ["button", "a"], None = all tags)
+            limit: Max results to return (None = unlimited)
+            ctx: MCP context
+
+        Returns:
+            list[InteractiveElement]: Filtered interactive elements with selectors for clicking
+        """
+        return await service.get_interactive_elements(
+            selector_scope=selector_scope, text_contains=text_contains, tag_filter=tag_filter, limit=limit
+        )
+
+    @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
+    async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> Sequence[FocusableElement]:
+        """Get keyboard-navigable elements sorted by tab order.
+
+        Args:
+            only_tabbable: True = Tab key only (tabindex >= 0)
+                          False = includes programmatic focus (tabindex >= -1)
+            ctx: MCP context
+
+        Returns:
+            list[FocusableElement]: Sorted by tab order, each with tag, text, selector, tab_index
+        """
+        return await service.get_focusable_elements(only_tabbable=only_tabbable)
