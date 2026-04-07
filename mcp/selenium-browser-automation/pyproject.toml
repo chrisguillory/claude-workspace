@@ -18,7 +18,6 @@ dependencies = [
 
 [project.scripts]
 mcp-selenium-browser-automation-server = "selenium_browser_automation.server:main"
-sba = "selenium_browser_automation.cli.main:main"
 selenium-browser-automation = "selenium_browser_automation.cli.main:main"
 
 [tool.hatch.build]

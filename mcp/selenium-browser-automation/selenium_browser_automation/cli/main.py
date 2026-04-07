@@ -42,7 +42,11 @@ def _get_socket_path() -> pathlib.Path:
     Walks the process tree to find the Claude Code ancestor PID.
     """
     if not os.environ.get('CLAUDECODE'):
-        typer.secho('Error: sba must be run inside Claude Code (CLAUDECODE env not set)', fg=typer.colors.RED, err=True)
+        typer.secho(
+            'Error: selenium-browser-automation must be run inside Claude Code (CLAUDECODE env not set)',
+            fg=typer.colors.RED,
+            err=True,
+        )
         raise SystemExit(1)
 
     current = os.getppid()
@@ -137,7 +141,7 @@ def _configure_logging(
 # -- Navigation commands --
 
 
-@app.command()
+@app.command('navigate')
 @error_boundary
 def navigate(
     url: Annotated[str, typer.Argument(help='URL to navigate to.')],
@@ -153,7 +157,7 @@ def navigate(
 # -- Interaction commands --
 
 
-@app.command()
+@app.command('click')
 @error_boundary
 def click(
     selector: Annotated[str, typer.Argument(help='CSS selector of element to click.')],
@@ -164,7 +168,7 @@ def click(
     _print_result(result, format)
 
 
-@app.command('type')
+@app.command('type-text')
 @error_boundary
 def type_text(
     text: Annotated[str, typer.Argument(help='Text to type.')],
@@ -187,7 +191,7 @@ def press_key(
     _print_result(result, format)
 
 
-@app.command()
+@app.command('hover')
 @error_boundary
 def hover(
     selector: Annotated[str, typer.Argument(help='CSS selector of element to hover.')],
@@ -199,7 +203,7 @@ def hover(
     _print_result(result, format)
 
 
-@app.command()
+@app.command('scroll')
 @error_boundary
 def scroll(
     direction: Annotated[str | None, typer.Option('--direction', '-d', help='up, down, left, right.')] = None,
@@ -215,9 +219,9 @@ def scroll(
 # -- Wait commands --
 
 
-@app.command()
+@app.command('wait-for-selector')
 @error_boundary
-def wait(
+def wait_for_selector(
     selector: Annotated[str, typer.Argument(help='CSS selector to wait for.')],
     state: Annotated[str, typer.Option('--state', help='visible, hidden, attached, detached.')] = 'visible',
     timeout: Annotated[int, typer.Option('--timeout', '-t', help='Timeout in ms.')] = 30000,
@@ -228,9 +232,9 @@ def wait(
     _print_result(result, format)
 
 
-@app.command('wait-network')
+@app.command('wait-for-network-idle')
 @error_boundary
-def wait_network(
+def wait_for_network_idle(
     timeout: Annotated[int, typer.Option('--timeout', '-t', help='Timeout in ms.')] = 10000,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
@@ -242,7 +246,7 @@ def wait_network(
 # -- Capture commands --
 
 
-@app.command()
+@app.command('screenshot')
 @error_boundary
 def screenshot(
     filename: Annotated[str, typer.Argument(help='Output filename.')],
@@ -254,9 +258,9 @@ def screenshot(
     _print_result(result, format)
 
 
-@app.command()
+@app.command('get-page-text')
 @error_boundary
-def text(
+def get_page_text(
     selector: Annotated[str, typer.Argument(help='CSS selector (default: auto).')] = 'auto',
     images: Annotated[bool, typer.Option('--images', help='Include image descriptions.')] = False,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -266,9 +270,35 @@ def text(
     _print_result(result, format)
 
 
-@app.command()
+@app.command('get-page-html')
 @error_boundary
-def snapshot(
+def get_page_html(
+    selector: Annotated[str | None, typer.Argument(help='CSS selector (default: full page).')] = None,
+    limit: Annotated[int | None, typer.Option('--limit', '-n', help='Max elements to return.')] = None,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Get raw HTML source."""
+    result = _call_tool('get_page_html', selector=selector, limit=limit)
+    _print_result(result, format)
+
+
+@app.command('get-interactive-elements')
+@error_boundary
+def get_interactive_elements(
+    scope: Annotated[str, typer.Argument(help='CSS selector scope (e.g., "body", ".wizard").')],
+    text_contains: Annotated[str | None, typer.Option('--text', help='Filter by text content.')] = None,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Find interactive elements by text or scope."""
+    result = _call_tool(
+        'get_interactive_elements', selector_scope=scope, text_contains=text_contains, tag_filter=None, limit=None
+    )
+    _print_result(result, format)
+
+
+@app.command('get-aria-snapshot')
+@error_boundary
+def get_aria_snapshot(
     selector: Annotated[str, typer.Argument(help='CSS selector scope.')] = 'body',
     urls: Annotated[bool, typer.Option('--urls', help='Include href values.')] = False,
     hidden: Annotated[bool, typer.Option('--hidden', help='Include hidden elements.')] = False,
@@ -279,9 +309,9 @@ def snapshot(
     _print_result(result, format)
 
 
-@app.command()
+@app.command('execute-javascript')
 @error_boundary
-def js(
+def execute_javascript(
     code: Annotated[str, typer.Argument(help='JavaScript code to execute.')],
     timeout: Annotated[int, typer.Option('--timeout', '-t', help='Timeout in ms.')] = 5000,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -291,9 +321,9 @@ def js(
     _print_result(result, format)
 
 
-@app.command()
+@app.command('capture-web-vitals')
 @error_boundary
-def vitals(
+def capture_web_vitals(
     timeout: Annotated[int, typer.Option('--timeout', '-t', help='Timeout in ms.')] = 5000,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
@@ -302,9 +332,9 @@ def vitals(
     _print_result(result, format)
 
 
-@app.command()
+@app.command('export-har')
 @error_boundary
-def har(
+def export_har(
     filename: Annotated[str, typer.Argument(help='Output HAR filename.')],
     bodies: Annotated[bool, typer.Option('--bodies', help='Include response bodies.')] = False,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -317,7 +347,7 @@ def har(
 # -- Batch command --
 
 
-@app.command()
+@app.command('pipeline')
 @error_boundary
 def pipeline(
     file: Annotated[str | None, typer.Option('--file', '-F', help='Read pipeline JSON from file.')] = None,
@@ -326,11 +356,17 @@ def pipeline(
 ) -> None:
     """Execute a batch pipeline of tool calls.
 
+    Accepts JSON from stdin or --file. Two formats supported:
+
+    \b
+    Wrapped:   {"steps": [{"tool": "click", "params": {...}}, ...]}
+    Bare:      [{"tool": "click", "params": {...}}, ...]
+
     \b
     Examples:
-        sba pipeline < workflow.json
-        sba pipeline -F workflow.json
-        sba pipeline --on-error continue < steps.json
+        selenium-browser-automation pipeline < workflow.json
+        selenium-browser-automation pipeline -F workflow.json
+        selenium-browser-automation pipeline --on-error continue < steps.json
     """
     if file:
         data = json.loads(pathlib.Path(file).read_text())

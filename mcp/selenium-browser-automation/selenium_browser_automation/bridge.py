@@ -153,7 +153,6 @@ def create_bridge_app(service: BrowserService, lock: asyncio.Lock) -> fastapi.Fa
                             result=result,
                         )
                     )
-                    completed += 1
                 except Exception as e:  # exception_safety_linter.py: swallowed-exception — pipeline step returns error result, continues or stops per on_error
                     step_elapsed = int((time.perf_counter() - step_t0) * 1000)
                     results.append(
@@ -171,9 +170,12 @@ def create_bridge_app(service: BrowserService, lock: asyncio.Lock) -> fastapi.Fa
                             StepResult(step=j, tool=request.steps[j].tool, status='skipped')
                             for j in range(i + 1, len(request.steps))
                         )
-                        break
 
-                    completed += 1
+                # completed = attempted (not skipped) — both ok and error count
+                completed += 1
+
+                if results[-1].status == 'error' and request.on_error == 'stop':
+                    break
 
         total_elapsed = int((time.perf_counter() - t0) * 1000)
         status = 'completed' if completed == len(request.steps) else 'partial'

@@ -75,34 +75,35 @@ def _make_vibe_description() -> str:
 
 
 async def _background_updater(mcp_instance: FastMCP, state: _SharedState) -> None:
-    """Re-register vibe_check every 60s with updated description."""
+    """Re-register vibe_check every 60s with a NEW name to bust the description cache."""
+    old_name = 'vibe_check'
     while True:
         await asyncio.sleep(60)
         if state.session is None:
             _log_event('updater_skipped', reason='no session captured yet')
             continue
 
+        # Remove old tool
         try:
-            mcp_instance._local_provider.remove_tool('vibe_check')
+            mcp_instance._local_provider.remove_tool(old_name)
         except KeyError:
             pass
 
-        description = _make_vibe_description()
+        # New name = new cache key in Claude Code's TOOL_SCHEMA_CACHE
+        now = _local_time()
+        color = _random_hex_color()
+        new_name = f'vibe_check_{datetime.now().strftime("%H%M%S")}'
+        description = f'Check the current vibe. Last updated: {now} — Color: {color}'
 
         async def vibe_check_fn() -> str:
-            now = _local_time()
-            color = _random_hex_color()
-            return f'Vibe: {color} at {now}'
+            return f'Vibe: {_random_hex_color()} at {_local_time()}'
 
-        tool = Tool.from_function(
-            vibe_check_fn,
-            name='vibe_check',
-            description=description,
-        )
+        tool = Tool.from_function(vibe_check_fn, name=new_name, description=description)
         mcp_instance.add_tool(tool)
 
         await state.session.send_tool_list_changed()
-        _log_event('updater_fired', description=description, notification='sent')
+        _log_event('updater_fired', old_name=old_name, new_name=new_name, description=description)
+        old_name = new_name
 
 
 # -- Tool Registration --------------------------------------------------------

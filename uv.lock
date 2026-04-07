@@ -3045,7 +3045,7 @@ wheels = [
 
 [[package]]
 name = "selenium-browser-automation-mcp"
-version = "0.6.2"
+version = "0.7.0"
 source = { editable = "mcp/selenium-browser-automation" }
 dependencies = [
     { name = "cc-lib" },
@@ -3057,6 +3057,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "selenium" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
@@ -3070,6 +3071,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyyaml" },
     { name = "selenium" },
+    { name = "uvicorn", specifier = ">=0.38.0" },
 ]
 
 [[package]]
