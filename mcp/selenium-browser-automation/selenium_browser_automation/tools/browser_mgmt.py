@@ -4,14 +4,10 @@ __all__ = [
     'register_browser_mgmt_tools',
 ]
 
-import asyncio
 from typing import Any
 
-import fastmcp.exceptions
-import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from selenium import webdriver
 
 from ..models import (
     DownloadResourceResult,
@@ -173,4 +169,3 @@ def register_browser_mgmt_tools(service: BrowserService, mcp: FastMCP) -> None:
         Note: Requires vision processing. full_page=True uses CDP Page.captureScreenshot.
         """
         return await service.screenshot(filename=filename, full_page=full_page)
-

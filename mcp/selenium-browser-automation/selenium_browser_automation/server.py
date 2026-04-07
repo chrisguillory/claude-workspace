@@ -23,11 +23,14 @@ import sys
 import threading
 import types
 import typing
+from pathlib import Path
 
 # Third-Party Libraries
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 
 # Local
+from .bridge import create_bridge_app
 from .service import BrowserService
 from .state import BrowserState
 from .tools import register_all_tools
@@ -68,9 +71,35 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
+    # Start HTTP bridge on Unix socket for CLI client access
+    socket_path = _find_socket_path()
+    uvicorn_server = None
+    uvicorn_task = None
+    if socket_path:
+        # Clean stale socket from previous run
+        if socket_path.exists():
+            socket_path.unlink()
+
+        state.cli_lock = asyncio.Lock()
+        bridge_app = create_bridge_app(service, state.cli_lock)
+        config = uvicorn.Config(bridge_app, uds=socket_path.as_posix(), log_level='warning')
+        uvicorn_server = uvicorn.Server(config)
+        uvicorn_task = asyncio.create_task(uvicorn_server.serve())
+        logger.info('HTTP bridge: %s', socket_path)
+
     logger.info('Browser service initialized (screenshots: %s, captures: %s)', state.screenshot_dir, state.capture_dir)
 
     yield
+
+    # SHUTDOWN: Stop HTTP bridge
+    if uvicorn_server:
+        uvicorn_server.should_exit = True
+    if uvicorn_task:
+        uvicorn_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await uvicorn_task
+    if socket_path and socket_path.exists():
+        socket_path.unlink()
 
     # SHUTDOWN: Cleanup after all requests complete (graceful shutdown path)
     if state.driver:
@@ -96,6 +125,33 @@ def main() -> None:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _find_socket_path() -> Path | None:
+    """Find Claude Code PID via process tree walk, return socket path.
+
+    Returns None if not running under Claude Code (e.g., standalone testing).
+    """
+    current = os.getppid()
+    for _ in range(20):
+        result = subprocess.run(
+            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if not result.stdout.strip():
+            break
+        parts = result.stdout.strip().split(None, 1)
+        ppid = int(parts[0])
+        comm = parts[1] if len(parts) > 1 else ''
+        if 'claude' in comm.lower():
+            return Path(f'/tmp/selenium-browser-automation-{current}.sock')
+        if ppid == 0:
+            break
+        current = ppid
+    logger.info('Claude Code not found in process tree — HTTP bridge disabled')
+    return None
 
 
 def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:

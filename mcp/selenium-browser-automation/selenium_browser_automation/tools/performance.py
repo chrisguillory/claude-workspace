@@ -4,13 +4,10 @@ __all__ = [
     'register_performance_tools',
 ]
 
-import asyncio
 from typing import Any, Literal
 
-from cc_lib.types import JsonObject
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
-from selenium import webdriver
 
 from ..models import (
     ConsoleLogsResult,
@@ -166,4 +163,3 @@ Workflow:
             get_console_logs()  # Check for interaction errors
         """
         return await service.get_console_logs(level_filter=level_filter, pattern=pattern)
-
