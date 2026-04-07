@@ -45,8 +45,42 @@ fn filter_base64(value: Value) -> Value {
     }
 }
 
+/// Split a single long string into chunks at character boundaries.
+/// Advances by `step` bytes each iteration to provide overlap.
+fn split_at_char_boundaries(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
+    let step = chunk_size.saturating_sub(overlap).max(1);
+    let mut chunks = Vec::new();
+    let mut pos = 0;
+
+    while pos < text.len() {
+        // Find end boundary (snap backward to valid UTF-8)
+        let mut end = (pos + chunk_size).min(text.len());
+        while end > pos && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end == pos {
+            // Advance past the current multi-byte character
+            end = pos + 1;
+            while end < text.len() && !text.is_char_boundary(end) {
+                end += 1;
+            }
+        }
+        chunks.push(text[pos..end].to_string());
+
+        // Advance by step, snap forward to valid UTF-8
+        let mut next = pos + step;
+        while next < text.len() && !text.is_char_boundary(next) {
+            next += 1;
+        }
+        pos = next;
+    }
+
+    chunks
+}
+
 /// Split text on newline boundaries into chunks of approximately `chunk_size`
 /// characters with `overlap` characters carried forward between chunks.
+/// Falls back to character-boundary splitting for lines exceeding `chunk_size`.
 fn split_text_on_newlines(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
     if text.len() <= chunk_size {
         return vec![text.to_string()];
@@ -59,6 +93,18 @@ fn split_text_on_newlines(text: &str, chunk_size: usize, overlap: usize) -> Vec<
 
     for line in &lines {
         let line_len = line.len() + 1; // +1 for newline
+
+        // Single line exceeds chunk_size — split on character boundaries
+        if line.len() > chunk_size {
+            if !current_lines.is_empty() {
+                chunks.push(current_lines.join("\n"));
+                current_lines = Vec::new();
+                current_len = 0;
+            }
+            chunks.extend(split_at_char_boundaries(line, chunk_size, overlap));
+            continue;
+        }
+
         if current_len + line_len > chunk_size && !current_lines.is_empty() {
             chunks.push(current_lines.join("\n"));
 
@@ -74,6 +120,13 @@ fn split_text_on_newlines(text: &str, chunk_size: usize, overlap: usize) -> Vec<
             }
             current_lines = overlap_lines;
             current_len = overlap_len;
+
+            // If overlap + new line still exceeds budget, flush overlap first
+            if current_len + line_len > chunk_size && !current_lines.is_empty() {
+                chunks.push(current_lines.join("\n"));
+                current_lines = Vec::new();
+                current_len = 0;
+            }
         }
         current_lines.push(line);
         current_len += line_len;
@@ -226,6 +279,83 @@ mod tests {
     }
 
     #[test]
+    fn test_split_long_line_no_newlines() {
+        // A single line exceeding chunk_size — must split on char boundaries
+        let long_line = "x".repeat(5000);
+        let chunks = split_text_on_newlines(&long_line, 1500, 200);
+        assert!(chunks.len() >= 3, "Expected 3+ chunks, got {}", chunks.len());
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert!(
+                chunk.len() <= 1500,
+                "Chunk {} has {} chars, exceeds 1500",
+                i,
+                chunk.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_split_long_line_multibyte_utf8() {
+        // Multi-byte chars (→ = 3 bytes each). 2000 arrows = 6000 bytes
+        let arrows = "→".repeat(2000);
+        let chunks = split_text_on_newlines(&arrows, 1500, 200);
+        assert!(chunks.len() >= 2);
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert!(
+                chunk.len() <= 1500,
+                "Chunk {} has {} bytes, exceeds 1500",
+                i,
+                chunk.len()
+            );
+            // Verify valid UTF-8 (would panic on slice if not)
+            assert!(chunk.chars().all(|c| c == '→'));
+        }
+    }
+
+    #[test]
+    fn test_split_mixed_long_and_short() {
+        let text = format!("short1\nshort2\n{}\nshort3", "y".repeat(3000));
+        let chunks = split_text_on_newlines(&text, 1500, 200);
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert!(
+                chunk.len() <= 1500,
+                "Chunk {} has {} chars, exceeds 1500",
+                i,
+                chunk.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_split_overlap_doesnt_exceed_budget() {
+        // Overlap carryover should not produce oversized chunks
+        let text = "aaaaaaaaa\nbbbbbbbbb\ncccccccccccc";
+        let chunks = split_text_on_newlines(&text, 20, 10);
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert!(
+                chunk.len() <= 20,
+                "Chunk {} has {} chars, exceeds chunk_size 20: {:?}",
+                i,
+                chunk.len(),
+                chunk
+            );
+        }
+    }
+
+    #[test]
+    fn test_char_boundary_split_tiny_chunk_size() {
+        // chunk_size smaller than a multi-byte char — should not panic
+        let text = "→→→"; // 9 bytes, 3 chars
+        let chunks = split_at_char_boundaries(&text, 2, 0);
+        assert!(!chunks.is_empty());
+        // Each chunk should be valid UTF-8
+        for chunk in &chunks {
+            assert!(chunk.len() > 0);
+            let _ = chunk.chars().count(); // validates UTF-8
+        }
+    }
+
+    #[test]
     fn test_split_text_empty() {
         let chunks = split_text_on_newlines("", 1500, 200);
         assert_eq!(chunks.len(), 1);
@@ -271,5 +401,211 @@ mod tests {
             serde_json::from_str(r#"{"text": "hello world", "count": 42}"#).unwrap();
         let filtered = filter_base64(json.clone());
         assert_eq!(json, filtered);
+    }
+
+    // ── Text splitter: additional edge cases ──────────────────────
+
+    #[test]
+    fn test_split_exact_chunk_size() {
+        let text = "a".repeat(1500);
+        let chunks = split_text_on_newlines(&text, 1500, 200);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].len(), 1500);
+    }
+
+    #[test]
+    fn test_split_one_over_chunk_size() {
+        let text = "a".repeat(1501);
+        let chunks = split_text_on_newlines(&text, 1500, 200);
+        assert!(chunks.len() >= 2, "Should split 1501 chars into 2+ chunks");
+        for (i, c) in chunks.iter().enumerate() {
+            assert!(c.len() <= 1500, "Chunk {} is {} chars", i, c.len());
+        }
+    }
+
+    #[test]
+    fn test_split_under_chunk_size() {
+        let text = "hello\nworld\nfoo";
+        let chunks = split_text_on_newlines(text, 1500, 200);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "hello\nworld\nfoo");
+    }
+
+    #[test]
+    fn test_split_chunk_size_one() {
+        let text = "abc";
+        let chunks = split_text_on_newlines(text, 1, 0);
+        assert!(chunks.len() >= 3, "Each char should be a chunk, got {}", chunks.len());
+    }
+
+    #[test]
+    fn test_split_no_overlap() {
+        let text = "aaaa\nbbbb\ncccc\ndddd";
+        let chunks = split_text_on_newlines(text, 10, 0);
+        assert!(chunks.len() >= 2);
+        // With zero overlap, chunks should be disjoint
+        if chunks.len() >= 2 {
+            let first_last = chunks[0].split('\n').last().unwrap();
+            let second_first = chunks[1].split('\n').next().unwrap();
+            assert_ne!(first_last, second_first, "Zero overlap should not repeat lines");
+        }
+    }
+
+    #[test]
+    fn test_split_strict_size_on_realistic_input() {
+        // Simulate a realistic pretty-printed JSON with long string values
+        let mut lines = Vec::new();
+        lines.push(r#"{"#.to_string());
+        lines.push(format!(r#"  "short_key": "short_value","#));
+        lines.push(format!(r#"  "long_key": "{}","#, "x".repeat(3000)));
+        lines.push(format!(r#"  "medium_key": "{}","#, "y".repeat(800)));
+        lines.push(r#"  "final": true"#.to_string());
+        lines.push(r#"}"#.to_string());
+        let text = lines.join("\n");
+
+        let chunks = split_text_on_newlines(&text, 1500, 200);
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert!(
+                chunk.len() <= 1500,
+                "Chunk {} has {} chars (max 1500): {:?}",
+                i,
+                chunk.len(),
+                &chunk[..80.min(chunk.len())]
+            );
+        }
+    }
+
+    // ── Character boundary splitter ──────────────────────────────
+
+    #[test]
+    fn test_char_boundary_basic() {
+        let text = "a".repeat(3000);
+        let chunks = split_at_char_boundaries(&text, 1000, 100);
+        assert!(chunks.len() >= 3);
+        for (i, c) in chunks.iter().enumerate() {
+            assert!(c.len() <= 1000, "Chunk {} is {} chars", i, c.len());
+        }
+    }
+
+    #[test]
+    fn test_char_boundary_overlap_content() {
+        let text = "abcdefghij"; // 10 chars
+        let chunks = split_at_char_boundaries(&text, 5, 2);
+        // step = 5 - 2 = 3. Positions: 0..5, 3..8, 6..10
+        assert!(chunks.len() >= 2);
+        // Overlap: end of chunk 0 should appear at start of chunk 1
+        if chunks.len() >= 2 {
+            let overlap_from_first = &chunks[0][chunks[0].len() - 2..];
+            let start_of_second = &chunks[1][..2.min(chunks[1].len())];
+            assert_eq!(
+                overlap_from_first, start_of_second,
+                "Overlap content should match"
+            );
+        }
+    }
+
+    #[test]
+    fn test_char_boundary_emoji() {
+        // Emoji: 🎉 = 4 bytes (U+1F389)
+        let text = "🎉".repeat(500); // 2000 bytes
+        let chunks = split_at_char_boundaries(&text, 100, 20);
+        for (i, c) in chunks.iter().enumerate() {
+            assert!(c.len() <= 100, "Chunk {} is {} bytes", i, c.len());
+            // Verify all chars are valid emoji
+            assert!(c.chars().all(|ch| ch == '🎉'), "Chunk {} has invalid chars", i);
+        }
+    }
+
+    #[test]
+    fn test_char_boundary_mixed_width() {
+        // Mix of 1-byte (ASCII), 2-byte (é), 3-byte (→), 4-byte (🎉)
+        let text = "hello→world🎉café→→🎉🎉end";
+        let chunks = split_at_char_boundaries(&text, 10, 3);
+        for (i, c) in chunks.iter().enumerate() {
+            assert!(c.len() <= 10, "Chunk {} is {} bytes", i, c.len());
+            let _ = c.chars().count(); // validates UTF-8
+        }
+    }
+
+    #[test]
+    fn test_char_boundary_empty() {
+        let chunks = split_at_char_boundaries("", 100, 10);
+        assert!(chunks.is_empty() || chunks == vec![""]);
+    }
+
+    #[test]
+    fn test_char_boundary_under_chunk_size() {
+        let chunks = split_at_char_boundaries("hello", 100, 10);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "hello");
+    }
+
+    #[test]
+    fn test_char_boundary_forward_progress() {
+        // Ensure no infinite loop with large overlap
+        let text = "x".repeat(100);
+        let chunks = split_at_char_boundaries(&text, 10, 9);
+        // step = 10 - 9 = 1, so ~100 chunks
+        assert!(chunks.len() >= 90);
+        assert!(chunks.len() <= 110);
+    }
+
+    // ── Base64: additional edge cases ────────────────────────────
+
+    #[test]
+    fn test_base64_at_threshold() {
+        // Exactly 500 chars, mod 4, all valid base64
+        let b64 = "ABCD".repeat(125); // 500 chars
+        assert!(is_likely_base64(&b64));
+    }
+
+    #[test]
+    fn test_base64_below_threshold() {
+        let b64 = "ABCD".repeat(124); // 496 chars < 500
+        assert!(!is_likely_base64(&b64));
+    }
+
+    #[test]
+    fn test_base64_in_array() {
+        let b64 = "A".repeat(504);
+        let json: Value = serde_json::from_str(&format!(
+            r#"[{{"key": "{}"}}, {{"key": "normal"}}]"#,
+            b64
+        ))
+        .unwrap();
+        let filtered = filter_base64(json);
+        let arr = filtered.as_array().unwrap();
+        assert!(arr[0]["key"].as_str().unwrap().starts_with("[base64 content,"));
+        assert_eq!(arr[1]["key"].as_str().unwrap(), "normal");
+    }
+
+    #[test]
+    fn test_base64_placeholder_format() {
+        let b64 = "A".repeat(504);
+        let json: Value =
+            serde_json::from_str(&format!(r#"{{"data": "{}"}}"#, b64)).unwrap();
+        let filtered = filter_base64(json);
+        let placeholder = filtered["data"].as_str().unwrap();
+        assert_eq!(placeholder, "[base64 content, 504 bytes]");
+    }
+
+    #[test]
+    fn test_base64_non_base64_long_string() {
+        // 600 chars with spaces — not base64
+        let text = format!("This is a long text. {}", "word ".repeat(116));
+        assert!(!is_likely_base64(&text));
+    }
+
+    #[test]
+    fn test_base64_deeply_nested() {
+        let b64 = "A".repeat(504);
+        let json: Value = serde_json::from_str(&format!(
+            r#"{{"a": {{"b": {{"c": {{"d": "{}"}}}}}}}}"#,
+            b64
+        ))
+        .unwrap();
+        let filtered = filter_base64(json);
+        let inner = &filtered["a"]["b"]["c"]["d"];
+        assert!(inner.as_str().unwrap().starts_with("[base64 content,"));
     }
 }
