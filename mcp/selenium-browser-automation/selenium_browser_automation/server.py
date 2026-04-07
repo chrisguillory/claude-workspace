@@ -14,57 +14,39 @@ from __future__ import annotations
 
 # Standard Library
 import asyncio
-import base64
 import contextlib
 import io
 import json
 import logging
 import os
-import re
 import signal
 import subprocess
 import sys
 import tempfile
 import threading
-import time
 import types
 import typing
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast
-from urllib.parse import parse_qs, unquote, urlparse
+from typing import Any, Literal, cast
+from urllib.parse import parse_qs, urlparse
 
 # Third-Party Libraries
 import fastmcp.exceptions
 import httpx
-from cc_lib.schemas.base import SubsetModel
 from cc_lib.types import JsonObject
 from cc_lib.utils import Timer
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
 
 # Local
-from selenium_browser_automation.tree_utils import (
-    compact_aria_tree,
-    compact_visual_tree,
-    serialize_aria_snapshot,
-    serialize_visual_tree,
-)
-
 from . import chrome_profile_state_export
 
 # Local imports
-from .chrome_profiles import list_all_profiles
-from .helpers import build_page_metadata, build_storage_init_script, count_tree_nodes, save_large_output_to_file
+from .helpers import build_storage_init_script
 from .models import (
     # Browser selection
     Browser,
@@ -73,63 +55,42 @@ from .models import (
     # Chrome profile state export
     ChromeProfileStateExportResult,
     ClearProxyResult,
-    CLSMetric,
     ConfigureProxyResult,
     # Console logs
-    ConsoleLogEntry,
     ConsoleLogsResult,
     # Web Vitals
     CoreWebVitals,
     DownloadResourceResult,
-    FCPMetric,
     FocusableElement,
     HARExportResult,
-    INPMetric,
     InteractiveElement,
     # JavaScript execution
     JavaScriptResult,
-    LCPMetric,
     NavigationResult,
     # Network
     NetworkCapture,
-    NetworkRequest,
     PageTextResult,
     ProfileState,
     # Profile state (browser state persistence)
     ProfileStateCookie,
     ProfileStateIndexedDB,
     ProfileStateOriginStorage,
-    RequestTiming,
     ResizeWindowResult,
     SaveProfileStateResult,
     SetBlockedURLsResult,
     SleepResult,
-    SlowestRequestSummary,
-    SmartExtractionInfo,
-    TTFBMetric,
     WaitForSelectorResult,
 )
 from .scripts import (
-    ARIA_SNAPSHOT_SCRIPT,
-    HOVER_OCCLUSION_SCRIPT,
-    HOVER_STABILITY_SCRIPT,
     INDEXEDDB_CAPTURE_SCRIPT,
     INDEXEDDB_RESTORE_SCRIPT,
-    NETWORK_MONITOR_CHECK_SCRIPT,
-    NETWORK_MONITOR_SETUP_SCRIPT,
-    RESOURCE_TIMING_SCRIPT,
     RESPONSE_BODY_CAPTURE_SCRIPT,
-    TEXT_EXTRACTION_SCRIPT,
-    VISUAL_TREE_SCRIPT,
-    WEB_VITALS_SCRIPT,
-    build_execute_javascript_async_script,
 )
-from .scroll import execute_scroll
+from .service import BrowserService
 from .state import BrowserState
 from .validators import validate_css_selector as _validate_css_selector_impl
 
 __all__ = [
-    'BrowserService',
     'lifespan',
     'main',
     'register_tools',
@@ -163,124 +124,6 @@ _VISUAL_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
     ('offscreen', 'offscreen'),
     ('other', 'other'),
 ]
-
-
-class BrowserService:
-    """Browser automation service - protocol-agnostic, pure domain logic."""
-
-    def __init__(self, state: BrowserState) -> None:
-        self.state = state  # Non-Optional - guaranteed by constructor
-
-    async def close_browser(self) -> None:
-        """Tear down browser and clear session state.
-
-        Also clears origin tracking since a fresh browser is a fresh session.
-        """
-        if self.state.driver:
-            await asyncio.to_thread(self.state.driver.quit)
-            self.state.driver = None
-            self.state.current_browser = None
-        # Clear origin tracking and storage caches - new browser = new session
-        self.state.origin_tracker.clear()
-        self.state.local_storage_cache.clear()
-        self.state.session_storage_cache.clear()
-        self.state.indexed_db_cache.clear()
-        # Clear lazy restore state - new browser = fresh session
-        self.state.pending_profile_state = None
-        self.state.restored_origins.clear()
-        # Reset response body capture state - new browser needs interceptor reinstalled
-        self.state.response_body_capture_enabled = False
-
-    async def get_browser(self, enable_har_capture: bool = False, browser: Browser | None = None) -> webdriver.Chrome:
-        """Initialize and return browser session (lazy singleton pattern).
-
-        Args:
-            enable_har_capture: Enable Chrome performance logging for HAR export.
-            browser: Which browser to use - "chrome" or "chromium". Defaults to
-                    the currently running browser, or "chromium" if none is running.
-                    Use "chromium" to avoid AppleScript targeting conflicts when
-                    your personal Chrome is running (different bundle ID).
-
-        Returns:
-            WebDriver instance
-        """
-        if self.state.driver is not None:
-            return self.state.driver
-
-        if browser is None:
-            browser = self.state.current_browser or 'chromium'
-
-        # CRITICAL: Stealth configuration to bypass Cloudflare bot detection
-        opts = Options()
-
-        # Set binary location for Chromium (macOS-specific for now)
-        # TODO: Add cross-platform support (Linux: /usr/bin/chromium-browser, Windows: shutil.which)
-        if browser == 'chromium':
-            if sys.platform != 'darwin':
-                raise fastmcp.exceptions.ToolError(
-                    f'browser="chromium" is currently only supported on macOS (got {sys.platform})',
-                )
-            chromium_path = '/Applications/Chromium.app/Contents/MacOS/Chromium'
-            if not Path(chromium_path).exists():
-                raise fastmcp.exceptions.ToolError(
-                    f'Chromium not found at {chromium_path}. Install with: brew install --cask chromium',
-                )
-            opts.binary_location = chromium_path
-            logger.info('Using Chromium: %s', chromium_path)
-
-        opts.add_argument('--disable-blink-features=AutomationControlled')
-        opts.add_argument('--window-size=1920,1080')
-        opts.add_experimental_option('excludeSwitches', ['enable-automation'])
-        opts.add_experimental_option('useAutomationExtension', False)
-        opts.add_experimental_option(
-            'prefs',
-            {
-                'credentials_enable_service': False,
-                'profile.password_manager_enabled': False,
-            },
-        )
-        # Browser console logging (always enabled, lightweight)
-        # Captures console.log/warn/error for debugging via get_console_logs()
-        logging_prefs = {'browser': 'ALL'}
-
-        # Performance logging for HAR export (opt-in due to overhead)
-        # When enabled, Chrome continuously buffers Network.* events which adds
-        # CPU, memory, and data transfer overhead even when export_har() isn't called.
-        if enable_har_capture:
-            logging_prefs['performance'] = 'ALL'
-            opts.add_experimental_option('perfLoggingPrefs', {'enableNetwork': True})
-
-        opts.set_capability('goog:loggingPrefs', logging_prefs)
-
-        # Apply proxy configuration if mitmproxy is running
-        # mitmproxy handles upstream authentication, Chrome just connects to local proxy
-        if self.state.proxy_config and self.state.mitmproxy_process:
-            opts.add_argument('--proxy-server=http://127.0.0.1:8080')
-            opts.add_argument('--ignore-certificate-errors')  # mitmproxy uses self-signed certs
-            logger.info(
-                'Using local mitmproxy -> %s:%s', self.state.proxy_config['host'], self.state.proxy_config['port']
-            )
-
-        # Initialize driver in thread pool (blocking operation)
-        self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
-        self.state.current_browser = browser
-
-        # CRITICAL: CDP injection AFTER driver creation but BEFORE first navigation
-        # This is what makes Selenium bypass Cloudflare where Playwright fails
-        await asyncio.to_thread(
-            self.state.driver.execute_cdp_cmd,
-            'Page.addScriptToEvaluateOnNewDocument',
-            {
-                'source': """
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    window.navigator.chrome = { runtime: {} };
-                    Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
-                    Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
-                """,
-            },
-        )
-
-        return self.state.driver
 
 
 def register_tools(service: BrowserService) -> None:
@@ -773,80 +616,7 @@ def register_tools(service: BrowserService) -> None:
             - For page structure, use get_aria_snapshot() first
             - Iframe content is not extracted (matches Chrome behavior)
         """
-        driver = await service.get_browser()
-
-        logger.info("Extracting text from '%s'", selector)
-
-        # Execute the extraction script (loaded from scripts/)
-        try:
-            result = await asyncio.to_thread(driver.execute_script, TEXT_EXTRACTION_SCRIPT, selector)
-        except WebDriverException as e:
-            raise fastmcp.exceptions.ToolError(f'Failed to execute extraction script: {e}') from e
-
-        # Handle selector not found
-        if result.get('error'):
-            raise fastmcp.exceptions.ToolError(
-                f"Selector '{selector}' not found on page. "
-                "Use get_aria_snapshot(selector='body') to discover valid selectors, "
-                'or use get_page_html() to inspect the page structure.',
-            )
-
-        # Extract result components
-        title = result.get('title', 'Untitled')
-        url = result.get('url', '')
-        text = result.get('text', '')
-
-        # Handle image markers based on include_images parameter
-        if include_images:
-            # Convert markers to [Image: alt text] format
-            text = re.sub(r'__IMG_ALT__(.+?)__END_IMG__', r'[Image: \1]', text)
-        else:
-            # Remove all image markers
-            text = re.sub(r'__IMG_ALT__.+?__END_IMG__', '', text)
-
-        char_count = len(text)  # Recalculate after marker processing
-
-        # Handle empty extraction
-        if not text:
-            text = '[No text content found in selected element]'
-
-        # Get actual source element (may differ from selector in auto mode)
-        source_element = result.get('sourceElement', selector)
-
-        # Build smart_info only for auto mode
-        smart_info = None
-        if result.get('isSmartExtraction'):
-            smart_info = SmartExtractionInfo(
-                fallback_used=result.get('fallbackUsed', False),
-                body_character_count=result.get('bodyCharacterCount', 0),
-            )
-
-        logger.info('Extracted %s characters from <%s>', f'{char_count:,}', source_element)
-
-        # Save large text to file to preserve line structure
-        saved_to_file = False
-        file_path: str | None = None
-
-        if char_count > LARGE_OUTPUT_THRESHOLD:
-            timestamp = datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')
-            filename = f'page_text_{timestamp}.txt'
-            output_path = service.state.screenshot_dir / filename
-            output_path.write_text(text, encoding='utf-8')
-
-            saved_to_file = True
-            file_path = str(output_path)
-            text = text[:2000]  # Preview only
-
-        return PageTextResult(
-            title=title,
-            url=url,
-            source_element=source_element,
-            text=text,
-            character_count=char_count,
-            saved_to_file=saved_to_file,
-            file_path=file_path,
-            smart_info=smart_info,
-        )
+        return await service.get_page_text(selector=selector, include_images=include_images)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -883,72 +653,7 @@ def register_tools(service: BrowserService) -> None:
             # Specific form by ID
             html = get_page_html(selector="form#login")
         """
-        driver = await service.get_browser()
-
-        if selector:
-            logger.info("Extracting HTML for '%s'%s", selector, f' (limit: {limit})' if limit else '')
-
-            try:
-                elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, selector)
-            except WebDriverException as e:
-                raise fastmcp.exceptions.ToolError(f"Invalid CSS selector '{selector}': {e}") from e
-
-            count = len(elements)
-
-            if count == 0:
-                raise fastmcp.exceptions.ToolError(
-                    f"No elements found matching selector '{selector}'. "
-                    "Use get_aria_snapshot(selector='body') to discover valid selectors.",
-                )
-
-            actual_limit = min(count, limit) if limit is not None else count
-
-            html_parts = []
-            for i in range(actual_limit):
-                try:
-                    html = await asyncio.to_thread(driver.execute_script, 'return arguments[0].outerHTML;', elements[i])
-                    html_parts.append(html)
-                except WebDriverException:
-                    continue  # Element may have become stale
-
-            logger.info(
-                'Extracted %s of %s elements%s',
-                len(html_parts),
-                count,
-                f' (limited to {limit})' if limit and count > limit else '',
-            )
-
-            html_output = '\n'.join(html_parts)
-
-            if len(html_output) > LARGE_OUTPUT_THRESHOLD:
-                return save_large_output_to_file(
-                    html_output,
-                    service.state.screenshot_dir,
-                    'page_html',
-                    'html',
-                )
-
-            return html_output
-
-        else:
-            logger.info('Extracting full page HTML source')
-
-            try:
-                page_html: str = await asyncio.to_thread(lambda: driver.page_source)
-            except WebDriverException as e:
-                raise fastmcp.exceptions.ToolError(f'Failed to get page source: {e}') from e
-
-            logger.info('Extracted %s characters of HTML', f'{len(page_html):,}')
-
-            if len(page_html) > LARGE_OUTPUT_THRESHOLD:
-                return save_large_output_to_file(
-                    page_html,
-                    service.state.screenshot_dir,
-                    'page_html',
-                    'html',
-                )
-
-            return page_html
+        return await service.get_page_html(selector=selector, limit=limit)
 
     @mcp.tool(annotations=ToolAnnotations(title='Take Screenshot', readOnlyHint=True))
     async def screenshot(filename: str, ctx: Context[Any, Any, Any], full_page: bool = False) -> str:
@@ -970,34 +675,7 @@ def register_tools(service: BrowserService) -> None:
 
         Note: Requires vision processing. full_page=True uses CDP Page.captureScreenshot.
         """
-        driver = await service.get_browser()
-
-        screenshot_path = service.state.screenshot_dir / filename
-
-        if full_page:
-            logger.info('Taking full-page screenshot: %s', filename)
-            # Use CDP to capture full page
-            result = await asyncio.to_thread(
-                driver.execute_cdp_cmd,
-                'Page.captureScreenshot',
-                {'captureBeyondViewport': True},
-            )
-
-            if 'data' not in result:
-                raise fastmcp.exceptions.ToolError(
-                    'CDP full-page capture returned no data. Use full_page=False for viewport screenshot.',
-                )
-
-            screenshot_data = base64.b64decode(result['data'])
-            screenshot_path.write_bytes(screenshot_data)
-            logger.info('Full-page screenshot saved to %s', screenshot_path)
-            return str(screenshot_path)
-
-        # Viewport screenshot
-        logger.info('Taking viewport screenshot: %s', filename)
-        await asyncio.to_thread(driver.save_screenshot, str(screenshot_path))
-        logger.info('Screenshot saved to %s', screenshot_path)
-        return str(screenshot_path)
+        return await service.screenshot(filename=filename, full_page=full_page)
 
     async def _download_with_browser_context(driver: webdriver.Chrome, url: str) -> tuple[bytes, int, str]:
         """Download a URL using httpx with headers and cookies extracted from the browser session.
@@ -1065,46 +743,7 @@ def register_tools(service: BrowserService) -> None:
 
         Errors: Raises ToolError if response status >= 400, network failure, or local file not found.
         """
-        if not url.startswith(('http://', 'https://', 'file://')):
-            raise fastmcp.exceptions.ValidationError('URL must start with http://, https://, or file://')
-
-        safe_filename = ''.join(c if c.isalnum() or c in '.-_' else '_' for c in output_filename)
-        if not safe_filename or safe_filename.startswith('.'):
-            safe_filename = 'resource_' + safe_filename
-        save_path = service.state.screenshot_dir / safe_filename
-
-        if url.startswith('file://'):
-            local_path = Path(unquote(urlparse(url).path))
-            if not local_path.is_file():
-                raise fastmcp.exceptions.ToolError(f'Local file not found: {local_path}')
-            body = local_path.read_bytes()
-            save_path.write_bytes(body)
-            return DownloadResourceResult(
-                path=str(save_path),
-                size_bytes=len(body),
-                content_type='application/octet-stream',
-                status=200,
-                url=url,
-            )
-
-        driver = await service.get_browser()
-        logger.info('Downloading: %s', url)
-
-        body, status, content_type = await _download_with_browser_context(driver, url)
-
-        if status >= 400:
-            raise fastmcp.exceptions.ToolError(f'Download failed with status {status}: {url}')
-
-        save_path.write_bytes(body)
-        logger.info('Downloaded %d bytes to %s', len(body), save_path)
-
-        return DownloadResourceResult(
-            path=str(save_path),
-            size_bytes=len(body),
-            content_type=content_type,
-            status=status,
-            url=url,
-        )
+        return await service.download_resource(url=url, output_filename=output_filename)
 
     @mcp.tool(annotations=ToolAnnotations(title='Get ARIA Snapshot', readOnlyHint=True))
     async def get_aria_snapshot(
@@ -1149,57 +788,13 @@ def register_tools(service: BrowserService) -> None:
             3. Call get_interactive_elements() if you need CSS selectors for clicking
             4. Call get_page_text() if you need actual text content
         """
-        driver = await service.get_browser()
-
-        # Execute ARIA snapshot script (loaded from scripts/)
-        result = await asyncio.to_thread(
-            driver.execute_script,
-            ARIA_SNAPSHOT_SCRIPT,
-            selector,
-            include_urls,
-            include_hidden,
-        )
-
-        # Destructure: JS returns {tree, stats} or null (selector not found)
-        if result is None:
-            snapshot_data = None
-            page_stats: dict[str, Any] = {}
-        else:
-            snapshot_data = result.get('tree')
-            page_stats = result.get('stats', {})
-
-        # Count nodes before compaction (for page metadata stats)
-        raw_node_count = count_tree_nodes(snapshot_data)
-
-        # Apply compaction if requested
-        if compact_tree:
-            snapshot_data = compact_aria_tree(snapshot_data)
-
-        # Convert to Playwright-compatible YAML format using custom serializer
-        yaml_output = serialize_aria_snapshot(snapshot_data)
-
-        # Append page metadata footer
-        metadata = build_page_metadata(
-            page_stats=page_stats,
-            include_page_info=include_page_info,
+        return await service.get_aria_snapshot(
+            selector=selector,
             include_urls=include_urls,
             compact_tree=compact_tree,
-            raw_node_count=raw_node_count,
-            compacted_node_count=count_tree_nodes(snapshot_data),
-            hidden_reason_keys=_ARIA_HIDDEN_REASON_KEYS,
+            include_hidden=include_hidden,
+            include_page_info=include_page_info,
         )
-        if metadata:
-            yaml_output += metadata
-
-        if len(yaml_output) > LARGE_OUTPUT_THRESHOLD:
-            return save_large_output_to_file(
-                yaml_output,
-                service.state.screenshot_dir,
-                'aria_snapshot',
-                'yaml',
-            )
-
-        return yaml_output
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Visual Tree', readOnlyHint=True))
     async def get_visual_tree(
@@ -1243,59 +838,13 @@ def register_tools(service: BrowserService) -> None:
             | sr-only/clip    | INCLUDED   | EXCLUDED    |
             | display:none    | EXCLUDED   | EXCLUDED    |
         """
-        driver = await service.get_browser()
-
-        # Execute visual tree script
-        result = await asyncio.to_thread(
-            driver.execute_script,
-            VISUAL_TREE_SCRIPT,
-            selector,
-            include_urls,
-            include_hidden,
-        )
-
-        # Destructure: JS returns {tree, stats} or null (selector not found)
-        if result is None:
-            return f'Selector not found: {selector}'
-        snapshot_data = result.get('tree')
-        page_stats: dict[str, Any] = result.get('stats', {})
-
-        if snapshot_data is None:
-            return f'Selector not found: {selector}'
-
-        # Count nodes before compaction (for page metadata stats)
-        raw_node_count = count_tree_nodes(snapshot_data)
-
-        if compact_tree:
-            snapshot_data = compact_visual_tree(snapshot_data)
-            if snapshot_data is None:
-                return ''
-
-        # Serialize to YAML (same format as ARIA snapshot)
-        yaml_output = serialize_visual_tree(snapshot_data)
-
-        # Append page metadata footer
-        metadata = build_page_metadata(
-            page_stats=page_stats,
-            include_page_info=include_page_info,
+        return await service.get_visual_tree(
+            selector=selector,
             include_urls=include_urls,
             compact_tree=compact_tree,
-            raw_node_count=raw_node_count,
-            compacted_node_count=count_tree_nodes(snapshot_data),
-            hidden_reason_keys=_VISUAL_HIDDEN_REASON_KEYS,
+            include_hidden=include_hidden,
+            include_page_info=include_page_info,
         )
-        if metadata:
-            yaml_output += metadata
-
-        if len(yaml_output) > LARGE_OUTPUT_THRESHOLD:
-            return save_large_output_to_file(
-                yaml_output,
-                service.state.screenshot_dir,
-                'visual_tree',
-                'yaml',
-            )
-
-        return yaml_output
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Interactive Elements', readOnlyHint=True))
     async def get_interactive_elements(
@@ -1341,85 +890,9 @@ def register_tools(service: BrowserService) -> None:
             2. Look for nearby buttons or the CHEVRON_RIGHT pattern
             3. Scope search with selector_scope to reduce false positives
         """
-        driver = await service.get_browser()
-
-        logger.info('Finding interactive elements in scope: %s', selector_scope)
-
-        # Prepare filter values for JS
-        text_filter_lower = text_contains.lower() if text_contains else None
-        tag_filter_upper = [tag.upper() for tag in tag_filter] if tag_filter else None
-
-        elements = await asyncio.to_thread(
-            driver.execute_script,
-            """
-            const params = arguments[0];
-            const { scopeSelector, textFilter, tagFilter, maxLimit } = params;
-            const results = [];
-            const scopeElement = document.querySelector(scopeSelector);
-            if (!scopeElement) return results;
-
-            const allElements = scopeElement.querySelectorAll('*');
-
-            allElements.forEach((el, index) => {
-                const style = window.getComputedStyle(el);
-                const isVisible = style.display !== 'none' &&
-                                style.visibility !== 'hidden' &&
-                                style.opacity !== '0';
-
-                // Multiple detection methods
-                const hasPointer = style.cursor === 'pointer';
-                const isButton = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
-                const isLink = el.tagName === 'A' || el.getAttribute('role') === 'link';
-                const isInput = ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName);
-
-                // Check for click handlers (native onclick and React onClick)
-                const hasOnclick = el.onclick !== null;
-                const hasReactOnClick = Object.keys(el).some(k => {
-                    if (!k.startsWith('__reactProps')) return false;
-                    const props = el[k];
-                    return props && typeof props.onClick === 'function';
-                });
-
-                const isInteractive = hasPointer || isButton || isLink || isInput || hasOnclick || hasReactOnClick;
-
-                if (!isVisible || !isInteractive) return;
-
-                // Apply tag filter
-                if (tagFilter && !tagFilter.includes(el.tagName)) return;
-
-                const text = el.textContent?.trim() || '';
-
-                // Apply text filter
-                if (textFilter && !text.toLowerCase().includes(textFilter)) return;
-
-                // Apply limit
-                if (maxLimit && results.length >= maxLimit) return;
-
-                const selector = `${el.tagName.toLowerCase()}[data-automation-id="${index}"]`;
-                el.setAttribute('data-automation-id', index);
-
-                results.push({
-                    tag: el.tagName,
-                    text: text.substring(0, 100),
-                    selector: selector,
-                    cursor: style.cursor,
-                    href: el.href || null,
-                    classes: el.getAttribute('class') || ''
-                });
-            });
-
-            return results;
-            """,
-            {
-                'scopeSelector': selector_scope,
-                'textFilter': text_filter_lower,
-                'tagFilter': tag_filter_upper,
-                'maxLimit': limit,
-            },
+        return await service.get_interactive_elements(
+            selector_scope=selector_scope, text_contains=text_contains, tag_filter=tag_filter, limit=limit
         )
-
-        logger.info('Found %s interactive elements (filtered)', len(elements))
-        return [InteractiveElement(**el) for el in elements]
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
     async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> Sequence[FocusableElement]:
@@ -1433,57 +906,7 @@ def register_tools(service: BrowserService) -> None:
         Returns:
             list[FocusableElement]: Sorted by tab order, each with tag, text, selector, tab_index
         """
-        driver = await service.get_browser()
-
-        logger.info('Finding focusable elements (only_tabbable=%s)', only_tabbable)
-
-        min_tab_index = 0 if only_tabbable else -1
-
-        elements = await asyncio.to_thread(
-            driver.execute_script,
-            """
-            const params = arguments[0];
-            const { minTabIndex } = params;
-            const results = [];
-            const focusableSelectors = 'a[href], button, input, select, textarea, [tabindex]';
-            const allElements = document.querySelectorAll(focusableSelectors);
-
-            allElements.forEach((el, index) => {
-                const style = window.getComputedStyle(el);
-                const isVisible = style.display !== 'none' &&
-                                style.visibility !== 'hidden';
-                const tabIndex = el.tabIndex;
-                const isFocusable = tabIndex >= minTabIndex;
-                const isDisabled = el.disabled;
-
-                if (isVisible && isFocusable && !isDisabled) {
-                    const text = el.textContent?.trim().substring(0, 100) || '';
-                    const selector = `${el.tagName.toLowerCase()}[data-focus-id="${index}"]`;
-                    el.setAttribute('data-focus-id', index);
-
-                    results.push({
-                        tag: el.tagName,
-                        text: text,
-                        selector: selector,
-                        tab_index: tabIndex,
-                        is_tabbable: tabIndex >= 0,
-                        classes: el.getAttribute('class') || ''
-                    });
-                }
-            });
-
-            return results.sort((a, b) => {
-                if (a.tab_index === b.tab_index) return 0;
-                if (a.tab_index === 0 && b.tab_index > 0) return 1;
-                if (b.tab_index === 0 && a.tab_index > 0) return -1;
-                return a.tab_index - b.tab_index;
-            });
-            """,
-            {'minTabIndex': min_tab_index},
-        )
-
-        logger.info('Found %s focusable elements', len(elements))
-        return [FocusableElement(**el) for el in elements]
+        return await service.get_focusable_elements(only_tabbable=only_tabbable)
 
     @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))
     async def click(
@@ -1508,56 +931,9 @@ def register_tools(service: BrowserService) -> None:
             3. wait_for_network_idle() - wait for dynamic content
             4. get_aria_snapshot() - understand new page state
         """
-        driver = await service.get_browser()
-
-        # PRE-ACTION: Capture localStorage before click (might navigate away)
-        await _capture_current_origin_storage(service, driver)
-        url_before = driver.current_url
-
-        logger.info('Clicking element: %s%s', css_selector, ' (with delay)' if wait_for_network else '')
-
-        _validate_css_selector(css_selector)
-
-        # Wait for element to be clickable (up to 10 seconds)
-        try:
-            element = await asyncio.to_thread(
-                WebDriverWait(driver, 10).until,
-                EC.element_to_be_clickable((By.CSS_SELECTOR, css_selector)),
-            )
-        except WebDriverException as e:
-            raise fastmcp.exceptions.ToolError(
-                f"Failed to find clickable element '{css_selector}': {e}\n"
-                f"Use get_interactive_elements(text_contains='...') to discover valid selectors.",
-            ) from None
-
-        # Click element
-        try:
-            await asyncio.to_thread(element.click)
-        except WebDriverException as e:
-            error_msg = str(e).lower()
-            if 'intercepted' in error_msg or 'other element would receive' in error_msg:
-                raise fastmcp.exceptions.ToolError(
-                    f"Element '{css_selector}' is obscured by another element. "
-                    f'Try: close overlays/modals, scroll into view, or use '
-                    f'execute_javascript("document.querySelector(\'{css_selector}\').click()")',
-                ) from None
-            raise fastmcp.exceptions.ToolError(f"Click failed on '{css_selector}': {e}") from None
-
-        if wait_for_network:
-            delay_sec = network_timeout / 1000
-            logger.info('Waiting %ss for content to load', delay_sec)
-            await asyncio.sleep(delay_sec)
-            logger.info('Delay complete')
-
-        # POST-ACTION: Check if navigation occurred, track new origin and restore localStorage
-        url_after = driver.current_url
-        if url_after != url_before:
-            service.state.origin_tracker.add_origin(url_after)
-            logger.info('Navigation detected: %s -> %s', url_before, url_after)
-            # Lazy restore: if we navigated to a new origin with pending storage state
-            await _restore_pending_profile_state_for_current_origin(service, driver)
-
-        logger.info('Click successful')
+        return await service.click(
+            css_selector=css_selector, wait_for_network=wait_for_network, network_timeout=network_timeout
+        )
 
     @mcp.tool(annotations=ToolAnnotations(title='Wait for Network Idle', readOnlyHint=True, idempotentHint=True))
     async def wait_for_network_idle(ctx: Context[Any, Any, Any], timeout: int = 10000) -> None:
@@ -1573,37 +949,7 @@ def register_tools(service: BrowserService) -> None:
         Note: Uses JavaScript instrumentation of Fetch/XHR APIs to track network activity.
               Waits for no active requests + 500ms idle threshold.
         """
-        driver = await service.get_browser()
-
-        # Step 1: Inject monitoring script (loaded from scripts/)
-        await asyncio.to_thread(driver.execute_script, NETWORK_MONITOR_SETUP_SCRIPT)
-        logger.info('Network monitor injected')
-
-        # Step 2: Poll for idle state (500ms threshold)
-        start_time = time.time()
-        idle_threshold_ms = 500
-        timeout_s = timeout / 1000
-
-        while time.time() - start_time < timeout_s:
-            status = await asyncio.to_thread(driver.execute_script, NETWORK_MONITOR_CHECK_SCRIPT)
-
-            if status['activeRequests'] == 0:
-                if status['lastRequestTime'] is None:
-                    # No requests made yet - check elapsed time since monitoring started
-                    elapsed = time.time() - start_time
-                    if elapsed >= idle_threshold_ms / 1000:
-                        logger.info('Network idle (no requests made)')
-                        return
-                else:
-                    # Check time since last request completed
-                    elapsed_since_last = status['currentTime'] - status['lastRequestTime']
-                    if elapsed_since_last >= idle_threshold_ms:
-                        logger.info('Network idle after %.2fs', elapsed_since_last / 1000)
-                        return
-
-            await asyncio.sleep(0.05)  # Poll every 50ms
-
-        logger.info('Network idle timeout after %ss', timeout_s)
+        return await service.wait_for_network_idle(timeout=timeout)
 
     @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
     async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
@@ -1626,49 +972,7 @@ def register_tools(service: BrowserService) -> None:
         Note: Key names use Selenium's Keys enum (uppercase with underscores).
               For combinations, use + (e.g., 'CONTROL+A').
         """
-        driver = await service.get_browser()
-
-        # PRE-ACTION: Capture localStorage before key press (ENTER might submit form and navigate)
-        await _capture_current_origin_storage(service, driver)
-        url_before = driver.current_url
-
-        logger.info('Pressing key: %s', key)
-
-        # Map common key names to Selenium Keys
-        # Handle key combinations (e.g., "CONTROL+A")
-        if '+' in key:
-            parts = key.split('+')
-            keys_combo = []
-            for part in parts:
-                key_attr = part.upper().replace(' ', '_')
-                if hasattr(Keys, key_attr):
-                    keys_combo.append(getattr(Keys, key_attr))
-                else:
-                    keys_combo.append(part)
-
-            # Send key combination
-            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, 'body')
-            await asyncio.to_thread(body.send_keys, *keys_combo)
-        else:
-            # Single key
-            key_attr = key.upper().replace(' ', '_')
-            if hasattr(Keys, key_attr):
-                key_value = getattr(Keys, key_attr)
-            else:
-                key_value = key
-
-            body = await asyncio.to_thread(driver.find_element, By.TAG_NAME, 'body')
-            await asyncio.to_thread(body.send_keys, key_value)
-
-        # POST-ACTION: Check if navigation occurred, track new origin and restore localStorage
-        url_after = driver.current_url
-        if url_after != url_before:
-            service.state.origin_tracker.add_origin(url_after)
-            logger.info('Navigation detected: %s -> %s', url_before, url_after)
-            # Lazy restore: if we navigated to a new origin with pending storage state
-            await _restore_pending_profile_state_for_current_origin(service, driver)
-
-        logger.info('Key press successful')
+        return await service.press_key(key=key)
 
     @mcp.tool(annotations=ToolAnnotations(title='Type Text', destructiveHint=False, idempotentHint=False))
     async def type_text(text: str, ctx: Context[Any, Any, Any], delay_ms: int = 0) -> None:
@@ -1686,22 +990,7 @@ def register_tools(service: BrowserService) -> None:
             - type_text('Hello, world!') - Type text instantly
             - type_text('search query', delay_ms=50) - Type with 50ms delay between chars
         """
-        driver = await service.get_browser()
-
-        logger.info('Typing text: "%s"%s', text, f' with {delay_ms}ms delay' if delay_ms > 0 else '')
-
-        active_element = await asyncio.to_thread(lambda: driver.switch_to.active_element)
-
-        if delay_ms > 0:
-            # Type with delay between characters
-            for char in text:
-                await asyncio.to_thread(active_element.send_keys, char)
-                await asyncio.sleep(delay_ms / 1000)
-        else:
-            # Type all at once
-            await asyncio.to_thread(active_element.send_keys, text)
-
-        logger.info('Text typing successful')
+        return await service.type_text(text=text, delay_ms=delay_ms)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -1730,90 +1019,7 @@ def register_tools(service: BrowserService) -> None:
             3. get_aria_snapshot() - see dropdown content
             4. click(dropdown_item_selector) - select item
         """
-        driver = await service.get_browser()
-
-        # Validate duration
-        if duration_ms < 0:
-            raise ValueError('duration_ms cannot be negative')
-        if duration_ms > 30000:
-            raise ValueError('duration_ms exceeds maximum of 30000ms (30 seconds)')
-
-        logger.info('Hovering over element: %s', css_selector)
-
-        _validate_css_selector(css_selector)
-
-        # Wait for element to be present
-        try:
-            element = await asyncio.to_thread(
-                WebDriverWait(driver, 10).until,
-                EC.presence_of_element_located((By.CSS_SELECTOR, css_selector)),
-            )
-        except WebDriverException as e:
-            raise fastmcp.exceptions.ToolError(
-                f"Failed to find element for hover '{css_selector}': {e}\n"
-                f"Use get_interactive_elements(text_contains='...') to discover valid selectors.",
-            ) from None
-
-        # Scroll element into view (Playwright does this automatically)
-        await asyncio.to_thread(
-            driver.execute_script,
-            "arguments[0].scrollIntoView({behavior: 'instant', block: 'nearest'});",
-            element,
-        )
-
-        # Verify element is visible (not display:none, visibility:hidden, etc.)
-        is_displayed = await asyncio.to_thread(element.is_displayed)
-        if not is_displayed:
-            raise ValueError(f"Element '{css_selector}' is not visible - cannot hover")
-
-        # Multi-signal stability check (based on Playwright's approach)
-        # Uses: requestAnimationFrame timing, getAnimations() API, distance threshold
-        stability_result = await asyncio.to_thread(
-            driver.execute_script,
-            HOVER_STABILITY_SCRIPT,
-            element,
-        )
-
-        # Log stability check results
-        if stability_result.get('hasInfiniteAnimation'):
-            logger.warning('Element has infinite animation - hover may be inconsistent')
-
-        if not stability_result.get('stable'):
-            if stability_result.get('runningAnimations', 0) > 0:
-                logger.info(
-                    'Element has %s running animation(s), proceeding after %s frame checks',
-                    stability_result['runningAnimations'],
-                    stability_result['framesChecked'],
-                )
-            else:
-                logger.info(
-                    'Element did not stabilize after %s frames (final distance: %.1fpx)',
-                    stability_result['framesChecked'],
-                    stability_result.get('finalDistance', 0),
-                )
-
-        # Verify element receives pointer events (not obscured by overlay/modal)
-        pointer_check = await asyncio.to_thread(
-            driver.execute_script,
-            HOVER_OCCLUSION_SCRIPT,
-            element,
-        )
-        if pointer_check == 'obscured':
-            raise ValueError(
-                f"Element '{css_selector}' is obscured by another element at its center. "
-                'A modal, overlay, or other element may be blocking it.',
-            )
-
-        # Move mouse to element center
-        actions = ActionChains(driver)
-        await asyncio.to_thread(actions.move_to_element(element).perform)
-
-        # Hold if duration specified (for menus that need sustained hover)
-        if duration_ms > 0:
-            logger.info('Holding hover for %sms', duration_ms)
-            await asyncio.sleep(duration_ms / 1000)
-
-        logger.info('Hover successful')
+        return await service.hover(css_selector=css_selector, duration_ms=duration_ms)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -1884,29 +1090,13 @@ def register_tools(service: BrowserService) -> None:
             2. scroll(direction='down') - scroll to see more content
             3. get_aria_snapshot('body') - see updated content
         """
-        driver = await service.get_browser()
-        logger.info(
-            'Scroll: direction=%s, position=%s, selector=%s, amount=%s, behavior=%s',
-            direction,
-            position,
-            css_selector,
-            scroll_amount,
-            behavior,
+        return await service.scroll(
+            direction=direction,
+            scroll_amount=scroll_amount,
+            css_selector=css_selector,
+            behavior=behavior,
+            position=position,
         )
-        try:
-            result = await asyncio.to_thread(
-                execute_scroll,
-                driver,
-                direction=direction,
-                scroll_amount=scroll_amount,
-                css_selector=css_selector,
-                behavior=behavior,
-                position=position,
-            )
-        except ValueError as e:
-            raise fastmcp.exceptions.ToolError(str(e)) from None
-        logger.info('Scroll complete: %s, scrolled=%s', result.get('mode'), result.get('scrolled'))
-        return result
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -1938,31 +1128,7 @@ def register_tools(service: BrowserService) -> None:
         """
 
         # Validation
-        if duration_ms < 0:
-            raise ValueError('duration_ms cannot be negative')
-        if duration_ms > 300000:
-            raise ValueError(
-                'duration_ms exceeds maximum of 300000ms (5 minutes). '
-                'Such long delays usually indicate missing condition-based waiting logic. '
-                'Consider using wait_for_selector() or wait_for_network_idle() instead.',
-            )
-
-        # Graduated warnings for AI agents
-        if duration_ms > 10000:
-            logger.info(
-                'Warning: Long sleep(%sms) requested. '
-                'Consider wait_for_selector() or wait_for_network_idle() for dynamic content.',
-                duration_ms,
-            )
-
-        if reason:
-            logger.info('Sleeping %sms: %s', duration_ms, reason)
-        else:
-            logger.info('Sleeping %sms', duration_ms)
-
-        await asyncio.sleep(duration_ms / 1000)
-
-        return SleepResult(slept_ms=duration_ms)
+        return await service.sleep(duration_ms=duration_ms, reason=reason)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2006,135 +1172,7 @@ def register_tools(service: BrowserService) -> None:
             ValueError: If timeout is invalid or selector is empty
             TimeoutError: If element doesn't reach desired state within timeout
         """
-        driver = await service.get_browser()
-
-        # Validation
-        if not css_selector or not css_selector.strip():
-            raise ValueError('css_selector cannot be empty')
-        if timeout < 0:
-            raise ValueError('timeout cannot be negative')
-        if timeout > 300000:
-            raise ValueError('timeout exceeds maximum of 300000ms (5 minutes)')
-
-        logger.info("Waiting for selector '%s' to be %s", css_selector, state)
-
-        _validate_css_selector(css_selector)
-
-        # Early validation: detect invalid CSS before entering polling loop.
-        # Without this, an invalid selector silently wastes the full timeout.
-        try:
-            await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, css_selector)
-        except WebDriverException as e:
-            raise fastmcp.exceptions.ToolError(
-                f"Invalid CSS selector '{css_selector}': {e}\n"
-                f'Use get_aria_snapshot() to discover valid selectors, or '
-                f'get_interactive_elements() to find elements by text.',
-            ) from None
-
-        start_time = time.time()
-        timeout_s = timeout / 1000
-        polling_interval = 0.05  # 50ms polling
-
-        while time.time() - start_time < timeout_s:
-            try:
-                elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, css_selector)
-
-                if state == 'attached':
-                    # Element exists in DOM
-                    if elements:
-                        elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info("Selector '%s' attached after %sms", css_selector, elapsed_ms)
-                        return WaitForSelectorResult(
-                            selector=css_selector,
-                            state='attached',
-                            elapsed_ms=elapsed_ms,
-                            element_count=len(elements),
-                        )
-
-                elif state == 'detached':
-                    # Element removed from DOM
-                    if not elements:
-                        elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info("Selector '%s' detached after %sms", css_selector, elapsed_ms)
-                        return WaitForSelectorResult(
-                            selector=css_selector,
-                            state='detached',
-                            elapsed_ms=elapsed_ms,
-                        )
-
-                elif state == 'visible':
-                    # Element exists AND is displayed
-                    for element in elements:
-                        is_displayed = await asyncio.to_thread(element.is_displayed)
-                        if is_displayed:
-                            elapsed_ms = int((time.time() - start_time) * 1000)
-                            logger.info("Selector '%s' visible after %sms", css_selector, elapsed_ms)
-                            return WaitForSelectorResult(
-                                selector=css_selector,
-                                state='visible',
-                                elapsed_ms=elapsed_ms,
-                                element_count=len(elements),
-                            )
-
-                elif state == 'hidden':
-                    # Element not in DOM OR not displayed
-                    if not elements:
-                        elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info("Selector '%s' hidden (not in DOM) after %sms", css_selector, elapsed_ms)
-                        return WaitForSelectorResult(
-                            selector=css_selector,
-                            state='hidden',
-                            elapsed_ms=elapsed_ms,
-                            reason='not_in_dom',
-                        )
-                    # Check if all matching elements are hidden
-                    all_hidden = True
-                    for element in elements:
-                        is_displayed = await asyncio.to_thread(element.is_displayed)
-                        if is_displayed:
-                            all_hidden = False
-                            break
-                    if all_hidden:
-                        elapsed_ms = int((time.time() - start_time) * 1000)
-                        logger.info("Selector '%s' hidden (not displayed) after %sms", css_selector, elapsed_ms)
-                        return WaitForSelectorResult(
-                            selector=css_selector,
-                            state='hidden',
-                            elapsed_ms=elapsed_ms,
-                            reason='not_displayed',
-                            element_count=len(elements),
-                        )
-
-            except Exception:  # exception_safety_linter.py: swallowed-exception — polling resilience; selector evaluation may hit stale element
-                pass
-
-            await asyncio.sleep(polling_interval)
-
-        # Timeout reached
-        elapsed_ms = int((time.time() - start_time) * 1000)
-
-        # Build helpful error message for AI agents
-        try:
-            elements = await asyncio.to_thread(driver.find_elements, By.CSS_SELECTOR, css_selector)
-            element_count = len(elements)
-            if elements:
-                first_displayed = await asyncio.to_thread(elements[0].is_displayed)
-                current_state = 'visible' if first_displayed else 'in DOM but hidden'
-            else:
-                current_state = 'not in DOM'
-        except (
-            Exception
-        ):  # exception_safety_linter.py: swallowed-exception — best-effort diagnostics for timeout error message
-            element_count = 0
-            current_state = 'unknown (selector may be invalid)'
-
-        raise TimeoutError(
-            f"wait_for_selector('{css_selector}', state='{state}') timed out after {elapsed_ms}ms. "
-            f'Current state: {current_state} (found {element_count} element(s)). '
-            f'Possible causes: (1) Selector is incorrect, (2) Element is in iframe, '
-            f"(3) Element requires user action to appear, (4) Page didn't finish loading. "
-            f'Try: verify selector with get_page_html(), check for iframes, or increase timeout.',
-        )
+        return await service.wait_for_selector(css_selector=css_selector, state=state, timeout=timeout)
 
     @mcp.tool(annotations=ToolAnnotations(title='List Chrome Profiles', readOnlyHint=True, idempotentHint=True))
     async def list_chrome_profiles(
@@ -2157,14 +1195,7 @@ def register_tools(service: BrowserService) -> None:
         Example (verbose):
             Returns all fields including avatar settings, creation time, etc.
         """
-        logger.info('Listing Chrome profiles (verbose=%s)', verbose)
-
-        # Call module function
-        result = await asyncio.to_thread(list_all_profiles, verbose=verbose)
-
-        logger.info('Found %s profiles', result.total_count)
-
-        return result
+        return await service.list_chrome_profiles(verbose=verbose)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2200,22 +1231,7 @@ def register_tools(service: BrowserService) -> None:
             (e.g., macOS enforces minimum ~500px width). The returned dimensions
             reflect the actual size achieved.
         """
-        driver = await service.get_browser()
-
-        # Validation: positive integers only
-        if width <= 0 or height <= 0:
-            raise ValueError(f'Width and height must be positive integers. Got: {width}x{height}')
-
-        logger.info('Resizing window to %sx%s', width, height)
-
-        await asyncio.to_thread(driver.set_window_size, width, height)
-
-        # Get actual size (may differ due to OS constraints)
-        size = await asyncio.to_thread(driver.get_window_size)
-
-        logger.info('Window resized to %sx%s', size['width'], size['height'])
-
-        return ResizeWindowResult(width=size['width'], height=size['height'])
+        return await service.resize_window(width=width, height=height)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2249,63 +1265,7 @@ def register_tools(service: BrowserService) -> None:
         Note: INP requires user interaction to measure. LCP may not be final
               until user interacts with the page.
         """
-        driver = await service.get_browser()
-
-        start_time = time.time()
-        current_url = driver.current_url
-
-        logger.info('Capturing Core Web Vitals for %s', current_url)
-
-        errors: list[str] = []
-
-        # Use execute_async_script for Promise-based collection (script from scripts/)
-        results = await asyncio.to_thread(
-            driver.execute_async_script,
-            WEB_VITALS_SCRIPT,
-            timeout_ms,
-        )
-
-        collection_duration = (time.time() - start_time) * 1000
-
-        # Parse results into Pydantic models
-        T = TypeVar('T', bound=SubsetModel)
-
-        def parse_metric(data: JsonObject | None, model_cls: type[T]) -> T | None:
-            if not data:
-                return None
-            if 'error' in data:
-                errors.append(f'{data.get("name", "Unknown")}: {data["error"]}')
-                return None
-            return model_cls(**data)
-
-        vitals = CoreWebVitals(
-            url=current_url,
-            timestamp=time.time(),
-            fcp=parse_metric(results.get('fcp') if results else None, FCPMetric),
-            lcp=parse_metric(results.get('lcp') if results else None, LCPMetric),
-            ttfb=parse_metric(results.get('ttfb') if results else None, TTFBMetric),
-            cls=parse_metric(results.get('cls') if results else None, CLSMetric),
-            inp=parse_metric(results.get('inp') if results else None, INPMetric),
-            collection_duration_ms=collection_duration,
-            errors=errors,
-        )
-
-        # Log summary
-        metrics_found = []
-        if vitals.fcp:
-            metrics_found.append(f'FCP={vitals.fcp.value:.0f}ms ({vitals.fcp.rating})')
-        if vitals.lcp:
-            metrics_found.append(f'LCP={vitals.lcp.value:.0f}ms ({vitals.lcp.rating})')
-        if vitals.ttfb:
-            metrics_found.append(f'TTFB={vitals.ttfb.value:.0f}ms ({vitals.ttfb.rating})')
-        if vitals.cls:
-            metrics_found.append(f'CLS={vitals.cls.value:.3f} ({vitals.cls.rating})')
-        if vitals.inp:
-            metrics_found.append(f'INP={vitals.inp.value:.0f}ms ({vitals.inp.rating})')
-
-        logger.info('Web Vitals captured in %.0fms: %s', collection_duration, ', '.join(metrics_found) or 'none')
-
-        return vitals
+        return await service.capture_web_vitals(timeout_ms=timeout_ms)
 
     @mcp.tool(
         description="""Get resource timing data from the browser's Performance API.
@@ -2333,106 +1293,9 @@ Note:
         clear_resource_timing_buffer: bool = False,
         min_duration_ms: int = 0,
     ) -> NetworkCapture:
-        driver = await service.get_browser()
-
-        start_time = time.time()
-        current_url = driver.current_url
-
-        logger.info('Getting resource timings for %s', current_url)
-
-        # Collect resource timing via JavaScript Performance API (script from scripts/)
-        raw_entries = await asyncio.to_thread(driver.execute_script, RESOURCE_TIMING_SCRIPT)
-
-        # Handle empty/null response
-        if not raw_entries:
-            raw_entries = []
-
-        # Filter by min_duration_ms
-        if min_duration_ms > 0:
-            raw_entries = [e for e in raw_entries if e.get('duration_ms', 0) >= min_duration_ms]
-
-        # Convert to NetworkRequest models
-        requests = []
-        total_size = 0
-        for i, entry in enumerate(raw_entries):
-            timing_data = entry.get('timing', {})
-            req = NetworkRequest(
-                request_id=str(i),
-                url=entry.get('url', ''),
-                method=entry.get('method', 'GET'),
-                resource_type=entry.get('resource_type'),
-                encoded_data_length=entry.get('encoded_data_length', 0),
-                started_at=entry.get('started_at', 0),
-                duration_ms=entry.get('duration_ms'),
-                timing=RequestTiming(
-                    blocked=timing_data.get('blocked', 0),
-                    dns=timing_data.get('dns', 0),
-                    connect=timing_data.get('connect', 0),
-                    ssl=timing_data.get('ssl', 0),
-                    send=timing_data.get('send', 0),
-                    wait=timing_data.get('wait', 0),
-                    receive=timing_data.get('receive', 0),
-                )
-                if timing_data
-                else None,
-            )
-            requests.append(req)
-            total_size += entry.get('encoded_data_length', 0)
-
-        # Sort by duration (slowest first) for summary
-        sorted_by_duration = sorted(requests, key=lambda r: r.duration_ms or 0, reverse=True)
-        slowest = [
-            SlowestRequestSummary(url=r.url, duration_ms=r.duration_ms, type=r.resource_type)
-            for r in sorted_by_duration[:10]
-        ]
-
-        # Count by resource type
-        type_counts: dict[str, int] = {}
-        for r in requests:
-            t = r.resource_type or 'other'
-            type_counts[t] = type_counts.get(t, 0) + 1
-
-        # Calculate total time (longest request duration)
-        total_time = max((r.duration_ms or 0) for r in requests) if requests else 0
-
-        # Clear resource timing buffer if requested
-        if clear_resource_timing_buffer:
-            await asyncio.to_thread(
-                driver.execute_script,
-                'performance.clearResourceTimings();',
-            )
-
-        collection_duration = (time.time() - start_time) * 1000
-
-        result = NetworkCapture(
-            url=current_url,
-            timestamp=time.time(),
-            requests=requests,
-            total_requests=len(requests),
-            total_size_bytes=total_size,
-            total_time_ms=total_time,
-            slowest_requests=slowest,
-            requests_by_type=type_counts,
-            errors=[],
+        return await service.get_resource_timings(
+            clear_resource_timing_buffer=clear_resource_timing_buffer, min_duration_ms=min_duration_ms
         )
-
-        # Log summary
-        if slowest:
-            slowest_url = slowest[0].url
-            # Truncate URL for logging
-            if len(slowest_url) > 60:
-                slowest_url = slowest_url[:57] + '...'
-            logger.info(
-                'Captured %s requests in %.0fms, slowest: %.0fms (%s)',
-                len(requests),
-                collection_duration,
-                slowest[0].duration_ms or 0,
-                slowest_url,
-            )
-        else:
-            logger.info('Captured %s requests in %.0fms', len(requests), collection_duration)
-
-        return result
 
     async def _lookup_intercepted_body(
         driver: webdriver.Chrome,
@@ -2829,83 +1692,7 @@ Workflow:
             click(selector)
             get_console_logs()  # Check for interaction errors
         """
-        driver = await service.get_browser()
-
-        logger.info('Getting browser console logs')
-
-        # Get browser logs (clears buffer after retrieval)
-        try:
-            raw_logs = await asyncio.to_thread(driver.get_log, 'browser')
-        except WebDriverException:
-            logger.exception('Failed to get console logs')
-            return ConsoleLogsResult(
-                logs=[],
-                total_count=0,
-            )
-
-        # Parse raw logs into structured entries
-        entries: list[ConsoleLogEntry] = []
-        level_counts = {'SEVERE': 0, 'WARNING': 0, 'INFO': 0}
-
-        # Level hierarchy for filtering
-        level_hierarchy = {'SEVERE': 3, 'WARNING': 2, 'INFO': 1}
-        min_level = level_hierarchy.get(level_filter, 0) if level_filter and level_filter != 'ALL' else 0
-
-        # Compile pattern if provided
-        pattern_regex = re.compile(pattern, re.IGNORECASE) if pattern else None
-
-        for log in raw_logs:
-            level = log.get('level', 'INFO')
-            message = log.get('message', '')
-            source = log.get('source', '')
-            timestamp = log.get('timestamp', 0)
-
-            # Normalize level (Chrome sometimes uses lowercase)
-            level = level.upper()
-            if level not in level_counts:
-                level = 'INFO'  # Default unknown levels to INFO
-
-            # Count all logs by level (before filtering)
-            level_counts[level] += 1
-
-            # Apply level filter
-            if min_level > 0 and level_hierarchy.get(level, 0) < min_level:
-                continue
-
-            # Apply pattern filter
-            if pattern_regex and not pattern_regex.search(message):
-                continue
-
-            entries.append(
-                ConsoleLogEntry(
-                    level=level,
-                    message=message,
-                    source=source,
-                    timestamp=timestamp,
-                ),
-            )
-
-        result = ConsoleLogsResult(
-            logs=entries,
-            total_count=len(raw_logs),
-            severe_count=level_counts['SEVERE'],
-            warning_count=level_counts['WARNING'],
-            info_count=level_counts['INFO'],
-        )
-
-        # Log summary
-        if result.total_count > 0:
-            logger.info(
-                'Console logs: %s errors, %s warnings, %s info (%s returned after filtering)',
-                result.severe_count,
-                result.warning_count,
-                result.info_count,
-                len(entries),
-            )
-        else:
-            logger.info('No console logs captured')
-
-        return result
+        return await service.get_console_logs(level_filter=level_filter, pattern=pattern)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -3053,24 +1840,7 @@ Workflow:
         Returns:
             Status dict confirming proxy cleared
         """
-        logger.info('Clearing proxy configuration')
-
-        # Close browser first
-        await service.close_browser()
-
-        # Stop mitmproxy process
-        if service.state.mitmproxy_process:
-            service.state.mitmproxy_process.terminate()
-            try:
-                service.state.mitmproxy_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                service.state.mitmproxy_process.kill()
-            service.state.mitmproxy_process = None
-            logger.info('mitmproxy stopped')
-
-        service.state.proxy_config = None
-
-        return ClearProxyResult(status='proxy_cleared')
+        return await service.clear_proxy()
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -3102,20 +1872,7 @@ Workflow:
             navigate('https://example.com')  # Loads without analytics
             set_blocked_urls([])  # Clear all blocks
         """
-        driver = await service.get_browser()
-
-        await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.enable', {})
-        await asyncio.to_thread(driver.execute_cdp_cmd, 'Network.setBlockedURLs', {'urls': list(urls)})
-
-        if urls:
-            logger.info('Blocked %s URL pattern(s): %s', len(urls), urls)
-        else:
-            logger.info('Cleared all URL blocks')
-
-        return SetBlockedURLsResult(
-            blocked_url_count=len(urls),
-            patterns=list(urls),
-        )
+        return await service.set_blocked_urls(urls=urls)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -3185,68 +1942,7 @@ Workflow:
             - Map → object, Set → array, circular references → "[Circular Reference]"
             - Sites with strict CSP may block execution
         """
-        driver = await service.get_browser()
-
-        logger.info('Executing JavaScript (%s chars)', len(code))
-
-        # Escape user code as JSON string to prevent injection
-        # json.dumps handles quotes, backslashes, newlines, etc.
-        escaped_code = json.dumps(code)
-
-        # Build the async wrapper for Selenium's execute_async_script
-        # (uses safe_serialize.js loaded from scripts/)
-        async_script = build_execute_javascript_async_script(escaped_code)
-
-        try:
-            # Use asyncio.wait_for for Python-side timeout
-            # timeout_ms=0 means no timeout (wait indefinitely)
-            if timeout_ms > 0:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(driver.execute_async_script, async_script),
-                    timeout=timeout_ms / 1000,
-                )
-            else:
-                result = await asyncio.to_thread(driver.execute_async_script, async_script)
-
-            # Log result type for debugging
-            result_type = result.get('result_type', 'unknown') if isinstance(result, dict) else 'unknown'
-            success = result.get('success', False) if isinstance(result, dict) else False
-
-            if success:
-                logger.info('JS execution successful: %s', result_type)
-            else:
-                error = result.get('error', 'Unknown error') if isinstance(result, dict) else 'Unknown error'
-                logger.warning('JS execution failed: %s', error)
-
-            return JavaScriptResult(**result)
-
-        except TimeoutError:
-            logger.warning(
-                'JS execution timed out after %sms',
-                timeout_ms,
-            )  # exception_safety_linter.py: logger-no-exc-info — TimeoutError has no useful traceback
-            return JavaScriptResult(
-                success=False,
-                result_type='unserializable',
-                error=f'Execution exceeded {timeout_ms}ms timeout',
-                error_type='timeout',
-            )
-        except WebDriverException as e:
-            logger.exception('JS execution WebDriver error')
-            return JavaScriptResult(
-                success=False,
-                result_type='unserializable',
-                error=str(e),
-                error_type='execution',
-            )
-        except Exception as e:  # exception_safety_linter.py: swallowed-exception — error captured in JavaScriptResult
-            logger.warning('JS execution unexpected error: %s', e, exc_info=True)
-            return JavaScriptResult(
-                success=False,
-                result_type='unserializable',
-                error=str(e),
-                error_type='execution',
-            )
+        return await service.execute_javascript(code=code, timeout_ms=timeout_ms)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -3555,47 +2251,13 @@ Workflow:
             Contains sensitive auth tokens - treat as credentials.
         """
 
-        logger.info("Exporting Chrome profile state from profile '%s' to %s", chrome_profile, output_file)
-
-        # Convert Sequence to list for the export function
-        filter_list = list(origins_filter) if origins_filter else None
-
-        # Call the sync export function in a thread
-        result = await asyncio.to_thread(
-            chrome_profile_state_export.export_chrome_profile_state,
+        return await service.export_chrome_profile_state(
             output_file=output_file,
             chrome_profile=chrome_profile,
             include_session_storage=include_session_storage,
             include_indexeddb=include_indexeddb,
-            origins_filter=filter_list,
+            origins_filter=origins_filter,
             live_session_storage_via_applescript=live_session_storage_via_applescript,
-        )
-
-        # Log summary
-        parts = [f'{result.cookie_count} cookies']
-        if result.local_storage_keys > 0:
-            parts.append(f'{result.local_storage_keys} localStorage keys')
-        if result.session_storage_keys > 0:
-            source_label = 'live' if result.session_storage_source == 'live' else 'disk'
-            parts.append(f'{result.session_storage_keys} sessionStorage keys ({source_label})')
-        if result.indexeddb_origins > 0:
-            parts.append(f'{result.indexeddb_origins} IndexedDB origins')
-
-        logger.info('Exported %s across %s origins to %s', ', '.join(parts), result.origin_count, result.path)
-
-        if result.warnings:
-            for warning in result.warnings:
-                logger.warning(warning)
-
-        return ChromeProfileStateExportResult(
-            path=result.path,
-            cookie_count=result.cookie_count,
-            origin_count=result.origin_count,
-            local_storage_keys=result.local_storage_keys,
-            session_storage_keys=result.session_storage_keys,
-            indexeddb_origins=result.indexeddb_origins,
-            session_storage_source=result.session_storage_source,
-            warnings=list(result.warnings),
         )
 
 

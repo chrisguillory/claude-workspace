@@ -25,6 +25,7 @@ from vertexai.preview import tokenization
 
 from document_search.clients import _retry
 from document_search.clients._retry.gemini import GeminiTransientErrorCategory
+from document_search.clients.protocols import TransientErrorCategory
 from document_search.schemas.embeddings import TaskIntent
 
 __all__ = [
@@ -234,6 +235,9 @@ class GeminiClient:
         tokenizer = tokenization.get_tokenizer_for_model(self.EMBEDDING_TO_TOKENIZER[self._model])
         token_sum = sum(tokenizer.count_tokens(t).total_tokens for t in texts)
         return token_sum + 1  # API adds BOS token
+
+    def on_transient_error(self, category: TransientErrorCategory) -> None:
+        """Called from before_sleep on categorized transient errors. No-op by default."""
 
     async def close(self) -> None:
         """No-op: google-genai Client manages its own HTTP lifecycle."""

@@ -130,7 +130,9 @@ exclude = [
     "scratch",
     "tests/linters/edge_cases",  # intentionally bad code — linter test inputs
     "mcp/document-search",  # fastembed not in workspace root venv
+    "mcp/selenium-browser-automation",  # selenium not in workspace root venv
     "tests/document_search",  # imports from mcp/document-search
+    "tests/selenium_browser_automation",  # imports from mcp/selenium-browser-automation
 ]
 
 [[tool.mypy.overrides]]
