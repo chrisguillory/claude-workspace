@@ -15,38 +15,29 @@ from __future__ import annotations
 # Standard Library
 import asyncio
 import contextlib
-import io
 import json
 import logging
 import os
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import types
 import typing
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
-from urllib.parse import parse_qs, urlparse
+from typing import Any, Literal
 
 # Third-Party Libraries
 import fastmcp.exceptions
 import httpx
 from cc_lib.types import JsonObject
-from cc_lib.utils import Timer
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
 
 # Local
-from . import chrome_profile_state_export
-
 # Local imports
-from .helpers import build_storage_init_script
 from .models import (
     # Browser selection
     Browser,
@@ -73,8 +64,6 @@ from .models import (
     ProfileState,
     # Profile state (browser state persistence)
     ProfileStateCookie,
-    ProfileStateIndexedDB,
-    ProfileStateOriginStorage,
     ResizeWindowResult,
     SaveProfileStateResult,
     SetBlockedURLsResult,
@@ -204,77 +193,13 @@ def register_tools(service: BrowserService) -> None:
         file downloads) and cannot be accessed from a different browsing context.
         """
         # Resolve browser: use current if running, otherwise default to 'chromium'
-        if browser is None:
-            browser = service.state.current_browser or 'chromium'
-
-        if not url.startswith(VALID_URL_PREFIXES):
-            raise fastmcp.exceptions.ValidationError(
-                'URL must start with http://, https://, file://, about:, data:, or blob:',
-            )
-
-        if service.state.current_browser is not None and browser != service.state.current_browser and not fresh_browser:
-            raise fastmcp.exceptions.ValidationError(
-                f"Browser changed from '{service.state.current_browser}' to '{browser}'. "
-                'Pass fresh_browser=True to restart with the new browser.',
-            )
-
-        if enable_har_capture and not fresh_browser:
-            raise fastmcp.exceptions.ValidationError(
-                'enable_har_capture requires fresh_browser=True (performance logging must be set at browser init)',
-            )
-
-        if init_scripts and not fresh_browser:
-            raise fastmcp.exceptions.ValidationError(
-                'init_scripts requires fresh_browser=True (scripts must be registered before first navigation)',
-            )
-
-        logger.info(
-            'Navigating to %s%s%s%s',
-            url,
-            ' (fresh browser)' if fresh_browser else '',
-            ' (HAR capture enabled)' if enable_har_capture else '',
-            f' ({len(init_scripts)} init scripts)' if init_scripts else '',
+        return await service.navigate(
+            url=url,
+            fresh_browser=fresh_browser,
+            enable_har_capture=enable_har_capture,
+            init_scripts=init_scripts,
+            browser=browser,
         )
-
-        if fresh_browser:
-            await service.close_browser()
-
-        driver = await service.get_browser(enable_har_capture=enable_har_capture, browser=browser)
-
-        # Install user init scripts (after browser creation, before navigation)
-        # Scripts registered here run on EVERY new document in this session
-        if init_scripts:
-            for script in init_scripts:
-                await asyncio.to_thread(
-                    driver.execute_cdp_cmd,
-                    'Page.addScriptToEvaluateOnNewDocument',
-                    {'source': script},
-                )
-
-        # Install response body capture interceptor for HAR export
-        # Must run BEFORE first navigation to capture all fetch/XHR responses
-        await _install_response_body_capture_if_needed(driver, service, enable_har_capture, 'navigate')
-
-        # PRE-ACTION: Capture localStorage before navigating away
-        # (CDP can't query departed origins - frame is gone after navigation)
-        await _capture_current_origin_storage(service, driver)
-
-        # Navigate (blocking operation)
-        await asyncio.to_thread(driver.get, url)
-
-        # Track the final origin after redirects for multi-origin storage capture
-        final_url = driver.current_url
-        service.state.origin_tracker.add_origin(final_url)
-
-        logger.info('Successfully navigated to %s (tracked origins: %s)', final_url, len(service.state.origin_tracker))
-
-        # Lazy restore: if navigate_with_profile_state() was called previously, restore
-        # storage for current origin. This handles multi-origin sessions where the user
-        # navigates to different origins after the initial session import.
-        # The helper is idempotent and checks restored_origins to avoid double-restore.
-        await _restore_pending_profile_state_for_current_origin(service, driver)
-
-        return NavigationResult(current_url=driver.current_url, title=driver.title)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -347,203 +272,15 @@ def register_tools(service: BrowserService) -> None:
         in the current page context. Blob URLs are ephemeral in-memory resources (PDFs, images,
         file downloads) and cannot be accessed from a different browsing context.
         """
-        timer = Timer()
-
-        # Validate URL
-        if not url.startswith(VALID_URL_PREFIXES):
-            raise fastmcp.exceptions.ValidationError(
-                'URL must start with http://, https://, file://, about:, data:, or blob:',
-            )
-
-        # Validate profile state source - exactly one required
-        has_file = profile_state_file is not None
-        has_chrome = chrome_profile is not None
-
-        if not has_file and not has_chrome:
-            raise fastmcp.exceptions.ValidationError(
-                'Exactly one of profile_state_file or chrome_profile is required. '
-                'Provide a profile state source to import.',
-            )
-
-        if has_file and has_chrome:
-            raise fastmcp.exceptions.ValidationError(
-                'Cannot specify both profile_state_file and chrome_profile. Choose one profile state source.',
-            )
-
-        # Log what we're doing
-        if has_chrome:
-            logger.info(
-                "Importing profile state from Chrome profile '%s' and navigating to %s%s%s%s",
-                chrome_profile,
-                url,
-                f' (filtering: {origins_filter})' if origins_filter else '',
-                ' (HAR capture enabled)' if enable_har_capture else '',
-                f' ({len(init_scripts)} init scripts)' if init_scripts else '',
-            )
-        else:
-            logger.info(
-                'Loading profile state from %s and navigating to %s%s%s%s',
-                profile_state_file,
-                url,
-                f' (filtering: {origins_filter})' if origins_filter else '',
-                ' (HAR capture enabled)' if enable_har_capture else '',
-                f' ({len(init_scripts)} init scripts)' if init_scripts else '',
-            )
-
-        # Load profile state from the appropriate source
-        profile_state: ProfileState
-
-        if has_chrome and chrome_profile:
-            # Export from Chrome profile to temp file, then load
-            # Use TemporaryDirectory as context manager for automatic cleanup
-            with tempfile.TemporaryDirectory(prefix='chrome_profile_state_') as temp_dir:
-                temp_file_path = Path(temp_dir) / 'profile_state.json'
-                filter_list = list(origins_filter) if origins_filter else None
-
-                # Use Python-level stdout redirect to capture ccl_chromium_reader's
-                # "Error decoding..." print statements without affecting MCP's fd-level I/O
-                def _export_with_stdout_captured() -> None:
-                    with contextlib.redirect_stdout(io.StringIO()):
-                        chrome_profile_state_export.export_chrome_profile_state(
-                            output_file=str(temp_file_path),
-                            chrome_profile=chrome_profile,
-                            include_session_storage=True,
-                            include_indexeddb=False,  # IndexedDB schema issues
-                            origins_filter=filter_list,
-                            live_session_storage_via_applescript=live_session_storage_via_applescript,
-                        )
-
-                await asyncio.to_thread(_export_with_stdout_captured)
-                profile_state = await _load_profile_state_from_file(str(temp_file_path))
-
-            logger.info("Exported %s cookies from Chrome profile '%s'", len(profile_state.cookies), chrome_profile)
-
-        elif profile_state_file:
-            # Load from file directly
-            profile_state = await _load_profile_state_from_file(profile_state_file)
-
-            logger.info('Loaded %s cookies from %s', len(profile_state.cookies), profile_state_file)
-
-        else:
-            # This should not happen due to earlier validation
-            raise fastmcp.exceptions.ValidationError('No valid profile state source specified.')
-
-        # Apply origins_filter to loaded profile state if specified
-        if origins_filter and has_file:
-            # Filter cookies
-            filtered_cookies = []
-            for cookie in profile_state.cookies:
-                cookie_domain = cookie.domain.lower().strip('.')
-                for pattern in origins_filter:
-                    pattern_clean = pattern.lower().strip('.')
-                    if cookie_domain == pattern_clean or cookie_domain.endswith('.' + pattern_clean):
-                        filtered_cookies.append(cookie)
-                        break
-
-            # Filter origins (dict-based in new format)
-            filtered_origins: dict[str, ProfileStateOriginStorage] = {}
-            for origin_url, origin_data in profile_state.origins.items():
-                origin_domain = origin_url.lower()
-                # Extract domain from origin URL
-                if '://' in origin_domain:
-                    origin_domain = origin_domain.split('://', 1)[1]
-                    origin_domain = origin_domain.split('/', 1)[0]
-                    origin_domain = origin_domain.split(':', 1)[0]
-
-                for pattern in origins_filter:
-                    pattern_clean = pattern.lower().strip('.')
-                    if origin_domain == pattern_clean or origin_domain.endswith('.' + pattern_clean):
-                        filtered_origins[origin_url] = origin_data
-                        break
-
-            # Create filtered profile state
-            profile_state = ProfileState(
-                cookies=list(filtered_cookies),
-                origins=filtered_origins,
-            )
-
-            logger.info(
-                'Filtered to %s cookies and %s origins matching %s',
-                len(filtered_cookies),
-                len(filtered_origins),
-                origins_filter,
-            )
-
-        # Resolve browser before close_browser() clears current_browser
-        if browser is None:
-            browser = service.state.current_browser or 'chromium'
-
-        # Always start fresh browser for session import
-        await service.close_browser()
-
-        # Get browser with configuration
-        driver = await service.get_browser(enable_har_capture=enable_har_capture, browser=browser)
-
-        # Build and register storage init script for localStorage/sessionStorage
-        # This runs BEFORE page JavaScript on every new document (Playwright-style)
-        storage_init_script = build_storage_init_script(profile_state)
-        if storage_init_script:
-            await asyncio.to_thread(
-                driver.execute_cdp_cmd,
-                'Page.addScriptToEvaluateOnNewDocument',
-                {'source': storage_init_script},
-            )
-            # Count storage entries for logging
-            storage_entry_count = sum(
-                len(origin_data.local_storage or {}) + len(origin_data.session_storage or {})
-                for origin_data in profile_state.origins.values()
-            )
-            logger.info(
-                'Registered storage init script (%s entries across %s origins)',
-                storage_entry_count,
-                len(profile_state.origins),
-            )
-
-        # Install user init scripts (after storage script, before navigation)
-        if init_scripts:
-            for script in init_scripts:
-                await asyncio.to_thread(
-                    driver.execute_cdp_cmd,
-                    'Page.addScriptToEvaluateOnNewDocument',
-                    {'source': script},
-                )
-
-        # Install response body capture interceptor for HAR export
-        # Must run BEFORE first navigation to capture all fetch/XHR responses
-        await _install_response_body_capture_if_needed(
-            driver,
-            service,
-            enable_har_capture,
-            'navigate_with_profile_state',
-        )
-
-        # Inject cookies via CDP BEFORE navigation
-        cookies_injected = await _inject_cookies_via_cdp(driver, profile_state.cookies)
-
-        logger.info('Injected %s cookies via CDP', cookies_injected)
-
-        # PRE-ACTION: Capture localStorage before navigating away
-        await _capture_current_origin_storage(service, driver)
-
-        # Navigate (blocking operation)
-        await asyncio.to_thread(driver.get, url)
-
-        # Track the final origin after redirects
-        final_url = driver.current_url
-        service.state.origin_tracker.add_origin(final_url)
-
-        logger.info('Successfully navigated to %s (tracked origins: %s)', final_url, len(service.state.origin_tracker))
-
-        # Setup lazy restore for localStorage/sessionStorage/IndexedDB
-        await _setup_pending_profile_state(service, profile_state)
-
-        # Restore storage for current origin immediately
-        await _restore_pending_profile_state_for_current_origin(service, driver)
-
-        return NavigationResult(
-            current_url=driver.current_url,
-            title=driver.title,
-            elapsed_seconds=round(timer.elapsed(), 3),
+        return await service.navigate_with_profile_state(
+            url=url,
+            profile_state_file=profile_state_file,
+            chrome_profile=chrome_profile,
+            origins_filter=origins_filter,
+            live_session_storage_via_applescript=live_session_storage_via_applescript,
+            browser=browser,
+            enable_har_capture=enable_har_capture,
+            init_scripts=init_scripts,
         )
 
     @mcp.tool(
@@ -1395,257 +1132,8 @@ Workflow:
         include_response_bodies: bool = False,
         max_body_size_mb: int = 10,
     ) -> HARExportResult:
-        driver = await service.get_browser()
-
-        logger.info('Exporting HAR to %s', filename)
-        errors: list[str] = []
-
-        # Get performance logs (clears buffer - subsequent calls return only newer entries)
-        try:
-            logs = await asyncio.to_thread(driver.get_log, 'performance')
-        except WebDriverException as e:
-            errors.append(f'Failed to get performance logs: {e}')
-            logs = []
-
-        if not logs:
-            logger.info('No performance logs available')
-            har_path = service.state.capture_dir / filename
-            empty_har = {
-                'log': {
-                    'version': '1.2',
-                    'creator': {'name': 'selenium-browser-automation', 'version': '1.0'},
-                    'entries': [],
-                },
-            }
-            har_path.write_text(json.dumps(empty_har, indent=2))
-            return HARExportResult(
-                path=str(har_path),
-                entry_count=0,
-                size_bytes=len(json.dumps(empty_har)),
-                has_errors=True,
-                errors=['No performance logs available. Navigate to pages first.'],
-            )
-
-        # Parse and filter Network.* events
-        transactions: dict[str, dict[str, Any]] = {}
-        for entry in logs:
-            try:
-                log_data = json.loads(entry['message'])
-                message = log_data.get('message', {})
-                method = message.get('method', '')
-                params = message.get('params', {})
-
-                if not method.startswith('Network.'):
-                    continue
-
-                request_id = params.get('requestId')
-                if not request_id:
-                    continue
-
-                if method == 'Network.requestWillBeSent':
-                    req = params.get('request', {})
-                    transactions[request_id] = {
-                        'request': req,
-                        'wall_time': params.get('wallTime'),
-                        'timestamp': params.get('timestamp'),
-                        'initiator': params.get('initiator'),
-                    }
-
-                elif method == 'Network.responseReceived':
-                    if request_id in transactions:
-                        resp = params.get('response', {})
-                        transactions[request_id]['response'] = resp
-                        transactions[request_id]['resource_type'] = params.get('type')
-
-                elif method == 'Network.loadingFinished':
-                    if request_id in transactions:
-                        transactions[request_id]['encoded_data_length'] = params.get('encodedDataLength', 0)
-                        transactions[request_id]['complete'] = True
-
-            except (json.JSONDecodeError, KeyError):
-                continue
-
-        # Convert transactions to HAR entries
-        har_entries = []
-
-        for request_id, txn in transactions.items():
-            if 'response' not in txn:
-                continue  # Skip incomplete transactions
-
-            req = txn.get('request', {})
-            resp = txn.get('response', {})
-            timing = resp.get('timing', {})
-
-            # Convert wallTime (seconds since epoch) to ISO 8601
-            wall_time = txn.get('wall_time')
-            if wall_time:
-                dt = datetime.fromtimestamp(wall_time, tz=UTC)
-                started_datetime = dt.isoformat().replace('+00:00', 'Z')
-            else:
-                started_datetime = datetime.now(UTC).isoformat().replace('+00:00', 'Z')
-
-            # Convert headers dict to HAR array format
-            def headers_to_har(headers_dict: JsonObject | None) -> Sequence[Mapping[str, str]]:
-                if not headers_dict:
-                    return []
-                return [{'name': k, 'value': str(v)} for k, v in headers_dict.items()]
-
-            # Parse query string from URL
-            def parse_query_string(url: str) -> Sequence[Mapping[str, str]]:
-                parsed = urlparse(url)
-                query_params = parse_qs(parsed.query)
-                return [{'name': name, 'value': value} for name, values in query_params.items() for value in values]
-
-            # Convert CDP timing to HAR timing (duration in ms)
-            def convert_timing(timing_obj: JsonObject) -> Mapping[str, float | int]:
-                def safe_duration(start_key: str, end_key: str) -> float | int:
-                    start = timing_obj.get(start_key)
-                    end = timing_obj.get(end_key)
-                    if start is not None and end is not None and start >= 0 and end >= 0:
-                        duration: float = max(0, end - start)
-                        return duration
-                    return -1
-
-                return {
-                    'blocked': -1,  # Not directly available
-                    'dns': safe_duration('dnsStart', 'dnsEnd'),
-                    'connect': safe_duration('connectStart', 'connectEnd'),
-                    'ssl': safe_duration('sslStart', 'sslEnd'),
-                    'send': safe_duration('sendStart', 'sendEnd'),
-                    'wait': safe_duration('sendEnd', 'receiveHeadersEnd'),
-                    'receive': 0,  # Would need loadingFinished timing
-                }
-
-            har_timing = convert_timing(timing)
-
-            # Calculate total time
-            total_time = sum(v for v in har_timing.values() if v >= 0)
-
-            har_entry = {
-                'startedDateTime': started_datetime,
-                'time': total_time,
-                'request': {
-                    'method': req.get('method', 'GET'),
-                    'url': req.get('url', ''),
-                    'httpVersion': resp.get('protocol', 'HTTP/1.1'),
-                    'headers': headers_to_har(req.get('headers', {})),
-                    'queryString': parse_query_string(req.get('url', '')),
-                    'cookies': [],  # Would need to parse from headers
-                    'headersSize': -1,
-                    'bodySize': len(req.get('postData', '')) if req.get('postData') else 0,
-                },
-                'response': {
-                    'status': resp.get('status', 0),
-                    'statusText': resp.get('statusText', ''),
-                    'httpVersion': resp.get('protocol', 'HTTP/1.1'),
-                    'headers': headers_to_har(resp.get('headers', {})),
-                    'cookies': [],
-                    'content': {
-                        'size': resp.get('encodedDataLength', 0),
-                        'mimeType': resp.get('mimeType', ''),
-                    },
-                    'redirectURL': '',
-                    'headersSize': -1,
-                    'bodySize': txn.get('encoded_data_length', -1),
-                },
-                'cache': {},
-                'timings': har_timing,
-                'serverIPAddress': resp.get('remoteIPAddress', ''),
-                'connection': resp.get('connectionId', ''),
-            }
-
-            # Add POST data if present
-            if req.get('postData'):
-                har_entry['request']['postData'] = {
-                    'mimeType': req.get('headers', {}).get('Content-Type', ''),
-                    'text': req.get('postData'),
-                }
-
-            # Fetch response body if requested (configurable size limit)
-            if include_response_bodies:
-                mime_type = resp.get('mimeType', '')
-                body_size = txn.get('encoded_data_length', 0)
-                max_body_bytes = max(1, min(max_body_size_mb, 50)) * 1024 * 1024  # 1-50MB
-                should_fetch = body_size < max_body_bytes and (
-                    'json' in mime_type or 'text' in mime_type or 'xml' in mime_type or 'javascript' in mime_type
-                )
-                if should_fetch:
-                    body_source: str | None = None
-
-                    # First, try CDP getResponseBody (works for static resources)
-                    try:
-                        body_result = await asyncio.to_thread(
-                            driver.execute_cdp_cmd,
-                            'Network.getResponseBody',
-                            {'requestId': request_id},
-                        )
-                        if body_result.get('body'):
-                            har_entry['response']['content']['text'] = body_result['body']
-                            if body_result.get('base64Encoded'):
-                                har_entry['response']['content']['encoding'] = 'base64'
-                            body_source = 'cdp'
-                    except WebDriverException:
-                        # CDP failed - Chrome likely GC'd the response body
-                        # Will try JavaScript interceptor fallback below
-                        pass
-
-                    # Fallback: Check JavaScript interceptor capture
-                    # No try/except here - let programming errors bubble up
-                    if body_source is None and service.state.response_body_capture_enabled:
-                        intercepted = await _lookup_intercepted_body(
-                            driver,
-                            url=req.get('url', ''),
-                            method=req.get('method', 'GET'),
-                            cdp_timestamp=txn.get('wall_time'),
-                        )
-                        if intercepted is not None and intercepted.get('body'):
-                            har_entry['response']['content']['text'] = intercepted['body']
-                            if intercepted.get('base64Encoded'):
-                                har_entry['response']['content']['encoding'] = 'base64'
-                            body_source = 'interceptor'
-                            if intercepted.get('truncated'):
-                                errors.append(f'Response truncated at 10MB: {req.get("url", "")[:80]}')
-
-                    # Report if body unavailable from both sources
-                    if body_source is None:
-                        method = req.get('method', 'GET')
-                        status = resp.get('status', 0)
-                        url_preview = req.get('url', '')[:100]
-
-                        if method == 'OPTIONS':
-                            # CORS preflight - no body expected
-                            errors.append(f'[{method} {status}] CORS preflight: {url_preview}')
-                        elif status == 204:
-                            # HTTP 204 No Content - no body by definition
-                            errors.append(f'[{method} {status}] No Content: {url_preview}')
-                        else:
-                            # Unexpected - we wanted a body but couldn't get it
-                            errors.append(f'[{method} {status}] body unavailable: {url_preview}')
-
-            har_entries.append(har_entry)
-
-        # Build HAR structure
-        har = {
-            'log': {
-                'version': '1.2',
-                'creator': {'name': 'selenium-browser-automation', 'version': '1.0'},
-                'entries': har_entries,
-            },
-        }
-
-        # Save to file
-        har_path = service.state.capture_dir / filename
-        har_json = json.dumps(har, indent=2)
-        har_path.write_text(har_json)
-
-        logger.info('Exported %s entries to %s', len(har_entries), har_path)
-
-        return HARExportResult(
-            path=str(har_path),
-            entry_count=len(har_entries),
-            size_bytes=len(har_json),
-            has_errors=len(errors) > 0,
-            errors=errors,
+        return await service.export_har(
+            filename=filename, include_response_bodies=include_response_bodies, max_body_size_mb=max_body_size_mb
         )
 
     @mcp.tool(
@@ -1749,81 +1237,7 @@ Workflow:
             navigate("https://api.ipify.org")  # Shows proxy IP, not your real IP
             navigate(url, fresh_browser=True)  # Gets NEW IP from proxy pool
         """
-        logger.info('Configuring proxy via mitmproxy: %s:%s', host, port)
-
-        # Close existing browser and mitmproxy
-        await service.close_browser()
-
-        # Stop any existing mitmproxy process
-        if service.state.mitmproxy_process:
-            service.state.mitmproxy_process.terminate()
-            try:
-                service.state.mitmproxy_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                service.state.mitmproxy_process.kill()
-            service.state.mitmproxy_process = None
-
-        # Store proxy config
-        service.state.proxy_config = {
-            'host': host,
-            'port': str(port),
-            'username': username,
-            'password': password,
-        }
-
-        # Start mitmproxy with upstream authentication
-        # mitmproxy handles auth with Bright Data, Chrome connects to localhost:8080
-        upstream_url = f'http://{host}:{port}'
-        upstream_auth = f'{username}:{password}'
-
-        try:
-            service.state.mitmproxy_process = subprocess.Popen(
-                [
-                    'mitmdump',
-                    '--mode',
-                    f'upstream:{upstream_url}',
-                    '--upstream-auth',
-                    upstream_auth,
-                    '--listen-host',
-                    '127.0.0.1',
-                    '--listen-port',
-                    '8080',
-                    '--ssl-insecure',  # Accept upstream proxy's certs
-                    '--quiet',  # Reduce log noise
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            # Give mitmproxy time to start
-            await asyncio.sleep(2)
-
-            # Check if process is still running
-            if service.state.mitmproxy_process.poll() is not None:
-                stderr = (
-                    service.state.mitmproxy_process.stderr.read().decode()
-                    if service.state.mitmproxy_process.stderr
-                    else ''
-                )
-                raise RuntimeError(f'mitmproxy failed to start: {stderr}')
-
-            logger.info('mitmproxy started on localhost:8080')
-
-        except FileNotFoundError:
-            service.state.proxy_config = None
-            raise fastmcp.exceptions.ToolError('mitmproxy not found. Install with: pip install mitmproxy') from None
-        except Exception as e:
-            service.state.proxy_config = None
-            if service.state.mitmproxy_process:
-                service.state.mitmproxy_process.kill()
-                service.state.mitmproxy_process = None
-            raise fastmcp.exceptions.ToolError(f'Failed to start mitmproxy: {e}') from e
-
-        return ConfigureProxyResult(
-            status='proxy_configured',
-            host=host,
-            port=port,
-            note='Browser will use this proxy on next navigate()',
-        )
+        return await service.configure_proxy(host=host, port=port, username=username, password=password)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -2006,185 +1420,7 @@ Workflow:
             - Tokens may expire between save and restore - re-authenticate if needed
         """
 
-        driver = service.state.driver
-        if driver is None:
-            raise fastmcp.exceptions.ToolError('Browser not initialized. Call navigate() first to establish a session.')
-
-        logger.info('Exporting storage state to %s', filename)
-
-        # Get all cookies via CDP Network.getCookies
-        cookies_result = await asyncio.to_thread(
-            driver.execute_cdp_cmd,
-            'Network.getCookies',
-            {},  # Empty = get all cookies
-        )
-
-        cdp_cookies = cookies_result.get('cookies', [])
-
-        # Convert CDP cookies to ProfileStateCookie models
-        profile_cookies: list[ProfileStateCookie] = []
-        for cookie in cdp_cookies:
-            is_session = cookie.get('session', False)
-            expires = -1.0 if is_session else cookie.get('expires', -1.0)
-
-            same_site = cookie.get('sameSite', 'Lax')
-            if same_site not in ('Strict', 'Lax', 'None'):
-                same_site = 'Lax'
-
-            profile_cookies.append(
-                ProfileStateCookie(
-                    name=cookie['name'],
-                    value=cookie['value'],
-                    domain=cookie['domain'],
-                    path=cookie['path'],
-                    expires=expires,
-                    http_only=cookie.get('httpOnly', False),
-                    secure=cookie.get('secure', False),
-                    same_site=same_site,
-                ),
-            )
-
-        # Get current origin (for result metadata)
-        current_origin = await asyncio.to_thread(driver.execute_script, 'return window.location.origin')
-
-        # =================================================================
-        # Multi-Origin Storage Capture (localStorage + sessionStorage)
-        # =================================================================
-        # CDP DOMStorage.getDOMStorageItems requires an active frame for the origin.
-        # For departed origins (navigated away), we use the cached data captured
-        # during navigate(). For the current origin, we query CDP directly.
-        # =================================================================
-
-        tracked_origins = service.state.origin_tracker.get_origins()
-        await _cdp_enable_domstorage(driver)
-
-        # Build origins as dict[str, ProfileStateOriginStorage]
-        origins_data: dict[str, ProfileStateOriginStorage] = {}
-        total_localstorage_items = 0
-        total_sessionstorage_items = 0
-        indexeddb_databases_count = 0
-        indexeddb_records_count = 0
-
-        for origin in tracked_origins:
-            if origin.startswith(('chrome://', 'about:', 'data:', 'blob:', 'file://')):
-                continue
-
-            # Capture localStorage: cache for departed origins, CDP for current
-            if origin == current_origin:
-                local_storage_items = await _cdp_get_storage(driver, origin, is_local=True)
-            elif origin in service.state.local_storage_cache:
-                local_storage_items = service.state.local_storage_cache[origin]
-            else:
-                local_storage_items = []
-
-            # Capture sessionStorage: cache for departed origins, CDP for current
-            if origin == current_origin:
-                session_storage_items = await _cdp_get_storage(driver, origin, is_local=False)
-            elif origin in service.state.session_storage_cache:
-                session_storage_items = service.state.session_storage_cache[origin]
-            else:
-                session_storage_items = []
-
-            # Capture IndexedDB if requested
-            indexeddb_databases: list[dict[str, Any]] = []
-            if include_indexeddb:
-                if origin == current_origin:
-                    async_wrapper = f"""
-                        var callback = arguments[arguments.length - 1];
-                        (function() {{ {INDEXEDDB_CAPTURE_SCRIPT} }})()
-                            .then(function(r) {{ callback(r); }})
-                            .catch(function(e) {{ callback([]); }});
-                    """
-                    indexeddb_result = await asyncio.to_thread(driver.execute_async_script, async_wrapper)
-                    # execute_async_script returns Any; cast to expected JS structure
-                    indexeddb_databases = cast(list[dict[str, Any]], indexeddb_result) if indexeddb_result else []
-                elif origin in service.state.indexed_db_cache:
-                    indexeddb_databases = service.state.indexed_db_cache[origin]
-
-            # Only add origin if it has any storage
-            if local_storage_items or session_storage_items or indexeddb_databases:
-                # Convert array of {name, value} to dict[str, str]
-                local_storage_dict = {item['name']: item['value'] for item in local_storage_items}
-                session_storage_dict = (
-                    {item['name']: item['value'] for item in session_storage_items} if session_storage_items else None
-                )
-
-                # Validate raw JS dicts through Pydantic model
-                validated_indexeddb: list[ProfileStateIndexedDB] | None = (
-                    [ProfileStateIndexedDB.model_validate(db) for db in indexeddb_databases]
-                    if indexeddb_databases
-                    else None
-                )
-
-                origins_data[origin] = ProfileStateOriginStorage(
-                    local_storage=local_storage_dict,
-                    session_storage=session_storage_dict,
-                    indexed_db=validated_indexeddb,
-                )
-
-                total_localstorage_items += len(local_storage_items)
-                total_sessionstorage_items += len(session_storage_items)
-
-                # Count IndexedDB for metadata
-                if indexeddb_databases:
-                    for db in indexeddb_databases:
-                        indexeddb_databases_count += 1
-                        for store in db.get('objectStores', []):
-                            indexeddb_records_count += len(store.get('records', []))
-
-        # Build log message parts
-        log_storage_parts = [
-            f'{total_localstorage_items} localStorage',
-            f'{total_sessionstorage_items} sessionStorage',
-        ]
-        if include_indexeddb:
-            log_storage_parts.append(f'{indexeddb_databases_count} IndexedDB databases')
-
-        logger.info(
-            'Captured storage: %s across %s origins (of %s tracked)',
-            ' + '.join(log_storage_parts),
-            len(origins_data),
-            len(tracked_origins),
-        )
-
-        # Build ProfileState with typed models
-        profile_state = ProfileState(
-            cookies=profile_cookies,
-            origins=origins_data,
-        )
-
-        # Determine file path (allow absolute or relative to cwd)
-        file_path = Path(filename)
-        if not file_path.is_absolute():
-            file_path = Path.cwd() / filename
-
-        # Save to file (by_alias=True for camelCase IndexedDB fields for JS compatibility)
-        json_content = profile_state.model_dump_json(indent=2, by_alias=True)
-        file_path.write_text(json_content)
-
-        result = SaveProfileStateResult(
-            path=str(file_path),
-            cookies_count=len(profile_cookies),
-            origins_count=len(origins_data),
-            current_origin=current_origin,
-            size_bytes=len(json_content),
-            indexeddb_databases_count=indexeddb_databases_count if include_indexeddb else None,
-            indexeddb_records_count=indexeddb_records_count if include_indexeddb else None,
-            tracked_origins=tracked_origins,
-        )
-
-        # Build log message
-        log_parts = [
-            f'Saved {result.cookies_count} cookies',
-            f'{total_localstorage_items} localStorage + {total_sessionstorage_items} sessionStorage items '
-            f'across {len(origins_data)} origins',
-        ]
-        if include_indexeddb and indexeddb_databases_count > 0:
-            log_parts.append(f'{indexeddb_databases_count} IndexedDB databases ({indexeddb_records_count} records)')
-
-        logger.info('%s for %s to %s (%s bytes)', ' + '.join(log_parts), current_origin, file_path, result.size_bytes)
-
-        return result
+        return await service.save_profile_state(filename=filename, include_indexeddb=include_indexeddb)
 
     @mcp.tool(
         annotations=ToolAnnotations(
