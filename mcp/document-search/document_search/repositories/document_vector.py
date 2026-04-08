@@ -114,11 +114,12 @@ class DocumentVectorRepository:
             await self._client.upsert(self._collection_name, batch)
         return len(points)
 
-    async def search(self, query: SearchQuery) -> SearchResult:
+    async def search(self, query: SearchQuery, *, search_timeout: int | None = None) -> SearchResult:
         """Search documents using configurable strategy.
 
         Args:
             query: Typed search query with vectors, filters, and search_type.
+            search_timeout: Qdrant gRPC timeout in seconds. None uses client default.
 
         Returns:
             Typed search results.
@@ -141,6 +142,7 @@ class DocumentVectorRepository:
             limit=fetch_limit,
             score_threshold=query.score_threshold,
             file_types=file_types,
+            timeout=search_timeout,
         )
 
         # Post-filter by source_path_prefix if specified

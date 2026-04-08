@@ -91,7 +91,7 @@ class QdrantClient:
     # - Timeout doubled from default 5s to handle large batch upserts under load
     # - Must pass explicit limits to override qdrant-client's localhost defaults
     #   which disable keep-alive (max_keepalive_connections=0)
-    DEFAULT_TIMEOUT = 10
+    DEFAULT_TIMEOUT = 60
     DEFAULT_POOL_SIZE = (os.cpu_count() or 8) * 2
 
     def __init__(
@@ -244,6 +244,7 @@ class QdrantClient:
         limit: int = 10,
         score_threshold: float | None = None,
         file_types: Sequence[str] | None = None,
+        timeout: int | None = None,
     ) -> Sequence[SearchResultDict]:
         """Search with configurable strategy.
 
@@ -289,6 +290,7 @@ class QdrantClient:
                 limit=limit,
                 score_threshold=score_threshold,
                 query_filter=query_filter,
+                timeout=timeout,
             )
         elif search_type == 'embedding':
             # Dense vectors only - neural similarity
@@ -301,6 +303,7 @@ class QdrantClient:
                 limit=limit,
                 score_threshold=score_threshold,
                 query_filter=query_filter,
+                timeout=timeout,
             )
         else:
             # Hybrid: RRF fusion of dense + sparse (default)
@@ -328,6 +331,7 @@ class QdrantClient:
                 query=FusionQuery(fusion=Fusion.RRF),
                 limit=limit,
                 score_threshold=score_threshold,
+                timeout=timeout,
             )
 
         return [
