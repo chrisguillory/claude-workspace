@@ -43,6 +43,7 @@ __all__ = [
     'ProfileStateIndexedDBObjectStore',
     'ProfileStateIndexedDBRecord',
     'ProfileStateOriginStorage',
+    'ProxyConfig',
     'RequestTiming',
     'ResizeWindowResult',
     'ResourceCapture',
@@ -809,6 +810,15 @@ class ResizeWindowResult(ClosedModel):
 
     width: int
     height: int
+
+
+class ProxyConfig(ClosedModel):
+    """Proxy configuration for mitmproxy upstream authentication."""
+
+    host: str
+    port: int
+    username: str
+    password: str
 
 
 class ConfigureProxyResult(ClosedModel):

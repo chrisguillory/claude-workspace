@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 from selenium import webdriver
 
-from .models import Browser, ProfileState
+from .models import Browser, ProfileState, ProxyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class BrowserState:
         self.capture_temp_dir = capture_temp_dir
         self.capture_dir = capture_dir
         self.capture_counter = capture_counter
-        self.proxy_config: dict[str, str] | None = None
+        self.proxy_config: ProxyConfig | None = None
         self.mitmproxy_process: subprocess.Popen[bytes] | None = None
         self.origin_tracker = OriginTracker()
         self.local_storage_cache: dict[str, list[dict[str, str]]] = {}

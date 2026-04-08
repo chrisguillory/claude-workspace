@@ -16,6 +16,7 @@ The lock only guards CLI-vs-CLI interleaving, not MCP-vs-CLI.
 from __future__ import annotations
 
 __all__ = [
+    'BridgeError',
     'PipelineRequest',
     'PipelineResponse',
     'PipelineStep',
@@ -48,6 +49,13 @@ type OnErrorPolicy = Literal['stop', 'continue']
 # -- Request/Response models --
 
 
+class BridgeError(ClosedModel):
+    """Structured error from bridge dispatch."""
+
+    type: str
+    message: str
+
+
 class ToolRequest(ClosedModel):
     """Single tool invocation request."""
 
@@ -61,7 +69,7 @@ class ToolResponse(ClosedModel):
     status: ToolStatus
     result: Any = None  # strict_typing_linter.py: loose-typing — tool results vary per tool
     elapsed_ms: int = 0
-    error: Mapping[str, str] | None = None
+    error: BridgeError | None = None
 
 
 class PipelineStep(ClosedModel):
@@ -86,7 +94,7 @@ class StepResult(ClosedModel):
     status: StepStatus
     elapsed_ms: int = 0
     result: Any = None  # strict_typing_linter.py: loose-typing — tool results vary per tool
-    error: Mapping[str, str] | None = None
+    error: BridgeError | None = None
 
 
 class PipelineResponse(ClosedModel):
@@ -124,7 +132,7 @@ def create_bridge_app(service: BrowserService, lock: asyncio.Lock) -> fastapi.Fa
                 return ToolResponse(
                     status='error',
                     elapsed_ms=elapsed,
-                    error={'type': type(e).__name__, 'message': str(e)},
+                    error=BridgeError(type=type(e).__name__, message=str(e)),
                 )
             except (
                 Exception
@@ -134,7 +142,7 @@ def create_bridge_app(service: BrowserService, lock: asyncio.Lock) -> fastapi.Fa
                 return ToolResponse(
                     status='error',
                     elapsed_ms=elapsed,
-                    error={'type': type(e).__name__, 'message': str(e)},
+                    error=BridgeError(type=type(e).__name__, message=str(e)),
                 )
 
     @app.post('/pipeline')
@@ -171,7 +179,7 @@ def create_bridge_app(service: BrowserService, lock: asyncio.Lock) -> fastapi.Fa
                             tool=step.tool,
                             status='error',
                             elapsed_ms=step_elapsed,
-                            error={'type': type(e).__name__, 'message': str(e)},
+                            error=BridgeError(type=type(e).__name__, message=str(e)),
                         )
                     )
 

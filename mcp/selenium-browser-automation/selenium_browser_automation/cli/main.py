@@ -287,6 +287,243 @@ def export_har(
     _print_result(result, format)
 
 
+@app.command('navigate-with-profile-state', rich_help_panel='Navigation')
+@error_boundary
+def navigate_with_profile_state(
+    url: Annotated[str, typer.Argument(help='URL to navigate to after profile state import.')],
+    profile_state_file: Annotated[
+        str | None, typer.Option('--profile-state-file', help='Path to ProfileState JSON.')
+    ] = None,
+    chrome_profile: Annotated[str | None, typer.Option('--chrome-profile', help='Chrome profile name.')] = None,
+    origin: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str] | None, typer.Option('--origin', help='Filter origins (repeatable).')
+    ] = None,
+    live_session_storage: Annotated[
+        bool,
+        typer.Option(
+            '--live-session-storage/--no-live-session-storage', help='Extract live sessionStorage via AppleScript.'
+        ),
+    ] = False,
+    browser: Annotated[str | None, typer.Option('--browser', '-b', help='chrome or chromium.')] = None,
+    har: Annotated[bool, typer.Option('--har', help='Enable HAR capture.')] = False,
+    init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')
+    ] = None,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Navigate with imported profile state (cookies, localStorage)."""
+    result = _call_tool(
+        'navigate_with_profile_state',
+        url=url,
+        profile_state_file=profile_state_file,
+        chrome_profile=chrome_profile,
+        origins_filter=origin,
+        live_session_storage_via_applescript=live_session_storage,
+        browser=browser,
+        enable_har_capture=har,
+        init_scripts=init_script,
+    )
+    _print_result(result, format)
+
+
+@app.command('get-visual-tree', rich_help_panel='Content')
+@error_boundary
+def get_visual_tree(
+    selector: Annotated[str, typer.Argument(help='CSS selector scope.')] = 'body',
+    urls: Annotated[bool, typer.Option('--urls', help='Include href values.')] = False,
+    hidden: Annotated[bool, typer.Option('--hidden', help='Include hidden elements.')] = False,
+    compact: Annotated[bool, typer.Option('--compact/--no-compact', help='Remove structural noise.')] = True,
+    page_info: Annotated[bool, typer.Option('--page-info', help='Show extended page stats.')] = False,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Get visual tree (what sighted users see)."""
+    result = _call_tool(
+        'get_visual_tree',
+        selector=selector,
+        include_urls=urls,
+        include_hidden=hidden,
+        compact_tree=compact,
+        include_page_info=page_info,
+    )
+    _print_result(result, format)
+
+
+@app.command('get-focusable-elements', rich_help_panel='Content')
+@error_boundary
+def get_focusable_elements(
+    only_tabbable: Annotated[bool, typer.Option('--only-tabbable/--all', help='Tab-key-only vs all focusable.')] = True,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Get keyboard-navigable elements."""
+    result = _call_tool('get_focusable_elements', only_tabbable=only_tabbable)
+    _print_result(result, format)
+
+
+@app.command('download-resource', rich_help_panel='Content')
+@error_boundary
+def download_resource(
+    url: Annotated[str, typer.Argument(help='URL to download (http/https/file).')],
+    output_filename: Annotated[str, typer.Argument(help='Filename to save as.')],
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Download a resource using browser session cookies."""
+    result = _call_tool('download_resource', url=url, output_filename=output_filename)
+    _print_result(result, format)
+
+
+@app.command('resize-window', rich_help_panel='Interaction')
+@error_boundary
+def resize_window(
+    width: Annotated[int, typer.Argument(help='Window width in pixels.')],
+    height: Annotated[int, typer.Argument(help='Window height in pixels.')],
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Resize the browser window."""
+    result = _call_tool('resize_window', width=width, height=height)
+    _print_result(result, format)
+
+
+@app.command('sleep', rich_help_panel='Wait')
+@error_boundary
+def sleep_cmd(
+    duration: Annotated[int, typer.Argument(help='Duration in milliseconds.')],
+    reason: Annotated[str | None, typer.Option('--reason', help='Context for the delay.')] = None,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Pause execution for a fixed duration."""
+    result = _call_tool('sleep', duration_ms=duration, reason=reason)
+    _print_result(result, format)
+
+
+@app.command('get-resource-timings', rich_help_panel='Capture')
+@error_boundary
+def get_resource_timings(
+    clear_buffer: Annotated[bool, typer.Option('--clear-buffer', help='Clear timing buffer after retrieval.')] = False,
+    min_duration: Annotated[
+        int, typer.Option('--min-duration', help='Only include requests slower than this (ms).')
+    ] = 0,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Get resource timing data from Performance API."""
+    result = _call_tool('get_resource_timings', clear_resource_timing_buffer=clear_buffer, min_duration_ms=min_duration)
+    _print_result(result, format)
+
+
+@app.command('get-console-logs', rich_help_panel='Capture')
+@error_boundary
+def get_console_logs(
+    level: Annotated[str | None, typer.Option('--level', help='Filter: ALL, SEVERE, WARNING, INFO.')] = None,
+    pattern: Annotated[str | None, typer.Option('--pattern', help='Regex pattern to filter messages.')] = None,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Get browser console logs."""
+    result = _call_tool('get_console_logs', level_filter=level, pattern=pattern)
+    _print_result(result, format)
+
+
+# -- Profile State commands --
+
+
+@app.command('list-chrome-profiles', rich_help_panel='Profile State')
+@error_boundary
+def list_chrome_profiles(
+    verbose: Annotated[bool, typer.Option('--verbose/--no-verbose', help='Include all metadata.')] = False,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """List Chrome profiles with metadata."""
+    result = _call_tool('list_chrome_profiles', verbose=verbose)
+    _print_result(result, format)
+
+
+@app.command('save-profile-state', rich_help_panel='Profile State')
+@error_boundary
+def save_profile_state(
+    filename: Annotated[str, typer.Argument(help='Output filename (e.g., auth.json).')],
+    include_indexeddb: Annotated[
+        bool, typer.Option('--include-indexeddb/--no-include-indexeddb', help='Capture IndexedDB databases.')
+    ] = False,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Save browser storage state to JSON for session persistence."""
+    result = _call_tool('save_profile_state', filename=filename, include_indexeddb=include_indexeddb)
+    _print_result(result, format)
+
+
+@app.command('export-chrome-profile-state', rich_help_panel='Profile State')
+@error_boundary
+def export_chrome_profile_state(
+    output_file: Annotated[str, typer.Argument(help='Output JSON filename.')],
+    chrome_profile: Annotated[str, typer.Option('--chrome-profile', help='Chrome profile name.')] = 'Default',
+    include_session_storage: Annotated[
+        bool, typer.Option('--include-session-storage/--no-include-session-storage', help='Include sessionStorage.')
+    ] = True,
+    include_indexeddb: Annotated[
+        bool, typer.Option('--include-indexeddb/--no-include-indexeddb', help='Include IndexedDB.')
+    ] = False,
+    origin: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str] | None, typer.Option('--origin', help='Filter origins (repeatable).')
+    ] = None,
+    live_session_storage: Annotated[
+        bool,
+        typer.Option(
+            '--live-session-storage/--no-live-session-storage', help='Extract live sessionStorage via AppleScript.'
+        ),
+    ] = False,
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Export profile state from Chrome's profile files."""
+    result = _call_tool(
+        'export_chrome_profile_state',
+        output_file=output_file,
+        chrome_profile=chrome_profile,
+        include_session_storage=include_session_storage,
+        include_indexeddb=include_indexeddb,
+        origins_filter=origin,
+        live_session_storage_via_applescript=live_session_storage,
+    )
+    _print_result(result, format)
+
+
+# -- Proxy commands --
+
+
+@app.command('configure-proxy', rich_help_panel='Proxy')
+@error_boundary
+def configure_proxy(
+    host: Annotated[str, typer.Argument(help='Proxy host (e.g., brd.superproxy.io).')],
+    port: Annotated[int, typer.Argument(help='Proxy port (e.g., 33335).')],
+    username: Annotated[str, typer.Argument(help='Proxy username.')],
+    password: Annotated[str, typer.Argument(help='Proxy password.')],
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Configure authenticated HTTP proxy via mitmproxy."""
+    result = _call_tool('configure_proxy', host=host, port=port, username=username, password=password)
+    _print_result(result, format)
+
+
+@app.command('clear-proxy', rich_help_panel='Proxy')
+@error_boundary
+def clear_proxy(
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Clear proxy and return to direct connection."""
+    result = _call_tool('clear_proxy')
+    _print_result(result, format)
+
+
+@app.command('set-blocked-urls', rich_help_panel='Proxy')
+@error_boundary
+def set_blocked_urls(
+    url: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str], typer.Option('--url', help='URL pattern to block (repeatable). Empty list clears.')
+    ],
+    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Block network requests matching URL patterns."""
+    result = _call_tool('set_blocked_urls', urls=url)
+    _print_result(result, format)
+
+
 # -- Batch command --
 
 

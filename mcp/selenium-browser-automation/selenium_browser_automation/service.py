@@ -72,6 +72,7 @@ from .models import (
     ProfileStateCookie,
     ProfileStateIndexedDB,
     ProfileStateOriginStorage,
+    ProxyConfig,
     RequestTiming,
     ResizeWindowResult,
     SaveProfileStateResult,
@@ -212,9 +213,7 @@ class BrowserService:
         if self.state.proxy_config and self.state.mitmproxy_process:
             opts.add_argument('--proxy-server=http://127.0.0.1:8080')
             opts.add_argument('--ignore-certificate-errors')  # mitmproxy uses self-signed certs
-            logger.info(
-                'Using local mitmproxy -> %s:%s', self.state.proxy_config['host'], self.state.proxy_config['port']
-            )
+            logger.info('Using local mitmproxy -> %s:%s', self.state.proxy_config.host, self.state.proxy_config.port)
 
         # Initialize driver in thread pool (blocking operation)
         self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
@@ -2985,12 +2984,7 @@ class BrowserService:
             self.state.mitmproxy_process = None
 
         # Store proxy config
-        self.state.proxy_config = {
-            'host': host,
-            'port': str(port),
-            'username': username,
-            'password': password,
-        }
+        self.state.proxy_config = ProxyConfig(host=host, port=port, username=username, password=password)
 
         # Start mitmproxy with upstream authentication
         # mitmproxy handles auth with Bright Data, Chrome connects to localhost:8080
