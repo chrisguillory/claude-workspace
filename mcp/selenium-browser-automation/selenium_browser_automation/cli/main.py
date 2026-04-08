@@ -32,21 +32,6 @@ add_completion_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
-# -- App callback --
-
-
-@app.callback(invoke_without_command=True)
-def _configure_logging(
-    ctx: typer.Context,
-    verbose: Annotated[bool, typer.Option('--verbose', '-v', help='Show detailed output')] = False,
-) -> None:
-    """Configure logging and show help when no command given."""
-    level = logging.INFO if verbose else logging.WARNING
-    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
-
-
 # -- Navigation commands --
 
 
@@ -586,6 +571,18 @@ def main() -> None:
 
 
 # -- Private helpers --
+
+
+@app.callback(invoke_without_command=True)
+def _configure_logging(
+    ctx: typer.Context,
+    verbose: Annotated[bool, typer.Option('--verbose', '-v', help='Show detailed output')] = False,
+) -> None:
+    """Configure logging and show help when no command given."""
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
 
 
 def _get_socket_path() -> pathlib.Path:
