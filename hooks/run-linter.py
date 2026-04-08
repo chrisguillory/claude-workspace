@@ -76,8 +76,13 @@ def main() -> int:
     payload = PostToolUseHookInput.model_validate_json(sys.stdin.buffer.read())
     file_path = payload.tool_input.get('file_path', '')
 
-    # Only lint Python files.
-    if not file_path.endswith('.py'):
+    # File-type gate: Python sources only (.py, .pyi).
+    # This lives here — not in the settings.json `if` pattern — because Claude Code's
+    # hook `if` uses a custom regex matcher (not glob): `*` becomes `.*`, but brace
+    # expansion, character classes, and extglob are all escaped to literals.
+    # Matching `.py` + `.pyi` would require duplicate hook entries per extension.
+    # Centralizing here keeps settings.json clean and supports both extensions.
+    if not file_path.endswith(('.py', '.pyi')):
         return 0
 
     # Skip if the file doesn't exist (e.g., deleted).

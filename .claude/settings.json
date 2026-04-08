@@ -4,21 +4,21 @@
       {
         "matcher": "Edit",
         "hooks": [
-          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/exception_safety_linter.py" },
-          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/reexport_linter.py" },
-          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/strict_typing_linter.py" },
-          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/suppression_rationale_linter.py" },
-          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/uv_script_linter.py" }
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/exception_safety_linter.py" },
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/reexport_linter.py" },
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/strict_typing_linter.py" },
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/suppression_rationale_linter.py" },
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/uv_script_linter.py" }
         ]
       },
       {
         "matcher": "Write",
         "hooks": [
-          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/exception_safety_linter.py" },
-          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/reexport_linter.py" },
-          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/strict_typing_linter.py" },
-          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/suppression_rationale_linter.py" },
-          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/uv_script_linter.py" }
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/exception_safety_linter.py" },
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/reexport_linter.py" },
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/strict_typing_linter.py" },
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/suppression_rationale_linter.py" },
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/run-linter.py \"$CLAUDE_PROJECT_DIR\"/linters/uv_script_linter.py" }
         ]
       }
     ]
