@@ -1,15 +1,15 @@
-"""Unit tests for _count_tree_nodes and _build_page_metadata."""
+"""Unit tests for count_tree_nodes and build_page_metadata."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
 
-from selenium_browser_automation.server import (
-    _ARIA_HIDDEN_REASON_KEYS,
-    _VISUAL_HIDDEN_REASON_KEYS,
-    _build_page_metadata,
-    _count_tree_nodes,
+from selenium_browser_automation.helpers import (
+    ARIA_HIDDEN_REASON_KEYS,
+    VISUAL_HIDDEN_REASON_KEYS,
+    build_page_metadata,
+    count_tree_nodes,
 )
 
 # --- _count_tree_nodes ---
@@ -17,13 +17,13 @@ from selenium_browser_automation.server import (
 
 class TestCountTreeNodes:
     def test_none_returns_zero(self) -> None:
-        assert _count_tree_nodes(None) == 0
+        assert count_tree_nodes(None) == 0
 
     def test_single_node(self) -> None:
-        assert _count_tree_nodes({'role': 'button', 'name': 'Click'}) == 1
+        assert count_tree_nodes({'role': 'button', 'name': 'Click'}) == 1
 
     def test_text_node(self) -> None:
-        assert _count_tree_nodes({'type': 'text', 'content': 'hello'}) == 1
+        assert count_tree_nodes({'type': 'text', 'content': 'hello'}) == 1
 
     def test_parent_with_children(self) -> None:
         tree: dict[str, Any] = {
@@ -34,7 +34,7 @@ class TestCountTreeNodes:
                 {'role': 'listitem', 'name': 'C'},
             ],
         }
-        assert _count_tree_nodes(tree) == 4  # parent + 3 children
+        assert count_tree_nodes(tree) == 4  # parent + 3 children
 
     def test_nested_tree(self) -> None:
         tree: dict[str, Any] = {
@@ -50,13 +50,13 @@ class TestCountTreeNodes:
             ],
         }
         # nav(1) > list(1) > [listitem(1) > text(1), listitem(1) > text(1)] = 6
-        assert _count_tree_nodes(tree) == 6
+        assert count_tree_nodes(tree) == 6
 
     def test_no_children_key(self) -> None:
-        assert _count_tree_nodes({'role': 'img', 'name': 'Logo'}) == 1
+        assert count_tree_nodes({'role': 'img', 'name': 'Logo'}) == 1
 
     def test_empty_children(self) -> None:
-        assert _count_tree_nodes({'role': 'div', 'children': []}) == 1
+        assert count_tree_nodes({'role': 'div', 'children': []}) == 1
 
 
 # --- _build_page_metadata ---
@@ -93,7 +93,7 @@ class TestBuildPageMetadataTier1:
 
     def test_visual_hidden_reasons(self) -> None:
         stats = {'hidden': {'total': 4, 'opacity': 2, 'clipped': 1, 'offscreen': 1}}
-        result = _meta(page_stats=stats, hidden_reason_keys=_VISUAL_HIDDEN_REASON_KEYS)
+        result = _meta(page_stats=stats, hidden_reason_keys=VISUAL_HIDDEN_REASON_KEYS)
         assert 'opacity: 2' in result
         assert 'clipped: 1' in result
         assert 'offscreen: 1' in result
@@ -208,10 +208,10 @@ def _meta(
     compact_tree: bool = False,
     raw_node_count: int = 0,
     compacted_node_count: int = 0,
-    hidden_reason_keys: Sequence[tuple[str, str]] = _ARIA_HIDDEN_REASON_KEYS,
+    hidden_reason_keys: Sequence[tuple[str, str]] = ARIA_HIDDEN_REASON_KEYS,
 ) -> str:
     """Helper to call _build_page_metadata with sensible defaults."""
-    return _build_page_metadata(
+    return build_page_metadata(
         page_stats=page_stats or {},
         include_page_info=include_page_info,
         include_urls=include_urls,

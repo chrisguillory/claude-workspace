@@ -1,11 +1,12 @@
 [project]
 name = "selenium-browser-automation-mcp"
-version = "0.6.2"
+version = "0.7.0"
 description = "Selenium Browser Automation MCP Server - CDP stealth injection for Cloudflare bypass"
 requires-python = ">=3.13"
 dependencies = [
     "ccl-chromium-reader",
     "dfindexeddb>=20251109",
+    "fastapi>=0.124.0",
     "fastmcp>=2.12.5",
     "httpx",
     "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
@@ -13,10 +14,12 @@ dependencies = [
     "pydantic>=2.0.0",
     "pyyaml",
     "selenium",
+    "uvicorn>=0.38.0",
 ]
 
 [project.scripts]
 mcp-selenium-browser-automation-server = "selenium_browser_automation.server:main"
+selenium-browser-automation = "selenium_browser_automation.cli.main:main"
 
 [tool.hatch.build]
 # Package directory to include in distribution
