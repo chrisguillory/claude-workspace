@@ -515,8 +515,8 @@ def clear_proxy(
 @error_boundary
 def set_blocked_urls(
     url: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
-        list[str], typer.Option('--url', help='URL pattern to block (repeatable). Empty list clears.')
-    ],
+        list[str], typer.Option('--url', help='URL pattern to block (repeatable). No flags = clear all.')
+    ] = [],  # noqa: B006 — Typer creates fresh list per invocation
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Block network requests matching URL patterns."""
