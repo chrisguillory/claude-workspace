@@ -19,23 +19,29 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.hooks import SessionEndHookInput
 from cc_lib.session_tracker import SessionManager
 from cc_lib.utils import Timer
 
-# Start timing
-timer = Timer()
+boundary = ErrorBoundary(exit_code=2)
 
-# Read and validate hook input from stdin
-hook_data = SessionEndHookInput.model_validate_json(sys.stdin.read())
 
-# Update session tracking (atomic with file locking)
-with SessionManager(hook_data.cwd) as manager:
-    if Path(hook_data.transcript_path).exists():
-        manager.end_session(hook_data.session_id, reason=hook_data.reason)
-        print(f'Completed in {timer.elapsed_ms()} ms')
-        print(f'session_id: {hook_data.session_id}')
-        print(repr(hook_data))
-    else:
-        manager.remove_empty_session(hook_data.session_id, hook_data.transcript_path)
-        print(f'Session {hook_data.session_id} removed (no transcript) in {timer.elapsed_ms()} ms')
+@boundary
+def main() -> None:
+    timer = Timer()
+    hook_data = SessionEndHookInput.model_validate_json(sys.stdin.read())
+
+    with SessionManager(hook_data.cwd) as manager:
+        if Path(hook_data.transcript_path).exists():
+            manager.end_session(hook_data.session_id, reason=hook_data.reason)
+            print(f'Completed in {timer.elapsed_ms()} ms')
+            print(f'session_id: {hook_data.session_id}')
+            print(repr(hook_data))
+        else:
+            manager.remove_empty_session(hook_data.session_id, hook_data.transcript_path)
+            print(f'Session {hook_data.session_id} removed (no transcript) in {timer.elapsed_ms()} ms')
+
+
+if __name__ == '__main__':
+    main()

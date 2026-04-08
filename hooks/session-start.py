@@ -17,133 +17,106 @@ See: https://code.claude.com/docs/en/hooks#sessionstart
 # ///
 from __future__ import annotations
 
-import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 import packaging.version
 import psutil
+from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.phantom import PhantomHandler
+from cc_lib.schemas.base import SubsetModel
 from cc_lib.schemas.hooks import SessionStartHookInput
 from cc_lib.session_tracker import SessionManager, find_claude_pid
 from cc_lib.utils import Timer
 
-# Start timing
-timer = Timer()
+boundary = ErrorBoundary(exit_code=2)
 
 
-def get_claude_version(claude_pid: int) -> str:
-    """Extract Claude Code version from the running process's executable path.
+@boundary
+def main() -> None:
+    timer = Timer()
+    hook_data = SessionStartHookInput.model_validate_json(sys.stdin.read())
+    project_dir = hook_data.cwd
 
-    Uses psutil to get the actual executable path of the Claude process,
-    which contains the version (e.g., ~/.local/share/claude/versions/2.1.12).
+    # Verify path encoding matches transcript location
+    transcript_path = Path(hook_data.transcript_path)
+    encoded_project = transcript_path.parent.name
+    encoded_from_cwd = project_dir.replace('/', '-')
+    if not encoded_from_cwd.startswith('-'):
+        encoded_from_cwd = '-' + encoded_from_cwd
+    encoding_matches = encoded_project == encoded_from_cwd
 
-    Args:
-        claude_pid: PID of the running Claude process
+    claude_pid = find_claude_pid()
+    claude_version = _get_claude_version(claude_pid)
+    process_created_at = _get_process_created_at(claude_pid)
 
-    Returns:
-        Version string (e.g., "2.1.12")
+    # Extract parent_id from first line of transcript
+    parent_id = _extract_parent_id(Path(hook_data.transcript_path))
 
-    Raises:
-        packaging.version.InvalidVersion: If path doesn't contain valid version
-        psutil.NoSuchProcess: If the process no longer exists
-    """
+    # Track session
+    with SessionManager(project_dir) as manager:
+        manager.detect_crashed_sessions()
+        phantom = PhantomHandler(manager, claude_pid, claude_version)
+
+        if phantom.is_phantom(hook_data.session_id, hook_data.source, Path(hook_data.transcript_path)):
+            manager.prune_orphaned_sessions()
+        else:
+            phantom.cleanup(hook_data.session_id)
+            manager.prune_orphaned_sessions()
+            manager.start_session(
+                session_id=hook_data.session_id,
+                transcript_path=hook_data.transcript_path,
+                source=hook_data.source,
+                claude_pid=claude_pid,
+                parent_id=parent_id,
+                startup_model=hook_data.model,
+                claude_version=claude_version,
+                process_created_at=process_created_at,
+            )
+
+    phantom.log()
+
+    print(f'Completed in {timer.elapsed_ms()} ms')
+    print(repr(hook_data))
+    print(f'claude_pid: {claude_pid}')
+    print(f'claude_version: {claude_version}')
+    print(f'process_created_at: {process_created_at}')
+    print(f'parent_id: {parent_id}')
+    print(f'encoding_verified: {encoding_matches}')
+
+
+# -- Helpers ------------------------------------------------------------------
+
+
+def _get_claude_version(claude_pid: int) -> str:
+    """Extract Claude Code version from the running process's executable path."""
     exe_path = Path(psutil.Process(claude_pid).exe())
-    version = packaging.version.Version(exe_path.name)
-    return str(version)
+    return str(packaging.version.Version(exe_path.name))
 
 
-def get_process_created_at(claude_pid: int) -> datetime:
-    """Get the process creation time from the OS via psutil.
-
-    This is authoritative - it comes directly from the OS, not from cached data.
-
-    Args:
-        claude_pid: PID of the running Claude process
-
-    Returns:
-        datetime when the OS created the process (timezone-aware, local time)
-
-    Raises:
-        psutil.NoSuchProcess: If the process no longer exists
-    """
+def _get_process_created_at(claude_pid: int) -> datetime:
+    """Get process creation time from the OS via psutil."""
     create_time = psutil.Process(claude_pid).create_time()
     return datetime.fromtimestamp(create_time, UTC).astimezone()
 
 
-# Read and validate hook input from stdin
-hook_data = SessionStartHookInput.model_validate_json(sys.stdin.read())
+class _TranscriptFirstLine(SubsetModel):
+    """First line of a transcript JSONL — only the field we need."""
 
-# Use cwd as project directory (source of truth)
-project_dir = hook_data.cwd
+    leafUuid: str | None = None
 
-# Verify: encode cwd and check it matches transcript_path encoding
-transcript_path = Path(hook_data.transcript_path)
-encoded_project = transcript_path.parent.name
-encoded_from_cwd = project_dir.replace('/', '-')
-if not encoded_from_cwd.startswith('-'):
-    encoded_from_cwd = '-' + encoded_from_cwd
 
-encoding_matches = encoded_project == encoded_from_cwd
-
-# Find Claude PID
-try:
-    claude_pid = find_claude_pid()
-except RuntimeError:
-    print(f'Error: Could not find Claude PID. Hook data: {hook_data}', file=sys.stderr)
-    sys.exit(1)
-
-# Extract parent_id from transcript file
-parent_id: str | None = None
-transcript_file = Path(hook_data.transcript_path)
-
-if transcript_file.exists():
+def _extract_parent_id(transcript_file: Path) -> str | None:
+    """Extract parent_id (leafUuid) from first line of transcript file."""
+    if not transcript_file.exists():
+        return None
     with open(transcript_file) as f:
         first_line = f.readline()
-        if first_line:
-            metadata = json.loads(first_line)
-            if 'leafUuid' in metadata:
-                parent_id = metadata['leafUuid']
+        if not first_line:
+            return None
+        return _TranscriptFirstLine.model_validate_json(first_line).leafUuid
 
-# Get Claude version and process creation time from running process
-claude_version = get_claude_version(claude_pid)
-process_created_at = get_process_created_at(claude_pid)
 
-# Track session using SessionManager (atomic with file locking)
-with SessionManager(project_dir) as manager:
-    crashed_ids = manager.detect_crashed_sessions()
-
-    phantom = PhantomHandler(manager, claude_pid, claude_version)
-
-    if phantom.is_phantom(hook_data.session_id, hook_data.source, transcript_file):
-        pruned_ids = manager.prune_orphaned_sessions()
-    else:
-        phantom.cleanup(hook_data.session_id)
-        pruned_ids = manager.prune_orphaned_sessions()
-        manager.start_session(
-            session_id=hook_data.session_id,
-            transcript_path=hook_data.transcript_path,
-            source=hook_data.source,
-            claude_pid=claude_pid,
-            parent_id=parent_id,
-            startup_model=hook_data.model,
-            claude_version=claude_version,
-            process_created_at=process_created_at,
-        )
-
-phantom.log()
-
-# Print session information
-print(f'Completed in {timer.elapsed_ms()} ms')
-print(repr(hook_data))
-print(f'claude_pid: {claude_pid}')
-print(f'claude_version: {claude_version}')
-print(f'process_created_at: {process_created_at}')
-print(f'parent_id: {parent_id}')
-print(f'encoding_verified: {encoding_matches}')
-phantom.print_diagnostics()
-if crashed_ids:
-    print(f'crashed_sessions: {crashed_ids}')
-if pruned_ids:
-    print(f'pruned_orphaned_sessions: {pruned_ids}')
+if __name__ == '__main__':
+    main()
