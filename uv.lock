@@ -3081,18 +3081,20 @@ wheels = [
 
 [[package]]
 name = "selenium-browser-automation-mcp"
-version = "0.6.2"
+version = "0.7.0"
 source = { editable = "mcp/selenium-browser-automation" }
 dependencies = [
     { name = "cc-lib" },
     { name = "ccl-chromium-reader" },
     { name = "dfindexeddb" },
+    { name = "fastapi" },
     { name = "fastmcp" },
     { name = "httpx" },
     { name = "pycryptodome" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "selenium" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
@@ -3100,12 +3102,14 @@ requires-dist = [
     { name = "cc-lib", editable = "cc-lib" },
     { name = "ccl-chromium-reader", git = "https://github.com/cclgroupltd/ccl_chromium_reader.git" },
     { name = "dfindexeddb", specifier = ">=20251109" },
+    { name = "fastapi", specifier = ">=0.124.0" },
     { name = "fastmcp", specifier = ">=2.12.5" },
     { name = "httpx" },
     { name = "pycryptodome", specifier = ">=3.23.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyyaml" },
     { name = "selenium" },
+    { name = "uvicorn", specifier = ">=0.38.0" },
 ]
 
 [[package]]

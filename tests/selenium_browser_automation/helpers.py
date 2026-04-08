@@ -9,11 +9,11 @@ from typing import Any
 import selenium_browser_automation
 import yaml
 from selenium import webdriver
-from selenium_browser_automation.server import (
-    _ARIA_HIDDEN_REASON_KEYS,
-    _VISUAL_HIDDEN_REASON_KEYS,
-    _build_page_metadata,
-    _count_tree_nodes,
+from selenium_browser_automation.helpers import (
+    ARIA_HIDDEN_REASON_KEYS,
+    VISUAL_HIDDEN_REASON_KEYS,
+    build_page_metadata,
+    count_tree_nodes,
 )
 from selenium_browser_automation.tree_utils import (
     compact_aria_tree,
@@ -63,7 +63,7 @@ class TreeTestRunner:
 
         is_aria = tool_name == 'aria'
         script = ARIA_SNAPSHOT_SCRIPT if is_aria else VISUAL_TREE_SCRIPT
-        reason_keys = _ARIA_HIDDEN_REASON_KEYS if is_aria else _VISUAL_HIDDEN_REASON_KEYS
+        reason_keys = ARIA_HIDDEN_REASON_KEYS if is_aria else VISUAL_HIDDEN_REASON_KEYS
 
         result = self.driver.execute_script(script, selector, include_urls, include_hidden)
 
@@ -74,15 +74,15 @@ class TreeTestRunner:
             tree_data = result.get('tree')
             stats = result.get('stats', {})
 
-        raw_count = _count_tree_nodes(tree_data)
+        raw_count = count_tree_nodes(tree_data)
 
         if compact_tree and tree_data:
             tree_data = compact_aria_tree(tree_data) if is_aria else compact_visual_tree(tree_data)
 
         tree_yaml = serialize_aria_snapshot(tree_data) if is_aria else serialize_visual_tree(tree_data)
 
-        compacted_count = _count_tree_nodes(tree_data)
-        metadata_footer = _build_page_metadata(
+        compacted_count = count_tree_nodes(tree_data)
+        metadata_footer = build_page_metadata(
             page_stats=stats,
             include_page_info=include_page_info,
             include_urls=include_urls,
