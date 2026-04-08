@@ -32,14 +32,23 @@ Usage in .claude/settings.json::
 The linter path is relative to the repository root (cwd of the hook).
 Multiple linters can be configured as separate hook entries.
 
-Exit codes (Claude Code hook protocol):
-    0 — Success, no feedback shown.
-    2 — Blocking error: stderr is shown to Claude as inline feedback
-        and Claude must address the violation before continuing.
+Exit code visibility (Claude Code hook protocol)::
 
-ErrorBoundary guarantees exit 2 on any unhandled exception (e.g.,
-Pydantic ValidationError from schema drift). Exit 1 is never used —
-it is a black hole where the model sees nothing.
+    Code | User sees          | Model sees               | Debug log
+    ---- | ------------------ | ------------------------ | ---------
+    0    | Nothing            | Nothing (PostToolUse)    | stdout
+    1    | "hook error"       | Nothing                  | stderr
+    2    | "blocking error"   | stderr as system context | stderr
+
+Exit 1 is a black hole — the model cannot see the error or self-diagnose.
+Hooks should never exit 1. Use exit 2 to guarantee all errors (including
+unexpected exceptions) surface to the model as actionable feedback.
+
+ErrorBoundary(exit_code=2) enforces this: any unhandled exception (e.g.,
+Pydantic ValidationError from schema drift) exits 2 with the traceback
+on stderr, which the model sees and can act on.
+
+Ref: https://code.claude.com/docs/en/hooks (exit code semantics)
 """
 
 from __future__ import annotations

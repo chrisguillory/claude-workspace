@@ -19,8 +19,10 @@ Four layers of error handling:
         Handles unexpected errors, continues serving.
 
     Layer 4 — Process Boundary:
-        ErrorBoundary(exit_code=1) at entry points.
+        ErrorBoundary(exit_code=N) at entry points.
         Handles unexpected errors, exits with non-zero code.
+        For Claude Code hooks, use exit_code=2 — exit 1 is a black hole
+        where the model sees nothing (see hooks/run-linter.py docstring).
 
 System exceptions (KeyboardInterrupt, SystemExit, GeneratorExit, CancelledError)
 always pass through — they are not application errors. This uses Python's
