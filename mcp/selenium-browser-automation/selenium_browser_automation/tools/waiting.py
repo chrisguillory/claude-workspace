@@ -107,6 +107,4 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         Returns:
             Dict with slept_ms confirming the sleep duration
         """
-
-        # Validation
         return await service.sleep(duration_ms=duration_ms, reason=reason)

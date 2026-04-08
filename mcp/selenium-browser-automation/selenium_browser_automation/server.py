@@ -38,13 +38,7 @@ from .tools import register_all_tools
 __all__ = [
     'lifespan',
     'main',
-    'register_tools',
 ]
-
-
-def register_tools(service: BrowserService) -> None:
-    """Register all MCP tools — delegates to tools/ package."""
-    register_all_tools(service, mcp)
 
 
 @contextlib.asynccontextmanager
@@ -59,7 +53,7 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
 
     state = await BrowserState.create()
     service = BrowserService(state)
-    register_tools(service)
+    _register_tools(service)
 
     # Register signal handlers to ensure cleanup on SIGTERM/SIGINT
     # This is critical for `claude mcp reconnect` which sends SIGTERM
@@ -125,6 +119,11 @@ def main() -> None:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _register_tools(service: BrowserService) -> None:
+    """Register all MCP tools — delegates to tools/ package."""
+    register_all_tools(service, mcp)
 
 
 def _find_socket_path() -> Path | None:

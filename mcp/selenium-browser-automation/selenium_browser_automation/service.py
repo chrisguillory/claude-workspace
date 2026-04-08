@@ -37,7 +37,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from . import chrome_profile_state_export
 from .chrome_profiles import list_all_profiles
-from .helpers import build_page_metadata, build_storage_init_script, count_tree_nodes, save_large_output_to_file
+from .helpers import (
+    ARIA_HIDDEN_REASON_KEYS,
+    VISUAL_HIDDEN_REASON_KEYS,
+    build_page_metadata,
+    build_storage_init_script,
+    count_tree_nodes,
+    save_large_output_to_file,
+)
 from .models import (
     Browser,
     ChromeProfilesResult,
@@ -108,23 +115,6 @@ def _validate_css_selector(selector: str) -> None:
 
 VALID_URL_PREFIXES = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
 LARGE_OUTPUT_THRESHOLD = 25_000
-
-_ARIA_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
-    ('ariaHidden', 'aria-hidden'),
-    ('displayNone', 'display-none'),
-    ('visibilityHidden', 'visibility-hidden'),
-    ('inert', 'inert'),
-    ('other', 'other'),
-]
-
-_VISUAL_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
-    ('displayNone', 'display-none'),
-    ('visibilityHidden', 'visibility-hidden'),
-    ('opacity', 'opacity'),
-    ('clipped', 'clipped'),
-    ('offscreen', 'offscreen'),
-    ('other', 'other'),
-]
 
 
 class BrowserService:
@@ -671,7 +661,7 @@ class BrowserService:
             compact_tree=compact_tree,
             raw_node_count=raw_node_count,
             compacted_node_count=count_tree_nodes(snapshot_data),
-            hidden_reason_keys=_ARIA_HIDDEN_REASON_KEYS,
+            hidden_reason_keys=ARIA_HIDDEN_REASON_KEYS,
         )
         if metadata:
             yaml_output += metadata
@@ -768,7 +758,7 @@ class BrowserService:
             compact_tree=compact_tree,
             raw_node_count=raw_node_count,
             compacted_node_count=count_tree_nodes(snapshot_data),
-            hidden_reason_keys=_VISUAL_HIDDEN_REASON_KEYS,
+            hidden_reason_keys=VISUAL_HIDDEN_REASON_KEYS,
         )
         if metadata:
             yaml_output += metadata
@@ -2052,7 +2042,7 @@ class BrowserService:
         Args:
             code: JavaScript expression to evaluate.
                   For multiple statements: (() => { const x = 1; return x; })()
-            timeout_ms: Maximum execution time in milliseconds. 0 disables timeout. Default: 5000.
+            timeout_ms: Maximum execution time in milliseconds. 0 disables timeout. Default: 30000.
 
         Returns:
             JavaScriptResult with success status, typed result, and error details if failed.

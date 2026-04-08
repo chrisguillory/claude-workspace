@@ -9,10 +9,11 @@ from typing import Any
 import selenium_browser_automation
 import yaml
 from selenium import webdriver
-from selenium_browser_automation.helpers import build_page_metadata, count_tree_nodes
-from selenium_browser_automation.service import (
-    _ARIA_HIDDEN_REASON_KEYS,
-    _VISUAL_HIDDEN_REASON_KEYS,
+from selenium_browser_automation.helpers import (
+    ARIA_HIDDEN_REASON_KEYS,
+    VISUAL_HIDDEN_REASON_KEYS,
+    build_page_metadata,
+    count_tree_nodes,
 )
 from selenium_browser_automation.tree_utils import (
     compact_aria_tree,
@@ -62,7 +63,7 @@ class TreeTestRunner:
 
         is_aria = tool_name == 'aria'
         script = ARIA_SNAPSHOT_SCRIPT if is_aria else VISUAL_TREE_SCRIPT
-        reason_keys = _ARIA_HIDDEN_REASON_KEYS if is_aria else _VISUAL_HIDDEN_REASON_KEYS
+        reason_keys = ARIA_HIDDEN_REASON_KEYS if is_aria else VISUAL_HIDDEN_REASON_KEYS
 
         result = self.driver.execute_script(script, selector, include_urls, include_hidden)
 

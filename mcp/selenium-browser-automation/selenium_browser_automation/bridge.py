@@ -6,6 +6,11 @@ shared BrowserService injected via closure (DI pattern from CLAUDE.md).
 
 Dispatch uses BrowserService.tool_registry — no getattr, no MCP protocol
 in the HTTP path.
+
+Concurrency: The asyncio.Lock serializes CLI requests against each other.
+MCP tools do NOT acquire this lock — FastMCP stdio is inherently sequential,
+and Claude Code serializes tool calls (waits for response before sending next).
+The lock only guards CLI-vs-CLI interleaving, not MCP-vs-CLI.
 """
 
 from __future__ import annotations
@@ -170,16 +175,14 @@ def create_bridge_app(service: BrowserService, lock: asyncio.Lock) -> fastapi.Fa
                         )
                     )
 
-                    if request.on_error == 'stop':
-                        results.extend(
-                            StepResult(step=j, tool=request.steps[j].tool, status='skipped')
-                            for j in range(i + 1, len(request.steps))
-                        )
-
                 # completed = attempted (not skipped) — both ok and error count
                 completed += 1
 
-                if results[-1].status == 'error' and request.on_error == 'stop':
+                if request.on_error == 'stop' and results[-1].status == 'error':
+                    results.extend(
+                        StepResult(step=j, tool=request.steps[j].tool, status='skipped')
+                        for j in range(i + 1, len(request.steps))
+                    )
                     break
 
         total_elapsed = int((time.perf_counter() - t0) * 1000)

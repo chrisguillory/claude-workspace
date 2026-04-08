@@ -94,7 +94,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         in the current page context. Blob URLs are ephemeral in-memory resources (PDFs, images,
         file downloads) and cannot be accessed from a different browsing context.
         """
-        # Resolve browser: use current if running, otherwise default to 'chromium'
         return await service.navigate(
             url=url,
             fresh_browser=fresh_browser,

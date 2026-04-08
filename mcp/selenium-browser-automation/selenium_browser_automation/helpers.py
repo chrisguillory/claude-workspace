@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 __all__ = [
+    'ARIA_HIDDEN_REASON_KEYS',
+    'VISUAL_HIDDEN_REASON_KEYS',
     'build_page_metadata',
     'build_storage_init_script',
     'count_tree_nodes',
@@ -14,6 +16,23 @@ from pathlib import Path
 from typing import Any
 
 from .models import ProfileState
+
+ARIA_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
+    ('ariaHidden', 'aria-hidden'),
+    ('displayNone', 'display-none'),
+    ('visibilityHidden', 'visibility-hidden'),
+    ('inert', 'inert'),
+    ('other', 'other'),
+]
+
+VISUAL_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
+    ('displayNone', 'display-none'),
+    ('visibilityHidden', 'visibility-hidden'),
+    ('opacity', 'opacity'),
+    ('clipped', 'clipped'),
+    ('offscreen', 'offscreen'),
+    ('other', 'other'),
+]
 
 
 def count_tree_nodes(

@@ -94,7 +94,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         Args:
             code: JavaScript expression to evaluate.
                   For multiple statements: (() => { const x = 1; return x; })()
-            timeout_ms: Maximum execution time in milliseconds. 0 disables timeout. Default: 5000.
+            timeout_ms: Maximum execution time in milliseconds. 0 disables timeout. Default: 30000.
 
         Returns:
             JavaScriptResult with success status, typed result, and error details if failed.

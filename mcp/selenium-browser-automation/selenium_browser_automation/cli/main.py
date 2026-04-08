@@ -56,13 +56,16 @@ def navigate(
     url: Annotated[str, typer.Argument(help='URL to navigate to.')],
     fresh: Annotated[bool, typer.Option('--fresh', help='Close and reopen browser.')] = False,
     browser: Annotated[str | None, typer.Option('--browser', '-b', help='chrome or chromium.')] = None,
+    har: Annotated[bool, typer.Option('--har', help='Enable HAR capture (requires --fresh).')] = False,
     init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')
     ] = None,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Navigate to a URL."""
-    result = _call_tool('navigate', url=url, fresh_browser=fresh, browser=browser, init_scripts=init_script)
+    result = _call_tool(
+        'navigate', url=url, fresh_browser=fresh, browser=browser, enable_har_capture=har, init_scripts=init_script
+    )
     _print_result(result, format)
 
 
@@ -432,5 +435,9 @@ def _print_result(result: object, format: str) -> None:
                 typer.echo(val)
             else:
                 typer.echo(json.dumps(val, indent=2, default=str))
+        else:
+            elapsed = result.get('elapsed_ms')
+            msg = f'OK ({elapsed}ms)' if elapsed is not None else 'OK'
+            typer.secho(msg, fg=typer.colors.GREEN)
     elif result is not None:
         typer.echo(str(result))
