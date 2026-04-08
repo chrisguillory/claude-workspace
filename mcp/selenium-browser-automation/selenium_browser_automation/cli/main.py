@@ -6,11 +6,6 @@ Each command dispatches to a BrowserService method on the shared WebDriver.
 
 from __future__ import annotations
 
-__all__ = [
-    'app',
-    'main',
-]
-
 import json
 import logging
 import os
