@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 __all__ = [
-    'register_interaction_tools',
+    'register_tools',
 ]
 
 from typing import Any, Literal
@@ -13,7 +13,7 @@ from mcp.types import ToolAnnotations
 from ..service import BrowserService
 
 
-def register_interaction_tools(service: BrowserService, mcp: FastMCP) -> None:
+def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     """Register interaction tools."""
 
     @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 __all__ = [
-    'register_performance_tools',
+    'register_tools',
 ]
 
 from typing import Any, Literal
@@ -18,7 +18,7 @@ from ..models import (
 from ..service import BrowserService
 
 
-def register_performance_tools(service: BrowserService, mcp: FastMCP) -> None:
+def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     """Register performance tools."""
 
     @mcp.tool(

@@ -2,28 +2,23 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit",
         "hooks": [
-          {
-            "type": "command",
-            "command": "hooks/run-linter.py linters/exception_safety_linter.py"
-          },
-          {
-            "type": "command",
-            "command": "hooks/run-linter.py linters/reexport_linter.py"
-          },
-          {
-            "type": "command",
-            "command": "hooks/run-linter.py linters/strict_typing_linter.py"
-          },
-          {
-            "type": "command",
-            "command": "hooks/run-linter.py linters/suppression_rationale_linter.py"
-          },
-          {
-            "type": "command",
-            "command": "hooks/run-linter.py linters/uv_script_linter.py"
-          }
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/exception_safety_linter.py" },
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/reexport_linter.py" },
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/strict_typing_linter.py" },
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/suppression_rationale_linter.py" },
+          { "type": "command", "if": "Edit(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/uv_script_linter.py" }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/exception_safety_linter.py" },
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/reexport_linter.py" },
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/strict_typing_linter.py" },
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/suppression_rationale_linter.py" },
+          { "type": "command", "if": "Write(/Users/chris/claude-workspace/*)", "command": "hooks/run-linter.py linters/uv_script_linter.py" }
         ]
       }
     ]

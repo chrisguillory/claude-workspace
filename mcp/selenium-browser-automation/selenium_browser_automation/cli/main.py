@@ -50,34 +50,41 @@ def _configure_logging(
 # -- Navigation commands --
 
 
-@app.command('navigate')
+@app.command('navigate', rich_help_panel='Navigation')
 @error_boundary
 def navigate(
     url: Annotated[str, typer.Argument(help='URL to navigate to.')],
     fresh: Annotated[bool, typer.Option('--fresh', help='Close and reopen browser.')] = False,
     browser: Annotated[str | None, typer.Option('--browser', '-b', help='chrome or chromium.')] = None,
+    init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')
+    ] = None,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Navigate to a URL."""
-    result = _call_tool('navigate', url=url, fresh_browser=fresh, browser=browser)
+    result = _call_tool('navigate', url=url, fresh_browser=fresh, browser=browser, init_scripts=init_script)
     _print_result(result, format)
 
 
 # -- Interaction commands --
 
 
-@app.command('click')
+@app.command('click', rich_help_panel='Interaction')
 @error_boundary
 def click(
     selector: Annotated[str, typer.Argument(help='CSS selector of element to click.')],
+    wait_for_network: Annotated[bool, typer.Option('--wait-for-network', help='Add delay after click.')] = False,
+    network_timeout: Annotated[int, typer.Option('--network-timeout', help='Delay duration in ms.')] = 10000,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Click an element."""
-    result = _call_tool('click', css_selector=selector)
+    result = _call_tool(
+        'click', css_selector=selector, wait_for_network=wait_for_network, network_timeout=network_timeout
+    )
     _print_result(result, format)
 
 
-@app.command('type-text')
+@app.command('type-text', rich_help_panel='Interaction')
 @error_boundary
 def type_text(
     text: Annotated[str, typer.Argument(help='Text to type.')],
@@ -89,7 +96,7 @@ def type_text(
     _print_result(result, format)
 
 
-@app.command('press-key')
+@app.command('press-key', rich_help_panel='Interaction')
 @error_boundary
 def press_key(
     key: Annotated[str, typer.Argument(help='Key name (e.g., ENTER, TAB, ESCAPE).')],
@@ -100,7 +107,7 @@ def press_key(
     _print_result(result, format)
 
 
-@app.command('hover')
+@app.command('hover', rich_help_panel='Interaction')
 @error_boundary
 def hover(
     selector: Annotated[str, typer.Argument(help='CSS selector of element to hover.')],
@@ -112,23 +119,29 @@ def hover(
     _print_result(result, format)
 
 
-@app.command('scroll')
+@app.command('scroll', rich_help_panel='Interaction')
 @error_boundary
 def scroll(
     direction: Annotated[str | None, typer.Option('--direction', '-d', help='up, down, left, right.')] = None,
     amount: Annotated[int, typer.Option('--amount', '-n', help='Scroll amount.')] = 3,
     selector: Annotated[str | None, typer.Option('--selector', '-s', help='Element to scroll.')] = None,
+    behavior: Annotated[Literal['instant', 'smooth'], typer.Option('--behavior', help='Scroll animation.')] = 'instant',
+    position: Annotated[
+        str | None, typer.Option('--position', '-p', help='Absolute: top, bottom, left, right.')
+    ] = None,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Scroll the page or an element."""
-    result = _call_tool('scroll', direction=direction, scroll_amount=amount, css_selector=selector)
+    result = _call_tool(
+        'scroll', direction=direction, scroll_amount=amount, css_selector=selector, behavior=behavior, position=position
+    )
     _print_result(result, format)
 
 
 # -- Wait commands --
 
 
-@app.command('wait-for-selector')
+@app.command('wait-for-selector', rich_help_panel='Wait')
 @error_boundary
 def wait_for_selector(
     selector: Annotated[str, typer.Argument(help='CSS selector to wait for.')],
@@ -141,7 +154,7 @@ def wait_for_selector(
     _print_result(result, format)
 
 
-@app.command('wait-for-network-idle')
+@app.command('wait-for-network-idle', rich_help_panel='Wait')
 @error_boundary
 def wait_for_network_idle(
     timeout: Annotated[int, typer.Option('--timeout', '-t', help='Timeout in ms.')] = 10000,
@@ -155,7 +168,7 @@ def wait_for_network_idle(
 # -- Capture commands --
 
 
-@app.command('screenshot')
+@app.command('screenshot', rich_help_panel='Capture')
 @error_boundary
 def screenshot(
     filename: Annotated[str, typer.Argument(help='Output filename.')],
@@ -167,7 +180,7 @@ def screenshot(
     _print_result(result, format)
 
 
-@app.command('get-page-text')
+@app.command('get-page-text', rich_help_panel='Content')
 @error_boundary
 def get_page_text(
     selector: Annotated[str, typer.Argument(help='CSS selector (default: auto).')] = 'auto',
@@ -179,7 +192,7 @@ def get_page_text(
     _print_result(result, format)
 
 
-@app.command('get-page-html')
+@app.command('get-page-html', rich_help_panel='Content')
 @error_boundary
 def get_page_html(
     selector: Annotated[str | None, typer.Argument(help='CSS selector (default: full page).')] = None,
@@ -191,38 +204,55 @@ def get_page_html(
     _print_result(result, format)
 
 
-@app.command('get-interactive-elements')
+@app.command('get-interactive-elements', rich_help_panel='Content')
 @error_boundary
 def get_interactive_elements(
     scope: Annotated[str, typer.Argument(help='CSS selector scope (e.g., "body", ".wizard").')],
     text_contains: Annotated[str | None, typer.Option('--text', help='Filter by text content.')] = None,
+    tag_filter: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str] | None, typer.Option('--tag', help='Filter by HTML tag (repeatable).')
+    ] = None,
+    limit: Annotated[int | None, typer.Option('--limit', '-n', help='Max results.')] = None,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Find interactive elements by text or scope."""
     result = _call_tool(
-        'get_interactive_elements', selector_scope=scope, text_contains=text_contains, tag_filter=None, limit=None
+        'get_interactive_elements',
+        selector_scope=scope,
+        text_contains=text_contains,
+        tag_filter=tag_filter,
+        limit=limit,
     )
     _print_result(result, format)
 
 
-@app.command('get-aria-snapshot')
+@app.command('get-aria-snapshot', rich_help_panel='Content')
 @error_boundary
 def get_aria_snapshot(
     selector: Annotated[str, typer.Argument(help='CSS selector scope.')] = 'body',
     urls: Annotated[bool, typer.Option('--urls', help='Include href values.')] = False,
     hidden: Annotated[bool, typer.Option('--hidden', help='Include hidden elements.')] = False,
+    compact: Annotated[bool, typer.Option('--compact/--no-compact', help='Remove structural noise.')] = True,
+    page_info: Annotated[bool, typer.Option('--page-info', help='Show extended page stats.')] = False,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Get ARIA accessibility snapshot."""
-    result = _call_tool('get_aria_snapshot', selector=selector, include_urls=urls, include_hidden=hidden)
+    result = _call_tool(
+        'get_aria_snapshot',
+        selector=selector,
+        include_urls=urls,
+        include_hidden=hidden,
+        compact_tree=compact,
+        include_page_info=page_info,
+    )
     _print_result(result, format)
 
 
-@app.command('execute-javascript')
+@app.command('execute-javascript', rich_help_panel='Capture')
 @error_boundary
 def execute_javascript(
     code: Annotated[str, typer.Argument(help='JavaScript code to execute.')],
-    timeout: Annotated[int, typer.Option('--timeout', '-t', help='Timeout in ms.')] = 5000,
+    timeout: Annotated[int, typer.Option('--timeout', '-t', help='Timeout in ms.')] = 30000,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Execute JavaScript."""
@@ -230,7 +260,7 @@ def execute_javascript(
     _print_result(result, format)
 
 
-@app.command('capture-web-vitals')
+@app.command('capture-web-vitals', rich_help_panel='Capture')
 @error_boundary
 def capture_web_vitals(
     timeout: Annotated[int, typer.Option('--timeout', '-t', help='Timeout in ms.')] = 5000,
@@ -241,22 +271,23 @@ def capture_web_vitals(
     _print_result(result, format)
 
 
-@app.command('export-har')
+@app.command('export-har', rich_help_panel='Capture')
 @error_boundary
 def export_har(
     filename: Annotated[str, typer.Argument(help='Output HAR filename.')],
     bodies: Annotated[bool, typer.Option('--bodies', help='Include response bodies.')] = False,
+    max_body_size: Annotated[int, typer.Option('--max-body-size', help='Max response body size in MB.')] = 10,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Export HAR network capture."""
-    result = _call_tool('export_har', filename=filename, include_response_bodies=bodies)
+    result = _call_tool('export_har', filename=filename, include_response_bodies=bodies, max_body_size_mb=max_body_size)
     _print_result(result, format)
 
 
 # -- Batch command --
 
 
-@app.command('pipeline')
+@app.command('pipeline', rich_help_panel='Batch')
 @error_boundary
 def pipeline(
     file: Annotated[str | None, typer.Option('--file', '-F', help='Read pipeline JSON from file.')] = None,

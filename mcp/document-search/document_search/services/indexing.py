@@ -287,7 +287,7 @@ class IndexingService:
 
         # Chunk
         ft = get_file_type(file_path)
-        chunks = list(await self._chunking.chunk_file(file_path))
+        chunks, _skipped = await self._chunking.chunk_file(file_path)
         if not chunks:
             by_file_type: dict[FileType, str] = {}
             if ft is not None:
@@ -912,12 +912,17 @@ class IndexingService:
             file_key = str(file_path)
             tracer.record(file_key, 'chunk', 'started')
             try:
-                chunks = list(
-                    await asyncio.wait_for(
-                        self._chunking.chunk_file(file_path),
-                        timeout=FILE_CHUNK_TIMEOUT_SECONDS,
-                    ),
+                chunks, skipped_lines = await asyncio.wait_for(
+                    self._chunking.chunk_file(file_path),
+                    timeout=FILE_CHUNK_TIMEOUT_SECONDS,
                 )
+
+                if skipped_lines > 0:
+                    logger.warning(
+                        '[CHUNK] %s: %d oversized/invalid JSON lines skipped',
+                        file_path.name,
+                        skipped_lines,
+                    )
 
                 file_hash = self._cached_hashes.pop(file_key, None) or _file_hash(file_path)
                 file_size = file_path.stat().st_size

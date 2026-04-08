@@ -4,12 +4,12 @@ Handles different file types with appropriate chunking strategies:
 - Markdown: Structure-aware splitting by headers
 - Text: Recursive character splitting
 - JSON: Logical structure-based splitting
-- JSONL: Streaming line-by-line with adaptive grouping
+- JSONL: Rust + rayon parallel chunking (jsonl-chunker-rs)
 - PDF: Page-aware semantic chunking with ProcessPoolExecutor
 - CSV: Context-aware row grouping with header context
 
-PDF and JSONL processing use ProcessPoolExecutor to bypass the GIL for
-CPU-bound operations (4x speedup for JSONL, significant gains for PDF).
+JSONL uses jsonl-chunker-rs (Rust + rayon, 157x faster than LangChain splitter).
+PDF uses ProcessPoolExecutor to bypass the GIL for CPU-bound extraction.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from concurrent.futures import ProcessPoolExecutor
 from email.policy import default as email_default_policy
 from pathlib import Path
 
+import jsonl_chunker_rs
 import pandas as pd
 from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
@@ -39,7 +40,6 @@ from document_search.schemas.chunking import (
     get_file_type,
 )
 from document_search.schemas.embeddings import MAX_TEXT_CHARS
-from document_search.services.chunking_worker import chunk_jsonl
 from document_search.services.pdf_extraction import extract_pdf
 
 __all__ = [
@@ -155,14 +155,16 @@ class ChunkingService:
             self._process_pool.shutdown(wait=True)
             self._process_pool = None
 
-    async def chunk_file(self, path: Path) -> Sequence[Chunk]:
+    async def chunk_file(self, path: Path) -> tuple[Sequence[Chunk], int]:
         """Chunk a single file based on its type.
 
         Args:
             path: Path to file.
 
         Returns:
-            Sequence of chunks with metadata.
+            Tuple of (chunks, skipped_lines). skipped_lines is the count of
+            lines that were dropped during chunking (e.g., oversized invalid
+            JSON in JSONL files). Always 0 for non-JSONL file types.
 
         Raises:
             ValueError: If file type not supported.
@@ -175,8 +177,8 @@ class ChunkingService:
         if file_type is None:
             raise ValueError(f'Unsupported file type: {path.suffix}')
 
-        chunks = await self._chunk_by_type(path, file_type)
-        return self._filter_short_chunks(chunks)
+        chunks, skipped = await self._chunk_by_type(path, file_type)
+        return self._filter_short_chunks(chunks), skipped
 
     # --- Private ---
 
@@ -191,22 +193,25 @@ class ChunkingService:
         """Filter out chunks below minimum length threshold."""
         return [c for c in chunks if len(c.text.strip()) >= MIN_CHUNK_LENGTH]
 
-    async def _chunk_by_type(self, path: Path, file_type: FileType) -> Sequence[Chunk]:
-        """Route to appropriate chunker based on file type."""
+    async def _chunk_by_type(self, path: Path, file_type: FileType) -> tuple[Sequence[Chunk], int]:
+        """Route to appropriate chunker based on file type.
+
+        Returns (chunks, skipped_lines). Only JSONL returns non-zero skipped.
+        """
         match file_type:
             case 'pdf':
-                return await self._chunk_pdf(path)
+                return await self._chunk_pdf(path), 0
             case 'csv':
-                return await self._chunk_csv(path)
+                return await self._chunk_csv(path), 0
             case 'jsonl':
                 return await self._chunk_jsonl(path)
             case 'markdown' | 'text' | 'json' | 'image' | 'email':
-                # These are fast enough to run in thread pool
-                return await asyncio.to_thread(
+                chunks = await asyncio.to_thread(
                     self._chunk_content_sync_from_file,
                     path,
                     file_type,
                 )
+                return chunks, 0
             case _:
                 raise ValueError(f'Unsupported file type: {file_type}')
 
@@ -657,28 +662,37 @@ class ChunkingService:
     # JSONL Chunking Implementation
     # =========================================================================
 
-    async def _chunk_jsonl(self, path: Path) -> Sequence[Chunk]:
-        """Chunk JSONL using ProcessPoolExecutor for 4x speedup.
+    async def _chunk_jsonl(self, path: Path) -> tuple[Sequence[Chunk], int]:
+        """Chunk JSONL using Rust + rayon for 157x speedup over LangChain.
 
-        Uses subprocess worker to bypass GIL for CPU-bound JSON parsing.
+        Uses jsonl-chunker-rs with rayon parallelism. GIL released during
+        compute via py.allow_threads. asyncio.to_thread prevents event loop
+        blocking during PyO3 argument conversion.
+
+        Returns (chunks, skipped_lines) where skipped_lines counts oversized
+        lines that failed JSON parsing and were dropped.
         """
-        loop = asyncio.get_running_loop()
-        chunk_data = await loop.run_in_executor(
-            self._pool,
-            chunk_jsonl,
+        raw_chunks, skipped = await asyncio.to_thread(
+            jsonl_chunker_rs.chunk_jsonl,
             str(path),
             self._chunk_size,
             self._chunk_overlap,
         )
 
-        # Convert ChunkData back to Chunk objects
-        return [
+        chunks = [
             Chunk(
-                text=cd['text'],
-                source_path=cd['source_path'],
-                chunk_index=cd['chunk_index'],
-                file_type=cd['file_type'],
-                metadata=ChunkMetadata(**cd['metadata']),
+                text=text,
+                source_path=str(path),
+                chunk_index=i,
+                file_type='jsonl',
+                metadata=ChunkMetadata(
+                    start_char=0,
+                    end_char=len(text),
+                    jsonl_line_start=line_num,
+                    jsonl_line_end=line_num,
+                    jsonl_record_count=1,
+                ),
             )
-            for cd in chunk_data
+            for i, (text, line_num) in enumerate(raw_chunks)
         ]
+        return chunks, skipped

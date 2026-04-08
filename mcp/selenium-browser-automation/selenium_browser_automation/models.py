@@ -719,7 +719,7 @@ class SaveProfileStateResult(ClosedModel):
 class ConsoleLogEntry(ClosedModel):
     """Individual browser console log entry."""
 
-    level: str  # SEVERE, WARNING, INFO
+    level: Literal['SEVERE', 'WARNING', 'INFO']
     message: str
     source: str  # javascript, network, security, etc.
     timestamp: int  # Epoch milliseconds
@@ -798,7 +798,7 @@ class WaitForSelectorResult(ClosedModel):
     """
 
     selector: str
-    state: str
+    state: Literal['visible', 'hidden', 'attached', 'detached']
     elapsed_ms: int
     element_count: int | None = None
     reason: str | None = None
@@ -814,7 +814,7 @@ class ResizeWindowResult(ClosedModel):
 class ConfigureProxyResult(ClosedModel):
     """Result of configure_proxy tool."""
 
-    status: str
+    status: Literal['proxy_configured']
     host: str
     port: int
     note: str
@@ -823,7 +823,7 @@ class ConfigureProxyResult(ClosedModel):
 class ClearProxyResult(ClosedModel):
     """Result of clear_proxy tool."""
 
-    status: str
+    status: Literal['proxy_cleared']
 
 
 class SetBlockedURLsResult(ClosedModel):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 __all__ = [
-    'register_browser_mgmt_tools',
+    'register_tools',
 ]
 
 from typing import Any
@@ -17,7 +17,7 @@ from ..models import (
 from ..service import BrowserService
 
 
-def register_browser_mgmt_tools(service: BrowserService, mcp: FastMCP) -> None:
+def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     """Register browser mgmt tools."""
 
     @mcp.tool(
@@ -85,7 +85,7 @@ def register_browser_mgmt_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=False,
         ),
     )
-    async def execute_javascript(code: str, ctx: Context[Any, Any, Any], timeout_ms: int = 5000) -> JavaScriptResult:
+    async def execute_javascript(code: str, ctx: Context[Any, Any, Any], timeout_ms: int = 30000) -> JavaScriptResult:
         """Execute JavaScript in the browser and return the result.
 
         Evaluates a JavaScript expression in the current page context.

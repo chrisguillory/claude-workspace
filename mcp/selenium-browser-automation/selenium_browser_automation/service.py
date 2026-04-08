@@ -2043,7 +2043,7 @@ class BrowserService:
         )
 
     @tool_registry.register_tool
-    async def execute_javascript(self, code: str, timeout_ms: int = 5000) -> JavaScriptResult:
+    async def execute_javascript(self, code: str, timeout_ms: int = 30000) -> JavaScriptResult:
         """Execute JavaScript in the browser and return the result.
 
         Evaluates a JavaScript expression in the current page context.

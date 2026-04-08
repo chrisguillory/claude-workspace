@@ -10,7 +10,7 @@ import selenium_browser_automation
 import yaml
 from selenium import webdriver
 from selenium_browser_automation.helpers import build_page_metadata, count_tree_nodes
-from selenium_browser_automation.server import (
+from selenium_browser_automation.service import (
     _ARIA_HIDDEN_REASON_KEYS,
     _VISUAL_HIDDEN_REASON_KEYS,
 )

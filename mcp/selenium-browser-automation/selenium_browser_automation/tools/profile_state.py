@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 __all__ = [
-    'register_profile_state_tools',
+    'register_tools',
 ]
 
 from collections.abc import Sequence
@@ -18,7 +18,7 @@ from ..models import (
 from ..service import BrowserService
 
 
-def register_profile_state_tools(service: BrowserService, mcp: FastMCP) -> None:
+def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     """Register profile state tools."""
 
     @mcp.tool(

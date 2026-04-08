@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "ccl-chromium-reader",
     "dfindexeddb>=20251109",
+    "fastapi>=0.124.0",
     "fastmcp>=2.12.5",
     "httpx",
     "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",

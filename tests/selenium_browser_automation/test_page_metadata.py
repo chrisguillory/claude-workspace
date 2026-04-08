@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from selenium_browser_automation.helpers import build_page_metadata, count_tree_nodes
-from selenium_browser_automation.server import (
+from selenium_browser_automation.service import (
     _ARIA_HIDDEN_REASON_KEYS,
     _VISUAL_HIDDEN_REASON_KEYS,
 )

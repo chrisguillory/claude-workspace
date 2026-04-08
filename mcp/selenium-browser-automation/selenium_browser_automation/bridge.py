@@ -24,7 +24,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import fastapi
 import pydantic
@@ -33,6 +33,11 @@ from cc_lib.schemas.base import ClosedModel
 from .service import BrowserService
 
 logger = logging.getLogger(__name__)
+
+type ToolStatus = Literal['ok', 'error']
+type StepStatus = Literal['ok', 'error', 'skipped']
+type PipelineStatus = Literal['completed', 'partial']
+type OnErrorPolicy = Literal['stop', 'continue']
 
 
 # -- Request/Response models --
@@ -48,7 +53,7 @@ class ToolRequest(ClosedModel):
 class ToolResponse(ClosedModel):
     """Single tool invocation response."""
 
-    status: str  # "ok" or "error"
+    status: ToolStatus
     result: Any = None  # strict_typing_linter.py: loose-typing — tool results vary per tool
     elapsed_ms: int = 0
     error: Mapping[str, str] | None = None
@@ -65,7 +70,7 @@ class PipelineRequest(ClosedModel):
     """Batch pipeline request — ordered sequence of tool calls."""
 
     steps: Sequence[PipelineStep]
-    on_error: str = 'stop'  # "stop" or "continue"
+    on_error: OnErrorPolicy = 'stop'
 
 
 class StepResult(ClosedModel):
@@ -73,7 +78,7 @@ class StepResult(ClosedModel):
 
     step: int
     tool: str
-    status: str  # "ok", "error", "skipped"
+    status: StepStatus
     elapsed_ms: int = 0
     result: Any = None  # strict_typing_linter.py: loose-typing — tool results vary per tool
     error: Mapping[str, str] | None = None
@@ -82,7 +87,7 @@ class StepResult(ClosedModel):
 class PipelineResponse(ClosedModel):
     """Batch pipeline response with per-step results."""
 
-    status: str  # "completed" or "partial"
+    status: PipelineStatus
     completed: int
     total: int
     elapsed_ms: int
