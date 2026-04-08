@@ -27,9 +27,6 @@ add_completion_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
-# -- Navigation commands --
-
-
 @app.command('navigate', rich_help_panel='Navigation')
 @error_boundary
 def navigate(
@@ -47,9 +44,6 @@ def navigate(
         'navigate', url=url, fresh_browser=fresh, browser=browser, enable_har_capture=har, init_scripts=init_script
     )
     _print_result(result, format)
-
-
-# -- Interaction commands --
 
 
 @app.command('click', rich_help_panel='Interaction')
@@ -121,9 +115,6 @@ def scroll(
     _print_result(result, format)
 
 
-# -- Wait commands --
-
-
 @app.command('wait-for-selector', rich_help_panel='Wait')
 @error_boundary
 def wait_for_selector(
@@ -146,9 +137,6 @@ def wait_for_network_idle(
     """Wait for network to be idle."""
     result = _call_tool('wait_for_network_idle', timeout=timeout)
     _print_result(result, format)
-
-
-# -- Capture commands --
 
 
 @app.command('screenshot', rich_help_panel='Capture')
@@ -401,9 +389,6 @@ def get_console_logs(
     _print_result(result, format)
 
 
-# -- Profile State commands --
-
-
 @app.command('list-chrome-profiles', rich_help_panel='Profile State')
 @error_boundary
 def list_chrome_profiles(
@@ -464,9 +449,6 @@ def export_chrome_profile_state(
     _print_result(result, format)
 
 
-# -- Proxy commands --
-
-
 @app.command('configure-proxy', rich_help_panel='Proxy')
 @error_boundary
 def configure_proxy(
@@ -502,9 +484,6 @@ def set_blocked_urls(
     """Block network requests matching URL patterns."""
     result = _call_tool('set_blocked_urls', urls=url)
     _print_result(result, format)
-
-
-# -- Batch command --
 
 
 @app.command('pipeline', rich_help_panel='Batch')
