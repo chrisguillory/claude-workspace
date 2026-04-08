@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --quiet --no-project --script
+#!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
@@ -15,7 +15,7 @@ and runs the specified linter on that file. If the linter finds
 violations, exits 2 with the linter output on stderr — this is the
 most reliable way to surface feedback to Claude Code.
 
-Usage in .claude/settings.local.json::
+Usage in .claude/settings.json::
 
     {
       "hooks": {
@@ -34,9 +34,12 @@ Multiple linters can be configured as separate hook entries.
 
 Exit codes (Claude Code hook protocol):
     0 — Success, no feedback shown.
-    1 — Hook error, logged but non-blocking.
     2 — Blocking error: stderr is shown to Claude as inline feedback
         and Claude must address the violation before continuing.
+
+ErrorBoundary guarantees exit 2 on any unhandled exception (e.g.,
+Pydantic ValidationError from schema drift). Exit 1 is never used —
+it is a black hole where the model sees nothing.
 """
 
 from __future__ import annotations
@@ -46,9 +49,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.hooks import PostToolUseHookInput
 
+boundary = ErrorBoundary(exit_code=2)
 
+
+@boundary
 def main() -> int:
     if len(sys.argv) < 2:
         print('Usage: run-linter.py <linter-script> [extra-args...]', file=sys.stderr)
