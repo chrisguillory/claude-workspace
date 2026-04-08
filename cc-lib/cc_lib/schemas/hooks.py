@@ -41,6 +41,7 @@ class SessionStartHookInput(StrictModel):
     source: Literal['startup', 'resume', 'compact', 'clear']
     model: str | None = None
     permission_mode: str | None = None
+    agent_id: str | None = None
     agent_type: str | None = None
 
 
@@ -56,6 +57,8 @@ class SessionEndHookInput(StrictModel):
     hook_event_name: Literal['SessionEnd']
     reason: Literal['prompt_input_exit', 'clear', 'logout', 'bypass_permissions_disabled', 'other']
     permission_mode: str | None = None
+    agent_id: str | None = None
+    agent_type: str | None = None
 
 
 class PreToolUseHookInput(StrictModel):
@@ -72,6 +75,8 @@ class PreToolUseHookInput(StrictModel):
     tool_input: JsonObject
     tool_use_id: str
     permission_mode: str | None = None
+    agent_id: str | None = None
+    agent_type: str | None = None
 
 
 class PostToolUseHookInput(StrictModel):
@@ -89,6 +94,8 @@ class PostToolUseHookInput(StrictModel):
     tool_response: JsonValue | None = None
     tool_use_id: str
     permission_mode: str | None = None
+    agent_id: str | None = None
+    agent_type: str | None = None
 
 
 # -- Tool input types ---------------------------------------------------------
