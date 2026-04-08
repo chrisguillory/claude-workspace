@@ -6,10 +6,9 @@ Supports incremental indexing via content hash comparison.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import Annotated, Literal
+from collections.abc import Mapping, Sequence
+from typing import Literal
 
-import pydantic
 from cc_lib.schemas import StrictModel
 from cc_lib.types import JsonDatetime, JsonUuid
 
@@ -24,9 +23,7 @@ __all__ = [
     'FileIndexSummary',
     'FileProcessingError',
     'FileTypeStats',
-    'IndexingProgress',
     'IndexingResult',
-    'ProgressCallback',
     'StopAfterStage',
 ]
 
@@ -222,43 +219,3 @@ class IndexingResult(StrictModel):
             )
             for category, files in grouped.items()
         ]
-
-
-class IndexingProgress(StrictModel):
-    """Progress update during indexing operation.
-
-    Emitted via callback for real-time progress reporting.
-    """
-
-    files_scanned: int
-    files_total: int
-    files_indexed: int  # Created > 0 chunks
-    files_cached: int  # Hash unchanged
-    files_no_content: int = 0  # Processed, 0 chunks
-    chunks_created: int
-    embeddings_pending: int  # Chunks waiting to be embedded
-    current_file: str | None = None
-    current_phase: Annotated[str, pydantic.Field(pattern=r'^(scanning|chunking|embedding|storing)$')] = 'scanning'
-    errors_so_far: int = 0
-    elapsed_seconds: float = 0.0
-
-    @property
-    def percent_complete(self) -> float:
-        """Completion percentage (0-100)."""
-        if self.files_total == 0:
-            return 0.0
-        return (self.files_indexed + self.files_cached + self.files_no_content) / self.files_total * 100
-
-    @property
-    def estimated_remaining_seconds(self) -> float | None:
-        """Estimated time remaining based on current rate."""
-        processed = self.files_indexed + self.files_cached + self.files_no_content
-        if processed == 0 or self.elapsed_seconds == 0:
-            return None
-        rate = processed / self.elapsed_seconds
-        remaining = self.files_total - processed
-        return remaining / rate if rate > 0 else None
-
-
-# Type alias for progress callback
-type ProgressCallback = Callable[[IndexingProgress], None]

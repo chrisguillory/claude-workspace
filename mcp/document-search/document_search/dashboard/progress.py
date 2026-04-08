@@ -1,7 +1,7 @@
 """Progress writer for dashboard operation monitoring.
 
 Writes OperationState snapshots to files for dashboard consumption.
-Called by server.py during indexing operations.
+Called by orchestration layer during indexing operations.
 
 Each operation gets:
 - {operation_id}.json: State snapshots (progress, result, error)
@@ -50,8 +50,8 @@ class ProgressWriter:
     stalled_since is recorded. Progress resuming clears the stall.
     """
 
-    def __init__(self, mcp_server_pid: int) -> None:
-        self._pid = mcp_server_pid
+    def __init__(self, owner_pid: int) -> None:
+        self._pid = owner_pid
         self._operation_id: str | None = None
         self._state: OperationState | None = None
         self._log_handler: logging.FileHandler | None = None
@@ -64,7 +64,7 @@ class ProgressWriter:
     def start_operation(
         self,
         collection_name: str,
-        directory: str,
+        target_path: str,
     ) -> str:
         """Start tracking a new operation.
 
@@ -73,7 +73,7 @@ class ProgressWriter:
 
         Args:
             collection_name: Name of the collection being indexed.
-            directory: Directory being indexed.
+            target_path: File or directory being indexed.
 
         Returns:
             operation_id for this operation.
@@ -87,9 +87,9 @@ class ProgressWriter:
         self._stalled_since = None
         self._state = OperationState(
             operation_id=op_id,
-            mcp_server_pid=self._pid,
+            owner_pid=self._pid,
             collection_name=collection_name,
-            directory=directory,
+            target_path=target_path,
             created_at=now,
             updated_at=now,
             ended_at=None,
@@ -171,9 +171,9 @@ class ProgressWriter:
 
         self._state = OperationState(
             operation_id=self._state.operation_id,
-            mcp_server_pid=self._state.mcp_server_pid,
+            owner_pid=self._state.owner_pid,
             collection_name=self._state.collection_name,
-            directory=self._state.directory,
+            target_path=self._state.target_path,
             created_at=self._state.created_at,
             updated_at=now,
             ended_at=None,
@@ -245,9 +245,9 @@ class ProgressWriter:
         now = _now()
         self._state = OperationState(
             operation_id=self._state.operation_id,
-            mcp_server_pid=self._state.mcp_server_pid,
+            owner_pid=self._state.owner_pid,
             collection_name=self._state.collection_name,
-            directory=self._state.directory,
+            target_path=self._state.target_path,
             created_at=self._state.created_at,
             updated_at=now,
             ended_at=now,

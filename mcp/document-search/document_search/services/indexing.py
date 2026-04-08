@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 import time
+import traceback
 from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -32,11 +33,14 @@ from cc_lib.utils import Timer
 from numpy.typing import NDArray
 
 from document_search.clients import QdrantClient, create_embedding_client
+from document_search.clients.protocols import EmbeddingClient
 from document_search.clients.redis import RedisClient
+from document_search.dashboard.progress import ProgressWriter
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import EXTENSION_MAP, Chunk, FileType, get_file_type
 from document_search.schemas.config import EmbeddingConfig
+from document_search.schemas.dashboard import OperationProgress
 from document_search.schemas.embeddings import EmbeddingVector
 from document_search.schemas.indexing import (
     CHUNK_STRATEGY_VERSION,
@@ -45,11 +49,10 @@ from document_search.schemas.indexing import (
     FileProcessingError,
     FileTypeStats,
     IndexingResult,
-    ProgressCallback,
     StopAfterStage,
 )
 from document_search.schemas.tracing import PipelineTimingReport, QueueDepthSample, StageTimingReport
-from document_search.schemas.vectors import ClearResult, VectorPoint
+from document_search.schemas.vectors import ClearResult
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.sparse_embedding import SparseEmbeddingService, SparseVector
@@ -121,6 +124,99 @@ class IndexingService:
         # Cached aggregate timing stats (updated every ~5s by monitor loop)
         self._cached_timing_stats: Sequence[StageTimingReport] = ()
         self._cached_scan_seconds: float | None = None
+
+    async def index(
+        self,
+        path: Path,
+        *,
+        collection_name: str,
+        owner_pid: int,
+        respect_gitignore: bool | None = None,
+        stop_after: StopAfterStage | None = None,
+        embed_workers: int = NUM_EMBED_WORKERS,
+        embedding_client: EmbeddingClient | None = None,
+        redis_client: RedisClient | None = None,
+    ) -> IndexingResult:
+        """Index a file or directory with full dashboard integration.
+
+        Public entry point — wraps _run_pipeline() with ProgressWriter
+        lifecycle, monitoring coroutine, and error handling.
+
+        Args:
+            path: File or directory to index.
+            collection_name: Target collection name.
+            owner_pid: PID of the calling process (for dashboard liveness checks).
+            respect_gitignore: Git ignore filtering (directories only).
+            stop_after: Stop pipeline at a stage boundary.
+            embed_workers: Number of embed workers.
+            embedding_client: For transient error delta tracking (optional).
+            redis_client: For connection HWM tracking (optional).
+        """
+        if not path.is_file() and not path.is_dir():
+            raise ValueError(f'Path not found: {path}')
+
+        # Capture baseline transient error counts for delta calculation
+        transient_errors_start: Mapping[str, int] = dict(embedding_client.transient_errors) if embedding_client else {}
+
+        # Setup progress writer (attaches FileHandler to root logger)
+        progress_writer = ProgressWriter(owner_pid=owner_pid)
+        operation_id = progress_writer.start_operation(collection_name, str(path))
+        logger.debug('Operation: %s', operation_id)
+        logger.info('Indexing: %s', path)
+
+        # Reset connection high-water marks for this operation
+        if redis_client:
+            redis_client.reset_hwm()
+
+        # Start pipeline as a task
+        indexing_task = asyncio.create_task(
+            self._run_pipeline(
+                path,
+                respect_gitignore=respect_gitignore,
+                stop_after=stop_after,
+                embed_workers=embed_workers,
+            ),
+        )
+
+        # Start monitoring alongside
+        monitor_task = asyncio.create_task(
+            _monitor_progress(
+                indexing_task=indexing_task,
+                indexing_service=self,
+                progress_writer=progress_writer,
+                embedding_client=embedding_client,
+                redis_client=redis_client,
+                transient_errors_start=transient_errors_start,
+            ),
+        )
+
+        try:
+            result = await indexing_task
+            await self.drain_writes()
+            conn_stats = redis_client.connection_stats if redis_client else None
+            logger.info(
+                'Indexing complete: %s indexed, %s cached, %s chunks, %s errors',
+                result.files_indexed,
+                result.files_cached,
+                result.chunks_created,
+                len(result.errors),
+            )
+            if conn_stats:
+                logger.info('Redis connections: %s', conn_stats)
+            progress_writer.complete_with_success(result, redis_conn_stats=conn_stats)
+            return result
+        except Exception as e:
+            error_tb = ''.join(traceback.format_exception(e))
+            progress_writer.complete_with_error(error_tb)
+            raise
+        finally:
+            self.cancel_writes()
+            monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor_task
+            # Idempotent — ensures log handler cleanup even on CancelledError
+            # (which bypasses both try and except Exception blocks)
+            progress_writer._close_log_handler()
 
     async def get_index_stats(self) -> Mapping[str, int | str]:
         """Get current index statistics."""
@@ -234,6 +330,8 @@ class IndexingService:
             gc_gen2_total=op.tracer.gc_gen2_collections_total,
         )
 
+    # ── Write lifecycle ────────────────────────────────────────
+
     def get_partial_timing(self) -> PipelineTimingReport | None:
         """Build partial timing report and cache aggregate stats.
 
@@ -248,8 +346,6 @@ class IndexingService:
         self._cached_scan_seconds = report.scan_seconds
         return report
 
-    # ── Write lifecycle ────────────────────────────────────────
-
     async def drain_writes(self) -> None:
         """Flush all pending cache and index writes."""
         await self._embedding.drain_writes()
@@ -262,154 +358,83 @@ class IndexingService:
         """Cancel in-flight write batchers."""
         self._embedding.cancel_writes()
 
-    # ── Single-file indexing ───────────────────────────────────
+    def shutdown(self) -> None:
+        """Shutdown services and release resources.
 
-    async def index_file(self, file_path: Path) -> IndexingResult:
-        """Index a single file directly (bypasses pipeline for simplicity).
+        Shuts down ProcessPoolExecutors used for PDF chunking and sparse embeddings.
+        Should be called when the service is no longer needed.
+        """
+        self._chunking.shutdown()
+        self._sparse_embedding.shutdown()
 
-        Useful for testing, quick re-indexing of specific files, or targeted updates.
-        Follows same patterns as pipeline workers: fail-fast on infrastructure errors,
-        upsert-then-delete for atomicity.
+    async def clear_documents(self, path: str, *, clear_cache: bool) -> ClearResult:
+        """Clear documents from the index.
 
         Args:
-            file_path: Path to file to index.
+            path: Resolved path to clear. Use "**" for entire index.
+            clear_cache: Also delete cached embeddings via reverse index.
+                Decoupled from Qdrant — uses Redis reverse index only.
 
         Returns:
-            IndexingResult with counts.
+            ClearResult with counts of files and chunks removed.
         """
-        if not file_path.is_file():
-            raise ValueError(f'Not a file: {file_path}')
+        if path == '**':
+            if clear_cache:
+                # Empty prefix matches all embed-idx:file:* keys
+                await self._embedding.invalidate_path_cache('')
+            # Drop entire Qdrant collection + clear all Redis state
+            chunks_count = await self._repo.count()
+            await self._repo.delete_collection()
+            await self._state_store.clear_collection()
+            return ClearResult(files_removed=0, chunks_removed=chunks_count, path=None)
 
-        await self._repo.ensure_collection(EMBEDDING_DIMENSION)
+        # Single lookup, reused for both cache invalidation and chunk retrieval
+        file_state = await self._state_store.get_file_state(path)
 
-        file_key = str(file_path)
-        timer = Timer()
+        if clear_cache:
+            if file_state is not None:
+                # Known single file — invalidate exact key only
+                await self._embedding.invalidate_file_cache(path)
+            else:
+                # Directory prefix — SCAN with trailing / for safety
+                await self._embedding.invalidate_path_cache(path)
 
-        # Chunk
-        ft = get_file_type(file_path)
-        chunks, _skipped = await self._chunking.chunk_file(file_path)
-        if not chunks:
-            by_file_type: dict[FileType, str] = {}
-            if ft is not None:
-                by_file_type[ft] = FileTypeStats(scanned=1, no_content=1).to_summary()
-            return IndexingResult(
-                files_scanned=1,
-                files_indexed=0,
-                files_cached=0,
-                files_no_content=1,
-                chunks_created=0,
-                chunks_deleted=0,
-                chunks_skipped=0,
-                embeddings_created=0,
-                embed_cache_hits=self._embedding.cache_hits,
-                embed_cache_misses=self._embedding.cache_misses,
-                by_file_type=by_file_type,
-                elapsed_seconds=round(timer.elapsed(), 3),
-                errors=(),
-            )
+        if file_state is not None:
+            # Exact file match
+            chunk_ids = list(file_state.chunk_ids)
+            if chunk_ids:
+                await self._repo.delete(chunk_ids)
+            await self._state_store.delete_file_state(path)
+            return ClearResult(files_removed=1, chunks_removed=len(chunk_ids), path=path)
 
-        chunk_ids = [_deterministic_chunk_id(file_key, c.chunk_index, c.text) for c in chunks]
+        # Directory prefix — get all chunk IDs under path from Redis
+        all_chunk_ids_str = await self._state_store.get_chunk_ids_under_path(path)
+        if all_chunk_ids_str:
+            await self._repo.delete([UUID(cid) for cid in all_chunk_ids_str])
+        files_under = await self._state_store.get_files_under_path(path)
+        files_removed = len(files_under)
+        await self._state_store.delete_files_under_path(path)
 
-        # Embed (dense + sparse)
-        texts = [c.text for c in chunks]
-        dense = await self._embedding.embed_texts(texts)
-        await self._embedding.update_file_cache_index(file_key, texts)
+        return ClearResult(files_removed=files_removed, chunks_removed=len(all_chunk_ids_str), path=path)
 
-        sparse_results, _wall, _cpu = await self._sparse_embedding.embed_batch(texts)
-        # Build points using same factory as pipeline
-        points = [
-            VectorPoint.from_chunk(chunk, dense_emb, sparse_indices, sparse_values, chunk_id)
-            for chunk, dense_emb, (sparse_indices, sparse_values), chunk_id in zip(
-                chunks,
-                dense,
-                sparse_results,
-                chunk_ids,
-                strict=True,
-            )
-        ]
-
-        # Upsert new chunks
-        await self._repo.upsert(points)
-
-        # Delete only obsolete chunks (upsert-then-delete for atomicity)
-        old_state = await self._state_store.get_file_state(file_key)
-        obsolete_ids = set(old_state.chunk_ids) - set(chunk_ids) if old_state else set()
-        if obsolete_ids:
-            await self._repo.delete(list(obsolete_ids))
-        chunks_deleted = len(obsolete_ids)
-
-        # Write new state to Redis (immediately durable)
-        file_hash = _file_hash(file_path)
-        await self._state_store.put_file_state(
-            file_key,
-            FileIndexState(
-                file_path=file_key,
-                file_hash=file_hash,
-                file_size=file_path.stat().st_size,
-                chunk_count=len(chunks),
-                chunk_ids=chunk_ids,
-                indexed_at=datetime.now(UTC),
-                chunk_strategy_version=CHUNK_STRATEGY_VERSION,
-            ),
-        )
-
-        # Build by_file_type for single file
-        by_file_type_final: dict[FileType, str] = {}
-        if ft is not None:
-            by_file_type_final[ft] = FileTypeStats(scanned=1, indexed=1, chunks=len(chunks)).to_summary()
-
-        return IndexingResult(
-            files_scanned=1,
-            files_indexed=1,
-            files_cached=0,
-            files_no_content=0,
-            chunks_created=len(chunks),
-            chunks_deleted=chunks_deleted,
-            chunks_skipped=0,
-            embeddings_created=len(chunks),
-            embed_cache_hits=self._embedding.cache_hits,
-            embed_cache_misses=self._embedding.cache_misses,
-            by_file_type=by_file_type_final,
-            elapsed_seconds=round(timer.elapsed(), 3),
-            errors=(),
-        )
-
-    async def index_directory(
+    async def _run_pipeline(
         self,
-        directory: Path,
+        path: Path,
         *,
         respect_gitignore: bool | None = None,
-        on_progress: ProgressCallback | None = None,
         stop_after: StopAfterStage | None = None,
         embed_workers: int = NUM_EMBED_WORKERS,
     ) -> IndexingResult:
-        """Index files using pipeline architecture with separate worker pools.
+        """Run the indexing pipeline (scan → chunk → embed → store).
 
-        Pipeline stages:
-        1. Chunk workers: Read files and split into chunks (CPU-bound)
-        2. Embed workers: Generate dense + sparse embeddings (Gemini I/O-bound)
-        3. Upsert workers: Store in Qdrant and update state (Qdrant I/O-bound)
+        Internal method — callers should use index() which adds dashboard
+        integration (ProgressWriter, monitoring, error handling).
 
-        Each stage runs independently, connected by queues. This allows:
-        - Embed workers to always be making Gemini calls (not blocked on Qdrant)
-        - Upsert workers to always be writing to Qdrant (not blocked on Gemini)
-        - Independent tuning of worker counts per stage
-
-        Every run is self-verifying via chunk-level comparison: changed files
-        are re-chunked and only chunks with new IDs are embedded and upserted.
-        Recovery from corruption: clear_documents() + re-index.
-
-        Args:
-            directory: Directory to index.
-            respect_gitignore: Git ignore filtering behavior.
-            on_progress: Optional callback for progress updates (not yet implemented).
-
-        Returns:
-            IndexingResult with counts and any errors.
+        Accepts any path — file or directory. File vs directory only affects
+        the scan phase (single file skips discovery). Everything downstream
+        is identical: classification, chunk workers, embed workers, upsert
+        workers, chunk-level diffing, HNSW management, tracing, and timing.
         """
-        if not directory.is_dir():
-            raise ValueError(f'Not a directory: {directory}')
-
         await self._repo.ensure_collection(EMBEDDING_DIMENSION)
 
         timer = Timer()
@@ -417,7 +442,7 @@ class IndexingService:
 
         # PHASE 1: Scan files
         extensions = set(EXTENSION_MAP.keys())
-        git_root = _find_git_root(str(directory))
+        git_root = _find_git_root(str(path)) if path.is_dir() else None
 
         # Create operation state before discovery so the monitor can report progress
         file_queue: asyncio.Queue[Path] = asyncio.Queue()
@@ -447,20 +472,22 @@ class IndexingService:
             tracer=tracer,
         )
 
-        # Run file discovery in a thread so the event loop (and monitor) stays responsive.
-        # Both paths update operation.files_found incrementally for dashboard visibility.
+        # Run file discovery — single files skip scan, directories discover.
         logger.debug('[SCAN] Starting file discovery...')
-        if respect_gitignore is not False and git_root:
+        if path.is_file():
+            all_files: Sequence[Path] = [path]
+            files_ignored = 0
+        elif respect_gitignore is not False and git_root:
             all_files, files_ignored = await asyncio.to_thread(
                 _get_git_files,
-                directory,
+                path,
                 extensions,
                 self._operation,
             )
         else:
             all_files = await asyncio.to_thread(
                 _walk_files_counted,
-                directory,
+                path,
                 extensions,
                 self._operation,
             )
@@ -578,9 +605,9 @@ class IndexingService:
         tracer.record_scan_seconds(timer.elapsed())
 
         # Populate file queue with chunk:queued events
-        for path in files_to_index:
-            tracer.record(str(path), 'chunk', 'queued')
-            await file_queue.put(path)
+        for file_path in files_to_index:
+            tracer.record(str(file_path), 'chunk', 'queued')
+            await file_queue.put(file_path)
 
         logger.debug(
             '[PIPELINE] Starting workers: %s chunk, %s embed, %s upsert for %s files',
@@ -722,25 +749,26 @@ class IndexingService:
 
         files_cached = sum(cached_by_type.values()) + counters.files_chunk_cached
 
-        # Orphan sweep: find files in Redis that were deleted from disk
-        scanned_paths: set[str] = {str(p) for p in all_files}
-        redis_files = await self._state_store.get_files_under_path(str(directory))
-        orphan_chunk_ids: list[UUID] = []
-        orphan_paths: list[str] = []
-        for file_path_str, file_state in redis_files:
-            if file_path_str not in scanned_paths:
-                orphan_chunk_ids.extend(file_state.chunk_ids)
-                orphan_paths.append(file_path_str)
-        if orphan_chunk_ids:
-            await self._repo.delete(orphan_chunk_ids)
-            chunks_deleted += len(orphan_chunk_ids)
-            logger.debug(
-                '[SWEEP] Deleted %s orphan chunks from %s removed files',
-                len(orphan_chunk_ids),
-                len(orphan_paths),
-            )
-        for p in orphan_paths:
-            await self._state_store.delete_file_state(p)
+        # Orphan sweep: find files in Redis that were deleted from disk (directories only)
+        if path.is_dir():
+            scanned_paths: set[str] = {str(p) for p in all_files}
+            redis_files = await self._state_store.get_files_under_path(str(path))
+            orphan_chunk_ids: list[UUID] = []
+            orphan_paths: list[str] = []
+            for file_path_str, file_state in redis_files:
+                if file_path_str not in scanned_paths:
+                    orphan_chunk_ids.extend(file_state.chunk_ids)
+                    orphan_paths.append(file_path_str)
+            if orphan_chunk_ids:
+                await self._repo.delete(orphan_chunk_ids)
+                chunks_deleted += len(orphan_chunk_ids)
+                logger.debug(
+                    '[SWEEP] Deleted %s orphan chunks from %s removed files',
+                    len(orphan_chunk_ids),
+                    len(orphan_paths),
+                )
+            for p in orphan_paths:
+                await self._state_store.delete_file_state(p)
 
         # Build timing report from tracer
         timing_report = tracer.build_report()
@@ -770,65 +798,6 @@ class IndexingService:
             stopped_after=stop_after,
             timing=timing_report,
         )
-
-    def shutdown(self) -> None:
-        """Shutdown services and release resources.
-
-        Shuts down ProcessPoolExecutors used for PDF chunking and sparse embeddings.
-        Should be called when the service is no longer needed.
-        """
-        self._chunking.shutdown()
-        self._sparse_embedding.shutdown()
-
-    async def clear_documents(self, path: str, *, clear_cache: bool) -> ClearResult:
-        """Clear documents from the index.
-
-        Args:
-            path: Resolved path to clear. Use "**" for entire index.
-            clear_cache: Also delete cached embeddings via reverse index.
-                Decoupled from Qdrant — uses Redis reverse index only.
-
-        Returns:
-            ClearResult with counts of files and chunks removed.
-        """
-        if path == '**':
-            if clear_cache:
-                # Empty prefix matches all embed-idx:file:* keys
-                await self._embedding.invalidate_path_cache('')
-            # Drop entire Qdrant collection + clear all Redis state
-            chunks_count = await self._repo.count()
-            await self._repo.delete_collection()
-            await self._state_store.clear_collection()
-            return ClearResult(files_removed=0, chunks_removed=chunks_count, path=None)
-
-        # Single lookup, reused for both cache invalidation and chunk retrieval
-        file_state = await self._state_store.get_file_state(path)
-
-        if clear_cache:
-            if file_state is not None:
-                # Known single file — invalidate exact key only
-                await self._embedding.invalidate_file_cache(path)
-            else:
-                # Directory prefix — SCAN with trailing / for safety
-                await self._embedding.invalidate_path_cache(path)
-
-        if file_state is not None:
-            # Exact file match
-            chunk_ids = list(file_state.chunk_ids)
-            if chunk_ids:
-                await self._repo.delete(chunk_ids)
-            await self._state_store.delete_file_state(path)
-            return ClearResult(files_removed=1, chunks_removed=len(chunk_ids), path=path)
-
-        # Directory prefix — get all chunk IDs under path from Redis
-        all_chunk_ids_str = await self._state_store.get_chunk_ids_under_path(path)
-        if all_chunk_ids_str:
-            await self._repo.delete([UUID(cid) for cid in all_chunk_ids_str])
-        files_under = await self._state_store.get_files_under_path(path)
-        files_removed = len(files_under)
-        await self._state_store.delete_files_under_path(path)
-
-        return ClearResult(files_removed=files_removed, chunks_removed=len(all_chunk_ids_str), path=path)
 
     async def _embed_dense_sub_batched(self, texts: Sequence[str]) -> Sequence[NDArray[np.float32]]:
         """Embed texts with sub-batching to avoid single-call stalls.
@@ -1407,11 +1376,54 @@ class PipelineCounters:
     files_chunk_cached: int = 0  # Files where all chunk IDs matched
 
 
+async def _monitor_progress(
+    *,
+    indexing_task: asyncio.Task[IndexingResult],
+    indexing_service: IndexingService,
+    progress_writer: ProgressWriter,
+    embedding_client: EmbeddingClient | None,
+    redis_client: RedisClient | None,
+    transient_errors_start: Mapping[str, int],
+) -> None:
+    """Poll pipeline snapshots and write progress updates (500ms loop)."""
+    tick = 0
+    while not indexing_task.done():
+        snapshot = indexing_service.get_pipeline_snapshot()
+        if snapshot:
+            if embedding_client:
+                current = embedding_client.transient_errors
+                transient_errors_delta = {
+                    k: current[k] - transient_errors_start.get(k, 0)
+                    for k in current
+                    if current[k] - transient_errors_start.get(k, 0) > 0
+                }
+            else:
+                transient_errors_delta = {}
+
+            tick += 1
+            if tick % 10 == 0:
+                partial_timing = indexing_service.get_partial_timing()
+                if partial_timing:
+                    progress_writer.update_timing(partial_timing)
+
+            conn_stats = redis_client.connection_stats if redis_client else None
+            progress = OperationProgress.from_snapshot(
+                snapshot,
+                status='running',
+                transient_errors=transient_errors_delta,
+                redis_conn_stats=conn_stats,
+                http_p50_ms=getattr(embedding_client, 'http_p50_ms', 0.0),
+                http_p99_ms=getattr(embedding_client, 'http_p99_ms', 0.0),
+            )
+            progress_writer.update_progress(progress)
+        await asyncio.sleep(0.5)
+
+
 @dataclass
 class _OperationState:
     """Per-operation mutable state.
 
-    Created in index_directory(), cleared on completion.
+    Created in index(), cleared on completion.
     Exposes pipeline internals for progress monitoring.
     """
 

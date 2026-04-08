@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse
 
 from document_search.dashboard.state import DashboardStateManager
 from document_search.paths import OPERATIONS_DIR
-from document_search.schemas.dashboard import DashboardState, McpServer, OperationState
+from document_search.schemas.dashboard import DashboardState, OperationState, RegisteredProcess
 from document_search.schemas.tracing import PipelineTimingReport
 
 __all__ = [
@@ -313,7 +313,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
         <div class="panel">
             <div class="section-header">
-                <h2>Connected MCP Servers</h2>
+                <h2>Connected Processes</h2>
                 <button class="btn-clear" onclick="restartDashboard()">Restart Dashboard</button>
             </div>
             <div id="servers"></div>
@@ -473,7 +473,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         </div>
                         ${!isComplete ? `<div class="op-meta" id="meta-${op.operation_id}">${formatOperationMeta(op)}</div>` : ''}
                     </div>
-                    <div class="op-meta">${escapeHtml(op.directory)} <span style="font-family:monospace;font-size:11px;color:#999">${op.operation_id.slice(0,8)}</span></div>
+                    <div class="op-meta">${escapeHtml(op.target_path)} <span style="font-family:monospace;font-size:11px;color:#999">${op.operation_id.slice(0,8)}</span></div>
                     ${isComplete ? formatCompletedSummary(op) : `<div id="progress-${op.operation_id}">${formatOperationProgressHtml(op)}</div>`}
                     ${!isComplete ? `<div id="timing-${op.operation_id}"></div>` : ''}
                     ${op.error ? `<div class="error-msg">${escapeHtml(op.error)}</div>` : ''}
@@ -1635,7 +1635,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
                 const [activeResp, serversResp, recentResp] = await Promise.all([
                     fetch('/api/operations/active'),
-                    fetch('/api/mcp-servers'),
+                    fetch('/api/processes'),
                     fetch('/api/operations?limit=10')
                 ]);
 
@@ -1696,10 +1696,14 @@ INDEX_HTML = """<!DOCTYPE html>
                     lastServerCount = servers.length;
                     document.getElementById('servers').innerHTML =
                         servers.length === 0
-                            ? '<div class="empty">No MCP servers connected</div>'
-                            : servers.map(s =>
-                                `<div class="server">PID: <strong>${s.pid}</strong> | Started: ${new Date(s.started_at).toLocaleString()}</div>`
-                            ).join('');
+                            ? '<div class="empty">No processes connected</div>'
+                            : servers.map(s => {
+                                const type = s.process_type === 'mcp' ? 'MCP Server' : 'CLI';
+                                const session = s.session_id
+                                    ? `Session ${s.session_id.slice(0, 8)}`
+                                    : '(standalone)';
+                                return `<div class="server">${type} │ PID ${s.pid} │ ${session} │ Since ${new Date(s.started_at).toLocaleTimeString()}</div>`;
+                            }).join('');
                 }
 
                 // Recent completed — only re-render when operations are added/removed
@@ -1811,7 +1815,7 @@ INDEX_HTML = """<!DOCTYPE html>
                             if (resp.ok) { location.href = '/?v=' + Date.now(); return; }
                         } catch (e) { /* still restarting */ }
                     }
-                    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#c62828;"><h2>Dashboard failed to restart. Check MCP server.</h2></div>';
+                    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#c62828;"><h2>Dashboard failed to restart.</h2></div>';
                 };
                 tryReconnect();
             } catch (e) {
@@ -1840,9 +1844,9 @@ INDEX_HTML = """<!DOCTYPE html>
 
 
 class DashboardServer:
-    """Dashboard server with MCP server monitoring.
+    """Dashboard server with registered process monitoring.
 
-    MCP servers register themselves via DashboardStateManager.register_mcp_server().
+    Producers register via DashboardStateManager.register_process().
     Dashboard monitors registered PIDs and exits when none are alive.
     """
 
@@ -1851,9 +1855,9 @@ class DashboardServer:
         self._should_exit = False
 
     async def run(self) -> None:
-        """Run server until all MCP servers exit."""
+        """Run server until all registered processes exit."""
         previous_state = self._state_manager.load()
-        existing_servers = previous_state.mcp_servers if previous_state else []
+        existing_servers = previous_state.registered_processes if previous_state else []
         preferred_port = previous_state.port if previous_state else None
 
         port = _find_port(preferred_port)
@@ -1861,12 +1865,12 @@ class DashboardServer:
         state = DashboardState(
             port=port,
             server_pid=os.getpid(),
-            mcp_servers=existing_servers,
+            registered_processes=existing_servers,
         )
         self._state_manager.save(state)
         logger.info('Dashboard starting on http://127.0.0.1:%s', port)
 
-        monitor_task = asyncio.create_task(self._monitor_mcp_servers())
+        monitor_task = asyncio.create_task(self._monitor_registered_processes())
 
         config = uvicorn.Config(
             app=self._create_app(),
@@ -1882,17 +1886,17 @@ class DashboardServer:
             monitor_task.cancel()
             self._state_manager.delete()
 
-    async def _monitor_mcp_servers(self) -> None:
-        """Shutdown when no MCP servers alive."""
+    async def _monitor_registered_processes(self) -> None:
+        """Shutdown when no registered processes alive."""
         # Grace period for initial registration
         await asyncio.sleep(MONITOR_INTERVAL_SECONDS * 2)
 
         while True:
             await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
-            live = self._state_manager.get_live_mcp_servers()
+            live = self._state_manager.get_live_processes()
 
             if not live:
-                logger.info('No live MCP servers, shutting down')
+                logger.info('No live registered processes, shutting down')
                 # Graceful exit - raises SystemExit which uvicorn handles
                 raise SystemExit(0)
 
@@ -1918,9 +1922,9 @@ class DashboardServer:
                 server_started=_START_TIME,
             )
 
-        @app.get('/api/mcp-servers')
-        def get_mcp_servers() -> Sequence[McpServer]:
-            return state_manager.get_live_mcp_servers()
+        @app.get('/api/processes')
+        def get_processes() -> Sequence[RegisteredProcess]:
+            return state_manager.get_live_processes()
 
         @app.get('/api/operations')
         def list_operations(limit: int = 20) -> Sequence[OperationState]:
@@ -1933,7 +1937,7 @@ class DashboardServer:
             """Get currently running operations.
 
             Detects two failure modes:
-            1. Orphaned: MCP server PID is dead (process crashed/exited).
+            1. Orphaned: owner PID is dead (process crashed/exited).
             2. Stale: updated_at is >1 hour old (server hung or restarted
                without proper cleanup).
             """
@@ -1943,8 +1947,8 @@ class DashboardServer:
             for op in ops:
                 if op.ended_at is not None:
                     continue
-                # Check if the MCP server that started this operation is still alive
-                if op.mcp_server_pid and not _pid_alive(op.mcp_server_pid):
+                # Check if the process that started this operation is still alive
+                if op.owner_pid and not _pid_alive(op.owner_pid):
                     _mark_orphaned(op)
                     continue
                 # Check for stale operations (no update for >1 hour)
@@ -2124,7 +2128,7 @@ def _exit_for_restart() -> None:
     """Hard-exit to release the port for the new dashboard process.
 
     Bypasses finally blocks intentionally — immediate port release is required.
-    New process reads existing MCP registrations from state file on disk.
+    New process reads existing process registrations from state file on disk.
     """
     os._exit(0)
 
@@ -2158,9 +2162,9 @@ def _read_operations() -> Sequence[OperationState]:
             ops.append(
                 OperationState(
                     operation_id=data.get('operation_id', file_path.stem),
-                    mcp_server_pid=data.get('mcp_server_pid', 0),
+                    owner_pid=data.get('owner_pid', 0),
                     collection_name=data.get('collection_name', '?'),
-                    directory=data.get('directory', '?'),
+                    target_path=data.get('target_path', '?'),
                     created_at=data.get('created_at', data.get('updated_at', '1970-01-01T00:00:00Z')),
                     updated_at=data.get('updated_at', '1970-01-01T00:00:00Z'),
                     ended_at=data.get('ended_at'),
@@ -2189,7 +2193,7 @@ def _mark_orphaned(op: OperationState) -> None:
         return
     data = json.loads(file_path.read_text())
     data['ended_at'] = data['updated_at']
-    data['error'] = f'MCP server (PID {op.mcp_server_pid}) exited before operation completed'
+    data['error'] = f'Process (PID {op.owner_pid}) exited before operation completed'
     if data.get('progress'):
         data['progress']['status'] = 'failed'
     file_path.write_text(json.dumps(data))
