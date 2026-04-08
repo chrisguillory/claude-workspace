@@ -51,6 +51,13 @@ CLAUDE CODE VERSION COMPATIBILITY:
                  claude-code-github-action, local-agent, remote), made AgentToolInput.subagent_type
                  optional (2.1.80+)
 - Schema v0.2.19: Added agentId to CompactBoundary/ApiError system records (agent sidechain files)
+- Schema v0.2.20: Added AttachmentRecord, PermissionModeRecord, WorktreeStateRecord,
+                  upgradeNudge to BridgeStatusSystemRecord, budgetTokens/skills/mcp to UserRecord (2.1.90+)
+- Schema v0.2.21: Added ScheduledTaskFireSystemRecord (/loop, CronCreate 2.1.85+),
+                  CronCreate/CronDelete/CronList tool inputs, SendMessageSimpleToolInput (2.1.81+),
+                  CompactMetadata.preCompactDiscoveredTools, expanded PermissionModeRecord permissionMode,
+                  agentId to InformationalSystemRecord/AttachmentRecord, slug to InformationalSystemRecord,
+                  Task.activeForm optional, Grep -r flag, fixed system dispatch for unknown subtypes (2.1.92+)
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -154,6 +161,9 @@ __all__ = [
     'CompanionIntroAttachment',
     'ConnectionError',
     'ContextManagement',
+    'CronCreateToolInput',
+    'CronDeleteToolInput',
+    'CronListToolInput',
     'CustomTitleRecord',
     'DocumentContent',
     'DocumentSource',
@@ -227,8 +237,10 @@ __all__ = [
     'ReadTextToolResult',
     'ReadToolInput',
     'SavedHookContextRecord',
+    'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
     'SendMessageRouting',
+    'SendMessageSimpleToolInput',
     'SendMessageToolInput',
     'SendMessageToolResult',
     'ServerToolUse',
@@ -301,11 +313,11 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.20'
+SCHEMA_VERSION = '0.2.21'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.90'
-LAST_VALIDATED = '2026-04-01'
-VALIDATION_RECORD_COUNT = 68_085
+CLAUDE_CODE_MAX_VERSION = '2.1.92'
+LAST_VALIDATED = '2026-04-08'
+VALIDATION_RECORD_COUNT = 1_164_569
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -518,6 +530,7 @@ class GrepToolInput(StrictModel):
     dash_B: int | None = pydantic.Field(None, alias='-B')
     dash_C: int | None = pydantic.Field(None, alias='-C')
     dash_i: bool | None = pydantic.Field(None, alias='-i')
+    dash_r: bool | None = pydantic.Field(None, alias='-r')
 
 
 # -- Glob Tool Input (2,507x occurrences) --------------------------------------
@@ -586,6 +599,13 @@ class SendMessageToolInput(StrictModel):
     recipient: str
     content: str
     summary: str
+
+
+class SendMessageSimpleToolInput(StrictModel):
+    """Simplified SendMessage input format (Claude Code 2.1.81+)."""
+
+    to: str
+    message: str
 
 
 # -- TaskCreate Tool Input (Claude Code 2.1.17+) -------------------------------
@@ -758,6 +778,28 @@ class KillShellToolInput(StrictModel):
     shell_id: str
 
 
+# -- Cron Tool Inputs (Claude Code 2.1.71+) ------------------------------------
+
+
+class CronCreateToolInput(StrictModel):
+    """Input for CronCreate tool - schedules recurring prompts."""
+
+    cron: str
+    prompt: str
+    recurring: bool | None = None
+    durable: bool | None = None
+
+
+class CronDeleteToolInput(StrictModel):
+    """Input for CronDelete tool - cancels a scheduled cron job."""
+
+    id: str
+
+
+class CronListToolInput(StrictModel):
+    """Input for CronList tool - lists scheduled cron jobs."""
+
+
 # -- ListMcpResourcesTool Input (5x occurrences) -------------------------------
 
 
@@ -886,6 +928,7 @@ ToolInput = Annotated[
     | ReadToolInput  # file_path required
     # Multi-field tools
     | SendMessageToolInput  # type, recipient, content, summary required (2.1.63+)
+    | SendMessageSimpleToolInput  # to, message required (2.1.81+)
     | TaskToolInput  # prompt, description, subagent_type required
     | TaskCreateToolInput  # subject, description required (2.1.17+)
     | TeamCreateToolInput  # team_name, description required (2.1.63+)
@@ -905,12 +948,15 @@ ToolInput = Annotated[
     | TaskUpdateToolInput  # taskId required (2.1.17+)
     | BashOutputToolInput  # bash_id required
     | KillShellToolInput  # shell_id required
+    | CronCreateToolInput  # cron, prompt required (2.1.71+)
+    | CronDeleteToolInput  # id required (2.1.71+)
     | SkillToolInput  # skill required
     # Optional-only fields (must be near end)
     | ExitPlanModeToolInput  # plan optional, launchSwarm optional
     | ListMcpResourcesToolInput  # server optional
     | EnterWorktreeToolInput  # name optional (2.1.63+)
     | TaskListToolInput  # No fields (2.1.17+)
+    | CronListToolInput  # No fields (2.1.71+)
     | EnterPlanModeToolInput  # No fields - must be last before fallback!
     | MCPToolInput,  # Fallback for MCP tools (PermissiveModel for observability)
     pydantic.Field(union_mode='left_to_right'),
@@ -1181,6 +1227,7 @@ class CompactMetadata(StrictModel):
 
     trigger: Literal['auto', 'manual']  # auto=24, manual=18 across all sessions
     preTokens: int
+    preCompactDiscoveredTools: Sequence[str] | None = None  # Tools discovered before compaction (2.1.81+)
 
 
 class MicrocompactMetadata(StrictModel):
@@ -1545,7 +1592,7 @@ class Task(StrictModel):
     id: str  # Matches filename without .json
     subject: str  # Brief imperative title (e.g., "Run tests")
     description: str  # Detailed what-to-do with acceptance criteria
-    activeForm: str  # Present continuous for UI spinner (e.g., "Running tests")
+    activeForm: str | None = None  # Present continuous for UI spinner (e.g., "Running tests")
     status: Literal['pending', 'in_progress', 'completed']
     blocks: Sequence[str]  # Task IDs that cannot start until this completes
     blockedBy: Sequence[str]  # Task IDs that must complete before this starts
@@ -2234,6 +2281,8 @@ class InformationalSystemRecord(BaseRecord):
     version: str | None = None
     gitBranch: str | None = None
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
+    slug: str | None = None
+    agentId: str | None = None
     teamName: str | None = None
     agentName: str | None = None
 
@@ -2311,6 +2360,26 @@ class BridgeStatusSystemRecord(BaseRecord):
     agentName: str | None = None
 
 
+class ScheduledTaskFireSystemRecord(BaseRecord):
+    """System record for scheduled task execution (subtype=scheduled_task_fire, Claude Code 2.1.85+).
+
+    Emitted as a transcript marker when /loop or CronCreate tasks fire.
+    """
+
+    type: Literal['system']
+    cwd: PathField
+    parentUuid: str | None
+    subtype: Literal['scheduled_task_fire']
+    content: str  # e.g., "Running scheduled task (Apr 7 7:23am)"
+    isMeta: bool
+    isSidechain: bool
+    userType: str
+    version: str
+    gitBranch: str
+    slug: str | None = None
+    entrypoint: str | None = None
+
+
 # Union of system subtype records
 SystemSubtypeRecord = Annotated[
     LocalCommandSystemRecord
@@ -2320,7 +2389,8 @@ SystemSubtypeRecord = Annotated[
     | InformationalSystemRecord
     | TurnDurationSystemRecord
     | StopHookSummarySystemRecord
-    | BridgeStatusSystemRecord,
+    | BridgeStatusSystemRecord
+    | ScheduledTaskFireSystemRecord,
     pydantic.Field(discriminator='subtype'),
 ]
 
@@ -2607,7 +2677,7 @@ class PermissionModeRecord(StrictModel):
     """
 
     type: Literal['permission-mode']
-    permissionMode: Literal['default']
+    permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions']
     sessionId: str
 
 
@@ -2653,6 +2723,7 @@ class AttachmentRecord(BaseRecord):
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None
+    agentId: str | None = None
     attachment: AttachmentData
 
 
@@ -2673,6 +2744,7 @@ SessionRecord = Annotated[
     | TurnDurationSystemRecord  # Must be before SystemRecord!
     | StopHookSummarySystemRecord  # Must be before SystemRecord!
     | BridgeStatusSystemRecord  # Must be before SystemRecord!
+    | ScheduledTaskFireSystemRecord  # Must be before SystemRecord!
     | SystemRecord
     | FileHistorySnapshotRecord
     | QueueOperationRecord
@@ -2684,7 +2756,8 @@ SessionRecord = Annotated[
     | LastPromptRecord
     | WorktreeStateRecord
     | PermissionModeRecord
-    | AttachmentRecord,
+    | AttachmentRecord
+    | BaseRecord,  # Fallback for unknown system subtypes
     pydantic.Field(union_mode='left_to_right'),
 ]
 
@@ -2768,6 +2841,7 @@ _summary_adapter = pydantic.TypeAdapter(SummaryRecord)
 # Explicit annotations needed: these wrap union/Annotated types where mypy can't infer
 _system_subtype_adapter: pydantic.TypeAdapter[SystemSubtypeRecord] = pydantic.TypeAdapter(SystemSubtypeRecord)
 _system_fallback_adapter: pydantic.TypeAdapter[SystemRecord] = pydantic.TypeAdapter(SystemRecord)
+_base_record_adapter: pydantic.TypeAdapter[BaseRecord] = pydantic.TypeAdapter(BaseRecord)
 _file_history_adapter = pydantic.TypeAdapter(FileHistorySnapshotRecord)
 _queue_operation_adapter = pydantic.TypeAdapter(QueueOperationRecord)
 _custom_title_adapter = pydantic.TypeAdapter(CustomTitleRecord)
@@ -2810,11 +2884,15 @@ def validate_session_record(
     elif record_type == 'progress':
         return _progress_adapter.validate_python(data)
     elif record_type == 'system':
-        try:
-            return _system_subtype_adapter.validate_python(data)
-        except pydantic.ValidationError:
-            # Unknown subtype or malformed subtype record -- SystemRecord's extra='forbid'
-            # will also reject known-subtype fields, producing equivalent errors to the union scan
+        if 'subtype' in data:
+            try:
+                return _system_subtype_adapter.validate_python(data)
+            except pydantic.ValidationError:
+                # Unknown subtype (e.g., new Claude Code feature) — use base record.
+                # In strict mode this re-raises; in lenient mode BaseRecord accepts extras.
+                return _base_record_adapter.validate_python(data)
+        else:
+            # Standard system record (no subtype) — use generic SystemRecord
             return _system_fallback_adapter.validate_python(data)
     elif record_type == 'summary':
         return _summary_adapter.validate_python(data)
