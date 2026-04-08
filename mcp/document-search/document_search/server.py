@@ -19,7 +19,6 @@ import logging
 import os
 import sys
 import time
-import traceback
 import typing
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
@@ -32,7 +31,6 @@ from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
 from document_search.clients.redis import RedisClient, discover_redis_port
 from document_search.dashboard.launcher import ensure_dashboard
-from document_search.dashboard.progress import ProgressWriter
 from document_search.dashboard.state import DashboardStateManager
 from document_search.paths import PROJECT_ROOT
 from document_search.repositories.collection_registry import CollectionRegistryManager
@@ -45,7 +43,6 @@ from document_search.schemas.config import (
     create_config,
     default_config,
 )
-from document_search.schemas.dashboard import OperationProgress
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import IndexingResult, StopAfterStage
 from document_search.schemas.pipeline_config import PipelineConfig
@@ -303,107 +300,23 @@ Returns:
         repository = state.get_repository(collection_name)
         await repository.ensure_collection(collection.dimensions)
 
-        # Auto-detect file vs directory
-        if resolved_path.is_file():
-            logger.info('Indexing file: %s', resolved_path)
-            try:
-                result = await indexing_service.index_file(resolved_path)
-                await indexing_service.drain_writes()
-            finally:
-                indexing_service.cancel_writes()
-            logger.info('Indexed: %s chunks', result.chunks_created)
-            if not include_timing:
-                result = result.__replace__(timing=None)
-            return result
-
-        if not resolved_path.is_dir():
+        if not resolved_path.is_file() and not resolved_path.is_dir():
             raise ValueError(f'Path not found: {resolved_path}')
 
-        # Capture baseline transient error counts for delta calculation
         embedding_client = state.get_embedding_client(collection)
-        transient_errors_start = dict(embedding_client.transient_errors)
-
-        # Setup progress writer (attaches FileHandler to root logger)
-        progress_writer = ProgressWriter(mcp_server_pid=os.getpid())
-        operation_id = progress_writer.start_operation(collection_name, str(resolved_path))
-        logger.debug('Operation: %s', operation_id)
-        logger.info('Indexing directory: %s', resolved_path)
-
-        # Reset connection high-water marks for this operation
-        state.redis_client.reset_hwm()
-
-        # Start indexing as a task
-        indexing_task = asyncio.create_task(
-            indexing_service.index_directory(
-                resolved_path,
-                respect_gitignore=respect_gitignore,
-                stop_after=stop_after,
-                embed_workers=embed_workers,
-            ),
+        result = await indexing_service.index(
+            resolved_path,
+            collection_name=collection_name,
+            owner_pid=os.getpid(),
+            respect_gitignore=respect_gitignore,
+            stop_after=stop_after,
+            embed_workers=embed_workers,
+            embedding_client=embedding_client,
+            redis_client=state.redis_client,
         )
-
-        # Monitoring coroutine
-        async def monitor_progress() -> None:
-            tick = 0
-            while not indexing_task.done():
-                snapshot = indexing_service.get_pipeline_snapshot()
-                if snapshot:
-                    # Compute delta: current counts minus baseline
-                    current = embedding_client.transient_errors
-                    transient_errors_delta = {
-                        k: current[k] - transient_errors_start.get(k, 0)
-                        for k in current
-                        if current[k] - transient_errors_start.get(k, 0) > 0
-                    }
-
-                    # Build partial timing report every 5s (10 ticks x 500ms)
-                    tick += 1
-                    if tick % 10 == 0:
-                        partial_timing = indexing_service.get_partial_timing()
-                        if partial_timing:
-                            progress_writer.update_timing(partial_timing)
-
-                    progress = OperationProgress.from_snapshot(
-                        snapshot,
-                        status='running',
-                        transient_errors=transient_errors_delta,
-                        redis_conn_stats=state.redis_client.connection_stats,
-                        http_p50_ms=getattr(embedding_client, 'http_p50_ms', 0.0),
-                        http_p99_ms=getattr(embedding_client, 'http_p99_ms', 0.0),
-                    )
-                    progress_writer.update_progress(progress)
-                await asyncio.sleep(0.5)
-
-        monitor_task = asyncio.create_task(monitor_progress())
-
-        try:
-            result = await indexing_task
-            await indexing_service.drain_writes()
-            conn_stats = state.redis_client.connection_stats
-            logger.info(
-                'Indexing complete: %s indexed, %s cached, %s chunks, %s errors',
-                result.files_indexed,
-                result.files_cached,
-                result.chunks_created,
-                len(result.errors),
-            )
-            logger.info('Redis connections: %s', conn_stats)
-            progress_writer.complete_with_success(result, redis_conn_stats=conn_stats)
-            if not include_timing:
-                result = result.__replace__(timing=None)
-            return result
-        except Exception as e:
-            error_tb = ''.join(traceback.format_exception(e))
-            progress_writer.complete_with_error(error_tb)
-            raise
-        finally:
-            indexing_service.cancel_writes()
-            monitor_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await monitor_task
-            # Idempotent — ensures log handler cleanup even on CancelledError
-            # (which bypasses both try and except Exception blocks)
-            progress_writer._close_log_handler()
+        if not include_timing:
+            result = result.__replace__(timing=None)
+        return result
 
     SEARCH_DOCS_BASE = """Search indexed documents with configurable search strategy.
 
@@ -919,7 +832,11 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     # Start dashboard and register this MCP server
     dashboard_state_manager = DashboardStateManager()
     dashboard_port = ensure_dashboard()
-    dashboard_state_manager.register_mcp_server(os.getpid())
+    dashboard_state_manager.register_process(
+        pid=os.getpid(),
+        process_type='mcp',
+        session_id=os.environ.get('CLAUDE_CODE_SESSION_ID'),
+    )
 
     # List existing collections
     collections = state.collection_registry.list_collections()
@@ -933,7 +850,7 @@ async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None
     yield
 
     # Cleanup resources
-    dashboard_state_manager.unregister_mcp_server(os.getpid())
+    dashboard_state_manager.unregister_process(os.getpid())
     await state.close()
     await redis_client.close()
     print('✓ Document Search MCP server shutdown', file=sys.stderr)

@@ -1,7 +1,7 @@
 """Dashboard schemas.
 
 Shared data models for:
-- MCP server registration and dashboard coordination
+- Process registration and dashboard coordination
 - Operation progress tracking and monitoring
 """
 
@@ -25,32 +25,37 @@ from document_search.schemas.tracing import QueueDepthSample, StageTimingReport
 
 __all__ = [
     'DashboardState',
-    'McpServer',
     'OperationProgress',
     'OperationState',
+    'ProcessType',
+    'RegisteredProcess',
 ]
 
+type ProcessType = Literal['mcp', 'cli']
 
-class McpServer(StrictModel):
-    """A registered MCP server instance.
+
+class RegisteredProcess(StrictModel):
+    """A registered process (MCP server or CLI) producing indexing operations.
 
     Identified by PID with started_at for robustness against PID reuse.
     """
 
     pid: int
     started_at: JsonDatetime
+    process_type: ProcessType = 'mcp'
+    session_id: str | None = None
 
 
 class DashboardState(StrictModel):
     """Persisted dashboard coordination state.
 
-    Tracks the dashboard server and registered MCP servers.
+    Tracks the dashboard server and registered producer processes.
     File location: paths.DASHBOARD_STATE_PATH
     """
 
     port: int
     server_pid: int
-    mcp_servers: Sequence[McpServer]
+    registered_processes: Sequence[RegisteredProcess]
 
 
 # Operation status type
@@ -286,9 +291,9 @@ class OperationState(StrictModel):
     """
 
     operation_id: str
-    mcp_server_pid: int
+    owner_pid: int
     collection_name: str
-    directory: str
+    target_path: str
 
     created_at: JsonDatetime
     updated_at: JsonDatetime

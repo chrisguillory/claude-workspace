@@ -34,9 +34,7 @@ from document_search.schemas.indexing import (
     FileIndexState,
     FileIndexSummary,
     FileProcessingError,
-    IndexingProgress,
     IndexingResult,
-    ProgressCallback,
 )
 from document_search.schemas.vectors import (
     SearchHit,
@@ -81,6 +79,4 @@ __all__ = [  # noqa: RUF022 — grouped by schema module, not alphabetical
     'FileProcessingError',
     'ErrorCategory',
     'IndexingResult',
-    'IndexingProgress',
-    'ProgressCallback',
 ]

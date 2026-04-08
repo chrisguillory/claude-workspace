@@ -142,14 +142,14 @@ def dashboard_status(
         else:
             typer.secho('Dashboard is not running.', fg=typer.colors.YELLOW)
         return
-    live_servers = manager.get_live_mcp_servers()
+    live_processes = manager.get_live_processes()
     if format == 'json':
         typer.echo(
             json.dumps(
                 {
                     'running': True,
                     'url': f'http://127.0.0.1:{port}',
-                    'mcp_servers': len(live_servers),
+                    'registered_processes': len(live_processes),
                 },
                 indent=2,
             )
@@ -157,7 +157,7 @@ def dashboard_status(
     else:
         typer.secho('Dashboard:', bold=True)
         typer.echo(f'  URL: http://127.0.0.1:{port}')
-        typer.echo(f'  MCP servers: {len(live_servers)}')
+        typer.echo(f'  Processes: {len(live_processes)}')
 
 
 @dashboard_app.command('url')
@@ -729,25 +729,33 @@ async def _index_async(
 
         stop = cast(StopAfterStage, stop_after) if stop_after else None
 
+        # Dashboard lifecycle — ensure dashboard is running and register this CLI process
+        from document_search.dashboard.launcher import ensure_dashboard  # noqa: PLC0415 — lazy
+
+        dashboard_state = DashboardStateManager()
+        ensure_dashboard()
+        dashboard_state.register_process(
+            pid=os.getpid(),
+            process_type='cli',
+            session_id=os.environ.get('CLAUDE_CODE_SESSION_ID'),
+        )
+
         try:
             all_results = []
             for p in paths:
                 resolved = p.expanduser().resolve()
-                if resolved.is_file():
-                    logger.info('Indexing file: %s', resolved)
-                    result = await indexing_service.index_file(resolved)
-                    await indexing_service.drain_writes()
-                elif resolved.is_dir():
-                    logger.info('Indexing directory: %s', resolved)
-                    result = await indexing_service.index_directory(
-                        resolved,
-                        respect_gitignore=gitignore,
-                        stop_after=stop,
-                    )
-                    await indexing_service.drain_writes()
-                else:
+                if not resolved.is_file() and not resolved.is_dir():
                     typer.secho(f'Path not found: {resolved}', fg=typer.colors.RED, err=True)
                     continue
+                result = await indexing_service.index(
+                    resolved,
+                    collection_name=collection_name,
+                    owner_pid=os.getpid(),
+                    respect_gitignore=gitignore,
+                    stop_after=stop,
+                    embedding_client=embedding_client,
+                    redis_client=ctx.redis,
+                )
                 all_results.append(result)
 
             if format == 'json':
@@ -774,11 +782,12 @@ async def _index_async(
             if total_errors:
                 typer.secho(f'  Errors: {total_errors}', fg=typer.colors.YELLOW)
 
-            dashboard_port = DashboardStateManager().get_dashboard_port()
+            dashboard_port = dashboard_state.get_dashboard_port()
             if dashboard_port:
                 typer.echo()
                 typer.secho(f'Dashboard: http://127.0.0.1:{dashboard_port}', fg=typer.colors.CYAN)
         finally:
+            dashboard_state.unregister_process(os.getpid())
             chunking_service.shutdown()
             sparse_service.shutdown()
             await embedding_client.close()

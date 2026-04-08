@@ -51,6 +51,7 @@ Simple, readable, maintainable, explicit. Fail-fast on misconfiguration. Single 
 | **Trust event authority**                     | Don't second-guess events with defensive validation |
 | **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available |
 | **Assertions only in tests/**                | Application code raises exceptions explicitly       |
+| **Ideal state over backwards compat**         | Dev-only project — rename cleanly, no migration shims |
 | **DI via closures**                           | FastMCP pattern for dependency injection           |
 
 ### Exception Handling

@@ -12,7 +12,7 @@ from pathlib import Path
 import filelock
 
 from document_search.paths import DASHBOARD_LOCK_PATH, DASHBOARD_STATE_PATH
-from document_search.schemas.dashboard import DashboardState, McpServer
+from document_search.schemas.dashboard import DashboardState, ProcessType, RegisteredProcess
 
 __all__ = [
     'DashboardStateManager',
@@ -61,47 +61,57 @@ class DashboardStateManager:
             return None
         return state.port
 
-    def register_mcp_server(self, pid: int) -> None:
-        """Add MCP server to state. Raises ValueError if dashboard not running."""
+    def register_process(
+        self,
+        pid: int,
+        process_type: ProcessType,
+        session_id: str | None = None,
+    ) -> None:
+        """Register a producer process. Raises ValueError if dashboard not running."""
         with self._lock:
             state = self.load()
             if state is None:
                 raise ValueError('No dashboard state - dashboard not running?')
 
-            if any(s.pid == pid for s in state.mcp_servers):
+            if any(s.pid == pid for s in state.registered_processes):
                 return
 
-            new_server = McpServer(pid=pid, started_at=datetime.now(UTC))
+            entry = RegisteredProcess(
+                pid=pid,
+                started_at=datetime.now(UTC),
+                process_type=process_type,
+                session_id=session_id,
+            )
             new_state = DashboardState(
                 port=state.port,
                 server_pid=state.server_pid,
-                mcp_servers=(*state.mcp_servers, new_server),
+                registered_processes=(*state.registered_processes, entry),
             )
             self._save_unlocked(new_state)
 
-    def unregister_mcp_server(self, pid: int) -> None:
-        """Remove MCP server from state."""
+    def unregister_process(self, pid: int) -> None:
+        """Remove a producer process from state."""
         with self._lock:
             state = self.load()
             if state is None:
                 return
 
-            new_servers = [s for s in state.mcp_servers if s.pid != pid]
-            if len(new_servers) != len(state.mcp_servers):
+            remaining = [s for s in state.registered_processes if s.pid != pid]
+            if len(remaining) != len(state.registered_processes):
                 new_state = DashboardState(
                     port=state.port,
                     server_pid=state.server_pid,
-                    mcp_servers=new_servers,
+                    registered_processes=remaining,
                 )
                 self._save_unlocked(new_state)
 
-    def get_live_mcp_servers(self) -> Sequence[McpServer]:
-        """Return MCP servers whose processes are still running."""
+    def get_live_processes(self) -> Sequence[RegisteredProcess]:
+        """Return registered processes whose PIDs are still alive."""
         with self._lock:
             state = self.load()
             if state is None:
                 return []
-            return [s for s in state.mcp_servers if _process_exists(s.pid)]
+            return [s for s in state.registered_processes if _process_exists(s.pid)]
 
     def _save_unlocked(self, state: DashboardState) -> None:
         """Save without acquiring lock. Caller must hold lock."""
