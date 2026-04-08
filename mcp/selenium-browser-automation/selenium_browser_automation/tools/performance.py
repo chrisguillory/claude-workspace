@@ -56,57 +56,47 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.capture_web_vitals(timeout_ms=timeout_ms)
 
     @mcp.tool(
-        description="""Get resource timing data from the browser's Performance API.
-
-Returns timing breakdown for all resources loaded by the page. No setup required -
-the Performance API is always available. Useful for identifying slow resources
-and network bottlenecks.
-
-Args:
-    clear_resource_timing_buffer: If True, clears the timing buffer after retrieval.
-        Default False (non-destructive). Set True when measuring sequential page loads
-        to avoid mixing entries from previous pages.
-    min_duration_ms: Only include requests slower than this threshold (0 = all).
-
-Returns:
-    NetworkCapture with requests, timing breakdown, and summary statistics
-    including slowest requests and breakdown by resource type.
-
-Note:
-    Browsers maintain a buffer of 150-250 entries. For long sessions or pages
-    with many resources, use clear_resource_timing_buffer=True to prevent data loss.""",
+        annotations=ToolAnnotations(
+            title='Get Resource Timings',
+            readOnlyHint=False,  # clear_resource_timing_buffer=True clears the buffer
+            idempotentHint=False,
+        ),
     )
     async def get_resource_timings(
         ctx: Context[Any, Any, Any],
         clear_resource_timing_buffer: bool = False,
         min_duration_ms: int = 0,
     ) -> NetworkCapture:
+        """Get resource timing data from the browser's Performance API.
+
+        Returns timing breakdown for all resources loaded by the page. No setup required -
+        the Performance API is always available. Useful for identifying slow resources
+        and network bottlenecks.
+
+        Args:
+            clear_resource_timing_buffer: If True, clears the timing buffer after retrieval.
+                Default False (non-destructive). Set True when measuring sequential page loads
+                to avoid mixing entries from previous pages.
+            min_duration_ms: Only include requests slower than this threshold (0 = all).
+
+        Returns:
+            NetworkCapture with requests, timing breakdown, and summary statistics
+            including slowest requests and breakdown by resource type.
+
+        Note:
+            Browsers maintain a buffer of 150-250 entries. For long sessions or pages
+            with many resources, use clear_resource_timing_buffer=True to prevent data loss.
+        """
         return await service.get_resource_timings(
             clear_resource_timing_buffer=clear_resource_timing_buffer, min_duration_ms=min_duration_ms
         )
 
     @mcp.tool(
-        description="""Export captured network traffic to HAR 1.2 file.
-
-Exports full HTTP transaction details (headers, status codes, timing) to HAR format
-for analysis in Chrome DevTools or other tools.
-
-IMPORTANT: HAR capture must be enabled via navigate(enable_har_capture=True, fresh_browser=True).
-This is opt-in due to performance overhead from Chrome's performance logging.
-
-Args:
-    filename: Output filename (required, e.g., "api-calls.har")
-    include_response_bodies: If True, fetch response bodies for JSON/text (default False)
-    max_body_size_mb: Max response body size to fetch in MB (default 10, max 50)
-
-Returns:
-    HARExportResult with path to saved file and entry count
-
-Workflow:
-    1. navigate(url, fresh_browser=True, enable_har_capture=True) - enable HAR capture
-    2. [interact with page]
-    3. export_har("capture.har") - export network data
-    4. Read the HAR file or import into Chrome DevTools""",
+        annotations=ToolAnnotations(
+            title='Export HAR',
+            readOnlyHint=False,  # Writes file to disk
+            idempotentHint=True,
+        ),
     )
     async def export_har(
         ctx: Context[Any, Any, Any],
@@ -114,6 +104,28 @@ Workflow:
         include_response_bodies: bool = False,
         max_body_size_mb: int = 10,
     ) -> HARExportResult:
+        """Export captured network traffic to HAR 1.2 file.
+
+        Exports full HTTP transaction details (headers, status codes, timing) to HAR format
+        for analysis in Chrome DevTools or other tools.
+
+        IMPORTANT: HAR capture must be enabled via navigate(enable_har_capture=True, fresh_browser=True).
+        This is opt-in due to performance overhead from Chrome's performance logging.
+
+        Args:
+            filename: Output filename (required, e.g., "api-calls.har")
+            include_response_bodies: If True, fetch response bodies for JSON/text (default False)
+            max_body_size_mb: Max response body size to fetch in MB (default 10, max 50)
+
+        Returns:
+            HARExportResult with path to saved file and entry count
+
+        Workflow:
+            1. navigate(url, fresh_browser=True, enable_har_capture=True) - enable HAR capture
+            2. [interact with page]
+            3. export_har("capture.har") - export network data
+            4. Read the HAR file or import into Chrome DevTools
+        """
         return await service.export_har(
             filename=filename, include_response_bodies=include_response_bodies, max_body_size_mb=max_body_size_mb
         )

@@ -43,6 +43,7 @@ from .helpers import (
     build_page_metadata,
     build_storage_init_script,
     count_tree_nodes,
+    sanitize_filename,
     save_large_output_to_file,
 )
 from .models import (
@@ -492,7 +493,7 @@ class BrowserService:
         """
         driver = await self.get_browser()
 
-        screenshot_path = self.state.screenshot_dir / filename
+        screenshot_path = self.state.screenshot_dir / sanitize_filename(filename, 'screenshot')
 
         if full_page:
             logger.info('Taking full-page screenshot: %s', filename)
@@ -542,10 +543,7 @@ class BrowserService:
         if not url.startswith(('http://', 'https://', 'file://')):
             raise fastmcp.exceptions.ValidationError('URL must start with http://, https://, or file://')
 
-        safe_filename = ''.join(c if c.isalnum() or c in '.-_' else '_' for c in output_filename)
-        if not safe_filename or safe_filename.startswith('.'):
-            safe_filename = 'resource_' + safe_filename
-        save_path = self.state.screenshot_dir / safe_filename
+        save_path = self.state.screenshot_dir / sanitize_filename(output_filename, 'resource')
 
         if url.startswith('file://'):
             local_path = Path(unquote(urlparse(url).path))
@@ -777,9 +775,9 @@ class BrowserService:
     async def get_interactive_elements(
         self,
         selector_scope: str,
-        text_contains: str | None,
-        tag_filter: Sequence[str] | None,
-        limit: int | None,
+        text_contains: str | None = None,
+        tag_filter: Sequence[str] | None = None,
+        limit: int | None = None,
     ) -> Sequence[InteractiveElement]:
         """Find clickable elements by text or other filters. Returns CSS selectors for click().
 
@@ -1229,7 +1227,7 @@ class BrowserService:
         # Verify element is visible (not display:none, visibility:hidden, etc.)
         is_displayed = await asyncio.to_thread(element.is_displayed)
         if not is_displayed:
-            raise ValueError(f"Element '{css_selector}' is not visible - cannot hover")
+            raise fastmcp.exceptions.ToolError(f"Element '{css_selector}' is not visible - cannot hover")
 
         # Multi-signal stability check (based on Playwright's approach)
         # Uses: requestAnimationFrame timing, getAnimations() API, distance threshold
@@ -1264,7 +1262,7 @@ class BrowserService:
             element,
         )
         if pointer_check == 'obscured':
-            raise ValueError(
+            raise fastmcp.exceptions.ToolError(
                 f"Element '{css_selector}' is obscured by another element at its center. "
                 'A modal, overlay, or other element may be blocking it.',
             )
@@ -2670,6 +2668,7 @@ class BrowserService:
         max_body_size_mb: int = 10,
     ) -> HARExportResult:
         driver = await self.get_browser()
+        filename = sanitize_filename(filename, 'har')
 
         logger.info('Exporting HAR to %s', filename)
         errors: list[str] = []

@@ -6,6 +6,7 @@ __all__ = [
     'build_page_metadata',
     'build_storage_init_script',
     'count_tree_nodes',
+    'sanitize_filename',
     'save_large_output_to_file',
 ]
 
@@ -104,6 +105,14 @@ def build_page_metadata(
     if not lines:
         return ''
     return '\n# --- page metadata ---\n' + '\n'.join(lines)
+
+
+def sanitize_filename(filename: str, prefix: str = 'file') -> str:
+    """Sanitize a filename to prevent path traversal. Allows alphanumeric, dot, dash, underscore."""
+    safe = ''.join(c if c.isalnum() or c in '.-_' else '_' for c in filename)
+    if not safe or safe.startswith('.'):
+        safe = f'{prefix}_{safe}'
+    return safe
 
 
 def save_large_output_to_file(content: str, output_dir: Path, prefix: str, extension: str) -> str:
