@@ -421,6 +421,8 @@ Args:
         - 'embedding': Dense vector similarity only. Useful for
           conceptual/semantic queries or debugging.
     file_types: Filter by file types (e.g., ['markdown', 'pdf']).
+    search_timeout: Qdrant search timeout in seconds. Increase for large
+        unfiltered collections (path="**"). Default uses client setting (30s).
 
 Returns:
     SearchResult with ranked hits including text snippets and metadata."""
@@ -442,6 +444,7 @@ Returns:
         limit: int = 10,
         search_type: SearchType = 'hybrid',
         file_types: Sequence[str] | None = None,
+        search_timeout: int | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
         if not ctx:
@@ -523,7 +526,7 @@ Returns:
         )
 
         # Layer 1: Search with specified strategy
-        result = await repository.search(search_query)
+        result = await repository.search(search_query, search_timeout=search_timeout)
 
         # Layer 2: Cross-encoder reranking
         result = await state.reranker_service.rerank(
