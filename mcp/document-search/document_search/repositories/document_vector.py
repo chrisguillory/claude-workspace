@@ -125,13 +125,14 @@ class DocumentVectorRepository:
             Typed search results.
 
         Note:
-            source_path_prefix filtering is done via post-filtering since
+            Path prefix filtering is done via post-filtering since
             Qdrant doesn't support native prefix matching.
         """
         file_types = list(query.file_types) if query.file_types else None
 
-        # Request extra results if we'll be post-filtering by path prefix
-        fetch_limit = query.limit * 3 if query.source_path_prefix else query.limit
+        # Request extra results if we'll be post-filtering by path prefixes
+        has_path_filter = bool(query.source_path_prefixes) or bool(query.exclude_path_prefixes)
+        fetch_limit = query.limit * 3 if has_path_filter else query.limit
 
         raw_results = await self._client.search(
             self._collection_name,
@@ -145,11 +146,17 @@ class DocumentVectorRepository:
             timeout=search_timeout,
         )
 
-        # Post-filter by source_path_prefix if specified
-        if query.source_path_prefix:
-            raw_results = [r for r in raw_results if r['source_path'].startswith(query.source_path_prefix)][
-                : query.limit
+        # Post-filter by path prefixes (include then exclude, truncate after both)
+        if query.source_path_prefixes:
+            raw_results = [
+                r for r in raw_results if any(r['source_path'].startswith(p) for p in query.source_path_prefixes)
             ]
+        if query.exclude_path_prefixes:
+            raw_results = [
+                r for r in raw_results if not any(r['source_path'].startswith(p) for p in query.exclude_path_prefixes)
+            ]
+        if has_path_filter:
+            raw_results = raw_results[: query.limit]
 
         hits = [
             SearchHit(

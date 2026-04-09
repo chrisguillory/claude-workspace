@@ -122,11 +122,12 @@ class SearchQuery(StrictModel):
     # Sparse vector for keyword matching (required for hybrid/lexical modes)
     sparse_indices: Sequence[int] | None = None
     sparse_values: Sequence[float] | None = None
-    limit: Annotated[int, pydantic.Field(ge=1, le=100)] = 10
+    limit: Annotated[int, pydantic.Field(ge=1, le=600)]
     score_threshold: float | None = None
     # Optional filters
     file_types: Sequence[FileType] | None = None
-    source_path_prefix: str | None = None
+    source_path_prefixes: Sequence[str] | None = None
+    exclude_path_prefixes: Sequence[str] | None = None
 
 
 class SearchHit(StrictModel):
