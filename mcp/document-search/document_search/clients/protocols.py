@@ -41,6 +41,16 @@ class EmbeddingClient(Protocol):
     Used for dashboard monitoring. Resets only on client recreation.
     """
 
+    @property
+    def http_p50_ms(self) -> float:
+        """Median HTTP round-trip time across all API calls."""
+        ...
+
+    @property
+    def http_p99_ms(self) -> float:
+        """99th percentile HTTP round-trip time across all API calls."""
+        ...
+
     async def embed(self, texts: Sequence[str], *, intent: TaskIntent) -> Sequence[EmbeddingVector]:
         """Embed texts into vectors."""
         ...

@@ -1448,8 +1448,8 @@ async def _monitor_progress(
                 status='running',
                 transient_errors=transient_errors_delta,
                 redis_conn_stats=conn_stats,
-                http_p50_ms=getattr(embedding_client, 'http_p50_ms', 0.0),
-                http_p99_ms=getattr(embedding_client, 'http_p99_ms', 0.0),
+                http_p50_ms=embedding_client.http_p50_ms if embedding_client else 0.0,
+                http_p99_ms=embedding_client.http_p99_ms if embedding_client else 0.0,
             )
             progress_writer.update_progress(progress)
         await asyncio.sleep(0.5)
