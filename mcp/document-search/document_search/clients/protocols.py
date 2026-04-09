@@ -19,6 +19,7 @@ __all__ = [
 
 type TransientErrorCategory = Literal[
     'bad_gateway',
+    'empty_response',
     'provider_unavailable',
     'rate_limit',
     'server_error',

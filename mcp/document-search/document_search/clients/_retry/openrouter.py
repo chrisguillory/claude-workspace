@@ -13,7 +13,11 @@ import httpx
 import tenacity
 
 from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
-from document_search.clients.openrouter_errors import OpenRouterAPIError, OpenRouterTruncatedResponse
+from document_search.clients.openrouter_errors import (
+    OpenRouterAPIError,
+    OpenRouterEmptyResponse,
+    OpenRouterTruncatedResponse,
+)
 
 __all__ = [
     'OpenRouterTransientErrorCategory',
@@ -30,6 +34,7 @@ OPENROUTER_RECOVERY_TIMEOUT = 60
 
 type OpenRouterTransientErrorCategory = Literal[
     'bad_gateway',  # 502 — upstream provider down or returned invalid response
+    'empty_response',  # HTTP 200 with empty/whitespace body — provider failed after headers sent
     'provider_unavailable',  # 404 "No successful provider responses." — all providers failed
     'rate_limit',  # 429 — upstream provider or OpenRouter rate limit
     'server_error',  # 500, 503, 504 — OpenRouter infrastructure issues
@@ -97,6 +102,9 @@ def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCat
     - OpenRouterUnexpectedResponse (unknown format won't change on retry)
     - 404 with other messages ("No endpoints found for model") — permanent
     """
+    if isinstance(exc, OpenRouterEmptyResponse):
+        return 'empty_response'
+
     if isinstance(exc, OpenRouterTruncatedResponse):
         return 'truncated_response'
 
