@@ -325,6 +325,7 @@ Args:
     collection_name: Name of the collection to search.
     path: Filter to files under this path. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
+        Accepts a single path string or a list of paths (matches files under ANY).
     limit: Maximum number of results to return (1-100).
     search_type: Search strategy:
         - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
@@ -334,6 +335,10 @@ Args:
         - 'embedding': Dense vector similarity only. Useful for
           conceptual/semantic queries or debugging.
     file_types: Filter by file types (e.g., ['markdown', 'pdf']).
+    exclude_paths: Exclude files under these paths from results.
+    min_score: Minimum cross-encoder relevance score. The reranker produces
+        raw logits where negative = irrelevant, positive = relevant.
+        Use 0.0 for "only relevant results", higher for stricter filtering.
     search_timeout: Qdrant search timeout in seconds. Increase for large
         unfiltered collections (path="**"). Default uses client setting (30s).
 
@@ -353,10 +358,12 @@ Returns:
     async def search_documents(
         query: str,
         collection_name: str,
-        path: str | None = None,
+        path: str | Sequence[str] | None = None,
         limit: int = 10,
         search_type: SearchType = 'hybrid',
         file_types: Sequence[str] | None = None,
+        exclude_paths: Sequence[str] | None = None,
+        min_score: float | None = None,
         search_timeout: int | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
@@ -419,13 +426,17 @@ Returns:
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 200)
 
-        # Resolve path (defaults to CWD, "**" means no filter)
-        if path == '**':
-            resolved_path: str | None = None
+        # Resolve paths (defaults to CWD, "**" means no filter)
+        if path == '**' or (not isinstance(path, str) and path is not None and '**' in path):
+            resolved_paths: Sequence[str] | None = None
         elif path is None:
-            resolved_path = str(Path.cwd())
+            resolved_paths = [str(Path.cwd())]
+        elif isinstance(path, str):
+            resolved_paths = [str(Path(path).expanduser().resolve())]
         else:
-            resolved_path = str(Path(path).expanduser().resolve())
+            resolved_paths = [str(Path(p).expanduser().resolve()) for p in path]
+
+        resolved_excludes = [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else None
 
         # Build search query
         search_query = SearchQuery(
@@ -435,7 +446,8 @@ Returns:
             sparse_values=sparse_values,
             limit=rerank_candidates,
             file_types=[typing.cast(FileType, ft) for ft in file_types] if file_types else None,
-            source_path_prefix=resolved_path,
+            source_path_prefixes=resolved_paths,
+            exclude_path_prefixes=resolved_excludes,
         )
 
         # Layer 1: Search with specified strategy
@@ -448,7 +460,12 @@ Returns:
             top_k=effective_limit,
         )
 
-        logger.info('Found %s results (reranked top %s)', result.total, effective_limit)
+        # Apply minimum relevance score filter (post-reranking)
+        if min_score is not None:
+            filtered_hits = [h for h in result.hits if h.score >= min_score]
+            result = SearchResult(hits=filtered_hits, total=len(filtered_hits))
+
+        logger.info('Found %s results (reranked top %s)', len(result.hits), effective_limit)
 
         return result
 

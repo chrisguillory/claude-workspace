@@ -38,6 +38,7 @@ from document_search.schemas.vectors import (
     EmbeddingInfo,
     IndexInfo,
     SearchQuery,
+    SearchResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -305,6 +306,12 @@ def search(
     search_type: Annotated[
         Literal['hybrid', 'lexical', 'embedding'], typer.Option('--type', '-t', help='Search strategy.')
     ] = 'hybrid',
+    exclude_path: Annotated[
+        list[str] | None, typer.Option('--exclude', '-x', help='Exclude files under these paths.')
+    ] = None,  # strict_typing_linter.py: mutable-type — typer requires list
+    min_score: Annotated[
+        float | None, typer.Option('--min-score', help='Minimum relevance score (0.0 = relevant).')
+    ] = None,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Search documents.
@@ -314,8 +321,12 @@ def search(
         document-search search "authentication flow"
         document-search search "API endpoints" -c api-specs --type lexical
         document-search search "error handling" --limit 5 -f json
+        document-search search "config" --exclude /path/to/noise/
+        document-search search "retry logic" --min-score 0.0
     """
-    asyncio.run(_search_async(query, _resolve_collection(collection), path, limit, search_type, format))
+    asyncio.run(
+        _search_async(query, _resolve_collection(collection), path, limit, search_type, exclude_path, min_score, format)
+    )
 
 
 @app.command()
@@ -584,6 +595,8 @@ async def _search_async(
     path: str | None,
     limit: int,
     search_type: Literal['hybrid', 'lexical', 'embedding'],
+    exclude_paths: Sequence[str] | None,
+    min_score: float | None,
     format: Literal['text', 'json'],
 ) -> None:
     async with infrastructure() as ctx:
@@ -636,6 +649,7 @@ async def _search_async(
 
             resolved_path = _resolve_path(path)
             filter_path = None if resolved_path == '**' else resolved_path
+            resolved_excludes = [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else None
 
             effective_limit = min(max(limit, 1), 100)
             rerank_candidates = min(effective_limit * 3, 200)
@@ -646,11 +660,16 @@ async def _search_async(
                 sparse_indices=sparse_indices,
                 sparse_values=sparse_values,
                 limit=rerank_candidates,
-                source_path_prefix=filter_path,
+                source_path_prefixes=[filter_path] if filter_path else None,
+                exclude_path_prefixes=resolved_excludes,
             )
 
             result = await repository.search(search_query)
             result = await reranker.rerank(query=query, result=result, top_k=effective_limit)
+
+            if min_score is not None:
+                filtered = [h for h in result.hits if h.score >= min_score]
+                result = SearchResult(hits=filtered, total=len(filtered))
 
             if format == 'json':
                 typer.echo(result.model_dump_json(indent=2))
