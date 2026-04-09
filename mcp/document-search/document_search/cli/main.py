@@ -768,13 +768,30 @@ async def _index_async(
                 typer.echo(json.dumps(result.model_dump(mode='json'), indent=2, default=str))
                 return
 
-            typer.secho('Indexing complete:', fg=typer.colors.GREEN)
+            typer.secho(f'Indexing complete ({result.elapsed_seconds:.1f}s):', fg=typer.colors.GREEN)
             typer.echo(f'  Scanned: {result.files_scanned}')
             typer.echo(f'  Indexed: {result.files_indexed}')
-            typer.echo(f'  Cached: {result.files_cached}')
-            typer.echo(f'  Chunks: {result.chunks_created}')
+            typer.echo(f'  Cached:  {result.files_cached}')
+            if result.files_ignored:
+                typer.echo(f'  Ignored: {result.files_ignored}')
+            if result.files_no_content:
+                typer.echo(f'  No content: {result.files_no_content}')
+            typer.echo(f'  Chunks:  {result.chunks_created}')
+            if result.chunks_skipped:
+                typer.echo(f'  Chunks skipped: {result.chunks_skipped}')
+            if result.chunks_deleted:
+                typer.echo(f'  Chunks deleted: {result.chunks_deleted}')
+            typer.echo(f'  Embeddings: {result.embed_cache_hits} cached, {result.embed_cache_misses} computed')
+            if result.by_file_type:
+                typer.echo('  By type:')
+                for ft, summary in result.by_file_type.items():
+                    typer.echo(f'    {ft}: {summary}')
+            if result.stopped_after:
+                typer.echo(f'  Stopped after: {result.stopped_after}')
             if result.errors:
                 typer.secho(f'  Errors: {len(result.errors)}', fg=typer.colors.YELLOW)
+                for err in result.errors:
+                    typer.secho(f'    {err.file_path}: {err.message}', fg=typer.colors.YELLOW)
 
             dashboard_port = dashboard_state.get_dashboard_port()
             if dashboard_port:
