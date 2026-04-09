@@ -236,6 +236,16 @@ class GeminiClient:
         token_sum = sum(tokenizer.count_tokens(t).total_tokens for t in texts)
         return token_sum + 1  # API adds BOS token
 
+    @property
+    def http_p50_ms(self) -> float:
+        """Not tracked for Gemini (uses google-genai SDK)."""
+        return 0.0
+
+    @property
+    def http_p99_ms(self) -> float:
+        """Not tracked for Gemini (uses google-genai SDK)."""
+        return 0.0
+
     def on_transient_error(self, category: TransientErrorCategory) -> None:
         """Called from before_sleep on categorized transient errors. No-op by default."""
 
