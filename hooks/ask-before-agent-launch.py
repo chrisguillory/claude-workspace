@@ -46,9 +46,9 @@ def ask_stdlib(reason: str) -> None:
 try:
     import pydantic
     from cc_lib.schemas.hooks import (
-        PreToolUseDecision,
         PreToolUseHookInput,
         PreToolUseHookOutput,
+        PreToolUseSpecificOutput,
     )
 except Exception as e:  # exception_safety_linter.py: swallowed-exception — fail closed: import error triggers manual approval, not silent pass
     # Fail CLOSED: if deps can't be imported, require manual approval
@@ -59,7 +59,7 @@ except Exception as e:  # exception_safety_linter.py: swallowed-exception — fa
 def ask(reason: str) -> None:
     """Emit an 'ask' decision using Pydantic models."""
     output = PreToolUseHookOutput(
-        hook_specific_output=PreToolUseDecision(
+        hook_specific_output=PreToolUseSpecificOutput(
             permission_decision='ask',
             permission_decision_reason=reason,
         ),
