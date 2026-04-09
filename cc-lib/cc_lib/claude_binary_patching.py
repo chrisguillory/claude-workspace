@@ -74,22 +74,6 @@ Patches:
                     Present in all versions with session-memory (2.0.64+),
                     verified in 2.1.45, 2.1.74, 2.1.80, 2.1.81.
 
-    verbose-agent-detail [tweak] Show subagent prompt/transcript/response when
-                    verbose=true. Reassigns isTranscriptMode = isTranscriptMode ||
-                    verbose in renderToolResultMessage by replacing a redundant
-                    variable alias (let T=H → $=$||K) and fixing 3 references.
-                    Anchor: ``Remote agent launched`` (stable UI text, 2.1.63+).
-                    Minified vars (T, H, K, N6, K6) stable from 2.1.85+.
-                    https://github.com/anthropics/claude-code/issues/14511
-                    https://github.com/anthropics/claude-code/issues/5974
-
-    verbose-agent-progress [tweak] Disable compact mode for in-progress subagent
-                    output. Replaces ``if(z){`` with ``if(0){`` to bypass the
-                    terminal-height check that caps visible messages to 3.
-                    Anchor: ``In progress\\u2026`` (stable UI text).
-                    The ``z`` variable is stable from 2.1.85+.
-                    https://github.com/anthropics/claude-code/issues/10397
-
     scratchpad      [feature] Enable session-scoped scratchpad directory. Creates
                     ``<data_dir>/<project>/<session>/scratchpad`` with auto-
                     permissions for reading and writing. Claude uses this
@@ -117,8 +101,6 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN)::
     tengu_coral_fern          2.1.21          2.1.20
     tengu_sm_compact          2.0.64          2.0.62 (co-introduced with session-memory)
     tengu_scratch             2.1.45          2.1.44
-    Remote agent launched     2.1.63          2.1.62 (let T=H pattern stable from 2.1.85+)
-    In progress\\u2026         2.1.50+         never absent (if(z){ stable from 2.1.85+)
 
 Site Count Evolution::
 
@@ -279,26 +261,6 @@ PATCHES: Sequence[PatchDef] = (
         new=b'||!0/*_scratch_*/',
         window=50,
         min_version='2.1.45',
-    ),
-    PatchDef(
-        name='verbose-agent-detail',
-        description='Expand completed subagent to show prompt, tool transcript, and response when verbose=true',
-        kind=PatchKind.TWEAK,
-        anchor=b'Remote agent launched',
-        old=b'let T=H;if(T.status==="remote_launched")return N6.createElement(m,{flexDirection:"column"},N6.createElement(K6,{height:1},N6.createElement(L,null,"Remote agent launched"," ",N6.createElement(L,{dimColor:!0},"\\xB7 ",T.taskId," \\xB7 ",T.sessionUrl',
-        new=b'$=$||K; if(H.status==="remote_launched")return N6.createElement(m,{flexDirection:"column"},N6.createElement(K6,{height:1},N6.createElement(L,null,"Remote agent launched"," ",N6.createElement(L,{dimColor:!0},"\\xB7 ",H.taskId," \\xB7 ",H.sessionUrl',
-        window=300,
-        min_version='2.1.85',
-    ),
-    PatchDef(
-        name='verbose-agent-progress',
-        description='Disable compact mode for in-progress subagent output',
-        kind=PatchKind.TWEAK,
-        anchor=b'In progress\\u2026',
-        old=b'if(z){',
-        new=b'if(0){',
-        window=600,
-        min_version='2.1.85',
     ),
 )
 
