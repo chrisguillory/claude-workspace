@@ -34,6 +34,7 @@ from document_search.clients import _retry
 from document_search.clients._retry.openrouter import OpenRouterTransientErrorCategory
 from document_search.clients.openrouter_errors import (
     OpenRouterAPIError,
+    OpenRouterEmptyResponse,
     OpenRouterTruncatedResponse,
     OpenRouterUnexpectedResponse,
 )
@@ -189,6 +190,17 @@ class OpenRouterClient:
             response = await self._client.post('/embeddings', json=body)
 
             response.raise_for_status()
+
+            # Detect empty/whitespace body before JSON parsing.
+            # OpenRouter can return HTTP 200 with no content when the upstream
+            # provider fails after headers are committed.
+            if not response.content or not response.content.strip():
+                raise OpenRouterEmptyResponse(
+                    raw_body_length=len(response.content),
+                    status_code=response.status_code,
+                    model=self._model,
+                    batch_size=len(texts),
+                )
 
             try:
                 data = response.json()

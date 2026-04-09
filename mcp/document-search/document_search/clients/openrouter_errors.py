@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     'OpenRouterAPIError',
+    'OpenRouterEmptyResponse',
     'OpenRouterTruncatedResponse',
     'OpenRouterUnexpectedResponse',
 ]
@@ -51,6 +52,42 @@ class OpenRouterAPIError(Exception):
         if metadata:
             line += f'\n  metadata: {dict(metadata)}'
         super().__init__(line)
+
+
+class OpenRouterEmptyResponse(Exception):
+    """OpenRouter returned HTTP 200 with an empty or whitespace-only body.
+
+    Root cause: Cloudflare Worker committed 200 headers, then the upstream
+    provider failed before generating any response content. The Worker
+    cannot change the status code after headers are sent.
+
+    Distinct from truncation (mid-body cutoff) — this is a pre-body failure.
+    Transient: retrying routes to a different provider instance.
+
+    References:
+    - Cloudflare community: HTTP 200 with empty body
+      https://community.cloudflare.com/t/cloudflared-sometimes-respond-http-status-200-with-empty-body/447257
+    - CherryHQ/cherry-studio#13863: OpenRouter empty responses
+    - chatboxai/chatbox#2688: Intermittent empty responses, 1 in 5-10
+    """
+
+    def __init__(
+        self,
+        *,
+        raw_body_length: int,
+        status_code: int,
+        batch_size: int,
+        model: str,
+    ) -> None:
+        self.raw_body_length = raw_body_length
+        self.status_code = status_code
+        self.batch_size = batch_size
+        self.model = model
+        super().__init__(
+            f'Empty response from OpenRouter '
+            f'(body={raw_body_length:,}b whitespace, status={status_code}, '
+            f'batch_size={batch_size}, model={model})'
+        )
 
 
 class OpenRouterTruncatedResponse(Exception):
