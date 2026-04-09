@@ -127,7 +127,7 @@ class IndexingService:
 
     async def index(
         self,
-        path: Path,
+        paths: Sequence[Path],
         *,
         collection_name: str,
         owner_pid: int,
@@ -137,13 +137,13 @@ class IndexingService:
         embedding_client: EmbeddingClient | None = None,
         redis_client: RedisClient | None = None,
     ) -> IndexingResult:
-        """Index a file or directory with full dashboard integration.
+        """Index files and/or directories with full dashboard integration.
 
         Public entry point — wraps _run_pipeline() with ProgressWriter
         lifecycle, monitoring coroutine, and error handling.
 
         Args:
-            path: File or directory to index.
+            paths: Files and/or directories to index.
             collection_name: Target collection name.
             owner_pid: PID of the calling process (for dashboard liveness checks).
             respect_gitignore: Git ignore filtering (directories only).
@@ -152,17 +152,19 @@ class IndexingService:
             embedding_client: For transient error delta tracking (optional).
             redis_client: For connection HWM tracking (optional).
         """
-        if not path.is_file() and not path.is_dir():
-            raise ValueError(f'Path not found: {path}')
+        for p in paths:
+            if not p.is_file() and not p.is_dir():
+                raise ValueError(f'Path not found: {p}')
 
         # Capture baseline transient error counts for delta calculation
         transient_errors_start: Mapping[str, int] = dict(embedding_client.transient_errors) if embedding_client else {}
 
         # Setup progress writer (attaches FileHandler to root logger)
         progress_writer = ProgressWriter(owner_pid=owner_pid)
-        operation_id = progress_writer.start_operation(collection_name, str(path))
+        target = ', '.join(str(p) for p in paths)
+        operation_id = progress_writer.start_operation(collection_name, target)
         logger.debug('Operation: %s', operation_id)
-        logger.info('Indexing: %s', path)
+        logger.info('Indexing: %s', target)
 
         # Reset connection high-water marks for this operation
         if redis_client:
@@ -171,7 +173,7 @@ class IndexingService:
         # Start pipeline as a task
         indexing_task = asyncio.create_task(
             self._run_pipeline(
-                path,
+                paths,
                 respect_gitignore=respect_gitignore,
                 stop_after=stop_after,
                 embed_workers=embed_workers,
@@ -417,9 +419,77 @@ class IndexingService:
 
         return ClearResult(files_removed=files_removed, chunks_removed=len(all_chunk_ids_str), path=path)
 
+    async def _discover_files(
+        self,
+        paths: Sequence[Path],
+        extensions: Set[str],
+        *,
+        respect_gitignore: bool | None,
+    ) -> tuple[Sequence[Path], int]:
+        """Aggregate files from all paths (files appended, directories scanned)."""
+        all_files: list[Path] = []
+        files_ignored = 0
+        for p in paths:
+            if p.is_file():
+                all_files.append(p)
+            else:
+                base_count = len(all_files)
+                git_root = _find_git_root(str(p))
+                if respect_gitignore is not False and git_root:
+                    found, ignored = await asyncio.to_thread(
+                        _get_git_files,
+                        p,
+                        extensions,
+                        self._operation,
+                        base_count,
+                    )
+                    all_files.extend(found)
+                    files_ignored += ignored
+                else:
+                    found = await asyncio.to_thread(
+                        _walk_files_counted,
+                        p,
+                        extensions,
+                        self._operation,
+                        base_count,
+                    )
+                    all_files.extend(found)
+        return all_files, files_ignored
+
+    async def _sweep_orphans(
+        self,
+        paths: Sequence[Path],
+        all_files: Sequence[Path],
+    ) -> int:
+        """Remove indexed files that no longer exist on disk (per directory)."""
+        scanned_paths: set[str] = {str(f) for f in all_files}
+        total_deleted = 0
+        for p in paths:
+            if not p.is_dir():
+                continue
+            redis_files = await self._state_store.get_files_under_path(str(p))
+            orphan_chunk_ids: list[UUID] = []
+            orphan_paths: list[str] = []
+            for file_path_str, file_state in redis_files:
+                if file_path_str not in scanned_paths:
+                    orphan_chunk_ids.extend(file_state.chunk_ids)
+                    orphan_paths.append(file_path_str)
+            if orphan_chunk_ids:
+                await self._repo.delete(orphan_chunk_ids)
+                total_deleted += len(orphan_chunk_ids)
+                logger.debug(
+                    '[SWEEP] Deleted %s orphan chunks from %s removed files under %s',
+                    len(orphan_chunk_ids),
+                    len(orphan_paths),
+                    p,
+                )
+            for orphan in orphan_paths:
+                await self._state_store.delete_file_state(orphan)
+        return total_deleted
+
     async def _run_pipeline(
         self,
-        path: Path,
+        paths: Sequence[Path],
         *,
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
@@ -430,10 +500,8 @@ class IndexingService:
         Internal method — callers should use index() which adds dashboard
         integration (ProgressWriter, monitoring, error handling).
 
-        Accepts any path — file or directory. File vs directory only affects
-        the scan phase (single file skips discovery). Everything downstream
-        is identical: classification, chunk workers, embed workers, upsert
-        workers, chunk-level diffing, HNSW management, tracing, and timing.
+        Accepts any mix of files and directories. The scan phase aggregates
+        files from all paths into one list. Everything downstream is identical.
         """
         await self._repo.ensure_collection(EMBEDDING_DIMENSION)
 
@@ -442,7 +510,6 @@ class IndexingService:
 
         # PHASE 1: Scan files
         extensions = set(EXTENSION_MAP.keys())
-        git_root = _find_git_root(str(path)) if path.is_dir() else None
 
         # Create operation state before discovery so the monitor can report progress
         file_queue: asyncio.Queue[Path] = asyncio.Queue()
@@ -472,26 +539,13 @@ class IndexingService:
             tracer=tracer,
         )
 
-        # Run file discovery — single files skip scan, directories discover.
+        # Run file discovery — aggregate files from all paths.
         logger.debug('[SCAN] Starting file discovery...')
-        if path.is_file():
-            all_files: Sequence[Path] = [path]
-            files_ignored = 0
-        elif respect_gitignore is not False and git_root:
-            all_files, files_ignored = await asyncio.to_thread(
-                _get_git_files,
-                path,
-                extensions,
-                self._operation,
-            )
-        else:
-            all_files = await asyncio.to_thread(
-                _walk_files_counted,
-                path,
-                extensions,
-                self._operation,
-            )
-            files_ignored = 0
+        all_files, files_ignored = await self._discover_files(
+            paths,
+            extensions,
+            respect_gitignore=respect_gitignore,
+        )
 
         files_total = len(all_files)
         self._operation.files_found = files_total
@@ -750,25 +804,7 @@ class IndexingService:
         files_cached = sum(cached_by_type.values()) + counters.files_chunk_cached
 
         # Orphan sweep: find files in Redis that were deleted from disk (directories only)
-        if path.is_dir():
-            scanned_paths: set[str] = {str(p) for p in all_files}
-            redis_files = await self._state_store.get_files_under_path(str(path))
-            orphan_chunk_ids: list[UUID] = []
-            orphan_paths: list[str] = []
-            for file_path_str, file_state in redis_files:
-                if file_path_str not in scanned_paths:
-                    orphan_chunk_ids.extend(file_state.chunk_ids)
-                    orphan_paths.append(file_path_str)
-            if orphan_chunk_ids:
-                await self._repo.delete(orphan_chunk_ids)
-                chunks_deleted += len(orphan_chunk_ids)
-                logger.debug(
-                    '[SWEEP] Deleted %s orphan chunks from %s removed files',
-                    len(orphan_chunk_ids),
-                    len(orphan_paths),
-                )
-            for p in orphan_paths:
-                await self._state_store.delete_file_state(p)
+        chunks_deleted += await self._sweep_orphans(paths, all_files)
 
         # Build timing report from tracer
         timing_report = tracer.build_report()
@@ -1499,19 +1535,28 @@ def _walk_files(directory: Path, extensions: Set[str]) -> Iterator[Path]:
                 yield root_path / filename
 
 
-def _walk_files_counted(directory: Path, extensions: Set[str], operation: _OperationState) -> Sequence[Path]:
+def _walk_files_counted(
+    directory: Path,
+    extensions: Set[str],
+    operation: _OperationState | None = None,
+    base_count: int = 0,
+) -> Sequence[Path]:
     """Walk directory, updating operation.files_found as files are discovered.
 
     Called from a thread via asyncio.to_thread. The monitor on the main thread
     reads operation.files_found every 500ms — CPython's GIL makes int attribute
     writes safe for cross-thread reads.
+
+    base_count is added to the local count so multi-path discovery shows
+    a monotonically increasing total across directories.
     """
     files: list[Path] = []
     for file_path in _walk_files(directory, extensions):
         files.append(file_path)
-        if len(files) % 100 == 0:
-            operation.files_found = len(files)
-    operation.files_found = len(files)
+        if operation is not None and len(files) % 100 == 0:
+            operation.files_found = base_count + len(files)
+    if operation is not None:
+        operation.files_found = base_count + len(files)
     return files
 
 
@@ -1519,6 +1564,7 @@ def _get_git_files(
     directory: Path,
     extensions: Set[str],
     operation: _OperationState | None = None,
+    base_count: int = 0,
 ) -> tuple[Sequence[Path], int]:
     """Get non-ignored files and count of ignored files using git ls-files.
 
@@ -1526,6 +1572,7 @@ def _get_git_files(
         directory: Directory to scan.
         extensions: File extensions to include.
         operation: If provided, files_found is updated incrementally.
+        base_count: Added to local count for multi-path discovery totals.
 
     Returns:
         Tuple of (files to index, count of ignored files with matching extensions).
@@ -1563,7 +1610,10 @@ def _get_git_files(
             if file_path.is_relative_to(directory_resolved) and file_path.is_file():
                 files.append(file_path)
                 if operation is not None and len(files) % 100 == 0:
-                    operation.files_found = len(files)
+                    operation.files_found = base_count + len(files)
+
+    if operation is not None:
+        operation.files_found = base_count + len(files)
 
     ignored_count = sum(1 for line in ignored.stdout.splitlines() if any(line.endswith(ext) for ext in extensions))
 

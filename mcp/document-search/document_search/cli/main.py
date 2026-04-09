@@ -741,46 +741,40 @@ async def _index_async(
         )
 
         try:
-            all_results = []
+            # Validate all paths upfront
+            resolved_paths: list[Path] = []
             for p in paths:
                 resolved = p.expanduser().resolve()
                 if not resolved.is_file() and not resolved.is_dir():
                     typer.secho(f'Path not found: {resolved}', fg=typer.colors.RED, err=True)
                     continue
-                result = await indexing_service.index(
-                    resolved,
-                    collection_name=collection_name,
-                    owner_pid=os.getpid(),
-                    respect_gitignore=gitignore,
-                    stop_after=stop,
-                    embedding_client=embedding_client,
-                    redis_client=ctx.redis,
-                )
-                all_results.append(result)
+                resolved_paths.append(resolved)
+
+            if not resolved_paths:
+                typer.secho('No valid paths to index.', fg=typer.colors.RED, err=True)
+                raise typer.Exit(1)
+
+            result = await indexing_service.index(
+                resolved_paths,
+                collection_name=collection_name,
+                owner_pid=os.getpid(),
+                respect_gitignore=gitignore,
+                stop_after=stop,
+                embedding_client=embedding_client,
+                redis_client=ctx.redis,
+            )
 
             if format == 'json':
-                typer.echo(
-                    json.dumps(
-                        [r.model_dump(mode='json') for r in all_results],
-                        indent=2,
-                        default=str,
-                    )
-                )
+                typer.echo(json.dumps(result.model_dump(mode='json'), indent=2, default=str))
                 return
 
-            total_scanned = sum(r.files_scanned for r in all_results)
-            total_indexed = sum(r.files_indexed for r in all_results)
-            total_cached = sum(r.files_cached for r in all_results)
-            total_chunks = sum(r.chunks_created for r in all_results)
-            total_errors = sum(len(r.errors) for r in all_results)
-
             typer.secho('Indexing complete:', fg=typer.colors.GREEN)
-            typer.echo(f'  Scanned: {total_scanned}')
-            typer.echo(f'  Indexed: {total_indexed}')
-            typer.echo(f'  Cached: {total_cached}')
-            typer.echo(f'  Chunks: {total_chunks}')
-            if total_errors:
-                typer.secho(f'  Errors: {total_errors}', fg=typer.colors.YELLOW)
+            typer.echo(f'  Scanned: {result.files_scanned}')
+            typer.echo(f'  Indexed: {result.files_indexed}')
+            typer.echo(f'  Cached: {result.files_cached}')
+            typer.echo(f'  Chunks: {result.chunks_created}')
+            if result.errors:
+                typer.secho(f'  Errors: {len(result.errors)}', fg=typer.colors.YELLOW)
 
             dashboard_port = dashboard_state.get_dashboard_port()
             if dashboard_port:

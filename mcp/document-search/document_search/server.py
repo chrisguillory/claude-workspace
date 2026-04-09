@@ -305,7 +305,7 @@ Returns:
 
         embedding_client = state.get_embedding_client(collection)
         result = await indexing_service.index(
-            resolved_path,
+            [resolved_path],
             collection_name=collection_name,
             owner_pid=os.getpid(),
             respect_gitignore=respect_gitignore,
