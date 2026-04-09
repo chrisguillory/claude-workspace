@@ -9,14 +9,22 @@ __all__ = [
     'BashToolInput',
     'EditToolInput',
     'PostToolUseHookInput',
-    'PreToolUseDecision',
+    'PostToolUseHookOutput',
+    'PostToolUseSpecificOutput',
     'PreToolUseHookInput',
     'PreToolUseHookOutput',
+    'PreToolUseSpecificOutput',
     'SessionEndHookInput',
     'SessionStartHookInput',
+    'SessionStartHookOutput',
+    'SessionStartSpecificOutput',
+    'SyncHookOutput',
+    'UserPromptSubmitHookOutput',
+    'UserPromptSubmitSpecificOutput',
     'WriteToolInput',
 ]
 
+from collections.abc import Sequence
 from typing import Literal
 
 import pydantic
@@ -127,21 +135,95 @@ class EditToolInput(StrictModel):
     replace_all: bool | None = None
 
 
-# -- Hook outputs -------------------------------------------------------------
+# -- Hook output envelope -----------------------------------------------------
 
 
-class PreToolUseDecision(CamelModel):
-    """Permission decision within a PreToolUse hook output."""
+class SyncHookOutput(CamelModel):
+    """Shared top-level envelope for all hook JSON output.
+
+    All fields are optional. Hooks return this structure on stdout as JSON.
+    The ``hook_specific_output`` field is overridden by per-event output models.
+    """
+
+    continue_: bool | None = pydantic.Field(None, alias='continue')
+    suppress_output: bool | None = None
+    stop_reason: str | None = None
+    decision: Literal['approve', 'block'] | None = None
+    reason: str | None = None
+    system_message: str | None = None
+
+
+# -- Hook-specific outputs ----------------------------------------------------
+
+
+class PreToolUseSpecificOutput(CamelModel):
+    """PreToolUse hookSpecificOutput — permission decisions and input modification."""
 
     hook_event_name: Literal['PreToolUse'] = 'PreToolUse'
-    permission_decision: Literal['allow', 'deny', 'ask']
+    permission_decision: Literal['allow', 'deny', 'ask', 'defer']
     permission_decision_reason: str | None = None
+    updated_input: JsonObject | None = None
+    additional_context: str | None = None
 
 
-class PreToolUseHookOutput(CamelModel):
+class PostToolUseSpecificOutput(CamelModel):
+    """PostToolUse hookSpecificOutput — context injection and MCP output replacement."""
+
+    hook_event_name: Literal['PostToolUse'] = 'PostToolUse'
+    additional_context: str | None = None
+    updated_mcp_tool_output: JsonValue | None = pydantic.Field(None, alias='updatedMCPToolOutput')
+
+
+class UserPromptSubmitSpecificOutput(CamelModel):
+    """UserPromptSubmit hookSpecificOutput — inject context before model responds."""
+
+    hook_event_name: Literal['UserPromptSubmit'] = 'UserPromptSubmit'
+    additional_context: str | None = None
+
+
+class SessionStartSpecificOutput(CamelModel):
+    """SessionStart hookSpecificOutput — context, initial message, and watch paths."""
+
+    hook_event_name: Literal['SessionStart'] = 'SessionStart'
+    additional_context: str | None = None
+    initial_user_message: str | None = None
+    watch_paths: Sequence[str] | None = None
+
+
+# -- Composed hook outputs ----------------------------------------------------
+
+
+class PreToolUseHookOutput(SyncHookOutput):
     """PreToolUse hook output.
 
     See: https://code.claude.com/docs/en/hooks#pretooluse
     """
 
-    hook_specific_output: PreToolUseDecision
+    hook_specific_output: PreToolUseSpecificOutput
+
+
+class PostToolUseHookOutput(SyncHookOutput):
+    """PostToolUse hook output.
+
+    See: https://code.claude.com/docs/en/hooks#posttooluse
+    """
+
+    hook_specific_output: PostToolUseSpecificOutput | None = None
+
+
+class UserPromptSubmitHookOutput(SyncHookOutput):
+    """UserPromptSubmit hook output.
+
+    See: https://code.claude.com/docs/en/hooks#userpromptsubmit
+    """
+
+    hook_specific_output: UserPromptSubmitSpecificOutput | None = None
+
+
+class SessionStartHookOutput(SyncHookOutput):
+    """SessionStart hook output.
+
+    See: https://code.claude.com/docs/en/hooks#sessionstart
+    """
+
+    hook_specific_output: SessionStartSpecificOutput | None = None

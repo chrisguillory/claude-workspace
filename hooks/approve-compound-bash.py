@@ -50,9 +50,9 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.library_boundary import LibraryBoundary
 from cc_lib.schemas.hooks import (
     BashToolInput,
-    PreToolUseDecision,
     PreToolUseHookInput,
     PreToolUseHookOutput,
+    PreToolUseSpecificOutput,
 )
 from cc_lib.utils import get_claude_config_home_dir
 
@@ -153,7 +153,7 @@ def handle_hook() -> None:
 
     if all(matches_prefix(cmd, prefixes) for cmd in subcommands):
         output = PreToolUseHookOutput(
-            hook_specific_output=PreToolUseDecision(
+            hook_specific_output=PreToolUseSpecificOutput(
                 permission_decision='allow',
                 permission_decision_reason=f'all {len(subcommands)} subcommands match allowed Bash prefixes',
             ),

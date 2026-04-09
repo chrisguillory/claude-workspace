@@ -51,6 +51,7 @@ from cc_lib.claude_binary_patching import (
     PatchScanResult,
     scan_binary,
 )
+from cc_lib.claude_process import kill_and_copy_resume
 from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.utils.atomic_write import atomic_write
@@ -128,6 +129,7 @@ def apply(
     features: bool = typer.Option(False, '--features', help='Apply feature patches'),
     tweaks: bool = typer.Option(False, '--tweaks', help='Apply tweak patches'),
     all_: bool = typer.Option(False, '--all', help='Apply all patches'),
+    restart: bool = typer.Option(False, '--restart', help='Kill Claude Code and copy resume command to clipboard'),
 ) -> None:
     """Apply patches. Default (no names/flags): fixes only.
 
@@ -137,12 +139,19 @@ def apply(
         apply --all          Apply everything (fixes + features + tweaks)
         apply --features     Apply feature patches only
         apply statusline     Apply a specific patch by name
+        apply --restart      Apply fixes and restart Claude Code
     """
     patches = resolve_patches(names, fixes=fixes, features=features, tweaks=tweaks, all_=all_)
     patcher = BinaryPatcher(path) if path else BinaryPatcher.detect()
     print(f'Target: {patcher.path} (version {patcher.version})')
     print(f'Size: {patcher.size_mb:.1f} MB')
     patcher.apply(patches)
+
+    if restart:
+        resume_cmd = kill_and_copy_resume()
+        print()
+        print(f'Resume command copied: {resume_cmd}')
+        print('Paste Cmd+V + Enter after Claude exits.')
 
 
 @app.command()
