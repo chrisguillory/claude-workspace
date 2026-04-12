@@ -371,7 +371,9 @@ MCP tools are session-aware - they automatically know the current session ID and
 | `clone_session`        | Clone session directly. Defaults to current session ("fork yourself") |
 | `delete_session`       | Delete session with auto-backup. Native sessions require `force=True` |
 | `move_session`         | Move session between projects. Defaults target to current project     |
+| `get_session_info`     | Get comprehensive session context. Defaults to current session        |
 | `session_lineage`      | Get lineage info. Defaults to current session                         |
+| `save_session_to_gist` | Save session to GitHub Gist (requires GitHub auth)                    |
 
 **Note**: Unlike CLI, MCP tools can't auto-launch Claude after operations.
 
