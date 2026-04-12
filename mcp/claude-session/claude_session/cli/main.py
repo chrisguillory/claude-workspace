@@ -223,7 +223,7 @@ def restore(
     ctx: typer.Context,
     archive: Annotated[str, typer.Argument(help='Archive path or Gist URL (gist://<gist-id> or file path)')],
     target_project: Annotated[
-        Path | None, typer.Option('--target-project', '-p', help='Target project directory (default: current)')
+        Path | None, typer.Option('--target-project', help='Target project directory (default: current)')
     ] = None,
     no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
     in_place: Annotated[
@@ -256,7 +256,7 @@ def clone(
         ),
     ] = None,
     target_project: Annotated[
-        Path | None, typer.Option('--target-project', '-p', help='Target project directory (default: current)')
+        Path | None, typer.Option('--target-project', help='Target project directory (default: current)')
     ] = None,
     source_project: Annotated[
         Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
@@ -351,7 +351,7 @@ def move(
         ),
     ] = None,
     target_project: Annotated[
-        Path | None, typer.Option('--target-project', '-p', help='Target project directory (default: current)')
+        Path | None, typer.Option('--target-project', help='Target project directory (default: current)')
     ] = None,
     source_project: Annotated[
         Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
@@ -384,7 +384,7 @@ def move(
     \b
     Examples:
         claude-session move 019b5232               # current project
-        claude-session move 019b5232 -p ~/proj-b   # specific project
+        claude-session move 019b5232 --target-project ~/proj-b
         claude-session move 019b5232 --dry-run     # preview
         claude-session move 019b5232 --launch      # move and resume
         claude-session move a1b2c3d4 --force       # native session

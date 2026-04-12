@@ -51,15 +51,6 @@ from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
 
-
-def _encode_project_filter(source_project: str | None) -> Path | None:
-    """Encode a project directory path for session discovery filtering."""
-    if source_project is None:
-        return None
-    resolved = Path(source_project).resolve()
-    return get_claude_config_home_dir() / 'projects' / encode_project_path(resolved)
-
-
 __all__ = [
     'ClaudeContext',
     'ServerState',
@@ -72,6 +63,18 @@ __all__ = [
 
 
 logger = logging.getLogger(__name__)
+
+
+# -- Helpers -------------------------------------------------------------------
+
+
+def _encode_project_filter(source_project: str | None) -> Path | None:
+    """Encode a project directory path for session discovery filtering."""
+    if source_project is None:
+        return None
+    resolved = Path(source_project).resolve()
+    return get_claude_config_home_dir() / 'projects' / encode_project_path(resolved)
+
 
 # -- Types ---------------------------------------------------------------------
 
