@@ -113,7 +113,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
@@ -125,9 +124,9 @@ import click
 import rich.console
 import rich.panel
 import typer
+from cc_lib.claude_process import kill_and_copy_resume
 from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.schemas import StrictModel
-from cc_lib.session_tracker import find_claude_pid, resolve_session_id
 from cc_lib.types import JsonObject
 
 # -- Pydantic Models -----------------------------------------------------------
@@ -207,48 +206,6 @@ KEYCHAIN_SERVICE_CREDENTIALS = 'Claude Code-credentials'
 KEYCHAIN_SERVICE_API_KEY = 'Claude Code'
 SETUP_TOKEN_PREFIX = 'sk-ant-oat01-'
 SETUP_TOKEN_LIFETIME_DAYS = 365
-
-
-# -- Process Relaunch ----------------------------------------------------------
-
-_KILL_SCRIPT = """\
-import os, signal, time
-pid = {claude_pid}
-time.sleep(0.5)
-os.kill(pid, signal.SIGTERM)
-for _ in range(50):
-    time.sleep(0.1)
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        break
-"""
-
-
-def _spawn_kill_and_copy_resume(claude_pid: int, session_id: str, model: str | None) -> None:
-    """Spawn a detached process that kills Claude, and copy the resume command.
-
-    The detached process survives the parent's death (start_new_session=True).
-    Sequence: sleep 0.5s → SIGTERM → wait up to 5s for exit.
-
-    The resume command is copied to clipboard so the user can Cmd+V + Enter
-    after Claude exits. A detached process cannot launch a TUI app in the
-    user's terminal, so we rely on the clipboard instead.
-    """
-    resume_cmd = f'claude --resume {session_id}'
-    if model:
-        resume_cmd += f' --model {shlex.quote(model)}'
-    subprocess.run(['pbcopy'], input=resume_cmd.encode(), check=False)
-
-    script = _KILL_SCRIPT.format(claude_pid=claude_pid)
-    subprocess.Popen(
-        [sys.executable, '-c', script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-        close_fds=True,
-    )
 
 
 # -- Keychain Operations -------------------------------------------------------
@@ -924,18 +881,10 @@ def cmd_switch_login(name: str, use_keychain: bool, restart: bool, model: str | 
     print()
 
     if restart:
-        try:
-            claude_pid = find_claude_pid()
-            cwd = os.getcwd()
-            session_id = resolve_session_id(claude_pid, cwd)
-            _spawn_kill_and_copy_resume(claude_pid, session_id, model)
-            model_flag = f' --model {model}' if model else ''
-            print(f'Killing Claude Code (PID {claude_pid})...')
-            print(f'Resume command copied to clipboard: claude --resume {session_id}{model_flag}')
-            print('Paste (Cmd+V) + Enter after Claude exits.')
-        except RuntimeError as e:
-            print(f'WARNING: Cannot auto-launch: {e}', file=sys.stderr)
-            print('Restart Claude Code manually to activate.')
+        extra_args = ['--model', model] if model else []
+        resume_cmd = kill_and_copy_resume(extra_args=extra_args)
+        print(f'Resume command copied to clipboard: {resume_cmd}')
+        print('Paste (Cmd+V) + Enter after Claude exits.')
     else:
         print('Restart Claude Code to activate.')
 

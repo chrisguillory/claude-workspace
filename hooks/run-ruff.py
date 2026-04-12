@@ -15,12 +15,12 @@ Runs all project rules but only auto-fixes mechanical formatting via
 
 Auto-fixed rules (--fixable whitelist)::
 
-    Code | Rule                  | Why safe           | Ref
-    ---- | --------------------- | ------------------ | ---
-    I001 | unsorted-imports      | Mechanical order   | https://docs.astral.sh/ruff/rules/unsorted-imports/
-    W291 | trailing-whitespace   | Invisible chars    | https://docs.astral.sh/ruff/rules/trailing-whitespace/
-    W292 | no-newline-at-eof     | POSIX convention   | https://docs.astral.sh/ruff/rules/missing-newline-at-end-of-file/
-    W293 | whitespace-with-indent| Blank line spaces  | https://docs.astral.sh/ruff/rules/blank-line-with-whitespace/
+    Code | Rule                           | Why safe         | Ref
+    ---- | ------------------------------ | ---------------- | ---
+    I001 | unsorted-imports               | Mechanical order | https://docs.astral.sh/ruff/rules/unsorted-imports/
+    W291 | trailing-whitespace            | Invisible chars  | https://docs.astral.sh/ruff/rules/trailing-whitespace/
+    W292 | missing-newline-at-end-of-file | POSIX convention | https://docs.astral.sh/ruff/rules/missing-newline-at-end-of-file/
+    W293 | blank-line-with-whitespace     | Blank line spaces | https://docs.astral.sh/ruff/rules/blank-line-with-whitespace/
 
 NOT auto-fixed (surfaced as errors for the model to fix):
     F401 (unused-import) — would silently remove imports that may be
