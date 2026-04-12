@@ -29,6 +29,7 @@ __all__ = [
     'SessionArchive',
     'SessionArchiveV1',
     'SessionArchiveV2',
+    'SessionEnvEntry',
     'TodoFileEntry',
     'ToolResultDirectoryEntry',
     'ToolResultDirectoryFileEntry',
@@ -131,6 +132,7 @@ class SessionArchiveV2(StrictModel):
     tool_results: Sequence[ToolResultEntry] = ()
     tool_result_dirs: Sequence[ToolResultDirectoryEntry] = ()
     todos: Sequence[TodoFileEntry] = ()
+    session_env: Sequence[SessionEnvEntry] = ()
     tasks: Sequence[Task] = ()  # Canonical Task model from session/models.py
     task_metadata: Mapping[str, str] = pydantic.Field(
         default_factory=dict
@@ -231,6 +233,19 @@ class ToolResultDirectoryEntry(StrictModel):
 
     name: str
     files: Sequence[ToolResultDirectoryFileEntry]
+
+
+class SessionEnvEntry(StrictModel):
+    """Session-env file content.
+
+    Derived fields:
+    - location: ~/.claude/session-env/{session_id}/{filename}
+
+    Session-env files are small text files written by hooks.
+    """
+
+    filename: str
+    content: str
 
 
 class TodoFileEntry(StrictModel):

@@ -59,6 +59,35 @@ Patterns:
         def main() -> None:
             ...
 
+    Per-exception exit codes (CLI tools with multiple outcomes)::
+
+        boundary = ErrorBoundary(exit_code=1)  # default for unhandled errors
+
+        class FixableIssue(Exception):
+            pass
+
+        class UnfixableIssue(Exception):
+            pass
+
+        @boundary.handler(FixableIssue)
+        def handle_fixable(exc: FixableIssue) -> None:
+            print(f'Fixable: {exc}', file=sys.stderr)
+            sys.exit(10)  # overrides boundary's exit_code
+
+        @boundary.handler(UnfixableIssue)
+        def handle_unfixable(exc: UnfixableIssue) -> None:
+            print(f'Unfixable: {exc}', file=sys.stderr)
+            sys.exit(20)
+
+        @boundary
+        def main() -> None:
+            ...  # FixableIssue -> exit 10, UnfixableIssue -> exit 20,
+                 # unhandled Exception -> exit 1 (boundary default)
+
+    This works because ``sys.exit()`` raises ``SystemExit`` (a BaseException),
+    which propagates out of ``_handle`` before the boundary's default
+    ``sys.exit(self._exit_code)`` executes.
+
     Exception enrichment (carry context from raise site to handler)::
 
         class RichValidationError(Exception):
@@ -172,6 +201,8 @@ class ErrorBoundary:
           (BaseException, not Exception), passes through. Process exits.
         - Inner with ``exit_code=None``: suppresses, outer never sees it.
           Execution continues.
+        - Handler calls ``sys.exit(N)``: same mechanism — SystemExit propagates
+          out of ``_handle``, boundary's default exit code never fires.
     """
 
     def __init__(self, *, handler: ErrorHandler | None = None, exit_code: int | None = None) -> None:
@@ -274,9 +305,14 @@ class ErrorBoundary:
         """Dispatch to handler, optionally exit. Returns handler result.
 
         Handler failures cannot breach the boundary — if the registered handler
-        raises, we fall back to stderr reporting of the original exception.
-        If that also fails (e.g. stderr broken), we proceed silently with
-        the configured suppress/exit behavior.
+        raises an Exception, we fall back to stderr reporting of the original
+        exception. If that also fails (e.g. stderr broken), we proceed silently
+        with the configured suppress/exit behavior.
+
+        Handlers CAN raise BaseException subclasses (SystemExit,
+        KeyboardInterrupt) to bypass the boundary's default exit code.
+        ``sys.exit(N)`` in a handler propagates past ``sys.exit(self._exit_code)``
+        since the latter never executes. See "Per-exception exit codes" pattern.
         """
         result = None
         try:
