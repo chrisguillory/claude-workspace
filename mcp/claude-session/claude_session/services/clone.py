@@ -320,17 +320,6 @@ class SessionCloneService:
             )
             logger.info('Wrote %d todo files', todos_cloned)
 
-        # Write tasks
-        tasks_cloned = 0
-        if tasks:
-            tasks_cloned = write_tasks(new_session_id, tasks)
-            logger.info('Cloned %d tasks', tasks_cloned)
-
-        # Write task metadata (.highwatermark, etc.)
-        if task_metadata:
-            metadata_written = write_task_metadata(new_session_id, task_metadata)
-            logger.info('Cloned %d task metadata files', metadata_written)
-
         # Write session-env files (or create empty directory Claude Code expects)
         if session_env:
             write_session_env(new_session_id, session_env)
@@ -351,6 +340,17 @@ class SessionCloneService:
             write_debug_log(new_session_id, debug_log)
             debug_log_cloned = True
             logger.info('Wrote debug log')
+
+        # Write tasks
+        tasks_cloned = 0
+        if tasks:
+            tasks_cloned = write_tasks(new_session_id, tasks)
+            logger.info('Cloned %d tasks', tasks_cloned)
+
+        # Write task metadata (.highwatermark, etc.)
+        if task_metadata:
+            metadata_written = write_task_metadata(new_session_id, task_metadata)
+            logger.info('Cloned %d task metadata files', metadata_written)
 
         # Clone main session file
         main_filename = f'{session_info.session_id}.jsonl'
@@ -423,6 +423,7 @@ class SessionCloneService:
             tool_results_restored=tool_results.total_file_count,
             todos_restored=todos_cloned,
             tasks_restored=tasks_cloned,
+            session_env_restored=bool(session_env),
             session_memory_restored=session_memory_cloned,
             debug_log_restored=debug_log_cloned,
             paths_translated=translator is not None,
