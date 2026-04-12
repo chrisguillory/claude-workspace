@@ -26,6 +26,7 @@ from claude_session.schemas.operations.archive import (
     MainSessionFileEntry,
     PlanFileEntry,
     SessionArchiveV2,
+    SessionEnvEntry,
     TodoFileEntry,
     ToolResultDirectoryEntry,
     ToolResultDirectoryFileEntry,
@@ -34,10 +35,8 @@ from claude_session.schemas.operations.archive import (
 )
 from claude_session.schemas.session import SessionRecord
 from claude_session.services.artifacts import (
-    collect_debug_log,
     collect_plan_files,
     collect_session_env,
-    collect_session_memory,
     collect_task_metadata,
     collect_todos,
     collect_tool_results,
@@ -276,18 +275,7 @@ class SessionArchiveService:
 
         # Collect session-env files
         session_env = collect_session_env(self.session_id)
-        if session_env:
-            logger.info('Collected %d session-env files', len(session_env))
-
-        # Collect session memory
-        session_memory = collect_session_memory(project_folder, self.session_id)
-        if session_memory:
-            logger.info('Found session-memory/summary.md')
-
-        # Collect debug log
-        debug_log = collect_debug_log(self.session_id)
-        if debug_log:
-            logger.info('Found debug log (%d bytes)', len(debug_log))
+        logger.info('Collected %d session-env files', len(session_env))
 
         # Extract source project path from session records (source of truth)
         # We use cwd from records, not self.project_path, because:
@@ -358,6 +346,11 @@ class SessionArchiveService:
             for d in tool_results.directories
         ]
 
+        # Convert session-env to entry models
+        session_env_entries = [
+            SessionEnvEntry(filename=filename, content=content) for filename, content in session_env.items()
+        ]
+
         # Extract agent_id from todo filename: {session_id}-agent-{agent_id}.json
         # collect_todos() already filters by session_id, so we know the prefix matches
         todo_prefix = f'{self.session_id}-agent-'
@@ -392,11 +385,9 @@ class SessionArchiveService:
             tool_results=tool_result_entries,
             tool_result_dirs=tool_result_dir_entries,
             todos=todo_entries,
+            session_env=session_env_entries,
             tasks=tasks,
             task_metadata=task_metadata,
-            session_env=session_env,
-            session_memory=session_memory,
-            debug_log=debug_log,
             total_session_records=len(main_records) + total_agent_records,
             total_agent_records=total_agent_records,
         )
