@@ -29,6 +29,7 @@ from claude_session.services.artifacts import (
     collect_task_metadata,
     collect_todos,
     collect_tool_results,
+    create_session_env_dir,
     detect_agent_structure,
     extract_custom_title_from_records,
     extract_slugs_from_records,
@@ -330,10 +331,12 @@ class SessionCloneService:
             metadata_written = write_task_metadata(new_session_id, task_metadata)
             logger.info('Cloned %d task metadata files', metadata_written)
 
-        # Write session-env files
+        # Write session-env files (or create empty directory Claude Code expects)
         if session_env:
             write_session_env(new_session_id, session_env)
             logger.info('Wrote %d session-env files', len(session_env))
+        else:
+            create_session_env_dir(new_session_id)
 
         # Write session memory
         session_memory_cloned = False
