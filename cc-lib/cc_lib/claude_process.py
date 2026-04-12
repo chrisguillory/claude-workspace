@@ -12,19 +12,6 @@ __all__ = [
     'kill_and_copy_resume',
 ]
 
-_KILL_SCRIPT = """\
-import os, signal, sys, time
-pid = int(sys.argv[1])
-time.sleep(0.5)
-os.kill(pid, signal.SIGTERM)
-for _ in range(50):
-    time.sleep(0.1)
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        break
-"""
-
 
 def kill_and_copy_resume(
     *,
@@ -72,3 +59,17 @@ def kill_and_copy_resume(
     )
 
     return resume_cmd
+
+
+_KILL_SCRIPT = """\
+import os, signal, sys, time
+pid = int(sys.argv[1])
+time.sleep(0.5)
+os.kill(pid, signal.SIGTERM)
+for _ in range(50):
+    time.sleep(0.1)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        break
+"""
