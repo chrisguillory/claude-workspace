@@ -58,7 +58,7 @@ uv tool install --editable ~/claude-workspace/mcp/claude-session
 ### MCP Server Setup
 
 ```bash
-claude mcp add --scope user claude-session -- mcp-claude-session-server
+claude mcp add --scope user claude-session -- claude-session-mcp
 ```
 
 ### Upgrading
@@ -347,13 +347,13 @@ Install the MCP server to use archive/restore directly from Claude Code:
 
 ```bash
 # If installed globally (see Installation)
-claude mcp add --scope user claude-session -- mcp-claude-session-server
+claude mcp add --scope user claude-session -- claude-session-mcp
 
 # From GitHub (always-latest)
-claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session mcp-claude-session-server
+claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session claude-session-mcp
 
 # From local clone
-claude mcp add --scope user claude-session -- uv run --project ~/claude-workspace/mcp/claude-session mcp-claude-session-server
+claude mcp add --scope user claude-session -- uv run --project ~/claude-workspace/mcp/claude-session claude-session-mcp
 ```
 
 **Tools:**

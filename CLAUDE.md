@@ -36,23 +36,24 @@ Before writing any documentation, comments, code descriptions, or commit message
 
 Simple, readable, maintainable, explicit. Fail-fast on misconfiguration. Single responsibility per function/validator.
 
-| Principle                                     | Application                                         |
-|-----------------------------------------------|-----------------------------------------------------|
-| **Explicit over implicit**                    | Clear control flow, avoid hidden behavior           |
-| **Fail-fast validation**                      | Validate configuration at startup, not at first use |
-| **Single responsibility**                     | One clear purpose per function/class/module         |
-| **Type hints everywhere**                     | Strict Pydantic models, function signatures, `| None` syntax |
-| **YAGNI & KISS**                              | Build what's needed, keep it simple                 |
-| **Worse is Better**                           | Simple, working solutions over perfect designs      |
-| **Make It Work, Make It Right, Make It Fast** | In that order                                       |
-| **Avoid Premature Optimization**              | Optimize when data shows need                       |
-| **Principle of least surprise**               | Code should behave as expected                      |
-| **Bubble exceptions**                         | Don't swallow errors, let them propagate            |
-| **Trust event authority**                     | Don't second-guess events with defensive validation |
-| **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available |
-| **Assertions only in tests/**                | Application code raises exceptions explicitly       |
-| **Ideal state over backwards compat**         | Dev-only project — rename cleanly, no migration shims |
-| **DI via closures**                           | FastMCP pattern for dependency injection           |
+| Principle                                     | Application                                                                     |
+|-----------------------------------------------|---------------------------------------------------------------------------------|
+| **Explicit over implicit**                    | Clear control flow, avoid hidden behavior                                       |
+| **Improve code health**                       | Surface adjacent staleness via `AskUserQuestion` — don't silently fix or ignore |
+| **Fail-fast validation**                      | Validate configuration at startup, not at first use                             |
+| **Single responsibility**                     | One clear purpose per function/class/module                                     |
+| **Type hints everywhere**                     | Strict Pydantic models, function signatures, `\| None` syntax                   |
+| **YAGNI & KISS**                              | Build what's needed, keep it simple                                             |
+| **Worse is Better**                           | Simple, working solutions over perfect designs                                  |
+| **Make It Work, Make It Right, Make It Fast** | In that order                                                                   |
+| **Avoid Premature Optimization**              | Optimize when data shows need                                                   |
+| **Principle of least surprise**               | Code should behave as expected                                                  |
+| **Bubble exceptions**                         | Don't swallow errors, let them propagate                                        |
+| **Trust event authority**                     | Don't second-guess events with defensive validation                             |
+| **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available                           |
+| **Assertions only in tests/**                 | Application code raises exceptions explicitly                                   |
+| **Ideal state over backwards compat**         | Dev-only project — rename cleanly, no migration shims                           |
+| **DI via closures**                           | FastMCP pattern for dependency injection                                        |
 
 ### Exception Handling
 
@@ -368,6 +369,10 @@ uv sync --all-groups --all-packages
 
 **Stash discipline**: Don't drop stashes carelessly. `git stash pop` with conflicts does NOT auto-drop - the stash remains as a backup. Other stashes (stash@{1}, stash@{2}) may contain unrelated work from previous sessions.
 
+**Separate style from substance**: By default, renames, reorganizations, and formatting go in one commit; features, fixes, and behavioral changes in another. Mixing them makes diffs hard to review and merges/rollbacks complex.
+
+**Docs travel with code**: When a change affects installation, invocation, or configuration, update README/CLAUDE.md/docstrings in the same commit. Not as a follow-up.
+
 **MCP server reconnect**: Ask the user to run `/mcp reconnect <server-name>` rather than trying bash commands. The CLI handles this.
 
 **Debug logs**: Session debug logs are at `~/.claude/debug/{session_id}.txt` for troubleshooting MCP server startup failures and other issues.
@@ -419,16 +424,22 @@ Document **what's in the PR, not the journey**. Focus on deliverables and result
 
 ## Naming Conventions
 
-| Type | Class Name | File Path |
-|------|------------|-----------|
-| Client | `S3Client` | `clients/s3.py` |
-| Service | `SessionTrackerService` | `services/session_tracker.py` |
-| Repository | `UserRepository` | `repositories/user.py` |
-| MCP Server | `PythonInterpreterServer` | `mcp/python-interpreter/python_interpreter/server.py` |
+| Type       | Class Name                | File Path                                               |
+|------------|---------------------------|---------------------------------------------------------|
+| Client     | `S3Client`                | `clients/s3.py`                                         |
+| Service    | `SessionTrackerService`   | `services/session_tracker.py`                           |
+| Repository | `UserRepository`          | `repositories/user.py`                                  |
+| MCP Server | `PythonInterpreterServer` | `mcp/python-interpreter/python_interpreter/mcp/main.py` |
 
 **Directory rules:**
 - Directories plural (`clients/`, `services/`) **except acronyms** (`mcp/` not `mcps/`)
 - Files and classes singular (`s3.py`, `S3Client`)
+
+**Entry point pattern:** `<name>` (CLI), `<name>-mcp` (MCP server), `<name>-daemon` (daemon). Role is suffixed, not prefixed. Source mirrors this: `cli/main.py`, `mcp/main.py`.
+
+### Ordering Conventions
+
+Lists of comparable entries are alphabetically sorted unless there's a semantic reason not to. Applies to workspace members in `pyproject.toml`, entry points, permission allow lists, tables of tools/servers, and import groups.
 
 ## Repository Structure
 
@@ -438,9 +449,11 @@ Document **what's in the PR, not the journey**. Focus on deliverables and result
 │   └── settings.local.json     # Hook and permission settings
 ├── hooks/                      # Claude Code hooks (SessionStart, SessionEnd, etc.)
 ├── mcp/                        # MCP servers (acronym, stays singular)
-│   ├── browser-automation/
+│   ├── claude-session/
+│   ├── document-search/
+│   ├── playwright-browser/
 │   ├── python-interpreter/
-│   └── selenium-browser-automation/
+│   └── selenium-browser/
 ├── cc-lib/                  # Shared library code
 │   └── cc_lib/             # Python package
 │       ├── types.py           # Shared type aliases
@@ -479,20 +492,26 @@ MCP servers are organized **by project** (not by type):
 
 ```
 mcp/
-├── browser-automation/
-│   └── browser_automation/
-│       └── server.py
+├── claude-session/
+│   └── claude_session/
+│       ├── cli/main.py
+│       └── mcp/main.py
+├── document-search/
+│   └── document_search/
+│       ├── cli/main.py
+│       └── mcp/main.py
 ├── python-interpreter/
 │   └── python_interpreter/
-│       ├── server.py
-│       └── client.py
-└── selenium-browser-automation/
-    └── selenium_browser_automation/
-        ├── server.py
+│       ├── cli/main.py
+│       └── mcp/main.py
+└── selenium-browser/
+    └── selenium_browser/
+        ├── cli/main.py
+        ├── mcp/main.py
         └── scripts/
 ```
 
-Related code (server + client) stays together, not split into separate directories.
+Related code (MCP server + CLI) stays together, split into `mcp/` and `cli/` subdirectories.
 
 ### Session Tracking
 
@@ -507,21 +526,21 @@ Session data model enforces strict typing via Pydantic BaseModel pattern with or
 
 ### Inline Script Dependencies
 
-All MCP servers use `uv run --script` with inline dependencies:
+Hooks and standalone scripts use `uv run --script` with inline PEP 723 dependencies:
 
 ```python
 #!/usr/bin/env -S uv run --script
 # /// script
 # dependencies = [
-#   "fastmcp>=2.12.5",
 #   "cc_lib",
-#   ...
 # ]
 #
 # [tool.uv.sources]
-# cc_lib = { path = "../../cc-lib/", editable = true }
+# cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 ```
+
+MCP servers use `pyproject.toml` entry points instead (see Installation Methods).
 
 ### PATH-Accessible Scripts (Launcher Pattern)
 
@@ -575,7 +594,7 @@ MCP servers are installed via `uv tool install` and registered in `~/.claude.jso
 uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
 
 # Configure Claude Code
-claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
+claude mcp add --scope user python-interpreter -- python-interpreter-mcp
 ```
 
 This adds to `~/.claude.json`:
@@ -585,7 +604,7 @@ This adds to `~/.claude.json`:
   "mcpServers": {
     "python-interpreter": {
       "type": "stdio",
-      "command": "mcp-python-interpreter-server",
+      "command": "python-interpreter-mcp",
       "args": []
     }
   }
@@ -608,14 +627,13 @@ Users see versions via `uv tool list` and upgrade via `uv tool upgrade <package-
 
 ### Entry Point Naming Convention
 
-| Component | Pattern                            | Example                          |
-|-----------|------------------------------------|----------------------------------|
-| Server    | `mcp-<package-dir-name>-server`    | `mcp-python-interpreter-server`  |
-| Client    | `mcp-<package-dir-name>-client`    | `mcp-python-interpreter-client`  |
+| Component | Pattern         | Example                     | Module Path              |
+|-----------|-----------------|-----------------------------|--------------------------|
+| CLI       | `<name>`        | `python-interpreter`        | `<pkg>.cli.main:main`    |
+| MCP       | `<name>-mcp`    | `python-interpreter-mcp`    | `<pkg>.mcp.main:main`    |
+| Daemon    | `<name>-daemon` | `claude-remote-bash-daemon` | `<pkg>.daemon:main`      |
 
-The directory name under `mcp/` IS the entry point name. No abbreviations, no truncations.
-
-Avoid generic names like `server` that could collide with other tools when installed globally via `uv tool install`.
+The directory name under `mcp/` IS the entry point base name. Role is suffixed, not prefixed.
 
 ### Tool Docstrings Guide Claude's Behavior
 
@@ -634,12 +652,12 @@ Example pattern:
 ```python
 """Execute Python code in persistent scope...
 
-IMPORTANT: For better user experience, you should typically use the Bash client instead:
-    mcp-python-interpreter-client <<'PY'
+IMPORTANT: For better user experience, you should typically use the CLI instead:
+    python-interpreter <<'PY'
     print("Hello")
     PY
 
-If mcp-python-interpreter-client is not found, install via:
+If python-interpreter is not found, install via:
     uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
 
 Only use this MCP tool directly if the user explicitly requests it or you need structured output."""
@@ -647,12 +665,12 @@ Only use this MCP tool directly if the user explicitly requests it or you need s
 
 ### Installation Methods
 
-Three installation patterns in order of preference:
+Four installation patterns in order of preference:
 
 **1. Global install** (recommended for users):
 ```bash
 uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/<server>
-claude mcp add --scope user <name> -- mcp-<package-dir-name>-server
+claude mcp add --scope user <name> -- <name>-mcp
 ```
 - Fast startup (no network call)
 - Version locked until explicit upgrade
@@ -662,7 +680,7 @@ claude mcp add --scope user <name> -- mcp-<package-dir-name>-server
 ```bash
 claude mcp add --scope user <name> -- uvx --refresh --from \
   git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/<server> \
-  mcp-<package-dir-name>-server
+  <name>-mcp
 ```
 - Network call every startup
 - Always gets latest from git
@@ -671,7 +689,7 @@ claude mcp add --scope user <name> -- uvx --refresh --from \
 **3. Local development - editable install** (recommended for developers):
 ```bash
 uv tool install --editable /path/to/claude-workspace/mcp/<server>
-claude mcp add --scope user <name> -- mcp-<package-dir-name>-server
+claude mcp add --scope user <name> -- <name>-mcp
 ```
 - Commands in PATH (permission patterns work)
 - Changes to source files take effect immediately
@@ -681,7 +699,7 @@ claude mcp add --scope user <name> -- mcp-<package-dir-name>-server
 ```bash
 claude mcp add --scope user <name> -- uv run \
   --project "$(git rev-parse --show-toplevel)/mcp/<server>" \
-  --script "$(git rev-parse --show-toplevel)/mcp/<server>/<package>/server.py"
+  --script "$(git rev-parse --show-toplevel)/mcp/<server>/<package>/mcp/main.py"
 ```
 Where `<package>` is the underscored Python package name (e.g., `python_interpreter`).
 - Uses local source files directly
@@ -694,20 +712,20 @@ Claude Code permission patterns use **literal prefix matching** (no shell expans
 
 | Pattern | Works? | Reason |
 |---------|--------|--------|
-| `Bash(mcp-python-interpreter-client:*)` | ✅ | Simple command name |
+| `Bash(python-interpreter:*)` | ✅ | Simple command name |
 | `Bash("$(git rev-parse ...)":*)` | ❌ | Shell expansion not evaluated |
-| `Bash(/absolute/path/client.py:*)` | ✅ | Literal path match |
+| `Bash(/absolute/path/cli/main.py:*)` | ✅ | Literal path match |
 
 This is why `uv tool install` is preferred—it creates simple commands in PATH that match easily.
 
-### Client vs MCP Tool
+### CLI vs MCP Tool
 
 | Component | Use Case | Invocation |
 |-----------|----------|------------|
 | MCP Tool (`mcp__python-interpreter__execute`) | Structured output, explicit request | Via MCP protocol |
-| Bash Client (`mcp-python-interpreter-client`) | Multiline code, readable approval prompts | Heredoc syntax |
+| CLI (`python-interpreter`) | Multiline code, readable approval prompts | Heredoc syntax |
 
-Claude should prefer the Bash client for multiline code because approval prompts show clean, readable Python instead of escaped JSON strings.
+Claude should prefer the CLI for multiline code because approval prompts show clean, readable text instead of escaped JSON strings.
 
 ### Release Process
 
@@ -726,8 +744,8 @@ When modifying MCP servers:
 ### Adding New MCP Servers
 
 1. Create directory under `mcp/your-server/`
-2. Add `server.py` with uv inline dependencies
-3. Add `pyproject.toml` with entry points following naming convention
+2. Add `mcp/main.py` and `cli/main.py` following the module layout convention
+3. Add `pyproject.toml` with entry points following naming convention (`<name>-mcp`, `<name>`)
 4. Include `cc_lib` in dependencies for shared utilities
 5. Use relative path: `cc_lib = { path = "../../cc-lib/", editable = true }`
 6. Configure logging in `lifespan()`: `logging.basicConfig(stream=sys.stderr, ...)`
@@ -741,14 +759,14 @@ Add to `cc-lib/cc_lib/` directory. All MCP servers can import them. Follow publi
 
 Test inline dependencies work:
 ```bash
-uv run --directory mcp/python-interpreter --script python_interpreter/server.py
+uv run --directory mcp/python-interpreter --script python_interpreter/mcp/main.py
 ```
 
 Should successfully import `cc_lib` and start the server.
 
 Test entry points work:
 ```bash
-uv run --project mcp/python-interpreter mcp-python-interpreter-server
+uv run --project mcp/python-interpreter python-interpreter-mcp
 ```
 
 ## Next Steps

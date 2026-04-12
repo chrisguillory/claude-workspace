@@ -1,5 +1,5 @@
 [project]
-name = "document-search-mcp"
+name = "document-search"
 version = "0.7.0"
 description = "Document Search MCP Server - Semantic search over local documents"
 requires-python = ">=3.13"
@@ -37,7 +37,7 @@ dev = [
 [project.scripts]
 document-search = "document_search.cli.main:main"
 document-search-dashboard = "document_search.dashboard:main"
-mcp-document-search-server = "document_search.server:main"
+document-search-mcp = "document_search.mcp.main:main"
 
 [tool.uv.sources]
 # Local development override: workspace reference takes precedence over git URL in dependencies.

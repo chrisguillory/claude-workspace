@@ -16,10 +16,11 @@ claude-workspace/
 │   ├── session-end.py
 │   └── print-session-info.py
 ├── mcp/                        # MCP servers
-│   ├── browser-automation/
+│   ├── claude-session/
 │   ├── document-search/
+│   ├── playwright-browser/
 │   ├── python-interpreter/
-│   └── selenium-browser-automation/
+│   └── selenium-browser/
 ├── cc-lib/                  # Shared Python package
 │   └── cc_lib/
 │       ├── session_tracker.py
@@ -50,16 +51,16 @@ Install all servers as editable from a local clone. Changes to source files take
 cd ~/claude-workspace
 
 # Install all servers (editable)
-uv tool install --editable mcp/python-interpreter --force
+uv tool install --editable mcp/claude-session --force
 uv tool install --editable mcp/document-search --force
-uv tool install --editable mcp/selenium-browser-automation --force
-uv tool install --editable mcp/browser-automation --force
+uv tool install --editable mcp/python-interpreter --force
+uv tool install --editable mcp/selenium-browser --force
 
 # Register with Claude Code
-claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
-claude mcp add --scope user document-search -- mcp-document-search-server
-claude mcp add --scope user selenium-browser-automation -- mcp-selenium-browser-automation-server
-claude mcp add --scope user browser-automation -- mcp-browser-automation-server
+claude mcp add --scope user claude-session -- claude-session-mcp
+claude mcp add --scope user document-search -- document-search-mcp
+claude mcp add --scope user python-interpreter -- python-interpreter-mcp
+claude mcp add --scope user selenium-browser -- selenium-browser-mcp
 
 # Verify
 uv tool list
@@ -73,41 +74,37 @@ If an MCP server fails to start after pulling updates, force reinstall and re-re
 cd ~/claude-workspace
 
 # Force reinstall + re-register (same commands as Quick Setup)
-uv tool install --editable mcp/python-interpreter --force
+uv tool install --editable mcp/claude-session --force
 uv tool install --editable mcp/document-search --force
-uv tool install --editable mcp/selenium-browser-automation --force
-uv tool install --editable mcp/browser-automation --force
+uv tool install --editable mcp/python-interpreter --force
+uv tool install --editable mcp/selenium-browser --force
 
-claude mcp remove python-interpreter --scope user
+claude mcp remove claude-session --scope user
 claude mcp remove document-search --scope user
-claude mcp remove selenium-browser-automation --scope user
-claude mcp remove browser-automation --scope user
+claude mcp remove python-interpreter --scope user
+claude mcp remove selenium-browser --scope user
 
-claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
-claude mcp add --scope user document-search -- mcp-document-search-server
-claude mcp add --scope user selenium-browser-automation -- mcp-selenium-browser-automation-server
-claude mcp add --scope user browser-automation -- mcp-browser-automation-server
+claude mcp add --scope user claude-session -- claude-session-mcp
+claude mcp add --scope user document-search -- document-search-mcp
+claude mcp add --scope user python-interpreter -- python-interpreter-mcp
+claude mcp add --scope user selenium-browser -- selenium-browser-mcp
 ```
 
 ### Per-Server Details
 
-#### [Python Interpreter MCP](mcp/python-interpreter)
+#### [Claude Session MCP](mcp/claude-session)
 
-Persistent Python execution environment with variable retention across calls and external interpreter support.
+Archive, restore, clone, and manage Claude Code sessions.
 
 | Entry Point | Purpose |
 |-------------|---------|
-| `mcp-python-interpreter-server` | MCP server (stdio) |
-| `mcp-python-interpreter-client` | CLI client for heredoc usage |
+| `claude-session-mcp` | MCP server (stdio) |
+| `claude-session` | CLI client |
 
 ```bash
 # Remote install (from GitHub)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
-claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
-
-# Check version / Upgrade
-uv tool list | grep python-interpreter
-uv tool upgrade python-interpreter-mcp
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session
+claude mcp add --scope user claude-session -- claude-session-mcp
 ```
 
 #### [Document Search MCP](mcp/document-search)
@@ -116,13 +113,14 @@ Semantic search over local documents using Gemini embeddings and Qdrant.
 
 | Entry Point                 | Purpose                 |
 |-----------------------------|-------------------------|
-| `mcp-document-search-server`       | MCP server (stdio)      |
+| `document-search-mcp`       | MCP server (stdio)      |
+| `document-search`           | CLI client              |
 | `document-search-dashboard` | Observability dashboard |
 
 ```bash
 # Remote install (from GitHub)
 uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/document-search
-claude mcp add --scope user document-search -- mcp-document-search-server
+claude mcp add --scope user document-search -- document-search-mcp
 
 # Start Qdrant
 docker compose -f ~/claude-workspace/mcp/document-search/docker-compose.yaml up -d
@@ -130,49 +128,69 @@ docker compose -f ~/claude-workspace/mcp/document-search/docker-compose.yaml up 
 
 **Requires:** Gemini API key at `~/.claude-workspace/secrets/document_search_api_key`.
 
-#### [Selenium Browser Automation MCP](mcp/selenium-browser-automation)
+#### [Playwright Browser MCP](mcp/playwright-browser)
+
+Playwright-based browser control with stealth mode.
+
+| Entry Point | Purpose |
+|-------------|---------|
+| `playwright-browser-mcp` | MCP server (stdio) |
+
+```bash
+# Remote install (from GitHub)
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/playwright-browser
+claude mcp add --scope user playwright-browser -- playwright-browser-mcp
+```
+
+**Requires:** Playwright browsers: `playwright install chromium`
+
+#### [Python Interpreter MCP](mcp/python-interpreter)
+
+Persistent Python execution environment with variable retention across calls and external interpreter support.
+
+| Entry Point | Purpose |
+|-------------|---------|
+| `python-interpreter-mcp` | MCP server (stdio) |
+| `python-interpreter` | CLI client for heredoc usage |
+
+```bash
+# Remote install (from GitHub)
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
+claude mcp add --scope user python-interpreter -- python-interpreter-mcp
+
+# Check version / Upgrade
+uv tool list | grep python-interpreter
+uv tool upgrade python-interpreter
+```
+
+#### [Selenium Browser MCP](mcp/selenium-browser)
 
 Selenium with CDP stealth injection to bypass Cloudflare bot detection.
 
 | Entry Point | Purpose |
 |-------------|---------|
-| `mcp-selenium-browser-automation-server` | MCP server (stdio) |
+| `selenium-browser-mcp` | MCP server (stdio) |
+| `selenium-browser` | CLI client |
 
 ```bash
 # Remote install (from GitHub)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser-automation
-claude mcp add --scope user selenium-browser-automation -- mcp-selenium-browser-automation-server
+uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser
+claude mcp add --scope user selenium-browser -- selenium-browser-mcp
 ```
 
 **Requires:** Chrome/Chromium installed on the system.
 
-#### [Browser Automation MCP](mcp/browser-automation) (Legacy)
-
-Playwright-based browser control with stealth mode. Superseded by Selenium Browser Automation.
-
-| Entry Point | Purpose |
-|-------------|---------|
-| `mcp-browser-automation-server` | MCP server (stdio) |
-
-```bash
-# Remote install (from GitHub)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/browser-automation
-claude mcp add --scope user browser-automation -- mcp-browser-automation-server
-```
-
-**Requires:** Playwright browsers: `playwright install chromium`
-
 ### Entry Point Reference
 
-All MCP server entry points follow the `mcp-<package-dir-name>-server` convention:
+Entry points follow the `<name>-mcp` convention for MCP servers and `<name>` for CLIs:
 
 | Package | Entry Points |
 |---------|-------------|
-| `python-interpreter-mcp` | `mcp-python-interpreter-server`, `mcp-python-interpreter-client` |
-| `document-search-mcp` | `mcp-document-search-server`, `document-search-dashboard` |
-| `selenium-browser-automation-mcp` | `mcp-selenium-browser-automation-server` |
-| `browser-automation-mcp` | `mcp-browser-automation-server` |
-| `claude-session-mcp` | `mcp-claude-session-server`, `claude-session` |
+| `claude-session` | `claude-session-mcp`, `claude-session` |
+| `document-search` | `document-search-mcp`, `document-search`, `document-search-dashboard` |
+| `playwright-browser` | `playwright-browser-mcp` |
+| `python-interpreter` | `python-interpreter-mcp`, `python-interpreter` |
+| `selenium-browser` | `selenium-browser-mcp`, `selenium-browser` |
 
 ### Dependency Resolution and Reproducibility
 
@@ -192,7 +210,7 @@ This repo includes a `uv.lock` file, but whether it's used depends on your insta
 git clone https://github.com/chrisguillory/claude-workspace.git
 cd claude-workspace
 uv sync
-uv run --project mcp/python-interpreter mcp-python-interpreter-server
+uv run --project mcp/python-interpreter python-interpreter-mcp
 ```
 
 ## Hook Installation

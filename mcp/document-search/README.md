@@ -40,13 +40,13 @@ For users installing from GitHub:
 
 ```bash
 uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/document-search
-claude mcp add --scope user document-search -- mcp-document-search-server
+claude mcp add --scope user document-search -- document-search-mcp
 ```
 
 To upgrade to the latest version:
 
 ```bash
-uv tool upgrade document-search-mcp
+uv tool upgrade document-search
 ```
 
 For local development with editable install, see the [workspace README](../../README.md).
