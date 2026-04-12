@@ -71,13 +71,19 @@ class SessionInfoService:
         self.discovery = SessionDiscoveryService()
         self.lineage = LineageService()
 
-    async def get_info(self, session_id: str, current_context: CurrentSessionContext | None = None) -> SessionContext:
+    async def get_info(
+        self,
+        session_id: str,
+        current_context: CurrentSessionContext | None = None,
+        project_filter: Path | None = None,
+    ) -> SessionContext:
         """
         Get comprehensive context for a session.
 
         Args:
             session_id: Session ID (full or prefix) to look up
             current_context: MCP server context for current session (optional)
+            project_filter: If set, restrict session lookup to this project folder
 
         Returns:
             SessionContext with all available information
@@ -87,7 +93,7 @@ class SessionInfoService:
             AmbiguousSessionError: If prefix matches multiple sessions
         """
         # Resolve session ID (supports both full ID and prefix)
-        session_info = await self.resolve_session(session_id)
+        session_info = await self.resolve_session(session_id, project_filter=project_filter)
 
         full_session_id = session_info.session_id
         session_folder = session_info.session_folder

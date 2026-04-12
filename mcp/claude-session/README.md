@@ -174,9 +174,10 @@ claude-session clone <session-id>
 #   session-id     Session ID to clone (full UUID or prefix)
 
 # Options:
-#   --project, -p      Target project directory (default: current)
-#   --no-translate     Don't translate file paths
-#   --launch, -l       Launch Claude Code after clone
+#   --target-project, -p    Target project directory (default: current)
+#   --source-project        Scope to sessions in this project directory
+#   --no-translate          Don't translate file paths
+#   --launch, -l            Launch Claude Code after clone
 ```
 
 ### Archive
@@ -193,6 +194,7 @@ claude-session archive <session-id> <output>
 #   --gist-token           GitHub token (or use GITHUB_TOKEN env)
 #   --gist-visibility      public or secret (default: secret)
 #   --gist-description     Gist description
+#   --source-project       Scope to sessions in this project directory
 ```
 
 ### Restore
@@ -204,11 +206,11 @@ claude-session restore <archive>
 #   archive        File path or gist://<gist-id>
 
 # Options:
-#   --project, -p      Target project directory (default: current)
-#   --no-translate     Don't translate file paths
-#   --in-place         Restore with original session ID (verbatim restore)
-#   --launch, -l       Launch Claude Code after restore
-#   --gist-token       GitHub token for private gists
+#   --target-project, -p    Target project directory (default: current)
+#   --no-translate          Don't translate file paths
+#   --in-place              Restore with original session ID (verbatim restore)
+#   --launch, -l            Launch Claude Code after restore
+#   --gist-token            GitHub token for private gists
 ```
 
 By default, restore generates a new UUIDv7 session ID and transforms all artifact IDs. Use `--in-place` for verbatim restoration with original IDs (useful for undoing a delete).
@@ -222,10 +224,10 @@ claude-session delete <session-id>
 #   session-id     Session ID to delete
 
 # Options:
-#   --force, -f        Required to delete native (UUIDv4) sessions
-#   --no-backup        Skip auto-backup before deletion
-#   --dry-run          Preview what would be deleted
-#   --project, -p      Project directory (default: current)
+#   --force, -f             Required to delete native (UUIDv4) sessions
+#   --no-backup             Skip auto-backup before deletion
+#   --dry-run               Preview what would be deleted
+#   --source-project        Scope to sessions in this project directory
 ```
 
 **Safety features:**
@@ -245,12 +247,13 @@ claude-session move <session-id>
 #   session-id     Session ID (full UUID or prefix). Auto-detected inside Claude Code.
 
 # Options:
-#   --project, -p      Target project directory (default: current)
-#   --force, -f        Required to move native (UUIDv4) sessions
-#   --terminate, -t    Terminate running Claude process before move
-#   --no-backup        Skip auto-backup before source deletion
-#   --dry-run          Preview what would be moved
-#   --launch, -l       Launch Claude Code in target project after move
+#   --target-project, -p    Target project directory (default: current)
+#   --source-project        Scope to sessions in this project directory
+#   --force, -f             Required to move native (UUIDv4) sessions
+#   --terminate, -t         Terminate running Claude process before move
+#   --no-backup             Skip auto-backup before source deletion
+#   --dry-run               Preview what would be moved
+#   --launch, -l            Launch Claude Code in target project after move
 ```
 
 Extra arguments after `--` are passed to `claude` CLI when using `--launch`:
@@ -307,7 +310,8 @@ claude-session lineage <session-id>
 #   session-id     Session ID (full UUID or prefix)
 
 # Options:
-#   --format, -f       Output format: text, tree, or json (default: text)
+#   --format, -f           Output format: text, tree, or json (default: text)
+#   --source-project       Scope to sessions in this project directory
 ```
 
 **Examples:**
