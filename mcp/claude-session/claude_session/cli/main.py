@@ -25,7 +25,7 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.session_tracker import load_sessions
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
-from claude_session.exceptions import ClaudeSessionError
+from claude_session.exceptions import ClaudeSessionError, SourceProjectConflictError
 from claude_session.launcher import launch_claude_with_session
 from claude_session.schemas.operations.lineage import LineageTree
 from claude_session.services.archive import SessionArchiveService
@@ -178,6 +178,9 @@ def archive(
     gist_description: Annotated[
         str, typer.Option('--gist-description', help='Gist description')
     ] = 'Claude Code Session Archive',
+    source_project: Annotated[
+        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+    ] = None,
 ) -> None:
     """Archive a Claude Code session to local file or GitHub Gist.
 
@@ -197,6 +200,9 @@ def archive(
         output = session_id
         session_id = None
 
+    if session_id is None and source_project is not None:
+        raise SourceProjectConflictError
+
     # Resolve session ID (auto-detect if needed)
     resolved_session_id = _resolve_session_id(session_id)
 
@@ -204,7 +210,11 @@ def archive(
     if output is None:
         output = 'gist://'
 
-    asyncio.run(_archive_async(resolved_session_id, output, format, gist_token, gist_visibility, gist_description))
+    asyncio.run(
+        _archive_async(
+            resolved_session_id, output, format, gist_token, gist_visibility, gist_description, source_project
+        )
+    )
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -212,8 +222,8 @@ def archive(
 def restore(
     ctx: typer.Context,
     archive: Annotated[str, typer.Argument(help='Archive path or Gist URL (gist://<gist-id> or file path)')],
-    project: Annotated[
-        Path | None, typer.Option('--project', '-p', help='Target project directory (default: current)')
+    target_project: Annotated[
+        Path | None, typer.Option('--target-project', '-p', help='Target project directory (default: current)')
     ] = None,
     no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
     in_place: Annotated[
@@ -231,7 +241,7 @@ def restore(
     Extra arguments after -- are passed to claude CLI:
         claude-session restore ARCHIVE --launch -- --chrome
     """
-    asyncio.run(_restore_async(archive, project, not no_translate, in_place, launch, gist_token, ctx.args))
+    asyncio.run(_restore_async(archive, target_project, not no_translate, in_place, launch, gist_token, ctx.args))
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -245,8 +255,11 @@ def clone(
             autocompletion=_complete_session_id,
         ),
     ] = None,
-    project: Annotated[
-        Path | None, typer.Option('--project', '-p', help='Target project directory (default: current)')
+    target_project: Annotated[
+        Path | None, typer.Option('--target-project', '-p', help='Target project directory (default: current)')
+    ] = None,
+    source_project: Annotated[
+        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
     ] = None,
     no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
     launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after clone')] = False,
@@ -261,6 +274,9 @@ def clone(
         claude-session clone SESSION_ID       # clone specific session
         claude-session clone SESSION_ID -l    # clone and launch
     """
+    if session_id is None and source_project is not None:
+        raise SourceProjectConflictError
+
     detected = auto_detect_session_id()
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
@@ -271,7 +287,11 @@ def clone(
     if session_id is None:
         session_id = detected
 
-    asyncio.run(_clone_async(_resolve_session_id(session_id), project, not no_translate, launch, ctx.args))
+    asyncio.run(
+        _clone_async(
+            _resolve_session_id(session_id), target_project, source_project, not no_translate, launch, ctx.args
+        )
+    )
 
 
 @app.command()
@@ -290,8 +310,8 @@ def delete(
     ] = False,
     no_backup: Annotated[bool, typer.Option('--no-backup', help="Don't keep a backup file for undo")] = False,
     dry_run: Annotated[bool, typer.Option('--dry-run', help='Preview what would be deleted')] = False,
-    project: Annotated[
-        Path | None, typer.Option('--project', '-p', help='Project directory (default: current)')
+    source_project: Annotated[
+        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
     """Delete session artifacts with auto-backup.
@@ -314,7 +334,9 @@ def delete(
         claude-session delete SESSION_ID --terminate    # kill running session first
         claude-session delete SESSION_ID --dry-run      # preview without deleting
     """
-    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, project))
+    if session_id is None and source_project is not None:
+        raise SourceProjectConflictError
+    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, source_project))
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -328,8 +350,11 @@ def move(
             autocompletion=_complete_session_id,
         ),
     ] = None,
-    project: Annotated[
-        Path | None, typer.Option('--project', '-p', help='Target project directory (default: current)')
+    target_project: Annotated[
+        Path | None, typer.Option('--target-project', '-p', help='Target project directory (default: current)')
+    ] = None,
+    source_project: Annotated[
+        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
     ] = None,
     force: Annotated[bool, typer.Option('--force', '-f', help='Required to move native (UUIDv4) sessions')] = False,
     terminate: Annotated[
@@ -364,6 +389,9 @@ def move(
         claude-session move 019b5232 --launch      # move and resume
         claude-session move a1b2c3d4 --force       # native session
     """
+    if session_id is None and source_project is not None:
+        raise SourceProjectConflictError
+
     detected = auto_detect_session_id()
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
@@ -374,7 +402,17 @@ def move(
         session_id = detected
 
     asyncio.run(
-        _move_async(_resolve_session_id(session_id), project, force, terminate, no_backup, dry_run, launch, ctx.args)
+        _move_async(
+            _resolve_session_id(session_id),
+            target_project,
+            source_project,
+            force,
+            terminate,
+            no_backup,
+            dry_run,
+            launch,
+            ctx.args,
+        )
     )
 
 
@@ -391,6 +429,9 @@ def lineage(
     format: Annotated[
         Literal['text', 'tree', 'json'], typer.Option('--format', '-f', help='Output format: text, tree, or json')
     ] = 'text',
+    source_project: Annotated[
+        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+    ] = None,
 ) -> None:
     """Show the lineage (parent-child relationships) for a session.
 
@@ -402,50 +443,9 @@ def lineage(
         claude-session lineage 019b53ff
         claude-session lineage c3bac5a6 --format tree
     """
-    session_id = _resolve_session_id(session_id)
-    lineage_service = LineageService()
-    tree = lineage_service.get_full_tree(session_id)
-
-    if tree is None:
-        typer.secho(f'No lineage found for {session_id}', fg=typer.colors.YELLOW)
-        typer.echo('(This is either a native session or lineage tracking was not enabled)')
-        return
-
-    if format == 'text':
-        node = tree.nodes[tree.queried_session_id]
-        typer.echo(f'Session: {node.session_id}')
-        if node.custom_title:
-            typer.echo(f'Title:   {node.custom_title}')
-        if node.cloned_at is not None:
-            # Child node — show operation metadata
-            typer.echo(f'Parent:  {node.parent_id}')
-            typer.echo(f'Cloned:  {node.cloned_at}')
-            typer.echo(f'Method:  {node.method}')
-            typer.echo(f'Source:  {node.parent_project_path}')
-            typer.echo(f'Target:  {node.target_project_path}')
-            typer.echo(f'Machine: {node.target_machine_id}')
-            if node.parent_machine_id:
-                if node.is_cross_machine:
-                    typer.secho(f'Source Machine: {node.parent_machine_id} (cross-machine)', fg=typer.colors.YELLOW)
-                else:
-                    typer.echo(f'Source Machine: {node.parent_machine_id} (same machine)')
-            if node.archive_path:
-                typer.echo(f'Archive: {node.archive_path}')
-            if node.paths_translated:
-                typer.secho('Paths translated: yes', fg=typer.colors.CYAN)
-        else:
-            # Root node — no operation metadata
-            typer.secho(f'Root session with {len(node.children)} clone(s)', fg=typer.colors.CYAN)
-            for child_id in node.children:
-                child_node = tree.nodes[child_id]
-                title_suffix = f' ({child_node.custom_title})' if child_node.custom_title else ''
-                typer.echo(f'  └─ {child_id}{title_suffix}')
-
-    elif format == 'tree':
-        _render_lineage_tree(tree)
-
-    elif format == 'json':
-        typer.echo(tree.model_dump_json(indent=2))
+    if session_id is None and source_project is not None:
+        raise SourceProjectConflictError
+    asyncio.run(_lineage_async(_resolve_session_id(session_id), format, source_project))
 
 
 @app.command()
@@ -461,6 +461,9 @@ def info(
     format: Annotated[
         Literal['text', 'json'], typer.Option('--format', '-f', help='Output format: text or json')
     ] = 'text',
+    source_project: Annotated[
+        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+    ] = None,
 ) -> None:
     """Display comprehensive information about a session.
 
@@ -475,7 +478,9 @@ def info(
         claude-session info 019b53ff
         claude-session info c3bac5a6 --format json
     """
-    asyncio.run(_info_async(_resolve_session_id(session_id), format))
+    if session_id is None and source_project is not None:
+        raise SourceProjectConflictError
+    asyncio.run(_info_async(_resolve_session_id(session_id), format, source_project))
 
 
 def main() -> None:
@@ -529,6 +534,13 @@ def _is_session_id(value: str) -> bool:
     return len(value) >= 8 and bool(re.fullmatch(r'[0-9a-f][0-9a-f-]*', value))
 
 
+def _encode_project_filter(project: Path | None) -> Path | None:
+    """Encode a project directory path for session discovery filtering."""
+    if project is None:
+        return None
+    return get_claude_config_home_dir() / 'projects' / encode_project_path(project.resolve())
+
+
 def _get_github_token_cli(gist_token: str | None) -> str | None:
     """Resolve GitHub token from flag, environment, or gh CLI.
 
@@ -573,16 +585,23 @@ async def _archive_async(
     gist_token: str | None,
     gist_visibility: Literal['public', 'secret'],
     gist_description: str,
+    source_project: Path | None,
 ) -> None:
     """Async implementation of archive command."""
 
     # Find the session
     discovery = SessionDiscoveryService()
-    session_info = await discovery.find_session_by_id(session_id)
+    project_filter = _encode_project_filter(source_project)
+    session_info = await discovery.find_session_by_id(session_id, project_filter=project_filter)
 
     if not session_info:
-        typer.secho(f'Error: Session not found: {session_id}', fg=typer.colors.RED, err=True)
-        typer.echo(f'Searched in: {discovery.claude_sessions_dir}', err=True)
+        if source_project:
+            typer.secho(
+                f'Error: Session not found: {session_id} in project {source_project}', fg=typer.colors.RED, err=True
+            )
+        else:
+            typer.secho(f'Error: Session not found: {session_id}', fg=typer.colors.RED, err=True)
+        typer.echo(f'Searched in: {project_filter or discovery.claude_sessions_dir}', err=True)
         raise SystemExit(1)
 
     logger.info('Found session in folder: %s', session_info.session_folder)
@@ -677,7 +696,7 @@ async def _archive_async(
 
 async def _restore_async(
     archive: str,
-    project: Path | None,
+    target_project: Path | None,
     translate_paths: bool,
     in_place: bool,
     launch: bool,
@@ -754,9 +773,9 @@ async def _restore_async(
             typer.secho(f'Error: Archive not found: {archive_path}', fg=typer.colors.RED, err=True)
             raise SystemExit(1)
 
-    # Determine project path
-    if project:
-        project_path = project.resolve()
+    # Determine target project path
+    if target_project:
+        project_path = target_project.resolve()
         if not project_path.exists():
             typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
             raise SystemExit(1)
@@ -816,16 +835,17 @@ async def _restore_async(
 
 async def _clone_async(
     session_id: str,
-    project: Path | None,
+    target_project: Path | None,
+    source_project: Path | None,
     translate_paths: bool,
     launch: bool,
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of clone command."""
 
-    # Determine project path
-    if project:
-        project_path = project.resolve()
+    # Determine target project path
+    if target_project:
+        project_path = target_project.resolve()
         if not project_path.exists():
             typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
             raise SystemExit(1)
@@ -838,9 +858,11 @@ async def _clone_async(
     clone_service = SessionCloneService(project_path)
 
     # Clone the session
+    project_filter = _encode_project_filter(source_project)
     result = await clone_service.clone(
         source_session_id=session_id,
         translate_paths=translate_paths,
+        project_filter=project_filter,
     )
 
     # Print success
@@ -878,16 +900,14 @@ async def _delete_async(
     terminate: bool,
     no_backup: bool,
     dry_run: bool,
-    project: Path | None,
+    source_project: Path | None,
 ) -> None:
     """Async implementation of delete command."""
 
     # Resolve session ID prefix to full ID
-    # When --project is provided, use it to disambiguate discovery
+    # When --source-project is provided, use it to disambiguate discovery
     info_service = SessionInfoService()
-    project_filter: Path | None = None
-    if project:
-        project_filter = get_claude_config_home_dir() / 'projects' / encode_project_path(project.resolve())
+    project_filter = _encode_project_filter(source_project)
     session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
     full_session_id = session_info.session_id
 
@@ -913,10 +933,10 @@ async def _delete_async(
             logger.info('Session is running (PID %s), will terminate before deletion', running_pid)
 
     # Initialize delete service
-    # When --project is explicit, use it (user intent wins over discovery)
+    # When --source-project is explicit, use it (user intent wins over discovery)
     # Otherwise, use discovered session_folder (handles cross-directory correctly)
-    if project:
-        project_path = project.resolve()
+    if source_project:
+        project_path = source_project.resolve()
         if not project_path.exists():
             typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
             raise SystemExit(1)
@@ -977,7 +997,8 @@ async def _delete_async(
 
 async def _move_async(
     session_id: str,
-    project: Path | None,
+    target_project: Path | None,
+    source_project: Path | None,
     force: bool,
     terminate: bool,
     no_backup: bool,
@@ -989,7 +1010,8 @@ async def _move_async(
 
     # Resolve session ID prefix to full ID
     info_service = SessionInfoService()
-    session_info = await info_service.resolve_session(session_id)
+    project_filter = _encode_project_filter(source_project)
+    session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
     full_session_id = session_info.session_id
 
     # Check if session is running
@@ -1011,8 +1033,8 @@ async def _move_async(
             logger.info('Session is running (PID %s), will terminate before move', running_pid)
 
     # Determine target project path
-    if project:
-        project_path = project.resolve()
+    if target_project:
+        project_path = target_project.resolve()
         if not project_path.exists():
             typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
             raise SystemExit(1)
@@ -1069,10 +1091,64 @@ async def _move_async(
             typer.secho(f'  claude --resume {result.session_id}', fg=typer.colors.CYAN)
 
 
-async def _info_async(session_id: str, format: Literal['text', 'json']) -> None:
+async def _lineage_async(session_id: str, format: Literal['text', 'tree', 'json'], source_project: Path | None) -> None:
+    """Async implementation of lineage command."""
+    # Resolve session ID via discovery (supports prefix matching + project filter)
+    info_service = SessionInfoService()
+    project_filter = _encode_project_filter(source_project)
+    session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
+    full_session_id = session_info.session_id
+
+    lineage_service = LineageService()
+    tree = lineage_service.get_full_tree(full_session_id)
+
+    if tree is None:
+        typer.secho(f'No lineage found for {full_session_id}', fg=typer.colors.YELLOW)
+        typer.echo('(This is either a native session or lineage tracking was not enabled)')
+        return
+
+    if format == 'text':
+        node = tree.nodes[tree.queried_session_id]
+        typer.echo(f'Session: {node.session_id}')
+        if node.custom_title:
+            typer.echo(f'Title:   {node.custom_title}')
+        if node.cloned_at is not None:
+            # Child node — show operation metadata
+            typer.echo(f'Parent:  {node.parent_id}')
+            typer.echo(f'Cloned:  {node.cloned_at}')
+            typer.echo(f'Method:  {node.method}')
+            typer.echo(f'Source:  {node.parent_project_path}')
+            typer.echo(f'Target:  {node.target_project_path}')
+            typer.echo(f'Machine: {node.target_machine_id}')
+            if node.parent_machine_id:
+                if node.is_cross_machine:
+                    typer.secho(f'Source Machine: {node.parent_machine_id} (cross-machine)', fg=typer.colors.YELLOW)
+                else:
+                    typer.echo(f'Source Machine: {node.parent_machine_id} (same machine)')
+            if node.archive_path:
+                typer.echo(f'Archive: {node.archive_path}')
+            if node.paths_translated:
+                typer.secho('Paths translated: yes', fg=typer.colors.CYAN)
+        else:
+            # Root node — no operation metadata
+            typer.secho(f'Root session with {len(node.children)} clone(s)', fg=typer.colors.CYAN)
+            for child_id in node.children:
+                child_node = tree.nodes[child_id]
+                title_suffix = f' ({child_node.custom_title})' if child_node.custom_title else ''
+                typer.echo(f'  └─ {child_id}{title_suffix}')
+
+    elif format == 'tree':
+        _render_lineage_tree(tree)
+
+    elif format == 'json':
+        typer.echo(tree.model_dump_json(indent=2))
+
+
+async def _info_async(session_id: str, format: Literal['text', 'json'], source_project: Path | None) -> None:
     """Async implementation of info command."""
     info_service = SessionInfoService()
-    context = await info_service.get_info(session_id)
+    project_filter = _encode_project_filter(source_project)
+    context = await info_service.get_info(session_id, project_filter=project_filter)
 
     if format == 'json':
         typer.echo(context.model_dump_json(indent=2))

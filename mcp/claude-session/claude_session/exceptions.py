@@ -6,7 +6,8 @@ Domain-specific exceptions used across services.
 Exception Hierarchy:
     ClaudeSessionError (base)
     ├── SessionResolutionError (lookup/resolution failures)
-    │   └── AmbiguousSessionError (prefix matches multiple sessions)
+    │   ├── AmbiguousSessionError (prefix matches multiple sessions)
+    │   └── SourceProjectConflictError (--source-project with auto-detection)
     ├── SessionDeletionError (deletion policy violations)
     │   ├── NativeSessionDeletionError (native session without --force)
     │   └── RunningSessionDeletionError (running session without --terminate)
@@ -31,6 +32,7 @@ __all__ = [
     'SessionDeletionError',
     'SessionMoveError',
     'SessionResolutionError',
+    'SourceProjectConflictError',
 ]
 
 
@@ -53,8 +55,15 @@ class AmbiguousSessionError(SessionResolutionError):
             matches_str += f'\n  ... and {len(matches) - 10} more'
         super().__init__(
             f"Session ID prefix '{prefix}' is ambiguous. Matches {len(matches)} sessions:\n  {matches_str}\n\n"
-            f'Provide a more specific session ID prefix, or use --project to target a specific project.'
+            f'Provide a more specific session ID prefix, or use --source-project to target a specific project.'
         )
+
+
+class SourceProjectConflictError(SessionResolutionError):
+    """Raised when --source-project is used with an auto-detected session ID."""
+
+    def __init__(self) -> None:
+        super().__init__('--source-project requires an explicit session ID (cannot be used with auto-detection).')
 
 
 class SessionDeletionError(ClaudeSessionError):

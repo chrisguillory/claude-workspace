@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from cc_lib.utils import get_claude_config_home_dir
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 from mcp.server.fastmcp import Context, FastMCP
 
 from claude_session.exceptions import RunningSessionDeletionError, RunningSessionMoveError
@@ -50,6 +50,15 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
+
+
+def _encode_project_filter(source_project: str | None) -> Path | None:
+    """Encode a project directory path for session discovery filtering."""
+    if source_project is None:
+        return None
+    resolved = Path(source_project).resolve()
+    return get_claude_config_home_dir() / 'projects' / encode_project_path(resolved)
+
 
 __all__ = [
     'ClaudeContext',
@@ -280,6 +289,7 @@ def register_tools(state: ServerState) -> None:
     async def clone_session(
         source_session_id: str | None = None,
         translate_paths: bool = True,
+        source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> RestoreResult:
         """
@@ -293,6 +303,8 @@ def register_tools(state: ServerState) -> None:
             source_session_id: Session ID to clone (full UUID or prefix).
                               If None, clones the current session.
             translate_paths: Translate paths to current project (default: True)
+            source_project: Scope session lookup to this project directory
+                           (for disambiguation when multiple projects have the same session ID)
 
         Returns:
             RestoreResult with new session ID and clone details
@@ -327,9 +339,11 @@ def register_tools(state: ServerState) -> None:
         clone_service = SessionCloneService(state.project_path)
 
         # Clone the session
+        project_filter = _encode_project_filter(source_project)
         result = await clone_service.clone(
             source_session_id=target_id,
             translate_paths=translate_paths,
+            project_filter=project_filter,
         )
 
         logger.info('Session cloned with new ID: %s', result.new_session_id)
@@ -344,6 +358,7 @@ def register_tools(state: ServerState) -> None:
         terminate_running: bool = False,
         no_backup: bool = False,
         dry_run: bool = False,
+        source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> DeleteResult:
         """
@@ -368,6 +383,7 @@ def register_tools(state: ServerState) -> None:
             terminate_running: Terminate running Claude process before deletion
             no_backup: Don't keep a backup file for undo
             dry_run: If True, show what would be deleted without actually deleting
+            source_project: Scope session lookup to this project directory
 
         Returns:
             DeleteResult with deletion details and backup path
@@ -398,7 +414,8 @@ def register_tools(state: ServerState) -> None:
 
         # Resolve prefix to full session ID
         info_service = SessionInfoService()
-        session_info = await info_service.resolve_session(session_id)
+        project_filter = _encode_project_filter(source_project)
+        session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
         full_session_id = session_info.session_id
 
         # Create delete service - use discovered session_folder for correct path resolution
@@ -465,6 +482,7 @@ def register_tools(state: ServerState) -> None:
     async def move_session(
         session_id: str,
         target_project: str | None = None,
+        source_project: str | None = None,
         force: bool = False,
         terminate_running: bool = False,
         no_backup: bool = False,
@@ -492,6 +510,8 @@ def register_tools(state: ServerState) -> None:
             session_id: Session ID to move (full UUID or prefix)
             target_project: Target project directory path. Defaults to
                           the current project (where this MCP server runs).
+            source_project: Scope session lookup to this project directory
+                           (for disambiguation when multiple projects have the same session ID)
             force: Required to move native (UUIDv4) sessions
             terminate_running: Terminate running Claude process before move
             no_backup: Don't keep backup after successful move
@@ -524,7 +544,8 @@ def register_tools(state: ServerState) -> None:
 
         # Resolve prefix to full session ID
         info_service = SessionInfoService()
-        session_info = await info_service.resolve_session(session_id)
+        project_filter = _encode_project_filter(source_project)
+        session_info = await info_service.resolve_session(session_id, project_filter=project_filter)
         full_session_id = session_info.session_id
 
         # Determine if termination is needed
@@ -579,6 +600,7 @@ def register_tools(state: ServerState) -> None:
     @server.tool()
     async def session_lineage(
         session_id: str | None = None,
+        source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> LineageTree | None:
         """
@@ -591,6 +613,7 @@ def register_tools(state: ServerState) -> None:
         Args:
             session_id: Session ID to look up. Accepts full UUID or prefix.
                        If None, uses the current session.
+            source_project: Scope session lookup to this project directory
 
         Returns:
             LineageTree with all nodes, or None if session has no lineage
@@ -610,7 +633,8 @@ def register_tools(state: ServerState) -> None:
 
         # Resolve prefix to full session ID and validate session exists
         info_service = SessionInfoService()
-        session_info = await info_service.resolve_session(target_id_or_prefix)
+        project_filter = _encode_project_filter(source_project)
+        session_info = await info_service.resolve_session(target_id_or_prefix, project_filter=project_filter)
         target_id = session_info.session_id
 
         logger.info('Looking up lineage for session: %s...', target_id[:12])
@@ -628,6 +652,7 @@ def register_tools(state: ServerState) -> None:
     @server.tool()
     async def get_session_info(
         session_id: str | None = None,
+        source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> SessionContext:
         """
@@ -648,6 +673,7 @@ def register_tools(state: ServerState) -> None:
         Args:
             session_id: Session ID (full UUID or prefix) to query.
                        If None, returns info for the current session.
+            source_project: Scope session lookup to this project directory
 
         Returns:
             SessionContext with comprehensive session information.
@@ -676,7 +702,8 @@ def register_tools(state: ServerState) -> None:
 
         # Get session info via service
         info_service = SessionInfoService()
-        return await info_service.get_info(target_id, current_context)
+        project_filter = _encode_project_filter(source_project)
+        return await info_service.get_info(target_id, current_context, project_filter=project_filter)
 
     @server.tool()
     async def save_session_to_gist(
@@ -684,6 +711,7 @@ def register_tools(state: ServerState) -> None:
         gist_id: str | None = None,
         visibility: Literal['public', 'secret'] = 'secret',
         description: str = 'Claude Code Session Archive',
+        source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> GistArchiveResult:
         """
@@ -697,6 +725,7 @@ def register_tools(state: ServerState) -> None:
             gist_id: Existing gist ID to update. If None, creates a new gist.
             visibility: 'public' or 'secret' (default: secret)
             description: Gist description
+            source_project: Scope session lookup to this project directory
 
         Returns:
             GistArchiveResult with gist URL, ID, and archive metadata.
@@ -744,7 +773,8 @@ def register_tools(state: ServerState) -> None:
 
         # Resolve prefix to full session ID
         info_service = SessionInfoService()
-        session_info = await info_service.resolve_session(target_id_or_prefix)
+        project_filter = _encode_project_filter(source_project)
+        session_info = await info_service.resolve_session(target_id_or_prefix, project_filter=project_filter)
         target_id = session_info.session_id
 
         logger.info('Saving session to Gist: %s...', target_id[:12])
