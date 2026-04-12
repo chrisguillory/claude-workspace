@@ -174,8 +174,8 @@ claude-session clone <session-id>
 #   session-id     Session ID to clone (full UUID or prefix)
 
 # Options:
-#   --target-project, --tp   Target project directory (default: current)
 #   --source-project, --sp   Scope to sessions in this project directory
+#   --target-project, --tp   Target project directory (default: current)
 #   --no-translate           Don't translate file paths
 #   --launch, -l             Launch Claude Code after clone
 ```
@@ -247,8 +247,8 @@ claude-session move <session-id>
 #   session-id     Session ID (full UUID or prefix). Auto-detected inside Claude Code.
 
 # Options:
-#   --target-project, --tp   Target project directory (default: current)
 #   --source-project, --sp   Scope to sessions in this project directory
+#   --target-project, --tp   Target project directory (default: current)
 #   --force, -f              Required to move native (UUIDv4) sessions
 #   --terminate, -t          Terminate running Claude process before move
 #   --no-backup              Skip auto-backup before source deletion

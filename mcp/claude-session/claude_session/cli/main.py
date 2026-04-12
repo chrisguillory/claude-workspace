@@ -255,11 +255,11 @@ def clone(
             autocompletion=_complete_session_id,
         ),
     ] = None,
-    target_project: Annotated[
-        Path | None, typer.Option('--target-project', '--tp', help='Target project directory (default: current)')
-    ] = None,
     source_project: Annotated[
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
+    ] = None,
+    target_project: Annotated[
+        Path | None, typer.Option('--target-project', '--tp', help='Target project directory (default: current)')
     ] = None,
     no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
     launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after clone')] = False,
@@ -289,7 +289,7 @@ def clone(
 
     asyncio.run(
         _clone_async(
-            _resolve_session_id(session_id), target_project, source_project, not no_translate, launch, ctx.args
+            _resolve_session_id(session_id), source_project, target_project, not no_translate, launch, ctx.args
         )
     )
 
@@ -350,11 +350,11 @@ def move(
             autocompletion=_complete_session_id,
         ),
     ] = None,
-    target_project: Annotated[
-        Path | None, typer.Option('--target-project', '--tp', help='Target project directory (default: current)')
-    ] = None,
     source_project: Annotated[
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
+    ] = None,
+    target_project: Annotated[
+        Path | None, typer.Option('--target-project', '--tp', help='Target project directory (default: current)')
     ] = None,
     force: Annotated[bool, typer.Option('--force', '-f', help='Required to move native (UUIDv4) sessions')] = False,
     terminate: Annotated[
@@ -404,8 +404,8 @@ def move(
     asyncio.run(
         _move_async(
             _resolve_session_id(session_id),
-            target_project,
             source_project,
+            target_project,
             force,
             terminate,
             no_backup,
@@ -835,8 +835,8 @@ async def _restore_async(
 
 async def _clone_async(
     session_id: str,
-    target_project: Path | None,
     source_project: Path | None,
+    target_project: Path | None,
     translate_paths: bool,
     launch: bool,
     extra_args: Sequence[str],
@@ -997,8 +997,8 @@ async def _delete_async(
 
 async def _move_async(
     session_id: str,
-    target_project: Path | None,
     source_project: Path | None,
+    target_project: Path | None,
     force: bool,
     terminate: bool,
     no_backup: bool,
