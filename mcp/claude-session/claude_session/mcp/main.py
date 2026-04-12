@@ -484,8 +484,8 @@ def register_tools(state: ServerState) -> None:
     @server.tool()
     async def move_session(
         session_id: str,
-        target_project: str | None = None,
         source_project: str | None = None,
+        target_project: str | None = None,
         force: bool = False,
         terminate_running: bool = False,
         no_backup: bool = False,
@@ -511,10 +511,10 @@ def register_tools(state: ServerState) -> None:
 
         Args:
             session_id: Session ID to move (full UUID or prefix)
-            target_project: Target project directory path. Defaults to
-                          the current project (where this MCP server runs).
             source_project: Scope session lookup to this project directory
                            (for disambiguation when multiple projects have the same session ID)
+            target_project: Target project directory path. Defaults to
+                          the current project (where this MCP server runs).
             force: Required to move native (UUIDv4) sessions
             terminate_running: Terminate running Claude process before move
             no_backup: Don't keep backup after successful move
