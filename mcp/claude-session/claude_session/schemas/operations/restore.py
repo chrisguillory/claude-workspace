@@ -45,6 +45,8 @@ class RestoreResult(StrictModel):
     tool_results_restored: int
     todos_restored: int
     tasks_restored: int
+    session_memory_restored: bool = False
+    debug_log_restored: bool = False
 
     # Transformation info
     paths_translated: bool

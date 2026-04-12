@@ -818,6 +818,10 @@ async def _restore_async(
         typer.echo(f'    - Todos: {result.todos_restored}')
     if result.tasks_restored:
         typer.echo(f'    - Tasks: {result.tasks_restored}')
+    if result.session_memory_restored:
+        typer.echo('    - Session memory: yes')
+    if result.debug_log_restored:
+        typer.echo('    - Debug log: yes')
     typer.echo()
     typer.echo(f'  Records: {result.main_records_restored:,} main + {result.agent_records_restored:,} agent')
     typer.echo(f'  Paths translated: {result.paths_translated}')
@@ -879,6 +883,10 @@ async def _clone_async(
         typer.echo(f'    - Tool results: {result.tool_results_restored}')
     if result.todos_restored:
         typer.echo(f'    - Todos: {result.todos_restored}')
+    if result.session_memory_restored:
+        typer.echo('    - Session memory: yes')
+    if result.debug_log_restored:
+        typer.echo('    - Debug log: yes')
     typer.echo()
     typer.echo(f'  Records: {result.main_records_restored:,} main + {result.agent_records_restored:,} agent')
     typer.echo(f'  Paths translated: {result.paths_translated}')
@@ -984,6 +992,12 @@ async def _delete_async(
             typer.echo(f'    - Todos: {result.todos_deleted}')
         if result.tasks_deleted:
             typer.echo(f'    - Tasks: {result.tasks_deleted}')
+        if result.session_env_deleted:
+            typer.echo(f'    - Session-env: {result.session_env_deleted}')
+        if result.session_memory_deleted:
+            typer.echo(f'    - Session memory: {result.session_memory_deleted}')
+        if result.debug_log_deleted:
+            typer.echo(f'    - Debug log: {result.debug_log_deleted}')
         typer.echo()
         typer.echo(f'  Directories removed: {len(result.directories_removed)}')
         typer.echo(f'  Size freed: {result.size_freed_bytes:,} bytes')

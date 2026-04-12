@@ -63,8 +63,11 @@ from claude_session.services.artifacts import (
     get_tasks_dir,
     get_todos_dir,
     get_tool_results_dir,
+    write_debug_log,
     write_jsonl,
     write_plan_files,
+    write_session_env,
+    write_session_memory,
     write_task_metadata,
     write_tasks,
     write_todos,
@@ -333,18 +336,34 @@ class SessionDeleteService:
         if task_file_paths:
             logger.info('Found %d task files and metadata', len(task_file_paths))
 
-        # 7. Session-env - expected to be empty, any file is unexpected
+        # 7. Session-env files
         session_env_dir = get_session_env_dir() / session_id
         if session_env_dir.exists():
             for path in session_env_dir.rglob('*'):
                 if path.is_file():
-                    # ANY file in session-env is unexpected
-                    unexpected_files.append(str(path))
+                    size = path.stat().st_size
+                    artifacts.append(ArtifactFile(path=str(path), size_bytes=size, artifact_type='session_env'))
                 elif path.is_dir():
                     directories_to_cleanup.append(str(path))
-
-            # Track session-env directory itself
             directories_to_cleanup.append(str(session_env_dir))
+
+        # 8. Session memory
+        session_memory_dir = session_dir / session_id / 'session-memory'
+        if session_memory_dir.exists():
+            summary_path = session_memory_dir / 'summary.md'
+            if summary_path.exists():
+                size = summary_path.stat().st_size
+                artifacts.append(ArtifactFile(path=str(summary_path), size_bytes=size, artifact_type='session_memory'))
+            unexpected_files.extend(
+                str(path) for path in session_memory_dir.iterdir() if path.is_file() and path.name != 'summary.md'
+            )
+            directories_to_cleanup.append(str(session_memory_dir))
+
+        # 9. Debug log
+        debug_log_path = get_claude_config_home_dir() / 'debug' / f'{session_id}.txt'
+        if debug_log_path.exists():
+            size = debug_log_path.stat().st_size
+            artifacts.append(ArtifactFile(path=str(debug_log_path), size_bytes=size, artifact_type='debug_log'))
 
         # Sort directories deepest-first for rmdir order
         directories_to_cleanup.sort(key=lambda p: -p.count('/'))
@@ -374,6 +393,9 @@ class SessionDeleteService:
             tool_result_files=tool_result_paths,
             todo_files=todo_file_paths,
             task_files=task_file_paths,
+            session_env_files=[a.path for a in artifacts if a.artifact_type == 'session_env'],
+            session_memory_files=[a.path for a in artifacts if a.artifact_type == 'session_memory'],
+            debug_log_files=[a.path for a in artifacts if a.artifact_type == 'debug_log'],
             directories_to_cleanup=directories_to_cleanup,
             unexpected_files=unexpected_files,
         )
@@ -436,6 +458,9 @@ class SessionDeleteService:
                 tool_results_deleted=0,
                 todos_deleted=0,
                 tasks_deleted=0,
+                session_env_deleted=0,
+                session_memory_deleted=0,
+                debug_log_deleted=0,
                 directories_removed=[],
                 duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
                 deleted_at=datetime.now(UTC),
@@ -472,6 +497,9 @@ class SessionDeleteService:
                 tool_results_deleted=counts['tool_results'],
                 todos_deleted=counts['todos'],
                 tasks_deleted=counts['tasks'],
+                session_env_deleted=counts['session_env'],
+                session_memory_deleted=counts['session_memory'],
+                debug_log_deleted=counts['debug_log'],
                 directories_removed=list(manifest.directories_to_cleanup),
                 duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
                 deleted_at=datetime.now(UTC),
@@ -498,6 +526,9 @@ class SessionDeleteService:
                 tool_results_deleted=0,
                 todos_deleted=0,
                 tasks_deleted=0,
+                session_env_deleted=0,
+                session_memory_deleted=0,
+                debug_log_deleted=0,
                 directories_removed=[],
                 duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
                 deleted_at=datetime.now(UTC),
@@ -553,6 +584,9 @@ class SessionDeleteService:
                 tool_results_deleted=0,
                 todos_deleted=0,
                 tasks_deleted=0,
+                session_env_deleted=0,
+                session_memory_deleted=0,
+                debug_log_deleted=0,
                 directories_removed=[],
                 duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
                 deleted_at=datetime.now(UTC),
@@ -597,6 +631,9 @@ class SessionDeleteService:
             tool_results_deleted=counts['tool_results'],
             todos_deleted=counts['todos'],
             tasks_deleted=counts['tasks'],
+            session_env_deleted=counts['session_env'],
+            session_memory_deleted=counts['session_memory'],
+            debug_log_deleted=counts['debug_log'],
             directories_removed=directories_removed,
             duration_ms=(end_time - start_time).total_seconds() * 1000,
             deleted_at=end_time,
@@ -821,8 +858,22 @@ class SessionDeleteService:
             )
             logger.info('Restored %s plan files', len(archive.plan_files))
 
-        # Recreate session-env directory
-        create_session_env_dir(archive.session_id)
+        # Restore session-env files
+        if archive.session_env:
+            write_session_env(archive.session_id, archive.session_env)
+            logger.info('Restored %d session-env files', len(archive.session_env))
+        else:
+            create_session_env_dir(archive.session_id)
+
+        # Restore session memory
+        if archive.session_memory:
+            write_session_memory(target_dir, archive.session_id, archive.session_memory)
+            logger.info('Restored session-memory/summary.md')
+
+        # Restore debug log
+        if archive.debug_log:
+            write_debug_log(archive.session_id, archive.debug_log)
+            logger.info('Restored debug log')
 
         logger.info('Rollback completed successfully')
 
@@ -832,7 +883,7 @@ class SessionDeleteService:
         Compute per-artifact-type counts from manifest.
 
         Returns:
-            Dict with keys: session_files, plan_files, tool_results, todos, tasks
+            Dict with per-artifact-type counts.
         """
         return {
             'session_files': 1 + len(manifest.agent_files),  # main + agents
@@ -840,6 +891,9 @@ class SessionDeleteService:
             'tool_results': len(manifest.tool_result_files),
             'todos': len(manifest.todo_files),
             'tasks': len(manifest.task_files),
+            'session_env': len(manifest.session_env_files),
+            'session_memory': len(manifest.session_memory_files),
+            'debug_log': len(manifest.debug_log_files),
         }
 
 
@@ -851,6 +905,9 @@ class ArtifactCounts(TypedDict):
     tool_results: int
     todos: int
     tasks: int
+    session_env: int
+    session_memory: int
+    debug_log: int
 
 
 # -- Utility Functions ---------------------------------------------------------

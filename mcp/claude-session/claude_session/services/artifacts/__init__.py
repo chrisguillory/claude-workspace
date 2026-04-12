@@ -29,6 +29,10 @@ from .custom_title import (
     extract_custom_title_from_records,
     generate_clone_custom_title,
 )
+from .debug_log import (
+    collect_debug_log,
+    write_debug_log,
+)
 from .jsonl import write_jsonl
 from .paths import (
     MissingCwdError,
@@ -44,9 +48,10 @@ from .plan_files import (
     write_plan_files,
 )
 from .session_env import (
+    collect_session_env,
     create_session_env_dir,
     get_session_env_dir,
-    validate_session_env_empty,
+    write_session_env,
 )
 from .session_memory import (
     SESSION_MEMORY_DIRNAME,
@@ -86,6 +91,9 @@ from .tool_results import (
 )
 
 __all__ = [
+    # debug_log
+    'collect_debug_log',
+    'write_debug_log',
     # custom_title
     'CLONE_SUFFIX_PATTERN',
     'extract_custom_title_from_file',
@@ -112,9 +120,10 @@ __all__ = [
     'write_plan_files',
     'apply_slug_mapping',
     # session_env
-    'get_session_env_dir',
-    'validate_session_env_empty',
+    'collect_session_env',
     'create_session_env_dir',
+    'get_session_env_dir',
+    'write_session_env',
     # todos
     'get_todos_dir',
     'collect_todos',
