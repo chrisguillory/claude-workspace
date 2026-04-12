@@ -24,6 +24,7 @@ __all__ = [
     'resolve_session_id',
 ]
 
+from cc_lib.exceptions import ClaudeProcessError
 
 # Path configuration
 SESSIONS_PATH = Path('~/.claude-workspace/sessions.json').expanduser()
@@ -371,7 +372,7 @@ def find_claude_pid() -> int:
             current = ppid
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             break
-    raise RuntimeError('Could not find Claude Code process in parent tree')
+    raise ClaudeProcessError('Could not find Claude Code process in parent tree')
 
 
 def resolve_session_id(claude_pid: int, cwd: str) -> str:
@@ -383,7 +384,7 @@ def resolve_session_id(claude_pid: int, cwd: str) -> str:
     if len(matching) > 1:
         ids = [s.session_id for s in matching]
         raise RuntimeError(f'Multiple active sessions for PID {claude_pid}: {ids}')
-    raise RuntimeError(f'No active session found for PID {claude_pid}')
+    raise ClaudeProcessError(f'No active session found for PID {claude_pid}')
 
 
 # Helper functions (not in __all__)

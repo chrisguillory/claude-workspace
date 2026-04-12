@@ -126,6 +126,7 @@ import rich.panel
 import typer
 from cc_lib.claude_process import kill_and_copy_resume
 from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.schemas import StrictModel
 from cc_lib.types import JsonObject
 
@@ -882,9 +883,13 @@ def cmd_switch_login(name: str, use_keychain: bool, restart: bool, model: str | 
 
     if restart:
         extra_args = ['--model', model] if model else []
-        resume_cmd = kill_and_copy_resume(extra_args=extra_args)
-        print(f'Resume command copied to clipboard: {resume_cmd}')
-        print('Paste (Cmd+V) + Enter after Claude exits.')
+        try:
+            resume_cmd = kill_and_copy_resume(extra_args=extra_args)
+            print(f'Resume command copied to clipboard: {resume_cmd}')
+            print('Paste (Cmd+V) + Enter after Claude exits.')
+        except ClaudeProcessError as e:
+            print(f'WARNING: Cannot restart: {e}', file=sys.stderr)
+            print('Restart Claude Code manually to activate.')
     else:
         print('Restart Claude Code to activate.')
 
