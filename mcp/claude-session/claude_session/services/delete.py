@@ -860,7 +860,8 @@ class SessionDeleteService:
 
         # Restore session-env files
         if archive.session_env:
-            write_session_env(archive.session_id, archive.session_env)
+            env_dict = {entry.filename: entry.content for entry in archive.session_env}
+            write_session_env(archive.session_id, env_dict)
             logger.info('Restored %d session-env files', len(archive.session_env))
         else:
             create_session_env_dir(archive.session_id)

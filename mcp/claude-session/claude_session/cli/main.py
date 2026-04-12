@@ -947,16 +947,8 @@ async def _delete_async(
             logger.info('Session is running (PID %s), will terminate before deletion', running_pid)
 
     # Initialize delete service
-    # When --source-project is explicit, use it (user intent wins over discovery)
-    # Otherwise, use discovered session_folder (handles cross-directory correctly)
-    if source_project:
-        project_path = source_project.resolve()
-        if not project_path.exists():
-            typer.secho(f'Error: Project directory does not exist: {project_path}', fg=typer.colors.RED, err=True)
-            raise SystemExit(1)
-        delete_service = SessionDeleteService(project_path=project_path)
-    else:
-        delete_service = SessionDeleteService(session_folder=session_info.session_folder)
+    # Always use discovered session_folder — source_project already scoped discovery above
+    delete_service = SessionDeleteService(session_folder=session_info.session_folder)
 
     # Pass PID to terminate if running and --terminate was specified
     terminate_pid = running_pid if is_running and terminate and not dry_run else None
