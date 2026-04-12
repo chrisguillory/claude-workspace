@@ -1,26 +1,25 @@
 """
-Session-env validation for clone/restore operations.
+Session-env artifact handling.
 
-Path pattern: ~/.claude/session-env/<session-id>/
+Collects and writes per-session environment files stored at
+~/.claude/session-env/<session-id>/.
 
-Currently observed to be empty directories. This module provides
-validation that fails fast if session-env contains data, ensuring
-we don't silently lose data if Claude Code starts using this directory.
-
-Future-proofing: When Claude Code starts using session-env, this module
-will need to be updated to collect and restore its contents.
+These files are hook-generated scripts (e.g., sessionstart-hook-1.sh)
+that inject environment variables into the session.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from cc_lib.utils import get_claude_config_home_dir
 
 __all__ = [
+    'collect_session_env',
     'create_session_env_dir',
     'get_session_env_dir',
-    'validate_session_env_empty',
+    'write_session_env',
 ]
 
 
@@ -29,49 +28,45 @@ def get_session_env_dir() -> Path:
     return get_claude_config_home_dir() / 'session-env'
 
 
-def validate_session_env_empty(session_id: str) -> None:
-    """
-    Validate that session-env directory is empty (or doesn't exist).
-
-    This is a fail-fast check to ensure we don't silently skip
-    session-env data if Claude Code starts using this directory.
-
-    If the session-env directory for this session doesn't exist, that's
-    fine - many sessions don't have one. If it exists but is empty,
-    that's also fine.
+def collect_session_env(session_id: str) -> Mapping[str, str]:
+    """Collect all files from session-env/<session-id>/.
 
     Args:
-        session_id: Session ID to check
+        session_id: Session ID to collect
 
-    Raises:
-        NotImplementedError: If session-env directory contains files.
-            Message includes the path and file count to help diagnose.
-            This error indicates Claude Code has started using this
-            directory and collection/restoration logic must be implemented.
+    Returns:
+        Mapping of filename to content. Empty dict if directory doesn't exist.
     """
     session_env_path = get_session_env_dir() / session_id
-
     if not session_env_path.exists():
-        return
+        return {}
 
-    # Check if directory contains any files (recursive)
-    files = list(session_env_path.rglob('*'))
-    file_count = sum(1 for f in files if f.is_file())
+    result: dict[str, str] = {}
+    for path in sorted(session_env_path.iterdir()):
+        if path.is_file():
+            result[path.name] = path.read_text()
+    return result
 
-    if file_count > 0:
-        raise NotImplementedError(
-            f'Session-env directory contains {file_count} files: {session_env_path}\n'
-            'Claude Code has started using session-env. This feature needs '
-            'implementation for collection and restoration.'
-        )
+
+def write_session_env(session_id: str, files: Mapping[str, str]) -> Path:
+    """Write session-env files for a session.
+
+    Args:
+        session_id: Session ID
+        files: Mapping of filename to content
+
+    Returns:
+        Path to the session-env directory.
+    """
+    session_env_path = get_session_env_dir() / session_id
+    session_env_path.mkdir(parents=True, exist_ok=True)
+    for filename, content in files.items():
+        (session_env_path / filename).write_text(content)
+    return session_env_path
 
 
 def create_session_env_dir(session_id: str) -> Path:
-    """
-    Create empty session-env directory for a new session.
-
-    Creates the directory structure to match what Claude Code expects.
-    Uses mkdir with exist_ok=True for idempotency.
+    """Create empty session-env directory for a new session.
 
     Args:
         session_id: New session ID
