@@ -13,8 +13,8 @@ uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdir
 ```
 
 This installs two commands to `~/.local/bin/`:
-- `mcp-python-interpreter-server` - The MCP server (used by Claude Code)
-- `mcp-python-interpreter-client` - The CLI client (for readable code execution)
+- `python-interpreter-mcp` - The MCP server (used by Claude Code)
+- `python-interpreter` - The CLI client (for readable code execution)
 
 > **Note:** Ensure `~/.local/bin` is in your PATH. Add to `~/.zshrc` or `~/.bashrc`:
 > ```bash
@@ -24,7 +24,7 @@ This installs two commands to `~/.local/bin/`:
 ### Configure Claude Code
 
 ```bash
-claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
+claude mcp add --scope user python-interpreter -- python-interpreter-mcp
 ```
 
 This adds the following to `~/.claude.json`:
@@ -32,7 +32,7 @@ This adds the following to `~/.claude.json`:
 ```json
 "python-interpreter": {
   "type": "stdio",
-  "command": "mcp-python-interpreter-server",
+  "command": "python-interpreter-mcp",
   "args": []
 }
 ```
@@ -45,7 +45,7 @@ Add to `.claude/settings.local.json` to skip permission prompts for the client:
 {
   "permissions": {
     "allow": [
-      "Bash(mcp-python-interpreter-client:*)"
+      "Bash(python-interpreter:*)"
     ]
   }
 }
@@ -55,15 +55,15 @@ Add to `.claude/settings.local.json` to skip permission prompts for the client:
 
 ```bash
 uv tool list | grep python-interpreter
-# python-interpreter-mcp v0.2.0
-# - mcp-python-interpreter-server
-# - mcp-python-interpreter-client
+# python-interpreter v0.4.0
+# - python-interpreter-mcp
+# - python-interpreter
 ```
 
 ### Upgrade
 
 ```bash
-uv tool upgrade python-interpreter-mcp
+uv tool upgrade python-interpreter
 ```
 
 ### Local Development
@@ -72,11 +72,11 @@ uv tool upgrade python-interpreter-mcp
 
 ```bash
 uv tool install --editable /path/to/claude-workspace/mcp/python-interpreter
-claude mcp add --scope user python-interpreter -- mcp-python-interpreter-server
+claude mcp add --scope user python-interpreter -- python-interpreter-mcp
 ```
 
 This gives you:
-- Commands in PATH (permission patterns like `Bash(mcp-python-interpreter-client:*)` work)
+- Commands in PATH (permission patterns like `Bash(python-interpreter:*)` work)
 - Changes to source files take effect immediately (no reinstall needed)
 
 **Script mode** (alternative, commands not in PATH):
@@ -84,17 +84,17 @@ This gives you:
 ```bash
 claude mcp add --scope user python-interpreter -- uv run \
   --project "$(git rev-parse --show-toplevel)/mcp/python-interpreter" \
-  --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/python_interpreter/server.py"
+  --script "$(git rev-parse --show-toplevel)/mcp/python-interpreter/python_interpreter/mcp/main.py"
 ```
 
 Or run the server directly for testing (from repo root):
 
 ```bash
 # Script mode (uses inline script dependencies)
-uv run --directory mcp/python-interpreter --script python_interpreter/server.py
+uv run --directory mcp/python-interpreter --script python_interpreter/mcp/main.py
 
 # Entry point mode (uses pyproject.toml dependencies)
-uv run --project mcp/python-interpreter mcp-python-interpreter-server
+uv run --project mcp/python-interpreter python-interpreter-mcp
 ```
 
 ## Tools
@@ -173,10 +173,10 @@ Code does **not** have access to MCP server internals — each interpreter runs 
 
 ## Client Usage
 
-The `mcp-python-interpreter-client` command lets you execute Python with readable heredoc syntax:
+The `python-interpreter` command lets you execute Python with readable heredoc syntax:
 
 ```bash
-mcp-python-interpreter-client <<'PY'
+python-interpreter <<'PY'
 import tiktoken
 tokens = tiktoken.get_encoding("cl100k_base").encode("Strawberry")
 print(f"Token count: {len(tokens)}")
@@ -201,15 +201,15 @@ code: "import tiktoken\ntokens = tiktoken.get_encoding(\"cl100k_base\").encode(\
 All those `\n` and `\"` escapes make it **hard to review what code is about to run**. You're approving code you can
 barely read.
 
-### The Solution: Heredoc Syntax via mcp-python-interpreter-client
+### The Solution: Heredoc Syntax via python-interpreter
 
-The server provides an HTTP bridge that lets Claude use Bash heredoc syntax instead. When Claude uses `mcp-python-interpreter-client`,
+The server provides an HTTP bridge that lets Claude use Bash heredoc syntax instead. When Claude uses `python-interpreter`,
 your approval prompt shows clean, readable Python:
 
 ```
 ❯ Bash
 
-mcp-python-interpreter-client <<'PY'
+python-interpreter <<'PY'
 import tiktoken
 tokens = tiktoken.get_encoding("cl100k_base").encode("Strawberry")
 print(f"Token count: {len(tokens)}")
@@ -218,7 +218,7 @@ PY
 
 **Same code, same execution, but you can actually read it before approving.**
 
-Claude automatically chooses `mcp-python-interpreter-client` for multi-line code to give you readable approval prompts. You don't need
+Claude automatically chooses `python-interpreter` for multi-line code to give you readable approval prompts. You don't need
 to do anything - the server handles this via the HTTP bridge and Unix socket.
 
 ## How This Works
@@ -226,13 +226,13 @@ to do anything - the server handles this via the HTTP bridge and Unix socket.
 ### Architecture
 
 ```
-Claude Code ──[stdio/JSON-RPC]──> mcp-python-interpreter-server
+Claude Code ──[stdio/JSON-RPC]──> python-interpreter-mcp
                                    ├── FastMCP (main, stdio)
                                    └── FastAPI (background, Unix socket)
                                             ▲
                                             │ HTTP POST /execute
                                             │
-Bash heredoc ──[stdin]──> mcp-python-interpreter-client ───┘
+Bash heredoc ──[stdin]──> python-interpreter ───┘
                           (auto-discovers socket via process tree)
 ```
 
@@ -248,4 +248,4 @@ The server discovers its Claude Code session by:
 The HTTP bridge listens on a session-scoped Unix socket:
 - **Path**: `/tmp/python-interpreter-{claude_pid}.sock`
 - **Purpose**: Allows Bash heredoc scripts to execute Python code without spawning new interpreters
-- **Discovery**: `mcp-python-interpreter-client` walks the process tree to find the socket path
+- **Discovery**: `python-interpreter` walks the process tree to find the socket path

@@ -1,0 +1,287 @@
+# Accessible Name Computation Tests (AccName 1.2)
+#
+# Red-green TDD: These tests are written BEFORE the fix. They expose bugs in
+# computeAccessibleName() and must FAIL on the current implementation, then
+# PASS after the fix is applied.
+#
+# Spec reference: https://w3c.github.io/accname/
+# Research: tests/selenium_browser/research/accname-research.md
+
+metadata:
+  description: Accessible name computation per WAI-ARIA AccName 1.2 spec
+  version: "1.0"
+  fixture: examples/accname.html
+
+# =============================================================================
+# PRIORITY ORDER (spec steps 2B, 2D)
+# =============================================================================
+# aria-labelledby (step 2B) MUST be checked before aria-label (step 2D).
+# Current bug: aria-label is checked first.
+
+test_1_priority:
+  description: aria-labelledby before aria-label per spec
+  selector: "#test-priority .demo"
+
+  tests:
+    - id: "1.1"
+      name: labelledby_wins_over_label
+      description: Element with both aria-labelledby and aria-label uses labelledby
+      expect:
+        includes:
+          - 'button "From Labelledby"'
+        excludes:
+          - 'button "Ignored"'
+
+    - id: "1.2"
+      name: labelledby_empty_falls_through
+      description: aria-labelledby with nonexistent ID falls through to aria-label
+      expect:
+        includes:
+          - 'button "Fallback Label"'
+
+    - id: "1.3"
+      name: aria_label_only
+      description: aria-label works when no aria-labelledby present
+      expect:
+        includes:
+          - 'button "Only AriaLabel"'
+
+# =============================================================================
+# FORM CONTROL LABEL ASSOCIATION (spec step 2E)
+# =============================================================================
+# Form controls get names from associated <label> elements.
+# Current implementation: manual label[for] + closest('label') for ALL elements.
+# Fix: use native element.labels API (only defined on labelable elements).
+
+test_2_labels:
+  description: Form control label association via element.labels API
+  selector: "#test-labels .demo"
+
+  tests:
+    - id: "2.1"
+      name: explicit_label_for
+      description: Input with label[for=id] gets label text as name
+      expect:
+        includes:
+          - 'textbox "Explicit Label"'
+
+    - id: "2.2"
+      name: wrapping_label
+      description: Input wrapped in label gets label text as name
+      expect:
+        includes:
+          - 'textbox "Wrapping Label"'
+
+    - id: "2.3"
+      name: multiple_labels_joined
+      description: Input with two labels gets names joined with space
+      expect:
+        includes:
+          - 'textbox "First Label Second Label"'
+
+    - id: "2.4"
+      name: select_with_label
+      description: Select element with label gets label text as name
+      expect:
+        includes:
+          - 'combobox "Pick One"'
+
+    - id: "2.5"
+      name: textarea_with_label
+      description: Textarea with label gets label text as name
+      expect:
+        includes:
+          - 'textbox "Comments"'
+
+    - id: "2.6"
+      name: aria_label_overrides_label
+      description: aria-label on input overrides associated label
+      expect:
+        includes:
+          - 'textbox "Override"'
+        excludes:
+          - 'textbox "Ignored Label"'
+
+    - id: "2.7"
+      name: non_form_element_no_label
+      description: Non-form div with matching label[for] should NOT get label text
+      expect:
+        excludes:
+          - 'generic "Should Not Apply"'
+
+# =============================================================================
+# FIELDSET + LEGEND (spec step 2E, HTML-AAM fieldset)
+# =============================================================================
+# Fieldset gets accessible name from first <legend> direct child.
+# Current bug: no fieldset/legend name computation exists.
+
+test_3_fieldset:
+  description: Fieldset name from first legend child
+  selector: "#test-fieldset .demo"
+
+  tests:
+    - id: "3.1"
+      name: basic_legend
+      description: Fieldset with legend gets legend text as name
+      expect:
+        includes:
+          - 'group "Contact Info"'
+
+    - id: "3.2"
+      name: legend_not_first_child
+      description: Legend found even when not first child element
+      expect:
+        includes:
+          - 'group "After Other Content"'
+
+    - id: "3.3"
+      name: multiple_legends_first_wins
+      description: When multiple legends exist, first one provides the name
+      expect:
+        includes:
+          - 'group "First Legend"'
+        excludes:
+          - 'group "Second Legend"'
+
+    - id: "3.4"
+      name: aria_label_overrides_legend
+      description: aria-label on fieldset overrides legend text
+      expect:
+        includes:
+          - 'group "Override Name"'
+        excludes:
+          - 'group "Ignored Legend"'
+
+    - id: "3.5"
+      name: no_legend_unnamed
+      description: Fieldset without legend has no accessible name
+      expect:
+        includes:
+          - "- group"
+
+    - id: "3.6"
+      name: rich_content_legend
+      description: Legend with rich content (strong, em) uses textContent
+      expect:
+        includes:
+          - 'group "Bold and italic legend"'
+
+# =============================================================================
+# FIGURE + FIGCAPTION (spec step 2E, HTML-AAM figure)
+# =============================================================================
+# Figure gets accessible name from first <figcaption> direct child.
+# Current bug: no figure/figcaption name computation exists.
+
+test_4_figure:
+  description: Figure name from first figcaption child
+  selector: "#test-figure .demo"
+
+  tests:
+    - id: "4.1"
+      name: basic_figcaption
+      description: Figure with figcaption gets figcaption text as name
+      expect:
+        includes:
+          - 'figure "Chart Description"'
+
+    - id: "4.2"
+      name: figcaption_before_content
+      description: Figcaption found regardless of position among siblings
+      expect:
+        includes:
+          - 'figure "Caption First"'
+
+    - id: "4.3"
+      name: aria_label_overrides_figcaption
+      description: aria-label on figure overrides figcaption text
+      expect:
+        includes:
+          - 'figure "Override Figure"'
+        excludes:
+          - 'figure "Ignored Caption"'
+
+    - id: "4.4"
+      name: no_figcaption_unnamed
+      description: Figure without figcaption has no accessible name
+      expect:
+        includes:
+          - "- figure"
+
+# =============================================================================
+# TABLE + CAPTION (spec step 2E, HTML-AAM table)
+# =============================================================================
+# Table gets accessible name from first <caption> direct child.
+# Current bug: no table/caption name computation exists.
+
+test_5_table:
+  description: Table name from first caption child
+  selector: "#test-table .demo"
+
+  tests:
+    - id: "5.1"
+      name: basic_caption
+      description: Table with caption gets caption text as name
+      expect:
+        includes:
+          - 'table "Sales Data"'
+
+    - id: "5.2"
+      name: aria_label_overrides_caption
+      description: aria-label on table overrides caption text
+      expect:
+        includes:
+          - 'table "Override Table"'
+        excludes:
+          - 'table "Ignored Caption"'
+
+    - id: "5.3"
+      name: no_caption_unnamed
+      description: Table without caption has no accessible name from caption
+      expect:
+        includes:
+          - "- table"
+
+# =============================================================================
+# TITLE ATTRIBUTE (spec step 2I — last resort)
+# =============================================================================
+# Title attribute should be checked AFTER all other name sources.
+# Current bug: title is checked before img alt and input placeholder.
+
+test_6_title:
+  description: Title attribute as last resort (spec step 2I)
+  selector: "#test-title .demo"
+
+  tests:
+    - id: "6.1"
+      name: text_content_wins_over_title
+      description: Button text content takes priority over title attribute
+      expect:
+        includes:
+          - 'button "Click Me"'
+        excludes:
+          - 'button "Button Tooltip"'
+
+    - id: "6.2"
+      name: title_last_resort
+      description: Title attribute used when no other name source exists
+      expect:
+        includes:
+          - 'note "Tooltip Only"'
+
+    - id: "6.3"
+      name: label_wins_over_title
+      description: Label text takes priority over title on input
+      expect:
+        includes:
+          - 'textbox "Real Label"'
+        excludes:
+          - 'textbox "Title Fallback"'
+
+    - id: "6.4"
+      name: alt_wins_over_title
+      description: Alt attribute takes priority over title on image
+      expect:
+        includes:
+          - 'img "Alt Text"'
+        excludes:
+          - 'img "Img Tooltip"'

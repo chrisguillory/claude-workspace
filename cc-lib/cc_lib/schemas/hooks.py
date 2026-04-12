@@ -160,7 +160,7 @@ class PreToolUseSpecificOutput(CamelModel):
     """PreToolUse hookSpecificOutput — permission decisions and input modification."""
 
     hook_event_name: Literal['PreToolUse'] = 'PreToolUse'
-    permission_decision: Literal['allow', 'deny', 'ask', 'defer']
+    permission_decision: Literal['allow', 'deny', 'ask', 'defer'] | None = None
     permission_decision_reason: str | None = None
     updated_input: JsonObject | None = None
     additional_context: str | None = None

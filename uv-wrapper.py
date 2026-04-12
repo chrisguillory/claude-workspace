@@ -24,7 +24,7 @@ This wrapper implements what UV should do but doesn't:
 
 When running MCP servers via Claude Code's ~/.claude.json configuration, we need:
 - Scripts to find their project dependencies (fastmcp, pandas, etc.)
-- Local imports to work (e.g., selenium-browser-automation importing from src/)
+- Local imports to work (e.g., selenium-browser importing from src/)
 - No hardcoded paths or complex --project flags
 
 Without this wrapper, UV adds only the script's immediate directory to Python's path,
