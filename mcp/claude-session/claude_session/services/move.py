@@ -96,6 +96,7 @@ class SessionMoveService:
         no_backup: bool = False,
         dry_run: bool = False,
         terminate_pid: int | None = None,
+        project_filter: Path | None = None,
     ) -> MoveResult:
         """
         Move a session from its current project to the target project.
@@ -106,7 +107,7 @@ class SessionMoveService:
             no_backup: Don't keep backup after successful move
             dry_run: Preview what would happen without making changes
             terminate_pid: PID to SIGKILL before deleting source
-            log: Optional logger
+            project_filter: If set, restrict session lookup to this project folder
 
         Returns:
             MoveResult with details of the operation
@@ -123,7 +124,7 @@ class SessionMoveService:
         # =====================================================================
         # Phase 1: Resolve & Collect
         # =====================================================================
-        session_info = await self._resolve_session(session_id)
+        session_info = await self._resolve_session(session_id, project_filter=project_filter)
         source_session_dir = session_info.session_folder
 
         logger.info('Moving session: %s', session_info.session_id)
@@ -390,9 +391,9 @@ class SessionMoveService:
         encoded = encode_project_path(self.target_project_path)
         return self.claude_sessions_dir / encoded
 
-    async def _resolve_session(self, session_id_or_prefix: str) -> SessionInfo:
+    async def _resolve_session(self, session_id_or_prefix: str, *, project_filter: Path | None = None) -> SessionInfo:
         """Resolve a session ID or prefix to a full session."""
-        match = await self.discovery_service.find_session_by_id(session_id_or_prefix)
+        match = await self.discovery_service.find_session_by_id(session_id_or_prefix, project_filter=project_filter)
         if not match:
             raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
         return match

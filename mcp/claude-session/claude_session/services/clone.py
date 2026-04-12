@@ -88,13 +88,16 @@ class SessionCloneService:
         self.parser_service = parser_service or SessionParserService()
         self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
-    async def clone(self, source_session_id: str, translate_paths: bool = True) -> RestoreResult:
+    async def clone(
+        self, source_session_id: str, translate_paths: bool = True, project_filter: Path | None = None
+    ) -> RestoreResult:
         """
         Clone a session directly without creating an archive file.
 
         Args:
             source_session_id: Session ID to clone (full UUID or prefix)
             translate_paths: Whether to translate paths to target project
+            project_filter: If set, restrict session lookup to this project folder
 
         Returns:
             RestoreResult with new session ID and details
@@ -105,7 +108,7 @@ class SessionCloneService:
             AmbiguousSessionError: If session ID prefix matches multiple sessions
         """
         # Resolve session ID (handle prefix matching)
-        session_info = await self._resolve_session(source_session_id)
+        session_info = await self._resolve_session(source_session_id, project_filter=project_filter)
 
         logger.info('Cloning session: %s', session_info.session_id)
         logger.info('Source session folder: %s', session_info.session_folder)
@@ -374,7 +377,7 @@ class SessionCloneService:
             custom_title=source_custom_title,  # Source title for provenance
         )
 
-    async def _resolve_session(self, session_id_or_prefix: str) -> SessionInfo:
+    async def _resolve_session(self, session_id_or_prefix: str, *, project_filter: Path | None = None) -> SessionInfo:
         """
         Resolve a session ID or prefix to a full session.
 
@@ -383,6 +386,7 @@ class SessionCloneService:
 
         Args:
             session_id_or_prefix: Full session ID or prefix
+            project_filter: If set, restrict search to this project folder
 
         Returns:
             SessionInfo for the matched session
@@ -391,7 +395,7 @@ class SessionCloneService:
             FileNotFoundError: If no sessions match
             AmbiguousSessionError: If multiple sessions match (from discovery service)
         """
-        match = await self.discovery_service.find_session_by_id(session_id_or_prefix)
+        match = await self.discovery_service.find_session_by_id(session_id_or_prefix, project_filter=project_filter)
         if not match:
             raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
         return match

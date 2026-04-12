@@ -36,24 +36,24 @@ Before writing any documentation, comments, code descriptions, or commit message
 
 Simple, readable, maintainable, explicit. Fail-fast on misconfiguration. Single responsibility per function/validator.
 
-| Principle                                     | Application                                                                     |
-|-----------------------------------------------|---------------------------------------------------------------------------------|
-| **Explicit over implicit**                    | Clear control flow, avoid hidden behavior                                       |
-| **Improve code health**                       | Surface adjacent staleness via `AskUserQuestion` — don't silently fix or ignore |
-| **Fail-fast validation**                      | Validate configuration at startup, not at first use                             |
-| **Single responsibility**                     | One clear purpose per function/class/module                                     |
-| **Type hints everywhere**                     | Strict Pydantic models, function signatures, `\| None` syntax                   |
-| **YAGNI & KISS**                              | Build what's needed, keep it simple                                             |
-| **Worse is Better**                           | Simple, working solutions over perfect designs                                  |
-| **Make It Work, Make It Right, Make It Fast** | In that order                                                                   |
-| **Avoid Premature Optimization**              | Optimize when data shows need                                                   |
-| **Principle of least surprise**               | Code should behave as expected                                                  |
-| **Bubble exceptions**                         | Don't swallow errors, let them propagate                                        |
-| **Trust event authority**                     | Don't second-guess events with defensive validation                             |
-| **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available                           |
-| **Assertions only in tests/**                 | Application code raises exceptions explicitly                                   |
-| **Ideal state over backwards compat**         | Dev-only project — rename cleanly, no migration shims                           |
-| **DI via closures**                           | FastMCP pattern for dependency injection                                        |
+| Principle                                     | Application                                                                                               |
+|-----------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| **Explicit over implicit**                    | Clear control flow, avoid hidden behavior                                                                 |
+| **Improve project health**                    | Surface adjacent staleness in any committed artifact (code, docs, configs) — don't silently fix or ignore |
+| **Fail-fast validation**                      | Validate configuration at startup, not at first use                                                       |
+| **Single responsibility**                     | One clear purpose per function/class/module                                                               |
+| **Type hints everywhere**                     | Strict Pydantic models, function signatures, `\| None` syntax                                             |
+| **YAGNI & KISS**                              | Build what's needed, keep it simple                                                                       |
+| **Worse is Better**                           | Simple, working solutions over perfect designs                                                            |
+| **Make It Work, Make It Right, Make It Fast** | In that order                                                                                             |
+| **Avoid Premature Optimization**              | Optimize when data shows need                                                                             |
+| **Principle of least surprise**               | Code should behave as expected                                                                            |
+| **Bubble exceptions**                         | Don't swallow errors, let them propagate                                                                  |
+| **Trust event authority**                     | Don't second-guess events with defensive validation                                                       |
+| **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available                                                     |
+| **Assertions only in tests/**                 | Application code raises exceptions explicitly                                                             |
+| **Ideal state over backwards compat**         | Dev-only project — rename cleanly, no migration shims                                                     |
+| **DI via closures**                           | FastMCP pattern for dependency injection                                                                  |
 
 ### Exception Handling
 
