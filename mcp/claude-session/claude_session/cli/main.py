@@ -818,6 +818,8 @@ async def _restore_async(
         typer.echo(f'    - Todos: {result.todos_restored}')
     if result.tasks_restored:
         typer.echo(f'    - Tasks: {result.tasks_restored}')
+    if result.session_env_restored:
+        typer.echo('    - Session-env: yes')
     if result.session_memory_restored:
         typer.echo('    - Session memory: yes')
     if result.debug_log_restored:
@@ -883,6 +885,10 @@ async def _clone_async(
         typer.echo(f'    - Tool results: {result.tool_results_restored}')
     if result.todos_restored:
         typer.echo(f'    - Todos: {result.todos_restored}')
+    if result.tasks_restored:
+        typer.echo(f'    - Tasks: {result.tasks_restored}')
+    if result.session_env_restored:
+        typer.echo('    - Session-env: yes')
     if result.session_memory_restored:
         typer.echo('    - Session memory: yes')
     if result.debug_log_restored:

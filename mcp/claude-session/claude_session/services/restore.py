@@ -482,6 +482,7 @@ class SessionRestoreService:
             tool_results_restored=tool_results_restored,
             todos_restored=todos_restored,
             tasks_restored=tasks_restored,
+            session_env_restored=bool(archive.session_env),
             session_memory_restored=session_memory_restored,
             debug_log_restored=debug_log_restored,
             paths_translated=translator is not None,

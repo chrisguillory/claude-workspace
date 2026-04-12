@@ -45,6 +45,7 @@ class RestoreResult(StrictModel):
     tool_results_restored: int
     todos_restored: int
     tasks_restored: int
+    session_env_restored: bool = False
     session_memory_restored: bool = False
     debug_log_restored: bool = False
 
