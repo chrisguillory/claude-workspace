@@ -35,6 +35,7 @@ from claude_session.services.artifacts import (
     ToolResultDirectory,
     ToolResultDirectoryFile,
     ToolResultFile,
+    create_session_env_dir,
     generate_agent_id_mapping,
     generate_clone_custom_title,
     generate_clone_slug,
@@ -367,10 +368,12 @@ class SessionRestoreService:
                 )
             logger.info('Restored %d todo files', todos_restored)
 
-        # Restore session-env files
+        # Restore session-env files (or create empty directory Claude Code expects)
         if archive.session_env:
             write_session_env(new_session_id, archive.session_env)
             logger.info('Restored %d session-env files', len(archive.session_env))
+        else:
+            create_session_env_dir(new_session_id)
 
         # Restore session memory
         session_memory_restored = False

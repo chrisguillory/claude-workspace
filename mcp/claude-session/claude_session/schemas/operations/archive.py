@@ -44,7 +44,7 @@ ARCHIVE_FORMAT_VERSION = '2.2'
 """Current archive format version. Used when creating new archives.
 
 Version history:
-- 2.2: Added session_memory and debug_log
+- 2.2: Added session_env, session_memory, and debug_log
 - 2.1: Added tool_result_dirs for pdf-<uuid>/page-NN.jpg directory structures
 - 2.0: Explicit artifact models, tasks support, agent structure preservation
 """
@@ -93,7 +93,7 @@ class SessionArchiveV2(StrictModel):
     Archive format v2.x - explicit artifact models.
 
     Version history:
-    - 2.2: Added session_memory and debug_log
+    - 2.2: Added session_env, session_memory, and debug_log
     - 2.1: Added tool_result_dirs for directory-based tool results (pdf page renders)
     - 2.0: Explicit artifact models, tasks support, agent structure preservation
     - 1.4: Added custom_title field
