@@ -74,6 +74,31 @@ Patches:
                     Present in all versions with session-memory (2.0.64+),
                     verified in 2.1.45, 2.1.74, 2.1.80, 2.1.81.
 
+    show-subagent-prompt-tools-response
+                    [tweak] Expand completed subagent to show prompt, tool
+                    calls, and response when verbose=true. Without this patch,
+                    subagent output is collapsed to a single "Done" line with
+                    "(ctrl+o to expand)". With it, verbose mode shows::
+
+                        Agent(description)
+                          ├ Prompt:
+                          │   The prompt sent to the agent
+                          ├ Read(file.py · lines 1-5)
+                          ├ Edit(file.py)
+                          ├ Bash(command)
+                          ├ Response:
+                          │   The agent's final answer
+                          └ Done (N tool uses · Xk tokens · Ys)
+
+                    Tool calls appear as one-line summaries (tool name + args),
+                    not full input/output.
+                    Reassigns isTranscriptMode = isTranscriptMode || verbose
+                    in renderToolResultMessage (let T=H → $=$||K + 3 refs).
+                    Anchor: ``Remote agent launched`` (stable UI text, 2.1.63+).
+                    Minified vars (T, H, K, N6, K6) stable from 2.1.85+.
+                    https://github.com/anthropics/claude-code/issues/14511
+                    https://github.com/anthropics/claude-code/issues/5974
+
     scratchpad      [feature] Enable session-scoped scratchpad directory. Creates
                     ``<data_dir>/<project>/<session>/scratchpad`` with auto-
                     permissions for reading and writing. Claude uses this
@@ -101,6 +126,7 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN)::
     tengu_coral_fern          2.1.21          2.1.20
     tengu_sm_compact          2.0.64          2.0.62 (co-introduced with session-memory)
     tengu_scratch             2.1.45          2.1.44
+    Remote agent launched     2.1.63          2.1.62 (let T=H pattern stable from 2.1.85+)
 
 Site Count Evolution::
 
@@ -251,6 +277,16 @@ PATCHES: Sequence[PatchDef] = (
         new=b'("tengu_sm_compact",!0)',
         window=50,
         min_version='2.0.64',
+    ),
+    PatchDef(
+        name='show-subagent-prompt-tools-response',
+        description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
+        kind=PatchKind.TWEAK,
+        anchor=b'Remote agent launched',
+        old=b'let T=H;if(T.status==="remote_launched")return N6.createElement(m,{flexDirection:"column"},N6.createElement(K6,{height:1},N6.createElement(L,null,"Remote agent launched"," ",N6.createElement(L,{dimColor:!0},"\\xB7 ",T.taskId," \\xB7 ",T.sessionUrl',
+        new=b'$=$||K; if(H.status==="remote_launched")return N6.createElement(m,{flexDirection:"column"},N6.createElement(K6,{height:1},N6.createElement(L,null,"Remote agent launched"," ",N6.createElement(L,{dimColor:!0},"\\xB7 ",H.taskId," \\xB7 ",H.sessionUrl',
+        window=300,
+        min_version='2.1.85',
     ),
     PatchDef(
         name='scratchpad',
