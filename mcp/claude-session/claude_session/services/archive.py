@@ -34,7 +34,10 @@ from claude_session.schemas.operations.archive import (
 )
 from claude_session.schemas.session import SessionRecord
 from claude_session.services.artifacts import (
+    collect_debug_log,
     collect_plan_files,
+    collect_session_env,
+    collect_session_memory,
     collect_task_metadata,
     collect_todos,
     collect_tool_results,
@@ -43,7 +46,6 @@ from claude_session.services.artifacts import (
     extract_slugs_from_records,
     extract_source_project_path,
     iter_tasks,
-    validate_session_env_empty,
 )
 from claude_session.services.lineage import get_machine_id
 from claude_session.services.parser import SessionParserService
@@ -272,8 +274,20 @@ class SessionArchiveService:
         todos = collect_todos(self.session_id)
         logger.info('Collected %d todo files', len(todos))
 
-        # Validate session-env is empty (future-proofing)
-        validate_session_env_empty(self.session_id)
+        # Collect session-env files
+        session_env = collect_session_env(self.session_id)
+        if session_env:
+            logger.info('Collected %d session-env files', len(session_env))
+
+        # Collect session memory
+        session_memory = collect_session_memory(project_folder, self.session_id)
+        if session_memory:
+            logger.info('Found session-memory/summary.md')
+
+        # Collect debug log
+        debug_log = collect_debug_log(self.session_id)
+        if debug_log:
+            logger.info('Found debug log (%d bytes)', len(debug_log))
 
         # Extract source project path from session records (source of truth)
         # We use cwd from records, not self.project_path, because:
@@ -380,6 +394,9 @@ class SessionArchiveService:
             todos=todo_entries,
             tasks=tasks,
             task_metadata=task_metadata,
+            session_env=session_env,
+            session_memory=session_memory,
+            debug_log=debug_log,
             total_session_records=len(main_records) + total_agent_records,
             total_agent_records=total_agent_records,
         )
