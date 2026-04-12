@@ -179,7 +179,7 @@ def archive(
         str, typer.Option('--gist-description', help='Gist description')
     ] = 'Claude Code Session Archive',
     source_project: Annotated[
-        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+        Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
     """Archive a Claude Code session to local file or GitHub Gist.
@@ -223,7 +223,7 @@ def restore(
     ctx: typer.Context,
     archive: Annotated[str, typer.Argument(help='Archive path or Gist URL (gist://<gist-id> or file path)')],
     target_project: Annotated[
-        Path | None, typer.Option('--target-project', help='Target project directory (default: current)')
+        Path | None, typer.Option('--target-project', '--tp', help='Target project directory (default: current)')
     ] = None,
     no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
     in_place: Annotated[
@@ -256,10 +256,10 @@ def clone(
         ),
     ] = None,
     target_project: Annotated[
-        Path | None, typer.Option('--target-project', help='Target project directory (default: current)')
+        Path | None, typer.Option('--target-project', '--tp', help='Target project directory (default: current)')
     ] = None,
     source_project: Annotated[
-        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+        Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
     no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
     launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after clone')] = False,
@@ -311,7 +311,7 @@ def delete(
     no_backup: Annotated[bool, typer.Option('--no-backup', help="Don't keep a backup file for undo")] = False,
     dry_run: Annotated[bool, typer.Option('--dry-run', help='Preview what would be deleted')] = False,
     source_project: Annotated[
-        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+        Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
     """Delete session artifacts with auto-backup.
@@ -351,10 +351,10 @@ def move(
         ),
     ] = None,
     target_project: Annotated[
-        Path | None, typer.Option('--target-project', help='Target project directory (default: current)')
+        Path | None, typer.Option('--target-project', '--tp', help='Target project directory (default: current)')
     ] = None,
     source_project: Annotated[
-        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+        Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
     force: Annotated[bool, typer.Option('--force', '-f', help='Required to move native (UUIDv4) sessions')] = False,
     terminate: Annotated[
@@ -430,7 +430,7 @@ def lineage(
         Literal['text', 'tree', 'json'], typer.Option('--format', '-f', help='Output format: text, tree, or json')
     ] = 'text',
     source_project: Annotated[
-        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+        Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
     """Show the lineage (parent-child relationships) for a session.
@@ -462,7 +462,7 @@ def info(
         Literal['text', 'json'], typer.Option('--format', '-f', help='Output format: text or json')
     ] = 'text',
     source_project: Annotated[
-        Path | None, typer.Option('--source-project', help='Scope to sessions in this project directory')
+        Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
     """Display comprehensive information about a session.
