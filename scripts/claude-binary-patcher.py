@@ -54,6 +54,7 @@ from cc_lib.claude_binary_patching import (
 from cc_lib.claude_process import kill_and_copy_resume
 from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.utils.atomic_write import atomic_write
 
 ORIGINALS_DIR = Path.home() / '.claude-workspace' / 'binary-patcher' / 'originals'
@@ -148,10 +149,14 @@ def apply(
     patcher.apply(patches)
 
     if restart:
-        resume_cmd = kill_and_copy_resume()
-        print()
-        print(f'Resume command copied: {resume_cmd}')
-        print('Paste Cmd+V + Enter after Claude exits.')
+        try:
+            resume_cmd = kill_and_copy_resume()
+            print()
+            print(f'Resume command copied: {resume_cmd}')
+            print('Paste Cmd+V + Enter after Claude exits.')
+        except ClaudeProcessError as e:
+            print(f'\nNote: {e}', file=sys.stderr)
+            print('Restart Claude Code manually to pick up the changes.')
 
 
 @app.command()
@@ -234,10 +239,14 @@ def restore(
     BinaryPatcher.restore(path)
 
     if restart:
-        resume_cmd = kill_and_copy_resume()
-        print()
-        print(f'Resume command copied: {resume_cmd}')
-        print('Paste Cmd+V + Enter after Claude exits.')
+        try:
+            resume_cmd = kill_and_copy_resume()
+            print()
+            print(f'Resume command copied: {resume_cmd}')
+            print('Paste Cmd+V + Enter after Claude exits.')
+        except ClaudeProcessError as e:
+            print(f'\nNote: {e}', file=sys.stderr)
+            print('Restart Claude Code manually to pick up the changes.')
 
 
 add_install_command(app, script_path=__file__)

@@ -12,6 +12,7 @@ from pathlib import Path
 import psutil
 from filelock import FileLock
 
+from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import JsonDatetime, SessionSource, SessionState
 
@@ -23,8 +24,6 @@ __all__ = [
     'find_claude_pid',
     'resolve_session_id',
 ]
-
-from cc_lib.exceptions import ClaudeProcessError
 
 # Path configuration
 SESSIONS_PATH = Path('~/.claude-workspace/sessions.json').expanduser()
