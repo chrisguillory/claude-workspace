@@ -34,6 +34,9 @@ class ArtifactFile(StrictModel):
         'task_file',  # ~/.claude/tasks/{session_id}/{task_id}.json
         'task_metadata',  # ~/.claude/tasks/{session_id}/.highwatermark
         'task_lock',  # ~/.claude/tasks/{session_id}/.lock (ephemeral, NOT backed up)
+        'session_env',  # ~/.claude/session-env/{session_id}/*.sh
+        'session_memory',  # ~/.claude/projects/<enc>/{sid}/session-memory/summary.md
+        'debug_log',  # ~/.claude/debug/{session_id}.txt
     ]
 
 
@@ -59,6 +62,9 @@ class DeleteManifest(StrictModel):
     tool_result_files: Sequence[PathStr]
     todo_files: Sequence[PathStr]
     task_files: Sequence[PathStr]
+    session_env_files: Sequence[PathStr]
+    session_memory_files: Sequence[PathStr]
+    debug_log_files: Sequence[PathStr]
 
     # Directories to clean up after files deleted (sorted deepest-first)
     directories_to_cleanup: Sequence[PathStr]
@@ -86,6 +92,9 @@ class DeleteResult(StrictModel):
     tool_results_deleted: int
     todos_deleted: int
     tasks_deleted: int
+    session_env_deleted: int
+    session_memory_deleted: int
+    debug_log_deleted: int
 
     # Directories that were cleaned up
     directories_removed: Sequence[PathStr]

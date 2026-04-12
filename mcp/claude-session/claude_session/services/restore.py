@@ -39,10 +39,14 @@ from claude_session.services.artifacts import (
     generate_agent_id_mapping,
     generate_clone_custom_title,
     generate_clone_slug,
+    get_session_env_dir,
     get_tasks_dir,
     get_todos_dir,
+    write_debug_log,
     write_jsonl,
     write_plan_files,
+    write_session_env,
+    write_session_memory,
     write_task_metadata,
     write_tasks,
     write_todos,
@@ -281,6 +285,18 @@ class SessionRestoreService:
         if archive.task_metadata:
             all_output_paths.extend(get_tasks_dir() / new_session_id / filename for filename in archive.task_metadata)
 
+        # 7. Session-env files
+        if archive.session_env:
+            all_output_paths.extend(get_session_env_dir() / new_session_id / f for f in archive.session_env)
+
+        # 8. Session memory
+        if archive.session_memory:
+            all_output_paths.append(target_dir / new_session_id / 'session-memory' / 'summary.md')
+
+        # 9. Debug log
+        if archive.debug_log:
+            all_output_paths.append(get_claude_config_home_dir() / 'debug' / f'{new_session_id}.txt')
+
         # Check ALL paths before writing ANYTHING
         existing_files = [p for p in all_output_paths if p.exists()]
         if existing_files:
@@ -352,8 +368,26 @@ class SessionRestoreService:
                 )
             logger.info('Restored %d todo files', todos_restored)
 
-        # Create session-env directory
-        create_session_env_dir(new_session_id)
+        # Restore session-env files (or create empty directory Claude Code expects)
+        if archive.session_env:
+            write_session_env(new_session_id, archive.session_env)
+            logger.info('Restored %d session-env files', len(archive.session_env))
+        else:
+            create_session_env_dir(new_session_id)
+
+        # Restore session memory
+        session_memory_restored = False
+        if archive.session_memory:
+            write_session_memory(target_dir, new_session_id, archive.session_memory)
+            session_memory_restored = True
+            logger.info('Restored session-memory/summary.md')
+
+        # Restore debug log
+        debug_log_restored = False
+        if archive.debug_log:
+            write_debug_log(new_session_id, archive.debug_log)
+            debug_log_restored = True
+            logger.info('Restored debug log')
 
         # Restore tasks
         if archive.tasks:
@@ -448,6 +482,9 @@ class SessionRestoreService:
             tool_results_restored=tool_results_restored,
             todos_restored=todos_restored,
             tasks_restored=tasks_restored,
+            session_env_restored=bool(archive.session_env),
+            session_memory_restored=session_memory_restored,
+            debug_log_restored=debug_log_restored,
             paths_translated=translator is not None,
             slug_mappings_applied=len(slug_mapping),
             agent_id_mappings_applied=len(agent_id_mapping),

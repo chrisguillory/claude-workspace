@@ -22,7 +22,10 @@ from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.artifacts import (
     collect_agent_file_info,
+    collect_debug_log,
     collect_plan_files,
+    collect_session_env,
+    collect_session_memory,
     collect_task_metadata,
     collect_todos,
     collect_tool_results,
@@ -34,13 +37,16 @@ from claude_session.services.artifacts import (
     generate_agent_id_mapping,
     generate_clone_custom_title,
     generate_clone_slug,
+    get_session_env_dir,
     get_tasks_dir,
     get_todos_dir,
     iter_tasks,
     transform_todo_filename,
-    validate_session_env_empty,
+    write_debug_log,
     write_jsonl,
     write_plan_files,
+    write_session_env,
+    write_session_memory,
     write_task_metadata,
     write_tasks,
     write_todos,
@@ -89,7 +95,11 @@ class SessionCloneService:
         self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
 
     async def clone(
-        self, source_session_id: str, translate_paths: bool = True, project_filter: Path | None = None
+        self,
+        source_session_id: str,
+        translate_paths: bool = True,
+        project_filter: Path | None = None,
+        include_debug_log: bool = True,
     ) -> RestoreResult:
         """
         Clone a session directly without creating an archive file.
@@ -98,6 +108,7 @@ class SessionCloneService:
             source_session_id: Session ID to clone (full UUID or prefix)
             translate_paths: Whether to translate paths to target project
             project_filter: If set, restrict session lookup to this project folder
+            include_debug_log: Whether to clone the debug log (default: True)
 
         Returns:
             RestoreResult with new session ID and details
@@ -142,8 +153,20 @@ class SessionCloneService:
         todos = collect_todos(session_info.session_id)
         logger.info('Found %d todo files', len(todos))
 
-        # Validate session-env is empty (fail fast if Claude starts using it)
-        validate_session_env_empty(session_info.session_id)
+        # Collect session-env files
+        session_env = collect_session_env(session_info.session_id)
+        if session_env:
+            logger.info('Found %d session-env files', len(session_env))
+
+        # Collect session memory
+        session_memory = collect_session_memory(source_session_dir, session_info.session_id)
+        if session_memory:
+            logger.info('Found session-memory/summary.md')
+
+        # Collect debug log
+        debug_log = collect_debug_log(session_info.session_id) if include_debug_log else None
+        if debug_log:
+            logger.info('Found debug log (%d bytes)', len(debug_log))
 
         # Collect tasks from source session
         tasks = list(iter_tasks(session_info.session_id))
@@ -241,6 +264,18 @@ class SessionCloneService:
         if task_metadata:
             all_output_paths.extend(get_tasks_dir() / new_session_id / filename for filename in task_metadata)
 
+        # 7. Session-env files
+        if session_env:
+            all_output_paths.extend(get_session_env_dir() / new_session_id / f for f in session_env)
+
+        # 8. Session memory
+        if session_memory:
+            all_output_paths.append(target_dir / new_session_id / 'session-memory' / 'summary.md')
+
+        # 9. Debug log
+        if debug_log:
+            all_output_paths.append(get_claude_config_home_dir() / 'debug' / f'{new_session_id}.txt')
+
         # Check ALL paths before writing ANYTHING
         existing_files = [p for p in all_output_paths if p.exists()]
         if existing_files:
@@ -285,6 +320,27 @@ class SessionCloneService:
             )
             logger.info('Wrote %d todo files', todos_cloned)
 
+        # Write session-env files (or create empty directory Claude Code expects)
+        if session_env:
+            write_session_env(new_session_id, session_env)
+            logger.info('Wrote %d session-env files', len(session_env))
+        else:
+            create_session_env_dir(new_session_id)
+
+        # Write session memory
+        session_memory_cloned = False
+        if session_memory:
+            write_session_memory(target_dir, new_session_id, session_memory)
+            session_memory_cloned = True
+            logger.info('Wrote session-memory/summary.md')
+
+        # Write debug log
+        debug_log_cloned = False
+        if debug_log:
+            write_debug_log(new_session_id, debug_log)
+            debug_log_cloned = True
+            logger.info('Wrote debug log')
+
         # Write tasks
         tasks_cloned = 0
         if tasks:
@@ -295,9 +351,6 @@ class SessionCloneService:
         if task_metadata:
             metadata_written = write_task_metadata(new_session_id, task_metadata)
             logger.info('Cloned %d task metadata files', metadata_written)
-
-        # Create session-env directory
-        create_session_env_dir(new_session_id)
 
         # Clone main session file
         main_filename = f'{session_info.session_id}.jsonl'
@@ -370,6 +423,9 @@ class SessionCloneService:
             tool_results_restored=tool_results.total_file_count,
             todos_restored=todos_cloned,
             tasks_restored=tasks_cloned,
+            session_env_restored=bool(session_env),
+            session_memory_restored=session_memory_cloned,
+            debug_log_restored=debug_log_cloned,
             paths_translated=translator is not None,
             slug_mappings_applied=len(slug_mapping),
             agent_id_mappings_applied=len(agent_id_mapping),
