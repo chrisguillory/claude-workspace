@@ -122,7 +122,6 @@ class SessionArchive(StrictModel):
     task_metadata: Mapping[str, str] = pydantic.Field(
         default_factory=dict
     )  # filename -> content (.highwatermark, etc.)
-    session_env: Sequence[SessionEnvEntry]
     session_memory: str | None  # session-memory/summary.md content
     debug_log: str | None  # debug/<session-id>.txt content
 
