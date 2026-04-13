@@ -25,7 +25,7 @@ from claude_session.schemas.operations.archive import (
     FileMetadata,
     MainSessionFileEntry,
     PlanFileEntry,
-    SessionArchiveV2,
+    SessionArchive,
     SessionEnvEntry,
     TodoFileEntry,
     ToolResultDirectoryEntry,
@@ -379,7 +379,7 @@ class SessionArchiveService:
             logger.warning('Claude Code version not found, using "unknown"')
 
         # Create v2 archive structure
-        archive = SessionArchiveV2(
+        archive = SessionArchive(
             version=ARCHIVE_FORMAT_VERSION,
             session_id=self.session_id,
             archived_at=datetime.now(UTC),
@@ -569,13 +569,13 @@ class SessionArchiveService:
 
         return version
 
-    async def _serialize_json(self, archive: SessionArchiveV2) -> bytes:
+    async def _serialize_json(self, archive: SessionArchive) -> bytes:
         """Serialize archive to uncompressed JSON."""
         logger.info('Serializing to JSON')
         json_str = archive.model_dump_json(indent=2, exclude_unset=True)
         return json_str.encode('utf-8')
 
-    async def _serialize_zst(self, archive: SessionArchiveV2) -> bytes:
+    async def _serialize_zst(self, archive: SessionArchive) -> bytes:
         """Serialize archive to zstd-compressed JSON."""
         logger.info('Serializing to zstd-compressed JSON')
 

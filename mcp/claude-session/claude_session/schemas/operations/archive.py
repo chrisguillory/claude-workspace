@@ -26,7 +26,7 @@ __all__ = [
     'FileMetadata',
     'MainSessionFileEntry',
     'PlanFileEntry',
-    'SessionArchiveV2',
+    'SessionArchive',
     'SessionEnvEntry',
     'TodoFileEntry',
     'ToolResultDirectoryEntry',
@@ -86,7 +86,7 @@ class ArchiveMetadata(StrictModel):
 # - Top-down ordering: composite model first, then constituents
 
 
-class SessionArchiveV2(StrictModel):
+class SessionArchive(StrictModel):
     """
     Archive format v2.x - explicit artifact models.
 

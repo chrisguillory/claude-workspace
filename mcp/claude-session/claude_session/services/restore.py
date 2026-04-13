@@ -22,7 +22,7 @@ import zstandard
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.introspection import get_path_fields
-from claude_session.schemas.operations.archive import SessionArchiveV2
+from claude_session.schemas.operations.archive import SessionArchive
 from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
@@ -492,7 +492,7 @@ class SessionRestoreService:
             custom_title=archive.custom_title,
         )
 
-    async def _load_json_archive(self, archive_file: Path, is_base64: bool) -> SessionArchiveV2:
+    async def _load_json_archive(self, archive_file: Path, is_base64: bool) -> SessionArchive:
         """Load archive from JSON file (optionally base64-encoded)."""
         if is_base64:
             with open(archive_file, encoding='utf-8') as f:
@@ -507,7 +507,7 @@ class SessionRestoreService:
 
         return self._parse_archive_data(data)
 
-    async def _load_zst_archive(self, archive_file: Path, is_base64: bool) -> SessionArchiveV2:
+    async def _load_zst_archive(self, archive_file: Path, is_base64: bool) -> SessionArchive:
         """Load archive from Zstandard compressed file (optionally base64-encoded)."""
         with open(archive_file, 'rb') as f:
             content = f.read()
@@ -526,9 +526,9 @@ class SessionRestoreService:
 
         return self._parse_archive_data(data)
 
-    def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchiveV2:
+    def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchive:
         """Parse and validate V2 archive data."""
-        return SessionArchiveV2.model_validate(data)
+        return SessionArchive.model_validate(data)
 
     def _iter_transformed_records(
         self,

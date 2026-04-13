@@ -42,7 +42,7 @@ from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.config.base import DATA_DIR
 from claude_session.exceptions import NativeSessionDeletionError
-from claude_session.schemas.operations.archive import SessionArchiveV2
+from claude_session.schemas.operations.archive import SessionArchive
 from claude_session.schemas.operations.delete import ArtifactFile, DeleteManifest, DeleteResult
 from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts import (
@@ -740,9 +740,9 @@ class SessionDeleteService:
         return metadata.file_path
 
     @staticmethod
-    def _parse_backup_data(data: Mapping[str, Any]) -> SessionArchiveV2:
+    def _parse_backup_data(data: Mapping[str, Any]) -> SessionArchive:
         """Parse and validate V2 backup data."""
-        return SessionArchiveV2.model_validate(data)
+        return SessionArchive.model_validate(data)
 
     async def _rollback_from_backup(self, backup_path: Path) -> None:
         """

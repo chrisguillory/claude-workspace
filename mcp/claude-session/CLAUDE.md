@@ -520,7 +520,7 @@ git commit -m "Schema vX.Y.Z: Fix validation for Claude Code X.Y.Z"
 
 ## Model Definition Ordering
 
-Use composite-first (top-down) ordering per root CLAUDE.md's Module Organization section. Define `SessionArchiveV2` before its constituent types (`AgentFileEntry`, `PlanFileEntry`, etc.). Use `from __future__ import annotations` to enable forward references.
+Use composite-first (top-down) ordering per root CLAUDE.md's Module Organization section. Define `SessionArchive` before its constituent types (`AgentFileEntry`, `PlanFileEntry`, etc.). Use `from __future__ import annotations` to enable forward references.
 
 ## Tool Usage Rules
 
