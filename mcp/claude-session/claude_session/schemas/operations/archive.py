@@ -26,15 +26,12 @@ __all__ = [
     'FileMetadata',
     'MainSessionFileEntry',
     'PlanFileEntry',
-    'SessionArchive',
-    'SessionArchiveV1',
     'SessionArchiveV2',
     'SessionEnvEntry',
     'TodoFileEntry',
     'ToolResultDirectoryEntry',
     'ToolResultDirectoryFileEntry',
     'ToolResultEntry',
-    'migrate_v1_to_v2',
     'parse_agent_metadata',
 ]
 
@@ -97,18 +94,6 @@ class SessionArchiveV2(StrictModel):
     - 2.2: Added session_env, session_memory, and debug_log
     - 2.1: Added tool_result_dirs for directory-based tool results (pdf page renders)
     - 2.0: Explicit artifact models, tasks support, agent structure preservation
-    - 1.4: Added custom_title field
-    - 1.3: Added machine_id field
-    - 1.2: Added tool_results and todos fields
-    - 1.1: Added plan_files field
-    - 1.0: Initial format
-
-    Key changes from v1:
-    - files mapping replaced with explicit main_session + agent_files
-    - Agent files have nested flag preserving subagents/ directory structure
-    - Tasks are now archived (optional, for restore --in-place)
-    - claude_code_version is required (never None)
-    - All artifact collections use typed entry models
 
     Derived fields (not stored, computed on restore):
     - Main session filename: f"{session_id}.jsonl"
@@ -137,9 +122,9 @@ class SessionArchiveV2(StrictModel):
     task_metadata: Mapping[str, str] = pydantic.Field(
         default_factory=dict
     )  # filename -> content (.highwatermark, etc.)
-    session_env: Sequence[SessionEnvEntry] = ()
-    session_memory: str | None = None  # session-memory/summary.md content
-    debug_log: str | None = None  # debug/<session-id>.txt content
+    session_env: Sequence[SessionEnvEntry]
+    session_memory: str | None  # session-memory/summary.md content
+    debug_log: str | None  # debug/<session-id>.txt content
 
     # Statistics (for quick inspection without iterating records)
     total_session_records: int
@@ -260,126 +245,6 @@ class TodoFileEntry(StrictModel):
     content: str  # JSON string (not parsed, may vary)
 
 
-# -- Session Archive V1 - Legacy Format (Backward Compatibility) ---------------
-
-
-class SessionArchiveV1(StrictModel):
-    """
-    Legacy archive format (v1.0-v1.4).
-
-    Uses implicit filename-keyed mappings. Agent file directory structure
-    is lost (only filename stored, not full relative path).
-
-    Kept for backward compatibility when loading old archives.
-    Use SessionArchiveV2 for new archives.
-    """
-
-    version: str  # "1.0" through "1.4"
-    session_id: str
-    archived_at: JsonDatetime
-    original_project_path: str
-    claude_code_version: str | None  # Can be None in v1
-    files: Mapping[str, Sequence[SessionRecord]]  # filename -> records
-    plan_files: Mapping[str, str] = pydantic.Field(default_factory=dict)  # slug -> content
-    tool_results: Mapping[str, str] = pydantic.Field(default_factory=dict)  # tool_use_id -> content
-    todos: Mapping[str, str] = pydantic.Field(default_factory=dict)  # filename -> JSON content
-    machine_id: str | None = None
-    custom_title: str | None = None
-
-
-# -- Union Type for Archive Loading --------------------------------------------
-
-# Used by restore/clone to handle either format
-type SessionArchive = SessionArchiveV1 | SessionArchiveV2
-
-
-# -- Migration Functions -------------------------------------------------------
-
-
-def migrate_v1_to_v2(v1: SessionArchiveV1) -> SessionArchiveV2:
-    """
-    Migrate v1.x archive to v2.0 format in memory.
-
-    Conservative approach:
-    - Agent files assumed flat (v1 loses nested info)
-    - Tasks empty (v1 doesn't capture tasks)
-    - claude_code_version set to "unknown" if None
-
-    This is NOT persisted - migration happens on load for consumption.
-
-    Args:
-        v1: Legacy v1.x archive
-
-    Returns:
-        SessionArchiveV2 equivalent
-    """
-    # Parse main session
-    main_filename = f'{v1.session_id}.jsonl'
-    main_records = list(v1.files.get(main_filename, []))
-
-    main_session = MainSessionFileEntry(
-        record_count=len(main_records),
-        records=main_records,
-    )
-
-    # Parse agent files (assume flat - v1 loses nested info)
-    agent_entries: list[AgentFileEntry] = []
-    agent_total_records = 0
-
-    for filename, records in v1.files.items():
-        if not filename.startswith('agent-'):
-            continue
-
-        # Parse agent ID and type from filename
-        agent_id, agent_type = parse_agent_metadata(filename)
-        record_list = list(records)
-
-        agent_entries.append(
-            AgentFileEntry(
-                agent_id=agent_id,
-                agent_type=agent_type,
-                nested=False,  # v1 loses nested info - assume flat
-                record_count=len(record_list),
-                records=record_list,
-            )
-        )
-        agent_total_records += len(record_list)
-
-    # Convert plan_files
-    plan_entries = [PlanFileEntry(slug=slug, content=content) for slug, content in v1.plan_files.items()]
-
-    # Convert tool_results (v1 only had .txt files)
-    tool_result_entries = [
-        ToolResultEntry(tool_use_id=tid, content=content.encode('utf-8'), extension='.txt')
-        for tid, content in v1.tool_results.items()
-    ]
-
-    # Convert todos - parse agent_id from filename
-    todo_entries: list[TodoFileEntry] = []
-    for filename, content in v1.todos.items():
-        agent_id = _extract_agent_id_from_todo_filename(filename, v1.session_id)
-        todo_entries.append(TodoFileEntry(agent_id=agent_id, content=content))
-
-    return SessionArchiveV2(
-        version='2.0',
-        session_id=v1.session_id,
-        archived_at=v1.archived_at,
-        original_project_path=v1.original_project_path,
-        claude_code_version=v1.claude_code_version or 'unknown',
-        machine_id=v1.machine_id,
-        custom_title=v1.custom_title,
-        main_session=main_session,
-        agent_files=agent_entries,
-        plan_files=plan_entries,
-        tool_results=tool_result_entries,
-        todos=todo_entries,
-        tasks=[],  # v1 has no tasks
-        task_metadata={},  # v1 has no task metadata
-        total_session_records=len(main_records) + agent_total_records,
-        total_agent_records=agent_total_records,
-    )
-
-
 def parse_agent_metadata(filename: str) -> tuple[str, str | None]:
     """
     Parse agent ID and type from filename.
@@ -413,31 +278,3 @@ def parse_agent_metadata(filename: str) -> tuple[str, str | None]:
 
     # Plain hex or unknown pattern - no type
     return (base, None)
-
-
-def _extract_agent_id_from_todo_filename(filename: str, session_id: str) -> str:
-    """
-    Extract agent ID from todo filename.
-
-    Format: {session_id}-agent-{agent_id}.json
-
-    Examples:
-        "019abc-agent-5271c147.json" -> "5271c147"
-        "019abc-agent-aprompt_suggestion-a12dbf.json" -> "aprompt_suggestion-a12dbf"
-
-    Args:
-        filename: Todo filename
-        session_id: Session ID to strip
-
-    Returns:
-        Agent ID portion
-    """
-    prefix = f'{session_id}-agent-'
-    if not filename.startswith(prefix):
-        # Fallback: try to extract anything after "agent-"
-        if '-agent-' in filename:
-            return filename.split('-agent-', 1)[1].removesuffix('.json')
-        # Last resort: return filename without extension
-        return filename.removesuffix('.json')
-
-    return filename.removeprefix(prefix).removesuffix('.json')

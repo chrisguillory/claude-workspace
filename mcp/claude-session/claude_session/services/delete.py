@@ -42,13 +42,8 @@ from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.config.base import DATA_DIR
 from claude_session.exceptions import NativeSessionDeletionError
-from claude_session.schemas.operations.archive import (
-    SessionArchiveV1,
-    SessionArchiveV2,
-    migrate_v1_to_v2,
-)
+from claude_session.schemas.operations.archive import SessionArchiveV2
 from claude_session.schemas.operations.delete import ArtifactFile, DeleteManifest, DeleteResult
-from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts import (
     ToolResultCollection,
@@ -746,29 +741,8 @@ class SessionDeleteService:
 
     @staticmethod
     def _parse_backup_data(data: Mapping[str, Any]) -> SessionArchiveV2:
-        """
-        Parse backup data with version detection.
-
-        Mirrors restore service's approach for consistency.
-        Backups created by this service are always v2, but this handles
-        legacy backups for robustness.
-
-        Args:
-            data: Parsed JSON backup data
-
-        Returns:
-            SessionArchiveV2 (v1 is migrated in memory)
-        """
-        version = data.get('version', '1.0')
-
-        if version.startswith('2.'):
-            return SessionArchiveV2.model_validate(data)
-        else:
-            # V1 backup (legacy) - convert records then migrate
-            for filename, records in data['files'].items():
-                data['files'][filename] = [validate_session_record(r) for r in records]
-            v1 = SessionArchiveV1.model_validate(data)
-            return migrate_v1_to_v2(v1)
+        """Parse and validate V2 backup data."""
+        return SessionArchiveV2.model_validate(data)
 
     async def _rollback_from_backup(self, backup_path: Path) -> None:
         """
@@ -776,8 +750,6 @@ class SessionDeleteService:
 
         Reads the backup archive and writes files back to their original
         locations (in-place restoration with original session ID).
-
-        Uses SessionArchiveV2 structure (v1 backups are migrated).
         """
         logger.info('Rolling back from backup: %s', backup_path)
 

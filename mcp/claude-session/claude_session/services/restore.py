@@ -22,11 +22,7 @@ import zstandard
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.introspection import get_path_fields
-from claude_session.schemas.operations.archive import (
-    SessionArchiveV1,
-    SessionArchiveV2,
-    migrate_v1_to_v2,
-)
+from claude_session.schemas.operations.archive import SessionArchiveV2
 from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
@@ -497,10 +493,7 @@ class SessionRestoreService:
         )
 
     async def _load_json_archive(self, archive_file: Path, is_base64: bool) -> SessionArchiveV2:
-        """Load archive from JSON file (optionally base64-encoded).
-
-        Handles both v1 and v2 formats - v1 is migrated to v2 in memory.
-        """
+        """Load archive from JSON file (optionally base64-encoded)."""
         if is_base64:
             with open(archive_file, encoding='utf-8') as f:
                 try:
@@ -515,10 +508,7 @@ class SessionRestoreService:
         return self._parse_archive_data(data)
 
     async def _load_zst_archive(self, archive_file: Path, is_base64: bool) -> SessionArchiveV2:
-        """Load archive from Zstandard compressed file (optionally base64-encoded).
-
-        Handles both v1 and v2 formats - v1 is migrated to v2 in memory.
-        """
+        """Load archive from Zstandard compressed file (optionally base64-encoded)."""
         with open(archive_file, 'rb') as f:
             content = f.read()
 
@@ -537,21 +527,8 @@ class SessionRestoreService:
         return self._parse_archive_data(data)
 
     def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchiveV2:
-        """Parse archive data with version detection.
-
-        V1 archives are migrated to V2 in memory for unified processing.
-        """
-        version = data.get('version', '1.0')
-
-        if version.startswith('2.'):
-            # V2: Validate directly (records are already dicts, Pydantic handles conversion)
-            return SessionArchiveV2.model_validate(data)
-        else:
-            # V1: Convert records then migrate
-            for filename, records in data['files'].items():
-                data['files'][filename] = [validate_session_record(r) for r in records]
-            v1 = SessionArchiveV1.model_validate(data)
-            return migrate_v1_to_v2(v1)
+        """Parse and validate V2 archive data."""
+        return SessionArchiveV2.model_validate(data)
 
     def _iter_transformed_records(
         self,

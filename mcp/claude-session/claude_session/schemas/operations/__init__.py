@@ -11,7 +11,6 @@ from claude_session.schemas.operations.archive import (
     ARCHIVE_FORMAT_VERSION,
     ArchiveMetadata,
     FileMetadata,
-    SessionArchive,
 )
 from claude_session.schemas.operations.context import SessionContext, SessionSource, SessionState
 from claude_session.schemas.operations.delete import ArtifactFile, DeleteManifest, DeleteResult
@@ -29,9 +28,8 @@ from claude_session.schemas.operations.restore import RestoreResult
 __all__ = [
     # Archive
     'ARCHIVE_FORMAT_VERSION',
-    'FileMetadata',
     'ArchiveMetadata',
-    'SessionArchive',
+    'FileMetadata',
     # Context
     'SessionContext',
     'SessionSource',
