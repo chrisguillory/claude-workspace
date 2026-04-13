@@ -22,11 +22,7 @@ import zstandard
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.introspection import get_path_fields
-from claude_session.schemas.operations.archive import (
-    SessionArchiveV1,
-    SessionArchiveV2,
-    migrate_v1_to_v2,
-)
+from claude_session.schemas.operations.archive import SessionArchive
 from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
@@ -42,9 +38,11 @@ from claude_session.services.artifacts import (
     get_session_env_dir,
     get_tasks_dir,
     get_todos_dir,
+    write_debug_log,
     write_jsonl,
     write_plan_files,
     write_session_env,
+    write_session_memory,
     write_task_metadata,
     write_tasks,
     write_todos,
@@ -277,16 +275,25 @@ class SessionRestoreService:
             else:
                 all_output_paths.extend(plans_dir / f'{new_slug}.md' for new_slug in slug_mapping.values())
 
-        # 6. Session-env files
-        if archive.session_env:
-            session_env_dir = get_session_env_dir() / new_session_id
-            all_output_paths.extend(session_env_dir / entry.filename for entry in archive.session_env)
-
-        # 7. Tasks
+        # 6. Tasks
         if archive.tasks:
             all_output_paths.extend(get_tasks_dir() / new_session_id / f'{task.id}.json' for task in archive.tasks)
         if archive.task_metadata:
             all_output_paths.extend(get_tasks_dir() / new_session_id / filename for filename in archive.task_metadata)
+
+        # 7. Session-env files
+        if archive.session_env:
+            all_output_paths.extend(
+                get_session_env_dir() / new_session_id / entry.filename for entry in archive.session_env
+            )
+
+        # 8. Session memory
+        if archive.session_memory:
+            all_output_paths.append(target_dir / new_session_id / 'session-memory' / 'summary.md')
+
+        # 9. Debug log
+        if archive.debug_log:
+            all_output_paths.append(get_claude_config_home_dir() / 'debug' / f'{new_session_id}.txt')
 
         # Check ALL paths before writing ANYTHING
         existing_files = [p for p in all_output_paths if p.exists()]
@@ -359,15 +366,28 @@ class SessionRestoreService:
                 )
             logger.info('Restored %d todo files', todos_restored)
 
-        # Restore session-env files (or create empty directory)
+        # Restore session-env files (or create empty directory Claude Code expects)
         session_env_restored = 0
         if archive.session_env:
-            session_env_restored = write_session_env(
-                new_session_id, {entry.filename: entry.content for entry in archive.session_env}
-            )
+            env_dict = {entry.filename: entry.content for entry in archive.session_env}
+            session_env_restored = write_session_env(new_session_id, env_dict)
             logger.info('Restored %d session-env files', session_env_restored)
         else:
             create_session_env_dir(new_session_id)
+
+        # Restore session memory
+        session_memory_restored = False
+        if archive.session_memory:
+            write_session_memory(target_dir, new_session_id, archive.session_memory)
+            session_memory_restored = True
+            logger.info('Restored session-memory/summary.md')
+
+        # Restore debug log
+        debug_log_restored = False
+        if archive.debug_log:
+            write_debug_log(new_session_id, archive.debug_log)
+            debug_log_restored = True
+            logger.info('Restored debug log')
 
         # Restore tasks
         if archive.tasks:
@@ -461,8 +481,10 @@ class SessionRestoreService:
             plan_files_restored=plan_files_restored,
             tool_results_restored=tool_results_restored,
             todos_restored=todos_restored,
-            session_env_restored=session_env_restored,
             tasks_restored=tasks_restored,
+            session_env_restored=session_env_restored,
+            session_memory_restored=session_memory_restored,
+            debug_log_restored=debug_log_restored,
             paths_translated=translator is not None,
             slug_mappings_applied=len(slug_mapping),
             agent_id_mappings_applied=len(agent_id_mapping),
@@ -470,11 +492,8 @@ class SessionRestoreService:
             custom_title=archive.custom_title,
         )
 
-    async def _load_json_archive(self, archive_file: Path, is_base64: bool) -> SessionArchiveV2:
-        """Load archive from JSON file (optionally base64-encoded).
-
-        Handles both v1 and v2 formats - v1 is migrated to v2 in memory.
-        """
+    async def _load_json_archive(self, archive_file: Path, is_base64: bool) -> SessionArchive:
+        """Load archive from JSON file (optionally base64-encoded)."""
         if is_base64:
             with open(archive_file, encoding='utf-8') as f:
                 try:
@@ -488,11 +507,8 @@ class SessionRestoreService:
 
         return self._parse_archive_data(data)
 
-    async def _load_zst_archive(self, archive_file: Path, is_base64: bool) -> SessionArchiveV2:
-        """Load archive from Zstandard compressed file (optionally base64-encoded).
-
-        Handles both v1 and v2 formats - v1 is migrated to v2 in memory.
-        """
+    async def _load_zst_archive(self, archive_file: Path, is_base64: bool) -> SessionArchive:
+        """Load archive from Zstandard compressed file (optionally base64-encoded)."""
         with open(archive_file, 'rb') as f:
             content = f.read()
 
@@ -510,22 +526,9 @@ class SessionRestoreService:
 
         return self._parse_archive_data(data)
 
-    def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchiveV2:
-        """Parse archive data with version detection.
-
-        V1 archives are migrated to V2 in memory for unified processing.
-        """
-        version = data.get('version', '1.0')
-
-        if version.startswith('2.'):
-            # V2: Validate directly (records are already dicts, Pydantic handles conversion)
-            return SessionArchiveV2.model_validate(data)
-        else:
-            # V1: Convert records then migrate
-            for filename, records in data['files'].items():
-                data['files'][filename] = [validate_session_record(r) for r in records]
-            v1 = SessionArchiveV1.model_validate(data)
-            return migrate_v1_to_v2(v1)
+    def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchive:
+        """Parse and validate V2 archive data."""
+        return SessionArchive.model_validate(data)
 
     def _iter_transformed_records(
         self,

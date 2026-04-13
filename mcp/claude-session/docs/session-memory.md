@@ -366,7 +366,7 @@ the `move_session` commit, all session operations handle them:
 
 | Operation | Handling |
 |-----------|---------|
-| **Archive** | Captured in `SessionArchiveV2` (if present) |
+| **Archive** | Captured in `SessionArchive` (if present) |
 | **Clone** | Copied to cloned session |
 | **Restore** | Restored from archive |
 | **Delete** | Backed up then deleted |
