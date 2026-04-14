@@ -453,7 +453,7 @@ def _detect_venv_provenance(cwd: str) -> str:
     """Detect venv status and how it got on PATH.
 
     Provenance detection (checked in priority order):
-        - CLAUDE_LAUNCH_VENV set → "launcher" (claude-launch activated the venv)
+        - CLAUDE_EXEC_VENV set → "launcher" (claude-exec activated the venv)
         - JEDITERM_SOURCE points to activate → "jediterm" (PyCharm auto-activated)
         - VIRTUAL_ENV set → "manual" (user activated before launching)
         - .venv/bin on PATH but none of the above → "unknown"
@@ -465,7 +465,7 @@ def _detect_venv_provenance(cwd: str) -> str:
     path_entries = os.environ.get('PATH', '').split(':')
     venv_on_path = str(venv_bin) in path_entries
 
-    launch_venv = os.environ.get('CLAUDE_LAUNCH_VENV', '')
+    launch_venv = os.environ.get('CLAUDE_EXEC_VENV', '')
     jediterm_source = os.environ.get('JEDITERM_SOURCE', '')
     virtual_env = os.environ.get('VIRTUAL_ENV', '')
 
