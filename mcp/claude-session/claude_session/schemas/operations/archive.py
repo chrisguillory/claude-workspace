@@ -77,7 +77,7 @@ class ArchiveMetadata(StrictModel):
     custom_title: str | None = None  # User-defined session name from /rename (if any)
 
 
-# -- Session Archive V2 - Explicit Artifact Models (Composite-First Ordering) ---
+# -- Session Archive - Explicit Artifact Models (Composite-First Ordering) ------
 #
 # Design principles:
 # - Store only source-of-truth fields (filenames derivable from IDs)
@@ -130,7 +130,7 @@ class SessionArchive(StrictModel):
     total_agent_records: int
 
 
-# -- V2 Entry Models (Constituents) --------------------------------------------
+# -- Entry Models (Constituents) ------------------------------------------------
 
 
 class MainSessionFileEntry(StrictModel):
