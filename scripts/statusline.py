@@ -37,7 +37,7 @@ Output Lines:
         +dir: added dirs │ transcript link
 
     Line 4 — Detail:
-        session: cumulative tokens │ last: per-turn tokens │ ⚠ >200k pricing │
+        session: cumulative tokens │ last: per-turn tokens │
         cache: +new ↺reused │ api: duration
 
 Key Semantics:
@@ -57,9 +57,6 @@ Key Semantics:
         run: — cumulative runtime across all process lifetimes (odometer, pauses
                between resumes)
         api: — cumulative API wait time, strict subset of run:
-
-    >200k pricing: a pricing cliff, not a capacity limit. When input crosses 200k,
-        ALL tokens in the request get premium rates (2x input, 1.5x output).
 
     lines: Claude Code's edit counter (editing effort), not git diff (net result).
         Accumulates across resumes like cost and runtime.
@@ -333,6 +330,17 @@ class StatusLineInput(StrictModel):
     transcript_path: str
     version: str
     exceeds_200k_tokens: bool
+    """Vestigial field — no longer actionable.
+
+    The 200k extended context pricing premium (2x input, 1.5x output) was
+    eliminated on 2026-03-13 when Anthropic shipped flat pricing across the
+    full 1M context window for Opus 4.6 and Sonnet 4.6. For subscribers
+    (Pro/Max/Team/Enterprise), per-token pricing never applied — billing is
+    quota-based. Claude Code still sends this field for backwards compat.
+
+    https://claude.com/blog/1m-context-ga
+    https://github.com/anthropics/claude-code/issues/28723
+    """
     # Conditional fields
     session_name: str | None = None  # Added in v2.1.41
     rate_limits: RateLimits | None = None  # Added in v2.1.80
@@ -439,6 +447,41 @@ def _osc8_link(url: str, text: str) -> str:
 
 
 type CwdLocation = Literal['project', 'added', 'unknown']
+
+
+def _detect_venv_provenance(cwd: str) -> str:
+    """Detect venv status and how it got on PATH.
+
+    Provenance detection (checked in priority order):
+        - CLAUDE_EXEC_VENV set → "launcher" (claude-exec activated the venv)
+        - JEDITERM_SOURCE points to activate → "jediterm" (PyCharm auto-activated)
+        - VIRTUAL_ENV set → "manual" (user activated before launching)
+        - .venv/bin on PATH but none of the above → "unknown"
+        - .venv/bin not on PATH but .venv/ exists → gap
+        - No .venv/ at all → no venv
+    """
+    venv_bin = Path(cwd) / '.venv' / 'bin'
+    venv_dir = Path(cwd) / '.venv'
+    path_entries = os.environ.get('PATH', '').split(':')
+    venv_on_path = str(venv_bin) in path_entries
+
+    launch_venv = os.environ.get('CLAUDE_EXEC_VENV', '')
+    jediterm_source = os.environ.get('JEDITERM_SOURCE', '')
+    virtual_env = os.environ.get('VIRTUAL_ENV', '')
+
+    if venv_on_path:
+        if launch_venv:
+            return f'{DIM}venv:{RESET} .venv {DIM}(launcher){RESET}'
+        if jediterm_source and 'activate' in jediterm_source:
+            return f'{DIM}venv:{RESET} .venv {DIM}(jediterm){RESET}'
+        if virtual_env:
+            return f'{DIM}venv:{RESET} .venv {DIM}(manual){RESET}'
+        return f'{DIM}venv:{RESET} .venv'
+
+    if venv_dir.is_dir():
+        return f'{YELLOW}venv:{RESET} {YELLOW}✗ (.venv exists but not on PATH){RESET}'
+
+    return f'{DIM}venv:{RESET} ✗'
 
 
 def _detect_git_worktree(cwd: str) -> str | None:
@@ -1023,9 +1066,25 @@ def _format_duration(ms: float) -> str:
     return f'{days}d{remaining_hours}h'
 
 
-def _format_cost(usd: float) -> str:
-    """Format cost with color based on amount."""
-    if usd >= 5.0:
+def _format_cost(usd: float, *, is_console: bool) -> str:
+    """Format cost with color based on amount and billing context.
+
+    Console/prepaid API users pay real money per token, so cost escalation
+    colors (yellow/$1+, red/$5+) are meaningful warnings. Subscribers
+    (Pro/Max/Team/Enterprise) see informational cost that doesn't map to
+    their bill — milestones are celebratory, not alarming:
+    dim < $100, normal $100+, cyan $500+, magenta $1000+.
+    """
+    if not is_console:
+        if usd >= 1000.0:
+            color = MAGENTA_BOLD
+        elif usd >= 500.0:
+            color = CYAN
+        elif usd >= 100.0:
+            color = RESET
+        else:
+            color = DIM
+    elif usd >= 5.0:
         color = RED
     elif usd >= 1.0:
         color = YELLOW
@@ -1562,7 +1621,7 @@ def main() -> None:
     # Cost
     cost = data.cost.total_cost_usd
     if cost is not None:
-        metrics.append(_format_cost(cost))
+        metrics.append(_format_cost(cost, is_console=is_console))
 
     # Cumulative runtime
     duration = data.cost.total_duration_ms
@@ -1609,6 +1668,9 @@ def main() -> None:
         if not cwd_n.startswith(d.rstrip('/'))
     )
 
+    # Venv provenance — where did .venv/bin on PATH come from?
+    line3.append(_detect_venv_provenance(data.cwd))
+
     # Worktree context — CC-managed (v2.1.69+) or detected via git
     if data.worktree:
         from_branch = f' (from: {data.worktree.original_branch})' if data.worktree.original_branch else ''
@@ -1636,10 +1698,6 @@ def main() -> None:
         last_in = _format_tokens(ctx.current_usage.input_tokens)
         last_out = _format_tokens(ctx.current_usage.output_tokens)
         line4.append(f'{DIM}last:{RESET} ↓{last_in} ↑{last_out}')
-
-    # Exceeds 200k pricing threshold (2x input, 1.5x output on entire request)
-    if data.exceeds_200k_tokens:
-        line4.append(f'{RED}⚠ >200k pricing{RESET}')
 
     # Cache tokens (from current usage)
     if ctx.current_usage is not None:
