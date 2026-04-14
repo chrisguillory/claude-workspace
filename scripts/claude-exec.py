@@ -9,15 +9,26 @@
 # [tool.uv.sources]
 # cc_lib = { path = "../cc-lib/", editable = true }
 # ///
-"""Transparent proxy for the claude binary with project venv activation.
+"""Transparent proxy for ``claude`` with tab completions and environment fixes.
 
-Activates ``$PWD/.venv/`` before exec'ing the real ``claude`` binary so that
-``process.env.PATH`` has ``.venv/bin`` from birth — flowing to hooks, MCP
-servers, statusline, and Bash tool commands equally.
+Provides zsh tab completion for all Claude Code flags (51 documented + 23
+hidden, from v2.1.92 binary analysis), subcommands with descriptions,
+model aliases, and project-scoped session completion with custom titles
+for ``--resume``.
 
-All arguments pass through to the real binary unchanged. The wrapper process
-is replaced entirely via ``os.execv`` — no parent zombie, no signal
-forwarding, the terminal talks directly to Claude Code.
+Also fixes environment issues that the bare ``claude`` binary doesn't handle:
+    - Activates ``$PWD/.venv/`` and cleans stale/IDE-injected PATH entries
+    - Injects ``--effort`` from settings.json env block
+    - Resolves ``--resume <title>`` to session UUIDs
+
+Usage::
+
+    claude-exec [claude args...]      # all args pass through to claude
+    claude-exec ext install           # install launcher + completions to PATH
+    claude-exec ext uninstall         # remove launcher + completions
+
+All arguments pass through to the real binary via ``os.execv`` — the wrapper
+process is replaced entirely, the terminal talks directly to Claude Code.
 """
 
 from __future__ import annotations
@@ -41,11 +52,14 @@ from cc_lib.cli import LauncherInstaller, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 
 boundary = ErrorBoundary(exit_code=1)
+ext_app = create_app(help='Claude exec management commands.')
+
+COMPLETION_DIR = Path.home() / '.config' / 'zsh' / 'completions'
 
 
 @boundary
 def main() -> None:
-    """Entry point: intercept completions, ``ext``, or activate venv + exec claude."""
+    """Entry point: intercept ``ext`` subcommand or activate venv + exec claude."""
     if len(sys.argv) > 1 and sys.argv[1] == 'ext':
         sys.argv = [sys.argv[0], *sys.argv[2:]]  # strip 'ext' so typer sees subcommands
         run_app(ext_app)
@@ -63,6 +77,57 @@ def main() -> None:
     # This is a single-user development tool, not a shared deployment.
     print(f'claude-exec: claude {" ".join(str(a) for a in args)}', file=sys.stderr)
     os.execv(binary, [binary, *args])
+
+
+# -- ext commands --------------------------------------------------------------
+
+
+@ext_app.command()
+def install() -> None:
+    """Install launcher and zsh completions to PATH."""
+    console = rich.console.Console(stderr=True)
+
+    launcher = LauncherInstaller(Path(__file__).resolve())
+    path = launcher.install('claude-exec')
+    console.print(f'Launcher: [bold]{path}[/bold]')
+    console.print(f'  -> {Path(__file__).resolve()}')
+
+    COMPLETION_DIR.mkdir(parents=True, exist_ok=True)
+    dest = COMPLETION_DIR / '_claude-exec'
+    dest.write_text(_generate_zsh_completion())
+    console.print(f'Completion: [bold]{dest}[/bold]')
+
+    console.print('\nRestart shell to activate.')
+
+
+@ext_app.command(name='resume-completions', hidden=True)
+def resume_completions(
+    project: Annotated[str, typer.Argument(help='Project path (default: CWD)')] = '',
+) -> None:
+    """Output session completions for zsh (hidden — called by tab completion)."""
+    index = SessionIndex(project or os.getcwd())
+    for entry in index.completions():
+        title = entry.title.replace(':', '\\:')
+        print(f'{entry.session_id}\t{title}\t{entry.mtime:.0f}')
+
+
+@ext_app.command()
+def uninstall() -> None:
+    """Remove launcher and zsh completions."""
+    console = rich.console.Console(stderr=True)
+
+    launcher_path = Path.home() / '.local' / 'bin' / 'claude-exec'
+    if launcher_path.exists():
+        launcher_path.unlink()
+        console.print(f'Removed: {launcher_path}')
+
+    completion_path = COMPLETION_DIR / '_claude-exec'
+    if completion_path.exists():
+        completion_path.unlink()
+        console.print(f'Removed: {completion_path}')
+
+
+# -- Venv activation -----------------------------------------------------------
 
 
 def _activate_venv(venv_path: Path) -> None:
@@ -105,6 +170,9 @@ def _is_stale_path(entry: str) -> bool:
     if '/.cursor/' in entry:
         return True
     return False
+
+
+# -- Effort flag injection -----------------------------------------------------
 
 
 def _inject_effort_flag(args: Sequence[str]) -> Sequence[str]:
@@ -161,6 +229,9 @@ def _read_settings_effort() -> EffortLevel | str:
         raise LaunchError(f'CLAUDE_CODE_EFFORT_LEVEL={value!r} in {settings_path}: {e.errors()[0]["msg"]}') from None
 
 
+# -- Resume title resolution ---------------------------------------------------
+
+
 def _resolve_resume_arg(args: Sequence[str]) -> Sequence[str]:
     """Resolve ``--resume <title>`` to ``--resume <session-id>`` if the value matches a custom title.
 
@@ -209,6 +280,9 @@ def _resolve_resume_arg(args: Sequence[str]) -> Sequence[str]:
                 return args
         break
     return args
+
+
+# -- Zsh completion generation -------------------------------------------------
 
 
 def _generate_zsh_completion() -> str:
@@ -266,7 +340,7 @@ def _generate_zsh_completion() -> str:
 
     for flag in mod.ROOT_FLAGS:
         if not flag.documented:
-            continue  # hide undocumented flags from completion
+            continue
 
         arg_spec = _zsh_arg_spec(
             arg_type=flag.arg_type,
@@ -282,12 +356,10 @@ def _generate_zsh_completion() -> str:
 
         lines.append(line + ' \\')
 
-    # Positional: first arg is subcommand or prompt
     lines.append("    '1: :_claude_exec_commands' \\")
     lines.append("    '*::arg:->rest'")
     lines.append('')
 
-    # Subcommand dispatch
     lines.extend(
         [
             '  case "$state" in',
@@ -304,14 +376,13 @@ def _generate_zsh_completion() -> str:
         ]
     )
 
-    # Subcommand list function
     lines.append('_claude_exec_commands() {')
     lines.append('  local -a subcommands')
     lines.append('  subcommands=(')
     for sub in mod.SUBCOMMANDS:
         desc = sub.description.replace("'", '')
         lines.append(f"    '{sub.name}:{desc}'")
-    lines.append("    'ext:Claude launcher management commands'")
+    lines.append("    'ext:Claude exec management commands'")
     lines.append('  )')
     lines.append("  _describe 'command' subcommands")
     lines.append('}')
@@ -487,61 +558,6 @@ def _resolve_binary() -> str:
         raise BinaryNotFoundError('`which claude` resolved to this script — check PATH')
 
     return binary
-
-
-# -- ext subcommand app --------------------------------------------------------
-
-ext_app = create_app(help='Claude launcher management commands.')
-
-COMPLETION_DIR = Path.home() / '.config' / 'zsh' / 'completions'
-
-
-@ext_app.command()
-def install() -> None:
-    """Install launcher and zsh completions to PATH."""
-    console = rich.console.Console(stderr=True)
-
-    # Launcher script
-    launcher = LauncherInstaller(Path(__file__).resolve())
-    path = launcher.install('claude-exec')
-    console.print(f'Launcher: [bold]{path}[/bold]')
-    console.print(f'  -> {Path(__file__).resolve()}')
-
-    # Static zsh completion (not typer's eval-based protocol)
-    COMPLETION_DIR.mkdir(parents=True, exist_ok=True)
-    dest = COMPLETION_DIR / '_claude-exec'
-    dest.write_text(_generate_zsh_completion())
-    console.print(f'Completion: [bold]{dest}[/bold]')
-
-    console.print('\nRestart shell to activate.')
-
-
-@ext_app.command(name='resume-completions', hidden=True)
-def resume_completions(
-    project: Annotated[str, typer.Argument(help='Project path (default: CWD)')] = '',
-) -> None:
-    """Output session completions for zsh (hidden — called by tab completion)."""
-    index = SessionIndex(project or os.getcwd())
-    for entry in index.completions():
-        # Escape colons in titles — zsh _describe uses colon as delimiter
-        title = entry.title.replace(':', '\\:')
-        print(f'{entry.session_id}\t{title}\t{entry.mtime:.0f}')
-
-
-@ext_app.command()
-def uninstall() -> None:
-    """Remove launcher and zsh completions."""
-    console = rich.console.Console(stderr=True)
-
-    launcher_path = Path.home() / '.local' / 'bin' / 'claude-exec'
-    if launcher_path.exists():
-        launcher_path.unlink()
-        console.print(f'Removed: {launcher_path}')
-
-    completion_path = COMPLETION_DIR / '_claude-exec'
-    if completion_path.exists():
-        completion_path.unlink()
-        console.print(f'Removed: {completion_path}')
 
 
 # -- Exceptions + error boundary handlers -------------------------------------
