@@ -1,30 +1,19 @@
 #!/usr/bin/env -S uv run --quiet --script
-"""Inject CLAUDE_CODE_SESSION_ID into Bash tool subprocess environments.
+"""Inject session environment into Bash tool subprocess environments.
 
-Claude Code sets CLAUDE_CODE_SESSION_ID for Anthropic employees via a
-build-time USER_TYPE=ant gate in Shell.ts. The code is dead-code-eliminated
-from the public binary — the string literal doesn't even exist in the
-shipped executable.
+Uses the CLAUDE_ENV_FILE mechanism to export variables into every subsequent
+Bash tool command for the session's lifetime. Currently injects:
 
-This hook uses the CLAUDE_ENV_FILE mechanism (NOT ant-gated, fully present
-in the binary) to achieve the same result. Claude Code passes CLAUDE_ENV_FILE
-to SessionStart hooks pointing to a session-specific .sh file. Whatever
-export statements are written there get sourced into every subsequent Bash
-tool command for the session's lifetime.
-
-After this hook runs, any script spawned by the Bash tool can read
-$CLAUDE_CODE_SESSION_ID to know which session invoked it.
+    CLAUDE_CODE_SESSION_ID  Session identifier. Claude Code sets this for
+        Anthropic employees via a build-time USER_TYPE=ant gate in Shell.ts
+        (dead-code-eliminated from the public binary). This hook replicates
+        it for all users.
 
 Source evidence:
     Shell.ts:323-327 — ant-only CLAUDE_CODE_SESSION_ID injection (DCE'd)
     hooks.ts:925 — CLAUDE_ENV_FILE passed to SessionStart hooks (not gated)
     bashProvider.ts:170-173 — session env script sourced before commands
     AsyncHookRegistry.ts:259-261 — cache invalidated after hook completes
-
-Related issues:
-    The session-env directory (~/.claude/session-env/{sessionId}/) exists
-    with 200+ subdirectories but all are empty — no hook has ever written
-    to CLAUDE_ENV_FILE until now.
 
 See: https://code.claude.com/docs/en/hooks#sessionstart
 """
