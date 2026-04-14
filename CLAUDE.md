@@ -38,26 +38,26 @@ Simple, readable, maintainable, explicit. Fail-fast on misconfiguration. Single 
 
 Principles describe the north star, not the minimum bar. New code embodies them; existing code converges incrementally when touched. Surface adjacent violations via *Improve project health* — don't hunt.
 
-| Principle                                     | Application                                                                                               |
-|-----------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| **Explicit over implicit**                    | Clear control flow, avoid hidden behavior                                                                 |
-| **Improve project health**                    | Surface adjacent staleness in any committed artifact (code, docs, configs) — don't silently fix or ignore |
-| **Fail-fast validation**                      | Validate configuration at startup, not at first use                                                       |
+| Principle                                     | Application                                                                                                    |
+|-----------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| **Explicit over implicit**                    | Clear control flow, avoid hidden behavior                                                                      |
+| **Improve project health**                    | Surface adjacent staleness in any committed artifact (code, docs, configs) — don't silently fix or ignore      |
+| **Fail-fast validation**                      | Validate configuration at startup, not at first use                                                            |
 | **Single responsibility**                     | One clear purpose per function/class/module; cross-cutting concerns (errors, logging) belong in infrastructure |
-| **Type hints everywhere**                     | Strict Pydantic models, function signatures, `\| None` syntax                                             |
-| **YAGNI & KISS**                              | Build what's needed, keep it simple                                                                       |
-| **Worse is Better**                           | Simple, working solutions over perfect designs                                                            |
-| **Make It Work, Make It Right, Make It Fast** | In that order                                                                                             |
-| **Avoid Premature Optimization**              | Optimize when data shows need                                                                             |
-| **Principle of least surprise**               | Code should behave as expected                                                                            |
-| **Bubble exceptions**                         | Easier to Ask Forgiveness (EAFP) over Look Before You Leap (LBYL) — let exceptions propagate to handlers |
-| **Leverage existing infrastructure**          | Don't reimplement what a decorator, handler, or base class already provides                               |
-| **DRY**                                       | Deduplicate behavior, not just text — semantic duplication counts                                         |
-| **Trust event authority**                     | Don't second-guess events with defensive validation                                                       |
-| **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available                                                     |
-| **Assertions only in tests/**                 | Application code raises exceptions explicitly                                                             |
-| **Ideal state over backwards compat**         | Dev-only project — rename cleanly, no migration shims                                                     |
-| **DI via closures**                           | FastMCP pattern for dependency injection                                                                  |
+| **Type hints everywhere**                     | Strict Pydantic models, function signatures, `\| None` syntax                                                  |
+| **YAGNI & KISS**                              | Build what's needed, keep it simple                                                                            |
+| **Worse is Better**                           | Simple, working solutions over perfect designs                                                                 |
+| **Make It Work, Make It Right, Make It Fast** | In that order                                                                                                  |
+| **Avoid Premature Optimization**              | Optimize when data shows need                                                                                  |
+| **Principle of least surprise**               | Code should behave as expected                                                                                 |
+| **Bubble exceptions**                         | Easier to Ask Forgiveness (EAFP) over Look Before You Leap (LBYL) — let exceptions propagate to handlers       |
+| **Leverage existing infrastructure**          | Don't reimplement what a decorator, handler, or base class already provides                                    |
+| **DRY**                                       | Deduplicate behavior, not just text — semantic duplication counts                                              |
+| **Trust event authority**                     | Don't second-guess events with defensive validation                                                            |
+| **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available                                                          |
+| **Assertions only in tests/**                 | Application code raises exceptions explicitly                                                                  |
+| **Ideal state over backwards compat**         | Dev-only project — rename cleanly, no migration shims                                                          |
+| **DI via closures**                           | FastMCP pattern for dependency injection                                                                       |
 
 ### Exception Handling
 
@@ -279,11 +279,11 @@ def get_users() -> Sequence[User]:
 
 **Python snake_case internally, camelCase JSON output** - Use Pydantic v2's `alias_generator` to maintain Pythonic code while producing JavaScript-friendly JSON.
 
-| Layer | Convention | Example |
-|-------|------------|---------|
-| Python field names | snake_case | `first_name`, `auto_increment` |
-| JSON output | camelCase | `firstName`, `autoIncrement` |
-| JSON input | Accept both | `populate_by_name=True` |
+| Layer              | Convention  | Example                        |
+|--------------------|-------------|--------------------------------|
+| Python field names | snake_case  | `first_name`, `auto_increment` |
+| JSON output        | camelCase   | `firstName`, `autoIncrement`   |
+| JSON input         | Accept both | `populate_by_name=True`        |
 
 **Industry standard:** Google APIs, GraphQL, JSON:API spec all use camelCase for JSON. Major exceptions (Stripe, GitHub) provide SDKs that handle the conversion.
 
@@ -737,20 +737,20 @@ Where `<package>` is the underscored Python package name (e.g., `python_interpre
 
 Claude Code permission patterns use **literal prefix matching** (no shell expansion):
 
-| Pattern | Works? | Reason |
-|---------|--------|--------|
-| `Bash(python-interpreter:*)` | ✅ | Simple command name |
-| `Bash("$(git rev-parse ...)":*)` | ❌ | Shell expansion not evaluated |
-| `Bash(/absolute/path/cli/main.py:*)` | ✅ | Literal path match |
+| Pattern                              | Works? | Reason                        |
+|--------------------------------------|--------|-------------------------------|
+| `Bash(python-interpreter:*)`         | ✅      | Simple command name           |
+| `Bash("$(git rev-parse ...)":*)`     | ❌      | Shell expansion not evaluated |
+| `Bash(/absolute/path/cli/main.py:*)` | ✅      | Literal path match            |
 
 This is why `uv tool install` is preferred—it creates simple commands in PATH that match easily.
 
 ### CLI vs MCP Tool
 
-| Component | Use Case | Invocation |
-|-----------|----------|------------|
-| MCP Tool (`mcp__python-interpreter__execute`) | Structured output, explicit request | Via MCP protocol |
-| CLI (`python-interpreter`) | Multiline code, readable approval prompts | Heredoc syntax |
+| Component                                     | Use Case                                  | Invocation       |
+|-----------------------------------------------|-------------------------------------------|------------------|
+| MCP Tool (`mcp__python-interpreter__execute`) | Structured output, explicit request       | Via MCP protocol |
+| CLI (`python-interpreter`)                    | Multiline code, readable approval prompts | Heredoc syntax   |
 
 Claude should prefer the CLI for multiline code because approval prompts show clean, readable text instead of escaped JSON strings.
 
