@@ -527,7 +527,7 @@ class SessionRestoreService:
         return self._parse_archive_data(data)
 
     def _parse_archive_data(self, data: Mapping[str, Any]) -> SessionArchive:
-        """Parse and validate V2 archive data."""
+        """Parse and validate archive data."""
         return SessionArchive.model_validate(data)
 
     def _iter_transformed_records(
