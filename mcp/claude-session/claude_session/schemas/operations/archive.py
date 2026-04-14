@@ -77,7 +77,7 @@ class ArchiveMetadata(StrictModel):
     custom_title: str | None = None  # User-defined session name from /rename (if any)
 
 
-# -- Session Archive V2 - Explicit Artifact Models (Composite-First Ordering) ---
+# -- Session Archive - Explicit Artifact Models (Composite-First Ordering) ------
 #
 # Design principles:
 # - Store only source-of-truth fields (filenames derivable from IDs)
@@ -122,7 +122,6 @@ class SessionArchive(StrictModel):
     task_metadata: Mapping[str, str] = pydantic.Field(
         default_factory=dict
     )  # filename -> content (.highwatermark, etc.)
-    session_env: Sequence[SessionEnvEntry]
     session_memory: str | None  # session-memory/summary.md content
     debug_log: str | None  # debug/<session-id>.txt content
 
@@ -131,7 +130,7 @@ class SessionArchive(StrictModel):
     total_agent_records: int
 
 
-# -- V2 Entry Models (Constituents) --------------------------------------------
+# -- Entry Models (Constituents) ------------------------------------------------
 
 
 class MainSessionFileEntry(StrictModel):

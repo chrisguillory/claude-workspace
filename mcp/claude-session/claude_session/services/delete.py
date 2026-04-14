@@ -741,7 +741,7 @@ class SessionDeleteService:
 
     @staticmethod
     def _parse_backup_data(data: Mapping[str, Any]) -> SessionArchive:
-        """Parse and validate V2 backup data."""
+        """Parse and validate backup data."""
         return SessionArchive.model_validate(data)
 
     async def _rollback_from_backup(self, backup_path: Path) -> None:
