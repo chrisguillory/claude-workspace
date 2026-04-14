@@ -36,19 +36,23 @@ Before writing any documentation, comments, code descriptions, or commit message
 
 Simple, readable, maintainable, explicit. Fail-fast on misconfiguration. Single responsibility per function/validator.
 
+Principles describe the north star, not the minimum bar. New code embodies them; existing code converges incrementally when touched. Surface adjacent violations via *Improve project health* — don't hunt.
+
 | Principle                                     | Application                                                                                               |
 |-----------------------------------------------|-----------------------------------------------------------------------------------------------------------|
 | **Explicit over implicit**                    | Clear control flow, avoid hidden behavior                                                                 |
 | **Improve project health**                    | Surface adjacent staleness in any committed artifact (code, docs, configs) — don't silently fix or ignore |
 | **Fail-fast validation**                      | Validate configuration at startup, not at first use                                                       |
-| **Single responsibility**                     | One clear purpose per function/class/module                                                               |
+| **Single responsibility**                     | One clear purpose per function/class/module; cross-cutting concerns (errors, logging) belong in infrastructure |
 | **Type hints everywhere**                     | Strict Pydantic models, function signatures, `\| None` syntax                                             |
 | **YAGNI & KISS**                              | Build what's needed, keep it simple                                                                       |
 | **Worse is Better**                           | Simple, working solutions over perfect designs                                                            |
 | **Make It Work, Make It Right, Make It Fast** | In that order                                                                                             |
 | **Avoid Premature Optimization**              | Optimize when data shows need                                                                             |
 | **Principle of least surprise**               | Code should behave as expected                                                                            |
-| **Bubble exceptions**                         | Don't swallow errors, let them propagate                                                                  |
+| **Bubble exceptions**                         | Easier to Ask Forgiveness (EAFP) over Look Before You Leap (LBYL) — let exceptions propagate to handlers |
+| **Leverage existing infrastructure**          | Don't reimplement what a decorator, handler, or base class already provides                               |
+| **DRY**                                       | Deduplicate behavior, not just text — semantic duplication counts                                         |
 | **Trust event authority**                     | Don't second-guess events with defensive validation                                                       |
 | **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available                                                     |
 | **Assertions only in tests/**                 | Application code raises exceptions explicitly                                                             |
@@ -91,6 +95,29 @@ def handle_session_end(session_id: str):
 1. You've **actually seen** the exception occur in practice
 2. The exception is **expected as part of normal flow** (e.g., file existence checks)
 3. The library documentation **explicitly requires** handling specific exceptions
+
+**Don't duplicate your infrastructure** — If a decorator, context manager, or handler already covers an error path, the decorated function should not re-handle it. Inline error handling that duplicates infrastructure behavior is a semantic DRY violation and separation of concerns violation simultaneously:
+
+```python
+# ❌ Anti-pattern: Manually reimplementing what ErrorBoundary provides
+@boundary
+def main() -> int:
+    result = subprocess.run([...], check=False)
+    if result.returncode != 0:
+        sys.stderr.buffer.write(result.stdout)
+        return 2  # ErrorBoundary already exits with 2
+    return 0
+
+# ✅ Correct: Business logic in main(), error handling at the boundary
+@boundary
+def main() -> int:
+    subprocess.run([...], check=True)
+    return 0
+
+@boundary.handler(subprocess.CalledProcessError)
+def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
+    sys.stderr.buffer.write(exc.stdout)
+```
 
 ## Python Specifics
 
@@ -345,10 +372,10 @@ uv {add,remove} package-name
 Run pre-commit hooks before committing to catch linting/formatting issues:
 
 ```bash
-uv run pre-commit run --all-files
+uv run pre-commit run --all-files || uv run pre-commit run --all-files
 ```
 
-If hooks auto-fix files (ruff format), re-stage and run again until clean.
+The `||` retry handles auto-fixers (ruff format, trailing whitespace) that modify files on the first run. The second run verifies clean. If the second run fails, it's a real error.
 
 If mypy fails with missing import errors for workspace member dependencies, sync all packages:
 
@@ -362,8 +389,8 @@ uv sync --all-groups --all-packages
 
 ```
 1. Stage changes: git add <files>
-2. Run pre-commit: uv run pre-commit run --all-files
-3. If pre-commit fails → fix issues → re-stage → re-run pre-commit
+2. Run pre-commit: uv run pre-commit run --all-files || uv run pre-commit run --all-files
+3. If pre-commit still fails → fix real issues → re-stage → re-run pre-commit
 4. Only AFTER pre-commit passes → write commit message and commit
 ```
 
