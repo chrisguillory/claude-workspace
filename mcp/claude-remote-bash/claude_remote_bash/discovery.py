@@ -49,7 +49,7 @@ async def register_service(
     Returns the AsyncZeroconf instance and ServiceInfo for later unregistration.
     The caller is responsible for calling ``unregister_service`` on shutdown.
     """
-    hostname = socket.gethostname()
+    hostname = socket.gethostname().removesuffix('.local')  # macOS includes .local already
     info = AsyncServiceInfo(
         type_=SERVICE_TYPE,
         name=f'{hostname}.{SERVICE_TYPE}',
