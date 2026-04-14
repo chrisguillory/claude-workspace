@@ -1,0 +1,137 @@
+"""Pydantic models for the claude-remote-bash protocol."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Annotated, Literal
+
+import pydantic
+from cc_lib.schemas.base import ClosedModel
+
+__all__ = [
+    'AuthFail',
+    'AuthOk',
+    'AuthRequest',
+    'ConfigContent',
+    'ErrorResponse',
+    'ExecuteRequest',
+    'ExecuteResult',
+    'FileContent',
+    'Message',
+    'ReadConfigRequest',
+    'ReadFileRequest',
+]
+
+
+# -- Authentication -----------------------------------------------------------
+
+
+class AuthRequest(ClosedModel):
+    """Client → Daemon: authenticate with pre-shared key."""
+
+    type: Literal['auth'] = 'auth'
+    key: str
+
+
+class AuthOk(ClosedModel):
+    """Daemon → Client: authentication succeeded."""
+
+    type: Literal['auth_ok'] = 'auth_ok'
+    alias: str
+    hostname: str
+    os: str
+    user: str
+    shell: str
+    version: str
+
+
+class AuthFail(ClosedModel):
+    """Daemon → Client: authentication failed."""
+
+    type: Literal['auth_fail'] = 'auth_fail'
+    reason: str
+
+
+# -- Command execution --------------------------------------------------------
+
+
+class ExecuteRequest(ClosedModel):
+    """Client → Daemon: execute a command."""
+
+    type: Literal['execute'] = 'execute'
+    id: str
+    command: str
+    session_id: str
+    agent_id: str | None = None
+    timeout: float = 120.0
+
+
+class ExecuteResult(ClosedModel):
+    """Daemon → Client: command execution result."""
+
+    type: Literal['result'] = 'result'
+    id: str
+    stdout: str
+    exit_code: int
+    cwd: str
+
+
+# -- File & config operations -------------------------------------------------
+
+
+class ReadFileRequest(ClosedModel):
+    """Client → Daemon: read a file."""
+
+    type: Literal['read_file'] = 'read_file'
+    path: str
+
+
+class FileContent(ClosedModel):
+    """Daemon → Client: file content."""
+
+    type: Literal['file_content'] = 'file_content'
+    path: str
+    content: str
+    size: int
+
+
+class ReadConfigRequest(ClosedModel):
+    """Client → Daemon: read Claude Code configuration."""
+
+    type: Literal['read_config'] = 'read_config'
+
+
+class ConfigContent(ClosedModel):
+    """Daemon → Client: Claude Code configuration."""
+
+    type: Literal['config'] = 'config'
+    claude_json: Mapping[str, object] | None = None
+    settings_json: Mapping[str, object] | None = None
+
+
+# -- Error --------------------------------------------------------------------
+
+
+class ErrorResponse(ClosedModel):
+    """Daemon → Client: error response for any request."""
+
+    type: Literal['error'] = 'error'
+    id: str | None = None
+    message: str
+
+
+# -- Discriminated union ------------------------------------------------------
+
+Message = Annotated[
+    AuthRequest
+    | AuthOk
+    | AuthFail
+    | ExecuteRequest
+    | ExecuteResult
+    | ReadFileRequest
+    | FileContent
+    | ReadConfigRequest
+    | ConfigContent
+    | ErrorResponse,
+    pydantic.Discriminator('type'),
+]
