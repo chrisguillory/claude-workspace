@@ -15,6 +15,7 @@ package = false
 # Workspace members - each must have its own pyproject.toml
 members = [
     "cc-lib",
+    "mcp/claude-remote-bash",
     "mcp/claude-session",
     "mcp/document-search",
     "mcp/playwright-browser",

@@ -43,7 +43,7 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypedDict
 
 import pydantic
 import rich.console
@@ -427,6 +427,14 @@ class SessionEntry:
     mtime: float
 
 
+class CacheEntry(TypedDict):
+    """Shape of a single cached session entry on disk."""
+
+    title: str
+    mtime: float
+    size: int
+
+
 class SessionIndex:
     """Scans project session files for resume completions with cached title extraction.
 
@@ -466,13 +474,13 @@ class SessionIndex:
 
     def _from_cache(self) -> Sequence[SessionEntry]:
         try:
-            cache: Mapping[str, Mapping[str, object]] = json.loads(self._cache_path.read_text())
+            cache: Mapping[str, CacheEntry] = json.loads(self._cache_path.read_text())
         except (OSError, json.JSONDecodeError):
             return self._scan_and_cache()
         return self._to_entries(cache)
 
     def _scan_and_cache(self) -> Sequence[SessionEntry]:
-        cache: dict[str, dict[str, object]] = dict(self._load_cache())  # mutable copy for incremental updates
+        cache: dict[str, CacheEntry] = dict(self._load_cache())  # mutable copy for incremental updates
 
         current: dict[str, tuple[Path, float, int]] = {}
         for entry in os.scandir(self._project_dir):
@@ -503,13 +511,13 @@ class SessionIndex:
 
         return self._to_entries(cache)
 
-    def _load_cache(self) -> Mapping[str, Mapping[str, object]]:
+    def _load_cache(self) -> Mapping[str, CacheEntry]:
         try:
-            return json.loads(self._cache_path.read_text())
+            return json.loads(self._cache_path.read_text())  # type: ignore[no-any-return]  # json.loads returns Any
         except (OSError, json.JSONDecodeError):
             return {}
 
-    def _save_cache(self, cache: Mapping[str, object]) -> None:
+    def _save_cache(self, cache: Mapping[str, CacheEntry]) -> None:
         self._cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._cache_path.with_suffix('.tmp')
         tmp.write_text(json.dumps(cache, separators=(',', ':')))
@@ -535,12 +543,12 @@ class SessionIndex:
             return None
 
     @staticmethod
-    def _to_entries(cache: Mapping[str, Mapping[str, object]]) -> Sequence[SessionEntry]:
+    def _to_entries(cache: Mapping[str, CacheEntry]) -> Sequence[SessionEntry]:
         entries = [
             SessionEntry(
                 session_id=sid,
-                title=str(info.get('title', '')),
-                mtime=float(info.get('mtime', 0)),
+                title=info.get('title', ''),
+                mtime=info.get('mtime', 0.0),
             )
             for sid, info in cache.items()
         ]
