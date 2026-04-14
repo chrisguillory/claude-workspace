@@ -59,6 +59,8 @@ def main() -> None:
     args = _resolve_resume_arg(args)
 
     binary = _resolve_binary()
+    # Intentional: show the full exec line for development visibility.
+    # This is a single-user development tool, not a shared deployment.
     print(f'claude-exec: claude {" ".join(str(a) for a in args)}', file=sys.stderr)
     os.execv(binary, [binary, *args])
 
@@ -96,7 +98,7 @@ def _clean_path(keep: str) -> str:
 
 def _is_stale_path(entry: str) -> bool:
     """True if this PATH entry should be removed during venv activation."""
-    if '/.venv/bin' in entry or '/venv/bin' in entry:
+    if '/.venv/bin' in entry:
         return True
     if '/PyCharm.app/' in entry or '/WebStorm.app/' in entry:
         return True
@@ -126,9 +128,14 @@ def _inject_effort_flag(args: Sequence[str]) -> Sequence[str]:
     if '--effort' in args:
         return args
 
-    effort = os.environ.get('CLAUDE_CODE_EFFORT_LEVEL') or _read_settings_effort()
+    effort = os.environ.get('CLAUDE_CODE_EFFORT_LEVEL', '') or _read_settings_effort()
     if not effort:
         return args
+
+    try:
+        effort = pydantic.TypeAdapter(EffortLevel).validate_python(effort)
+    except pydantic.ValidationError as e:
+        raise LaunchError(f'CLAUDE_CODE_EFFORT_LEVEL={effort!r}: {e.errors()[0]["msg"]}') from None
 
     return [*args, '--effort', effort]
 
@@ -394,7 +401,7 @@ class SessionIndex:
         return self._to_entries(cache)
 
     def _scan_and_cache(self) -> Sequence[SessionEntry]:
-        cache = self._load_cache()
+        cache: dict[str, dict[str, object]] = dict(self._load_cache())  # mutable copy for incremental updates
 
         current: dict[str, tuple[Path, float, int]] = {}
         for entry in os.scandir(self._project_dir):
