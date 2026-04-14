@@ -20,7 +20,7 @@ Four layers of error handling:
 
     Layer 4 — Process Boundary:
         ErrorBoundary(exit_code=N) at entry points.
-        Handles unexpected errors, exits with non-zero code.
+        Handles expected and unexpected errors, exits with non-zero code.
         For Claude Code hooks, use exit_code=2 — exit 1 is a black hole
         where the model sees nothing (see hooks/run-linter.py docstring).
 
@@ -58,6 +58,23 @@ Patterns:
         @boundary
         def main() -> None:
             ...
+
+    Subprocess error handling (hooks, scripts)::
+
+        boundary = ErrorBoundary(exit_code=2)
+
+        @boundary
+        def main() -> int:
+            subprocess.run([...], stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, check=True)
+            return 0
+
+        @boundary.handler(subprocess.CalledProcessError)
+        def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
+            sys.stderr.buffer.write(exc.stdout)
+
+    Use ``check=True`` and let ErrorBoundary handle the failure —
+    don't manually check ``returncode`` inside ``@boundary`` functions.
 
     Per-exception exit codes (CLI tools with multiple outcomes)::
 
