@@ -12,13 +12,13 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Literal
 
 import httpx
 import pyrate_limiter
 import tenacity
 from cc_lib import ConcurrencyTracker
+from cc_lib.utils import get_claude_workspace_config_home_dir
 from google import genai
 from google.genai.types import EmbedContentConfig, HttpOptions
 from vertexai.preview import tokenization
@@ -255,7 +255,7 @@ class GeminiClient:
 
 def _load_api_key() -> str:
     """Load API key from standard location."""
-    key_path = Path.home() / '.claude-workspace' / 'secrets' / 'document_search_api_key'
+    key_path = get_claude_workspace_config_home_dir() / 'secrets' / 'document_search_api_key'
     if not key_path.exists():
         raise FileNotFoundError(f'API key not found at {key_path}')
     return key_path.read_text().strip()

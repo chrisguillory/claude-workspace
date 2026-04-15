@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pydantic
-from cc_lib.utils import get_claude_config_home_dir
+from cc_lib.utils import get_claude_config_home_dir, get_claude_workspace_config_home_dir
 
 # -- Terminal Colors -----------------------------------------------------------
 
@@ -169,7 +169,7 @@ def find_session(session_id_or_prefix: str) -> Path:
 
 # -- Session Auto-Detection ----------------------------------------------------
 
-_SESSIONS_FILE = Path.home() / '.claude-workspace' / 'sessions.json'
+_SESSIONS_FILE = get_claude_workspace_config_home_dir() / 'sessions.json'
 _SESSION_DB_ADAPTER = pydantic.TypeAdapter(SessionDatabase)
 
 

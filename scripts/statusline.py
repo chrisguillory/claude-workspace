@@ -116,6 +116,7 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.session_tracker import find_claude_pid
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 # Credential Models — External Data (login files, config, keychain)
 #
@@ -532,12 +533,12 @@ def _classify_cwd(cwd: str, project_dir: str, added_dirs: Sequence[str]) -> CwdL
 
 CONFIG_PATH = Path.home() / '.claude.json'
 SCRIPT_PATH = Path(__file__).resolve()
-STATUSLINE_DIR = Path.home() / '.claude-workspace' / 'statusline'
+STATUSLINE_DIR = get_claude_workspace_config_home_dir() / 'statusline'
 CACHE_PATH = STATUSLINE_DIR / 'cache.json'
 SNAPSHOT_DIR = STATUSLINE_DIR / 'snapshots'
 ERROR_LOG_PATH = STATUSLINE_DIR / 'error.log'
-SWITCH_PENDING_PATH = Path.home() / '.claude-workspace' / '.switch-pending'
-LOGINS_DIR = Path.home() / '.claude-workspace' / 'logins'
+SWITCH_PENDING_PATH = get_claude_workspace_config_home_dir() / '.switch-pending'
+LOGINS_DIR = get_claude_workspace_config_home_dir() / 'logins'
 CACHE_TTL_SECONDS = 300  # 5 minutes
 
 SUBSCRIPTION_DISPLAY: Mapping[str, str] = {

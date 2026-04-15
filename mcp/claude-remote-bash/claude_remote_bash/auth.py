@@ -9,6 +9,7 @@ import stat
 from collections.abc import Mapping
 from pathlib import Path
 
+from cc_lib.utils import get_claude_workspace_config_home_dir
 from filelock import FileLock
 
 __all__ = [
@@ -20,7 +21,7 @@ __all__ = [
     'verify_key',
 ]
 
-CONFIG_DIR = Path.home() / '.claude-workspace' / 'claude-remote-bash'
+CONFIG_DIR = get_claude_workspace_config_home_dir() / 'claude-remote-bash'
 CONFIG_FILE = CONFIG_DIR / 'config.json'
 LOCK_FILE = CONFIG_DIR / 'config.lock'
 KEY_LENGTH = 32  # 256-bit key

@@ -6,6 +6,7 @@ __all__ = [
     'Timer',
     'encode_project_path',
     'get_claude_config_home_dir',
+    'get_claude_workspace_config_home_dir',
     'humanize_seconds',
     'load_module_from_path',
     'temporary_module',
@@ -111,6 +112,17 @@ def get_claude_config_home_dir() -> Path:
     if config_dir:
         return Path(config_dir).resolve()
     return Path.home() / '.claude'
+
+
+def get_claude_workspace_config_home_dir() -> Path:
+    """Return claude-workspace's config/data root directory (~/.claude-workspace).
+
+    Our project's persistent state root for sessions.json, secrets,
+    per-tool state, and other files. We never automatically write to Claude Code's
+    own config dir (~/.claude) — that is Claude-owned territory returned
+    by ``get_claude_config_home_dir()``.
+    """
+    return Path.home() / '.claude-workspace'
 
 
 def humanize_seconds(seconds: float) -> str:

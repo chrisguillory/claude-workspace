@@ -63,7 +63,7 @@ from typing import Any, Literal, TypedDict
 import pydantic
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import JsonDatetime, JsonObject, StrictJsonObject
-from cc_lib.utils import get_claude_config_home_dir
+from cc_lib.utils import get_claude_config_home_dir, get_claude_workspace_config_home_dir
 
 # Diagnostic sections produce heterogeneous data (TypedDict, Pydantic model, dict, None).
 # No common base type exists — this alias encapsulates the suppression in one place.
@@ -75,7 +75,7 @@ CLAUDE_CONFIG_PATH = Path.home() / '.claude.json'
 CLAUDE_DIR = get_claude_config_home_dir()
 STATSIG_DIR = CLAUDE_DIR / 'statsig'
 PROJECTS_DIR = CLAUDE_DIR / 'projects'
-SESSIONS_JSON = Path.home() / '.claude-workspace' / 'sessions.json'
+SESSIONS_JSON = get_claude_workspace_config_home_dir() / 'sessions.json'
 FALLBACK_CREDENTIALS = CLAUDE_DIR / '.credentials.json'
 
 KEYCHAIN_SERVICE = 'Claude Code-credentials'
