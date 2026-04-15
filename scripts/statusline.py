@@ -289,6 +289,7 @@ class WorkspaceInfo(StrictModel):
     current_dir: str
     project_dir: str
     added_dirs: Sequence[str] = ()  # Added in v2.1.47
+    git_worktree: str | None = None  # Added in v2.1.97
 
 
 class CostInfo(StrictModel):
