@@ -50,6 +50,7 @@ import rich.console
 import typer
 from cc_lib.cli import LauncherInstaller, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 boundary = ErrorBoundary(exit_code=1)
 ext_app = create_app(help='Claude exec management commands.')
@@ -65,12 +66,17 @@ def main() -> None:
         run_app(ext_app)
         return
 
-    venv_bin = Path.cwd() / '.venv' / 'bin'
-    if venv_bin.is_dir():
-        _activate_venv(venv_bin.parent)
-
     args = _inject_effort_flag(sys.argv[1:])
     args = _resolve_resume_arg(args)
+
+    # Worktree venv takes priority over CWD venv.
+    # Must run after _resolve_resume_arg so title→UUID is resolved.
+    venv_bin = Path.cwd() / '.venv' / 'bin'
+    worktree_venv = _resolve_worktree_venv(args)
+    if worktree_venv:
+        _activate_venv(worktree_venv)
+    elif venv_bin.is_dir():
+        _activate_venv(venv_bin.parent)
 
     binary = _resolve_binary()
     # Intentional: show the full exec line for development visibility.
@@ -162,14 +168,8 @@ def _clean_path(keep: str) -> str:
 
 
 def _is_stale_path(entry: str) -> bool:
-    """True if this PATH entry should be removed during venv activation."""
-    if '/.venv/bin' in entry:
-        return True
-    if '/PyCharm.app/' in entry or '/WebStorm.app/' in entry:
-        return True
-    if '/.cursor/' in entry:
-        return True
-    return False
+    """True if this PATH entry is a .venv/bin from another project or prior activation."""
+    return '/.venv/bin' in entry
 
 
 # -- Effort flag injection -----------------------------------------------------
@@ -444,11 +444,12 @@ class SessionIndex:
     """
 
     TITLE_NEEDLE = b'"custom-title"'
+    WORKTREE_NEEDLE = b'"worktree-state"'
     CACHE_FRESHNESS_SECONDS = 10.0
 
     def __init__(self, project_path: str) -> None:
-        encoded = self.encode_project_path(project_path)
-        self._project_dir = Path.home() / '.claude' / 'projects' / encoded
+        encoded = encode_project_path(project_path)
+        self._project_dir = get_claude_config_home_dir() / 'projects' / encoded
         self._cache_path = Path.home() / '.claude-workspace' / 'claude-exec' / f'{encoded}.json'
 
     def completions(self) -> Sequence[SessionEntry]:
@@ -460,11 +461,6 @@ class SessionIndex:
             return self._from_cache()
 
         return self._scan_and_cache()
-
-    @staticmethod
-    def encode_project_path(path: str) -> str:
-        """Encode a project path the same way Claude Code does."""
-        return ''.join(ch if ch.isalnum() else '-' for ch in path)
 
     def _cache_is_fresh(self) -> bool:
         try:
@@ -526,21 +522,42 @@ class SessionIndex:
     @classmethod
     def _extract_title(cls, path: Path) -> str | None:
         """Extract the last custom-title from a JSONL file using mmap rfind."""
-        try:
-            if path.stat().st_size == 0:
-                return None
-            with open(path, 'rb') as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                pos = mm.rfind(cls.TITLE_NEEDLE)
-                if pos == -1:
-                    return None
-                line_start = mm.rfind(b'\n', 0, pos) + 1
-                line_end = mm.find(b'\n', pos)
-                if line_end == -1:
-                    line_end = len(mm)
-                rec: dict[str, str] = json.loads(mm[line_start:line_end])
-                return rec.get('customTitle') or None
-        except (OSError, json.JSONDecodeError, ValueError):
+        if path.stat().st_size == 0:
             return None
+        with open(path, 'rb') as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            pos = mm.rfind(cls.TITLE_NEEDLE)
+            if pos == -1:
+                return None
+            line_start = mm.rfind(b'\n', 0, pos) + 1
+            line_end = mm.find(b'\n', pos)
+            if line_end == -1:
+                line_end = len(mm)
+            rec: dict[str, str] = json.loads(mm[line_start:line_end])
+            return rec.get('customTitle') or None
+
+    @classmethod
+    def _extract_worktree_path(cls, path: Path) -> str | None:
+        """Extract the active worktree path from the last worktree-state record.
+
+        Returns None if the session never entered a worktree or exited it
+        (``worktreeSession: null`` is the ExitWorktree signal). Sessions may
+        enter and exit worktrees multiple times — rfind gets the final state.
+        """
+        if path.stat().st_size == 0:
+            return None
+        with open(path, 'rb') as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            pos = mm.rfind(cls.WORKTREE_NEEDLE)
+            if pos == -1:
+                return None
+            line_start = mm.rfind(b'\n', 0, pos) + 1
+            line_end = mm.find(b'\n', pos)
+            if line_end == -1:
+                line_end = len(mm)
+            rec: dict[str, object] = json.loads(mm[line_start:line_end])
+            session = rec.get('worktreeSession')
+            if not isinstance(session, dict):
+                return None  # null = exited worktree via ExitWorktree
+            return str(session.get('worktreePath', '')) or None
 
     @staticmethod
     def _to_entries(cache: Mapping[str, CacheEntry]) -> Sequence[SessionEntry]:
@@ -554,6 +571,53 @@ class SessionIndex:
         ]
         entries.sort(key=lambda e: e.mtime, reverse=True)
         return entries
+
+
+def _resolve_worktree_venv(args: Sequence[str]) -> Path | None:
+    """Detect an active worktree from ``--resume`` session and return its venv path.
+
+    Scans the session JSONL for a ``worktree-state`` record. If the session
+    is currently in a worktree (not exited), validates the worktree directory
+    and its ``.venv`` exist, and returns the venv path for activation.
+
+    Returns None for fresh sessions, bare ``--resume`` (picker mode), exited
+    worktrees, or missing/unpopulated worktree venvs.
+    """
+    # Extract the --resume/-r value (already resolved from title→UUID by _resolve_resume_arg)
+    resume_id: str | None = None
+    for flag in ('--resume', '-r'):
+        if flag in args:
+            idx = list(args).index(flag)
+            if idx + 1 < len(args):
+                resume_id = args[idx + 1]
+            break
+
+    if not resume_id:
+        return None
+
+    # Construct JSONL path from CWD-based project dir encoding
+    encoded = encode_project_path(os.getcwd())
+    jsonl_path = get_claude_config_home_dir() / 'projects' / encoded / f'{resume_id}.jsonl'
+    if not jsonl_path.exists():
+        return None
+
+    worktree_path = SessionIndex._extract_worktree_path(jsonl_path)
+    if not worktree_path:
+        return None
+
+    # Validate the worktree is still active
+    wt = Path(worktree_path)
+    git_file = wt / '.git'
+    if not git_file.is_file():
+        return None
+
+    venv = wt / '.venv'
+    if not (venv / 'bin').is_dir():
+        return None
+
+    os.environ['CLAUDE_EXEC_WORKTREE'] = worktree_path
+    print(f'claude-exec: worktree venv {venv} (from session {resume_id})', file=sys.stderr)
+    return venv
 
 
 def _resolve_binary() -> str:
