@@ -1,6 +1,6 @@
 """Claude CLI introspection data — flags, subcommands, model aliases.
 
-Derived from binary analysis of the Claude Code CLI (v2.1.92).
+Derived from binary analysis of the Claude Code CLI (v2.1.110).
 
 This is a committed artifact, not a runtime generator. When Claude Code
 updates, re-run the binary analysis workflow (documented in
@@ -12,7 +12,7 @@ Analysis method:
     3. ``grep hideHelp`` for hidden flags
     4. Subcommand ``--help`` for nested structures
 
-Last verified: v2.1.92, 2026-04-12
+Last verified: v2.1.110, 2026-04-16
 """
 
 from __future__ import annotations
@@ -76,6 +76,10 @@ ROOT_FLAGS: Sequence[FlagDef] = [
         choices=('low', 'medium', 'high', 'max'),
         description='Effort level for the session',
     ),
+    FlagDef(
+        '--exclude-dynamic-system-prompt-sections',
+        description='Move per-machine sections (cwd, env info, memory, git) out of system prompt for cache reuse',
+    ),
     FlagDef('--fallback-model', arg_type='model', description='Fallback model when default is overloaded'),
     FlagDef('--file', arg_type='string', description='File resources to download at startup'),
     FlagDef('--fork-session', description='Create new session ID when resuming'),
@@ -128,33 +132,97 @@ ROOT_FLAGS: Sequence[FlagDef] = [
     FlagDef('--version', '-v', description='Output version number'),
     FlagDef('--worktree', '-w', arg_type='string', description='Create git worktree for session'),
     # Hidden flags (from binary analysis, not in --help)
-    FlagDef('--advisor', arg_type='model', documented=False, description='Advisor model'),
-    FlagDef('--agent-color', arg_type='string', documented=False, description='Agent color (team agents)'),
-    FlagDef('--agent-id', arg_type='string', documented=False, description='Agent ID (team agents)'),
-    FlagDef('--agent-name', arg_type='string', documented=False, description='Agent name (team agents)'),
-    FlagDef('--agent-type', arg_type='string', documented=False, description='Agent type (team agents)'),
+    FlagDef('--advisor', arg_type='model', documented=False, description='Server-side advisor tool model'),
+    FlagDef('--agent-color', arg_type='string', documented=False, description='Teammate UI color (team agents)'),
+    FlagDef('--agent-id', arg_type='string', documented=False, description='Teammate agent ID (team agents)'),
+    FlagDef('--agent-name', arg_type='string', documented=False, description='Teammate display name (team agents)'),
+    FlagDef('--agent-type', arg_type='string', documented=False, description='Custom agent type (team agents)'),
     FlagDef(
         '--append-system-prompt-file', arg_type='path', documented=False, description='Append system prompt from file'
     ),
-    FlagDef('--callback-port', arg_type='string', documented=False, description='Callback port for OAuth'),
-    FlagDef('--channels', arg_type='string', documented=False, description='Plugin channels'),
-    FlagDef('--cowork', documented=False, description='Enable cowork mode'),
-    FlagDef('--max-thinking-tokens', arg_type='string', documented=False, description='Maximum thinking tokens'),
-    FlagDef('--max-turns', arg_type='string', documented=False, description='Maximum conversation turns'),
-    FlagDef('--parent-session-id', arg_type='string', documented=False, description='Parent session ID (team agents)'),
-    FlagDef('--permission-prompt-tool', arg_type='string', documented=False, description='Permission prompt tool'),
-    FlagDef('--prefill', arg_type='string', documented=False, description='Prefill assistant response'),
-    FlagDef('--remote-control', arg_type='string', documented=False, description='Remote control session'),
-    FlagDef('--sparse', arg_type='path', documented=False, description='Sparse checkout paths'),
-    FlagDef('--system-prompt-file', arg_type='path', documented=False, description='System prompt from file'),
-    FlagDef('--task-budget', arg_type='string', documented=False, description='Task budget in tokens'),
-    FlagDef('--team-name', arg_type='string', documented=False, description='Team name (team agents)'),
-    FlagDef('--teammate-mode', arg_type='string', documented=False, description='Teammate mode'),
-    FlagDef('--teleport', arg_type='session', documented=False, description='Teleport to session'),
+    FlagDef('--channels', arg_type='string', documented=False, description='MCP servers for channel notifications'),
     FlagDef(
-        '--thinking', arg_type='choice', choices=('budget', 'disabled'), documented=False, description='Thinking mode'
+        '--dangerously-load-development-channels',
+        arg_type='string',
+        documented=False,
+        description='Load channel servers not on approved allowlist (local dev only)',
     ),
-    FlagDef('--workload', arg_type='string', documented=False, description='Workload tag'),
+    FlagDef(
+        '--deep-link-last-fetch', arg_type='string', documented=False, description='FETCH_HEAD mtime for deep link'
+    ),
+    FlagDef('--deep-link-origin', documented=False, description='Signal session launched from deep link'),
+    FlagDef('--deep-link-repo', arg_type='string', documented=False, description='Deep link repo slug'),
+    FlagDef('--enable-auth-status', documented=False, description='Enable auth status messages in SDK mode'),
+    FlagDef('--enable-auto-mode', documented=False, description='Opt in to auto mode'),
+    FlagDef('--init', documented=False, description='Run Setup hooks with init trigger, then continue'),
+    FlagDef('--init-only', documented=False, description='Run Setup and SessionStart:startup hooks, then exit'),
+    FlagDef('--maintenance', documented=False, description='Run Setup hooks with maintenance trigger'),
+    FlagDef(
+        '--max-thinking-tokens',
+        arg_type='string',
+        documented=False,
+        description='(DEPRECATED) Maximum thinking tokens (use --thinking instead)',
+    ),
+    FlagDef(
+        '--max-turns', arg_type='string', documented=False, description='Maximum conversation turns (--print mode)'
+    ),
+    FlagDef('--parent-session-id', arg_type='string', documented=False, description='Parent session ID (team agents)'),
+    FlagDef(
+        '--permission-prompt-tool', arg_type='string', documented=False, description='MCP tool for permission prompts'
+    ),
+    FlagDef('--plan-mode-required', documented=False, description='Require plan mode before implementation'),
+    FlagDef('--prefill', arg_type='string', documented=False, description='Pre-fill the prompt input'),
+    FlagDef('--rc', arg_type='string', documented=False, description='Alias for --remote-control'),
+    FlagDef('--remote', arg_type='string', documented=False, description='Create a remote session with description'),
+    FlagDef(
+        '--remote-control', arg_type='string', documented=False, description='Start session with Remote Control enabled'
+    ),
+    FlagDef(
+        '--resume-session-at',
+        arg_type='string',
+        documented=False,
+        description='Resume at specific message ID (--print + --resume)',
+    ),
+    FlagDef(
+        '--rewind-files',
+        arg_type='string',
+        documented=False,
+        description='Restore files to state at user message and exit (--resume)',
+    ),
+    FlagDef(
+        '--sdk-url', arg_type='string', documented=False, description='Remote WebSocket endpoint for SDK I/O streaming'
+    ),
+    FlagDef(
+        '--session-mirror',
+        documented=False,
+        description='Emit transcript_mirror frames on stdout (SDK-internal)',
+    ),
+    FlagDef('--system-prompt-file', arg_type='path', documented=False, description='System prompt from file'),
+    FlagDef('--task-budget', arg_type='string', documented=False, description='API-side task budget in tokens'),
+    FlagDef('--team-name', arg_type='string', documented=False, description='Team name (team agents)'),
+    FlagDef(
+        '--teammate-mode',
+        arg_type='choice',
+        choices=('auto', 'tmux', 'in-process'),
+        documented=False,
+        description='How to spawn teammates',
+    ),
+    FlagDef('--teleport', arg_type='session', documented=False, description='Resume a teleport session'),
+    FlagDef(
+        '--thinking',
+        arg_type='choice',
+        choices=('enabled', 'adaptive', 'disabled'),
+        documented=False,
+        description='Thinking mode',
+    ),
+    FlagDef(
+        '--thinking-display',
+        arg_type='choice',
+        choices=('summarized', 'omitted'),
+        documented=False,
+        description='How thinking content appears in response',
+    ),
+    FlagDef('--workload', arg_type='string', documented=False, description='Workload tag for billing attribution'),
 ]
 
 # -- Subcommands ---------------------------------------------------------------
@@ -167,15 +235,23 @@ SUBCOMMANDS: Sequence[SubcommandDef] = [
     SubcommandDef('install', 'Install Claude Code native build'),
     SubcommandDef('mcp', 'Configure and manage MCP servers'),
     SubcommandDef('plugin', 'Manage Claude Code plugins'),
+    SubcommandDef('remote-control', 'Connect local environment for Remote Control sessions (hidden; alias: rc)'),
     SubcommandDef('setup-token', 'Set up long-lived authentication token'),
     SubcommandDef('update', 'Check for updates and install'),
 ]
 
 MODEL_ALIASES: Sequence[str] = [
+    'best',
     'haiku',
     'opus',
+    'opus[1m]',
+    'opusplan',
     'sonnet',
+    'sonnet[1m]',
     'claude-haiku-4-5-20251001',
+    'claude-opus-4-5-20251101',
     'claude-opus-4-6',
+    'claude-sonnet-4-5-20250929',
+    'claude-sonnet-4-5-20250929[1m]',
     'claude-sonnet-4-6',
 ]
