@@ -159,6 +159,17 @@ def get_claude_exec_launch_dir() -> Path:
     return Path(value).resolve()
 
 
+def get_claude_workspace_config_home_dir() -> Path:
+    """Return claude-workspace's config/data root directory (~/.claude-workspace).
+
+    Our project's persistent state root for sessions.json, secrets,
+    per-tool state, and other files. We never automatically write to Claude Code's
+    own config dir (~/.claude) — that is Claude-owned territory returned
+    by ``get_claude_config_home_dir()``.
+    """
+    return (Path.home() / '.claude-workspace').resolve()
+
+
 def validate_hook_tree(script_path: Path) -> Path:
     """Validate a hook script lives at ``$CLAUDE_EXEC_LAUNCH_DIR/hooks/<name>``.
 
@@ -177,17 +188,6 @@ def validate_hook_tree(script_path: Path) -> Path:
     if actual != expected:
         raise HookTreeMismatchError(actual=actual, expected=expected)
     return launch_dir
-
-
-def get_claude_workspace_config_home_dir() -> Path:
-    """Return claude-workspace's config/data root directory (~/.claude-workspace).
-
-    Our project's persistent state root for sessions.json, secrets,
-    per-tool state, and other files. We never automatically write to Claude Code's
-    own config dir (~/.claude) — that is Claude-owned territory returned
-    by ``get_claude_config_home_dir()``.
-    """
-    return (Path.home() / '.claude-workspace').resolve()
 
 
 def humanize_seconds(seconds: float) -> str:
