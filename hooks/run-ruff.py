@@ -50,20 +50,29 @@ import sys
 from pathlib import Path
 
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.exceptions import HookTreeMismatchError
 from cc_lib.schemas.hooks import PostToolUseHookInput
+from cc_lib.utils import validate_hook_tree
 
 boundary = ErrorBoundary(exit_code=2)
 
 
 @boundary
 def main() -> int:
+    launch_dir = validate_hook_tree(Path(__file__))
+
     payload = PostToolUseHookInput.model_validate_json(sys.stdin.buffer.read())
     file_path = payload.tool_input.get('file_path', '')
 
     if not file_path.endswith(('.py', '.pyi')):
         return 0
 
-    if not Path(file_path).is_file():
+    file = Path(file_path)
+    if not file.is_file():
+        return 0
+
+    # Scope: silently skip files outside the project.
+    if not file.resolve().is_relative_to(launch_dir):
         return 0
 
     # Pass 1: check all project rules, auto-fix only the safe formatting ones.
@@ -89,6 +98,11 @@ def main() -> int:
 @boundary.handler(subprocess.CalledProcessError)
 def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
     sys.stderr.buffer.write(exc.stdout)
+
+
+@boundary.handler(HookTreeMismatchError)
+def _handle_tree_mismatch(exc: HookTreeMismatchError) -> None:
+    print(str(exc), file=sys.stderr)
 
 
 if __name__ == '__main__':

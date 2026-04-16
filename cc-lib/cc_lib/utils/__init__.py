@@ -11,6 +11,7 @@ __all__ = [
     'humanize_seconds',
     'load_module_from_path',
     'temporary_module',
+    'validate_hook_tree',
 ]
 
 import importlib.util
@@ -23,6 +24,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
+
+from cc_lib.exceptions import HookTreeMismatchError
 
 
 class Timer:
@@ -154,6 +157,26 @@ def get_claude_exec_launch_dir() -> Path:
             'CLAUDE_EXEC_LAUNCH_DIR is not set. Launch Claude Code via claude-exec (or its installed launcher).'
         )
     return Path(value).resolve()
+
+
+def validate_hook_tree(script_path: Path) -> Path:
+    """Validate a hook script lives at ``$CLAUDE_EXEC_LAUNCH_DIR/hooks/<name>``.
+
+    Self-consistency check for hook scripts. Catches the case where Claude Code
+    invoked a hook from a different tree than ``CLAUDE_EXEC_LAUNCH_DIR`` points
+    to (e.g., ``$CLAUDE_PROJECT_DIR/hooks/...`` resolved to the main tree while
+    we're working in a worktree).
+
+    Returns the launch_dir for the caller to reuse (e.g., for scope checks).
+    Raises ``HookTreeMismatchError`` if the script's resolved path does not
+    match ``launch_dir / 'hooks' / script_path.name``.
+    """
+    launch_dir = get_claude_exec_launch_dir()
+    expected = (launch_dir / 'hooks' / script_path.name).resolve()
+    actual = script_path.resolve()
+    if actual != expected:
+        raise HookTreeMismatchError(actual=actual, expected=expected)
+    return launch_dir
 
 
 def get_claude_workspace_config_home_dir() -> Path:

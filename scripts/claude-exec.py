@@ -67,12 +67,20 @@ def main() -> None:
         return
 
     args = _inject_effort_flag(sys.argv[1:])
+    args = _inject_allow_dangerous_flag(args)
     args = _resolve_resume_arg(args)
 
-    # Worktree venv takes priority over CWD venv.
+    # Detect worktree once; both env vars and venv decision derive from it.
     # Must run after _resolve_resume_arg so title→UUID is resolved.
+    worktree_path = _resolve_worktree_path(args)
+    launch_dir = worktree_path or Path.cwd()
+    os.environ['CLAUDE_EXEC_LAUNCH_DIR'] = str(launch_dir)
+    if worktree_path:
+        os.environ['CLAUDE_EXEC_WORKTREE'] = str(worktree_path)
+
+    # Worktree venv takes priority over CWD venv.
     venv_bin = Path.cwd() / '.venv' / 'bin'
-    worktree_venv = _resolve_worktree_venv(args)
+    worktree_venv = _venv_from_worktree(worktree_path)
     if worktree_venv:
         _activate_venv(worktree_venv)
     elif venv_bin.is_dir():
@@ -227,6 +235,47 @@ def _read_settings_effort() -> EffortLevel | str:
         return pydantic.TypeAdapter(EffortLevel).validate_python(value)
     except pydantic.ValidationError as e:
         raise LaunchError(f'CLAUDE_CODE_EFFORT_LEVEL={value!r} in {settings_path}: {e.errors()[0]["msg"]}') from None
+
+
+# -- Allow-dangerous flag injection --------------------------------------------
+
+
+def _inject_allow_dangerous_flag(args: Sequence[str]) -> Sequence[str]:
+    """Add ``--allow-dangerously-skip-permissions`` so bypass mode is Shift+Tab-reachable.
+
+    This flag (distinct from ``--dangerously-skip-permissions``) adds
+    ``bypassPermissions`` to the Shift+Tab cycle WITHOUT starting in it.
+    Default behavior: launch in ``default`` mode, toggle into bypass only
+    when needed, without having to restart the session. Stable since v2.1.86.
+
+    Skipped if the user explicitly set ``--dangerously-skip-permissions``
+    (coupled "start in bypass"), ``--allow-dangerously-skip-permissions``
+    (avoid duplicate), or ``--permission-mode bypassPermissions`` (same
+    effect). Respects ``--permission-mode <other>`` — bug #17544 confirms
+    ``--allow-`` variant composes cleanly with an explicit initial mode.
+
+    Requires ``skipDangerousModePermissionPrompt: true`` in settings.json
+    to avoid the one-time warning dialog when Shift+Tab-ing into bypass.
+
+    Refs:
+        https://code.claude.com/docs/en/permission-modes
+        https://github.com/anthropics/claude-code/issues/28697 (shipped feature)
+        https://github.com/anthropics/claude-code/issues/17544 (--permission-mode composes)
+        https://github.com/anthropics/claude-code/issues/21062 (still open: unlock by default)
+    """
+    explicit_bypass_flags = {
+        '--allow-dangerously-skip-permissions',
+        '--dangerously-skip-permissions',
+    }
+    if any(a in explicit_bypass_flags for a in args):
+        return args
+
+    # Also skip if user passed --permission-mode bypassPermissions explicitly
+    for i, a in enumerate(args):
+        if a == '--permission-mode' and i + 1 < len(args) and args[i + 1] == 'bypassPermissions':
+            return args
+
+    return [*args, '--allow-dangerously-skip-permissions']
 
 
 # -- Resume title resolution ---------------------------------------------------
@@ -573,17 +622,19 @@ class SessionIndex:
         return entries
 
 
-def _resolve_worktree_venv(args: Sequence[str]) -> Path | None:
-    """Detect an active worktree from ``--resume`` session and return its venv path.
+def _resolve_worktree_path(args: Sequence[str]) -> Path | None:
+    """Detect an active worktree from ``--resume`` session, return its path.
 
-    Scans the session JSONL for a ``worktree-state`` record. If the session
-    is currently in a worktree (not exited), validates the worktree directory
-    and its ``.venv`` exist, and returns the venv path for activation.
+    Scans the session JSONL for a ``worktree-state`` record and validates
+    the worktree directory still exists and has a ``.git`` file (worktrees
+    have ``.git`` files, not directories).
 
     Returns None for fresh sessions, bare ``--resume`` (picker mode), exited
-    worktrees, or missing/unpopulated worktree venvs.
+    worktrees (``worktreeSession: null``), or missing worktree directories.
+
+    Pure function — no side effects. Caller is responsible for setting any
+    related env vars based on the returned value.
     """
-    # Extract the --resume/-r value (already resolved from title→UUID by _resolve_resume_arg)
     resume_id: str | None = None
     for flag in ('--resume', '-r'):
         if flag in args:
@@ -595,7 +646,6 @@ def _resolve_worktree_venv(args: Sequence[str]) -> Path | None:
     if not resume_id:
         return None
 
-    # Construct JSONL path from CWD-based project dir encoding
     encoded = encode_project_path(os.getcwd())
     jsonl_path = get_claude_config_home_dir() / 'projects' / encoded / f'{resume_id}.jsonl'
     if not jsonl_path.exists():
@@ -605,18 +655,20 @@ def _resolve_worktree_venv(args: Sequence[str]) -> Path | None:
     if not worktree_path:
         return None
 
-    # Validate the worktree is still active
     wt = Path(worktree_path)
-    git_file = wt / '.git'
-    if not git_file.is_file():
+    if not (wt / '.git').is_file():
         return None
 
-    venv = wt / '.venv'
+    return wt
+
+
+def _venv_from_worktree(worktree_path: Path | None) -> Path | None:
+    """Given a worktree path, return its ``.venv`` if populated, else None."""
+    if worktree_path is None:
+        return None
+    venv = worktree_path / '.venv'
     if not (venv / 'bin').is_dir():
         return None
-
-    os.environ['CLAUDE_EXEC_WORKTREE'] = worktree_path
-    print(f'claude-exec: worktree venv {venv} (from session {resume_id})', file=sys.stderr)
     return venv
 
 
