@@ -1,4 +1,6 @@
-"""Claude CLI completion data — derived from binary analysis of v2.1.92.
+"""Claude CLI introspection data — flags, subcommands, model aliases.
+
+Derived from binary analysis of the Claude Code CLI (v2.1.92).
 
 This is a committed artifact, not a runtime generator. When Claude Code
 updates, re-run the binary analysis workflow (documented in

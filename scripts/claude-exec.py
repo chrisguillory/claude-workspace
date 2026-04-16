@@ -34,7 +34,6 @@ process is replaced entirely, the terminal talks directly to Claude Code.
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import json
 import mmap
 import os
@@ -48,9 +47,14 @@ from typing import Annotated, Literal, TypedDict
 import pydantic
 import rich.console
 import typer
+from cc_lib import claude_cli_introspection
 from cc_lib.cli import LauncherInstaller, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
+from cc_lib.utils import (
+    encode_project_path,
+    get_claude_config_home_dir,
+    get_claude_workspace_config_home_dir,
+)
 
 boundary = ErrorBoundary(exit_code=1)
 ext_app = create_app(help='Claude exec management commands.')
@@ -66,8 +70,14 @@ def main() -> None:
         run_app(ext_app)
         return
 
-    args = _inject_effort_flag(sys.argv[1:])
-    args = _inject_allow_dangerous_flag(args)
+    raw_args = sys.argv[1:]
+    if _is_subcommand_invocation(raw_args):
+        # Subcommands (update, mcp, config, etc.) have their own flag
+        # schemas — don't inject interactive-session flags.
+        args: Sequence[str] = raw_args
+    else:
+        args = _inject_effort_flag(raw_args)
+        args = _inject_allow_dangerous_flag(args)
     args = _resolve_resume_arg(args)
 
     # Detect worktree once; both env vars and venv decision derive from it.
@@ -139,6 +149,16 @@ def uninstall() -> None:
     if completion_path.exists():
         completion_path.unlink()
         console.print(f'Removed: {completion_path}')
+
+
+# -- Subcommand detection ------------------------------------------------------
+
+
+def _is_subcommand_invocation(args: Sequence[str]) -> bool:
+    """True if args start with a known claude subcommand."""
+    if not args:
+        return False
+    return args[0] in {sc.name for sc in claude_cli_introspection.SUBCOMMANDS}
 
 
 # -- Venv activation -----------------------------------------------------------
@@ -343,18 +363,10 @@ def _generate_zsh_completion() -> str:
 
     No Python callback on TAB — everything runs in native zsh.
     """
-    completions_path = Path(__file__).parent / 'claude-exec-completions.py'
-    spec = importlib.util.spec_from_file_location('claude_exec_completions', completions_path)
-    if spec is None or spec.loader is None:
-        raise LaunchError(f'failed to load completions from {completions_path}')
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[mod.__name__] = mod
-    spec.loader.exec_module(mod)
-
     lines: list[str] = [
         '#compdef claude-exec',
         '',
-        '# Auto-generated from claude-exec-completions.py (FlagDef data)',
+        '# Auto-generated from cc_lib.claude_cli_introspection (FlagDef data)',
         f'# Claude Code v2.1.92, {__import__("datetime").date.today().isoformat()}',
         '',
     ]
@@ -385,9 +397,9 @@ def _generate_zsh_completion() -> str:
     lines.append('_claude_exec() {')
     lines.append('  _arguments -s -S \\')
 
-    model_aliases = ' '.join(mod.MODEL_ALIASES)
+    model_aliases = ' '.join(claude_cli_introspection.MODEL_ALIASES)
 
-    for flag in mod.ROOT_FLAGS:
+    for flag in claude_cli_introspection.ROOT_FLAGS:
         if not flag.documented:
             continue
 
@@ -428,7 +440,7 @@ def _generate_zsh_completion() -> str:
     lines.append('_claude_exec_commands() {')
     lines.append('  local -a subcommands')
     lines.append('  subcommands=(')
-    for sub in mod.SUBCOMMANDS:
+    for sub in claude_cli_introspection.SUBCOMMANDS:
         desc = sub.description.replace("'", '')
         lines.append(f"    '{sub.name}:{desc}'")
     lines.append("    'ext:Claude exec management commands'")

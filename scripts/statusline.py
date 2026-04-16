@@ -1670,6 +1670,11 @@ def main() -> None:
         if not cwd_n.startswith(d.rstrip('/'))
     )
 
+    # LOUD warning if claude-exec wasn't used — hooks reference
+    # $CLAUDE_EXEC_LAUNCH_DIR and will misbehave without it.
+    if not os.environ.get('CLAUDE_EXEC_LAUNCH_DIR'):
+        line3.append(f'{BOLD}{RED}⚠ NOT LAUNCHED VIA claude-exec{RESET}')
+
     # Venv provenance — where did .venv/bin on PATH come from?
     line3.append(_detect_venv_provenance(data.cwd))
 
