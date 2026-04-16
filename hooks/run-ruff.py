@@ -45,6 +45,7 @@ ErrorBoundary(exit_code=2) guarantees no exception produces exit 1.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -60,6 +61,9 @@ boundary = ErrorBoundary(exit_code=2)
 @boundary
 def main() -> int:
     launch_dir = validate_hook_tree(Path(__file__))
+
+    if not shutil.which('ruff'):
+        raise RuffNotFoundError
 
     payload = PostToolUseHookInput.model_validate_json(sys.stdin.buffer.read())
     file_path = payload.tool_input.get('file_path', '')
@@ -95,6 +99,13 @@ def main() -> int:
     return 0
 
 
+class RuffNotFoundError(Exception):
+    """ruff binary not on PATH — project venv likely not activated."""
+
+    def __init__(self) -> None:
+        super().__init__('ruff not found on PATH. Launch Claude via claude-exec to activate the project venv.')
+
+
 @boundary.handler(subprocess.CalledProcessError)
 def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
     sys.stderr.buffer.write(exc.stdout)
@@ -102,6 +113,11 @@ def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
 
 @boundary.handler(HookTreeMismatchError)
 def _handle_tree_mismatch(exc: HookTreeMismatchError) -> None:
+    print(str(exc), file=sys.stderr)
+
+
+@boundary.handler(RuffNotFoundError)
+def _handle_ruff_not_found(exc: RuffNotFoundError) -> None:
     print(str(exc), file=sys.stderr)
 
 
