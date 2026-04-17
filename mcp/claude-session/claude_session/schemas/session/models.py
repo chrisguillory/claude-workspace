@@ -58,6 +58,15 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   CompactMetadata.preCompactDiscoveredTools, expanded PermissionModeRecord permissionMode,
                   agentId to InformationalSystemRecord/AttachmentRecord, slug to InformationalSystemRecord,
                   Task.activeForm optional, Grep -r flag, fixed system dispatch for unknown subtypes (2.1.92+)
+- Schema v0.2.22: Added 8 new AttachmentRecord variants (hook_success, hook_blocking_error,
+                  skill_listing, auto_mode, plan_mode_exit, task_reminder, command_permissions,
+                  nested_memory), SendMessagePromptToolInput ({to, prompt} shape),
+                  UsageIteration (non-empty message.usage.iterations),
+                  expanded TokenUsage.speed Literal to include 'fast',
+                  added 'claude-opus-4-7' to ModelId, agentId to ScheduledTaskFireSystemRecord
+                  (sidechain subagents), 'auto' to PermissionModeRecord permissionMode,
+                  made EditToolInput.new_string optional (aborted tool calls),
+                  AttachmentRecord.parentUuid nullable (first attachment) (2.1.112+)
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -146,6 +155,7 @@ __all__ = [
     'AsyncTaskLaunchResult',
     'AttachmentData',
     'AttachmentRecord',
+    'AutoModeAttachment',
     'BackgroundTask',
     'BaseRecord',
     'BashOutputToolInput',
@@ -156,6 +166,7 @@ __all__ = [
     'BridgeStatusSystemRecord',
     'CacheCreation',
     'ClearThinkingEdit',
+    'CommandPermissionsAttachment',
     'CompactBoundarySystemRecord',
     'CompactMetadata',
     'CompanionIntroAttachment',
@@ -185,8 +196,11 @@ __all__ = [
     'GrepToolInput',
     'GrepToolResult',
     'HandoffCommandResult',
+    'HookBlockingErrorAttachment',
+    'HookBlockingErrorDetail',
     'HookInfo',
     'HookProgressData',
+    'HookSuccessAttachment',
     'ImageContent',
     'ImageDimensions',
     'ImageFileInfo',
@@ -217,11 +231,14 @@ __all__ = [
     'MessageContent',
     'MicrocompactBoundarySystemRecord',
     'MicrocompactMetadata',
+    'NestedMemoryAttachment',
+    'NestedMemoryContent',
     'NetworkError',
     'NotebookEditToolInput',
     'PatchHunk',
     'PdfFileInfo',
     'PermissionModeRecord',
+    'PlanModeExitAttachment',
     'PrLinkRecord',
     'ProgressData',
     'ProgressRecord',
@@ -239,6 +256,7 @@ __all__ = [
     'SavedHookContextRecord',
     'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
+    'SendMessagePromptToolInput',
     'SendMessageRouting',
     'SendMessageSimpleToolInput',
     'SendMessageToolInput',
@@ -249,6 +267,7 @@ __all__ = [
     'SessionRecord',
     'SessionRecordAdapter',
     'SimpleThinkingMetadata',
+    'SkillListingAttachment',
     'SkillToolInput',
     'SkillToolResult',
     'StatusChange',
@@ -266,6 +285,8 @@ __all__ = [
     'TaskListToolResult',
     'TaskOutputPollingResult',
     'TaskOutputToolInput',
+    'TaskReminderAttachment',
+    'TaskReminderItem',
     'TaskSingleItem',
     'TaskSingleToolResult',
     'TaskStopToolResult',
@@ -292,6 +313,7 @@ __all__ = [
     'ToolUseCaller',
     'ToolUseContent',
     'TurnDurationSystemRecord',
+    'UsageIteration',
     'UserQuestion',
     'UserRecord',
     'UserRecordOrigin',
@@ -313,11 +335,11 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.21'
+SCHEMA_VERSION = '0.2.22'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.92'
-LAST_VALIDATED = '2026-04-08'
-VALIDATION_RECORD_COUNT = 1_164_569
+CLAUDE_CODE_MAX_VERSION = '2.1.112'
+LAST_VALIDATED = '2026-04-17'
+VALIDATION_RECORD_COUNT = 1_202_339
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -428,7 +450,7 @@ class EditToolInput(StrictModel):
 
     file_path: PathField
     old_string: str
-    new_string: str
+    new_string: str | None = None  # Missing on aborted/partial tool calls (Claude Code 2.1.112+)
     replace_all: bool | Literal['false'] | None = None
 
 
@@ -606,6 +628,13 @@ class SendMessageSimpleToolInput(StrictModel):
 
     to: str
     message: str
+
+
+class SendMessagePromptToolInput(StrictModel):
+    """SendMessage input using 'prompt' field (Claude Code 2.1.112+)."""
+
+    to: str
+    prompt: str
 
 
 # -- TaskCreate Tool Input (Claude Code 2.1.17+) -------------------------------
@@ -929,6 +958,7 @@ ToolInput = Annotated[
     # Multi-field tools
     | SendMessageToolInput  # type, recipient, content, summary required (2.1.63+)
     | SendMessageSimpleToolInput  # to, message required (2.1.81+)
+    | SendMessagePromptToolInput  # to, prompt required (2.1.112+)
     | TaskToolInput  # prompt, description, subagent_type required
     | TaskCreateToolInput  # subject, description required (2.1.17+)
     | TeamCreateToolInput  # team_name, description required (2.1.63+)
@@ -1149,6 +1179,17 @@ class ServerToolUse(StrictModel):
     web_fetch_requests: int  # Always present (553/553)
 
 
+class UsageIteration(StrictModel):
+    """Per-iteration usage entry on message.usage.iterations (Claude Code 2.1.112+ for non-empty)."""
+
+    type: Literal['message']
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
+    cache_creation: CacheCreation
+
+
 class TokenUsage(StrictModel):
     """Token usage information for assistant messages."""
 
@@ -1160,8 +1201,8 @@ class TokenUsage(StrictModel):
     service_tier: Literal['standard'] | None = None  # Only value: 'standard' (19018 occurrences) - null for synthetic
     server_tool_use: ServerToolUse | None = None  # Server-side tool use tracking (0.5% present)
     inference_geo: str | None = None  # Inference geography (Claude Code 2.1.31+, e.g. 'not_available')
-    iterations: EmptySequence | None = None  # Always null or [] in observed data (Claude Code 2.1.38+)
-    speed: Literal['standard'] | None = None  # Speed tier (Claude Code 2.1.41+)
+    iterations: Sequence[UsageIteration] | None = None  # Per-iteration usage (Claude Code 2.1.38+, non-empty 2.1.112+)
+    speed: Literal['standard', 'fast'] | None = None  # Speed tier (Claude Code 2.1.41+, 'fast' added 2.1.112+)
     research_preview_2026_02: str | None = None  # Research preview feature flag (e.g. 'active')
 
 
@@ -2378,6 +2419,7 @@ class ScheduledTaskFireSystemRecord(BaseRecord):
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None
+    agentId: str | None = None  # Present on sidechain subagent records (Claude Code 2.1.112+)
 
 
 # Union of system subtype records
@@ -2677,7 +2719,7 @@ class PermissionModeRecord(StrictModel):
     """
 
     type: Literal['permission-mode']
-    permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions']
+    permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto']
     sessionId: str
 
 
@@ -2701,8 +2743,117 @@ class McpInstructionsDeltaAttachment(StrictModel):
     removedNames: Sequence[str]
 
 
+class HookSuccessAttachment(StrictModel):
+    """Hook execution result surfaced as attachment (Claude Code 2.1.112+)."""
+
+    type: Literal['hook_success']
+    hookName: str
+    hookEvent: str  # e.g. 'SessionStart'
+    toolUseID: str
+    command: str
+    content: str
+    stdout: str
+    stderr: str
+    exitCode: int
+    durationMs: int
+
+
+class HookBlockingErrorDetail(StrictModel):
+    """Nested blocking error payload on HookBlockingErrorAttachment (Claude Code 2.1.112+)."""
+
+    blockingError: str
+    command: str
+
+
+class HookBlockingErrorAttachment(StrictModel):
+    """Hook blocking error surfaced as attachment (Claude Code 2.1.112+)."""
+
+    type: Literal['hook_blocking_error']
+    hookName: str
+    hookEvent: str
+    toolUseID: str
+    blockingError: HookBlockingErrorDetail
+
+
+class SkillListingAttachment(StrictModel):
+    """List of available skills injected into session (Claude Code 2.1.112+)."""
+
+    type: Literal['skill_listing']
+    content: str
+    skillCount: int
+    isInitial: bool
+
+
+class AutoModeAttachment(StrictModel):
+    """Auto-mode reminder injection (Claude Code 2.1.112+)."""
+
+    type: Literal['auto_mode']
+    reminderType: Literal['full']  # Only 'full' observed
+
+
+class PlanModeExitAttachment(StrictModel):
+    """Plan-mode exit marker referencing the plan file (Claude Code 2.1.112+)."""
+
+    type: Literal['plan_mode_exit']
+    planFilePath: str
+    planExists: bool
+
+
+class TaskReminderItem(StrictModel):
+    """Task item embedded in a TaskReminderAttachment (Claude Code 2.1.112+)."""
+
+    id: str
+    subject: str
+    description: str
+    status: Literal['pending', 'in_progress', 'completed']
+    blocks: Sequence[str]
+    blockedBy: Sequence[str]
+
+
+class TaskReminderAttachment(StrictModel):
+    """Task list reminder injection (Claude Code 2.1.112+)."""
+
+    type: Literal['task_reminder']
+    content: Sequence[TaskReminderItem]  # Empty when no tasks; populated after TaskCreate
+    itemCount: int
+
+
+class CommandPermissionsAttachment(StrictModel):
+    """Command-scoped permissions (Claude Code 2.1.112+)."""
+
+    type: Literal['command_permissions']
+    allowedTools: EmptySequence  # Always [] observed
+
+
+class NestedMemoryContent(StrictModel):
+    """Nested memory content payload on NestedMemoryAttachment (Claude Code 2.1.112+)."""
+
+    path: str
+    type: Literal['Project']  # Only 'Project' observed
+    content: str
+    contentDiffersFromDisk: bool
+
+
+class NestedMemoryAttachment(StrictModel):
+    """Nested CLAUDE.md memory injection (Claude Code 2.1.112+)."""
+
+    type: Literal['nested_memory']
+    path: str
+    content: NestedMemoryContent
+    displayPath: str
+
+
 AttachmentData = Annotated[
-    CompanionIntroAttachment | McpInstructionsDeltaAttachment,
+    CompanionIntroAttachment
+    | McpInstructionsDeltaAttachment
+    | HookSuccessAttachment
+    | HookBlockingErrorAttachment
+    | SkillListingAttachment
+    | AutoModeAttachment
+    | PlanModeExitAttachment
+    | TaskReminderAttachment
+    | CommandPermissionsAttachment
+    | NestedMemoryAttachment,
     pydantic.Field(discriminator='type'),
 ]
 
@@ -2716,7 +2867,7 @@ class AttachmentRecord(BaseRecord):
 
     type: Literal['attachment']
     cwd: PathField
-    parentUuid: str
+    parentUuid: str | None  # null on the very first attachment of a session (Claude Code 2.1.112+)
     isSidechain: bool
     userType: Literal['external']
     version: str
