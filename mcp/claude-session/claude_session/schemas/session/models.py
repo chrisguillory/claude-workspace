@@ -72,6 +72,9 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   selected_lines_in_ide, diagnostics, plan_file_reference, plan_mode_exit,
                   compact_file_reference, command_permissions, date_change, auto_mode,
                   auto_mode_exit) (2.1.112+)
+- Schema v0.2.23: Added NetworkError.type (always null in observed data; reserved/future field
+                  mirroring ApiError.type), extended CLAUDE_CODE_MAX_VERSION to 2.1.114
+                  (2.1.113/114 verified clean, no other schema changes needed)
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -361,11 +364,11 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.22'
+SCHEMA_VERSION = '0.2.23'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.112'
+CLAUDE_CODE_MAX_VERSION = '2.1.114'
 LAST_VALIDATED = '2026-04-18'
-VALIDATION_RECORD_COUNT = 484_345
+VALIDATION_RECORD_COUNT = 485_767
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1368,6 +1371,7 @@ class NetworkError(StrictModel):
     """Network error wrapper (for connection failures)."""
 
     cause: ConnectionError
+    type: None = None  # Always null in observed data; reserved/future field mirroring ApiError.type
 
 
 class EmptyError(StrictModel):

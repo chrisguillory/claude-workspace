@@ -3,9 +3,9 @@
     "AgentNameRecord": {
       "additionalProperties": false,
       "description": "Records the human-readable name assigned to a worker agent session.\n\nWritten to m✓ Exported JSON Schema to: session-schema.json
-  Schema version: 0.2.22
-  Claude Code compatibility: 2.0.35 - 2.1.112
-  Size: 246,925 bytes
+  Schema version: 0.2.23
+  Claude Code compatibility: 2.0.35 - 2.1.114
+  Size: 247,033 bytes
 
 Schema contains:
   200 model definitions
@@ -5594,6 +5594,11 @@ Schema contains:
       "properties": {
         "cause": {
           "$ref": "#/$defs/ConnectionError"
+        },
+        "type": {
+          "default": null,
+          "title": "Type",
+          "type": "null"
         }
       },
       "required": [
@@ -10084,11 +10089,11 @@ Schema contains:
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.22",
+  "x-schema-version": "0.2.23",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.112",
+    "max": "2.1.114",
     "last_validated": "2026-04-18",
-    "validation_record_count": 484345
+    "validation_record_count": 485767
   }
 }
