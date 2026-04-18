@@ -33,6 +33,7 @@ Record types found in session files (schema v0.2.9):
 | `turn_duration` | Turn timing data (v0.2.0) | `durationMs` |
 | `stop_hook_summary` | Hook execution summaries (v0.2.6) | `hookCount`, `hookInfos`, `hookErrors`, `stopReason` |
 | `bridge_status` | Remote-control bridge status (v0.2.14) | `content`, `url`, `isMeta` |
+| `away_summary` | Session recap for `/recap` (v0.2.22, Claude Code 2.1.108+) | `content` |
 
 ### Quick Reference: Message Content Types
 
