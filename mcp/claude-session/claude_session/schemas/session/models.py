@@ -580,7 +580,7 @@ class GrepToolInput(StrictModel):
         Hyphenated flags: -n (line numbers), -A/-B/-C (context), -i (case insensitive)
     """
 
-    pattern: str = pydantic.Field(validation_alias=pydantic.AliasChoices('pattern', 'command'))
+    pattern: str
     path: PathField | None = None
     output_mode: Literal['content', 'files_with_matches', 'count', 'context'] | None = None
     glob: str | None = None

@@ -496,6 +496,28 @@ Edit `claude_session/schemas/session/models.py`. Common fixes:
 - Always use fully typed models, never `dict` fallbacks
 - Minimize churn -- don't reorganize existing fields
 
+**Schema is the source of truth — not the session data.**
+
+When a validation failure is caused by Claude Code (or an underlying model) emitting **incorrect data** — e.g., a hallucinated field name, a typo, a malformed value — the fix is to **patch the offending JSONL record**, not to loosen the model to accept the malformed shape. Accommodating hallucinations in the schema:
+
+- Is a form of schema lying — the type signature no longer reflects the real tool/API contract.
+- Masks future occurrences of the same hallucination (valid-looking records with bogus data).
+- Degrades the "100% pass rate" signal into "100% pass after we stopped enforcing things."
+- Creates bad precedent — every model misfire becomes a candidate for schema loosening.
+
+Reserve schema change for observed **intended** structural evolution (new fields Anthropic shipped, new enum values added, new record types). If a record is failing because it's *wrong*, fix the data:
+
+```python
+# Example: one-off field-name hallucination (command→pattern in Grep input)
+# surgical jq/python edit to the specific record, preserving all other fields
+```
+
+`AliasChoices` / alternate field names are reserved for legitimate cases:
+- Python-keyword conflicts (`StatusChange.from_` aliasing `from`)
+- Non-identifier JSON keys (`GrepToolInput.dash_n` aliasing `-n`)
+
+They are **not** for accommodating client-side bugs in the upstream emitter.
+
 ### 4. Verify 100% pass rate
 ```bash
 ./scripts/validate_models.py --fast
