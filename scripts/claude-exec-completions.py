@@ -71,7 +71,7 @@ ROOT_FLAGS: Sequence[FlagDef] = [
     FlagDef(
         '--effort',
         arg_type='choice',
-        choices=('low', 'medium', 'high', 'max'),
+        choices=('low', 'medium', 'high', 'xhigh', 'max'),
         description='Effort level for the session',
     ),
     FlagDef('--fallback-model', arg_type='model', description='Fallback model when default is overloaded'),
@@ -175,5 +175,6 @@ MODEL_ALIASES: Sequence[str] = [
     'sonnet',
     'claude-haiku-4-5-20251001',
     'claude-opus-4-6',
+    'claude-opus-4-7',
     'claude-sonnet-4-6',
 ]

@@ -50,6 +50,7 @@ import rich.console
 import typer
 from cc_lib.cli import LauncherInstaller, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.schemas.base import ClosedModel
 
 boundary = ErrorBoundary(exit_code=1)
 ext_app = create_app(help='Claude exec management commands.')
@@ -208,7 +209,7 @@ def _inject_effort_flag(args: Sequence[str]) -> Sequence[str]:
     return [*args, '--effort', effort]
 
 
-type EffortLevel = Literal['low', 'medium', 'high', 'max']
+type EffortLevel = Literal['low', 'medium', 'high', 'xhigh', 'max']
 
 
 def _read_settings_effort() -> EffortLevel | str:
@@ -427,6 +428,19 @@ class SessionEntry:
     mtime: float
 
 
+class CachedSessionEntry(ClosedModel):
+    """On-disk cache shape for a single session index entry."""
+
+    title: str
+    mtime: float
+    size: int
+
+
+CACHE_ADAPTER: pydantic.TypeAdapter[Mapping[str, CachedSessionEntry]] = pydantic.TypeAdapter(
+    Mapping[str, CachedSessionEntry]
+)
+
+
 class SessionIndex:
     """Scans project session files for resume completions with cached title extraction.
 
@@ -465,14 +479,13 @@ class SessionIndex:
             return False
 
     def _from_cache(self) -> Sequence[SessionEntry]:
-        try:
-            cache: Mapping[str, Mapping[str, object]] = json.loads(self._cache_path.read_text())
-        except (OSError, json.JSONDecodeError):
+        cache = self._load_cache()
+        if cache is None:
             return self._scan_and_cache()
         return self._to_entries(cache)
 
     def _scan_and_cache(self) -> Sequence[SessionEntry]:
-        cache: dict[str, dict[str, object]] = dict(self._load_cache())  # mutable copy for incremental updates
+        cache: dict[str, CachedSessionEntry] = dict(self._load_cache() or {})
 
         current: dict[str, tuple[Path, float, int]] = {}
         for entry in os.scandir(self._project_dir):
@@ -484,13 +497,13 @@ class SessionIndex:
         updated = False
         for sid, (path, file_mtime, file_size) in current.items():
             cached = cache.get(sid)
-            if cached is not None and cached.get('mtime', 0) >= file_mtime and cached.get('size', 0) == file_size:
+            if cached is not None and cached.mtime >= file_mtime and cached.size == file_size:
                 continue
-            cache[sid] = {
-                'title': self._extract_title(path) or '',
-                'mtime': file_mtime,
-                'size': file_size,
-            }
+            cache[sid] = CachedSessionEntry(
+                title=self._extract_title(path) or '',
+                mtime=file_mtime,
+                size=file_size,
+            )
             updated = True
 
         for sid in list(cache):
@@ -503,16 +516,20 @@ class SessionIndex:
 
         return self._to_entries(cache)
 
-    def _load_cache(self) -> Mapping[str, Mapping[str, object]]:
+    def _load_cache(self) -> Mapping[str, CachedSessionEntry] | None:
         try:
-            return json.loads(self._cache_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return {}
+            raw = self._cache_path.read_text()
+        except OSError:
+            return None
+        try:
+            return CACHE_ADAPTER.validate_json(raw)
+        except pydantic.ValidationError:
+            return None
 
-    def _save_cache(self, cache: Mapping[str, object]) -> None:
+    def _save_cache(self, cache: Mapping[str, CachedSessionEntry]) -> None:
         self._cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._cache_path.with_suffix('.tmp')
-        tmp.write_text(json.dumps(cache, separators=(',', ':')))
+        tmp.write_bytes(CACHE_ADAPTER.dump_json(cache))
         tmp.replace(self._cache_path)
 
     @classmethod
@@ -535,15 +552,8 @@ class SessionIndex:
             return None
 
     @staticmethod
-    def _to_entries(cache: Mapping[str, Mapping[str, object]]) -> Sequence[SessionEntry]:
-        entries = [
-            SessionEntry(
-                session_id=sid,
-                title=str(info.get('title', '')),
-                mtime=float(info.get('mtime', 0)),
-            )
-            for sid, info in cache.items()
-        ]
+    def _to_entries(cache: Mapping[str, CachedSessionEntry]) -> Sequence[SessionEntry]:
+        entries = [SessionEntry(session_id=sid, title=info.title, mtime=info.mtime) for sid, info in cache.items()]
         entries.sort(key=lambda e: e.mtime, reverse=True)
         return entries
 
