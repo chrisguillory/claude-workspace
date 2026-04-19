@@ -310,7 +310,7 @@ wheels = [
 
 [[package]]
 name = "claude-session"
-version = "0.3.0"
+version = "0.3.2"
 source = { editable = "mcp/claude-session" }
 dependencies = [
     { name = "cc-lib" },
