@@ -5,9 +5,6 @@ This module defines strict types for all record types found in Claude Code sessi
 Uses discriminated unions for type-safe parsing of heterogeneous JSONL data.
 
 CLAUDE CODE VERSION COMPATIBILITY:
-- Validated against: Claude Code 2.0.35 - 2.0.65
-- Last validated: 2025-12-15
-- Validation coverage: 157,640 records across 1,039 session files
 - Schema v0.1.1: Added todos field for Claude Code 2.0.47+
 - Schema v0.1.2: Added error field to AssistantRecord for Claude Code 2.0.49+
 - Schema v0.1.3: Added slug, DocumentContent, ContextManagement, SkillToolInput,
@@ -58,6 +55,25 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   CompactMetadata.preCompactDiscoveredTools, expanded PermissionModeRecord permissionMode,
                   agentId to InformationalSystemRecord/AttachmentRecord, slug to InformationalSystemRecord,
                   Task.activeForm optional, Grep -r flag, fixed system dispatch for unknown subtypes (2.1.92+)
+- Schema v0.2.22: Added claude-opus-4-7 model ID (2.1.111 Opus 4.7 launch), UsageIteration for
+                  TokenUsage.iterations (2.1.100+), AwaySummarySystemRecord for /recap feature (2.1.108+),
+                  WorktreeSessionData.enteredExisting with optional originalBranch/originalHeadCommit
+                  (2.1.105 EnterWorktree path=), CompactMetadata.postTokens/durationMs, agentId on
+                  BridgeStatusSystemRecord, apiErrorStatus on AssistantRecord, ApiError.type literal,
+                  'auto' permissionMode (2.1.111), ExitWorktreeToolInput, MonitorToolInput (2.1.98+),
+                  EnterWorktreeToolInput.path (2.1.105+), GlobToolInput.limit, Grep -o flag and
+                  pattern/command AliasChoices, server_error error literal; expanded AttachmentData
+                  union by 21 types (task_reminder, hook_success, hook_blocking_error,
+                  hook_non_blocking_error, hook_additional_context, queued_command, dynamic_skill,
+                  skill_listing, nested_memory, file, edited_text_file, opened_file_in_ide,
+                  selected_lines_in_ide, diagnostics, plan_file_reference, plan_mode_exit,
+                  compact_file_reference, command_permissions, date_change, auto_mode,
+                  auto_mode_exit) (2.1.112+)
+- Schema v0.2.23: Added NetworkError.type (always null in observed data; reserved/future field
+                  mirroring ApiError.type), reverted v0.2.22's GrepToolInput pattern/command
+                  AliasChoices (Opus 4.7 hallucination patched at source per new
+                  'schema is the source of truth' rule in mcp/claude-session/CLAUDE.md §3),
+                  extended CLAUDE_CODE_MAX_VERSION to 2.1.114 (2.1.113/114 verified clean)
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -146,6 +162,9 @@ __all__ = [
     'AsyncTaskLaunchResult',
     'AttachmentData',
     'AttachmentRecord',
+    'AutoModeAttachment',
+    'AutoModeExitAttachment',
+    'AwaySummarySystemRecord',
     'BackgroundTask',
     'BaseRecord',
     'BashOutputToolInput',
@@ -156,7 +175,9 @@ __all__ = [
     'BridgeStatusSystemRecord',
     'CacheCreation',
     'ClearThinkingEdit',
+    'CommandPermissionsAttachment',
     'CompactBoundarySystemRecord',
+    'CompactFileReferenceAttachment',
     'CompactMetadata',
     'CompanionIntroAttachment',
     'ConnectionError',
@@ -165,10 +186,18 @@ __all__ = [
     'CronDeleteToolInput',
     'CronListToolInput',
     'CustomTitleRecord',
+    'DateChangeAttachment',
+    'DiagnosticFile',
+    'DiagnosticItem',
+    'DiagnosticPosition',
+    'DiagnosticSeverityRange',
+    'DiagnosticsAttachment',
     'DocumentContent',
     'DocumentSource',
+    'DynamicSkillAttachment',
     'EditToolInput',
     'EditToolResult',
+    'EditedTextFileAttachment',
     'EmptyError',
     'EnterPlanModeToolInput',
     'EnterPlanModeToolResult',
@@ -176,6 +205,10 @@ __all__ = [
     'EnterWorktreeToolResult',
     'ExitPlanModeToolInput',
     'ExitPlanModeToolResult',
+    'ExitWorktreeToolInput',
+    'FileAttachment',
+    'FileAttachmentContent',
+    'FileAttachmentFileContent',
     'FileBackupInfo',
     'FileHistorySnapshot',
     'FileHistorySnapshotRecord',
@@ -185,8 +218,13 @@ __all__ = [
     'GrepToolInput',
     'GrepToolResult',
     'HandoffCommandResult',
+    'HookAdditionalContextAttachment',
+    'HookBlockingErrorAttachment',
+    'HookBlockingErrorData',
     'HookInfo',
+    'HookNonBlockingErrorAttachment',
     'HookProgressData',
+    'HookSuccessAttachment',
     'ImageContent',
     'ImageDimensions',
     'ImageFileInfo',
@@ -217,11 +255,17 @@ __all__ = [
     'MessageContent',
     'MicrocompactBoundarySystemRecord',
     'MicrocompactMetadata',
+    'MonitorToolInput',
+    'NestedMemoryAttachment',
+    'NestedMemoryContent',
     'NetworkError',
     'NotebookEditToolInput',
+    'OpenedFileInIdeAttachment',
     'PatchHunk',
     'PdfFileInfo',
     'PermissionModeRecord',
+    'PlanFileReferenceAttachment',
+    'PlanModeExitAttachment',
     'PrLinkRecord',
     'ProgressData',
     'ProgressRecord',
@@ -230,6 +274,7 @@ __all__ = [
     'QuestionAnnotation',
     'QuestionOption',
     'QueueOperationRecord',
+    'QueuedCommandAttachment',
     'ReadImageToolResult',
     'ReadMcpResourceToolInput',
     'ReadMcpResourceToolResult',
@@ -239,6 +284,7 @@ __all__ = [
     'SavedHookContextRecord',
     'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
+    'SelectedLinesInIdeAttachment',
     'SendMessageRouting',
     'SendMessageSimpleToolInput',
     'SendMessageToolInput',
@@ -249,6 +295,7 @@ __all__ = [
     'SessionRecord',
     'SessionRecordAdapter',
     'SimpleThinkingMetadata',
+    'SkillListingAttachment',
     'SkillToolInput',
     'SkillToolResult',
     'StatusChange',
@@ -266,6 +313,8 @@ __all__ = [
     'TaskListToolResult',
     'TaskOutputPollingResult',
     'TaskOutputToolInput',
+    'TaskReminderAttachment',
+    'TaskReminderItem',
     'TaskSingleItem',
     'TaskSingleToolResult',
     'TaskStopToolResult',
@@ -292,6 +341,7 @@ __all__ = [
     'ToolUseCaller',
     'ToolUseContent',
     'TurnDurationSystemRecord',
+    'UsageIteration',
     'UserQuestion',
     'UserRecord',
     'UserRecordOrigin',
@@ -313,11 +363,11 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.21'
+SCHEMA_VERSION = '0.2.23'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.92'
-LAST_VALIDATED = '2026-04-08'
-VALIDATION_RECORD_COUNT = 1_164_569
+CLAUDE_CODE_MAX_VERSION = '2.1.114'
+LAST_VALIDATED = '2026-04-18'
+VALIDATION_RECORD_COUNT = 485_767
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -448,6 +498,23 @@ class EnterWorktreeToolInput(StrictModel):
     """Input for EnterWorktree tool - creates an isolated git worktree."""
 
     name: str | None = None  # Optional worktree name
+    path: str | None = None  # Path to existing worktree to attach to (Claude Code 2.1.105+)
+
+
+class ExitWorktreeToolInput(StrictModel):
+    """Input for ExitWorktree tool - exits the active worktree session (Claude Code 2.1.x)."""
+
+    action: Literal['keep', 'remove']  # keep retains the worktree; remove deletes it
+    discard_changes: bool | None = None  # When true with remove, discard uncommitted changes
+
+
+class MonitorToolInput(StrictModel):
+    """Input for Monitor tool - streams events from a long-running background script (Claude Code 2.1.98+)."""
+
+    description: str  # Short human-readable description of what is being monitored
+    timeout_ms: int  # Kill deadline in milliseconds
+    persistent: bool  # If True, runs for the lifetime of the session (ignores timeout_ms)
+    command: str  # Shell command or script to run
 
 
 class EnterPlanModeToolInput(StrictModel):
@@ -531,6 +598,7 @@ class GrepToolInput(StrictModel):
     dash_C: int | None = pydantic.Field(None, alias='-C')
     dash_i: bool | None = pydantic.Field(None, alias='-i')
     dash_r: bool | None = pydantic.Field(None, alias='-r')
+    dash_o: bool | None = pydantic.Field(None, alias='-o')  # --only-matching (ripgrep)
 
 
 # -- Glob Tool Input (2,507x occurrences) --------------------------------------
@@ -542,10 +610,12 @@ class GlobToolInput(StrictModel):
     Fields:
         pattern: Glob pattern to match files (e.g., "**/*.py")
         path: Directory to search in (defaults to cwd)
+        limit: Max number of files to return (Claude Code 2.1.100+)
     """
 
     pattern: str
     path: PathField | None = None
+    limit: int | None = None
 
 
 # -- Task Tool Input (872x occurrences) ----------------------------------------
@@ -955,6 +1025,8 @@ ToolInput = Annotated[
     | ExitPlanModeToolInput  # plan optional, launchSwarm optional
     | ListMcpResourcesToolInput  # server optional
     | EnterWorktreeToolInput  # name optional (2.1.63+)
+    | ExitWorktreeToolInput  # action required (2.1.105+)
+    | MonitorToolInput  # description, timeout_ms, persistent, command required (2.1.98+)
     | TaskListToolInput  # No fields (2.1.17+)
     | CronListToolInput  # No fields (2.1.71+)
     | EnterPlanModeToolInput  # No fields - must be last before fallback!
@@ -1149,6 +1221,21 @@ class ServerToolUse(StrictModel):
     web_fetch_requests: int  # Always present (553/553)
 
 
+class UsageIteration(StrictModel):
+    """A single internal iteration within a turn's token usage (Claude Code 2.1.100+).
+
+    Populated when the turn runs multiple internal inference iterations
+    (e.g., adaptive thinking with tool loops). All 6 fields are always present.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
+    cache_creation: CacheCreation
+    type: Literal['message']
+
+
 class TokenUsage(StrictModel):
     """Token usage information for assistant messages."""
 
@@ -1160,7 +1247,7 @@ class TokenUsage(StrictModel):
     service_tier: Literal['standard'] | None = None  # Only value: 'standard' (19018 occurrences) - null for synthetic
     server_tool_use: ServerToolUse | None = None  # Server-side tool use tracking (0.5% present)
     inference_geo: str | None = None  # Inference geography (Claude Code 2.1.31+, e.g. 'not_available')
-    iterations: EmptySequence | None = None  # Always null or [] in observed data (Claude Code 2.1.38+)
+    iterations: Sequence[UsageIteration] | None = None  # Internal inference iterations (Claude Code 2.1.100+)
     speed: Literal['standard'] | None = None  # Speed tier (Claude Code 2.1.41+)
     research_preview_2026_02: str | None = None  # Research preview feature flag (e.g. 'active')
 
@@ -1228,6 +1315,8 @@ class CompactMetadata(StrictModel):
     trigger: Literal['auto', 'manual']  # auto=24, manual=18 across all sessions
     preTokens: int
     preCompactDiscoveredTools: Sequence[str] | None = None  # Tools discovered before compaction (2.1.81+)
+    postTokens: int | None = None  # Token count after compaction (Claude Code 2.1.100+)
+    durationMs: int | None = None  # Compaction runtime in milliseconds (Claude Code 2.1.100+)
 
 
 class MicrocompactMetadata(StrictModel):
@@ -1265,6 +1354,7 @@ class ApiError(StrictModel):
     headers: Mapping[str, str | Sequence[str]]
     requestID: str | None = None  # Can be null for some errors
     error: ApiErrorResponse | None = None  # Can be missing for some errors (e.g., 503)
+    type: Literal['overloaded_error'] | None = None  # Top-level error type (Claude Code 2.1.100+)
 
 
 # noinspection PyShadowingBuiltins
@@ -1280,6 +1370,7 @@ class NetworkError(StrictModel):
     """Network error wrapper (for connection failures)."""
 
     cause: ConnectionError
+    type: None = None  # Always null in observed data; reserved/future field mirroring ApiError.type
 
 
 class EmptyError(StrictModel):
@@ -2084,7 +2175,7 @@ class UserRecord(BaseRecord):
         None,
         description='UUID of the assistant message that created the tool use this record responds to',
     )
-    permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions'] | None = pydantic.Field(
+    permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'] | None = pydantic.Field(
         None, description='Permission mode for the request (Claude Code 2.1.15+)'
     )
     planContent: str | None = pydantic.Field(None, description='Plan content for plan mode submissions')
@@ -2132,14 +2223,17 @@ class AssistantRecord(BaseRecord):
     apiError: Literal['max_output_tokens'] | None = pydantic.Field(
         None, description='API error code (Claude Code 2.1.15+)'
     )
-    error: Literal['rate_limit', 'unknown', 'invalid_request', 'authentication_failed'] | None = pydantic.Field(
-        None, description='Error type for API error messages'
+    error: Literal['rate_limit', 'unknown', 'invalid_request', 'authentication_failed', 'server_error'] | None = (
+        pydantic.Field(None, description='Error type for API error messages')
     )
     slug: str | None = pydantic.Field(None, description='Human-readable session slug (Claude Code 2.0.51+)')
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
     teamName: str | None = pydantic.Field(None, description='Team name when running in multi-agent team mode')
     agentName: str | None = pydantic.Field(None, description='Agent name within team')
     errorDetails: str | None = pydantic.Field(None, description='API error details string (e.g., prompt too long)')
+    apiErrorStatus: int | None = pydantic.Field(
+        None, description='HTTP status code for API errors (e.g., 400, 529) (Claude Code 2.1.100+)'
+    )
 
 
 # -- Summary Record (does NOT inherit from BaseRecord - different schema) ------
@@ -2356,6 +2450,7 @@ class BridgeStatusSystemRecord(BaseRecord):
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
+    agentId: str | None = None  # Agent identifier on sidechain records (Claude Code 2.1.x)
     teamName: str | None = None
     agentName: str | None = None
 
@@ -2380,6 +2475,27 @@ class ScheduledTaskFireSystemRecord(BaseRecord):
     entrypoint: str | None = None
 
 
+class AwaySummarySystemRecord(BaseRecord):
+    """System record for session recap (subtype=away_summary, Claude Code 2.1.108+).
+
+    Emitted when returning to an idle session to summarize prior goal/state.
+    Controlled by `/recap` or `CLAUDE_CODE_ENABLE_AWAY_SUMMARY`.
+    """
+
+    type: Literal['system']
+    cwd: PathField
+    parentUuid: str | None
+    subtype: Literal['away_summary']
+    content: str  # Recap text summarizing session goal and current state
+    isMeta: bool
+    isSidechain: bool
+    userType: str
+    version: str
+    gitBranch: str
+    slug: str | None = None
+    entrypoint: str | None = None
+
+
 # Union of system subtype records
 SystemSubtypeRecord = Annotated[
     LocalCommandSystemRecord
@@ -2390,7 +2506,8 @@ SystemSubtypeRecord = Annotated[
     | TurnDurationSystemRecord
     | StopHookSummarySystemRecord
     | BridgeStatusSystemRecord
-    | ScheduledTaskFireSystemRecord,
+    | ScheduledTaskFireSystemRecord
+    | AwaySummarySystemRecord,
     pydantic.Field(discriminator='subtype'),
 ]
 
@@ -2651,9 +2768,10 @@ class WorktreeSessionData(StrictModel):
     worktreePath: str
     worktreeName: str
     worktreeBranch: str
-    originalBranch: str
-    originalHeadCommit: str
     sessionId: str
+    originalBranch: str | None = None  # Absent when entering existing worktree (2.1.105+)
+    originalHeadCommit: str | None = None  # Absent when entering existing worktree (2.1.105+)
+    enteredExisting: bool | None = None  # True when EnterWorktree(path=...) attaches to existing worktree (2.1.105+)
 
 
 class WorktreeStateRecord(StrictModel):
@@ -2663,7 +2781,7 @@ class WorktreeStateRecord(StrictModel):
     """
 
     type: Literal['worktree-state']
-    worktreeSession: WorktreeSessionData
+    worktreeSession: WorktreeSessionData | None  # null on exit-worktree state records
     sessionId: str
 
 
@@ -2677,7 +2795,7 @@ class PermissionModeRecord(StrictModel):
     """
 
     type: Literal['permission-mode']
-    permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions']
+    permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto']
     sessionId: str
 
 
@@ -2701,8 +2819,292 @@ class McpInstructionsDeltaAttachment(StrictModel):
     removedNames: Sequence[str]
 
 
+class TaskReminderItem(StrictModel):
+    """Task entry within a task_reminder attachment."""
+
+    id: str
+    subject: str
+    description: str
+    status: Literal['pending', 'in_progress', 'completed']
+    blocks: Sequence[str]
+    blockedBy: Sequence[str]
+    activeForm: str | None = None  # Only set for tasks that were given an active-form label
+
+
+class TaskReminderAttachment(StrictModel):
+    """Task list reminder injected into the conversation (Claude Code 2.1.x)."""
+
+    type: Literal['task_reminder']
+    content: Sequence[TaskReminderItem]
+    itemCount: int
+
+
+class HookSuccessAttachment(StrictModel):
+    """Hook executed successfully — result injected as session attachment."""
+
+    type: Literal['hook_success']
+    hookName: str
+    toolUseID: str
+    hookEvent: str
+    content: str
+    stdout: str
+    stderr: str
+    exitCode: int
+    command: str
+    durationMs: int
+
+
+class HookBlockingErrorData(StrictModel):
+    """Nested error detail for hook_blocking_error."""
+
+    blockingError: str
+    command: str
+
+
+class HookBlockingErrorAttachment(StrictModel):
+    """Hook returned a blocking error — tool execution was halted."""
+
+    type: Literal['hook_blocking_error']
+    hookName: str
+    toolUseID: str
+    hookEvent: str
+    blockingError: HookBlockingErrorData
+
+
+class HookNonBlockingErrorAttachment(StrictModel):
+    """Hook returned a non-blocking error — tool continued."""
+
+    type: Literal['hook_non_blocking_error']
+    hookName: str
+    toolUseID: str
+    hookEvent: str
+    stderr: str
+    stdout: str
+    exitCode: int
+    command: str
+    durationMs: int
+
+
+class HookAdditionalContextAttachment(StrictModel):
+    """Hook returned additional context to inject into the conversation."""
+
+    type: Literal['hook_additional_context']
+    content: str | Sequence[str]
+    hookName: str
+    toolUseID: str
+    hookEvent: str
+
+
+class QueuedCommandAttachment(StrictModel):
+    """User command queued while Claude was working. prompt may be str or content blocks."""
+
+    type: Literal['queued_command']
+    prompt: str | Sequence[TextContent | ImageContent]
+    commandMode: str
+    imagePasteIds: Sequence[int] | None = None  # Present when prompt contains pasted images
+
+
+class DynamicSkillAttachment(StrictModel):
+    """Skill discovered dynamically at a non-default location (Claude Code 2.1.x)."""
+
+    type: Literal['dynamic_skill']
+    skillDir: PathField
+    skillNames: Sequence[str]
+    displayPath: str
+
+
+class SkillListingAttachment(StrictModel):
+    """Periodic listing of available skills (Claude Code 2.1.x)."""
+
+    type: Literal['skill_listing']
+    content: str
+    skillCount: int
+    isInitial: bool
+
+
+class NestedMemoryContent(StrictModel):
+    """Nested CLAUDE.md content payload."""
+
+    path: PathField
+    type: str  # e.g., "Project"
+    content: str
+    contentDiffersFromDisk: bool | None = None
+
+
+class NestedMemoryAttachment(StrictModel):
+    """Nested CLAUDE.md / memory file discovered under cwd."""
+
+    type: Literal['nested_memory']
+    path: PathField
+    content: NestedMemoryContent
+    displayPath: str
+
+
+class FileAttachmentFileContent(StrictModel):
+    """File content payload nested inside FileAttachment.content."""
+
+    filePath: PathField
+    content: str
+    numLines: int
+    startLine: int
+    totalLines: int
+
+
+class FileAttachmentContent(StrictModel):
+    """Content wrapper for FileAttachment — carries the underlying text file."""
+
+    type: Literal['text']
+    file: FileAttachmentFileContent
+
+
+class FileAttachment(StrictModel):
+    """Generic file reference attached to the conversation."""
+
+    type: Literal['file']
+    filename: PathField
+    content: FileAttachmentContent
+    displayPath: str
+
+
+class EditedTextFileAttachment(StrictModel):
+    """File edited externally — snippet with line numbers shown to Claude."""
+
+    type: Literal['edited_text_file']
+    filename: PathField
+    snippet: str
+
+
+class OpenedFileInIdeAttachment(StrictModel):
+    """File opened in the connected IDE (VSCode/JetBrains)."""
+
+    type: Literal['opened_file_in_ide']
+    filename: PathField
+
+
+class SelectedLinesInIdeAttachment(StrictModel):
+    """Lines selected in the connected IDE."""
+
+    type: Literal['selected_lines_in_ide']
+    ideName: str
+    lineStart: int
+    lineEnd: int
+    filename: PathField
+    content: str
+    displayPath: str
+
+
+class DiagnosticPosition(StrictModel):
+    """LSP-style position (line/character, 0-based)."""
+
+    line: int
+    character: int
+
+
+class DiagnosticSeverityRange(StrictModel):
+    """LSP-style position range for a diagnostic."""
+
+    start: DiagnosticPosition
+    end: DiagnosticPosition
+
+
+class DiagnosticItem(StrictModel):
+    """A single LSP-style diagnostic."""
+
+    message: str
+    severity: str  # 'Error', 'Warning', 'Info', 'Hint'
+    range: DiagnosticSeverityRange
+
+
+class DiagnosticFile(StrictModel):
+    """Diagnostics grouped by file URI."""
+
+    uri: str
+    diagnostics: Sequence[DiagnosticItem]
+
+
+class DiagnosticsAttachment(StrictModel):
+    """IDE diagnostics injected into the conversation."""
+
+    type: Literal['diagnostics']
+    files: Sequence[DiagnosticFile]
+    isNew: bool
+
+
+class PlanFileReferenceAttachment(StrictModel):
+    """Plan file content referenced in the conversation."""
+
+    type: Literal['plan_file_reference']
+    planFilePath: PathField
+    planContent: str
+
+
+class PlanModeExitAttachment(StrictModel):
+    """User exited plan mode — recorded whether the plan file was written."""
+
+    type: Literal['plan_mode_exit']
+    planFilePath: PathField
+    planExists: bool | None = None
+
+
+class CompactFileReferenceAttachment(StrictModel):
+    """File reference injected after a compact operation."""
+
+    type: Literal['compact_file_reference']
+    filename: PathField
+    displayPath: str
+
+
+class CommandPermissionsAttachment(StrictModel):
+    """Tool allow-list applied by a slash command."""
+
+    type: Literal['command_permissions']
+    allowedTools: Sequence[str]
+
+
+class DateChangeAttachment(StrictModel):
+    """Date rolled over mid-session — injected so Claude has the current date."""
+
+    type: Literal['date_change']
+    newDate: str
+
+
+class AutoModeAttachment(StrictModel):
+    """Auto mode activation reminder."""
+
+    type: Literal['auto_mode']
+    reminderType: str
+
+
+class AutoModeExitAttachment(StrictModel):
+    """Auto mode exited."""
+
+    type: Literal['auto_mode_exit']
+
+
 AttachmentData = Annotated[
-    CompanionIntroAttachment | McpInstructionsDeltaAttachment,
+    CompanionIntroAttachment
+    | McpInstructionsDeltaAttachment
+    | TaskReminderAttachment
+    | HookSuccessAttachment
+    | HookBlockingErrorAttachment
+    | HookNonBlockingErrorAttachment
+    | HookAdditionalContextAttachment
+    | QueuedCommandAttachment
+    | DynamicSkillAttachment
+    | SkillListingAttachment
+    | NestedMemoryAttachment
+    | FileAttachment
+    | EditedTextFileAttachment
+    | OpenedFileInIdeAttachment
+    | SelectedLinesInIdeAttachment
+    | DiagnosticsAttachment
+    | PlanFileReferenceAttachment
+    | PlanModeExitAttachment
+    | CompactFileReferenceAttachment
+    | CommandPermissionsAttachment
+    | DateChangeAttachment
+    | AutoModeAttachment
+    | AutoModeExitAttachment,
     pydantic.Field(discriminator='type'),
 ]
 
@@ -2716,7 +3118,7 @@ class AttachmentRecord(BaseRecord):
 
     type: Literal['attachment']
     cwd: PathField
-    parentUuid: str
+    parentUuid: str | None  # Null on the first record of a session
     isSidechain: bool
     userType: Literal['external']
     version: str
@@ -2745,6 +3147,7 @@ SessionRecord = Annotated[
     | StopHookSummarySystemRecord  # Must be before SystemRecord!
     | BridgeStatusSystemRecord  # Must be before SystemRecord!
     | ScheduledTaskFireSystemRecord  # Must be before SystemRecord!
+    | AwaySummarySystemRecord  # Must be before SystemRecord!
     | SystemRecord
     | FileHistorySnapshotRecord
     | QueueOperationRecord
@@ -2833,7 +3236,7 @@ def validated_copy[T: pydantic.BaseModel](
 
 # -- Fast Dispatch Validation --------------------------------------------------
 
-# Per-type TypeAdapters bypass the 17-member left-to-right union scan.
+# Per-type TypeAdapters bypass the 26-member left-to-right union scan.
 # When adding a new record type to SessionRecord, also add a branch below.
 _user_adapter = pydantic.TypeAdapter(UserRecord)
 _assistant_adapter = pydantic.TypeAdapter(AssistantRecord)
@@ -2861,7 +3264,7 @@ def validate_session_record(
     """Validate a session record dict using type-dispatch for performance.
 
     Dispatches to per-type TypeAdapters based on the 'type' field, avoiding
-    the full 17-member left-to-right union scan. Branches are ordered by
+    the full 26-member left-to-right union scan. Branches are ordered by
     frequency (assistant 33%, queue-operation 27%, user 22%, progress 17%).
 
     For 'system' records, uses SystemSubtypeRecord (discriminator='subtype')
