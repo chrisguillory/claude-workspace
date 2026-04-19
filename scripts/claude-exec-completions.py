@@ -2,7 +2,8 @@
 
 This is a committed artifact, not a runtime generator. When Claude Code
 updates, re-run the binary analysis workflow (documented in
-docs/claude-code-env-architecture.md) and update this file.
+``mcp/claude-session/CLAUDE.md`` § Unpacking the JS Bundle) and update
+this file.
 
 Analysis method:
     1. ``claude --help`` for documented flags
