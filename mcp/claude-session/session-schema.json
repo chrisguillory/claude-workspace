@@ -1833,8 +1833,16 @@
           "type": "boolean"
         },
         "isImage": {
-          "title": "Isimage",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Isimage"
         },
         "returnCodeInterpretation": {
           "anyOf": [
@@ -2048,13 +2056,24 @@
           ],
           "default": null,
           "title": "Assistantautobackgrounded"
+        },
+        "staleReadFileStateHint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stalereadfilestatehint"
         }
       },
       "required": [
         "stdout",
         "stderr",
-        "interrupted",
-        "isImage"
+        "interrupted"
       ],
       "title": "BashToolResult",
       "type": "object"
@@ -2680,6 +2699,36 @@
       "title": "CronCreateToolInput",
       "type": "object"
     },
+    "CronCreateToolResult": {
+      "additionalProperties": false,
+      "description": "Result from CronCreate tool - confirms scheduled task creation.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "humanSchedule": {
+          "title": "Humanschedule",
+          "type": "string"
+        },
+        "recurring": {
+          "title": "Recurring",
+          "type": "boolean"
+        },
+        "durable": {
+          "title": "Durable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "humanSchedule",
+        "recurring",
+        "durable"
+      ],
+      "title": "CronCreateToolResult",
+      "type": "object"
+    },
     "CronDeleteToolInput": {
       "additionalProperties": false,
       "description": "Input for CronDelete tool - cancels a scheduled cron job.",
@@ -3005,8 +3054,15 @@
           "type": "string"
         },
         "originalFile": {
-          "title": "Originalfile",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Originalfile"
         },
         "userModified": {
           "title": "Usermodified",
@@ -3292,6 +3348,67 @@
         "action"
       ],
       "title": "ExitWorktreeToolInput",
+      "type": "object"
+    },
+    "ExitWorktreeToolResult": {
+      "additionalProperties": false,
+      "description": "Result from ExitWorktree tool - confirms worktree exit (keep or remove).",
+      "properties": {
+        "action": {
+          "enum": [
+            "keep",
+            "remove"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "originalCwd": {
+          "$ref": "#/$defs/PathField"
+        },
+        "worktreePath": {
+          "$ref": "#/$defs/PathField"
+        },
+        "worktreeBranch": {
+          "title": "Worktreebranch",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "discardedFiles": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discardedfiles"
+        },
+        "discardedCommits": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discardedcommits"
+        }
+      },
+      "required": [
+        "action",
+        "originalCwd",
+        "worktreePath",
+        "worktreeBranch",
+        "message"
+      ],
+      "title": "ExitWorktreeToolResult",
       "type": "object"
     },
     "FileAttachment": {
@@ -6533,6 +6650,40 @@
       "title": "QueuedCommandAttachment",
       "type": "object"
     },
+    "ReadFileUnchangedFileInfo": {
+      "additionalProperties": false,
+      "description": "File info for Read tool 'file_unchanged' variant \u2014 file content unchanged since last read.",
+      "properties": {
+        "filePath": {
+          "$ref": "#/$defs/PathField"
+        }
+      },
+      "required": [
+        "filePath"
+      ],
+      "title": "ReadFileUnchangedFileInfo",
+      "type": "object"
+    },
+    "ReadFileUnchangedToolResult": {
+      "additionalProperties": false,
+      "description": "Result from Read tool when file is unchanged since last read (Claude Code 2.1.x).",
+      "properties": {
+        "type": {
+          "const": "file_unchanged",
+          "title": "Type",
+          "type": "string"
+        },
+        "file": {
+          "$ref": "#/$defs/ReadFileUnchangedFileInfo"
+        }
+      },
+      "required": [
+        "type",
+        "file"
+      ],
+      "title": "ReadFileUnchangedToolResult",
+      "type": "object"
+    },
     "ReadImageToolResult": {
       "additionalProperties": false,
       "description": "Result from Read tool execution (image files).",
@@ -6589,6 +6740,54 @@
         "contents"
       ],
       "title": "ReadMcpResourceToolResult",
+      "type": "object"
+    },
+    "ReadPartsFileInfo": {
+      "additionalProperties": false,
+      "description": "File info for Read tool 'parts' variant \u2014 PDF split into per-page tool-result files.",
+      "properties": {
+        "filePath": {
+          "$ref": "#/$defs/PathField"
+        },
+        "originalSize": {
+          "title": "Originalsize",
+          "type": "integer"
+        },
+        "outputDir": {
+          "$ref": "#/$defs/PathField"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "filePath",
+        "originalSize",
+        "outputDir",
+        "count"
+      ],
+      "title": "ReadPartsFileInfo",
+      "type": "object"
+    },
+    "ReadPartsToolResult": {
+      "additionalProperties": false,
+      "description": "Result from Read tool execution (large PDF split into parts) (Claude Code 2.1.x).",
+      "properties": {
+        "type": {
+          "const": "parts",
+          "title": "Type",
+          "type": "string"
+        },
+        "file": {
+          "$ref": "#/$defs/ReadPartsFileInfo"
+        }
+      },
+      "required": [
+        "type",
+        "file"
+      ],
+      "title": "ReadPartsToolResult",
       "type": "object"
     },
     "ReadPdfToolResult": {
@@ -7233,6 +7432,21 @@
         "commandName": {
           "title": "Commandname",
           "type": "string"
+        },
+        "allowedTools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowedtools"
         }
       },
       "required": [
@@ -8191,6 +8405,29 @@
         "agentId": {
           "title": "Agentid",
           "type": "string"
+        },
+        "agentType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agenttype"
+        },
+        "toolStats": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskToolStats"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -8204,6 +8441,51 @@
         "agentId"
       ],
       "title": "TaskToolResult",
+      "type": "object"
+    },
+    "TaskToolStats": {
+      "additionalProperties": false,
+      "description": "Per-subagent tool-use statistics returned with TaskToolResult (Claude Code 2.1.x).",
+      "properties": {
+        "readCount": {
+          "title": "Readcount",
+          "type": "integer"
+        },
+        "searchCount": {
+          "title": "Searchcount",
+          "type": "integer"
+        },
+        "bashCount": {
+          "title": "Bashcount",
+          "type": "integer"
+        },
+        "editFileCount": {
+          "title": "Editfilecount",
+          "type": "integer"
+        },
+        "linesAdded": {
+          "title": "Linesadded",
+          "type": "integer"
+        },
+        "linesRemoved": {
+          "title": "Linesremoved",
+          "type": "integer"
+        },
+        "otherToolCount": {
+          "title": "Othertoolcount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "readCount",
+        "searchCount",
+        "bashCount",
+        "editFileCount",
+        "linesAdded",
+        "linesRemoved",
+        "otherToolCount"
+      ],
+      "title": "TaskToolStats",
       "type": "object"
     },
     "TaskUpdateSuccessResult": {
@@ -9507,6 +9789,12 @@
               "$ref": "#/$defs/ReadImageToolResult"
             },
             {
+              "$ref": "#/$defs/ReadPartsToolResult"
+            },
+            {
+              "$ref": "#/$defs/ReadFileUnchangedToolResult"
+            },
+            {
               "$ref": "#/$defs/EditToolResult"
             },
             {
@@ -9588,7 +9876,13 @@
               "$ref": "#/$defs/SkillToolResult"
             },
             {
+              "$ref": "#/$defs/ExitWorktreeToolResult"
+            },
+            {
               "$ref": "#/$defs/EnterWorktreeToolResult"
+            },
+            {
+              "$ref": "#/$defs/CronCreateToolResult"
             },
             {
               "$ref": "#/$defs/TeamCreateToolResult"
@@ -10234,6 +10528,18 @@
           ],
           "default": null,
           "title": "Originalfile"
+        },
+        "userModified": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Usermodified"
         }
       },
       "required": [
@@ -10329,11 +10635,11 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.24",
+  "x-schema-version": "0.2.25",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
     "max": "2.1.114",
     "last_validated": "2026-04-18",
-    "validation_record_count": 1203708
+    "validation_record_count": 489917
   }
 }

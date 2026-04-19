@@ -80,6 +80,18 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   agentId on ScheduledTaskFireSystemRecord (sidechain subagents, 2.1.112+),
                   'fast' added to TokenUsage.speed Literal (2.1.112+), made EditToolInput.new_string
                   optional (aborted/partial tool calls)
+- Schema v0.2.25: Closed the remaining tool-result fallback gaps so every Claude Code built-in
+                  tool result parses into a typed model (true 100% validation, no MCPToolResult
+                  fallthrough). Additions: BashToolResult.staleReadFileStateHint, isImage optional;
+                  ReadPartsToolResult + ReadPartsFileInfo (large-PDF split), ReadFileUnchangedToolResult
+                  + ReadFileUnchangedFileInfo (unchanged-since-last-read); EditToolResult.originalFile
+                  optional (null when pre-edit contents not captured); WriteToolResult.userModified
+                  optional; TaskToolResult.agentType + toolStats (with new TaskToolStats);
+                  SkillToolResult.allowedTools optional; CronCreateToolResult (id, humanSchedule,
+                  recurring, durable); ExitWorktreeToolResult (action Literal['keep','remove'],
+                  originalCwd, worktreePath, worktreeBranch, message, plus discardedFiles/
+                  discardedCommits when action='remove'). ExitWorktreeToolResult precedes
+                  EnterWorktreeToolResult in the ToolResult union so the more-specific shape wins.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -189,6 +201,7 @@ __all__ = [
     'ConnectionError',
     'ContextManagement',
     'CronCreateToolInput',
+    'CronCreateToolResult',
     'CronDeleteToolInput',
     'CronListToolInput',
     'CustomTitleRecord',
@@ -212,6 +225,7 @@ __all__ = [
     'ExitPlanModeToolInput',
     'ExitPlanModeToolResult',
     'ExitWorktreeToolInput',
+    'ExitWorktreeToolResult',
     'FileAttachment',
     'FileAttachmentContent',
     'FileAttachmentFileContent',
@@ -284,9 +298,13 @@ __all__ = [
     'QuestionOption',
     'QueueOperationRecord',
     'QueuedCommandAttachment',
+    'ReadFileUnchangedFileInfo',
+    'ReadFileUnchangedToolResult',
     'ReadImageToolResult',
     'ReadMcpResourceToolInput',
     'ReadMcpResourceToolResult',
+    'ReadPartsFileInfo',
+    'ReadPartsToolResult',
     'ReadPdfToolResult',
     'ReadTextToolResult',
     'ReadToolInput',
@@ -330,6 +348,7 @@ __all__ = [
     'TaskStopToolResult',
     'TaskToolInput',
     'TaskToolResult',
+    'TaskToolStats',
     'TaskUpdateSuccessResult',
     'TaskUpdateToolInput',
     'TeamCreateToolInput',
@@ -373,11 +392,11 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.24'
+SCHEMA_VERSION = '0.2.25'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
 CLAUDE_CODE_MAX_VERSION = '2.1.114'
 LAST_VALIDATED = '2026-04-18'
-VALIDATION_RECORD_COUNT = 1_203_708
+VALIDATION_RECORD_COUNT = 490_121
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1506,7 +1525,7 @@ class BashToolResult(StrictModel):
     stdout: str
     stderr: str
     interrupted: bool
-    isImage: bool
+    isImage: bool | None = None  # Absent on minimal/early-exit Bash results (Claude Code 2.1.x)
     returnCodeInterpretation: (
         Literal['No matches found', 'Some directories were inaccessible', 'Files differ'] | None
     ) = None
@@ -1526,6 +1545,7 @@ class BashToolResult(StrictModel):
     persistedOutputSize: int | None = None  # Size of persisted output in bytes (Claude Code 2.1.45+)
     tokenSaverOutput: str | None = None  # Summarized output for token savings (Claude Code 2.1.80+)
     assistantAutoBackgrounded: bool | None = None  # True if assistant auto-backgrounded the task (2.1.80+)
+    staleReadFileStateHint: str | None = None  # Hint when command modified a previously-read file (Claude Code 2.1.x)
 
 
 class ReadTextToolResult(StrictModel):
@@ -1547,6 +1567,35 @@ class ReadImageToolResult(StrictModel):
 
     type: Literal['image']
     file: ImageFileInfo
+
+
+class ReadPartsFileInfo(StrictModel):
+    """File info for Read tool 'parts' variant — PDF split into per-page tool-result files."""
+
+    filePath: PathField
+    originalSize: int
+    outputDir: PathField
+    count: int
+
+
+class ReadPartsToolResult(StrictModel):
+    """Result from Read tool execution (large PDF split into parts) (Claude Code 2.1.x)."""
+
+    type: Literal['parts']
+    file: ReadPartsFileInfo
+
+
+class ReadFileUnchangedFileInfo(StrictModel):
+    """File info for Read tool 'file_unchanged' variant — file content unchanged since last read."""
+
+    filePath: PathField
+
+
+class ReadFileUnchangedToolResult(StrictModel):
+    """Result from Read tool when file is unchanged since last read (Claude Code 2.1.x)."""
+
+    type: Literal['file_unchanged']
+    file: ReadFileUnchangedFileInfo
 
 
 class GlobToolResult(StrictModel):
@@ -1579,7 +1628,7 @@ class EditToolResult(StrictModel):
     filePath: PathField
     oldString: str
     newString: str
-    originalFile: str
+    originalFile: str | None  # Null when Claude Code didn't capture pre-edit contents (Claude Code 2.1.x)
     userModified: bool
     replaceAll: bool
     structuredPatch: Sequence[PatchHunk]
@@ -1593,6 +1642,7 @@ class WriteToolResult(StrictModel):
     content: str
     structuredPatch: Sequence[PatchHunk] | None = None
     originalFile: str | None = None  # Present but always None for 'create' type
+    userModified: bool | None = None  # Whether user edited the content before accepting (Claude Code 2.1.x)
 
 
 class TodoToolResult(StrictModel):
@@ -1600,6 +1650,18 @@ class TodoToolResult(StrictModel):
 
     oldTodos: Sequence[TodoItem]
     newTodos: Sequence[TodoItem]
+
+
+class TaskToolStats(StrictModel):
+    """Per-subagent tool-use statistics returned with TaskToolResult (Claude Code 2.1.x)."""
+
+    readCount: int
+    searchCount: int
+    bashCount: int
+    editFileCount: int
+    linesAdded: int
+    linesRemoved: int
+    otherToolCount: int
 
 
 class TaskToolResult(StrictModel):
@@ -1613,6 +1675,8 @@ class TaskToolResult(StrictModel):
     totalToolUseCount: int
     usage: TokenUsage
     agentId: str  # Always present (621/621)
+    agentType: str | None = None  # Subagent type (e.g., 'Explore', 'general-purpose') (Claude Code 2.1.x)
+    toolStats: TaskToolStats | None = None  # Per-subagent tool-use stats (Claude Code 2.1.x)
 
 
 # -- TaskCreate/TaskUpdate/TaskList Result Structures (Claude Code 2.1.17+) ----
@@ -1975,6 +2039,7 @@ class SkillToolResult(StrictModel):
 
     success: bool
     commandName: str  # Skill name (e.g. 'canvas-design')
+    allowedTools: Sequence[str] | None = None  # Tool allow-list granted by the skill (Claude Code 2.1.x)
 
 
 # -- EnterWorktree Tool Result (Claude Code 2.1.63+) ---------------------------
@@ -1986,6 +2051,33 @@ class EnterWorktreeToolResult(StrictModel):
     worktreePath: str  # Absolute path to the created worktree
     worktreeBranch: str  # Git branch name for the worktree
     message: str  # Confirmation message
+
+
+# -- ExitWorktree Tool Result (Claude Code 2.1.x) ------------------------------
+
+
+class ExitWorktreeToolResult(StrictModel):
+    """Result from ExitWorktree tool - confirms worktree exit (keep or remove)."""
+
+    action: Literal['keep', 'remove']
+    originalCwd: PathField  # Directory to return to after exiting the worktree
+    worktreePath: PathField  # Absolute path of the exited worktree
+    worktreeBranch: str  # Git branch name of the exited worktree
+    message: str  # Confirmation message
+    discardedFiles: int | None = None  # Count of uncommitted files discarded (action='remove' only)
+    discardedCommits: int | None = None  # Count of commits discarded (action='remove' only)
+
+
+# -- CronCreate Tool Result (Claude Code 2.1.x) --------------------------------
+
+
+class CronCreateToolResult(StrictModel):
+    """Result from CronCreate tool - confirms scheduled task creation."""
+
+    id: str  # Job ID (e.g., '194d2a8f') used to cancel or inspect the schedule
+    humanSchedule: str  # Human-readable schedule (e.g., '* * * * *')
+    recurring: bool  # Whether the task fires on every cron match
+    durable: bool  # Whether the task survives Claude Code restart
 
 
 # -- TeamCreate Tool Result (Claude Code 2.1.63+) ------------------------------
@@ -2077,6 +2169,8 @@ ToolResult = Annotated[
     | ReadTextToolResult  # Read text files
     | ReadPdfToolResult  # Read PDF files
     | ReadImageToolResult  # Read image files
+    | ReadPartsToolResult  # Read large PDF split into parts (Claude Code 2.1.x)
+    | ReadFileUnchangedToolResult  # Read when file unchanged since last read (Claude Code 2.1.x)
     | EditToolResult
     | WriteToolResult
     | GrepToolResult
@@ -2104,7 +2198,9 @@ ToolResult = Annotated[
     | ReadMcpResourceToolResult  # ReadMcpResourceTool result
     | HandoffCommandResult  # Handoff command
     | SkillToolResult  # Skill tool result
+    | ExitWorktreeToolResult  # ExitWorktree result (2.1.x) - must precede EnterWorktree (superset of required fields)
     | EnterWorktreeToolResult  # EnterWorktree result (2.1.63+)
+    | CronCreateToolResult  # CronCreate result (2.1.x)
     | TeamCreateToolResult  # TeamCreate result (2.1.63+)
     | AgentTeammateSpawnedResult  # Agent teammate spawned result (2.1.63+)
     | SendMessageToolResult  # SendMessage result (2.1.63+)
