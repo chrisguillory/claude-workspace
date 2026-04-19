@@ -11,8 +11,8 @@
 # ///
 """Transparent proxy for ``claude`` with tab completions and environment fixes.
 
-Provides zsh tab completion for all Claude Code flags (51 documented + 23
-hidden, from v2.1.92 binary analysis), subcommands with descriptions,
+Provides zsh tab completion for all Claude Code flags (52 documented + 40
+hidden, from v2.1.114 binary analysis), subcommands with descriptions,
 model aliases, and project-scoped session completion with custom titles
 for ``--resume``.
 
@@ -307,7 +307,7 @@ def _generate_zsh_completion() -> str:
         '#compdef claude-exec',
         '',
         '# Auto-generated from claude-exec-completions.py (FlagDef data)',
-        f'# Claude Code v2.1.92, {__import__("datetime").date.today().isoformat()}',
+        f'# Claude Code v2.1.114, {__import__("datetime").date.today().isoformat()}',
         '',
     ]
 
