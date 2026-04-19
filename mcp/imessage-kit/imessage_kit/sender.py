@@ -7,9 +7,12 @@ __all__ = [
 ]
 
 import logging
+import re
 import subprocess
 import tempfile
+from collections.abc import Set
 from pathlib import Path
+from typing import get_args
 
 from imessage_kit.types import SendResult, SendService
 
@@ -18,6 +21,19 @@ logger = logging.getLogger(__name__)
 
 class MessageSender:
     """Send messages via osascript."""
+
+    # Handle: phone (E.164 or local with separators), email, or numeric short code.
+    # Chars excluded: quote, backslash, newline — anything that could break out of
+    # the AppleScript string context "{handle}". Restrictive whitelist over blacklist.
+    HANDLE_RE = re.compile(r'^(\+?[\d\-() .]+|[\w.+\-]+@[\w.\-]+\.[a-zA-Z]{2,})$')
+
+    # chat_guid: shape from chat.db, e.g. 'any;-;voyanquist@gmail.com' or
+    # 'any;+;3c9967c3251c4a88b8783fa7e7ab9557'. Alphanumerics + chat-id separators.
+    CHAT_GUID_RE = re.compile(r'^[\w;.+\-@]+$')
+
+    # SendService is a PEP 695 `type` alias (TypeAliasType), so we unwrap via
+    # __value__ before get_args — direct get_args(SendService) returns empty.
+    VALID_SERVICES: Set[str] = set(get_args(SendService.__value__))
 
     def send(
         self,
@@ -44,6 +60,19 @@ class MessageSender:
                 service=None,
                 error='Either handle or chat_guid is required.',
             )
+
+        # Validate before interpolating into AppleScript. Handle, chat_guid, and
+        # service are interpolated directly (only the message body is tempfile-safe),
+        # so we whitelist their shape to prevent AppleScript injection.
+        if handle is not None and not self.HANDLE_RE.match(handle):
+            msg = f'Invalid handle shape: {handle!r}. Expected phone, email, or short code.'
+            raise ValueError(msg)
+        if chat_guid is not None and not self.CHAT_GUID_RE.match(chat_guid):
+            msg = f'Invalid chat_guid shape: {chat_guid!r}. Expected chat.db GUID format.'
+            raise ValueError(msg)
+        if service not in self.VALID_SERVICES:
+            msg = f'Invalid service: {service!r}. Expected one of {sorted(self.VALID_SERVICES)}.'
+            raise ValueError(msg)
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
             f.write(text)
