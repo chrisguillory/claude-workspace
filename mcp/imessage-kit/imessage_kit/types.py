@@ -30,8 +30,16 @@ from cc_lib.types import JsonDatetime
 type MessageService = Literal['iMessage', 'SMS', 'RCS', 'iMessageLite']
 type ReactionName = Literal['love', 'like', 'dislike', 'laugh', 'emphasize', 'question']
 type AttachmentMode = Literal['view', 'save']
-type SendService = Literal['auto', 'iMessage', 'SMS']
 type ContactSourceKind = Literal['Google', 'iCloud']
+
+# RCS is intentionally NOT exposed as a send target. Apple's Messages.app dictionary
+# enumerates RCS as a service type, but selecting it in AppleScript does not give us
+# deterministic control over the wire protocol — RCS routing is decided by the paired
+# iPhone via Text Message Forwarding when conditions are met. Choosing 'SMS' here may
+# transparently send as RCS to RCS-capable Android recipients with no programmatic
+# signal back. Re-evaluate if Apple ever documents an RCS send path with deterministic
+# behavior or exposes one in chat.db's send-side schema.
+type SendService = Literal['auto', 'iMessage', 'SMS']
 
 
 class ContactSource(ClosedModel):
@@ -253,5 +261,9 @@ class SendResult(ClosedModel):
 
     service: MessageService | None
     """May not be determinable at send time."""
+
+    parts_sent: int
+    """How many parts dispatched. With attachments, total = 1 (text, if any) + N (attachments).
+    On success: equals total. On partial failure: less than total; error names which part failed."""
 
     error: str | None

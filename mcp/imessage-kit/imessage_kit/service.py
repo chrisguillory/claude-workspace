@@ -272,17 +272,28 @@ class IMessageService:
         chat_guid: str | None,
         service: SendService,
         confirm: bool,
+        attachments: Sequence[str] | None = None,
     ) -> SendResult:
-        """Send a message. Requires confirm=True to actually send."""
+        """Send a message and/or attachments. Requires confirm=True to actually send."""
         if not confirm:
             recipient = chat_guid or handle or ''
             return SendResult(
                 success=False,
                 recipient=recipient,
                 service=None,
-                error=f'Message preview — set confirm=true to send. To: {recipient}, Text: {text!r}',
+                parts_sent=0,
+                error=(
+                    f'Message preview — set confirm=true to send. '
+                    f'To: {recipient}, Text: {text!r}, Attachments: {list(attachments or [])}'
+                ),
             )
-        return self._state.sender.send(text, handle=handle, chat_guid=chat_guid, service=service)
+        return self._state.sender.send(
+            text,
+            handle=handle,
+            chat_guid=chat_guid,
+            service=service,
+            attachments=attachments,
+        )
 
     def lookup_contact(
         self,

@@ -255,24 +255,32 @@ def register_tools(service: IMessageService) -> None:
         ),
     )
     async def send_message(
-        text: str,
         confirm: bool,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
+        text: str = '',
         handle: str | None = None,
         chat_guid: str | None = None,
         service_type: str = 'auto',
+        attachments: Sequence[str] | None = None,
     ) -> SendResult:
-        """Send a message to a handle (1:1) or chat GUID (group).
+        """Send text and/or attachments to a handle (1:1) or chat GUID (group).
 
         Two-step UX: call with confirm=false to preview, confirm=true to send.
         Security boundary is ToolAnnotations(destructiveHint=True).
 
+        Each part (text + each attachment) is dispatched separately and arrives as
+        its own bubble. Messages.app may visually group consecutive images on the
+        receiving end. Fail-fast: if any part fails, subsequent parts are skipped
+        and SendResult.parts_sent reflects what was already dispatched.
+
         Args:
-            text: Message text.
             confirm: Must be true to send. False returns a preview.
+            text: Message body. Defaults to empty for attachments-only sends.
             handle: Phone/email for 1:1 chats.
             chat_guid: Chat GUID for group chats (from list_chats output).
             service_type: 'auto' (default), 'iMessage', or 'SMS'. Only applies to 1:1.
+            attachments: Ordered list of file paths (absolute or relative to cwd)
+                to attach. Each must exist and be readable.
         """
         return service.send_message(
             text,
@@ -280,6 +288,7 @@ def register_tools(service: IMessageService) -> None:
             chat_guid=chat_guid,
             service=service_type,  # type: ignore[arg-type]  # MCP signature is plain str; service.send_message validates against SendService Literal at boundary
             confirm=confirm,
+            attachments=attachments,
         )
 
     @server.tool(
