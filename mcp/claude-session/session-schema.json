@@ -1174,7 +1174,9 @@
               "nested_memory": "#/$defs/NestedMemoryAttachment",
               "opened_file_in_ide": "#/$defs/OpenedFileInIdeAttachment",
               "plan_file_reference": "#/$defs/PlanFileReferenceAttachment",
+              "plan_mode": "#/$defs/PlanModeAttachment",
               "plan_mode_exit": "#/$defs/PlanModeExitAttachment",
+              "plan_mode_reentry": "#/$defs/PlanModeReentryAttachment",
               "queued_command": "#/$defs/QueuedCommandAttachment",
               "selected_lines_in_ide": "#/$defs/SelectedLinesInIdeAttachment",
               "skill_listing": "#/$defs/SkillListingAttachment",
@@ -1235,7 +1237,13 @@
               "$ref": "#/$defs/PlanFileReferenceAttachment"
             },
             {
+              "$ref": "#/$defs/PlanModeAttachment"
+            },
+            {
               "$ref": "#/$defs/PlanModeExitAttachment"
+            },
+            {
+              "$ref": "#/$defs/PlanModeReentryAttachment"
             },
             {
               "$ref": "#/$defs/CompactFileReferenceAttachment"
@@ -2946,8 +2954,16 @@
           "type": "string"
         },
         "new_string": {
-          "title": "New String",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New String"
         },
         "replace_all": {
           "anyOf": [
@@ -2968,8 +2984,7 @@
       },
       "required": [
         "file_path",
-        "old_string",
-        "new_string"
+        "old_string"
       ],
       "title": "EditToolInput",
       "type": "object"
@@ -5928,6 +5943,41 @@
       "title": "PlanFileReferenceAttachment",
       "type": "object"
     },
+    "PlanModeAttachment": {
+      "additionalProperties": false,
+      "description": "Plan mode reminder \u2014 injected while plan mode is active (Claude Code 2.1.112+).",
+      "properties": {
+        "type": {
+          "const": "plan_mode",
+          "title": "Type",
+          "type": "string"
+        },
+        "reminderType": {
+          "title": "Remindertype",
+          "type": "string"
+        },
+        "isSubAgent": {
+          "title": "Issubagent",
+          "type": "boolean"
+        },
+        "planFilePath": {
+          "$ref": "#/$defs/PathField"
+        },
+        "planExists": {
+          "title": "Planexists",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "reminderType",
+        "isSubAgent",
+        "planFilePath",
+        "planExists"
+      ],
+      "title": "PlanModeAttachment",
+      "type": "object"
+    },
     "PlanModeExitAttachment": {
       "additionalProperties": false,
       "description": "User exited plan mode \u2014 recorded whether the plan file was written.",
@@ -5958,6 +6008,26 @@
         "planFilePath"
       ],
       "title": "PlanModeExitAttachment",
+      "type": "object"
+    },
+    "PlanModeReentryAttachment": {
+      "additionalProperties": false,
+      "description": "User re-entered plan mode with a previously saved plan (Claude Code 2.1.112+).",
+      "properties": {
+        "type": {
+          "const": "plan_mode_reentry",
+          "title": "Type",
+          "type": "string"
+        },
+        "planFilePath": {
+          "$ref": "#/$defs/PathField"
+        }
+      },
+      "required": [
+        "type",
+        "planFilePath"
+      ],
+      "title": "PlanModeReentryAttachment",
       "type": "object"
     },
     "PrLinkRecord": {
@@ -6192,6 +6262,27 @@
         "prompt"
       ],
       "title": "PromptPermission",
+      "type": "object"
+    },
+    "PushNotificationToolInput": {
+      "additionalProperties": false,
+      "description": "Input for PushNotification tool - sends a desktop/mobile notification (Claude Code 2.1.110+).",
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "status": {
+          "const": "proactive",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "status"
+      ],
+      "title": "PushNotificationToolInput",
       "type": "object"
     },
     "QueryUpdateData": {
@@ -6786,6 +6877,18 @@
           ],
           "default": null,
           "title": "Entrypoint"
+        },
+        "agentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentid"
         }
       },
       "required": [
@@ -6875,6 +6978,26 @@
         "displayPath"
       ],
       "title": "SelectedLinesInIdeAttachment",
+      "type": "object"
+    },
+    "SendMessagePromptToolInput": {
+      "additionalProperties": false,
+      "description": "SendMessage input using 'prompt' field (Claude Code 2.1.112+).",
+      "properties": {
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "prompt"
+      ],
+      "title": "SendMessagePromptToolInput",
       "type": "object"
     },
     "SendMessageRouting": {
@@ -8571,7 +8694,10 @@
         "speed": {
           "anyOf": [
             {
-              "const": "standard",
+              "enum": [
+                "standard",
+                "fast"
+              ],
               "type": "string"
             },
             {
@@ -8813,6 +8939,9 @@
               "$ref": "#/$defs/SendMessageSimpleToolInput"
             },
             {
+              "$ref": "#/$defs/SendMessagePromptToolInput"
+            },
+            {
               "$ref": "#/$defs/TaskToolInput"
             },
             {
@@ -8889,6 +9018,9 @@
             },
             {
               "$ref": "#/$defs/MonitorToolInput"
+            },
+            {
+              "$ref": "#/$defs/PushNotificationToolInput"
             },
             {
               "$ref": "#/$defs/TaskListToolInput"
@@ -10197,11 +10329,11 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.23",
+  "x-schema-version": "0.2.24",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
     "max": "2.1.114",
     "last_validated": "2026-04-18",
-    "validation_record_count": 485767
+    "validation_record_count": 1203708
   }
 }
