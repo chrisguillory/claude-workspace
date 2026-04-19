@@ -176,7 +176,7 @@ schemas.operations.archive needs this type, but services imports from schemas.
 
 # -- Model ID Types ------------------------------------------------------------
 
-# Model IDs actually observed in session data (validated against 180k+ records)
+# Model IDs actually observed in session data
 # Used for strict validation of the model field in Message and AssistantRecord
 ModelId = Literal[
     '<synthetic>',
@@ -192,7 +192,7 @@ ModelId = Literal[
     'sonnet',
 ]
 
-# All model IDs known to Claude Code 2.0.73 (superset - not currently used)
+# Superset of known model IDs (not currently used for validation)
 # Includes older models and aliases that may appear in future sessions
 _AllModelIds = Literal[
     # Claude 3 models
@@ -216,6 +216,7 @@ _AllModelIds = Literal[
     'claude-haiku-4',
     'claude-haiku-4-5',
     'claude-haiku-4-5-20251001',
+    'claude-haiku-4-5-20251001-v1',
     'claude-haiku-4-5@20251001',
     'claude-opus-4',
     'claude-opus-4-0',
@@ -226,11 +227,18 @@ _AllModelIds = Literal[
     'claude-opus-4-5',
     'claude-opus-4-5-20251101',
     'claude-opus-4-5@20251101',
+    'claude-opus-4-6',
+    'claude-opus-4-6-20251101',
+    'claude-opus-4-6-fast',
+    'claude-opus-4-6-v1',
+    'claude-opus-4-7',
     'claude-opus-4@20250514',
     'claude-sonnet-4',
     'claude-sonnet-4-20250514',
     'claude-sonnet-4-5',
+    'claude-sonnet-4-5-20250514',
     'claude-sonnet-4-5-20250929',
+    'claude-sonnet-4-5-20250929-v1',
     'claude-sonnet-4-5@20250929',
     'claude-sonnet-4-6',
     'claude-sonnet-4@20250514',
@@ -242,7 +250,7 @@ _AllModelIds = Literal[
     '<synthetic>',
 ]
 
-# All entrypoint values known to Claude Code 2.1.80 (not currently used for validation)
+# Superset of known entrypoint values (not currently used for validation)
 # Sourced from CLAUDE_CODE_ENTRYPOINT env var - external callers can set arbitrary values
 _KnownEntrypoints = Literal[
     'cli',
