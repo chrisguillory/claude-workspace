@@ -425,6 +425,32 @@ strings $(which claude) | grep -i 'Claude Code-credentials'
 
 The JS is heavily minified — function names are 2-4 character identifiers (`dB`, `b7T`, `$90`, `KTT`). These change between versions. Search by known string literals (env var names, error messages, keychain service names) rather than function names.
 
+### Unpacking the JS Bundle
+
+When `strings` isn't enough and you need to walk actual JS (e.g., to trace Commander option registrations, read `hideHelp` chains, inspect the router), use the wrapper script:
+
+```bash
+# Unpacks a COPY of the installed binary — installed claude is untouched
+scripts/claude-unpack-binary.py
+
+# Prints the unpacked JS path on stdout; pipe straight into analysis
+scripts/claude-unpack-binary.py | xargs grep -n hideHelp
+```
+
+> [!CAUTION]
+> `npx tweakcc unpack <binary>` rewrites its input **in place**. Running it directly against `~/.local/share/claude/versions/<version>` will overwrite the installed executable with extracted JS text, bricking `claude`. Always unpack a copy. The wrapper script enforces this by copying first.
+
+If you need to run tweakcc manually for some reason:
+
+```bash
+# Copy first — never pass the installed binary path directly to tweakcc
+cp "$(readlink -f "$(which claude)")" /tmp/claude-copy
+npx tweakcc@latest unpack /tmp/claude-copy    # rewrites /tmp/claude-copy in place
+# /tmp/claude-copy now contains the unpacked JS
+```
+
+Recovery if you clobber the installed binary: restore from `~/.claude-workspace/binary-patcher/originals/<version>`, or re-fetch via `claude-version-manager fetch <version>` (SHA-256 verified).
+
 ### Investigation Workflow
 
 1. **Start with the symptom** — identify an observable behavior (error message, env var name, API endpoint)
