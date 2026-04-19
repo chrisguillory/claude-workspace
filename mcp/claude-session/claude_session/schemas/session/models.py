@@ -74,6 +74,12 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   AliasChoices (Opus 4.7 hallucination patched at source per new
                   'schema is the source of truth' rule in mcp/claude-session/CLAUDE.md §3),
                   extended CLAUDE_CODE_MAX_VERSION to 2.1.114 (2.1.113/114 verified clean)
+- Schema v0.2.24: Filled in gaps observed against a larger corpus: SendMessagePromptToolInput
+                  ({to, prompt} shape, 2.1.112+), PushNotificationToolInput ({message, status}
+                  shape, 2.1.110+), PlanModeAttachment and PlanModeReentryAttachment (2.1.112+),
+                  agentId on ScheduledTaskFireSystemRecord (sidechain subagents, 2.1.112+),
+                  'fast' added to TokenUsage.speed Literal (2.1.112+), made EditToolInput.new_string
+                  optional (aborted/partial tool calls)
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -265,11 +271,14 @@ __all__ = [
     'PdfFileInfo',
     'PermissionModeRecord',
     'PlanFileReferenceAttachment',
+    'PlanModeAttachment',
     'PlanModeExitAttachment',
+    'PlanModeReentryAttachment',
     'PrLinkRecord',
     'ProgressData',
     'ProgressRecord',
     'PromptPermission',
+    'PushNotificationToolInput',
     'QueryUpdateData',
     'QuestionAnnotation',
     'QuestionOption',
@@ -285,6 +294,7 @@ __all__ = [
     'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
     'SelectedLinesInIdeAttachment',
+    'SendMessagePromptToolInput',
     'SendMessageRouting',
     'SendMessageSimpleToolInput',
     'SendMessageToolInput',
@@ -363,11 +373,11 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.23'
+SCHEMA_VERSION = '0.2.24'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
 CLAUDE_CODE_MAX_VERSION = '2.1.114'
 LAST_VALIDATED = '2026-04-18'
-VALIDATION_RECORD_COUNT = 485_767
+VALIDATION_RECORD_COUNT = 1_203_708
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -478,7 +488,7 @@ class EditToolInput(StrictModel):
 
     file_path: PathField
     old_string: str
-    new_string: str
+    new_string: str | None = None  # Absent on aborted/partial tool calls (Claude Code 2.1.112+)
     replace_all: bool | Literal['false'] | None = None
 
 
@@ -515,6 +525,13 @@ class MonitorToolInput(StrictModel):
     timeout_ms: int  # Kill deadline in milliseconds
     persistent: bool  # If True, runs for the lifetime of the session (ignores timeout_ms)
     command: str  # Shell command or script to run
+
+
+class PushNotificationToolInput(StrictModel):
+    """Input for PushNotification tool - sends a desktop/mobile notification (Claude Code 2.1.110+)."""
+
+    message: str  # Notification body (under 200 chars for mobile)
+    status: Literal['proactive']  # Only 'proactive' observed
 
 
 class EnterPlanModeToolInput(StrictModel):
@@ -676,6 +693,13 @@ class SendMessageSimpleToolInput(StrictModel):
 
     to: str
     message: str
+
+
+class SendMessagePromptToolInput(StrictModel):
+    """SendMessage input using 'prompt' field (Claude Code 2.1.112+)."""
+
+    to: str
+    prompt: str
 
 
 # -- TaskCreate Tool Input (Claude Code 2.1.17+) -------------------------------
@@ -999,6 +1023,7 @@ ToolInput = Annotated[
     # Multi-field tools
     | SendMessageToolInput  # type, recipient, content, summary required (2.1.63+)
     | SendMessageSimpleToolInput  # to, message required (2.1.81+)
+    | SendMessagePromptToolInput  # to, prompt required (2.1.112+)
     | TaskToolInput  # prompt, description, subagent_type required
     | TaskCreateToolInput  # subject, description required (2.1.17+)
     | TeamCreateToolInput  # team_name, description required (2.1.63+)
@@ -1027,6 +1052,7 @@ ToolInput = Annotated[
     | EnterWorktreeToolInput  # name optional (2.1.63+)
     | ExitWorktreeToolInput  # action required (2.1.105+)
     | MonitorToolInput  # description, timeout_ms, persistent, command required (2.1.98+)
+    | PushNotificationToolInput  # message, status required (2.1.110+)
     | TaskListToolInput  # No fields (2.1.17+)
     | CronListToolInput  # No fields (2.1.71+)
     | EnterPlanModeToolInput  # No fields - must be last before fallback!
@@ -1248,7 +1274,7 @@ class TokenUsage(StrictModel):
     server_tool_use: ServerToolUse | None = None  # Server-side tool use tracking (0.5% present)
     inference_geo: str | None = None  # Inference geography (Claude Code 2.1.31+, e.g. 'not_available')
     iterations: Sequence[UsageIteration] | None = None  # Internal inference iterations (Claude Code 2.1.100+)
-    speed: Literal['standard'] | None = None  # Speed tier (Claude Code 2.1.41+)
+    speed: Literal['standard', 'fast'] | None = None  # Speed tier (Claude Code 2.1.41+, 'fast' added 2.1.112+)
     research_preview_2026_02: str | None = None  # Research preview feature flag (e.g. 'active')
 
 
@@ -2473,6 +2499,7 @@ class ScheduledTaskFireSystemRecord(BaseRecord):
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None
+    agentId: str | None = None  # Present on sidechain subagent records (Claude Code 2.1.112+)
 
 
 class AwaySummarySystemRecord(BaseRecord):
@@ -3046,6 +3073,23 @@ class PlanModeExitAttachment(StrictModel):
     planExists: bool | None = None
 
 
+class PlanModeAttachment(StrictModel):
+    """Plan mode reminder — injected while plan mode is active (Claude Code 2.1.112+)."""
+
+    type: Literal['plan_mode']
+    reminderType: str
+    isSubAgent: bool
+    planFilePath: PathField
+    planExists: bool
+
+
+class PlanModeReentryAttachment(StrictModel):
+    """User re-entered plan mode with a previously saved plan (Claude Code 2.1.112+)."""
+
+    type: Literal['plan_mode_reentry']
+    planFilePath: PathField
+
+
 class CompactFileReferenceAttachment(StrictModel):
     """File reference injected after a compact operation."""
 
@@ -3099,7 +3143,9 @@ AttachmentData = Annotated[
     | SelectedLinesInIdeAttachment
     | DiagnosticsAttachment
     | PlanFileReferenceAttachment
+    | PlanModeAttachment
     | PlanModeExitAttachment
+    | PlanModeReentryAttachment
     | CompactFileReferenceAttachment
     | CommandPermissionsAttachment
     | DateChangeAttachment
