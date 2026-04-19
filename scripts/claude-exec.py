@@ -436,7 +436,7 @@ class CachedSessionEntry(ClosedModel):
     size: int
 
 
-_CACHE_ADAPTER: pydantic.TypeAdapter[Mapping[str, CachedSessionEntry]] = pydantic.TypeAdapter(
+CACHE_ADAPTER: pydantic.TypeAdapter[Mapping[str, CachedSessionEntry]] = pydantic.TypeAdapter(
     Mapping[str, CachedSessionEntry]
 )
 
@@ -522,14 +522,14 @@ class SessionIndex:
         except OSError:
             return None
         try:
-            return _CACHE_ADAPTER.validate_json(raw)
+            return CACHE_ADAPTER.validate_json(raw)
         except pydantic.ValidationError:
             return None
 
     def _save_cache(self, cache: Mapping[str, CachedSessionEntry]) -> None:
         self._cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._cache_path.with_suffix('.tmp')
-        tmp.write_bytes(_CACHE_ADAPTER.dump_json(cache))
+        tmp.write_bytes(CACHE_ADAPTER.dump_json(cache))
         tmp.replace(self._cache_path)
 
     @classmethod

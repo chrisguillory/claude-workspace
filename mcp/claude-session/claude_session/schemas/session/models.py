@@ -5,9 +5,6 @@ This module defines strict types for all record types found in Claude Code sessi
 Uses discriminated unions for type-safe parsing of heterogeneous JSONL data.
 
 CLAUDE CODE VERSION COMPATIBILITY:
-- Validated against: Claude Code 2.0.35 - 2.0.65
-- Last validated: 2025-12-15
-- Validation coverage: 157,640 records across 1,039 session files
 - Schema v0.1.1: Added todos field for Claude Code 2.0.47+
 - Schema v0.1.2: Added error field to AssistantRecord for Claude Code 2.0.49+
 - Schema v0.1.3: Added slug, DocumentContent, ContextManagement, SkillToolInput,
@@ -73,8 +70,10 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   compact_file_reference, command_permissions, date_change, auto_mode,
                   auto_mode_exit) (2.1.112+)
 - Schema v0.2.23: Added NetworkError.type (always null in observed data; reserved/future field
-                  mirroring ApiError.type), extended CLAUDE_CODE_MAX_VERSION to 2.1.114
-                  (2.1.113/114 verified clean, no other schema changes needed)
+                  mirroring ApiError.type), reverted v0.2.22's GrepToolInput pattern/command
+                  AliasChoices (Opus 4.7 hallucination patched at source per new
+                  'schema is the source of truth' rule in mcp/claude-session/CLAUDE.md §3),
+                  extended CLAUDE_CODE_MAX_VERSION to 2.1.114 (2.1.113/114 verified clean)
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -3148,6 +3147,7 @@ SessionRecord = Annotated[
     | StopHookSummarySystemRecord  # Must be before SystemRecord!
     | BridgeStatusSystemRecord  # Must be before SystemRecord!
     | ScheduledTaskFireSystemRecord  # Must be before SystemRecord!
+    | AwaySummarySystemRecord  # Must be before SystemRecord!
     | SystemRecord
     | FileHistorySnapshotRecord
     | QueueOperationRecord
@@ -3236,7 +3236,7 @@ def validated_copy[T: pydantic.BaseModel](
 
 # -- Fast Dispatch Validation --------------------------------------------------
 
-# Per-type TypeAdapters bypass the 17-member left-to-right union scan.
+# Per-type TypeAdapters bypass the 26-member left-to-right union scan.
 # When adding a new record type to SessionRecord, also add a branch below.
 _user_adapter = pydantic.TypeAdapter(UserRecord)
 _assistant_adapter = pydantic.TypeAdapter(AssistantRecord)
@@ -3264,7 +3264,7 @@ def validate_session_record(
     """Validate a session record dict using type-dispatch for performance.
 
     Dispatches to per-type TypeAdapters based on the 'type' field, avoiding
-    the full 17-member left-to-right union scan. Branches are ordered by
+    the full 26-member left-to-right union scan. Branches are ordered by
     frequency (assistant 33%, queue-operation 27%, user 22%, progress 17%).
 
     For 'system' records, uses SystemSubtypeRecord (discriminator='subtype')

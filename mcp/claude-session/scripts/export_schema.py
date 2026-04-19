@@ -30,12 +30,17 @@ from claude_session.schemas.session import (
 def export_schema(
     output_path: str = 'session-schema.json',
 ) -> Mapping[str, Any]:  # strict_typing_linter.py: loose-typing — JSON Schema output
-    """Export complete JSON Schema for SessionRecord."""
+    """Export complete JSON Schema for SessionRecord.
 
-    print('=' * 80)
-    print('JSON Schema Export')
-    print('=' * 80)
-    print()
+    Status messages go to stderr so that `> output.json` redirects do not
+    corrupt the JSON file. The JSON itself is written via ``json.dump`` to
+    the path argument.
+    """
+
+    print('=' * 80, file=sys.stderr)
+    print('JSON Schema Export', file=sys.stderr)
+    print('=' * 80, file=sys.stderr)
+    print(file=sys.stderr)
 
     # Generate schema
     schema = SessionRecordAdapter.json_schema()
@@ -60,20 +65,20 @@ def export_schema(
     with open(output_file, 'w') as f:
         json.dump(schema, f, indent=2)
 
-    print(f'✓ Exported JSON Schema to: {output_file}')
-    print(f'  Schema version: {SCHEMA_VERSION}')
-    print(f'  Claude Code compatibility: {CLAUDE_CODE_MIN_VERSION} - {CLAUDE_CODE_MAX_VERSION}')
-    print(f'  Size: {output_file.stat().st_size:,} bytes')
-    print()
+    print(f'✓ Exported JSON Schema to: {output_file}', file=sys.stderr)
+    print(f'  Schema version: {SCHEMA_VERSION}', file=sys.stderr)
+    print(f'  Claude Code compatibility: {CLAUDE_CODE_MIN_VERSION} - {CLAUDE_CODE_MAX_VERSION}', file=sys.stderr)
+    print(f'  Size: {output_file.stat().st_size:,} bytes', file=sys.stderr)
+    print(file=sys.stderr)
 
     # Show some stats
     definitions = schema.get('$defs', {})
-    print('Schema contains:')
-    print(f'  {len(definitions)} model definitions')
+    print('Schema contains:', file=sys.stderr)
+    print(f'  {len(definitions)} model definitions', file=sys.stderr)
 
     # Count discriminated unions
     discriminated_unions = sum(1 for def_name, def_schema in definitions.items() if 'discriminator' in def_schema)
-    print(f'  {discriminated_unions} discriminated unions')
+    print(f'  {discriminated_unions} discriminated unions', file=sys.stderr)
 
     return schema
 
