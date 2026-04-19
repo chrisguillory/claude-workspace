@@ -35,6 +35,36 @@ Record types found in session files (schema v0.2.9):
 | `bridge_status` | Remote-control bridge status (v0.2.14) | `content`, `url`, `isMeta` |
 | `away_summary` | Session recap for `/recap` (v0.2.22, Claude Code 2.1.108+) | `content` |
 
+### Quick Reference: Attachment Types
+
+Records with `type='attachment'` (discriminated by `attachment.type` field). Attachments inject non-message content into the conversation (hook output, queued commands, IDE state, file references, etc.):
+
+| Attachment Type | Purpose | Key Fields |
+|-----------------|---------|------------|
+| `companion_intro` | Companion creature introduction (`/buddy` feature) (v0.2.20) | `name`, `species` |
+| `mcp_instructions_delta` | MCP server instruction changes (added/removed tool descriptions) (v0.2.20) | `addedNames`, `addedBlocks`, `removedNames` |
+| `task_reminder` | Task-list reminder injected into conversation (v0.2.22) | `content` (Sequence[TaskReminderItem]), `itemCount` |
+| `hook_success` | Hook executed successfully — stdout/exit injected (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `content`, `stdout`, `stderr`, `exitCode`, `command`, `durationMs` |
+| `hook_blocking_error` | Hook returned a blocking error; tool execution halted (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `blockingError` |
+| `hook_non_blocking_error` | Hook returned a non-blocking error; tool continued (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `stderr`, `stdout`, `exitCode`, `command`, `durationMs` |
+| `hook_additional_context` | Hook returned context to inject into the conversation (v0.2.22) | `content` (str \| Sequence[str]), `hookName`, `toolUseID`, `hookEvent` |
+| `queued_command` | User command queued while Claude was working (v0.2.22) | `prompt` (str \| Sequence), `commandMode`, `imagePasteIds` |
+| `dynamic_skill` | Skill discovered at a non-default location (v0.2.22) | `skillDir`, `skillNames`, `displayPath` |
+| `skill_listing` | Periodic listing of available skills (v0.2.22) | `content`, `skillCount`, `isInitial` |
+| `nested_memory` | Nested CLAUDE.md / memory file discovered under cwd (v0.2.22) | `path`, `content` (NestedMemoryContent), `displayPath` |
+| `file` | Generic file reference attached to the conversation (v0.2.22) | `filename`, `content` (FileAttachmentContent), `displayPath` |
+| `edited_text_file` | File edited externally; snippet with line numbers shown (v0.2.22) | `filename`, `snippet` |
+| `opened_file_in_ide` | File opened in the connected IDE (VSCode/JetBrains) (v0.2.22) | `filename` |
+| `selected_lines_in_ide` | Lines selected in the connected IDE (v0.2.22) | `ideName`, `lineStart`, `lineEnd`, `filename`, `content`, `displayPath` |
+| `diagnostics` | IDE diagnostics injected into the conversation (v0.2.22) | `files` (Sequence[DiagnosticFile]), `isNew` |
+| `plan_file_reference` | Plan file content referenced in the conversation (v0.2.22) | `planFilePath`, `planContent` |
+| `plan_mode_exit` | User exited plan mode; whether plan file was written (v0.2.22) | `planFilePath`, `planExists` |
+| `compact_file_reference` | File reference injected after a compact operation (v0.2.22) | `filename`, `displayPath` |
+| `command_permissions` | Tool allow-list applied by a slash command (v0.2.22) | `allowedTools` |
+| `date_change` | Date rolled over mid-session; current date injected (v0.2.22) | `newDate` |
+| `auto_mode` | Auto mode activation reminder (v0.2.22, Claude Code 2.1.111+) | `reminderType` |
+| `auto_mode_exit` | Auto mode exited (v0.2.22, Claude Code 2.1.111+) | (none beyond `type`) |
+
 ### Quick Reference: Message Content Types
 
 Content blocks within `message.content` arrays (discriminated by `type` field):

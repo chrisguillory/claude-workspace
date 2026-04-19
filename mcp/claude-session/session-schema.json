@@ -2,15 +2,13 @@
   "$defs": {
     "AgentNameRecord": {
       "additionalProperties": false,
-      "description": "Records the human-readable name assigned to a worker agent session.\n\nWritten to m✓ Exported JSON Schema to: session-schema.json
-  Schema version: 0.2.23
-  Claude Code compatibility: 2.0.35 - 2.1.114
-  Size: 247,033 bytes
-
-Schema contains:
-  200 model definitions
-  0 discriminated unions
-
+      "description": "Records the human-readable name assigned to a worker agent session.\n\nWritten to main session files to associate agent sessions with descriptive names.",
+      "properties": {
+        "type": {
+          "const": "agent-name",
+          "title": "Type",
+          "type": "string"
+        },
         "agentName": {
           "title": "Agentname",
           "type": "string"
@@ -1309,6 +1307,113 @@ Schema contains:
         "type"
       ],
       "title": "AutoModeExitAttachment",
+      "type": "object"
+    },
+    "AwaySummarySystemRecord": {
+      "additionalProperties": false,
+      "description": "System record for session recap (subtype=away_summary, Claude Code 2.1.108+).\n\nEmitted when returning to an idle session to summarize prior goal/state.\nControlled by `/recap` or `CLAUDE_CODE_ENABLE_AWAY_SUMMARY`.",
+      "properties": {
+        "type": {
+          "const": "system",
+          "title": "Type",
+          "type": "string"
+        },
+        "uuid": {
+          "title": "Uuid",
+          "type": "string"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "cwd": {
+          "$ref": "#/$defs/PathField"
+        },
+        "parentUuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentuuid"
+        },
+        "subtype": {
+          "const": "away_summary",
+          "title": "Subtype",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "isMeta": {
+          "title": "Ismeta",
+          "type": "boolean"
+        },
+        "isSidechain": {
+          "title": "Issidechain",
+          "type": "boolean"
+        },
+        "userType": {
+          "title": "Usertype",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "gitBranch": {
+          "title": "Gitbranch",
+          "type": "string"
+        },
+        "slug": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Slug"
+        },
+        "entrypoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entrypoint"
+        }
+      },
+      "required": [
+        "type",
+        "uuid",
+        "timestamp",
+        "sessionId",
+        "cwd",
+        "parentUuid",
+        "subtype",
+        "content",
+        "isMeta",
+        "isSidechain",
+        "userType",
+        "version",
+        "gitBranch"
+      ],
+      "title": "AwaySummarySystemRecord",
       "type": "object"
     },
     "BackgroundTask": {
@@ -10044,6 +10149,9 @@ Schema contains:
     },
     {
       "$ref": "#/$defs/ScheduledTaskFireSystemRecord"
+    },
+    {
+      "$ref": "#/$defs/AwaySummarySystemRecord"
     },
     {
       "$ref": "#/$defs/SystemRecord"
