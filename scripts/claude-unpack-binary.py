@@ -78,13 +78,11 @@ def main(
     print(f'Copied installed binary -> {copy_path}', file=sys.stderr)
     print('Running `npx tweakcc unpack` on the COPY (never the installed binary)...', file=sys.stderr)
 
-    result = subprocess.run(
+    subprocess.run(
         ['npx', 'tweakcc@latest', 'unpack', str(copy_path)],
         cwd=output_dir,
-        check=False,
+        check=True,
     )
-    if result.returncode != 0:
-        raise UnpackError(f'tweakcc exited with status {result.returncode}')
 
     # tweakcc overwrites the input file in place with the unpacked JS —
     # so ``copy_path`` now contains JS, not Mach-O. That's exactly why
@@ -116,6 +114,11 @@ def _resolve_binary(explicit: Path | None) -> Path:
 @error_boundary.handler(UnpackError)
 def _handle_unpack_error(exc: UnpackError) -> None:
     print(exc, file=sys.stderr)
+
+
+@error_boundary.handler(subprocess.CalledProcessError)
+def _handle_tweakcc_failure(exc: subprocess.CalledProcessError) -> None:
+    print(f'tweakcc exited with status {exc.returncode}', file=sys.stderr)
 
 
 @error_boundary.handler(Exception)
