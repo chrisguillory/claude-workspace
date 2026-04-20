@@ -295,6 +295,13 @@ class IMessageService:
         SendResult with delivery_status='not_found' and applescript_succeeded=False
         (since nothing was dispatched).
 
+        Service routing:
+            - With `handle` (1:1): `service` determines routing — 'auto' lets
+              Messages.app pick iMessage vs SMS; 'iMessage' / 'SMS' force it.
+            - With `chat_guid` (group): `service` is IGNORED. AppleScript's
+              `send X to chat id "GUID"` form has no service-type parameter;
+              group chats are routed by the chat row's existing service.
+
         On confirm=True:
         1. Resolve target chat_id (for polling) from handle or chat_guid.
         2. Capture baseline max(ROWID) for that chat.

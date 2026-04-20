@@ -6,6 +6,8 @@ Combines the best of five MIT-licensed implementations into a single server that
 
 ## Prerequisites
 
+### Full Disk Access
+
 **Full Disk Access** is required for reading `~/Library/Messages/chat.db`.
 
 Grant it to the application that launches Claude Code:
@@ -20,6 +22,12 @@ The `diagnose` command walks the process tree and reports exactly which `.app` t
 1. **System Settings → Privacy & Security → Full Disk Access**
 2. Add the reported application (e.g., `/Applications/iTerm.app`)
 3. Restart Claude Code
+
+### Launch environment (macOS 26)
+
+`imessage-kit-mcp` inherits FDA from whatever process spawns it. Claude Code is the normal case and works by default.
+
+**Avoid wrapping `imessage-kit-mcp` in a LaunchAgent or Login Item on macOS 26.** `launchd` does not propagate TCC permissions to its children, so `chat.db` reads will fail loudly and AppleScript sends will silently lose attachments (same root cause as [openclaw #5116](https://github.com/openclaw/openclaw/issues/5116)). If you need 24/7 availability, create a notarized `.app` wrapper with its own Privacy & Security grants rather than scripting `imessage-kit-mcp` directly.
 
 ## Installation
 
@@ -89,9 +97,11 @@ Retrieve an attachment by ID. Requires `mode`:
 
 ### `send_message`
 
-Send a message to a handle (1:1) or chat GUID (group) via AppleScript. Two-step UX: `confirm=false` previews the message, `confirm=true` sends it. Security boundary is `ToolAnnotations(destructiveHint=True)`.
+Send text and/or attachments to a handle (1:1) or chat GUID (group) via AppleScript, then poll `chat.db` for the actual delivery status. Two-step UX: `confirm=false` previews the send, `confirm=true` dispatches. Security boundary is `ToolAnnotations(destructiveHint=True)`.
 
-`service_type`: `auto` (Messages.app decides), `iMessage`, or `SMS`.
+- **`service_type`**: `auto` (Messages.app decides), `iMessage`, or `SMS`. Only applies to 1:1 sends; **ignored when `chat_guid` is supplied** (group chats route by the chat row's existing service).
+- **`attachments`**: ordered list of file paths (absolute or relative). Each is staged into `~/Library/Messages/Attachments/imessage-kit-staging/<uuid>/` before dispatch — required on macOS 15+/26+ where Messages.app's sandbox rejects AppleScript `POSIX file` sends from foreign paths.
+- **Returns** `SendResult` with `delivery_status` (one of `read` / `delivered` / `sent` / `pending` / `failed` / `timeout` / `not_found`), plus AppleScript-hop provenance (`applescript_succeeded`, `applescript_error`) and chat.db provenance (`message_rowid`, `message_guid`, `error_code`, `attachment_transfer_states`). `success=True` when `delivery_status in {read, delivered, sent}`.
 
 ### `lookup_contact`
 
@@ -130,9 +140,27 @@ A person with a phone AND email has two separate chats. `lookup_contact` returns
 ## Limitations
 
 - **Reactions**: Can read tapback reactions on messages but cannot send them. macOS does not expose a scripting API for tapbacks.
-- **Delivery confirmation**: `send_message` returns success when Messages.app accepts the command, not when the message is delivered. "Not Delivered" errors are asynchronous and not reported.
+- **Recalls / edits**: Cannot unsend or edit messages — no AppleScript binding for either.
+- **Delivery window**: `send_message` polls `chat.db` for up to 30s (attachments) / 10s (text) after dispatch. Beyond that window, `delivery_status='sent'` means the message is queued at APNs — it will deliver when the recipient device comes back online. Poll `get_messages` later to watch the state flip.
 - **iCloud-offloaded attachments**: Files may exist in the database but not on disk if iCloud storage optimization offloaded them. `get_attachment` reports this; open Messages.app to trigger download.
 - **Group chat naming**: Can read group names but cannot set them (read-only in AppleScript dictionary).
+
+## Possible improvements
+
+Deferred during initial development per the project principle of not prematurely handling scenarios we haven't observed. Each item has enough context to revive when a real user hits it.
+
+- **Single-retry on transient AppleScript errors** — steipete/imsg v0.4.0 added this after empirical `osascript` flakiness on macOS 26 ([steipete/imsg CHANGELOG](https://github.com/steipete/imsg/blob/main/CHANGELOG.md)). We have not observed it; match the pattern if we do.
+- **Dedicated error for missing AppleEvents permission** — first-run users on a fresh Mac will hit "Not authorized to send Apple events" in `osascript` stderr. Currently surfaced raw via `SendResult.applescript_error`. Pattern-match the stderr and point at System Settings → Privacy & Security → Automation (mirroring how we handle FDA).
+- **SMS + Text Message Forwarding hint** — if `service='SMS'` fails and TMF isn't set up on a paired iPhone, append an actionable hint to `SendResult.error`.
+- **`diagnose()` under launchd** — the current FDA error assumes Claude Code is the responsible process. Under `launchd` the fix is elsewhere (notarized `.app` wrapper); detect the parent and surface the right remediation.
+- **Attachment size / MIME pre-flight** — iMessage caps ~100MB, MMS caps ~1MB (carrier-dependent). Currently oversized attachments fail at dispatch with a generic error. `stat().st_size` + `sips` MIME detection would produce a clearer signal.
+- **Group-chat service mismatch warning** — when caller passes `service='iMessage'` for a handle with only SMS capability, polling returns a generic `failed`. Cross-reference `chat.service_name` from the read-side for a clearer error.
+
+### References
+
+- [BlueBubbles #777](https://github.com/BlueBubblesApp/bluebubbles-server/issues/777) — macOS 26 chat GUID prefix change (`iMessage;-;` → `any;-;`)
+- [openclaw #5116](https://github.com/openclaw/openclaw/issues/5116) — FDA does not propagate via LaunchAgent on macOS 26
+- [steipete/imsg](https://github.com/steipete/imsg) — ecosystem-standard staging pattern for AppleScript attachment dispatch
 
 ## Attribution
 

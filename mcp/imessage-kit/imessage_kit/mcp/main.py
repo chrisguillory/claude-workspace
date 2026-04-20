@@ -278,7 +278,9 @@ def register_tools(service: IMessageService) -> None:
             text: Message body. Defaults to empty for attachments-only sends.
             handle: Phone/email for 1:1 chats.
             chat_guid: Chat GUID for group chats (from list_chats output).
-            service_type: 'auto' (default), 'iMessage', or 'SMS'. Only applies to 1:1.
+            service_type: 'auto' (default), 'iMessage', or 'SMS'. Only applies to 1:1
+                sends; IGNORED when chat_guid is supplied (group chats route by
+                the chat row's existing service).
             attachments: Ordered list of file paths (absolute or relative to cwd)
                 to attach. Each must exist and be readable.
         """
