@@ -154,7 +154,9 @@ Deferred during initial development per the project principle of not prematurely
 - **SMS + Text Message Forwarding hint** — if `service='SMS'` fails and TMF isn't set up on a paired iPhone, append an actionable hint to `SendResult.error`.
 - **`diagnose()` under launchd** — the current FDA error assumes Claude Code is the responsible process. Under `launchd` the fix is elsewhere (notarized `.app` wrapper); detect the parent and surface the right remediation.
 - **Attachment size / MIME pre-flight** — iMessage caps ~100MB, MMS caps ~1MB (carrier-dependent). Currently oversized attachments fail at dispatch with a generic error. `stat().st_size` + `sips` MIME detection would produce a clearer signal.
-- **Group-chat service mismatch warning** — when caller passes `service='iMessage'` for a handle with only SMS capability, polling returns a generic `failed`. Cross-reference `chat.service_name` from the read-side for a clearer error.
+- **Service mismatch warning** — when caller passes `service='iMessage'` for a handle (1:1 or group) whose chat is actually on SMS/RCS, polling correctly returns `failed` but the error summary is generic. Cross-reference `chat.service_name` from the read-side and include the expected-vs-actual service in the error message.
+- **`list_chats` aggregate consolidation** — the current query uses 5 correlated subqueries per chat row for counts and last-message fields. Works fine at current DB sizes (<1s on a 47K-message DB); a consolidated aggregate pass would scale better past 100K messages. Regression risk is real (especially the `unread_count` filter predicate), so defer until empirical slowness is observed.
+- **Unit test coverage** — the package has integration verification (live chat.db reads, live sends with delivery confirmation) but no unit tests. Highest-value targets: `parser.extract_text` on captured `attributedBody` blobs, `IMessageService._classify_delivery` state-machine parameterized over delivery flag combinations, `MessageSender._resolve_attachments` path staging, `ContactResolver._merge_by_handle_overlap` union-find edge cases.
 
 ### References
 

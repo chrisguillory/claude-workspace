@@ -23,8 +23,6 @@ from imessage_kit.types import Contact, ContactSource
 
 logger = logging.getLogger(__name__)
 
-CACHE_TTL = 300  # 5 minutes
-
 
 class ContactResolver:
     """Resolve phone numbers and emails to contact display names.
@@ -34,6 +32,14 @@ class ContactResolver:
     email overlap as the merge predicate. Each resulting Contact carries
     the list of source display names it was merged from.
     """
+
+    CACHE_TTL_S = 300  # 5 minutes
+
+    # Relevance scoring tiers for _match_score. Ordered descending.
+    # 1.0 (used inline) is a perfect match; 0.0 is no match.
+    SCORE_EXACT_NAME_PART = 0.95  # first OR last name exactly equals the query
+    SCORE_SUBSTRING_IN_NAME = 0.85  # query appears as a substring in the full name
+    FUZZY_MATCH_MIN_RATIO = 70  # fuzz.token_sort_ratio (0-100) floor below which we return no match
 
     def __init__(self, sources: Sequence[ContactSource]) -> None:
         self._sources = sources
@@ -105,7 +111,7 @@ class ContactResolver:
 
     def _ensure_cache(self) -> None:
         """Refresh contact cache if stale."""
-        if self._contacts is not None and (time.monotonic() - self._cache_time) < CACHE_TTL:
+        if self._contacts is not None and (time.monotonic() - self._cache_time) < self.CACHE_TTL_S:
             return
         self._load_all()
 
@@ -166,15 +172,15 @@ class ContactResolver:
         first = (contact.first_name or '').lower()
         last = (contact.last_name or '').lower()
         if query_lower in (first, last):
-            return 0.95
+            return self.SCORE_EXACT_NAME_PART
 
         # Substring match
         if query_lower in name_lower:
-            return 0.85
+            return self.SCORE_SUBSTRING_IN_NAME
 
         # Fuzzy match (token_sort_ratio avoids substring false positives)
         ratio: int = fuzz.token_sort_ratio(query_lower, name_lower)
-        if ratio >= 70:
+        if ratio >= self.FUZZY_MATCH_MIN_RATIO:
             return ratio / 100.0
 
         return 0.0
@@ -268,9 +274,8 @@ def _dedup_across_sources(
             passthrough.append(contact)
 
     merged: list[Contact] = []
-    for name_key, group in groups.items():
+    for group in groups.values():
         merged.extend(_merge_by_handle_overlap(group))
-        del name_key  # name_key is the grouping key, not used in merge
     merged.extend(passthrough)
     return merged
 

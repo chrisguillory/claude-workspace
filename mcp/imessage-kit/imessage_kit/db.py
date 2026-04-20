@@ -63,7 +63,11 @@ class ChatDB:
 
         try:
             uri = f'file:{self._path}?mode=ro'
-            conn = sqlite3.connect(uri, uri=True)
+            # check_same_thread=False: connection is read-only (mode=ro above) and
+            # SQLite serializes operations internally. Allows the connection to be
+            # used across threads — needed so MCP tools can offload blocking work
+            # to a worker thread (asyncio.to_thread) without hitting ProgrammingError.
+            conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             conn.execute('PRAGMA busy_timeout = 5000')
             conn.execute('SELECT 1 FROM message LIMIT 1')
@@ -244,6 +248,11 @@ class ChatDB:
         Filters to `is_from_me=1` and `cache_has_attachments` matching the expectation
         (so an attachment send doesn't correlate to a pure-text row that happened to
         land between dispatch and poll). Returns None if no matching row exists yet.
+
+        Multi-device race: a concurrent send from another Apple-ID-paired device
+        (e.g., iPhone) during our polling window could be picked up as "ours" here.
+        Rare in practice; caller's SendResult would reflect that message's status
+        instead. Text correlation would close this but isn't worth the complexity yet.
         """
         return cast(
             'sqlite3.Row | None',
@@ -263,12 +272,12 @@ class ChatDB:
         )
 
     def get_message_delivery_state(self, message_rowid: int) -> sqlite3.Row | None:
-        """Return current is_sent / is_delivered / error / date_delivered / date_read for a message."""
+        """Return current is_sent / is_delivered / error / date_delivered / date_read / service for a message."""
         return cast(
             'sqlite3.Row | None',
             self.conn.execute(
                 """
-                SELECT ROWID as rowid, guid, is_sent, is_delivered, error,
+                SELECT ROWID as rowid, guid, service, is_sent, is_delivered, error,
                        date_delivered, date_read, cache_has_attachments, text
                 FROM message WHERE ROWID = ?
                 """,
@@ -614,7 +623,14 @@ class ChatDB:
         *,
         limit: int = 50,
     ) -> Sequence[sqlite3.Row]:
-        """Get all replies in an inline thread."""
+        """Get all replies in an inline thread AND the originating message itself.
+
+        Replies have `thread_originator_guid` pointing at the original's guid.
+        The original is matched by its own guid (its own `thread_originator_guid`
+        is NULL, or points at a different parent if it's itself a reply in another
+        thread). Both are returned, ordered by date so the original naturally sorts
+        first.
+        """
         return self.conn.execute(
             """
             SELECT
@@ -624,11 +640,11 @@ class ChatDB:
                 m.message_summary_info, m.cache_has_attachments,
                 m.thread_originator_guid, m.thread_originator_part
             FROM message m
-            WHERE m.thread_originator_guid = ?
+            WHERE m.thread_originator_guid = ? OR m.guid = ?
             ORDER BY m.date ASC
             LIMIT ?
         """,
-            (thread_originator_guid, limit),
+            (thread_originator_guid, thread_originator_guid, limit),
         ).fetchall()
 
     # -- Queries: Handles --

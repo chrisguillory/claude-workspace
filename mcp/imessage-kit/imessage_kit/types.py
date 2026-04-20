@@ -48,7 +48,6 @@ type DeliveryStatus = Literal[
     'failed',  # message.error != 0 or any attachment.transfer_state == 6
     # Non-terminal "we don't know" states — polling ran out of budget:
     'pending',  # row exists but no terminal flag observed within the poll window
-    'timeout',  # we saw no resolution at all within the poll window
     'not_found',  # no matching message row ever appeared in chat.db (AppleScript lie)
 ]
 

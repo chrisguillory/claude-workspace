@@ -12,18 +12,18 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Set
 
 from imessage_kit.types import AttachmentSave, AttachmentView
 
 logger = logging.getLogger(__name__)
 
-HEIC_TYPES = frozenset({'image/heic', 'image/heif'})
-IMAGE_TYPES = frozenset({'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/tiff'}) | HEIC_TYPES
-MAX_VIEW_BYTES = 10 * 1024 * 1024  # 10 MB cap for base64 inline delivery
-
 
 class AttachmentHandler:
     """Read attachment files, convert HEIC, encode for delivery."""
+
+    HEIC_TYPES: Set[str] = {'image/heic', 'image/heif'}
+    MAX_VIEW_BYTES = 10 * 1024 * 1024  # 10 MB cap for base64 inline delivery
 
     def __init__(self, temp_dir: pathlib.Path) -> None:
         self._temp_dir = temp_dir
@@ -48,12 +48,12 @@ class AttachmentHandler:
             raise FileNotFoundError(msg)
 
         file_size = path.stat().st_size
-        if file_size > MAX_VIEW_BYTES:
-            msg = f'File too large for inline viewing ({file_size:,} bytes, max {MAX_VIEW_BYTES:,}). Use mode="save" instead.'
+        if file_size > self.MAX_VIEW_BYTES:
+            msg = f'File too large for inline viewing ({file_size:,} bytes, max {self.MAX_VIEW_BYTES:,}). Use mode="save" instead.'
             raise ValueError(msg)
 
         original_mime = mime_type
-        if mime_type in HEIC_TYPES:
+        if mime_type in self.HEIC_TYPES:
             data = self._convert_heic_to_jpeg(path)
             delivered_mime = 'image/jpeg'
         else:

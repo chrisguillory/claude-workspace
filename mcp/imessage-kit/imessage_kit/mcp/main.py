@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __all__ = ['main', 'server']
 
+import asyncio
 import contextlib
 import logging
 import sys
@@ -25,6 +26,7 @@ from imessage_kit.sources import SourceRegistry
 from imessage_kit.system import detect_root_app
 from imessage_kit.types import (
     AttachmentMeta,
+    AttachmentMode,
     AttachmentSave,
     AttachmentView,
     Chat,
@@ -231,7 +233,7 @@ def register_tools(service: IMessageService) -> None:
     )
     async def get_attachment(
         attachment_id: int,
-        mode: str,
+        mode: AttachmentMode,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
     ) -> AttachmentView | AttachmentSave:
         """Retrieve an attachment by ID.
@@ -284,7 +286,13 @@ def register_tools(service: IMessageService) -> None:
             attachments: Ordered list of file paths (absolute or relative to cwd)
                 to attach. Each must exist and be readable.
         """
-        return service.send_message(
+        # Offload to a worker thread so the event loop stays responsive during
+        # the up-to-45s chat.db polling (15s row discovery + 30s attachment delivery).
+        # service.send_message is deliberately sync for CLI parity; wrapping with
+        # asyncio.to_thread at the MCP boundary is the minimal way to un-block the
+        # event loop without making the core sync-or-async bimodal.
+        return await asyncio.to_thread(
+            service.send_message,
             text,
             handle=handle,
             chat_guid=chat_guid,

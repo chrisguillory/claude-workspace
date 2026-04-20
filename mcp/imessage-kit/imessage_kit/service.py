@@ -26,6 +26,7 @@ from imessage_kit.sender import DispatchOutcome, MessageSender
 from imessage_kit.system import detect_root_app
 from imessage_kit.types import (
     AttachmentMeta,
+    AttachmentMode,
     AttachmentSave,
     AttachmentView,
     Chat,
@@ -35,6 +36,7 @@ from imessage_kit.types import (
     DiagnosticResult,
     EditEvent,
     Message,
+    MessageService,
     Reaction,
     ReactionName,
     SendResult,
@@ -42,21 +44,6 @@ from imessage_kit.types import (
 )
 
 logger = logging.getLogger(__name__)
-
-REACTION_LABELS: Mapping[int, ReactionName] = {
-    2000: 'love',
-    2001: 'like',
-    2002: 'dislike',
-    2003: 'laugh',
-    2004: 'emphasize',
-    2005: 'question',
-    3000: 'love',
-    3001: 'like',
-    3002: 'dislike',
-    3003: 'laugh',
-    3004: 'emphasize',
-    3005: 'question',
-}
 
 
 @dataclass(frozen=True)
@@ -89,6 +76,24 @@ class IMessageService:
     # (queued, uploading) exist but are not terminal; we only interpret the ends.
     ATTACHMENT_STATE_DELIVERED = 5
     ATTACHMENT_STATE_FAILED = 6
+
+    # Tapback reaction codes → human-readable names. Two ranges because iMessage
+    # distinguishes "add reaction" (2000-2005) from "remove reaction" (3000-3005);
+    # we map both to the same label (we don't expose removes separately yet).
+    REACTION_LABELS: Mapping[int, ReactionName] = {
+        2000: 'love',
+        2001: 'like',
+        2002: 'dislike',
+        2003: 'laugh',
+        2004: 'emphasize',
+        2005: 'question',
+        3000: 'love',
+        3001: 'like',
+        3002: 'dislike',
+        3003: 'laugh',
+        3004: 'emphasize',
+        3005: 'question',
+    }
 
     def __init__(self, state: ServerState) -> None:
         self._state = state
@@ -162,6 +167,9 @@ class IMessageService:
         from_me: bool | None = None,
     ) -> Sequence[Message]:
         """Get messages from a chat with cursor pagination and filtering."""
+        if before_rowid is not None and after_rowid is not None:
+            msg = 'before_rowid and after_rowid are mutually exclusive; pass only one.'
+            raise ValueError(msg)
         resolved_chat_id = self._resolve_chat_id(handle, chat_id)
         rows = self._state.db.get_messages(
             resolved_chat_id,
@@ -223,7 +231,7 @@ class IMessageService:
 
         return results
 
-    def get_attachment(self, attachment_id: int, mode: str) -> AttachmentView | AttachmentSave:
+    def get_attachment(self, attachment_id: int, mode: AttachmentMode) -> AttachmentView | AttachmentSave:
         """Retrieve an attachment by ID in the specified mode."""
         row = self._state.db.get_attachment_by_id(attachment_id)
         if row is None:
@@ -347,7 +355,9 @@ class IMessageService:
             service=service,
             attachments=attachments,
         )
-        final_service = service if service != 'auto' else None
+        # MessageService is wider than SendService (includes RCS, iMessageLite); the
+        # 'auto' branch gets upgraded below from chat.db after polling finds the row.
+        final_service: MessageService | None = service if service != 'auto' else None
 
         if not outcome.applescript_succeeded:
             return SendResult(
@@ -397,6 +407,12 @@ class IMessageService:
         delivery_status = self._classify_delivery(final_state, transfer_states, expect_attachments)
         success = delivery_status in {'read', 'delivered', 'sent'}
         error_code = cast(int, final_state['error']) if final_state['error'] else None
+
+        # Upgrade service=None (from 'auto' input) to the actual routed service that
+        # chat.db recorded — Messages.app picks iMessage vs SMS vs RCS at send time
+        # and stores it in message.service. Caller can now see which path was taken.
+        if service == 'auto' and final_state['service']:
+            final_service = cast(MessageService, final_state['service'])
 
         error_summary: str | None = None
         if not success:
@@ -661,7 +677,7 @@ class IMessageService:
         reactions: list[Reaction] = []
         for r in rows:
             rtype = r['associated_message_type']
-            label = REACTION_LABELS.get(rtype)
+            label = self.REACTION_LABELS.get(rtype)
             if label is None:
                 continue
             if r['is_from_me']:
@@ -870,8 +886,6 @@ class IMessageService:
                 f'Attachment transfer failed (attachments {failed_indices} of '
                 f'{len(transfer_states)} at transfer_state={self.ATTACHMENT_STATE_FAILED}).'
             )
-        if delivery_status == 'timeout':
-            return 'Polling budget exhausted without a terminal delivery state.'
         if delivery_status == 'pending':
             return (
                 'Message row exists but no terminal delivery flag observed within poll window. '
