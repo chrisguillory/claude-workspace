@@ -798,21 +798,29 @@ class IMessageService:
         transfer_states: Sequence[int],
         expect_attachments: bool,
     ) -> bool:
-        """Check whether a message row has reached a terminal delivery state."""
+        """Check whether a message row has reached a terminal delivery state.
+
+        Note: is_sent=1 alone is NOT terminal here. It's a legitimate final
+        outcome (APNs queued; recipient may be offline), but when the recipient
+        is online the transition is_sent=1 → is_delivered=1 typically happens
+        within a second or two. We prefer to keep polling within the budget and
+        only fall back to reporting 'sent' at timeout via _classify_delivery —
+        that way online recipients see 'delivered' and offline ones still get
+        'sent' at the end of the window.
+        """
         if row['error']:
             return True  # failed
         if expect_attachments:
             if any(s == self.ATTACHMENT_STATE_FAILED for s in transfer_states):
                 return True  # failed
-            # All attachments must be delivered before text send flags are meaningful.
+            # All attachments must reach transfer_state=5 before we even inspect
+            # message-level flags — an incomplete upload is not terminal.
             if transfer_states and not all(s == self.ATTACHMENT_STATE_DELIVERED for s in transfer_states):
                 return False
         if row['date_read']:
             return True  # read
         if row['is_delivered']:
             return True  # delivered
-        if row['is_sent']:
-            return True  # sent (APNs queued; recipient may be offline)
         return False
 
     def _classify_delivery(
