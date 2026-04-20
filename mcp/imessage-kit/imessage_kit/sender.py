@@ -10,8 +10,11 @@ __all__ = [
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
+import time
+import uuid
 from collections.abc import Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,6 +65,26 @@ class MessageSender:
     # SendService is a PEP 695 `type` alias (TypeAliasType), so we unwrap via
     # __value__ before get_args — direct get_args(SendService) returns empty.
     VALID_SERVICES: Set[str] = set(get_args(SendService.__value__))
+
+    # Messages.app is sandboxed on macOS 15+ (Sequoia) / 26+ (Tahoe). When AppleScript
+    # dispatches `send (POSIX file "…")` from a foreign process, Messages only gets a
+    # sandbox extension for paths under a small allowlist — ~/Library/Messages/,
+    # ~/Pictures/, and $TMPDIR. Foreign paths (~/Downloads, /tmp, ~/Documents, etc.)
+    # silently fail: AppleScript returns success, chat.db records attachment.transfer_state=6
+    # and message.error=25, and Messages.app shows "Not Delivered". Empirically verified
+    # on macOS 26.4.1; ecosystem consensus (steipete/imsg, micahbrich/imsg-plus,
+    # mautrix/imessage, BlueBubbles) is to stage into ~/Library/Messages/Attachments/
+    # before dispatch. We use that approach: every attachment is copied to a per-send
+    # subdirectory here, and the AppleScript `POSIX file` clause references the staged copy.
+    STAGING_ROOT = Path.home() / 'Library' / 'Messages' / 'Attachments' / 'imessage-kit-staging'
+
+    # Staging dirs older than this are garbage-collected at MessageSender init. Keep
+    # long enough to aid debugging of failed sends; short enough that we don't grow
+    # unbounded over days of testing.
+    STAGING_TTL_HOURS = 24
+
+    def __init__(self) -> None:
+        self._cleanup_stale_staging()
 
     def send(
         self,
@@ -158,12 +181,20 @@ class MessageSender:
         )
 
     def _resolve_attachments(self, raw_paths: Sequence[str]) -> Sequence[Path]:
-        """Resolve relative paths and validate each attachment.
+        """Resolve relative paths, validate, and stage each attachment.
+
+        Staging copies the file into STAGING_ROOT so Messages.app's sandbox will
+        accept the AppleScript `POSIX file` clause. Foreign paths silently fail on
+        macOS 15+/26+; staging into ~/Library/Messages/ is the ecosystem-standard
+        workaround.
 
         Raises ValueError on any malformed shape, missing file, or unreadable file —
-        before any send happens, so we never partially dispatch on bad input.
+        before any send happens, so we never partially dispatch on bad input. If all
+        inputs validate, every file is staged; the returned paths point at the staged
+        copies, not the originals.
         """
-        resolved: list[Path] = []
+        # Validate every source path up front (fail fast before any staging or send).
+        sources: list[Path] = []
         for raw in raw_paths:
             path = Path(raw).resolve(strict=False)
             if not self.ATTACHMENT_PATH_RE.match(str(path)):
@@ -175,8 +206,42 @@ class MessageSender:
             if not os.access(path, os.R_OK):
                 msg = f'Attachment not readable: {path}'
                 raise ValueError(msg)
-            resolved.append(path)
-        return resolved
+            sources.append(path)
+
+        return [self._stage_attachment(p) for p in sources]
+
+    def _stage_attachment(self, source: Path) -> Path:
+        """Copy source into a fresh per-send subdirectory of STAGING_ROOT.
+
+        Each call gets a unique UUID subdirectory so concurrent or rapid sends don't
+        collide on filenames. Filename is preserved so Messages.app's UI shows the
+        original name to the recipient. shutil.copyfile preserves bytes but not
+        metadata — attachments don't need ownership/mtime round-tripping.
+        """
+        staging_dir = self.STAGING_ROOT / str(uuid.uuid4())
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        dest = staging_dir / source.name
+        shutil.copyfile(source, dest)
+        logger.debug('Staged attachment %s → %s', source, dest)
+        return dest
+
+    def _cleanup_stale_staging(self) -> None:
+        """Remove staging dirs older than STAGING_TTL_HOURS. Called once at init.
+
+        Lets OSError bubble — we own STAGING_ROOT and its subdirectories, so a
+        failure here indicates a real filesystem problem worth surfacing (not
+        something to silently absorb at startup).
+        """
+        if not self.STAGING_ROOT.exists():
+            return
+        cutoff = time.time() - self.STAGING_TTL_HOURS * 3600
+        for staging_dir in self.STAGING_ROOT.iterdir():
+            if not staging_dir.is_dir():
+                continue
+            if staging_dir.stat().st_mtime >= cutoff:
+                continue
+            shutil.rmtree(staging_dir)
+            logger.debug('Cleaned stale staging dir %s', staging_dir)
 
     def _dispatch_text(
         self,
