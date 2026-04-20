@@ -204,6 +204,96 @@ class ChatDB:
             ).fetchone(),
         )
 
+    def get_chat_id_by_guid(self, chat_guid: str) -> int | None:
+        """Resolve a chat GUID to a chat ROWID. Used to correlate sent messages to chats."""
+        row = cast(
+            'sqlite3.Row | None',
+            self.conn.execute('SELECT ROWID FROM chat WHERE guid = ?', (chat_guid,)).fetchone(),
+        )
+        return cast(int, row['ROWID']) if row else None
+
+    def get_max_message_rowid_for_chat(self, chat_id: int) -> int:
+        """Return the highest message ROWID currently in this chat (0 if empty).
+
+        Used as a baseline before sending — any new outbound row that appears with
+        a greater ROWID is a candidate for the message we just dispatched.
+        """
+        row = cast(
+            'sqlite3.Row | None',
+            self.conn.execute(
+                """
+                SELECT COALESCE(MAX(m.ROWID), 0) as max_rowid
+                FROM message m
+                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+                WHERE cmj.chat_id = ?
+                """,
+                (chat_id,),
+            ).fetchone(),
+        )
+        return cast(int, row['max_rowid']) if row else 0
+
+    def find_outbound_message_since(
+        self,
+        chat_id: int,
+        after_rowid: int,
+        *,
+        expect_attachments: bool,
+    ) -> sqlite3.Row | None:
+        """Find the earliest outbound message in this chat with ROWID > after_rowid.
+
+        Filters to `is_from_me=1` and `cache_has_attachments` matching the expectation
+        (so an attachment send doesn't correlate to a pure-text row that happened to
+        land between dispatch and poll). Returns None if no matching row exists yet.
+        """
+        return cast(
+            'sqlite3.Row | None',
+            self.conn.execute(
+                """
+                SELECT m.ROWID as rowid, m.guid, m.is_sent, m.is_delivered, m.error,
+                       m.date_delivered, m.date_read, m.cache_has_attachments, m.text
+                FROM message m
+                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+                WHERE cmj.chat_id = ? AND m.ROWID > ? AND m.is_from_me = 1
+                  AND m.cache_has_attachments = ?
+                ORDER BY m.ROWID ASC
+                LIMIT 1
+                """,
+                (chat_id, after_rowid, 1 if expect_attachments else 0),
+            ).fetchone(),
+        )
+
+    def get_message_delivery_state(self, message_rowid: int) -> sqlite3.Row | None:
+        """Return current is_sent / is_delivered / error / date_delivered / date_read for a message."""
+        return cast(
+            'sqlite3.Row | None',
+            self.conn.execute(
+                """
+                SELECT ROWID as rowid, guid, is_sent, is_delivered, error,
+                       date_delivered, date_read, cache_has_attachments, text
+                FROM message WHERE ROWID = ?
+                """,
+                (message_rowid,),
+            ).fetchone(),
+        )
+
+    def get_attachment_transfer_states(self, message_rowid: int) -> Sequence[int]:
+        """Return attachment.transfer_state values for a message, in attachment-join order.
+
+        Empty for text-only messages. Values in the wild: 5 = delivered, 6 = failed.
+        Intermediate states exist (queued, uploading) but are not interpreted here.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT a.transfer_state
+            FROM attachment a
+            JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
+            WHERE maj.message_id = ?
+            ORDER BY maj.ROWID ASC
+            """,
+            (message_rowid,),
+        ).fetchall()
+        return [cast(int, r['transfer_state']) for r in rows]
+
     def get_chat_participants(self, chat_id: int) -> Sequence[str]:
         """Get handle identifiers for all participants in a chat."""
         rows = self.conn.execute(

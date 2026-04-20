@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 __all__ = [
+    'DispatchOutcome',
     'MessageSender',
 ]
 
@@ -12,12 +13,33 @@ import re
 import subprocess
 import tempfile
 from collections.abc import Sequence, Set
+from dataclasses import dataclass
 from pathlib import Path
 from typing import get_args
 
-from imessage_kit.types import SendResult, SendService
+from imessage_kit.types import SendService
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DispatchOutcome:
+    """Internal result of an AppleScript dispatch attempt.
+
+    This is NOT the user-facing send result — it only describes the AppleScript
+    hop. The service layer augments it with chat.db delivery polling to produce
+    the final SendResult that callers see. AppleScript success does NOT imply
+    delivery; Messages.app may accept the call and later fail the transfer.
+    """
+
+    applescript_succeeded: bool
+    """True if every osascript invocation exited 0 for this send."""
+
+    applescript_error: str | None
+    """osascript stderr from the first failed invocation, if any."""
+
+    parts_sent: int
+    """How many parts (text + attachments) AppleScript accepted before any failure."""
 
 
 class MessageSender:
@@ -49,48 +71,31 @@ class MessageSender:
         chat_guid: str | None,
         service: SendService,
         attachments: Sequence[str] | None = None,
-    ) -> SendResult:
-        """Send text and/or attachments to a handle (1:1) or chat GUID (group).
+    ) -> DispatchOutcome:
+        """Dispatch text and/or attachments via AppleScript.
 
-        Each part (text + each attachment) is dispatched as a separate AppleScript
-        send, so they arrive as separate Messages bubbles. Messages.app on the
-        receiving end may visually group consecutive images.
+        Returns a DispatchOutcome describing the AppleScript hop only. Whether the
+        message actually reached the recipient is determined post-hoc by the
+        service layer polling chat.db — this method has no access to that truth.
 
-        Fail-fast semantics: if any part fails, subsequent parts are not attempted
-        and the returned SendResult.parts_sent reflects how much of the payload
-        was already dispatched.
-
-        Uses file-based message passing (tempfile + UTF-8 read) for the text body
-        to avoid AppleScript quote escaping. Attachment paths are validated and
-        interpolated directly.
+        Fail-fast: if any part's osascript call fails, subsequent parts are skipped
+        and parts_sent reflects what was already dispatched.
 
         Args:
             text: Message body. Pass empty string for attachments-only send.
             handle: Phone number or email for 1:1 chats.
             chat_guid: Chat GUID for group chats (from list_chats output).
             service: 'auto' (Messages.app decides), 'iMessage', or 'SMS'.
-                Only applies to 1:1 sends.
-            attachments: Ordered list of file paths (absolute or relative).
-                Relative paths are resolved against the current working directory.
-                Each must exist and be readable.
+            attachments: Ordered list of file paths (absolute or relative to cwd).
+                Each must exist and be readable. Raises ValueError on bad input.
         """
         if not handle and not chat_guid:
-            return SendResult(
-                success=False,
-                recipient='',
-                service=None,
-                parts_sent=0,
-                error='Either handle or chat_guid is required.',
-            )
+            msg = 'Either handle or chat_guid is required.'
+            raise ValueError(msg)
 
         if not text and not attachments:
-            return SendResult(
-                success=False,
-                recipient=chat_guid or handle or '',
-                service=None,
-                parts_sent=0,
-                error='Must provide text or at least one attachment.',
-            )
+            msg = 'Must provide text or at least one attachment.'
+            raise ValueError(msg)
 
         # Validate before interpolating into AppleScript. Handle, chat_guid, service,
         # and attachment paths are interpolated directly (only the text body is
@@ -114,12 +119,10 @@ class MessageSender:
             ok, err = self._dispatch_text(text, handle=handle, chat_guid=chat_guid, service=service)
             if not ok:
                 logger.warning('Text send failed to %s (service=%s): %s', recipient, service, err)
-                return SendResult(
-                    success=False,
-                    recipient=recipient,
-                    service=None,
+                return DispatchOutcome(
+                    applescript_succeeded=False,
+                    applescript_error=f'Text send failed: {err}',
                     parts_sent=0,
-                    error=f'Text send failed: {err}',
                 )
             parts_sent += 1
 
@@ -134,28 +137,24 @@ class MessageSender:
                     service,
                     err,
                 )
-                return SendResult(
-                    success=False,
-                    recipient=recipient,
-                    service=None,
+                return DispatchOutcome(
+                    applescript_succeeded=False,
+                    applescript_error=f'Attachment {i} of {len(resolved_attachments)} failed ({path}): {err}',
                     parts_sent=parts_sent,
-                    error=f'Attachment {i} of {len(resolved_attachments)} failed ({path}): {err}',
                 )
             parts_sent += 1
 
         logger.info(
-            'Sent %d part(s) to %s (service=%s, attachments=%d)',
+            'AppleScript dispatched %d part(s) to %s (service=%s, attachments=%d)',
             parts_sent,
             recipient,
             service,
             len(resolved_attachments),
         )
-        return SendResult(
-            success=True,
-            recipient=recipient,
-            service=service if service != 'auto' else None,
+        return DispatchOutcome(
+            applescript_succeeded=True,
+            applescript_error=None,
             parts_sent=parts_sent,
-            error=None,
         )
 
     def _resolve_attachments(self, raw_paths: Sequence[str]) -> Sequence[Path]:

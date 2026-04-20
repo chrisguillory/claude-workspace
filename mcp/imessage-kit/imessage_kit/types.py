@@ -32,6 +32,26 @@ type ReactionName = Literal['love', 'like', 'dislike', 'laugh', 'emphasize', 'qu
 type AttachmentMode = Literal['view', 'save']
 type ContactSourceKind = Literal['Google', 'iCloud']
 
+# Terminal states of a send as observed in chat.db, after polling post-dispatch.
+# AppleScript `send` returning success is NOT a reliable delivery signal on its own —
+# Messages.app writes a row into chat.db whose `is_sent`, `is_delivered`, `error`,
+# `date_delivered`, `date_read` columns (and the attachment `transfer_state`) are
+# the authoritative source of truth.
+type DeliveryStatus = Literal[
+    # Terminal success states (polling stops as soon as any of these is seen):
+    'read',  # delivered AND recipient has opened it (message.date_read > 0)
+    'delivered',  # recipient device acknowledged (is_delivered=1); not yet read
+    'sent',  # dispatched to APNs (is_sent=1); recipient device may be offline.
+    #        # APNs holds the message and delivers when the recipient comes back online.
+    #        # From our perspective this is terminal — we've done our job.
+    # Terminal failure state:
+    'failed',  # message.error != 0 or any attachment.transfer_state == 6
+    # Non-terminal "we don't know" states — polling ran out of budget:
+    'pending',  # row exists but no terminal flag observed within the poll window
+    'timeout',  # we saw no resolution at all within the poll window
+    'not_found',  # no matching message row ever appeared in chat.db (AppleScript lie)
+]
+
 # RCS is intentionally NOT exposed as a send target. Apple's Messages.app dictionary
 # enumerates RCS as a service type, but selecting it in AppleScript does not give us
 # deterministic control over the wire protocol — RCS routing is decided by the paired
@@ -253,17 +273,47 @@ class DiagnosticResult(ClosedModel):
 
 
 class SendResult(ClosedModel):
-    """Result of sending a message or reaction."""
+    """Result of sending a message and/or attachments.
+
+    `success` is True only when the post-dispatch poll of chat.db observes a
+    terminal delivery state of 'delivered' or 'read'. AppleScript accepting
+    the send is surfaced separately in `applescript_succeeded` — it is not a
+    reliable delivery signal on its own (observed in the wild: AppleScript
+    returns success while the attachment transfer fails silently).
+    """
 
     success: bool
     recipient: str
-    """Handle the message was sent to."""
+    """Handle or chat_guid the message was directed to."""
 
     service: MessageService | None
-    """May not be determinable at send time."""
+    """May be None for auto-routed sends where Messages.app chose the service."""
 
     parts_sent: int
-    """How many parts dispatched. With attachments, total = 1 (text, if any) + N (attachments).
-    On success: equals total. On partial failure: less than total; error names which part failed."""
+    """How many parts were dispatched via AppleScript. total = 1 (text, if any) + N (attachments).
+    On fail-fast: reflects parts attempted before the failure. Independent of actual delivery."""
+
+    # Post-dispatch chat.db provenance
+    delivery_status: DeliveryStatus
+    message_rowid: int | None
+    """chat.db message.ROWID of the row we identified as ours. None if not_found."""
+
+    message_guid: str | None
+    """chat.db message.guid. None if not_found."""
+
+    error_code: int | None
+    """chat.db message.error column value (non-zero = failure). None if not_found."""
+
+    attachment_transfer_states: Sequence[int]
+    """One entry per sent attachment, in order. 5 = delivered, 6 = failed.
+    Empty for text-only sends. Missing entries if some attachments never registered in chat.db."""
+
+    # AppleScript hop provenance (separate from delivery truth)
+    applescript_succeeded: bool
+    """True if every osascript invocation exited 0. Does NOT imply delivery."""
+
+    applescript_error: str | None
+    """osascript stderr from the first failed invocation, if any."""
 
     error: str | None
+    """Human-readable summary of the terminal outcome. None on full success."""

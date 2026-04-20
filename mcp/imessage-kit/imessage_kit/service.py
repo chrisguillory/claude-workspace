@@ -12,6 +12,7 @@ import pathlib
 import platform
 import plistlib
 import sqlite3
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,7 +22,7 @@ from imessage_kit.attachments import AttachmentHandler
 from imessage_kit.contacts import ContactResolver
 from imessage_kit.db import ChatDB, apple_ts_to_datetime
 from imessage_kit.parser import extract_text
-from imessage_kit.sender import MessageSender
+from imessage_kit.sender import DispatchOutcome, MessageSender
 from imessage_kit.system import detect_root_app
 from imessage_kit.types import (
     AttachmentMeta,
@@ -30,6 +31,7 @@ from imessage_kit.types import (
     Chat,
     Contact,
     ContactSource,
+    DeliveryStatus,
     DiagnosticResult,
     EditEvent,
     Message,
@@ -74,6 +76,19 @@ class ServerState:
 
 class IMessageService:
     """All tool business logic. Thin MCP tools delegate here."""
+
+    # Post-dispatch polling of chat.db. Row discovery usually happens in 1-2s;
+    # delivery confirmation takes longer for attachments (iCloud / APNs uploads).
+    ROW_DISCOVERY_TIMEOUT_S = 15.0
+    ROW_DISCOVERY_POLL_S = 0.3
+    DELIVERY_TIMEOUT_TEXT_S = 10.0
+    DELIVERY_TIMEOUT_ATTACHMENT_S = 30.0
+    DELIVERY_POLL_S = 0.5
+
+    # attachment.transfer_state values observed in chat.db. Intermediate states
+    # (queued, uploading) exist but are not terminal; we only interpret the ends.
+    ATTACHMENT_STATE_DELIVERED = 5
+    ATTACHMENT_STATE_FAILED = 6
 
     def __init__(self, state: ServerState) -> None:
         self._state = state
@@ -274,25 +289,125 @@ class IMessageService:
         confirm: bool,
         attachments: Sequence[str] | None = None,
     ) -> SendResult:
-        """Send a message and/or attachments. Requires confirm=True to actually send."""
+        """Send text and/or attachments, then poll chat.db for delivery status.
+
+        Requires confirm=True to actually send. On confirm=False, returns a preview
+        SendResult with delivery_status='not_found' and applescript_succeeded=False
+        (since nothing was dispatched).
+
+        On confirm=True:
+        1. Resolve target chat_id (for polling) from handle or chat_guid.
+        2. Capture baseline max(ROWID) for that chat.
+        3. Dispatch via MessageSender.send → DispatchOutcome (AppleScript hop).
+        4. If AppleScript failed, return with delivery_status='not_found'.
+        5. Poll chat.db for our new outbound row (ROWID > baseline, matching attachments presence).
+        6. Poll that row for terminal delivery state (read / delivered / sent / failed).
+        7. Assemble SendResult with both the AppleScript provenance and the chat.db truth.
+        """
+        recipient = chat_guid or handle or ''
+        expect_attachments = bool(attachments)
+
         if not confirm:
-            recipient = chat_guid or handle or ''
             return SendResult(
                 success=False,
                 recipient=recipient,
                 service=None,
                 parts_sent=0,
+                delivery_status='not_found',
+                message_rowid=None,
+                message_guid=None,
+                error_code=None,
+                attachment_transfer_states=[],
+                applescript_succeeded=False,
+                applescript_error=None,
                 error=(
                     f'Message preview — set confirm=true to send. '
                     f'To: {recipient}, Text: {text!r}, Attachments: {list(attachments or [])}'
                 ),
             )
-        return self._state.sender.send(
+
+        target_chat_id = self._resolve_chat_id_for_send(handle, chat_guid)
+        baseline_rowid = (
+            self._state.db.get_max_message_rowid_for_chat(target_chat_id)
+            if target_chat_id is not None
+            else self._get_global_max_message_rowid()
+        )
+
+        outcome: DispatchOutcome = self._state.sender.send(
             text,
             handle=handle,
             chat_guid=chat_guid,
             service=service,
             attachments=attachments,
+        )
+        final_service = service if service != 'auto' else None
+
+        if not outcome.applescript_succeeded:
+            return SendResult(
+                success=False,
+                recipient=recipient,
+                service=None,
+                parts_sent=outcome.parts_sent,
+                delivery_status='not_found',
+                message_rowid=None,
+                message_guid=None,
+                error_code=None,
+                attachment_transfer_states=[],
+                applescript_succeeded=False,
+                applescript_error=outcome.applescript_error,
+                error=outcome.applescript_error,
+            )
+
+        row = self._wait_for_outbound_row(
+            chat_id=target_chat_id,
+            baseline_rowid=baseline_rowid,
+            expect_attachments=expect_attachments,
+        )
+        if row is None:
+            return SendResult(
+                success=False,
+                recipient=recipient,
+                service=final_service,
+                parts_sent=outcome.parts_sent,
+                delivery_status='not_found',
+                message_rowid=None,
+                message_guid=None,
+                error_code=None,
+                attachment_transfer_states=[],
+                applescript_succeeded=True,
+                applescript_error=None,
+                error=(
+                    'AppleScript accepted the send, but no matching message row '
+                    f'appeared in chat.db within {self.ROW_DISCOVERY_TIMEOUT_S:.0f}s. '
+                    'Delivery outcome is unknown.'
+                ),
+            )
+
+        final_state, transfer_states = self._wait_for_terminal_delivery(
+            message_rowid=cast(int, row['rowid']),
+            expect_attachments=expect_attachments,
+        )
+        delivery_status = self._classify_delivery(final_state, transfer_states, expect_attachments)
+        success = delivery_status in {'read', 'delivered', 'sent'}
+        error_code = cast(int, final_state['error']) if final_state['error'] else None
+
+        error_summary: str | None = None
+        if not success:
+            error_summary = self._build_error_summary(delivery_status, error_code, transfer_states)
+
+        return SendResult(
+            success=success,
+            recipient=recipient,
+            service=final_service,
+            parts_sent=outcome.parts_sent,
+            delivery_status=delivery_status,
+            message_rowid=cast(int, final_state['rowid']),
+            message_guid=cast(str, final_state['guid']),
+            error_code=error_code,
+            attachment_transfer_states=transfer_states,
+            applescript_succeeded=True,
+            applescript_error=None,
+            error=error_summary,
         )
 
     def lookup_contact(
@@ -581,6 +696,175 @@ class IMessageService:
                     events.append(EditEvent(timestamp=ts, text=text))
 
         return events if events else None, is_retracted
+
+    # -- Private helpers: send orchestration --
+
+    def _resolve_chat_id_for_send(self, handle: str | None, chat_guid: str | None) -> int | None:
+        """Resolve target chat_id for polling. None if the chat doesn't exist yet (first send)."""
+        if chat_guid:
+            return self._state.db.get_chat_id_by_guid(chat_guid)
+        if handle:
+            chat = self._state.db.get_chat_for_handle(handle)
+            return cast(int, chat['chat_id']) if chat else None
+        return None
+
+    def _get_global_max_message_rowid(self) -> int:
+        """Fallback baseline when the target chat doesn't exist yet."""
+        row = cast(
+            'sqlite3.Row | None',
+            self._state.db.conn.execute('SELECT COALESCE(MAX(ROWID), 0) as m FROM message').fetchone(),
+        )
+        return cast(int, row['m']) if row else 0
+
+    def _wait_for_outbound_row(
+        self,
+        *,
+        chat_id: int | None,
+        baseline_rowid: int,
+        expect_attachments: bool,
+    ) -> sqlite3.Row | None:
+        """Poll chat.db until our new outbound row appears. Returns None on timeout."""
+        deadline = time.monotonic() + self.ROW_DISCOVERY_TIMEOUT_S
+        while time.monotonic() < deadline:
+            if chat_id is not None:
+                row = self._state.db.find_outbound_message_since(
+                    chat_id, baseline_rowid, expect_attachments=expect_attachments
+                )
+            else:
+                row = self._find_outbound_globally(baseline_rowid, expect_attachments)
+            if row is not None:
+                return row
+            time.sleep(self.ROW_DISCOVERY_POLL_S)
+        return None
+
+    def _find_outbound_globally(self, baseline_rowid: int, expect_attachments: bool) -> sqlite3.Row | None:
+        """Find an outbound message across all chats — used when target chat is new."""
+        return cast(
+            'sqlite3.Row | None',
+            self._state.db.conn.execute(
+                """
+                SELECT ROWID as rowid, guid, is_sent, is_delivered, error,
+                       date_delivered, date_read, cache_has_attachments, text
+                FROM message
+                WHERE ROWID > ? AND is_from_me = 1 AND cache_has_attachments = ?
+                ORDER BY ROWID ASC LIMIT 1
+                """,
+                (baseline_rowid, 1 if expect_attachments else 0),
+            ).fetchone(),
+        )
+
+    def _wait_for_terminal_delivery(
+        self,
+        *,
+        message_rowid: int,
+        expect_attachments: bool,
+    ) -> tuple[sqlite3.Row, Sequence[int]]:
+        """Poll a message row until it hits a terminal delivery state or times out.
+
+        Returns the final message row and the final attachment transfer states.
+        Terminal states: read/delivered/sent/failed. Non-terminal return paths:
+        pending (no flags set yet) and timeout (budget exhausted).
+        """
+        timeout = self.DELIVERY_TIMEOUT_ATTACHMENT_S if expect_attachments else self.DELIVERY_TIMEOUT_TEXT_S
+        deadline = time.monotonic() + timeout
+
+        final_row: sqlite3.Row | None = None
+        transfer_states: Sequence[int] = []
+
+        while time.monotonic() < deadline:
+            row = self._state.db.get_message_delivery_state(message_rowid)
+            if row is None:
+                # Extremely rare; row was there but disappeared. Treat as non-terminal.
+                time.sleep(self.DELIVERY_POLL_S)
+                continue
+            final_row = row
+            if expect_attachments:
+                transfer_states = self._state.db.get_attachment_transfer_states(message_rowid)
+            if self._is_terminal_state(row, transfer_states, expect_attachments):
+                return row, transfer_states
+            time.sleep(self.DELIVERY_POLL_S)
+
+        # Timeout path — return whatever we last observed.
+        if final_row is None:
+            final_row = self._state.db.get_message_delivery_state(message_rowid)
+            if expect_attachments:
+                transfer_states = self._state.db.get_attachment_transfer_states(message_rowid)
+        assert final_row is not None, 'message row disappeared during polling'
+        return final_row, transfer_states
+
+    def _is_terminal_state(
+        self,
+        row: sqlite3.Row,
+        transfer_states: Sequence[int],
+        expect_attachments: bool,
+    ) -> bool:
+        """Check whether a message row has reached a terminal delivery state."""
+        if row['error']:
+            return True  # failed
+        if expect_attachments:
+            if any(s == self.ATTACHMENT_STATE_FAILED for s in transfer_states):
+                return True  # failed
+            # All attachments must be delivered before text send flags are meaningful.
+            if transfer_states and not all(s == self.ATTACHMENT_STATE_DELIVERED for s in transfer_states):
+                return False
+        if row['date_read']:
+            return True  # read
+        if row['is_delivered']:
+            return True  # delivered
+        if row['is_sent']:
+            return True  # sent (APNs queued; recipient may be offline)
+        return False
+
+    def _classify_delivery(
+        self,
+        row: sqlite3.Row,
+        transfer_states: Sequence[int],
+        expect_attachments: bool,
+    ) -> DeliveryStatus:
+        """Classify a final row into a DeliveryStatus. Mirrors _is_terminal_state ordering."""
+        if row['error']:
+            return 'failed'
+        if expect_attachments and any(s == self.ATTACHMENT_STATE_FAILED for s in transfer_states):
+            return 'failed'
+        if (
+            expect_attachments
+            and transfer_states
+            and not all(s == self.ATTACHMENT_STATE_DELIVERED for s in transfer_states)
+        ):
+            return 'pending'
+        if row['date_read']:
+            return 'read'
+        if row['is_delivered']:
+            return 'delivered'
+        if row['is_sent']:
+            return 'sent'
+        return 'pending'
+
+    def _build_error_summary(
+        self,
+        delivery_status: DeliveryStatus,
+        error_code: int | None,
+        transfer_states: Sequence[int],
+    ) -> str:
+        """Human-readable explanation of a non-success terminal state."""
+        if delivery_status == 'failed':
+            if error_code:
+                return f'Delivery failed with chat.db error code {error_code}.'
+            failed_indices = [i for i, s in enumerate(transfer_states, start=1) if s == self.ATTACHMENT_STATE_FAILED]
+            return (
+                f'Attachment transfer failed (attachments {failed_indices} of '
+                f'{len(transfer_states)} at transfer_state={self.ATTACHMENT_STATE_FAILED}).'
+            )
+        if delivery_status == 'timeout':
+            return 'Polling budget exhausted without a terminal delivery state.'
+        if delivery_status == 'pending':
+            return (
+                'Message row exists but no terminal delivery flag observed within poll window. '
+                'Delivery may still be in flight — check chat.db later with get_messages.'
+            )
+        if delivery_status == 'not_found':
+            return 'AppleScript accepted the call but chat.db never reflected the send.'
+        return f'Unexpected delivery status: {delivery_status}.'
 
 
 def _clean_text(text: str | None) -> str | None:
