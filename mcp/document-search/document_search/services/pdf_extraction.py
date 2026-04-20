@@ -25,6 +25,7 @@ import fitz  # PyMuPDF
 import pdfplumber
 
 __all__ = [
+    'EncryptedPDFError',
     'PDFExtractionResult',
     'PDFPageData',
     'extract_pdf',
@@ -63,6 +64,18 @@ class PDFExtractionResult:
     footer_pattern: str
 
 
+class EncryptedPDFError(Exception):
+    """PDF is password-protected and cannot be extracted."""
+
+    def __init__(self, path: str) -> None:
+        # args=(path,) so pickle roundtrip through ProcessPoolExecutor reconstructs with the same path.
+        super().__init__(path)
+        self.path = path
+
+    def __str__(self) -> str:
+        return f'PDF is password-protected: {self.path}'
+
+
 def extract_pdf(path: str) -> PDFExtractionResult:
     """Extract all content from a PDF file.
 
@@ -80,6 +93,11 @@ def extract_pdf(path: str) -> PDFExtractionResult:
     """
     doc = fitz.open(path)
     try:
+        # Owner-only encryption (copy-protection) clears with an empty password.
+        # Genuine user-password encryption does not — raise so the pipeline can skip.
+        if doc.needs_pass and not doc.authenticate(''):
+            raise EncryptedPDFError(path)
+
         if doc.page_count == 0:
             return PDFExtractionResult(
                 path=path,
