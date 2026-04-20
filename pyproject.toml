@@ -17,6 +17,7 @@ members = [
     "cc-lib",
     "mcp/claude-session",
     "mcp/document-search",
+    "mcp/imessage-kit",
     "mcp/playwright-browser",
     "mcp/python-interpreter",
     "mcp/selenium-browser",
