@@ -59,6 +59,20 @@ Patches:
                         https://github.com/anthropics/claude-code/issues/37437
                         https://github.com/anthropics/claude-code/issues/24304
 
+    oversized-image     An image in the session exceeds Anthropic's 2000px
+                        many-image dimension cap (triggered when a request
+                        contains >20 images). Each resume replays the full
+                        history; API rejects with 400; a <synthetic> error
+                        record is appended, creating a growing error tail.
+                        Fix: redact the oversized image block in place
+                        (replace with a text placeholder preserving the
+                        tool_result structure) AND truncate the synthetic
+                        error tail back to the last clean exchange.
+                        https://github.com/anthropics/claude-code/issues/34025
+                        https://github.com/anthropics/claude-code/issues/16173
+                        https://github.com/anthropics/claude-code/issues/13480
+                        https://github.com/anthropics/claude-code/issues/9375
+
     stale-parent        (detect-only) After resume, new user record's
                         parentUuid latches onto old compaction segment,
                         skipping newer compact_boundary records. Session
@@ -108,6 +122,8 @@ Exit codes:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import subprocess
 import sys
@@ -305,13 +321,24 @@ def fix(
 
     _apply_patch(session, plan)
 
-    # Verify
+    # Verify: our applied patches must now be clean, and no previously-clean patch
+    # should have regressed. Pre-existing unfixable issues in OTHER patches are
+    # not our responsibility and don't trigger rollback.
     verify_analyzer = SessionAnalyzer(session.read_lines())
     verify_results = verify_analyzer.scan()
-    verify_bad = [r for r in verify_results if r.status in ('detected', 'unfixable')]
+    applied = {r.patch.name for r in detected}
+    before_status = {r.patch.name: r.status for r in results}
+    verify_bad = [
+        r
+        for r in verify_results
+        if r.status in ('detected', 'unfixable')
+        and (r.patch.name in applied or before_status.get(r.patch.name) == 'clean')
+    ]
 
     if verify_bad:
         print('Verification FAILED — restoring from backup', file=sys.stderr)
+        for r in verify_bad:
+            print(f'  {r.patch.name}: {r.status} — {r.details}', file=sys.stderr)
         backup_mgr.rollback(session)
         raise SystemExit(EXIT_ERROR)
 
@@ -405,8 +432,29 @@ class FixDataType:
 
         attributions: Mapping[str, str]
 
+    @dataclass(frozen=True, slots=True)
+    class ImageRedaction:
+        """One image content block to be replaced with a text placeholder."""
 
-type FixData = FixDataType.Truncate | FixDataType.DuplicateUuid | FixDataType.OrphanSidechain
+        record_index: int  # 0-based index into analyzer._records
+        json_path: Sequence[str | int]  # path from the record root to the image block
+        placeholder_text: str
+        original_dimensions: tuple[int, int]  # (width, height)
+        original_format: str  # 'PNG', 'JPEG', 'GIF', 'WebP'
+
+    @dataclass(frozen=True, slots=True)
+    class RedactImageAndTruncate:
+        """oversized-image patch: redact image blocks AND truncate error tail."""
+
+        redactions: Sequence[FixDataType.ImageRedaction]
+        truncate_to: int | None
+        error_loop_start: int | None
+        records_to_remove: int
+
+
+type FixData = (
+    FixDataType.Truncate | FixDataType.DuplicateUuid | FixDataType.OrphanSidechain | FixDataType.RedactImageAndTruncate
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,6 +482,7 @@ class PatchPlan:
     total_affected_lines: int
     rewire_map: Mapping[int, str]  # line -> new parentUuid (union from fix_data)
     truncate_to: int | None  # line to truncate to (from fix_data)
+    image_redactions: Sequence[FixDataType.ImageRedaction] = ()  # image blocks to replace in place
 
 
 # -- Patch registry (alphabetical) --------------------------------------------
@@ -456,6 +505,14 @@ PATCHES: Sequence[SessionPatchDef] = (
         description='SubAgent/hook progress entries create parentUuid orphans pointing into sidechain files. Session shows empty on resume.',
         kind=PatchKind.FIX,
         min_version='2.1.24',
+    ),
+    SessionPatchDef(
+        name='oversized-image',
+        description=(
+            'An image >2000px triggers an API 400 loop on sessions with >20 images. '
+            'Fix: redact the image in place + truncate the synthetic error tail.'
+        ),
+        kind=PatchKind.FIX,
     ),
     SessionPatchDef(
         name='stale-parent',
@@ -553,18 +610,26 @@ class SessionAnalyzer:
         """
         merged_rewire: dict[int, str] = {}
         truncate_to: int | None = None
+        image_redactions: list[FixDataType.ImageRedaction] = []
         total_affected = 0
         has_detected = False
 
         for r in results:
             total_affected += len(r.affected_lines)
-            if r.status == 'detected' and r.fix_data is not None:
-                has_detected = True
-                if isinstance(r.fix_data, FixDataType.Rewire):
-                    merged_rewire.update(r.fix_data.rewire_map)
-                elif isinstance(r.fix_data, FixDataType.Truncate):
-                    if truncate_to is None or r.fix_data.truncate_to < truncate_to:
-                        truncate_to = r.fix_data.truncate_to
+            if r.status != 'detected' or r.fix_data is None:
+                continue
+            has_detected = True
+            match r.fix_data:
+                case FixDataType.Rewire(rewire_map=m):
+                    # Matches DuplicateUuid and OrphanSidechain subclasses too.
+                    merged_rewire.update(m)
+                case FixDataType.Truncate(truncate_to=t):
+                    if truncate_to is None or t < truncate_to:
+                        truncate_to = t
+                case FixDataType.RedactImageAndTruncate(redactions=reds, truncate_to=t):
+                    image_redactions.extend(reds)
+                    if t is not None and (truncate_to is None or t < truncate_to):
+                        truncate_to = t
 
         # Holistic simulation: verify the combined rewire map produces a clean chain
         fixable = has_detected
@@ -577,6 +642,7 @@ class SessionAnalyzer:
             total_affected_lines=total_affected,
             rewire_map=merged_rewire,
             truncate_to=truncate_to,
+            image_redactions=tuple(image_redactions),
         )
 
     def _simulate_rewire(self, rewire_map: Mapping[int, str]) -> bool:
@@ -955,11 +1021,143 @@ def _detect_stale_parent(
     )
 
 
+def _detect_oversized_image(
+    analyzer: SessionAnalyzer,
+    patch: SessionPatchDef,
+) -> SessionScanResult:
+    """Detect images exceeding Anthropic's 2000px many-image dimension cap.
+
+    Two conditions required to flag a session:
+    1. At least one base64 image block has width or height > 2000px.
+    2. At least one <synthetic> assistant record contains the API error
+       text 'dimension limit for many-image requests' (confirms the image
+       is actively blocking, not merely historical).
+
+    Fix is composite: redact each oversized image (replace the image block
+    with a text placeholder in place, preserving tool_result structure) AND
+    truncate the synthetic-error tail back to the last clean exchange.
+    """
+    # Phase 1: find oversized base64 image blocks
+    redactions: list[FixDataType.ImageRedaction] = []
+    for rec_idx, rec in enumerate(analyzer._records):
+        if rec is None:
+            continue
+        msg = rec.get('message')
+        if not isinstance(msg, dict):
+            continue
+        for path, block in _walk_image_blocks(msg):
+            src = block.get('source') or {}
+            if src.get('type') != 'base64':
+                continue
+            dims = _sample_image_dimensions(src.get('data') or '')
+            if dims is None:
+                continue
+            fmt, w, h = dims
+            if w > IMAGE_DIMENSION_THRESHOLD or h > IMAGE_DIMENSION_THRESHOLD:
+                placeholder = (
+                    f'[image redacted by claude-session-patcher -- '
+                    f"original {fmt} was {w}x{h} pixels, exceeded Anthropic's "
+                    f'{IMAGE_DIMENSION_THRESHOLD}px many-image dimension limit]'
+                )
+                redactions.append(
+                    FixDataType.ImageRedaction(
+                        record_index=rec_idx,
+                        json_path=('message', *path),
+                        placeholder_text=placeholder,
+                        original_dimensions=(w, h),
+                        original_format=fmt,
+                    )
+                )
+
+    # Phase 2: find synthetic dimension-limit error records
+    dim_error_lines: list[int] = []
+    for i, rec in enumerate(analyzer._records):
+        if rec is None:
+            continue
+        if rec.get('type') != 'assistant':
+            continue
+        msg = rec.get('message') or {}
+        if msg.get('model') != '<synthetic>':
+            continue
+        content = msg.get('content') or []
+        if not isinstance(content, list):
+            continue
+        text_blob = ' '.join(b.get('text', '') for b in content if isinstance(b, dict))
+        if 'dimension limit for many-image requests' in text_blob:
+            dim_error_lines.append(i + 1)
+
+    # Phase 3: decide status
+    if not redactions and not dim_error_lines:
+        return SessionScanResult(patch=patch, status='clean', details='No oversized images or dimension errors')
+
+    if not redactions and dim_error_lines:
+        return SessionScanResult(
+            patch=patch,
+            status='unfixable',
+            details=(
+                f'Dimension error loop at L{dim_error_lines[0]} but no oversized '
+                f'base64 image found; may be a URL image or unsupported format'
+            ),
+            affected_lines=tuple(dim_error_lines),
+        )
+
+    if redactions and not dim_error_lines:
+        first = redactions[0]
+        return SessionScanResult(
+            patch=patch,
+            status='clean',
+            details=(
+                f'{len(redactions)} oversized image(s) present but no active error loop '
+                f'(primary: L{first.record_index + 1} {first.original_format} '
+                f'{first.original_dimensions[0]}x{first.original_dimensions[1]})'
+            ),
+            affected_lines=tuple(r.record_index + 1 for r in redactions),
+        )
+
+    # Both conditions met — compute truncation point
+    error_loop_start = dim_error_lines[0]
+    truncate_to = _walk_back_to_clean(analyzer._records, error_loop_start - 1)
+
+    if truncate_to <= 0:
+        return SessionScanResult(
+            patch=patch,
+            status='unfixable',
+            details=(
+                f'{len(redactions)} oversized image(s) and error loop at L{error_loop_start}, '
+                f'but no clean record precedes the error loop'
+            ),
+            affected_lines=tuple(r.record_index + 1 for r in redactions),
+        )
+
+    records_to_remove = len(analyzer._records) - truncate_to
+    primary = redactions[0]
+    details = (
+        f'{len(redactions)} oversized image(s) '
+        f'(primary: L{primary.record_index + 1} {primary.original_format} '
+        f'{primary.original_dimensions[0]}x{primary.original_dimensions[1]}), '
+        f'error loop at L{error_loop_start}; redact + truncate to L{truncate_to} '
+        f'(remove {records_to_remove} tail records)'
+    )
+    return SessionScanResult(
+        patch=patch,
+        status='detected',
+        details=details,
+        affected_lines=tuple(r.record_index + 1 for r in redactions) + tuple(dim_error_lines),
+        fix_data=FixDataType.RedactImageAndTruncate(
+            redactions=tuple(redactions),
+            truncate_to=truncate_to,
+            error_loop_start=error_loop_start,
+            records_to_remove=records_to_remove,
+        ),
+    )
+
+
 # Detector dispatch — execution order matters (duplicate-uuid modifies index)
 _DETECTORS: Mapping[str, Callable[..., SessionScanResult]] = {
     'consecutive-messages': _detect_consecutive_messages,
     'duplicate-uuid': _detect_duplicate_uuid,
     'orphan-sidechain': _detect_orphan_sidechain,
+    'oversized-image': _detect_oversized_image,
     'stale-parent': _detect_stale_parent,
 }
 
@@ -968,6 +1166,7 @@ _DETECTOR_ORDER: Mapping[str, int] = {
     'orphan-sidechain': 1,
     'stale-parent': 2,
     'consecutive-messages': 3,
+    'oversized-image': 4,
 }
 
 
@@ -1136,6 +1335,159 @@ class BackupManager:
 # -- Private helpers -----------------------------------------------------------
 
 
+IMAGE_DIMENSION_THRESHOLD = 2000  # Anthropic's many-image per-request cap
+IMAGE_HEADER_B64_SAMPLE = 524288  # ~384KB of image data, plenty for any header
+
+
+def _image_dimensions(data: bytes) -> tuple[str, int, int] | None:
+    """Parse image header; return (format, width, height), or None if unknown."""
+    if len(data) < 24:
+        return None
+    # PNG: 89 50 4E 47 0D 0A 1A 0A + IHDR chunk (width @ 16, height @ 20, big-endian)
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return ('PNG', int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big'))
+    # JPEG: SOI FF D8, then scan for SOFn marker
+    if data[:2] == b'\xff\xd8':
+        return _parse_jpeg_dimensions(data)
+    # GIF87a / GIF89a: width @ 6 (LE), height @ 8 (LE)
+    if data[:6] in (b'GIF87a', b'GIF89a'):
+        return ('GIF', int.from_bytes(data[6:8], 'little'), int.from_bytes(data[8:10], 'little'))
+    # WebP: RIFF....WEBP + VP8/VP8L/VP8X chunk
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return _parse_webp_dimensions(data)
+    return None
+
+
+def _parse_jpeg_dimensions(data: bytes) -> tuple[str, int, int] | None:
+    """Scan JPEG markers for SOFn and read dimensions."""
+    i = 2  # skip SOI (FF D8)
+    n = len(data)
+    while i < n - 9:
+        if data[i] != 0xFF:
+            return None
+        marker = data[i + 1]
+        # SOF markers (non-arithmetic, non-differential frames): C0-C3, C5-C7, C9-CB, CD-CF.
+        # Exclude C4 (DHT), C8 (reserved), CC (DAC).
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            h = int.from_bytes(data[i + 5 : i + 7], 'big')
+            w = int.from_bytes(data[i + 7 : i + 9], 'big')
+            return ('JPEG', w, h)
+        seg_len = int.from_bytes(data[i + 2 : i + 4], 'big')
+        if seg_len < 2:
+            return None
+        i += 2 + seg_len
+    return None
+
+
+def _parse_webp_dimensions(data: bytes) -> tuple[str, int, int] | None:
+    """Parse VP8/VP8L/VP8X chunk dimensions."""
+    if len(data) < 30:
+        return None
+    chunk = data[12:16]
+    if chunk == b'VP8 ':
+        # Lossy VP8: width/height packed at offset 26 as 14-bit LE
+        w = int.from_bytes(data[26:28], 'little') & 0x3FFF
+        h = int.from_bytes(data[28:30], 'little') & 0x3FFF
+        return ('WebP', w, h)
+    if chunk == b'VP8L':
+        # Lossless VP8L: (width-1) + (height-1), 14 bits each, packed from byte 21
+        b = data[21:25]
+        w = 1 + (b[0] | ((b[1] & 0x3F) << 8))
+        h = 1 + ((b[1] >> 6) | (b[2] << 2) | ((b[3] & 0x0F) << 10))
+        return ('WebP', w, h)
+    if chunk == b'VP8X':
+        # Extended VP8X: (width-1) + (height-1), 24-bit LE at offset 24, 27
+        w = 1 + int.from_bytes(data[24:27], 'little')
+        h = 1 + int.from_bytes(data[27:30], 'little')
+        return ('WebP', w, h)
+    return None
+
+
+def _walk_image_blocks(
+    value: Any,
+    path: tuple[str | int, ...] = (),
+) -> Sequence[tuple[tuple[str | int, ...], Mapping[str, Any]]]:
+    """Collect (json_path, image_block) for every image content block in `value`.
+
+    Images can live at varying depths inside a session record: directly in
+    message.content, nested inside tool_result content arrays, or deeper.
+    """
+    found: list[tuple[tuple[str | int, ...], Mapping[str, Any]]] = []
+    if isinstance(value, dict):
+        if value.get('type') == 'image':
+            # An image block is a leaf for this search: its `source` dict is a
+            # descriptor, not a content container for further image blocks.
+            found.append((path, value))
+            return found
+        for k, v in value.items():
+            found.extend(_walk_image_blocks(v, (*path, k)))
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            found.extend(_walk_image_blocks(v, (*path, i)))
+    return found
+
+
+def _walk_back_to_clean(records: Sequence[Any], first_bad_idx: int) -> int:
+    """Walk backwards from first_bad_idx-1 to find the last clean record.
+
+    Clean = user record carrying a tool_result, or a non-synthetic assistant
+    response. Matches the semantics used by consecutive-messages.
+    Returns 1-based line count to keep (0 if no clean record found).
+    """
+    idx = first_bad_idx - 1
+    while idx >= 0:
+        rec = records[idx]
+        if rec is None:
+            idx -= 1
+            continue
+        rec_type = rec.get('type')
+        if rec_type == 'user':
+            msg = rec.get('message', {})
+            content = msg.get('content', [])
+            if isinstance(content, list):
+                has_tool_result = any(isinstance(b, dict) and b.get('type') == 'tool_result' for b in content)
+                if has_tool_result:
+                    break
+        if rec_type == 'assistant':
+            msg = rec.get('message', {})
+            if msg.get('model') != '<synthetic>':
+                break
+        idx -= 1
+    return idx + 1
+
+
+def _sample_image_dimensions(b64_data: Any) -> tuple[str, int, int] | None:
+    """Decode a sample of base64 and parse image header dimensions.
+
+    Typed `Any` because the caller reads from potentially-malformed session
+    records — `source.data` should be a string but can be anything in broken
+    sessions. Malformed inputs silently return None (skip the image) rather
+    than crashing the scan.
+    """
+    if not isinstance(b64_data, str) or not b64_data:
+        return None
+    try:
+        sample = base64.b64decode(b64_data[:IMAGE_HEADER_B64_SAMPLE], validate=False)
+    except (binascii.Error, ValueError, TypeError):
+        return None
+    return _image_dimensions(sample)
+
+
+def _apply_image_redaction(
+    rec: dict[str, Any],  # strict_typing_linter.py: mutable-type — rec is mutated in place
+    redaction: FixDataType.ImageRedaction,
+) -> None:
+    """Navigate rec via redaction.json_path and replace the image block with text."""
+    path = redaction.json_path
+    if not path:
+        return
+    parent: Any = rec
+    for key in path[:-1]:
+        parent = parent[key]
+    last_key = path[-1]
+    parent[last_key] = {'type': 'text', 'text': redaction.placeholder_text}
+
+
 def _attribute_orphans(file_path: Path, orphan_uuids: Set[str]) -> Mapping[str, str]:
     """Search sidechain agent files for orphan UUIDs. Returns uuid -> agent filename."""
     if not orphan_uuids:
@@ -1172,10 +1524,23 @@ def _attribute_orphans(file_path: Path, orphan_uuids: Set[str]) -> Mapping[str, 
 def _apply_patch(session: SessionFile, plan: PatchPlan) -> None:
     """Apply patch plan to session file atomically.
 
-    1. Apply rewire_map (modify parentUuid on affected lines)
-    2. Apply truncate_to (remove lines from that point)
+    1. Apply image_redactions (replace image blocks with text placeholders)
+    2. Apply rewire_map (modify parentUuid on affected lines)
+    3. Apply truncate_to (remove lines from that point)
     """
     lines = list(session.read_lines())
+
+    # Batch redactions by line so a record with multiple oversized images gets
+    # one json.loads / json.dumps round trip.
+    redactions_by_line: dict[int, list[FixDataType.ImageRedaction]] = {}
+    for r in plan.image_redactions:
+        redactions_by_line.setdefault(r.record_index, []).append(r)
+
+    for idx, redactions in redactions_by_line.items():
+        rec = json.loads(lines[idx])
+        for r in redactions:
+            _apply_image_redaction(rec, r)
+        lines[idx] = json.dumps(rec) + '\n'
 
     for line_num, new_parent in plan.rewire_map.items():
         idx = line_num - 1
@@ -1230,12 +1595,20 @@ def _fix_all(*, dry_run: bool) -> None:
 
             backup_mgr.create(session, plan)
             try:
+                applied = {r.patch.name for r in plan.results if r.status == 'detected'}
+                before_status = {r.patch.name: r.status for r in plan.results}
+
                 _apply_patch(session, plan)
 
-                # Verify
+                # Verify: applied patches must clear, previously-clean must stay clean
                 verify_analyzer = SessionAnalyzer(session.read_lines())
                 verify_results = verify_analyzer.scan()
-                verify_bad = [r for r in verify_results if r.status in ('detected', 'unfixable')]
+                verify_bad = [
+                    r
+                    for r in verify_results
+                    if r.status in ('detected', 'unfixable')
+                    and (r.patch.name in applied or before_status.get(r.patch.name) == 'clean')
+                ]
 
                 if verify_bad:
                     backup_mgr.rollback(session)
@@ -1286,6 +1659,16 @@ def _print_check(
                 print(
                     f'    Patch: truncate to L{r.fix_data.truncate_to} (remove {r.fix_data.records_to_remove} records)'
                 )
+            elif isinstance(r.fix_data, FixDataType.RedactImageAndTruncate):
+                print(f'    Patch: redact {len(r.fix_data.redactions)} oversized image block(s)')
+                for red in r.fix_data.redactions:
+                    w, h = red.original_dimensions
+                    print(f'      - L{red.record_index + 1} {red.original_format} {w}x{h}')
+                if r.fix_data.truncate_to is not None:
+                    print(
+                        f'    Then: truncate to L{r.fix_data.truncate_to} '
+                        f'(remove {r.fix_data.records_to_remove} tail records)'
+                    )
             elif isinstance(r.fix_data, FixDataType.OrphanSidechain):
                 print(f'    Patch: rewire {len(r.fix_data.rewire_map)} parentUuid pointer(s)')
                 for uuid, agent in r.fix_data.attributions.items():
