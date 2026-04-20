@@ -1,0 +1,32 @@
+[project]
+name = "imessage-kit"
+version = "0.1.0"
+description = "iMessage MCP Server - Read, search, and send iMessages via macOS chat.db"
+requires-python = ">=3.13"
+dependencies = [
+    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
+    "fastmcp>=2.12.5",
+    "pydantic>=2.12.4",
+    "thefuzz>=0.22.1",
+    "typer>=0.20.0",
+]
+
+[project.scripts]
+imessage-kit = "imessage_kit.cli.main:main"
+imessage-kit-mcp = "imessage_kit.mcp.main:main"
+
+[tool.uv.sources]
+# Local development override: workspace reference takes precedence over git URL in dependencies.
+# Remote uvx installations use the git URL; local development uses workspace (faster, sees live changes).
+cc-lib = { workspace = true }
+
+[tool.hatch.build]
+# Package directory to include in distribution
+include = ["imessage_kit/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
