@@ -55,6 +55,7 @@ from document_search.schemas.tracing import PipelineTimingReport, QueueDepthSamp
 from document_search.schemas.vectors import ClearResult
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
+from document_search.services.pdf_extraction import EncryptedPDFError
 from document_search.services.sparse_embedding import SparseEmbeddingService, SparseVector
 from document_search.services.tracing import PipelineTracer
 
@@ -1052,7 +1053,7 @@ class IndexingService:
                         len(deleted_ids),
                     )
 
-            except (TimeoutError, OSError, UnicodeDecodeError) as e:
+            except (TimeoutError, OSError, UnicodeDecodeError, EncryptedPDFError) as e:
                 # Known file-level errors: record and continue.
                 # Include errored file bytes so ETA estimate converges correctly.
                 try:
