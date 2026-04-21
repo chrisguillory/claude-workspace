@@ -45,25 +45,38 @@ ErrorBoundary(exit_code=2) guarantees no exception produces exit 1.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.exceptions import HookTreeMismatchError
 from cc_lib.schemas.hooks import PostToolUseHookInput
+from cc_lib.utils import validate_hook_tree
 
 boundary = ErrorBoundary(exit_code=2)
 
 
 @boundary
 def main() -> int:
+    launch_dir = validate_hook_tree(Path(__file__))
+
+    if not shutil.which('ruff'):
+        raise RuffNotFoundError
+
     payload = PostToolUseHookInput.model_validate_json(sys.stdin.buffer.read())
     file_path = payload.tool_input.get('file_path', '')
 
     if not file_path.endswith(('.py', '.pyi')):
         return 0
 
-    if not Path(file_path).is_file():
+    file = Path(file_path)
+    if not file.is_file():
+        return 0
+
+    # Scope: silently skip files outside the project.
+    if not file.resolve().is_relative_to(launch_dir):
         return 0
 
     # Pass 1: check all project rules, auto-fix only the safe formatting ones.
@@ -86,9 +99,26 @@ def main() -> int:
     return 0
 
 
+class RuffNotFoundError(Exception):
+    """ruff binary not on PATH — project venv likely not activated."""
+
+    def __init__(self) -> None:
+        super().__init__('ruff not found on PATH. Launch Claude via claude-exec to activate the project venv.')
+
+
 @boundary.handler(subprocess.CalledProcessError)
 def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
     sys.stderr.buffer.write(exc.stdout)
+
+
+@boundary.handler(HookTreeMismatchError)
+def _handle_tree_mismatch(exc: HookTreeMismatchError) -> None:
+    print(str(exc), file=sys.stderr)
+
+
+@boundary.handler(RuffNotFoundError)
+def _handle_ruff_not_found(exc: RuffNotFoundError) -> None:
+    print(str(exc), file=sys.stderr)
 
 
 if __name__ == '__main__':

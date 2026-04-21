@@ -139,13 +139,13 @@ import typer
 from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import CCVersion
-from cc_lib.utils import encode_project_path, get_claude_config_home_dir
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
 from cc_lib.utils.atomic_write import atomic_write
 
 # -- Constants -----------------------------------------------------------------
 
-BACKUP_DIR = Path.home() / '.claude-workspace' / 'scripts' / 'claude-session-patcher' / 'backups'
-LEGACY_BACKUP_DIR = Path.home() / '.claude-workspace' / 'claude-session' / 'chain-backups'
+BACKUP_DIR = get_claude_workspace_config_home_dir() / 'scripts' / 'claude-session-patcher' / 'backups'
+LEGACY_BACKUP_DIR = get_claude_workspace_config_home_dir() / 'claude-session' / 'chain-backups'
 
 EXIT_HEALTHY = 0
 EXIT_FIXABLE = 1

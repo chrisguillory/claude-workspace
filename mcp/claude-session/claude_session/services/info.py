@@ -18,7 +18,7 @@ from pathlib import Path
 import psutil
 import pydantic
 from cc_lib.session_tracker import Session, SessionDatabase
-from cc_lib.utils import get_claude_config_home_dir
+from cc_lib.utils import get_claude_config_home_dir, get_claude_workspace_config_home_dir
 
 from claude_session.schemas.operations.context import SessionContext
 from claude_session.schemas.operations.discovery import SessionInfo
@@ -36,7 +36,7 @@ __all__ = [
 
 
 # Claude workspace sessions.json location (our own data, NOT affected by CLAUDE_CONFIG_DIR)
-CLAUDE_WORKSPACE_SESSIONS = Path.home() / '.claude-workspace' / 'sessions.json'
+CLAUDE_WORKSPACE_SESSIONS = get_claude_workspace_config_home_dir() / 'sessions.json'
 
 
 @dataclass

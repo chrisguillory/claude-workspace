@@ -11,10 +11,10 @@ __all__ = [
 ]
 
 import json
-import pathlib
 from collections.abc import Mapping
 
 import filelock
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 from python_interpreter.models import InterpreterRegistry, SavedInterpreterConfig
 
@@ -22,7 +22,7 @@ from python_interpreter.models import InterpreterRegistry, SavedInterpreterConfi
 class InterpreterRegistryManager:
     """Manages saved interpreter configurations with atomic file persistence."""
 
-    STATE_DIR = pathlib.Path.home() / '.claude-workspace' / 'python_interpreter'
+    STATE_DIR = get_claude_workspace_config_home_dir() / 'python_interpreter'
 
     def __init__(self) -> None:
         self._state_path = self.STATE_DIR / 'interpreters.json'

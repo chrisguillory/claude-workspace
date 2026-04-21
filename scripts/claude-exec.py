@@ -18,7 +18,15 @@ for ``--resume``.
 
 Also fixes environment issues that the bare ``claude`` binary doesn't handle:
     - Activates ``$PWD/.venv/`` and cleans stale/IDE-injected PATH entries
+    - Detects worktree state on resume (repairs trailing-NULL worktreeSession
+      records so Claude Code re-chdirs into the worktree)
     - Injects ``--effort`` from settings.json env block
+    - Injects ``--thinking-display summarized`` (Opus 4.7 default is
+      ``omitted``; makes thinking-block content visible in JSONL)
+    - Injects ``--append-system-prompt`` with visible-reasoning bundle
+      (gated on ``CLAUDE_EXEC_VISIBLE_REASONING=1``)
+    - Injects ``--allow-dangerously-skip-permissions`` so bypass mode is
+      Shift+Tab-reachable without starting in it
     - Resolves ``--resume <title>`` to session UUIDs
 
 Usage::
@@ -34,7 +42,6 @@ process is replaced entirely, the terminal talks directly to Claude Code.
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import json
 import mmap
 import os
@@ -48,9 +55,12 @@ from typing import Annotated, Literal
 import pydantic
 import rich.console
 import typer
+from cc_lib import claude_cli_introspection
 from cc_lib.cli import LauncherInstaller, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.schemas import OpenModel
 from cc_lib.schemas.base import ClosedModel
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 boundary = ErrorBoundary(exit_code=1)
 ext_app = create_app(help='Claude exec management commands.')
@@ -66,12 +76,33 @@ def main() -> None:
         run_app(ext_app)
         return
 
-    venv_bin = Path.cwd() / '.venv' / 'bin'
-    if venv_bin.is_dir():
-        _activate_venv(venv_bin.parent)
-
-    args = _inject_effort_flag(sys.argv[1:])
+    raw_args = sys.argv[1:]
+    if _is_subcommand_invocation(raw_args):
+        # Subcommands (update, mcp, config, etc.) have their own flag
+        # schemas — don't inject interactive-session flags.
+        args: Sequence[str] = raw_args
+    else:
+        args = _inject_effort_flag(raw_args)
+        args = _inject_allow_dangerous_flag(args)
+        args = _inject_thinking_display_flag(args)
+        args = _inject_visible_reasoning_prompt(args)
     args = _resolve_resume_arg(args)
+
+    # Detect worktree once; both env vars and venv decision derive from it.
+    # Must run after _resolve_resume_arg so title→UUID is resolved.
+    worktree_path = WorktreeResolver(args).resolve()
+    launch_dir = worktree_path or Path.cwd()
+    os.environ['CLAUDE_EXEC_LAUNCH_DIR'] = str(launch_dir)
+    if worktree_path:
+        os.environ['CLAUDE_EXEC_WORKTREE'] = str(worktree_path)
+
+    # Worktree venv takes priority over CWD venv.
+    venv_bin = Path.cwd() / '.venv' / 'bin'
+    worktree_venv = WorktreeResolver.venv_of(worktree_path)
+    if worktree_venv:
+        _activate_venv(worktree_venv)
+    elif venv_bin.is_dir():
+        _activate_venv(venv_bin.parent)
 
     binary = _resolve_binary()
     # Intentional: show the full exec line for development visibility.
@@ -126,6 +157,16 @@ def uninstall() -> None:
     if completion_path.exists():
         completion_path.unlink()
         console.print(f'Removed: {completion_path}')
+
+
+# -- Subcommand detection ------------------------------------------------------
+
+
+def _is_subcommand_invocation(args: Sequence[str]) -> bool:
+    """True if args start with a known claude subcommand."""
+    if not args:
+        return False
+    return args[0] in {sc.name for sc in claude_cli_introspection.SUBCOMMANDS}
 
 
 # -- Venv activation -----------------------------------------------------------
@@ -230,6 +271,170 @@ def _read_settings_effort() -> EffortLevel | str:
         raise LaunchError(f'CLAUDE_CODE_EFFORT_LEVEL={value!r} in {settings_path}: {e.errors()[0]["msg"]}') from None
 
 
+# -- Allow-dangerous flag injection --------------------------------------------
+
+
+def _inject_allow_dangerous_flag(args: Sequence[str]) -> Sequence[str]:
+    """Add ``--allow-dangerously-skip-permissions`` so bypass mode is Shift+Tab-reachable.
+
+    This flag (distinct from ``--dangerously-skip-permissions``) adds
+    ``bypassPermissions`` to the Shift+Tab cycle WITHOUT starting in it.
+    Default behavior: launch in ``default`` mode, toggle into bypass only
+    when needed, without having to restart the session. Stable since v2.1.86.
+
+    Skipped if the user explicitly set ``--dangerously-skip-permissions``
+    (coupled "start in bypass"), ``--allow-dangerously-skip-permissions``
+    (avoid duplicate), or ``--permission-mode bypassPermissions`` (same
+    effect). Respects ``--permission-mode <other>`` — bug #17544 confirms
+    ``--allow-`` variant composes cleanly with an explicit initial mode.
+
+    Requires ``skipDangerousModePermissionPrompt: true`` in settings.json
+    to avoid the one-time warning dialog when Shift+Tab-ing into bypass.
+
+    Refs:
+        https://code.claude.com/docs/en/permission-modes
+        https://github.com/anthropics/claude-code/issues/28697 (shipped feature)
+        https://github.com/anthropics/claude-code/issues/17544 (--permission-mode composes)
+        https://github.com/anthropics/claude-code/issues/21062 (still open: unlock by default)
+    """
+    explicit_bypass_flags = {
+        '--allow-dangerously-skip-permissions',
+        '--dangerously-skip-permissions',
+    }
+    if any(a in explicit_bypass_flags for a in args):
+        return args
+
+    # Also skip if user passed --permission-mode bypassPermissions explicitly
+    for i, a in enumerate(args):
+        if a == '--permission-mode' and i + 1 < len(args) and args[i + 1] == 'bypassPermissions':
+            return args
+
+    return [*args, '--allow-dangerously-skip-permissions']
+
+
+# -- Thinking-display flag injection -------------------------------------------
+
+
+def _inject_thinking_display_flag(args: Sequence[str]) -> Sequence[str]:
+    """Pass ``--thinking-display summarized`` so Opus 4.7 thinking stays visible.
+
+    Opus 4.7 (released 2026-04-16) changed the server-side default for the API's
+    ``thinking.display`` parameter from ``"summarized"`` to ``"omitted"``.
+    Claude Code v2.1.112 does not send the ``display`` field unless this hidden
+    CLI flag is supplied, so on 4.7 the assistant's ``thinking`` text is
+    silently empty in the session JSONL. Forcing ``summarized`` restores the
+    pre-4.7 behavior.
+
+    The binary exposes no settings.json key and no env var for this knob —
+    CLI-flag injection is the only persistent workaround (verified against
+    v2.1.112's commander registration and request-builder). Opus 4.7 still
+    writes the encrypted ``signature`` field even when ``thinking`` is empty
+    (for multi-turn continuity), but the user sees nothing downstream.
+
+    The companion ``showThinkingSummaries: true`` settings.json key gates a
+    different mechanism (the ``redact-thinking-2026-02-12`` beta header).
+    Both levers must be favorable to see thinking content.
+
+    Removable: delete this function and the call in ``main()`` when Anthropic
+    either flips the server default back to ``"summarized"`` on Opus 4.7+, or
+    exposes ``thinkingDisplay`` as a settings.json / env-var knob.
+
+    Related bugs:
+        https://github.com/anthropics/claude-code/issues/48065
+        https://github.com/anthropics/claude-code/issues/49268
+        https://github.com/anthropics/claude-code/issues/49708
+    """
+    if any(a == '--thinking-display' or a.startswith('--thinking-display=') for a in args):
+        return args
+    return [*args, '--thinking-display', 'summarized']
+
+
+# -- Visible-reasoning system-prompt injection --------------------------------
+
+
+VISIBLE_REASONING_PROMPT = (
+    'Before any non-trivial response, structure your output as two '
+    'markdown sections: first "## Reasoning" containing your step-by-step '
+    'thinking, then "## Answer" containing your final response. For '
+    'trivial single-step tasks (direct lookups, single-file reads, '
+    'one-line edits), skip both headings and answer directly.\n\n'
+    'Inside the Reasoning section: state any assumptions, note '
+    'alternatives considered if relevant, and call out low-confidence '
+    'claims. Before moving to the Answer section, self-verify your plan '
+    "against the user's stated criteria.\n\n"
+    'When making claims about code: never speculate about a file you '
+    "haven't read — open it first. Ground any claim about code by "
+    'quoting the relevant lines and citing file path plus line numbers.'
+)
+
+
+def _inject_visible_reasoning_prompt(args: Sequence[str]) -> Sequence[str]:
+    """Append a system-prompt instruction for visible reasoning + verification.
+
+    Bundles Anthropic-endorsed visibility instructions (manual CoT
+    scaffolding, self-verification before finishing, anti-hallucination
+    for code) per the 2026 prompt-engineering best-practices page.
+
+    Rationale: Opus 4.7 changed the ``thinking.display`` default to
+    ``"omitted"``, making the model's internal reasoning channel opaque
+    to external users. This injection routes reasoning into the visible
+    response text instead — same-model output, fully persisted to the
+    JSONL, greppable and diff-able across sessions. Strictly more useful
+    than the thinking-block channel for engineers auditing what the model
+    is actually doing. (Anthropic's own Claude Code system prompt uses
+    the thinking-block channel — that choice is for end-user coding UX,
+    not for debugging the model.)
+
+    Gated on ``CLAUDE_EXEC_VISIBLE_REASONING=1`` in the process
+    environment. Set it inline (``CLAUDE_EXEC_VISIBLE_REASONING=1
+    claude-exec``) or via ``export`` in the shell.
+
+    Per user preference, uses ``## Reasoning`` / ``## Answer`` markdown
+    headings (vs the Anthropic-canonical ``<thinking>`` / ``<answer>``
+    XML tags) for dictation-playback ergonomics.
+
+    Fails fast on collision with any user-passed ``--system-prompt``-family
+    flag. Silent-skip would hide the conflict; silent-append would create
+    ambiguous prompt composition. Error message includes an escape hatch:
+    ``env -u CLAUDE_EXEC_VISIBLE_REASONING claude-exec ...``.
+
+    Removable: delete this function, the constant above, and the call in
+    ``main()`` when Anthropic restores raw thinking visibility by default
+    on Opus 4.7+, or when a cleaner mechanism lands.
+
+    Refs:
+        https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices
+            Anthropic's 2026 best-practices — names this pattern
+            "Manual CoT as a fallback".
+        Wei et al. 2022, Chain-of-Thought Prompting:
+            https://arxiv.org/abs/2201.11903
+        Chen, Benton et al. (Anthropic) 2025, faithfulness caveat:
+            https://arxiv.org/abs/2505.05410
+    """
+    if os.environ.get('CLAUDE_EXEC_VISIBLE_REASONING') != '1':
+        return args
+
+    collision_flags = (
+        '--system-prompt',
+        '--system-prompt-file',
+        '--append-system-prompt',
+        '--append-system-prompt-file',
+    )
+    for flag in collision_flags:
+        for a in args:
+            if a == flag or a.startswith(f'{flag}='):
+                raise LaunchError(
+                    f'CLAUDE_EXEC_VISIBLE_REASONING=1 conflicts with '
+                    f'{flag} on the command line. The injection and your '
+                    f'explicit flag cannot coexist meaningfully — pass '
+                    f'one or the other, not both. To skip injection for '
+                    f'this invocation only: '
+                    f'`env -u CLAUDE_EXEC_VISIBLE_REASONING claude-exec ...`.'
+                )
+
+    return [*args, '--append-system-prompt', VISIBLE_REASONING_PROMPT]
+
+
 # -- Resume title resolution ---------------------------------------------------
 
 
@@ -295,18 +500,10 @@ def _generate_zsh_completion() -> str:
 
     No Python callback on TAB — everything runs in native zsh.
     """
-    completions_path = Path(__file__).parent / 'claude-exec-completions.py'
-    spec = importlib.util.spec_from_file_location('claude_exec_completions', completions_path)
-    if spec is None or spec.loader is None:
-        raise LaunchError(f'failed to load completions from {completions_path}')
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[mod.__name__] = mod
-    spec.loader.exec_module(mod)
-
     lines: list[str] = [
         '#compdef claude-exec',
         '',
-        '# Auto-generated from claude-exec-completions.py (FlagDef data)',
+        '# Auto-generated from cc_lib.claude_cli_introspection (FlagDef data)',
         f'# Claude Code v2.1.114, {__import__("datetime").date.today().isoformat()}',
         '',
     ]
@@ -337,9 +534,9 @@ def _generate_zsh_completion() -> str:
     lines.append('_claude_exec() {')
     lines.append('  _arguments -s -S \\')
 
-    model_aliases = ' '.join(mod.MODEL_ALIASES)
+    model_aliases = ' '.join(claude_cli_introspection.MODEL_ALIASES)
 
-    for flag in mod.ROOT_FLAGS:
+    for flag in claude_cli_introspection.ROOT_FLAGS:
         if not flag.documented:
             continue
 
@@ -380,7 +577,7 @@ def _generate_zsh_completion() -> str:
     lines.append('_claude_exec_commands() {')
     lines.append('  local -a subcommands')
     lines.append('  subcommands=(')
-    for sub in mod.SUBCOMMANDS:
+    for sub in claude_cli_introspection.SUBCOMMANDS:
         desc = sub.description.replace("'", '')
         lines.append(f"    '{sub.name}:{desc}'")
     lines.append("    'ext:Claude exec management commands'")
@@ -556,6 +753,220 @@ class SessionIndex:
         entries = [SessionEntry(session_id=sid, title=info.title, mtime=info.mtime) for sid, info in cache.items()]
         entries.sort(key=lambda e: e.mtime, reverse=True)
         return entries
+
+
+# -- Worktree resolution on resume --------------------------------------------
+
+
+class WorktreeSession(OpenModel):
+    """Claude Code's ``worktreeSession`` payload from session JSONL.
+
+    External protocol data — we declare only the field ``claude-exec``
+    reads. ``OpenModel``'s ``extra='allow'`` preserves the rest
+    (``originalCwd``, ``worktreeName``, ``worktreeBranch``,
+    ``originalBranch``, ``originalHeadCommit``, ``sessionId``,
+    ``enteredExisting``, and anything Claude Code adds in future versions)
+    so the repair step round-trips byte-for-byte.
+    """
+
+    worktreePath: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class WorktreeScan:
+    """Result of scanning a session JSONL for the current worktree state.
+
+    ``worktree_session``
+        Typed view of the field claude-exec reads (``worktreePath``), or
+        ``None`` if no populated record was found. ``SubsetModel``/``OpenModel``
+        drops/preserves unknown fields on dump — for round-trip fidelity use
+        ``raw_record``.
+    ``raw_record``
+        The full original ``worktreeSession`` dict from Claude Code's
+        JSONL (with ``originalCwd``, ``originalBranch``, ``worktreeName``,
+        etc.), preserved opaquely so the repair-append round-trips the
+        full payload. ``None`` iff ``worktree_session`` is ``None``.
+    ``saw_null_after``
+        True if ``worktreeSession: null`` cleanup records appeared AFTER
+        the populated record. Triggers a repair-append so Claude Code's
+        own ``v3_()`` chdir on resume sees a populated final record.
+    ``explicitly_exited``
+        True if an ``ExitWorktree`` tool_use record appeared AFTER the
+        populated record. Definitive signal the user intentionally left
+        the worktree — overrides ``saw_null_after``, do NOT repair.
+    """
+
+    worktree_session: WorktreeSession | None
+    raw_record: Mapping[str, object] | None
+    saw_null_after: bool
+    explicitly_exited: bool
+
+
+class WorktreeResolver:
+    """Detect, report, and repair the worktree state of a resuming session.
+
+    Background — Claude Code writes ``worktreeSession: null`` cleanup
+    records into session JSONL at several points:
+
+    - When the user invokes the ``ExitWorktree`` tool
+    - Periodic ``reAppendSessionMetadata()`` every ~32 KB of writes
+    - Graceful shutdown re-appends session metadata
+    - Session resume re-appends metadata onto the fresh JSONL
+
+    By the time ``claude-exec`` reads the JSONL on resume, the LAST
+    ``worktree-state`` record is almost always NULL — even when the user
+    was genuinely in a worktree. Claude Code's own ``v3_()`` reads that
+    final record and decides whether to chdir. Seeing NULL, it stays in
+    the main tree, and the user's cwd silently drifts from the venv
+    ``claude-exec`` is about to activate.
+
+    The fix is three layers:
+
+    1. Scan backwards through ``worktree-state`` records for the last
+       populated one whose ``worktreePath`` directory still has a ``.git``
+       file. The ``.git`` check distinguishes "Claude Code wrote a cleanup
+       NULL" from "user removed the worktree directory" — the latter
+       correctly returns None and we fall back to the main tree.
+    2. Look for an ``ExitWorktree`` tool_use record AFTER that populated
+       record. If present, the user explicitly exited — return None,
+       respect intent, do NOT re-enter even if NULLs followed.
+    3. Otherwise, if NULL cleanups appeared after the populated record,
+       append a fresh copy of that record. Claude Code's ``v3_()`` reads
+       the final record on resume and calls ``process.chdir(worktreePath)``
+       — which is what we want.
+
+    One-shot: construct once per ``claude-exec`` invocation, call
+    ``resolve()``, discard. No persistent state.
+    """
+
+    WORKTREE_NEEDLE = b'"worktree-state"'
+    EXIT_WORKTREE_NEEDLE = b'"name":"ExitWorktree"'
+
+    def __init__(self, args: Sequence[str]) -> None:
+        self._args = args
+
+    def resolve(self) -> Path | None:
+        """Return the worktree to enter on resume, or None for the main tree.
+
+        Returns None for fresh sessions, bare ``--resume`` (picker mode),
+        sessions with no stored worktree-state, stale records (the
+        worktree directory has been removed), and explicit ``ExitWorktree``
+        calls.
+        """
+        resume_id = self._resume_id()
+        if resume_id is None:
+            return None
+
+        jsonl_path = self._jsonl_path(resume_id)
+        if jsonl_path is None:
+            return None
+
+        scan = self.scan(jsonl_path)
+        if scan.worktree_session is None or scan.explicitly_exited:
+            return None
+
+        if scan.saw_null_after and scan.raw_record is not None:
+            self._repair(jsonl_path, scan.raw_record, resume_id)
+
+        return Path(scan.worktree_session.worktreePath)
+
+    @staticmethod
+    def venv_of(worktree_path: Path | None) -> Path | None:
+        """Return the worktree's populated ``.venv`` directory, or None."""
+        if worktree_path is None:
+            return None
+        venv = worktree_path / '.venv'
+        if not (venv / 'bin').is_dir():
+            return None
+        return venv
+
+    @classmethod
+    def scan(cls, path: Path) -> WorktreeScan:
+        """Scan a session JSONL for worktree state. See ``WorktreeScan``."""
+        empty = WorktreeScan(
+            worktree_session=None,
+            raw_record=None,
+            saw_null_after=False,
+            explicitly_exited=False,
+        )
+        if path.stat().st_size == 0:
+            return empty
+
+        saw_null_after = False
+        with open(path, 'rb') as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            end = len(mm)
+            while True:
+                pos = mm.rfind(cls.WORKTREE_NEEDLE, 0, end)
+                if pos == -1:
+                    return WorktreeScan(
+                        worktree_session=None,
+                        raw_record=None,
+                        saw_null_after=saw_null_after,
+                        explicitly_exited=False,
+                    )
+                line_start = mm.rfind(b'\n', 0, pos) + 1
+                line_end = mm.find(b'\n', pos)
+                if line_end == -1:
+                    line_end = len(mm)
+                rec: dict[str, object] = json.loads(mm[line_start:line_end])
+                session_dict = rec.get('worktreeSession')
+                if isinstance(session_dict, dict):
+                    try:
+                        parsed = WorktreeSession.model_validate(session_dict)
+                    except pydantic.ValidationError:
+                        end = line_start
+                        continue
+                    if (Path(parsed.worktreePath) / '.git').is_file():
+                        explicitly_exited = mm.find(cls.EXIT_WORKTREE_NEEDLE, line_end) != -1
+                        return WorktreeScan(
+                            worktree_session=parsed,
+                            raw_record=session_dict,
+                            saw_null_after=saw_null_after,
+                            explicitly_exited=explicitly_exited,
+                        )
+                    # Stale record (worktree dir gone). Keep scanning —
+                    # maybe an earlier worktree still exists on disk.
+                else:
+                    # NULL cleanup record written by Claude Code.
+                    saw_null_after = True
+                end = line_start
+
+    def _resume_id(self) -> str | None:
+        """Parse ``--resume <id>`` / ``-r <id>`` from args, or None."""
+        for flag in ('--resume', '-r'):
+            if flag in self._args:
+                idx = list(self._args).index(flag)
+                if idx + 1 < len(self._args):
+                    return self._args[idx + 1]
+                return None
+        return None
+
+    @staticmethod
+    def _jsonl_path(resume_id: str) -> Path | None:
+        """Return the session JSONL path for the current project, or None."""
+        encoded = encode_project_path(os.getcwd())
+        path = get_claude_config_home_dir() / 'projects' / encoded / f'{resume_id}.jsonl'
+        return path if path.exists() else None
+
+    @staticmethod
+    def _repair(jsonl_path: Path, raw_record: Mapping[str, object], resume_id: str) -> None:
+        """Append a fresh populated worktree-state record to the JSONL.
+
+        Round-trips the original payload byte-for-byte so Claude Code's
+        ``v3_()`` on resume reads it and calls ``process.chdir(worktreePath)``.
+        """
+        record = {
+            'type': 'worktree-state',
+            'worktreeSession': raw_record,
+            'sessionId': resume_id,
+        }
+        with jsonl_path.open('ab') as fh:
+            fh.write(json.dumps(record, separators=(',', ':')).encode() + b'\n')
+        worktree_path = raw_record.get('worktreePath') if isinstance(raw_record, dict) else None
+        print(
+            f'claude-exec: repaired trailing NULL worktree-state → {worktree_path}',
+            file=sys.stderr,
+        )
 
 
 def _resolve_binary() -> str:
