@@ -95,7 +95,7 @@ class RunningSessionDeletionError(SessionDeletionError):
 
 
 class CrossSessionArtifactsRequiredError(SessionDeletionError):
-    """Raised when siblings exist but --delete-cross-session-artifacts is unset."""
+    """Raised when siblings exist but delete_cross_session_artifacts is unset."""
 
     def __init__(self, session_id: str, sibling_project_folders: Sequence[Path]) -> None:
         self.session_id = session_id
@@ -103,17 +103,17 @@ class CrossSessionArtifactsRequiredError(SessionDeletionError):
         siblings_str = ', '.join(str(p) for p in sibling_project_folders)
         super().__init__(
             f'Session {session_id} has sibling copies in other projects ({siblings_str}). '
-            f'Pass --delete-cross-session-artifacts=true to delete shared artifacts or =false to preserve them.'
+            f'Set delete_cross_session_artifacts to true to delete shared artifacts, or false to preserve them.'
         )
 
 
 class CrossSessionArtifactsNotApplicableError(SessionDeletionError):
-    """Raised when --delete-cross-session-artifacts is passed but no siblings exist."""
+    """Raised when delete_cross_session_artifacts is passed but no siblings exist."""
 
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(
-            f'Session {session_id} has no sibling copies; --delete-cross-session-artifacts has no effect. Omit the flag.'
+            f'Session {session_id} has no sibling copies; delete_cross_session_artifacts has no effect. Omit the argument.'
         )
 
 
