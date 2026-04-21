@@ -35,6 +35,7 @@ from claude_session.exceptions import RunningSessionDeletionError, RunningSessio
 from claude_session.schemas.operations.archive import ArchiveMetadata
 from claude_session.schemas.operations.context import SessionContext
 from claude_session.schemas.operations.delete import DeleteResult
+from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.schemas.operations.gist import GistArchiveResult
 from claude_session.schemas.operations.lineage import LineageTree
 from claude_session.schemas.operations.move import MoveResult
@@ -74,6 +75,13 @@ def _encode_project_filter(source_project: str | None) -> Path | None:
         return None
     resolved = Path(source_project).resolve()
     return get_claude_config_home_dir() / 'projects' / encode_project_path(resolved)
+
+
+def _is_same_running_session(session_info: SessionInfo, state: ServerState) -> bool:
+    """Whether session_info identifies this MCP server's host session."""
+    if session_info.session_id != state.session_id:
+        return False
+    return session_info.session_folder.name == encode_project_path(state.project_path.resolve())
 
 
 # -- Types ---------------------------------------------------------------------
@@ -362,6 +370,7 @@ def register_tools(state: ServerState) -> None:
         no_backup: bool = False,
         dry_run: bool = False,
         source_project: str | None = None,
+        delete_cross_session_artifacts: bool | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> DeleteResult:
         """
@@ -373,6 +382,12 @@ def register_tools(state: ServerState) -> None:
         If the session is currently running (another Claude process), set
         terminate_running=True to kill it before deletion. For self-deletion
         (deleting the current session), termination is automatic.
+
+        When sibling copies of the UUID exist in other project folders,
+        delete_cross_session_artifacts is required — True deletes shared
+        UUID-keyed artifacts (plans, tasks, todos, session-env, debug log)
+        destructively for siblings, False preserves them. The flag must be
+        omitted when no siblings exist.
 
         Deletion is atomic with rollback on failure. A backup is always
         created for rollback capability. The no_backup flag only controls
@@ -387,6 +402,9 @@ def register_tools(state: ServerState) -> None:
             no_backup: Don't keep a backup file for undo
             dry_run: If True, show what would be deleted without actually deleting
             source_project: Scope session lookup to this project directory
+            delete_cross_session_artifacts: Required (and only allowed) when
+                sibling copies of the UUID exist in other project folders.
+                True = delete shared UUID-keyed artifacts; False = preserve them.
 
         Returns:
             DeleteResult with deletion details and backup path
@@ -408,6 +426,13 @@ def register_tools(state: ServerState) -> None:
             # Delete without backup
             result = await delete_session('019b5232-...', no_backup=True)
 
+            # Delete a stale duplicate while preserving shared artifacts for live siblings
+            result = await delete_session(
+                '019b5232-...',
+                source_project='/path/to/stale/project',
+                delete_cross_session_artifacts=False,
+            )
+
         Note:
             To undo a delete, run:
             claude-session restore --in-place <backup_path>
@@ -425,14 +450,14 @@ def register_tools(state: ServerState) -> None:
         delete_service = SessionDeleteService(session_folder=session_info.session_folder)
 
         # Determine if termination is needed
-        is_self_delete = full_session_id == state.session_id
+        is_self_delete = _is_same_running_session(session_info, state)
 
         if is_self_delete:
             # Self-deletion: auto-terminate (no flag needed)
             terminate_pid = state.claude_pid if not dry_run else None
         else:
             # Other session: check if running
-            is_running, running_pid = info_service.is_session_running(full_session_id)
+            is_running, running_pid = info_service.is_session_running(full_session_id, session_info.session_folder)
             if is_running:
                 if dry_run:
                     logger.info('Warning: Session is currently running (PID %s)', running_pid)
@@ -456,6 +481,7 @@ def register_tools(state: ServerState) -> None:
             no_backup=no_backup,
             dry_run=dry_run,
             terminate_pid_before_delete=terminate_pid,
+            delete_cross_session_artifacts=delete_cross_session_artifacts,
         )
 
         if result.success:
@@ -552,12 +578,12 @@ def register_tools(state: ServerState) -> None:
         full_session_id = session_info.session_id
 
         # Determine if termination is needed
-        is_self_move = full_session_id == state.session_id
+        is_self_move = _is_same_running_session(session_info, state)
 
         if is_self_move:
             terminate_pid = state.claude_pid if not dry_run else None
         else:
-            is_running, running_pid = info_service.is_session_running(full_session_id)
+            is_running, running_pid = info_service.is_session_running(full_session_id, session_info.session_folder)
             if is_running:
                 if dry_run:
                     logger.info('Warning: Session is currently running (PID %s)', running_pid)
@@ -785,12 +811,12 @@ def register_tools(state: ServerState) -> None:
         # Determine correct PID for version detection:
         # - If archiving current session: use live PID from state
         # - If archiving other session: get historical PID from sessions.json (if available)
-        is_current_session = target_id == state.session_id
+        is_current_session = _is_same_running_session(session_info, state)
         if is_current_session:
             archive_claude_pid: int | None = state.claude_pid
         else:
             # Get target session's PID from workspace sessions.json
-            workspace_session = info_service._load_workspace_session(target_id)
+            workspace_session = info_service._load_workspace_session(target_id, session_info.session_folder)
             archive_claude_pid = workspace_session.metadata.claude_pid if workspace_session else None
 
         # Create Gist storage backend

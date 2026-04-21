@@ -33,7 +33,7 @@ from claude_session.schemas.operations.archive import (
     ToolResultEntry,
     parse_agent_metadata,
 )
-from claude_session.schemas.session import SessionRecord
+from claude_session.schemas.session import SessionRecord, Task
 from claude_session.services.artifacts import (
     collect_debug_log,
     collect_plan_files,
@@ -201,6 +201,7 @@ class SessionArchiveService:
         storage: StorageBackend,
         output_path: str | None,
         format_param: Literal['json', 'zst'] | None,
+        skip_cross_session_artifacts: bool = False,
     ) -> ArchiveMetadata:
         """
         Create archive of current session.
@@ -209,6 +210,12 @@ class SessionArchiveService:
             storage: Storage backend (call-time parameter!)
             output_path: Optional output path (None = temp file)
             format_param: Optional format override
+            skip_cross_session_artifacts: When True, omit UUID-keyed shared
+                artifacts (plans, todos, tasks, task metadata, session-env,
+                debug log) from the archive. Used by delete's backup path
+                when siblings are being preserved so the backup mirrors the
+                scoped delete instead of snapshotting the sibling's state.
+
         Returns:
             Archive metadata
 
@@ -260,57 +267,57 @@ class SessionArchiveService:
         # Extract Claude Code version from records
         claude_code_version = await self._extract_claude_code_version(files_data)
 
-        # Extract slugs and collect plan files
         slugs = extract_slugs_from_records(files_data)
         logger.info('Found %d unique slugs in session', len(slugs))
 
-        plan_files = collect_plan_files(slugs)
-        logger.info('Collected %d plan files (of %d slugs)', len(plan_files), len(slugs))
+        # Cross-session (UUID-keyed) artifacts. Skipped when the caller wants a
+        # scoped archive (delete's backup preserving siblings), so the backup
+        # mirrors the scoped delete instead of snapshotting the sibling's state.
+        plan_files: Mapping[str, str] = {}
+        todos: Mapping[str, str] = {}
+        session_env: Mapping[str, str] = {}
+        debug_log: str | None = None
+        tasks: list[Task] = []
+        task_metadata: Mapping[str, str] = {}
+        if not skip_cross_session_artifacts:
+            plan_files = collect_plan_files(slugs)
+            logger.info('Collected %d plan files (of %d slugs)', len(plan_files), len(slugs))
 
-        # Collect tool results (v1.2+)
+            todos = collect_todos(self.session_id)
+            logger.info('Collected %d todo files', len(todos))
+
+            session_env = collect_session_env(self.session_id)
+            if session_env:
+                logger.info('Collected %d session-env files', len(session_env))
+
+            debug_log = collect_debug_log(self.session_id)
+            if debug_log:
+                logger.info('Found debug log (%d bytes)', len(debug_log))
+
+            tasks = list(iter_tasks(self.session_id))
+            if tasks:
+                logger.info('Collected %d tasks', len(tasks))
+
+            task_metadata = collect_task_metadata(self.session_id)
+            if task_metadata:
+                logger.info('Collected %d task metadata files', len(task_metadata))
+
+        # Project-scoped artifacts: always collected.
         tool_results = collect_tool_results(project_folder, self.session_id)
         logger.info('Collected %d tool result files', tool_results.total_file_count)
 
-        # Collect todos (v1.2+)
-        todos = collect_todos(self.session_id)
-        logger.info('Collected %d todo files', len(todos))
-
-        # Collect session-env files
-        session_env = collect_session_env(self.session_id)
-        if session_env:
-            logger.info('Collected %d session-env files', len(session_env))
-
-        # Collect session memory
         session_memory = collect_session_memory(project_folder, self.session_id)
         if session_memory:
             logger.info('Found session-memory/summary.md')
 
-        # Collect debug log
-        debug_log = collect_debug_log(self.session_id)
-        if debug_log:
-            logger.info('Found debug log (%d bytes)', len(debug_log))
-
-        # Extract source project path from session records (source of truth)
-        # We use cwd from records, not self.project_path, because:
-        # 1. MCP handlers pass Claude's cwd which is correct
-        # 2. CLI archive command may pass a lossy-decoded path from SessionDiscoveryService
-        # The record cwd field is always the authoritative source
+        # Extract source project path from session records (source of truth).
+        # Record cwd is authoritative; self.project_path may be lossy-decoded
+        # (CLI archive) or correct (MCP handlers passing Claude's lsof cwd).
         source_project_path = extract_source_project_path(files_data)
 
-        # Extract custom title (user-defined session name from /rename)
         custom_title = extract_custom_title_from_records(files_data)
         if custom_title:
             logger.info('Found custom title: %s', custom_title)
-
-        # Collect tasks
-        tasks = list(iter_tasks(self.session_id))
-        if tasks:
-            logger.info('Collected %d tasks', len(tasks))
-
-        # Collect task metadata (.highwatermark, etc.)
-        task_metadata = collect_task_metadata(self.session_id)
-        if task_metadata:
-            logger.info('Collected %d task metadata files', len(task_metadata))
 
         # Build v2 explicit entry models
         main_filename = f'{self.session_id}.jsonl'
