@@ -10,7 +10,9 @@ Exception Hierarchy:
     │   └── SourceProjectConflictError (--source-project with auto-detection)
     ├── SessionDeletionError (deletion policy violations)
     │   ├── NativeSessionDeletionError (native session without --force)
-    │   └── RunningSessionDeletionError (running session without --terminate)
+    │   ├── RunningSessionDeletionError (running session without --terminate)
+    │   ├── CrossSessionArtifactsRequiredError (sibling copies exist, flag missing)
+    │   └── CrossSessionArtifactsNotApplicableError (no siblings, flag passed)
     └── SessionMoveError (move policy violations)
         ├── SameProjectMoveError (session already in target project)
         ├── NativeSessionMoveError (native session without --force)
@@ -20,10 +22,13 @@ Exception Hierarchy:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 __all__ = [
     'AmbiguousSessionError',
     'ClaudeSessionError',
+    'CrossSessionArtifactsNotApplicableError',
+    'CrossSessionArtifactsRequiredError',
     'NativeSessionDeletionError',
     'NativeSessionMoveError',
     'RunningSessionDeletionError',
@@ -87,6 +92,29 @@ class RunningSessionDeletionError(SessionDeletionError):
         self.session_id = session_id
         self.pid = pid
         super().__init__(f'Session {session_id} is running (PID {pid}). Use --terminate to kill the process.')
+
+
+class CrossSessionArtifactsRequiredError(SessionDeletionError):
+    """Raised when siblings exist but delete_cross_session_artifacts is unset."""
+
+    def __init__(self, session_id: str, sibling_project_folders: Sequence[Path]) -> None:
+        self.session_id = session_id
+        self.sibling_project_folders = sibling_project_folders
+        siblings_str = ', '.join(str(p) for p in sibling_project_folders)
+        super().__init__(
+            f'Session {session_id} has sibling copies in other projects ({siblings_str}). '
+            f'Set delete_cross_session_artifacts to true to delete shared artifacts, or false to preserve them.'
+        )
+
+
+class CrossSessionArtifactsNotApplicableError(SessionDeletionError):
+    """Raised when delete_cross_session_artifacts is passed but no siblings exist."""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        super().__init__(
+            f'Session {session_id} has no sibling copies; delete_cross_session_artifacts has no effect. Omit the argument.'
+        )
 
 
 class SessionMoveError(ClaudeSessionError):
