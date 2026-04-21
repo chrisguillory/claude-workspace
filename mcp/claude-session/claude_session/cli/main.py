@@ -313,6 +313,14 @@ def delete(
     source_project: Annotated[
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
+    delete_cross_session_artifacts: Annotated[
+        bool | None,
+        typer.Option(
+            '--delete-cross-session-artifacts/--no-delete-cross-session-artifacts',
+            help='Required when sibling copies of the UUID exist in other projects. '
+            'True = delete shared UUID-keyed artifacts (destructive for siblings); False = preserve them.',
+        ),
+    ] = None,
 ) -> None:
     """Delete session artifacts with auto-backup.
 
@@ -322,6 +330,12 @@ def delete(
     If the session is currently running, use --terminate to kill the Claude
     process before deletion. This prevents the session file from being
     recreated when the process exits.
+
+    When sibling copies of the UUID exist in other project folders (e.g., a
+    stale duplicate JSONL), --delete-cross-session-artifacts is required and
+    controls whether shared UUID-keyed artifacts (plans, tasks, todos,
+    session-env, debug log) are deleted or preserved. The flag must be
+    omitted when no siblings exist.
 
     A backup is saved to ~/.claude-workspace/claude-session/deleted/ for undo capability.
     Use 'restore --in-place' on the backup to undo.
@@ -333,10 +347,22 @@ def delete(
         claude-session delete SESSION_ID --force        # delete native session
         claude-session delete SESSION_ID --terminate    # kill running session first
         claude-session delete SESSION_ID --dry-run      # preview without deleting
+        claude-session delete SESSION_ID --sp /path/stale --no-delete-cross-session-artifacts
+                                                        # delete stale duplicate, keep shared artifacts
     """
     if session_id is None and source_project is not None:
         raise SourceProjectConflictError
-    asyncio.run(_delete_async(_resolve_session_id(session_id), force, terminate, no_backup, dry_run, source_project))
+    asyncio.run(
+        _delete_async(
+            _resolve_session_id(session_id),
+            force,
+            terminate,
+            no_backup,
+            dry_run,
+            source_project,
+            delete_cross_session_artifacts,
+        )
+    )
 
 
 @app.command(context_settings={'allow_extra_args': True, 'ignore_unknown_options': True})
@@ -915,6 +941,7 @@ async def _delete_async(
     no_backup: bool,
     dry_run: bool,
     source_project: Path | None,
+    delete_cross_session_artifacts: bool | None,
 ) -> None:
     """Async implementation of delete command."""
 
@@ -926,7 +953,7 @@ async def _delete_async(
     full_session_id = session_info.session_id
 
     # Check if session is running
-    is_running, running_pid = info_service.is_session_running(full_session_id)
+    is_running, running_pid = info_service.is_session_running(full_session_id, session_info.session_folder)
 
     if is_running:
         assert running_pid is not None  # is_running=True guarantees this
@@ -960,6 +987,7 @@ async def _delete_async(
         no_backup=no_backup,
         dry_run=dry_run,
         terminate_pid_before_delete=terminate_pid,
+        delete_cross_session_artifacts=delete_cross_session_artifacts,
     )
 
     if not result.success:
@@ -1027,7 +1055,7 @@ async def _move_async(
     full_session_id = session_info.session_id
 
     # Check if session is running
-    is_running, running_pid = info_service.is_session_running(full_session_id)
+    is_running, running_pid = info_service.is_session_running(full_session_id, session_info.session_folder)
 
     if is_running:
         assert running_pid is not None
