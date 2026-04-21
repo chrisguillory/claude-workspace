@@ -926,7 +926,7 @@ async def _delete_async(
     full_session_id = session_info.session_id
 
     # Check if session is running
-    is_running, running_pid = info_service.is_session_running(full_session_id)
+    is_running, running_pid = info_service.is_session_running(full_session_id, session_info.session_folder)
 
     if is_running:
         assert running_pid is not None  # is_running=True guarantees this
@@ -1027,7 +1027,7 @@ async def _move_async(
     full_session_id = session_info.session_id
 
     # Check if session is running
-    is_running, running_pid = info_service.is_session_running(full_session_id)
+    is_running, running_pid = info_service.is_session_running(full_session_id, session_info.session_folder)
 
     if is_running:
         assert running_pid is not None

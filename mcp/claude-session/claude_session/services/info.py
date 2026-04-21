@@ -18,7 +18,7 @@ from pathlib import Path
 import psutil
 import pydantic
 from cc_lib.session_tracker import Session, SessionDatabase
-from cc_lib.utils import get_claude_config_home_dir
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.schemas.operations.context import SessionContext
 from claude_session.schemas.operations.discovery import SessionInfo
@@ -52,6 +52,12 @@ class CurrentSessionContext:
     project_path: Path
     claude_pid: int
     temp_dir: str
+
+    def matches(self, session_id: str, session_folder: Path) -> bool:
+        """Whether this context identifies (session_id, session_folder)."""
+        if self.session_id != session_id:
+            return False
+        return session_folder.name == encode_project_path(self.project_path.resolve())
 
 
 # noinspection PyMethodMayBeStatic
@@ -103,10 +109,10 @@ class SessionInfoService:
         debug_file = get_claude_config_home_dir() / 'debug' / f'{full_session_id}.txt'
 
         # Get project path - need to extract from session file or use current context
-        project_path = await self._get_project_path(session_file, full_session_id, current_context)
+        project_path = await self._get_project_path(session_file, full_session_id, session_folder, current_context)
 
         # Load claude-workspace session data if available
-        workspace_session = self._load_workspace_session(full_session_id)
+        workspace_session = self._load_workspace_session(full_session_id, session_folder)
 
         # Check lineage and get cloned_at timestamp
         lineage_entry = self.lineage.get_entry(full_session_id)
@@ -123,7 +129,7 @@ class SessionInfoService:
         custom_title = extract_custom_title_from_file(session_file)
 
         # Determine if this is the current session
-        is_current = current_context is not None and current_context.session_id == full_session_id
+        is_current = current_context is not None and current_context.matches(full_session_id, session_folder)
 
         # Environment fields:
         # - temp_dir: Only available for current session (MCP server runtime)
@@ -179,22 +185,23 @@ class SessionInfoService:
             has_lineage=has_lineage,
         )
 
-    def is_session_running(self, session_id: str) -> tuple[bool, int | None]:
+    def is_session_running(self, session_id: str, project_folder: Path) -> tuple[bool, int | None]:
         """
         Check if a session's Claude process is still running.
 
-        Uses sessions.json to find the session's PID, then verifies:
+        Looks up the (session_id, project_folder) entry in sessions.json, then verifies:
         1. Session state is 'active'
         2. Process with that PID exists
         3. Process creation time matches (guards against PID recycling)
 
         Args:
-            session_id: Full session ID to check
+            session_id: Full session ID to check.
+            project_folder: Project folder scoping the lookup.
 
         Returns:
             (is_running, pid) - pid is the Claude process ID if running, None otherwise
         """
-        workspace_session = self._load_workspace_session(session_id)
+        workspace_session = self._load_workspace_session(session_id, project_folder)
         if workspace_session is None:
             return False, None  # Not in sessions.json
 
@@ -247,6 +254,7 @@ class SessionInfoService:
         self,
         session_file: Path,
         session_id: str,
+        session_folder: Path,
         current_context: CurrentSessionContext | None,
     ) -> Path:
         """
@@ -258,7 +266,7 @@ class SessionInfoService:
         3. Fall back to encoded folder name (lossy)
         """
         # Use current context if available and matching
-        if current_context and current_context.session_id == session_id:
+        if current_context and current_context.matches(session_id, session_folder):
             return current_context.project_path
 
         # Try to extract from session file's first record
@@ -375,14 +383,11 @@ class SessionInfoService:
             # Process gone - use cached fallback from sessions.json
             return fallback
 
-    def _load_workspace_session(self, session_id: str) -> Session | None:
+    def _load_workspace_session(self, session_id: str, project_folder: Path) -> Session | None:
         """
-        Load session data from claude-workspace sessions.json.
+        Load the sessions.json entry matching (session_id, project_folder).
 
-        Uses the Session Pydantic model from cc_lib.session_tracker.
-
-        Returns:
-            Session model if found, None otherwise.
+        Returns the Session model if found, None otherwise.
         """
         if not CLAUDE_WORKSPACE_SESSIONS.exists():
             return None
@@ -394,7 +399,10 @@ class SessionInfoService:
         db = adapter.validate_python(data)
 
         for session in db.sessions:
-            if session.session_id == session_id:
-                return session
+            if session.session_id != session_id:
+                continue
+            if encode_project_path(Path(session.project_dir).resolve()) != project_folder.name:
+                continue
+            return session
 
         return None
