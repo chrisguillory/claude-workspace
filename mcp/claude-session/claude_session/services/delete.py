@@ -450,7 +450,9 @@ class SessionDeleteService:
             raise CrossSessionArtifactsNotApplicableError(session_id)
 
         # When preserving shared artifacts, drop them from the delete plan
-        if siblings and delete_cross_session_artifacts is False:
+        # and from the backup so the backup mirrors this scoped delete.
+        preserving_shared = bool(siblings and delete_cross_session_artifacts is False)
+        if preserving_shared:
             manifest = self._filter_out_cross_session_artifacts(manifest)
 
         # Validation: check for unexpected files (fail fast)
@@ -528,7 +530,7 @@ class SessionDeleteService:
         logger.info('Creating backup for atomic rollback...')
 
         try:
-            backup_path = Path(await self._create_backup(session_id))
+            backup_path = Path(await self._create_backup(session_id, skip_cross_session_artifacts=preserving_shared))
             logger.info('Backup created: %s', backup_path)
         except Exception as e:  # exception_safety_linter.py: swallowed-exception — returns failure result to caller
             return DeleteResult(
@@ -684,11 +686,15 @@ class SessionDeleteService:
     def _filter_out_cross_session_artifacts(self, manifest: DeleteManifest) -> DeleteManifest:
         """Drop UUID-keyed shared artifacts from the delete plan so sibling copies survive."""
         kept_files = [a for a in manifest.files if a.artifact_type not in self.CROSS_SESSION_ARTIFACT_TYPES]
-        cross_session_prefixes = (
-            str(get_tasks_dir() / manifest.session_id),
-            str(get_session_env_dir() / manifest.session_id),
+        cross_session_roots = (
+            get_tasks_dir() / manifest.session_id,
+            get_session_env_dir() / manifest.session_id,
         )
-        kept_dirs = [d for d in manifest.directories_to_cleanup if not d.startswith(cross_session_prefixes)]
+        kept_dirs = [
+            d
+            for d in manifest.directories_to_cleanup
+            if not any(Path(d).is_relative_to(root) for root in cross_session_roots)
+        ]
         return manifest.model_copy(
             update={
                 'files': kept_files,
@@ -763,12 +769,15 @@ class SessionDeleteService:
                 original_exc.add_note('Rollback completed successfully')
             raise
 
-    async def _create_backup(self, session_id: str) -> str:
+    async def _create_backup(self, session_id: str, *, skip_cross_session_artifacts: bool = False) -> str:
         """
         Create a backup archive for rollback capability.
 
         Uses SessionArchiveService to create a consistent archive format
         that can be restored with restore --in-place.
+
+        When skip_cross_session_artifacts is True, the backup omits UUID-keyed
+        shared artifacts so it mirrors a cross-session-preserving delete.
         """
         self.DELETED_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -789,6 +798,7 @@ class SessionDeleteService:
             storage=storage,
             output_path=str(backup_path),
             format_param='json',
+            skip_cross_session_artifacts=skip_cross_session_artifacts,
         )
 
         return metadata.file_path
