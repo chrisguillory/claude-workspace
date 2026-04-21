@@ -38,10 +38,7 @@ def _configure_logging(
         typer.echo(ctx.get_help())
 
 
-# -- Commands --
-
-
-@app.command('diagnose')
+@app.command('diagnose', rich_help_panel='Diagnostics')
 @error_boundary
 def diagnose() -> None:
     """Check FDA, DB access, contacts, and macOS version.
@@ -53,7 +50,7 @@ def diagnose() -> None:
     _print_json(service.diagnose())
 
 
-@app.command('list-chats')
+@app.command('list-chats', rich_help_panel='Chats')
 @error_boundary
 def list_chats(
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max chats to return')] = 20,
@@ -64,7 +61,33 @@ def list_chats(
     _print_json(service.list_chats(limit=limit, is_group=is_group))
 
 
-@app.command('get-messages')
+@app.command('get-chat-info', rich_help_panel='Chats')
+@error_boundary
+def get_chat_info(
+    handle: Annotated[str, typer.Argument(help='Phone number or email')],
+) -> None:
+    """Get detailed chat metadata: participants, counts, date range."""
+    service = _make_service()
+    _print_json(service.get_chat_info(handle=handle))
+
+
+@app.command('get-chat-thread', rich_help_panel='Chats')
+@error_boundary
+def get_chat_thread(
+    thread_originator_guid: Annotated[str, typer.Argument(help='GUID of the original message')],
+    limit: Annotated[int, typer.Option('--limit', '-n', help='Max replies plus originator')] = 50,
+) -> None:
+    """Get an inline reply thread by the originating message's GUID.
+
+    \b
+    Returns the originator plus every message whose thread_originator_guid
+    points at it, ordered by date.
+    """
+    service = _make_service()
+    _print_json(service.get_chat_thread(thread_originator_guid, limit=limit))
+
+
+@app.command('get-messages', rich_help_panel='Messages')
 @error_boundary
 def get_messages(
     handle: Annotated[str, typer.Argument(help='Phone number or email')],
@@ -85,7 +108,15 @@ def get_messages(
     _print_json(service.get_messages(handle=handle, limit=limit, from_me=from_me, has_attachment=has_attachment))
 
 
-@app.command('search')
+@app.command('get-unread', rich_help_panel='Messages')
+@error_boundary
+def get_unread() -> None:
+    """Get unread messages across all chats."""
+    service = _make_service()
+    _print_json(service.get_unread())
+
+
+@app.command('search', rich_help_panel='Messages')
 @error_boundary
 def search(
     query: Annotated[str, typer.Argument(help='Search text')],
@@ -102,7 +133,73 @@ def search(
     _print_json(service.search_messages(query, limit=limit, handle=handle))
 
 
-@app.command('lookup-contact')
+@app.command('list-attachments', rich_help_panel='Attachments')
+@error_boundary
+def list_attachments(
+    handle: Annotated[str, typer.Argument(help='Phone number or email')],
+    limit: Annotated[int, typer.Option('--limit', '-n', help='Max attachments')] = 20,
+    mime_type: Annotated[str | None, typer.Option('--mime', help="Prefix filter (e.g., 'image/')")] = None,
+) -> None:
+    """List attachment metadata for a chat."""
+    service = _make_service()
+    _print_json(service.list_attachments(handle=handle, limit=limit, mime_type=mime_type))
+
+
+@app.command('get-attachment', rich_help_panel='Attachments')
+@error_boundary
+def get_attachment(
+    attachment_id: Annotated[int, typer.Argument(help='Attachment ROWID from list-attachments')],
+    mode: Annotated[str, typer.Option('--mode', help="'view' (base64 inline) or 'save' (temp file path)")] = 'save',
+) -> None:
+    """Retrieve an attachment by ID.
+
+    \b
+    --mode view: base64-encoded bytes (HEIC auto-converted to JPEG; 10MB inline cap)
+    --mode save: native file copied to a temp dir, returns absolute path
+    """
+    service = _make_service()
+    _print_json(service.get_attachment(attachment_id, mode))  # type: ignore[arg-type]  # service validates mode against AttachmentMode Literal
+
+
+@app.command('send', rich_help_panel='Sending')
+@error_boundary
+def send(
+    confirm: Annotated[bool, typer.Option('--confirm', help='Actually send (default: preview only)')] = False,
+    text: Annotated[str, typer.Option('--text', '-t', help='Message body (empty for attachments-only)')] = '',
+    handle: Annotated[str | None, typer.Option('--handle', help='Phone/email for 1:1 chats')] = None,
+    chat_guid: Annotated[
+        str | None, typer.Option('--chat-guid', help='Chat GUID for group chats (from list-chats)')
+    ] = None,
+    service_type: Annotated[
+        str, typer.Option('--service', help='"auto" / "iMessage" / "SMS" — ignored when --chat-guid is supplied')
+    ] = 'auto',
+    attachment: Annotated[  # strict_typing_linter.py: mutable-type — Typer requires list[T] for repeatable options; Sequence raises RuntimeError at command registration
+        list[str] | None,
+        typer.Option('--attachment', '-a', help='Attach file (repeatable)'),
+    ] = None,
+) -> None:
+    """Send a message and/or attachments via AppleScript; polls chat.db for delivery status.
+
+    \b
+    Default is preview — add --confirm to actually dispatch.
+    Examples:
+        imessage-kit send --handle +15555550100 -t hi
+        imessage-kit send --handle +15555550100 -t hi --confirm
+        imessage-kit send --handle +15555550100 -a /tmp/foo.png --confirm
+    """
+    service = _make_service()
+    result = service.send_message(
+        text,
+        handle=handle,
+        chat_guid=chat_guid,
+        service=service_type,  # type: ignore[arg-type]  # service validates service_type against SendService Literal
+        confirm=confirm,
+        attachments=attachment,
+    )
+    _print_json(result)
+
+
+@app.command('lookup-contact', rich_help_panel='Contacts')
 @error_boundary
 def lookup_contact(
     query: Annotated[str, typer.Argument(help='Name, phone, or email')],
@@ -121,36 +218,6 @@ def lookup_contact(
     """
     service = _make_service()
     _print_json(service.lookup_contact(query, limit=limit, source=source))
-
-
-@app.command('get-unread')
-@error_boundary
-def get_unread() -> None:
-    """Get unread messages across all chats."""
-    service = _make_service()
-    _print_json(service.get_unread())
-
-
-@app.command('get-chat-info')
-@error_boundary
-def get_chat_info(
-    handle: Annotated[str, typer.Argument(help='Phone number or email')],
-) -> None:
-    """Get detailed chat metadata: participants, counts, date range."""
-    service = _make_service()
-    _print_json(service.get_chat_info(handle=handle))
-
-
-@app.command('list-attachments')
-@error_boundary
-def list_attachments(
-    handle: Annotated[str, typer.Argument(help='Phone number or email')],
-    limit: Annotated[int, typer.Option('--limit', '-n', help='Max attachments')] = 20,
-    mime_type: Annotated[str | None, typer.Option('--mime', help="Prefix filter (e.g., 'image/')")] = None,
-) -> None:
-    """List attachment metadata for a chat."""
-    service = _make_service()
-    _print_json(service.list_attachments(handle=handle, limit=limit, mime_type=mime_type))
 
 
 def main() -> None:
