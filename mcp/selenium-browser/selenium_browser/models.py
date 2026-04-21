@@ -191,6 +191,7 @@ class ChromeLocalState(OpenModel):
     breadcrumbs: JsonObject | None = None
     browser: JsonObject | None = None
     cloned_install: JsonObject | None = None  # Chrome 120+ install tracking
+    enterprise_reporting: JsonObject | None = None  # Enterprise telemetry (e.g., saas_usage)
     extensible_enterprise_sso: JsonObject | None = None  # Enterprise SSO config
     glic: JsonObject | None = None  # Glic multi-instance settings
     hardware_acceleration_mode_previous: bool | None = None
