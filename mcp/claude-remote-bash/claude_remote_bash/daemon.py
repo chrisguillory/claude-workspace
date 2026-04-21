@@ -1,4 +1,3 @@
-#!/usr/bin/env -S uv run --script
 """Daemon entry point: TCP server + mDNS registration + command dispatch."""
 
 from __future__ import annotations
@@ -11,8 +10,12 @@ import signal
 import socket
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
+
+__all__ = [
+    'main',
+]
 
 from claude_remote_bash.auth import DaemonConfig, generate_key, load_config, save_config, verify_key
 from claude_remote_bash.context import SessionContextStore
@@ -216,8 +219,8 @@ class _Daemon:
     def _handle_read_config(self) -> ConfigContent:
         """Read Claude Code configuration files."""
         return ConfigContent(
-            claude_json=_read_json_file(Path.home() / '.claude.json'),
-            settings_json=_read_json_file(Path.home() / '.claude' / 'settings.json'),
+            claude_json=json.loads((Path.home() / '.claude.json').read_text()),
+            settings_json=json.loads((Path.home() / '.claude' / 'settings.json').read_text()),
         )
 
 
@@ -272,14 +275,6 @@ def _extract_flag(args: Sequence[str], flag: str) -> str | None:
         if idx + 1 < len(args):
             return args[idx + 1]
     return None
-
-
-def _read_json_file(path: Path) -> Mapping[str, object] | None:
-    """Read a JSON file, returning None if it doesn't exist or can't be parsed."""
-    try:
-        return json.loads(path.read_text())  # type: ignore[no-any-return]  # json.loads returns Any
-    except (OSError, json.JSONDecodeError):
-        return None
 
 
 if __name__ == '__main__':
