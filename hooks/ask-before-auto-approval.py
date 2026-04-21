@@ -45,8 +45,10 @@ from cc_lib.schemas.hooks import (
 )
 
 GATED_TOOLS = {
-    'mcp__google-workspace__create_event',
     'Edit',
+    'Write',
+    'mcp__google-workspace__create_event',
+    'mcp__selenium-browser__navigate_with_profile_state',
 }
 
 GATE_DIR = Path.home() / '.claude-workspace' / 'ask-before-auto-approval'
