@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cc_lib.utils import get_claude_workspace_config_home_dir
+
 __all__ = [
     'COLLECTIONS_LOCK_PATH',
     'COLLECTIONS_STATE_PATH',
@@ -25,7 +27,7 @@ __all__ = [
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Base directories
-WORKSPACE_DIR = Path.home() / '.claude-workspace'
+WORKSPACE_DIR = get_claude_workspace_config_home_dir()
 DOCUMENT_SEARCH_DIR = WORKSPACE_DIR / 'document_search'
 
 # Collection registry

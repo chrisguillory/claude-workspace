@@ -6,9 +6,12 @@ __all__ = [
     'Timer',
     'encode_project_path',
     'get_claude_config_home_dir',
+    'get_claude_exec_launch_dir',
+    'get_claude_workspace_config_home_dir',
     'humanize_seconds',
     'load_module_from_path',
     'temporary_module',
+    'validate_hook_tree',
 ]
 
 import importlib.util
@@ -21,6 +24,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
+
+from cc_lib.exceptions import HookTreeMismatchError
 
 
 class Timer:
@@ -110,7 +115,79 @@ def get_claude_config_home_dir() -> Path:
     config_dir = os.environ.get('CLAUDE_CONFIG_DIR')
     if config_dir:
         return Path(config_dir).resolve()
-    return Path.home() / '.claude'
+    return (Path.home() / '.claude').resolve()
+
+
+def get_claude_exec_launch_dir() -> Path:
+    """Return the project root that claude-exec froze at session launch time.
+
+    The canonical source of truth for hooks and scripts that need the session's
+    project root. Always points to the active worktree (if in one) or the main
+    tree. Immune to any mid-session ``cd`` because it's frozen by claude-exec
+    before ``os.execv``.
+
+    Use this instead of ``$CLAUDE_PROJECT_DIR`` in hook commands and related
+    infrastructure.
+
+    Why this exists — Claude Code's ``$CLAUDE_PROJECT_DIR`` is frozen at session
+    startup from ``process.cwd()`` and is NEVER updated by ``EnterWorktree``.
+    This is intentional (see Claude Code's ``src/utils/hooks.ts``:
+    *"getProjectRoot() is never updated when entering a worktree, so hooks that
+    reference \\$CLAUDE_PROJECT_DIR always resolve relative to the real repo
+    root"*). So in a worktree session, ``$CLAUDE_PROJECT_DIR`` resolves to the
+    main tree — not what hook commands want.
+
+    Alternatives that do NOT work reliably (empirically verified on v2.1.109):
+
+    - ``$PWD`` — drifts when the shell ``cd``s into a subdirectory.
+    - ``$(git rev-parse --show-toplevel)`` — resolves relative to ``$PWD``.
+      Returns the project root only when ``$PWD`` is within the project tree;
+      otherwise either returns a different root or fails. Unreliable whenever
+      the shell has ``cd``'d outside the project (e.g. an
+      ``additionalDirectories`` entry).
+    - ``$CLAUDE_PROJECT_DIR`` — frozen but points to the main tree in worktree
+      sessions.
+
+    Requires claude-exec in the launch chain. Raises ``LookupError`` if unset —
+    launch via ``claude-exec`` (or its installed launcher).
+    """
+    value = os.environ.get('CLAUDE_EXEC_LAUNCH_DIR')
+    if not value:
+        raise LookupError(
+            'CLAUDE_EXEC_LAUNCH_DIR is not set. Launch Claude Code via claude-exec (or its installed launcher).'
+        )
+    return Path(value).resolve()
+
+
+def get_claude_workspace_config_home_dir() -> Path:
+    """Return claude-workspace's config/data root directory (~/.claude-workspace).
+
+    Our project's persistent state root for sessions.json, secrets,
+    per-tool state, and other files. We never automatically write to Claude Code's
+    own config dir (~/.claude) — that is Claude-owned territory returned
+    by ``get_claude_config_home_dir()``.
+    """
+    return (Path.home() / '.claude-workspace').resolve()
+
+
+def validate_hook_tree(script_path: Path) -> Path:
+    """Validate a hook script lives at ``$CLAUDE_EXEC_LAUNCH_DIR/hooks/<name>``.
+
+    Self-consistency check for hook scripts. Catches the case where Claude Code
+    invoked a hook from a different tree than ``CLAUDE_EXEC_LAUNCH_DIR`` points
+    to (e.g., ``$CLAUDE_PROJECT_DIR/hooks/...`` resolved to the main tree while
+    we're working in a worktree).
+
+    Returns the launch_dir for the caller to reuse (e.g., for scope checks).
+    Raises ``HookTreeMismatchError`` if the script's resolved path does not
+    match ``launch_dir / 'hooks' / script_path.name``.
+    """
+    launch_dir = get_claude_exec_launch_dir()
+    expected = (launch_dir / 'hooks' / script_path.name).resolve()
+    actual = script_path.resolve()
+    if actual != expected:
+        raise HookTreeMismatchError(actual=actual, expected=expected)
+    return launch_dir
 
 
 def humanize_seconds(seconds: float) -> str:

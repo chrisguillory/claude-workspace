@@ -6,10 +6,10 @@ import json
 import os
 import subprocess
 import time
-from pathlib import Path
 
 import pydantic
 from cc_lib.session_tracker import SessionDatabase
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 __all__ = [
     'auto_detect_session_id',
@@ -55,7 +55,7 @@ def resolve_session_id_from_pid(claude_pid: int, *, max_attempts: int) -> str | 
     Raises:
         RuntimeError: If multiple active sessions match the same PID.
     """
-    sessions_file = Path.home() / '.claude-workspace' / 'sessions.json'
+    sessions_file = get_claude_workspace_config_home_dir() / 'sessions.json'
     adapter = pydantic.TypeAdapter(SessionDatabase)
 
     for attempt in range(max_attempts):

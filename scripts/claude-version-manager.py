@@ -57,6 +57,7 @@ from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import ClosedModel, OpenModel
 from cc_lib.types import CCVersion
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 CDN_BASE = 'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases'
 NPM_PACKAGE = '@anthropic-ai/claude-code'
@@ -241,7 +242,7 @@ def cli_info(
             if not applied and not unpatched and not changed:
                 print('  Modified (ad-hoc signed, no recognized patches)')
 
-        originals_dir = Path.home() / '.claude-workspace' / 'binary-patcher' / 'originals'
+        originals_dir = get_claude_workspace_config_home_dir() / 'binary-patcher' / 'originals'
         original = originals_dir / version
         if original.exists():
             print(f'  Original: {original} ({original.stat().st_size / 1_000_000:.0f} MB)')

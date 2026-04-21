@@ -20,6 +20,7 @@ from typing import TypeVar, cast
 import lazy_object_proxy
 import pydantic
 import pydantic_settings
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 __all__ = [
     'DATA_DIR',
@@ -36,7 +37,7 @@ T = TypeVar('T', bound='BaseSessionSettings')
 logger = logging.getLogger(__name__)
 
 # Canonical data directory for claude-session
-DATA_DIR = pathlib.Path.home() / '.claude-workspace' / 'claude-session'
+DATA_DIR = get_claude_workspace_config_home_dir() / 'claude-session'
 
 # Legacy data directory (pre-migration)
 LEGACY_DATA_DIR = pathlib.Path.home() / '.claude-session-mcp'

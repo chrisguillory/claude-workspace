@@ -36,11 +36,12 @@ import httpx
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import SubsetModel
 from cc_lib.types import JsonDatetime
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 # Hardcoded for personal use with mainstay-io/monorepo
 REPO_SLUG = 'mainstay-io/monorepo'
 REPO_ID = '839989396'
-SESSION_FILE = Path.home() / '.claude-workspace' / 'scripts' / 'gh_upload_session.json'
+SESSION_FILE = get_claude_workspace_config_home_dir() / 'scripts' / 'gh_upload_session.json'
 
 # MIME type mapping for common file extensions
 MIME_TYPES: Mapping[str, str] = {
