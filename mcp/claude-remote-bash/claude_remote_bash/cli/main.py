@@ -28,6 +28,10 @@ from claude_remote_bash.models import (
 )
 from claude_remote_bash.protocol import ProtocolError, read_message, write_message
 
+__all__ = [
+    'main',
+]
+
 logger = logging.getLogger(__name__)
 
 app = create_app(help='Cross-machine shell execution for Claude Code.')
