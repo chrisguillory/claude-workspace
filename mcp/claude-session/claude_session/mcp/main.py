@@ -370,6 +370,7 @@ def register_tools(state: ServerState) -> None:
         no_backup: bool = False,
         dry_run: bool = False,
         source_project: str | None = None,
+        delete_cross_session_artifacts: bool | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> DeleteResult:
         """
@@ -381,6 +382,12 @@ def register_tools(state: ServerState) -> None:
         If the session is currently running (another Claude process), set
         terminate_running=True to kill it before deletion. For self-deletion
         (deleting the current session), termination is automatic.
+
+        When sibling copies of the UUID exist in other project folders,
+        delete_cross_session_artifacts is required — True deletes shared
+        UUID-keyed artifacts (plans, tasks, todos, session-env, debug log)
+        destructively for siblings, False preserves them. The flag must be
+        omitted when no siblings exist.
 
         Deletion is atomic with rollback on failure. A backup is always
         created for rollback capability. The no_backup flag only controls
@@ -395,6 +402,9 @@ def register_tools(state: ServerState) -> None:
             no_backup: Don't keep a backup file for undo
             dry_run: If True, show what would be deleted without actually deleting
             source_project: Scope session lookup to this project directory
+            delete_cross_session_artifacts: Required (and only allowed) when
+                sibling copies of the UUID exist in other project folders.
+                True = delete shared UUID-keyed artifacts; False = preserve them.
 
         Returns:
             DeleteResult with deletion details and backup path
@@ -415,6 +425,13 @@ def register_tools(state: ServerState) -> None:
 
             # Delete without backup
             result = await delete_session('019b5232-...', no_backup=True)
+
+            # Delete a stale duplicate while preserving shared artifacts for live siblings
+            result = await delete_session(
+                '019b5232-...',
+                source_project='/path/to/stale/project',
+                delete_cross_session_artifacts=False,
+            )
 
         Note:
             To undo a delete, run:
@@ -464,6 +481,7 @@ def register_tools(state: ServerState) -> None:
             no_backup=no_backup,
             dry_run=dry_run,
             terminate_pid_before_delete=terminate_pid,
+            delete_cross_session_artifacts=delete_cross_session_artifacts,
         )
 
         if result.success:

@@ -32,7 +32,7 @@ import signal
 import subprocess
 import time
 import uuid
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Mapping, Sequence, Set
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,7 +41,11 @@ from typing import Any, TypedDict
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.config.base import DATA_DIR
-from claude_session.exceptions import NativeSessionDeletionError
+from claude_session.exceptions import (
+    CrossSessionArtifactsNotApplicableError,
+    CrossSessionArtifactsRequiredError,
+    NativeSessionDeletionError,
+)
 from claude_session.schemas.operations.archive import SessionArchive
 from claude_session.schemas.operations.delete import ArtifactFile, DeleteManifest, DeleteResult
 from claude_session.services.archive import SessionArchiveService
@@ -104,6 +108,18 @@ class SessionDeleteService:
     # - OSError ENOTEMPTY: directory not empty = bug in discovery
     # - IsADirectoryError: wrong operation = bug in our code
     EXPECTED_DELETION_ERRORS = (PermissionError,)
+
+    # Artifact types keyed only by session UUID, shared across project-folder
+    # copies of the same UUID. Other types are scoped to a specific project folder.
+    CROSS_SESSION_ARTIFACT_TYPES: Set[str] = {
+        'plan_file',
+        'todo_file',
+        'task_file',
+        'task_metadata',
+        'task_lock',
+        'session_env',
+        'debug_log',
+    }
 
     def __init__(self, *, project_path: Path | None = None, session_folder: Path | None = None) -> None:
         """
@@ -402,24 +418,21 @@ class SessionDeleteService:
         no_backup: bool = False,
         dry_run: bool = False,
         terminate_pid_before_delete: int | None = None,
+        delete_cross_session_artifacts: bool | None = None,
     ) -> DeleteResult:
         """
         Delete session artifacts with atomic rollback on failure.
-
-        Implements strong exception safety:
-        - Either all artifacts are deleted successfully
-        - Or system is rolled back to original state
-
-        The --no-backup flag controls whether the backup is kept after
-        successful deletion (for user undo capability). Rollback always
-        works regardless of this flag - backup is created temporarily
-        for atomicity, then either kept or removed based on the flag.
 
         Args:
             session_id: Session to delete
             force: Required to delete native (UUIDv4) sessions
             no_backup: Don't keep backup after success (rollback still works)
             dry_run: Preview what would be deleted
+            terminate_pid_before_delete: SIGKILL this PID before deletion (self-delete)
+            delete_cross_session_artifacts: Required when sibling copies of the UUID
+                exist in other project folders. True = delete shared UUID-scoped
+                artifacts (destructive for siblings); False = preserve them.
+                Must be None when no siblings exist.
 
         Returns:
             DeleteResult with deletion details
@@ -428,6 +441,17 @@ class SessionDeleteService:
 
         # Discover all artifacts
         manifest = await self.discover_artifacts(session_id)
+
+        # Validate the cross-session-artifacts flag against sibling presence
+        siblings = self._find_sibling_project_folders(session_id)
+        if siblings and delete_cross_session_artifacts is None:
+            raise CrossSessionArtifactsRequiredError(session_id, siblings)
+        if not siblings and delete_cross_session_artifacts is not None:
+            raise CrossSessionArtifactsNotApplicableError(session_id)
+
+        # When preserving shared artifacts, drop them from the delete plan
+        if siblings and delete_cross_session_artifacts is False:
+            manifest = self._filter_out_cross_session_artifacts(manifest)
 
         # Validation: check for unexpected files (fail fast)
         if manifest.unexpected_files:
@@ -647,6 +671,36 @@ class SessionDeleteService:
         assert self.project_path is not None  # Ensured by __init__ validation
         encoded_path = encode_project_path(self.project_path)
         return self.claude_sessions_dir / encoded_path
+
+    def _find_sibling_project_folders(self, session_id: str) -> Sequence[Path]:
+        """Return project folders containing a JSONL for this UUID, excluding this session's own folder."""
+        current_session_dir = self._get_session_dir()
+        return [
+            jsonl.parent
+            for jsonl in self.claude_sessions_dir.glob(f'*/{session_id}.jsonl')
+            if jsonl.parent != current_session_dir
+        ]
+
+    def _filter_out_cross_session_artifacts(self, manifest: DeleteManifest) -> DeleteManifest:
+        """Drop UUID-keyed shared artifacts from the delete plan so sibling copies survive."""
+        kept_files = [a for a in manifest.files if a.artifact_type not in self.CROSS_SESSION_ARTIFACT_TYPES]
+        cross_session_prefixes = (
+            str(get_tasks_dir() / manifest.session_id),
+            str(get_session_env_dir() / manifest.session_id),
+        )
+        kept_dirs = [d for d in manifest.directories_to_cleanup if not d.startswith(cross_session_prefixes)]
+        return manifest.model_copy(
+            update={
+                'files': kept_files,
+                'total_size_bytes': sum(a.size_bytes for a in kept_files),
+                'plan_files': [],
+                'todo_files': [],
+                'task_files': [],
+                'session_env_files': [],
+                'debug_log_files': [],
+                'directories_to_cleanup': kept_dirs,
+            }
+        )
 
     @asynccontextmanager
     async def _atomic_deletion(self, backup_path: Path) -> AsyncGenerator[None]:
