@@ -1,6 +1,6 @@
 [package]
 name = "bm25-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "BM25 sparse embedding compatible with fastembed Qdrant/bm25, using rayon for parallel computation"
 

@@ -230,6 +230,7 @@ impl BM25 {
         }
 
         // Step 4: BM25 term frequency scoring.
+        // Dedup by token_id: Qdrant rejects sparse vectors with duplicate indices.
         let doc_len = state.stem_ranges.len() as f64;
         let mut counts: HashMap<&str, u32> = HashMap::with_capacity(state.stem_ranges.len() / 2);
         for &(start, end) in &state.stem_ranges {
@@ -237,17 +238,14 @@ impl BM25 {
             *counts.entry(stem).or_insert(0) += 1;
         }
 
-        let mut indices = Vec::with_capacity(counts.len());
-        let mut values = Vec::with_capacity(counts.len());
-
+        let mut by_token: HashMap<u32, f64> = HashMap::with_capacity(counts.len());
         for (token, count) in &counts {
             let tf = (*count as f64 * (self.k + 1.0))
                 / (*count as f64 + self.k * (1.0 - self.b + self.b * doc_len / self.avg_len));
-            indices.push(token_id(token));
-            values.push(tf);
+            by_token.insert(token_id(token), tf);
         }
 
-        (indices, values)
+        by_token.into_iter().unzip()
     }
 }
 
