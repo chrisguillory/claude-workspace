@@ -178,8 +178,10 @@ from enum import Enum
 from typing import Literal
 
 from cc_lib.types import CCVersion
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 __all__ = [
+    'ORIGINALS_DIR',
     'PATCHES',
     'PATCHES_BY_KIND',
     'PATCHES_BY_NAME',
@@ -188,6 +190,8 @@ __all__ = [
     'PatchScanResult',
     'scan_binary',
 ]
+
+ORIGINALS_DIR = get_claude_workspace_config_home_dir() / 'binary-patcher' / 'originals'
 
 
 class PatchKind(str, Enum):

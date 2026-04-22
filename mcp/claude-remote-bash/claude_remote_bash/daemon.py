@@ -29,10 +29,8 @@ from claude_remote_bash.models import (
     ErrorResponse,
     ExecuteRequest,
     ExecuteResult,
-    FileContent,
     Message,
     ReadConfigRequest,
-    ReadFileRequest,
 )
 from claude_remote_bash.protocol import ProtocolError, read_message, write_message
 
@@ -122,6 +120,8 @@ async def run_daemon(config: DaemonConfig) -> None:
 class _Daemon:
     """TCP server that accepts authenticated connections and executes commands."""
 
+    AUTH_TIMEOUT_SECONDS = 10.0
+
     def __init__(self, config: DaemonConfig) -> None:
         self._config = config
         self._contexts = SessionContextStore(default_cwd=os.path.expanduser('~'))
@@ -145,7 +145,11 @@ class _Daemon:
 
     async def _authenticate(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> bool:
         """Perform PSK authentication handshake. Returns True on success."""
-        msg = await read_message(reader)
+        try:
+            msg = await asyncio.wait_for(read_message(reader), timeout=self.AUTH_TIMEOUT_SECONDS)
+        except TimeoutError:
+            logger.warning('Auth timeout from %s', writer.get_extra_info('peername'), exc_info=True)
+            return False
 
         if not isinstance(msg, AuthRequest):
             await write_message(writer, AuthFail(reason='expected auth message'))
@@ -181,8 +185,6 @@ class _Daemon:
         """Dispatch a message to the appropriate handler."""
         if isinstance(msg, ExecuteRequest):
             return await self._handle_execute(msg)
-        if isinstance(msg, ReadFileRequest):
-            return self._handle_read_file(msg)
         if isinstance(msg, ReadConfigRequest):
             return self._handle_read_config()
         return ErrorResponse(message=f'unexpected message type: {msg.type}')
@@ -206,15 +208,6 @@ class _Daemon:
             exit_code=result.exit_code,
             cwd=result.cwd,
         )
-
-    def _handle_read_file(self, msg: ReadFileRequest) -> FileContent | ErrorResponse:
-        """Read a file from the local filesystem."""
-        path = Path(msg.path).expanduser().resolve()
-        try:
-            content = path.read_text()
-            return FileContent(path=str(path), content=content, size=len(content))
-        except (OSError, ValueError) as e:
-            return ErrorResponse(message=f'cannot read {path}: {e}')
 
     def _handle_read_config(self) -> ConfigContent:
         """Read Claude Code configuration files."""

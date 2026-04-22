@@ -58,7 +58,7 @@ import typer
 from cc_lib import claude_cli_introspection
 from cc_lib.cli import LauncherInstaller, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas import OpenModel
+from cc_lib.schemas import CamelModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
@@ -163,10 +163,36 @@ def uninstall() -> None:
 
 
 def _is_subcommand_invocation(args: Sequence[str]) -> bool:
-    """True if args start with a known claude subcommand."""
-    if not args:
+    """True if args contain a known claude subcommand, skipping leading global flags.
+
+    Commander.js (Claude Code's CLI framework) accepts global flags before the
+    subcommand (`claude --debug mcp list`), so detection must skip flag tokens
+    (and their values, for known value-taking flags) to find the first positional.
+    """
+    candidate = _first_positional(args)
+    if candidate is None:
         return False
-    return args[0] in {sc.name for sc in claude_cli_introspection.SUBCOMMANDS}
+    return candidate in {sc.name for sc in claude_cli_introspection.SUBCOMMANDS}
+
+
+def _first_positional(args: Sequence[str]) -> str | None:
+    """Return the first positional arg, skipping leading flags and their values."""
+    takes_value: dict[str, bool] = {}
+    for flag in claude_cli_introspection.ROOT_FLAGS:
+        takes_value[flag.name] = flag.arg_type != 'none'
+        if flag.short:
+            takes_value[flag.short] = flag.arg_type != 'none'
+
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if not tok.startswith('-'):
+            return tok
+        if '=' in tok:  # --flag=value is a single token
+            i += 1
+            continue
+        i += 2 if takes_value.get(tok, False) else 1
+    return None
 
 
 # -- Venv activation -----------------------------------------------------------
@@ -650,8 +676,8 @@ class SessionIndex:
     CACHE_FRESHNESS_SECONDS = 10.0
 
     def __init__(self, project_path: str) -> None:
-        encoded = self.encode_project_path(project_path)
-        self._project_dir = Path.home() / '.claude' / 'projects' / encoded
+        encoded = encode_project_path(project_path)
+        self._project_dir = get_claude_config_home_dir() / 'projects' / encoded
         self._cache_path = Path.home() / '.claude-workspace' / 'claude-exec' / f'{encoded}.json'
 
     def completions(self) -> Sequence[SessionEntry]:
@@ -663,11 +689,6 @@ class SessionIndex:
             return self._from_cache()
 
         return self._scan_and_cache()
-
-    @staticmethod
-    def encode_project_path(path: str) -> str:
-        """Encode a project path the same way Claude Code does."""
-        return ''.join(ch if ch.isalnum() else '-' for ch in path)
 
     def _cache_is_fresh(self) -> bool:
         try:
@@ -758,18 +779,19 @@ class SessionIndex:
 # -- Worktree resolution on resume --------------------------------------------
 
 
-class WorktreeSession(OpenModel):
+class WorktreeSession(CamelModel):
     """Claude Code's ``worktreeSession`` payload from session JSONL.
 
-    External protocol data — we declare only the field ``claude-exec``
-    reads. ``OpenModel``'s ``extra='allow'`` preserves the rest
-    (``originalCwd``, ``worktreeName``, ``worktreeBranch``,
-    ``originalBranch``, ``originalHeadCommit``, ``sessionId``,
-    ``enteredExisting``, and anything Claude Code adds in future versions)
-    so the repair step round-trips byte-for-byte.
+    Claude Code protocol data — we declare only the field ``claude-exec``
+    reads. ``CamelModel``'s ``alias_generator=to_camel`` maps Python
+    ``worktree_path`` to JSON ``worktreePath``. The inherited ``extra='allow'``
+    default preserves the rest (``originalCwd``, ``worktreeName``,
+    ``worktreeBranch``, ``originalBranch``, ``originalHeadCommit``,
+    ``sessionId``, ``enteredExisting``, and anything Claude Code adds in
+    future versions) so the repair step round-trips byte-for-byte.
     """
 
-    worktreePath: str
+    worktree_path: str
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -868,7 +890,7 @@ class WorktreeResolver:
         if scan.saw_null_after and scan.raw_record is not None:
             self._repair(jsonl_path, scan.raw_record, resume_id)
 
-        return Path(scan.worktree_session.worktreePath)
+        return Path(scan.worktree_session.worktree_path)
 
     @staticmethod
     def venv_of(worktree_path: Path | None) -> Path | None:
@@ -909,6 +931,11 @@ class WorktreeResolver:
                 if line_end == -1:
                     line_end = len(mm)
                 rec: dict[str, object] = json.loads(mm[line_start:line_end])
+                if rec.get('type') != 'worktree-state':
+                    # Incidental match — the needle appeared inside a user
+                    # message, tool result, or other record body. Skip.
+                    end = line_start
+                    continue
                 session_dict = rec.get('worktreeSession')
                 if isinstance(session_dict, dict):
                     try:
@@ -916,7 +943,7 @@ class WorktreeResolver:
                     except pydantic.ValidationError:
                         end = line_start
                         continue
-                    if (Path(parsed.worktreePath) / '.git').is_file():
+                    if (Path(parsed.worktree_path) / '.git').is_file():
                         explicitly_exited = mm.find(cls.EXIT_WORKTREE_NEEDLE, line_end) != -1
                         return WorktreeScan(
                             worktree_session=parsed,

@@ -86,6 +86,7 @@ def load_config() -> DaemonConfig | None:
 def save_config(config: DaemonConfig) -> Path:
     """Save config to disk with 0600 permissions. Returns the config file path."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(CONFIG_DIR, stat.S_IRWXU)  # 0o700 — umask doesn't narrow mkdir mode
     with FileLock(LOCK_FILE):
         CONFIG_FILE.write_text(json.dumps(config.to_dict(), indent=2) + '\n')
         os.chmod(CONFIG_FILE, stat.S_IRUSR | stat.S_IWUSR)

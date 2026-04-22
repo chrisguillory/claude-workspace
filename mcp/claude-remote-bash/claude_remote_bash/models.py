@@ -16,10 +16,8 @@ __all__ = [
     'ErrorResponse',
     'ExecuteRequest',
     'ExecuteResult',
-    'FileContent',
     'Message',
     'ReadConfigRequest',
-    'ReadFileRequest',
 ]
 
 
@@ -76,23 +74,7 @@ class ExecuteResult(ClosedModel):
     cwd: str
 
 
-# -- File & config operations -------------------------------------------------
-
-
-class ReadFileRequest(ClosedModel):
-    """Client → Daemon: read a file."""
-
-    type: Literal['read_file'] = 'read_file'
-    path: str
-
-
-class FileContent(ClosedModel):
-    """Daemon → Client: file content."""
-
-    type: Literal['file_content'] = 'file_content'
-    path: str
-    content: str
-    size: int
+# -- Config operations --------------------------------------------------------
 
 
 class ReadConfigRequest(ClosedModel):
@@ -128,8 +110,6 @@ Message = Annotated[
     | AuthFail
     | ExecuteRequest
     | ExecuteResult
-    | ReadFileRequest
-    | FileContent
     | ReadConfigRequest
     | ConfigContent
     | ErrorResponse,

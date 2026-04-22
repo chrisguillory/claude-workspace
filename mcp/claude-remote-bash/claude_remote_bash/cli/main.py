@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 from collections.abc import Mapping, Sequence
@@ -101,7 +102,7 @@ def discover() -> None:
 
     typer.echo(f'Found {len(hosts)} daemon(s):\n')
     for h in hosts:
-        typer.echo(f'  {h.alias:<12} {h.ip}:{h.port}  ({h.hostname})  os={h.os} user={h.user} v{h.version}')
+        typer.echo(f'  {h.alias:<12} {h.ip}:{h.port}  ({h.hostname})  v{h.version}')
 
 
 @app.command()
@@ -239,8 +240,10 @@ def _read_cache() -> Sequence[Mapping[str, object]] | None:
 def _write_cache(hosts: Sequence[DiscoveredHost]) -> None:
     """Write host discovery results to cache."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(CACHE_DIR, 0o700)
     entries = [{'alias': h.alias, 'hostname': h.hostname, 'ip': h.ip, 'port': h.port} for h in hosts]
     CACHE_FILE.write_text(json.dumps({'timestamp': time.time(), 'hosts': entries}))
+    os.chmod(CACHE_FILE, 0o600)
 
 
 # -- Exceptions + error boundary handlers -------------------------------------
