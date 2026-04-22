@@ -236,6 +236,7 @@ class _Daemon:
         return ExecuteResult(
             id=msg.id,
             stdout=result.stdout,
+            stderr=result.stderr,
             exit_code=result.exit_code,
             cwd=result.cwd,
         )

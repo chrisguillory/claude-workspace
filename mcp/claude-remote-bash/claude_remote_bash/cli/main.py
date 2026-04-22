@@ -92,6 +92,8 @@ def execute(
 
     if result.stdout:
         typer.echo(result.stdout)
+    if result.stderr:
+        typer.echo(result.stderr, err=True)
 
     raise SystemExit(result.exit_code)
 
