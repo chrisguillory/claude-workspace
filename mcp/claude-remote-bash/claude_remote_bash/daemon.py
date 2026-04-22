@@ -20,6 +20,7 @@ __all__ = [
 from claude_remote_bash.auth import DaemonConfig, generate_key, load_config, save_config, verify_key
 from claude_remote_bash.context import SessionContextStore
 from claude_remote_bash.discovery import register_service, unregister_service
+from claude_remote_bash.exceptions import ProtocolError
 from claude_remote_bash.executor import execute_command
 from claude_remote_bash.models import (
     AuthFail,
@@ -32,7 +33,7 @@ from claude_remote_bash.models import (
     Message,
     ReadConfigRequest,
 )
-from claude_remote_bash.protocol import ProtocolError, read_message, write_message
+from claude_remote_bash.protocol import read_message, write_message
 
 logger = logging.getLogger(__name__)
 

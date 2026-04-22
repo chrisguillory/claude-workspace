@@ -6,12 +6,14 @@ import asyncio
 import socket
 from collections.abc import Mapping, Sequence
 
+import ifaddr
 from zeroconf import IPVersion, ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
 __all__ = [
     'DiscoveredHost',
     'browse_hosts',
+    'publishable_ipv4s',
     'register_service',
     'resolve_host',
     'unregister_service',
@@ -22,17 +24,21 @@ BROWSE_TIMEOUT_SECONDS = 3.0
 
 
 class DiscoveredHost:
-    """A daemon discovered via mDNS."""
+    """A daemon discovered via mDNS.
 
-    def __init__(self, *, alias: str, hostname: str, ip: str, port: int, version: str) -> None:
+    A single host may advertise multiple IP addresses (LAN + VPN + ethernet);
+    callers should try each in order until one accepts a TCP connection.
+    """
+
+    def __init__(self, *, alias: str, hostname: str, ips: Sequence[str], port: int, version: str) -> None:
         self.alias = alias
         self.hostname = hostname
-        self.ip = ip
+        self.ips = list(ips)
         self.port = port
         self.version = version
 
     def __repr__(self) -> str:
-        return f'DiscoveredHost(alias={self.alias!r}, ip={self.ip}, port={self.port})'
+        return f'DiscoveredHost(alias={self.alias!r}, ips={self.ips}, port={self.port})'
 
 
 async def register_service(
@@ -45,6 +51,10 @@ async def register_service(
 
     Returns the AsyncZeroconf instance and ServiceInfo for later unregistration.
     The caller is responsible for calling ``unregister_service`` on shutdown.
+
+    Advertises all non-loopback, non-link-local IPv4 addresses the host has.
+    Clients iterate through them at connect time, so LAN/VPN/ethernet all
+    appear in the mesh without operator intervention.
     """
     hostname = socket.gethostname().removesuffix('.local')  # macOS includes .local already
     info = AsyncServiceInfo(
@@ -56,7 +66,7 @@ async def register_service(
             'version': version,
         },
         server=f'{hostname}.local.',
-        addresses=[socket.inet_aton(_local_ip())],
+        addresses=[socket.inet_aton(ip) for ip in publishable_ipv4s()],
     )
     azc = AsyncZeroconf(ip_version=IPVersion.V4Only)
     await azc.async_register_service(info)
@@ -97,7 +107,7 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> Sequence[Disc
             DiscoveredHost(
                 alias=_decode_prop(props, b'alias'),
                 hostname=info.server or '',
-                ip=addresses[0],
+                ips=addresses,
                 port=info.port,
                 version=_decode_prop(props, b'version'),
             )
@@ -149,15 +159,47 @@ def resolve_host(hosts: Sequence[DiscoveredHost], query: str) -> DiscoveredHost 
     return None
 
 
-def _local_ip() -> str:
-    """Discover the local LAN IP address via UDP connect to a public address."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('8.8.8.8', 80))
-        host: str = s.getsockname()[0]
-        return host
-    finally:
-        s.close()
+def publishable_ipv4s() -> Sequence[str]:
+    """Return all non-loopback, non-link-local IPv4 addresses for this host.
+
+    Addresses are sorted to prefer common home-LAN ranges before VPN/tunnel
+    ranges. The full list is published via mDNS so clients can try each in
+    turn; the sort order just decides which IP the client attempts first.
+
+    Preference order (lowest-numbered rank is tried first):
+        0 - 192.168.0.0/16      (consumer LAN)
+        1 - 172.16.0.0/12       (enterprise LAN / Docker)
+        2 - 10.0.0.0/8          (VPN, corp LAN, Tailscale-adjacent)
+        3 - 100.64.0.0/10       (CGNAT / Tailscale)
+        4 - everything else     (public IPv4, etc.)
+    """
+    ips: set[str] = set()
+    for adapter in ifaddr.get_adapters():
+        for addr in adapter.ips:
+            if not addr.is_IPv4:
+                continue
+            ip = addr.ip
+            if not isinstance(ip, str):
+                continue
+            if ip.startswith(('127.', '169.254.')):
+                continue
+            ips.add(ip)
+    return sorted(ips, key=_ipv4_rank)
+
+
+def _ipv4_rank(ip: str) -> tuple[int, str]:
+    """Sort key for IPv4 addresses — prefer home-LAN ranges over VPN/tunnel."""
+    if ip.startswith('192.168.'):
+        return (0, ip)
+    first = int(ip.split('.', 1)[0])
+    second = int(ip.split('.', 2)[1])
+    if first == 172 and 16 <= second <= 31:
+        return (1, ip)
+    if first == 10:
+        return (2, ip)
+    if first == 100 and 64 <= second <= 127:
+        return (3, ip)
+    return (4, ip)
 
 
 def _decode_prop(props: Mapping[bytes, bytes | None], key: bytes) -> str:

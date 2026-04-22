@@ -18,6 +18,13 @@ from cc_lib.error_boundary import ErrorBoundary
 
 from claude_remote_bash.auth import load_config
 from claude_remote_bash.discovery import DiscoveredHost, browse_hosts, resolve_host
+from claude_remote_bash.exceptions import (
+    AuthError,
+    DaemonError,
+    HostNotFoundError,
+    HostUnreachableError,
+    RemoteBashError,
+)
 from claude_remote_bash.models import (
     AuthFail,
     AuthRequest,
@@ -27,7 +34,7 @@ from claude_remote_bash.models import (
     Message,
     ReadConfigRequest,
 )
-from claude_remote_bash.protocol import ProtocolError, read_message, write_message
+from claude_remote_bash.protocol import read_message, write_message
 
 __all__ = [
     'main',
@@ -102,7 +109,8 @@ def discover() -> None:
 
     typer.echo(f'Found {len(hosts)} daemon(s):\n')
     for h in hosts:
-        typer.echo(f'  {h.alias:<12} {h.ip}:{h.port}  ({h.hostname})  v{h.version}')
+        ips_str = ','.join(h.ips) if h.ips else '?'
+        typer.echo(f'  {h.alias:<12} {ips_str}:{h.port}  ({h.hostname})  v{h.version}')
 
 
 @app.command()
@@ -130,9 +138,9 @@ async def _execute_remote(
     timeout: float,
 ) -> ExecuteResult:
     """Connect to a daemon, authenticate, and execute a command."""
-    ip, port = await _resolve_host(host)
+    ips, port = await _resolve_host(host)
 
-    reader, writer = await asyncio.open_connection(ip, port)
+    reader, writer = await _open_connection_any(ips, port)
     try:
         await _authenticate(reader, writer)
 
@@ -160,8 +168,8 @@ async def _execute_remote(
 
 async def _send_message(host: str, msg: Message) -> Message:
     """Connect, authenticate, send a message, and return the response."""
-    ip, port = await _resolve_host(host)
-    reader, writer = await asyncio.open_connection(ip, port)
+    ips, port = await _resolve_host(host)
+    reader, writer = await _open_connection_any(ips, port)
     try:
         await _authenticate(reader, writer)
         await write_message(writer, msg)
@@ -169,6 +177,28 @@ async def _send_message(host: str, msg: Message) -> Message:
     finally:
         writer.close()
         await writer.wait_closed()
+
+
+CONNECT_TIMEOUT_SECONDS = 2.0
+
+
+async def _open_connection_any(ips: Sequence[str], port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Try each IP in order with a short per-attempt timeout; return the first success.
+
+    Daemons advertise all their IPv4 addresses via mDNS (LAN + VPN + ethernet).
+    We attempt each with a short timeout so an unreachable VPN address fails
+    fast and we fall through to the LAN address.
+    """
+    errors: list[str] = []
+    for ip in ips:
+        try:
+            return await asyncio.wait_for(
+                asyncio.open_connection(ip, port),
+                timeout=CONNECT_TIMEOUT_SECONDS,
+            )
+        except (TimeoutError, OSError) as exc:
+            errors.append(f'{ip}:{port} ({type(exc).__name__}: {exc})')
+    raise HostUnreachableError('Could not connect to any advertised address:\n  ' + '\n  '.join(errors))
 
 
 async def _authenticate(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -184,8 +214,11 @@ async def _authenticate(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         raise AuthError(f'Authentication failed: {response.reason}')
 
 
-async def _resolve_host(host: str) -> tuple[str, int]:
-    """Resolve a host specifier to (ip, port).
+async def _resolve_host(host: str) -> tuple[Sequence[str], int]:
+    """Resolve a host specifier to (ips, port).
+
+    A single host may advertise multiple IPv4 addresses (LAN + VPN + ethernet);
+    the caller tries each in turn. For a literal ip:port the list has one entry.
 
     Resolution chain:
         1. Direct ip:port (e.g., "192.168.4.24:63276")
@@ -194,15 +227,16 @@ async def _resolve_host(host: str) -> tuple[str, int]:
     """
     if ':' in host:
         parts = host.rsplit(':', 1)
-        return parts[0], int(parts[1])
+        return [parts[0]], int(parts[1])
 
     cached = _read_cache()
     if cached is not None:
         for entry in cached:
-            if str(entry.get('alias', '')).lower() == host.lower():
-                return str(entry['ip']), int(str(entry['port']))
-            if host.lower() in str(entry.get('hostname', '')).lower():
-                return str(entry['ip']), int(str(entry['port']))
+            if (
+                str(entry.get('alias', '')).lower() == host.lower()
+                or host.lower() in str(entry.get('hostname', '')).lower()
+            ):
+                return _cache_ips(entry), int(str(entry['port']))
 
     hosts = await browse_hosts(timeout=3.0)
     _write_cache(hosts)
@@ -211,7 +245,18 @@ async def _resolve_host(host: str) -> tuple[str, int]:
     if found is None:
         raise HostNotFoundError(f'Host not found: {host}\nRun `claude-remote-bash discover` to see available hosts.')
 
-    return found.ip, found.port
+    return found.ips, found.port
+
+
+def _cache_ips(entry: Mapping[str, object]) -> Sequence[str]:
+    """Extract IP list from a cache entry, accepting both new and legacy formats."""
+    ips = entry.get('ips')
+    if isinstance(ips, list) and ips:
+        return [str(ip) for ip in ips]
+    legacy = entry.get('ip')
+    if isinstance(legacy, str) and legacy:
+        return [legacy]
+    return []
 
 
 # -- Helpers -------------------------------------------------------------------
@@ -241,62 +286,25 @@ def _write_cache(hosts: Sequence[DiscoveredHost]) -> None:
     """Write host discovery results to cache."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(CACHE_DIR, 0o700)
-    entries = [{'alias': h.alias, 'hostname': h.hostname, 'ip': h.ip, 'port': h.port} for h in hosts]
+    entries = [{'alias': h.alias, 'hostname': h.hostname, 'ips': list(h.ips), 'port': h.port} for h in hosts]
     CACHE_FILE.write_text(json.dumps({'timestamp': time.time(), 'hosts': entries}))
     os.chmod(CACHE_FILE, 0o600)
 
 
-# -- Exceptions + error boundary handlers -------------------------------------
-
-
-class RemoteBashError(Exception):
-    """Base exception for CLI errors."""
-
-
-class AuthError(RemoteBashError):
-    """Authentication failed or not configured."""
-
-
-class HostNotFoundError(RemoteBashError):
-    """Host alias could not be resolved via mDNS."""
-
-
-class DaemonError(RemoteBashError):
-    """Daemon returned an error response."""
-
-
-@error_boundary.handler(AuthError)
-def _handle_auth_error(exc: AuthError) -> None:
-    print(exc, file=sys.stderr)
-
-
-@error_boundary.handler(HostNotFoundError)
-def _handle_host_not_found(exc: HostNotFoundError) -> None:
-    print(exc, file=sys.stderr)
-
-
-@error_boundary.handler(DaemonError)
-def _handle_daemon_error(exc: DaemonError) -> None:
-    print(f'Daemon error: {exc}', file=sys.stderr)
-
-
-@error_boundary.handler(ConnectionRefusedError)
-def _handle_connection_refused(exc: ConnectionRefusedError) -> None:
-    print(f'Connection refused — is the daemon running? ({exc})', file=sys.stderr)
-
-
-@error_boundary.handler(ProtocolError)
-def _handle_protocol_error(exc: ProtocolError) -> None:
-    print(f'Protocol error: {exc}', file=sys.stderr)
+# -- Error boundary handlers --------------------------------------------------
+# Exception classes live in claude_remote_bash.exceptions. Handlers stay here
+# because dispatch is a CLI-layer concern (how errors surface to the user).
 
 
 @error_boundary.handler(RemoteBashError)
-def _handle_remote_bash_error(exc: RemoteBashError) -> None:
+def _handle_user_facing(exc: RemoteBashError) -> None:
+    """Every expected exception self-formats via ``__str__``; just print it."""
     print(exc, file=sys.stderr)
 
 
 @error_boundary.handler(Exception)
 def _handle_unexpected(exc: Exception) -> None:
+    """Unexpected exceptions get the class name prepended for diagnostic clarity."""
     print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
 
 
