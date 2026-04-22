@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from cc_lib.utils import encode_project_path, get_claude_config_home_dir
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
 from mcp.server.fastmcp import Context, FastMCP
 
 from claude_session.exceptions import RunningSessionDeletionError, RunningSessionMoveError
@@ -947,7 +947,7 @@ def _discover_session_id(claude_pid: int) -> str:
     """
     session_id = resolve_session_id_from_pid(claude_pid, max_attempts=10)
     if session_id is None:
-        sessions_file = pathlib.Path.home() / '.claude-workspace' / 'sessions.json'
+        sessions_file = get_claude_workspace_config_home_dir() / 'sessions.json'
         raise RuntimeError(
             f'Could not find active session for Claude PID {claude_pid} in {sessions_file} '
             f'after 10 attempts. Ensure claude-workspace SessionStart hook is configured.'

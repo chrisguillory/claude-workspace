@@ -12,7 +12,9 @@ Analysis method:
        name to enumerate hidden flags
     4. Subcommand ``--help`` for nested structures
 
-Last verified: v2.1.114, 2026-04-18
+Last fully verified: v2.1.114, 2026-04-18.
+Spot-added post-v2.1.114: ``--allowedTools`` / ``--disallowedTools``
+camelCase aliases (verified against v2.1.116 ``--help`` output).
 """
 
 from __future__ import annotations
@@ -59,6 +61,7 @@ ROOT_FLAGS: Sequence[FlagDef] = [
     FlagDef('--agents', arg_type='json', description='JSON object defining custom agents'),
     FlagDef('--allow-dangerously-skip-permissions', description='Enable bypassing permission checks as an option'),
     FlagDef('--allowed-tools', arg_type='string', description='Comma or space-separated list of tool names to allow'),
+    FlagDef('--allowedTools', arg_type='string', description='camelCase alias of --allowed-tools'),
     FlagDef('--append-system-prompt', arg_type='string', description='Append to the default system prompt'),
     FlagDef('--bare', description='Minimal mode: skip hooks, LSP, plugins, auto-memory'),
     FlagDef('--betas', arg_type='string', description='Beta headers for API requests'),
@@ -70,6 +73,7 @@ ROOT_FLAGS: Sequence[FlagDef] = [
     FlagDef('--debug-file', arg_type='path', description='Write debug logs to specific file'),
     FlagDef('--disable-slash-commands', description='Disable all skills'),
     FlagDef('--disallowed-tools', arg_type='string', description='Comma or space-separated list of tool names to deny'),
+    FlagDef('--disallowedTools', arg_type='string', description='camelCase alias of --disallowed-tools'),
     FlagDef(
         '--effort',
         arg_type='choice',

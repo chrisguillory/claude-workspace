@@ -53,13 +53,14 @@ Ref: https://code.claude.com/docs/en/hooks (exit code semantics)
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.exceptions import HookTreeMismatchError
 from cc_lib.schemas.hooks import PostToolUseHookInput
+from cc_lib.utils import validate_hook_tree
 
 boundary = ErrorBoundary(exit_code=2)
 
@@ -67,47 +68,50 @@ boundary = ErrorBoundary(exit_code=2)
 @boundary
 def main() -> int:
     if len(sys.argv) < 2:
-        print('Usage: run-linter.py <linter-script> [extra-args...]', file=sys.stderr)
+        print('Usage: run-linter.py <linter-path> [extra-args...]', file=sys.stderr)
         return 2
 
-    linter = sys.argv[1]
-    extra_args = sys.argv[2:]
+    launch_dir = validate_hook_tree(Path(__file__))
 
     payload = PostToolUseHookInput.model_validate_json(sys.stdin.buffer.read())
     file_path = payload.tool_input.get('file_path', '')
 
     # File-type gate: Python sources only (.py, .pyi).
-    # This lives here — not in the settings.json `if` pattern — because Claude Code's
-    # hook `if` uses a custom regex matcher (not glob): `*` becomes `.*`, but brace
-    # expansion, character classes, and extglob are all escaped to literals.
-    # Matching `.py` + `.pyi` would require duplicate hook entries per extension.
-    # Centralizing here keeps settings.json clean and supports both extensions.
     if not file_path.endswith(('.py', '.pyi')):
         return 0
 
     # Skip if the file doesn't exist (e.g., deleted).
-    if not Path(file_path).is_file():
+    file = Path(file_path)
+    if not file.is_file():
         return 0
 
-    # Ensure _lib subpackage (config, hashability_inspector) is importable.
-    linter_dir = str(Path(linter).resolve().parent)
-    env = dict(os.environ)
-    existing = env.get('PYTHONPATH', '')
-    env['PYTHONPATH'] = f'{linter_dir}:{existing}' if existing else linter_dir
+    # Scope: silently skip files outside the project.
+    if not file.resolve().is_relative_to(launch_dir):
+        return 0
 
-    result = subprocess.run(
-        [sys.executable, linter, *extra_args, file_path],
-        env=env,
+    # Run with cwd=launch_dir so relative linter paths resolve correctly and
+    # Python adds the linter's directory to sys.path (for _lib imports).
+    # Claude Code's hook subprocess cwd tracks STATE.cwd (drifts with user's
+    # `cd` commands), so inherited cwd isn't reliable.
+    subprocess.run(
+        [sys.executable, sys.argv[1], *sys.argv[2:], file_path],
+        cwd=launch_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        check=False,
+        check=True,
     )
 
-    if result.returncode != 0:
-        sys.stderr.buffer.write(result.stdout)
-        return 2
-
     return 0
+
+
+@boundary.handler(subprocess.CalledProcessError)
+def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
+    sys.stderr.buffer.write(exc.stdout)
+
+
+@boundary.handler(HookTreeMismatchError)
+def _handle_tree_mismatch(exc: HookTreeMismatchError) -> None:
+    print(str(exc), file=sys.stderr)
 
 
 if __name__ == '__main__':

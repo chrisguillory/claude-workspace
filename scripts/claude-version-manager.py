@@ -52,7 +52,7 @@ from pathlib import Path
 import httpx
 import pydantic
 import typer
-from cc_lib.claude_binary_patching import scan_binary
+from cc_lib.claude_binary_patching import ORIGINALS_DIR, scan_binary
 from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import ClosedModel, OpenModel
@@ -241,8 +241,7 @@ def cli_info(
             if not applied and not unpatched and not changed:
                 print('  Modified (ad-hoc signed, no recognized patches)')
 
-        originals_dir = Path.home() / '.claude-workspace' / 'binary-patcher' / 'originals'
-        original = originals_dir / version
+        original = ORIGINALS_DIR / version
         if original.exists():
             print(f'  Original: {original} ({original.stat().st_size / 1_000_000:.0f} MB)')
     else:
