@@ -51,7 +51,9 @@ Patches (alphabetical by name):
                     permissions.deny case fixed upstream at 2.1.101 (#39344).
                     https://github.com/anthropics/claude-code/issues/42797
                     https://github.com/anthropics/claude-code/issues/51255
-                    See ``docs/hook-ask-bypass-analysis.md`` for full analysis.
+                    Full analysis (published as secret gist from the PR that
+                    introduced this patch):
+                    https://gist.github.com/chrisguillory/8d5d401ac356b47ec078940080726b83
 
     mcp-tool-results [fix] MCP tool result rendering. outputSchema safeParse
                     guard returns null on schema mismatch, killing the React
