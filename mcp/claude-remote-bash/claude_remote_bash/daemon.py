@@ -19,7 +19,7 @@ __all__ = [
 
 from cc_lib.error_boundary import ErrorBoundary
 
-from claude_remote_bash.auth import DaemonConfig, generate_key, load_config, save_config, verify_key
+from claude_remote_bash.auth import CONFIG_FILE, DaemonConfig, generate_key, load_config, save_config, verify_key
 from claude_remote_bash.context import SessionContextStore
 from claude_remote_bash.discovery import register_service, unregister_service
 from claude_remote_bash.exceptions import (
@@ -59,6 +59,10 @@ def main() -> None:
     )
 
     args = sys.argv[1:]
+
+    if '--help' in args or '-h' in args:
+        _cmd_help()
+        return
 
     if '--init' in args:
         _cmd_init()
@@ -276,6 +280,34 @@ def _cmd_join(key: str) -> None:
         print(f'Name: {config.name}')
     else:
         print('Set a name: claude-remote-bash-daemon --name <alias>')
+
+
+def _cmd_help() -> None:
+    """Print usage. Printed to stdout so `--help | less` works."""
+    print(f"""\
+claude-remote-bash-daemon v{VERSION} — TCP server + mDNS registration for cross-machine shell execution.
+
+Usage:
+  claude-remote-bash-daemon                     Start the daemon (bare invocation)
+  claude-remote-bash-daemon --init              Generate a new PSK and save config
+  claude-remote-bash-daemon --join <key>        Save a shared PSK from another machine
+  claude-remote-bash-daemon --name <alias>      Set this daemon's alias (saves + exits)
+  claude-remote-bash-daemon --allow-firewall    Approve daemon's python binary in macOS Application Firewall (sudo)
+  claude-remote-bash-daemon --help              Show this message
+
+First-time setup:
+  First machine:
+    claude-remote-bash-daemon --init            # generates and prints PSK
+    claude-remote-bash-daemon --name M1
+    claude-remote-bash-daemon                   # start — click Allow on firewall dialog
+  Additional machines:
+    claude-remote-bash-daemon --join <PSK>      # same PSK as above
+    claude-remote-bash-daemon --name M2
+    claude-remote-bash-daemon --allow-firewall  # optional: skip the firewall dialog
+    claude-remote-bash-daemon                   # start
+
+Config file: {CONFIG_FILE}
+""")
 
 
 def _cmd_allow_firewall() -> None:
