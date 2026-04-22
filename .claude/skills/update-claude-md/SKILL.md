@@ -1,4 +1,5 @@
 ---
+name: update-claude-md
 description: "Updates CLAUDE.md using multi-phase workflow: analyze current state, draft updates (Sonnet), invoke claude-md-architect agent (Opus) for complete refactoring, compare both versions, synthesize final result"
 argument-hint: <patterns/principles/changes to incorporate>
 allowed-tools: Read, Write, Task, AskUserQuestion, Bash(git branch:*), Bash(git log:*), Bash(git status:*)
