@@ -1,4 +1,5 @@
 ---
+name: handoff
 description: "Generate comprehensive handoff document capturing session context, work completed, pending tasks, and key decisions"
 argument-hint: <optional focus areas or specific instructions>
 allowed-tools: Read, Write, Bash(git log:*), Bash(git status:*), Bash(git diff:*)
