@@ -19,11 +19,11 @@ status: "Analysis complete — patch designs ready for decision"
 | | |
 |---|---|
 | **What happens** | Your `ask-before-auto-approval.py` PreToolUse hook returns `{"permissionDecision":"ask"}` for `Edit .claude/settings.json` under auto mode. Claude Code silently discards the decision, routes to the LLM classifier, the classifier returns "allow", the Edit runs without a prompt. |
-| **Why** | Function `Ma_` (outer permission resolver) drops the hook result `H` when built-in safety check `FJH` *also* returns `"ask"`. The fallback re-entry in auto mode uses the classifier, not a prompt. |
-| **Affected paths** | `.claude/settings.json`, `.claude/settings.local.json`, all 5 managed settings categories, `.claude/commands/*`, `.claude/agents/*`, `.claude/skills/*`, and an internal "sensitive files" list. |
+| **Why** | Function `Ma_` (outer permission resolver) drops the hook result `H` whenever `FJH` *also* returns `"ask"`. `FJH` emits ask for three `decisionReason.type` values: `rule` (user-configured `permissions.ask` matched via `rG7`/`i$8`), `safetyCheck` (built-in path-based check via `deH`/`SPH`), and `sandboxOverride` (Bash sandboxing). In auto mode the fallback re-enters the permission pipeline ending at the classifier — binary allow/deny, no prompt path — so any of these three paths is silently overridden. |
+| **Affected paths** | Three categories: (a) **Rule** — any tool/path matching a user-configured `permissions.ask` rule (the #42797 class); (b) **safetyCheck** — `.claude/settings.json`, `.claude/settings.local.json`, all 5 managed settings categories, `.claude/commands/*`, `.claude/agents/*`, `.claude/skills/*`, and an internal "sensitive files" list; (c) **sandboxOverride** — Bash invocations that produce the sandbox-override decision. **Not in scope:** `workingDir` prompts (Edit on paths outside the project root) — these surface via a separate outside-cwd check upstream of `FJH`'s ask-filter and were never bypassed. |
 | **Our hook's practical reach** | Only fires for `{Edit, Write, mcp__…}` in auto mode. Outside those, no hook ask exists and the bypass can't apply. |
 | **Classification verdict** | **`FIX`** (high confidence). Anthropic has already fixed the symmetric `deny` case (#39344 → v2.1.101); this is the same pattern in the `ask` dimension. |
-| **Recommended patch** | **Option A**: 1-byte flip (`behavior==="ask"` → `behavior==="xsk"`) inside the FJH-ask branch of `Ma_`. Same-length, stable from v2.1.109, narrow effect. Optionally pair with Option C (narrowed) for defense-in-depth. |
+| **Recommended patch** | **Option A**: 1-byte flip (`behavior==="ask"` → `behavior==="xsk"`) inside the FJH-ask branch of `Ma_`. Same-length, stable from v2.1.109, narrow effect. Neutralizes all three FJH-emitted `ask` paths above. Optionally pair with Option C (narrowed) for defense-in-depth. |
 
 ---
 
@@ -510,6 +510,9 @@ That adds ~58 bytes between the existing test and the `return`. The original is 
 
 Flip `classifierApprovable: true` → `classifierApprovable: false` at each of the 3 emission sites in `deH`. Each is a 1-byte change (`!0` → `!1`).
 
+> [!WARNING]
+> **Anchors below are v2.1.116-specific.** `Ae_` and `TB5` are minified function names — at v2.1.114 the equivalents are `Fa_`/`DC5`, and earlier versions use different names again (see Appendix D). A cross-version Option C would need to anchor on `classifierApprovable:!0` itself (stable from v2.1.90) plus a secondary discriminator to pick the 3 target sites out of 6 matches. The `min_version='2.1.90'` fields below assume that cross-version rewrite; as written, these PatchDefs scan only on v2.1.116.
+
 **PatchDefs:**
 ```python
 PatchDef(
@@ -625,12 +628,15 @@ The FJH-ask bypass in `Ma_` is unconditional — not gated by a flag we could to
 | Non-auto mode, any file | hook doesn't fire (returns 0) | unchanged |
 | Auto mode, non-gated tool | hook returns 0 | unchanged |
 | Auto mode, gated tool, FJH clear | prompt shown | unchanged |
-| **Auto mode, gated tool, FJH=ask (settings.json)** | **classifier decides (allow)** | **prompt shown** |
+| **Auto mode, FJH=ask via `rule` (user `permissions.ask` match)** | **classifier decides (typically allow — #42797)** | **prompt shown** |
+| **Auto mode, FJH=ask via `safetyCheck` (e.g. `.claude/settings.json`)** | **classifier decides (allow)** | **prompt shown** |
+| **Auto mode, FJH=ask via `sandboxOverride` (Bash)** | **classifier decides** | **prompt shown** |
 | Any mode, hook deny | deny | unchanged |
 | Any mode, FJH deny | deny | unchanged |
 | Auto mode, gated tool, hook=allow, FJH=ask | classifier decides | **hook-allow wins (silent allow)** |
+| Auto mode, Edit outside project root (`workingDir` prompt) | prompt shown (unaffected) | unchanged — **not covered by this patch** |
 
-Last row is the edge case. Today: no effect (our hook only emits ask). Future-hook caveat.
+The bypass-class covers all three `FJH`-emitted ask types. Our `ask-before-auto-approval.py` hook today exercises the `safetyCheck` row for settings.json; the `rule` row is the #42797 case (static `permissions.ask` silently ignored) and benefits automatically from the same patch. `workingDir` prompts surface via a separate outside-cwd check upstream of `FJH`'s filter and were never bypassed — the patch does not interact with that path. The `hook=allow, FJH=ask` row is the edge case flagged in Agent B's review: today, no effect (our hook only emits ask). Future-hook caveat.
 
 ### 5.2 Risk matrix
 
@@ -740,8 +746,10 @@ Counts measured across locally-available originals `2.1.86, 2.1.87, 2.1.90, 2.1.
 | Anchor `ask rule/safety check requires full permission pipeline` | 0 | 0 | 0 | 0 | 3 | 3 | 3 | 3 | 3 |
 | `behavior==="ask"` in 200B before anchor | — | — | — | — | 2 | 2 | 2 | 2 | 2 |
 | `classifierApprovable:!0` | 0 | 0 | 6 | 6 | 6 | 6 | 6 | 6 | 6 |
-| `if(Ae_($))return{safe:!1` | — | — | 2 | 2 | 2 | 2 | 2 | 2 | 2 |
-| `else if(TB5($))return{safe:!1` | — | — | 2 | 2 | 2 | 2 | 2 | 2 | 2 |
+| `if(Ae_($))return{safe:!1` (minified name, 2.1.116) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
+| `else if(TB5($))return{safe:!1` (minified name, 2.1.116) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
+| `if(Fa_($))return{safe:!1` (minified name, 2.1.114) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 0 |
+| `else if(DC5($))return{safe:!1` (minified name, 2.1.114) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 0 |
 
 **Identifier drift in the `Ma_` FJH-result variable:**
 - v2.1.109 through v2.1.114: `j`
@@ -749,7 +757,7 @@ Counts measured across locally-available originals `2.1.86, 2.1.87, 2.1.90, 2.1.
 
 The log function varies too: `h` (older) vs `y` (2.1.116). A patch matching the full `if(j?.behavior==="ask")return h(\`...` would NOT survive the v2.1.114→v2.1.116 rename. **But `behavior==="ask"` is stable across all versions** — Option A's patch is version-stable from 2.1.109 onwards.
 
-**`classifierApprovable:!0` is stable from 2.1.90 onwards** — Option C survives an extra ~19 versions.
+**Gate function name drift in `deH`:** the `settings.json` matcher is `Ae_` at 2.1.116, `Fa_` at 2.1.114, and different names again at 2.1.109–2.1.112 (none of the observed forms scan across the full range). Only `classifierApprovable:!0` is build-stable from 2.1.90 onwards — Option C survives an extra ~19 versions **but must use `classifierApprovable:!0` as the anchor, not build-specific minified names**.
 
 ## Appendix E — Reference file paths
 
