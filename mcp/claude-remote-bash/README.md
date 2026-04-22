@@ -79,21 +79,21 @@ sequenceDiagram
     participant M2 as M2 (joining)
     participant M3 as M3 (client + joining)
 
-    U->>M1: claude-remote-bash-daemon --init
+    U->>M1: claude-remote-bash-daemon init
     M1-->>U: PSK = a3f8c1e9...<br/>(copied to clipboard via pbcopy)
-    U->>M1: claude-remote-bash-daemon --name M1
+    U->>M1: claude-remote-bash-daemon set-name M1
     U->>M1: claude-remote-bash-daemon
     Note over M1: macOS Application Firewall dialog<br/>"Allow python3.13 to accept connections?"
     U->>M1: Click Allow (or --allow-firewall separately)
     M1-->>U: Listening on port 63276<br/>(mDNS advertised)
 
-    U->>M2: claude-remote-bash-daemon --join a3f8c1e9...
-    U->>M2: claude-remote-bash-daemon --name M2
-    U->>M2: claude-remote-bash-daemon --allow-firewall
+    U->>M2: claude-remote-bash-daemon join a3f8c1e9...
+    U->>M2: claude-remote-bash-daemon set-name M2
+    U->>M2: claude-remote-bash-daemon allow-firewall
     U->>M2: claude-remote-bash-daemon
     M2-->>U: Listening on port 59118
 
-    U->>M3: claude-remote-bash-daemon --join a3f8c1e9...
+    U->>M3: claude-remote-bash-daemon join a3f8c1e9...
     U->>M3: claude-remote-bash discover
     M3-->>U: Found 2 daemon(s):<br/>  M1 192.168.4.11:63276<br/>  M2 192.168.4.22:59118
 ```
@@ -103,8 +103,8 @@ sequenceDiagram
 **On the first machine (M1 — the PSK origin):**
 
 ```bash
-claude-remote-bash-daemon --init                # generates 256-bit PSK, copies to clipboard
-claude-remote-bash-daemon --name M1             # aliases this daemon
+claude-remote-bash-daemon init                # generates 256-bit PSK, copies to clipboard
+claude-remote-bash-daemon set-name M1             # aliases this daemon
 claude-remote-bash-daemon                       # starts the daemon; keep terminal open
 ```
 
@@ -113,9 +113,9 @@ The first start on macOS triggers an **Application Firewall dialog** ("Allow pyt
 **On every other machine (M2, M3, …):**
 
 ```bash
-claude-remote-bash-daemon --join a3f8c1e9...    # paste the PSK from M1
-claude-remote-bash-daemon --name M2
-claude-remote-bash-daemon --allow-firewall      # optional: approve without a dialog (sudo)
+claude-remote-bash-daemon join a3f8c1e9...    # paste the PSK from M1
+claude-remote-bash-daemon set-name M2
+claude-remote-bash-daemon allow-firewall      # optional: approve without a dialog (sudo)
 claude-remote-bash-daemon                       # start
 ```
 
@@ -255,7 +255,7 @@ macOS's Application Firewall has a behavior that's subtle enough to deserve its 
 | **`--allow-firewall` flag** | Headless install, dismissed dialog, or scripted setup. | Wraps `socketfilterfw --add` and `--unblockapp` against `sys.executable`. Requires sudo. |
 
 ```bash
-claude-remote-bash-daemon --allow-firewall
+claude-remote-bash-daemon allow-firewall
 # → sudo prompt
 # → Approving binary in Application Firewall: /opt/homebrew/.../python3.13
 # → Approved. Restart of the daemon is NOT required — existing socket is unblocked.
@@ -311,13 +311,13 @@ ping <target-hostname>.local             # basic mDNS reachability
 Running `claude-remote-bash-daemon` manually in a terminal is fine for a test run, but for day-to-day use you want it to start at login and survive crashes. `--install-service` writes a per-user `LaunchAgent` plist.
 
 ```bash
-claude-remote-bash-daemon --install-service
+claude-remote-bash-daemon install-service
 # → Installed: ~/Library/LaunchAgents/com.claude-remote-bash.daemon.plist
 # → Binary:    /Users/chris/.local/bin/claude-remote-bash-daemon
 # → Logs:      ~/Library/Logs/claude-remote-bash-daemon.log
 # → Status:    launchctl list | grep com.claude-remote-bash.daemon
 
-claude-remote-bash-daemon --uninstall-service
+claude-remote-bash-daemon uninstall-service
 # → Uninstalled: ~/Library/LaunchAgents/com.claude-remote-bash.daemon.plist
 ```
 
