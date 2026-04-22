@@ -19,11 +19,12 @@ status: "Analysis complete — patch designs ready for decision"
 | | |
 |---|---|
 | **What happens** | Your `ask-before-auto-approval.py` PreToolUse hook returns `{"permissionDecision":"ask"}` for `Edit .claude/settings.json` under auto mode. Claude Code silently discards the decision, routes to the LLM classifier, the classifier returns "allow", the Edit runs without a prompt. |
-| **Why** | Function `Ma_` (outer permission resolver) drops the hook result `H` whenever `FJH` *also* returns `"ask"`. `FJH` emits ask for three `decisionReason.type` values: `rule` (user-configured `permissions.ask` matched via `rG7`/`i$8`), `safetyCheck` (built-in path-based check via `deH`/`SPH`), and `sandboxOverride` (Bash sandboxing). In auto mode the fallback re-enters the permission pipeline ending at the classifier — binary allow/deny, no prompt path — so any of these three paths is silently overridden. |
-| **Affected paths** | Three categories: (a) **Rule** — any tool/path matching a user-configured `permissions.ask` rule (the #42797 class); (b) **safetyCheck** — `.claude/settings.json`, `.claude/settings.local.json`, all 5 managed settings categories, `.claude/commands/*`, `.claude/agents/*`, `.claude/skills/*`, and an internal "sensitive files" list; (c) **sandboxOverride** — Bash invocations that produce the sandbox-override decision. **Not in scope:** `workingDir` prompts (Edit on paths outside the project root) — these surface via a separate outside-cwd check upstream of `FJH`'s ask-filter and were never bypassed. |
-| **Our hook's practical reach** | Only fires for `{Edit, Write, mcp__…}` in auto mode. Outside those, no hook ask exists and the bypass can't apply. |
+| **Why** | Function `Ma_` (outer permission resolver) drops the hook result `H` whenever `FJH` *also* returns `"ask"`. The fallback re-enters the permission pipeline ending at the classifier — binary allow/deny, no prompt path — so the hook's protective ask is silently overridden. `FJH` can emit ask via three `decisionReason.type` values (`rule`, `safetyCheck`, `sandboxOverride`); the bypass fires for any of them so long as the hook was also opining. |
+| **Where this bypass fires (patch scope)** | The `Ma_` bypass branch is only reached when a PreToolUse hook emits `"allow"` or `"ask"` for the tool call. Concrete example: `ask-before-auto-approval.py` emits ask for Edit on `.claude/settings.json`, and the built-in safetyCheck chain (`deH`→`FJH`) emits ask for the same Edit → bypass fires → patch restores the prompt. Same shape applies when the hook-gated tool also hits an FJH rule match or sandboxOverride decision. |
+| **What this patch does *not* fix** | **Pure `permissions.ask` without a hook** — the upstream #42797 bug. When no PreToolUse hook opines, `Ma_` short-circuits to a 5-arg fallback (`JM`) *before* `FJH` is consulted, and the rule-match + classifier-bypass happens inside `JM`, which this patch does not touch. The `ask-before-auto-approval.py` hook is itself the polyfill for #42797; this PR ensures that polyfill isn't silently overridden in the `FJH`-also-asks case. `workingDir` prompts (Edit outside project root) also surface via a separate check and were never bypassed. |
+| **Our hook's practical reach** | Fires for `{Edit, Write, NotebookEdit, mcp__…}` in auto mode. Outside those, no hook ask exists, `Ma_` takes the 5-arg fallback, and this patch has no effect. |
 | **Classification verdict** | **`FIX`** (high confidence). Anthropic has already fixed the symmetric `deny` case (#39344 → v2.1.101); this is the same pattern in the `ask` dimension. |
-| **Recommended patch** | **Option A**: 1-byte flip (`behavior==="ask"` → `behavior==="xsk"`) inside the FJH-ask branch of `Ma_`. Same-length, stable from v2.1.109, narrow effect. Neutralizes all three FJH-emitted `ask` paths above. Optionally pair with Option C (narrowed) for defense-in-depth. |
+| **Recommended patch** | **Option A**: 1-byte flip (`behavior==="ask"` → `behavior==="xsk"`) inside the FJH-ask branch of `Ma_`. Same-length, stable from v2.1.109, narrow effect. Optionally pair with Option C (narrowed) for defense-in-depth. |
 
 ---
 
@@ -623,20 +624,23 @@ The FJH-ask bypass in `Ma_` is unconditional — not gated by a flag we could to
 
 ### 5.1 Effective scope of Option A
 
+The patched branch in `Ma_` is only reached when a PreToolUse hook emitted `"allow"` or `"ask"` (step [2] of `Ma_`). Scenarios where no hook opines short-circuit to `JM` before `FJH` is consulted and are untouched by this patch.
+
 | Scenario | Pre-patch | Post-patch |
 |---|---|---|
 | Non-auto mode, any file | hook doesn't fire (returns 0) | unchanged |
-| Auto mode, non-gated tool | hook returns 0 | unchanged |
-| Auto mode, gated tool, FJH clear | prompt shown | unchanged |
-| **Auto mode, FJH=ask via `rule` (user `permissions.ask` match)** | **classifier decides (typically allow — #42797)** | **prompt shown** |
-| **Auto mode, FJH=ask via `safetyCheck` (e.g. `.claude/settings.json`)** | **classifier decides (allow)** | **prompt shown** |
-| **Auto mode, FJH=ask via `sandboxOverride` (Bash)** | **classifier decides** | **prompt shown** |
+| Auto mode, non-gated tool (no hook opines) | not in patch path — flows through `JM` | unchanged |
+| Auto mode, gated tool, FJH clear | prompt shown (hook-ask honored via 6-arg path) | unchanged |
+| **Auto mode, gated tool (hook=ask), FJH=ask via `safetyCheck`** (e.g. Edit on `.claude/settings.json`) | **classifier decides (allow)** | **prompt shown** ✓ *empirically verified* |
+| **Auto mode, gated tool (hook=ask), FJH=ask via `rule`** (hook-gated tool also matches a `permissions.ask` pattern) | **classifier decides** | **prompt shown** |
+| **Auto mode, gated tool (hook=ask), FJH=ask via `sandboxOverride`** (only applies if a hook gates Bash) | **classifier decides** | **prompt shown** |
+| Auto mode, gated tool, hook=allow, FJH=ask | classifier decides | **hook-allow wins (silent allow)** — edge case |
 | Any mode, hook deny | deny | unchanged |
 | Any mode, FJH deny | deny | unchanged |
-| Auto mode, gated tool, hook=allow, FJH=ask | classifier decides | **hook-allow wins (silent allow)** |
-| Auto mode, Edit outside project root (`workingDir` prompt) | prompt shown (unaffected) | unchanged — **not covered by this patch** |
+| **Auto mode, pure `permissions.ask` (no hook)** — the #42797 bug | **classifier decides (silent)** | **still classifier decides — NOT fixed by this patch** |
+| Auto mode, Edit outside project root (`workingDir` prompt) | prompt shown (unaffected) | unchanged — not interacting with FJH's ask-filter |
 
-The bypass-class covers all three `FJH`-emitted ask types. Our `ask-before-auto-approval.py` hook today exercises the `safetyCheck` row for settings.json; the `rule` row is the #42797 case (static `permissions.ask` silently ignored) and benefits automatically from the same patch. `workingDir` prompts surface via a separate outside-cwd check upstream of `FJH`'s filter and were never bypassed — the patch does not interact with that path. The `hook=allow, FJH=ask` row is the edge case flagged in Agent B's review: today, no effect (our hook only emits ask). Future-hook caveat.
+Our `ask-before-auto-approval.py` hook today exercises the `safetyCheck` row for settings.json — that's the empirically verified fix. The `rule` and `sandboxOverride` rows fire by the same mechanism whenever a hook-gated tool also triggers those FJH paths, so they benefit from the same patch. The bottom row — pure static `permissions.ask` with no hook — is the upstream #42797 bug that motivated writing `ask-before-auto-approval.py` in the first place; fixing it would require patching `JM` or the classifier entry point, which is out of scope here. The `hook=allow, FJH=ask` edge case has no current effect (our hook only emits ask). Future-hook caveat.
 
 ### 5.2 Risk matrix
 
