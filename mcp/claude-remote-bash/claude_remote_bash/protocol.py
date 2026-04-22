@@ -8,10 +8,10 @@ import struct
 
 import pydantic
 
+from claude_remote_bash.exceptions import ProtocolError
 from claude_remote_bash.models import Message
 
 __all__ = [
-    'ProtocolError',
     'read_message',
     'write_message',
 ]
@@ -23,10 +23,6 @@ HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 MAX_PAYLOAD_SIZE = 10 * 1024 * 1024  # 10 MB guard
 
 _MESSAGE_ADAPTER: pydantic.TypeAdapter[Message] = pydantic.TypeAdapter(Message)
-
-
-class ProtocolError(Exception):
-    """Protocol-level error (framing, size limits, malformed JSON)."""
 
 
 async def read_message(reader: asyncio.StreamReader) -> Message:
