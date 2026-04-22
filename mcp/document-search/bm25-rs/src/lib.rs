@@ -23,10 +23,12 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use rayon::prelude::*;
+use unicode_general_category::{get_general_category, GeneralCategory};
 use rust_stemmers::{Algorithm, Stemmer};
 
 /// Default BM25 parameters matching fastembed Qdrant/bm25.
@@ -115,33 +117,44 @@ fn murmur3_x86_32(data: &[u8], seed: u32) -> u32 {
     h1
 }
 
-/// Check if a character matches Python's `\w` (word character) per Unicode rules.
-/// Python's `\w` with re.UNICODE matches: [a-zA-Z0-9_] plus Unicode letters/digits.
+/// Match Python's `\w` (with re.UNICODE, the Python 3 default): `_` plus any
+/// codepoint in Unicode General Category L* (letters) or N* (numbers).
+///
+/// Notably excludes Mn/Mc (combining marks) that `char::is_alphanumeric()`
+/// would include via the `Alphabetic` derived property — this mismatch is
+/// what made Devanagari/Thai/Arabic tokenize differently from fastembed.
 #[inline(always)]
 fn is_word_char(c: char) -> bool {
-    c == '_' || c.is_alphanumeric()
-}
-
-/// Check if a character is Unicode punctuation (category "P").
-/// fastembed filters tokens where ALL characters are punctuation.
-fn is_punctuation(c: char) -> bool {
-    if c.is_ascii_punctuation() {
+    if c == '_' {
         return true;
     }
-    let cp = c as u32;
-    matches!(cp,
-        0x00A1..=0x00BF  // Latin-1 punctuation
-        | 0x2010..=0x2027 // General punctuation
-        | 0x2030..=0x205E // General punctuation continued
-        | 0x2E00..=0x2E52 // Supplemental punctuation
-        | 0x3001..=0x3003 // CJK punctuation
-        | 0x3008..=0x3011 // CJK brackets
-        | 0x3014..=0x301F // CJK brackets continued
-        | 0xFE50..=0xFE6B // Small form variants
-        | 0xFF01..=0xFF0F // Fullwidth punctuation
-        | 0xFF1A..=0xFF20 // Fullwidth punctuation
-        | 0xFF3B..=0xFF40 // Fullwidth brackets
-        | 0xFF5B..=0xFF65 // Fullwidth punctuation
+    matches!(
+        get_general_category(c),
+        GeneralCategory::LowercaseLetter
+            | GeneralCategory::UppercaseLetter
+            | GeneralCategory::TitlecaseLetter
+            | GeneralCategory::ModifierLetter
+            | GeneralCategory::OtherLetter
+            | GeneralCategory::DecimalNumber
+            | GeneralCategory::LetterNumber
+            | GeneralCategory::OtherNumber
+    )
+}
+
+/// Match Python's `unicodedata.category(c).startswith("P")` — any codepoint
+/// in Unicode General Category P* (connector, dash, open, close, initial,
+/// final, other punctuation). fastembed filters single-character tokens
+/// whose one char is punctuation.
+fn is_punctuation(c: char) -> bool {
+    matches!(
+        get_general_category(c),
+        GeneralCategory::ConnectorPunctuation
+            | GeneralCategory::DashPunctuation
+            | GeneralCategory::OpenPunctuation
+            | GeneralCategory::ClosePunctuation
+            | GeneralCategory::InitialPunctuation
+            | GeneralCategory::FinalPunctuation
+            | GeneralCategory::OtherPunctuation
     )
 }
 
@@ -206,7 +219,7 @@ impl BM25 {
         // Step 3: Stem -- filter stopwords, length, punctuation, then Snowball stem.
         for &(start, end) in &state.token_ranges {
             let token = &state.token_buf[start..end];
-            if token.len() > TOKEN_MAX_LENGTH {
+            if token.chars().count() > TOKEN_MAX_LENGTH {
                 continue;
             }
             if self.stopwords.contains(token) {
@@ -216,8 +229,7 @@ impl BM25 {
             // Multi-char tokens like "___" are NOT filtered.
             let mut chars = token.chars();
             if let (Some(c), None) = (chars.next(), chars.next()) {
-                // Single character token -- check if it's punctuation
-                if c.is_ascii_punctuation() || is_punctuation(c) {
+                if is_punctuation(c) {
                     continue;
                 }
             }
@@ -230,15 +242,17 @@ impl BM25 {
         }
 
         // Step 4: BM25 term frequency scoring.
+        // IndexMap preserves insertion order, matching fastembed's Python dict
+        // semantics so emitted (indices, values) are in first-occurrence order.
         // Dedup by token_id: Qdrant rejects sparse vectors with duplicate indices.
         let doc_len = state.stem_ranges.len() as f64;
-        let mut counts: HashMap<&str, u32> = HashMap::with_capacity(state.stem_ranges.len() / 2);
+        let mut counts: IndexMap<&str, u32> = IndexMap::with_capacity(state.stem_ranges.len() / 2);
         for &(start, end) in &state.stem_ranges {
             let stem = &state.stem_buf[start..end];
             *counts.entry(stem).or_insert(0) += 1;
         }
 
-        let mut by_token: HashMap<u32, f64> = HashMap::with_capacity(counts.len());
+        let mut by_token: IndexMap<u32, f64> = IndexMap::with_capacity(counts.len());
         for (token, count) in &counts {
             let tf = (*count as f64 * (self.k + 1.0))
                 / (*count as f64 + self.k * (1.0 - self.b + self.b * doc_len / self.avg_len));
