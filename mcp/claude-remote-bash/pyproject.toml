@@ -14,7 +14,6 @@ dependencies = [
 [project.scripts]
 claude-remote-bash = "claude_remote_bash.cli.main:main"
 claude-remote-bash-daemon = "claude_remote_bash.daemon:main"
-claude-remote-bash-mcp = "claude_remote_bash.mcp.main:main"
 
 [tool.uv.sources]
 cc-lib = { workspace = true }

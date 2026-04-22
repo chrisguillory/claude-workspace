@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import socket
 from collections.abc import Mapping, Sequence
 
@@ -25,13 +24,11 @@ BROWSE_TIMEOUT_SECONDS = 3.0
 class DiscoveredHost:
     """A daemon discovered via mDNS."""
 
-    def __init__(self, *, alias: str, hostname: str, ip: str, port: int, os: str, user: str, version: str) -> None:
+    def __init__(self, *, alias: str, hostname: str, ip: str, port: int, version: str) -> None:
         self.alias = alias
         self.hostname = hostname
         self.ip = ip
         self.port = port
-        self.os = os
-        self.user = user
         self.version = version
 
     def __repr__(self) -> str:
@@ -56,9 +53,6 @@ async def register_service(
         port=port,
         properties={
             'alias': alias,
-            'os': 'darwin',
-            'user': os.environ.get('USER', 'unknown'),
-            'shell': os.environ.get('SHELL', '/bin/zsh'),
             'version': version,
         },
         server=f'{hostname}.local.',
@@ -105,8 +99,6 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> Sequence[Disc
                 hostname=info.server or '',
                 ip=addresses[0],
                 port=info.port,
-                os=_decode_prop(props, b'os'),
-                user=_decode_prop(props, b'user'),
                 version=_decode_prop(props, b'version'),
             )
         )
