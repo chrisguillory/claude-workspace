@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import errno
+import logging
 import socket
 from collections.abc import Mapping, Sequence
 
@@ -56,6 +58,7 @@ async def register_service(
     Clients iterate through them at connect time, so LAN/VPN/ethernet all
     appear in the mesh without operator intervention.
     """
+    _install_zeroconf_log_filter()
     hostname = socket.gethostname().removesuffix('.local')  # macOS includes .local already
     info = AsyncServiceInfo(
         type_=SERVICE_TYPE,
@@ -85,6 +88,7 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> Sequence[Disc
     Listens for mDNS advertisements for ``timeout`` seconds, resolves each
     discovered service, and returns a list of hosts with their metadata.
     """
+    _install_zeroconf_log_filter()
     azc = AsyncZeroconf(ip_version=IPVersion.V4Only)
     hosts: list[DiscoveredHost] = []
     resolved_names: set[str] = set()
@@ -192,6 +196,31 @@ def publishable_ipv4s() -> Sequence[str]:
     return sorted(ips, key=_ipv4_rank)
 
 
+class _QuietUnreachableInterfaces(logging.Filter):
+    """Drop ENETUNREACH / EHOSTUNREACH / EADDRNOTAVAIL from zeroconf.
+
+    Zeroconf iterates every network interface at startup and attempts to bind
+    a multicast socket on each. On a machine with VPN tunnels or offline
+    interfaces this produces a scary-looking warning with traceback per bad
+    interface — but the registration succeeds on whatever interfaces DO work,
+    and the failures are entirely expected. Suppressing them by errno (rather
+    than message text) is robust to zeroconf version changes.
+    """
+
+    _QUIET_ERRNOS = frozenset({errno.ENETUNREACH, errno.EHOSTUNREACH, errno.EADDRNOTAVAIL})
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not record.exc_info:
+            return True
+        exc = record.exc_info[1]
+        if isinstance(exc, OSError) and exc.errno in self._QUIET_ERRNOS:
+            return False
+        return True
+
+
+_zeroconf_log_filter_installed = False
+
+
 def _ipv4_rank(ip: str) -> tuple[int, str]:
     """Sort key for IPv4 addresses — prefer home-LAN ranges over VPN/tunnel."""
     if ip.startswith('192.168.'):
@@ -213,3 +242,12 @@ def _decode_prop(props: Mapping[bytes, bytes | None], key: bytes) -> str:
     if val is None:
         return ''
     return val.decode(errors='replace') if isinstance(val, bytes) else str(val)
+
+
+def _install_zeroconf_log_filter() -> None:
+    """Install the unreachable-interface filter on the zeroconf logger once per process."""
+    global _zeroconf_log_filter_installed  # noqa: PLW0603 — single-writer idempotency flag
+    if _zeroconf_log_filter_installed:
+        return
+    logging.getLogger('zeroconf').addFilter(_QuietUnreachableInterfaces())
+    _zeroconf_log_filter_installed = True
