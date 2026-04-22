@@ -110,7 +110,6 @@ wheels = [
 
 [[package]]
 name = "bm25-rs"
-version = "0.1.0"
 source = { editable = "mcp/document-search/bm25-rs" }
 
 [package.metadata]
