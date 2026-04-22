@@ -28,11 +28,32 @@ Patch Kinds:
     feature   Enables gated/disabled functionality (Statsig gate flip).
     tweak     Behavioral adjustment (telemetry, config, UX change).
 
-Patches:
-    statusline      [fix] Multi-line truncation (Ink wrap prop regression).
-                    Anchor: ``statusLine?.padding`` (stable since 2.0.0).
-                    Regression introduced in 2.1.51 (last clean: 2.1.50).
-                    https://github.com/anthropics/claude-code/issues/28750
+Patches (alphabetical by name):
+
+    hook-ask-no-override
+                    [fix] Prevent auto-mode LLM classifier from silently
+                    overriding a PreToolUse hook's ``permissionDecision: "ask"``
+                    when a built-in safetyCheck also returns ask (e.g., edits
+                    to ``.claude/settings.json``). Claude Code's ``Ma_`` drops
+                    the hook result and re-enters the permission pipeline,
+                    which in auto mode ends at the classifier — binary
+                    allow/deny with no prompt path. The hook's protective ask
+                    is lost.
+                    Fix flips the FJH-ask comparison literal so the bypass
+                    branch is unreachable; control flow falls through to the
+                    final ``await O(_,w,K,T,$,H)`` (6-arg) which routes to
+                    the documented user-prompt path.
+                    Anchor: ``ask rule/safety check requires full permission pipeline``
+                    (stable diagnostic message since 2.1.109).
+                    1-byte flip: ``behavior==="ask"`` → ``behavior==="xsk"``.
+                    Bytes stable across 2.1.109..2.1.116.
+                    Classification precedent: symmetric hook-ask vs
+                    permissions.deny case fixed upstream at 2.1.101 (#39344).
+                    https://github.com/anthropics/claude-code/issues/42797
+                    https://github.com/anthropics/claude-code/issues/51255
+                    Full analysis (published as secret gist from the PR that
+                    introduced this patch):
+                    https://gist.github.com/chrisguillory/8d5d401ac356b47ec078940080726b83
 
     mcp-tool-results [fix] MCP tool result rendering. outputSchema safeParse
                     guard returns null on schema mismatch, killing the React
@@ -45,6 +66,20 @@ Patches:
                     renamed to ``J`` at 2.1.110 (patch bumped to target 2.1.110+).
                     https://github.com/anthropics/claude-code/issues/41361
 
+    remember-skill  [feature] Enable /remember skill for session memory search.
+                    Statsig gate ``tengu_coral_fern``, default false.
+                    Not publicly documented or mentioned in any changelog.
+                    Flag introduced in 2.1.21 (last absent: 2.1.20).
+
+    scratchpad      [feature] Enable session-scoped scratchpad directory. Creates
+                    ``<data_dir>/<project>/<session>/scratchpad`` with auto-
+                    permissions for reading and writing. Claude uses this
+                    instead of ``/tmp`` for intermediate files.
+                    Statsig gate ``tengu_scratch``, default false.
+                    Uses different gate mechanism (no default arg) — patched
+                    by replacing call ``("tengu_scratch")`` with ``||!0``.
+                    Flag introduced in 2.1.45 (last absent: 2.1.44).
+
     session-memory  [feature] Enable background session memory extraction. Claude
                     writes summaries to session-memory/summary.md, loaded
                     at the start of future sessions for cross-session context.
@@ -54,11 +89,6 @@ Patches:
                     Related flags: ``tengu_sm_compact``, ``tengu_sm_config``.
                     https://claudefa.st/blog/guide/mechanics/session-memory
                     https://giuseppegurgone.com/claude-memory
-
-    remember-skill  [feature] Enable /remember skill for session memory search.
-                    Statsig gate ``tengu_coral_fern``, default false.
-                    Not publicly documented or mentioned in any changelog.
-                    Flag introduced in 2.1.21 (last absent: 2.1.20).
 
     show-subagent-prompt-tools-response
                     [tweak] Expand completed subagent to show prompt, tool
@@ -86,14 +116,10 @@ Patches:
                     https://github.com/anthropics/claude-code/issues/14511
                     https://github.com/anthropics/claude-code/issues/5974
 
-    scratchpad      [feature] Enable session-scoped scratchpad directory. Creates
-                    ``<data_dir>/<project>/<session>/scratchpad`` with auto-
-                    permissions for reading and writing. Claude uses this
-                    instead of ``/tmp`` for intermediate files.
-                    Statsig gate ``tengu_scratch``, default false.
-                    Uses different gate mechanism (no default arg) — patched
-                    by replacing call ``("tengu_scratch")`` with ``||!0``.
-                    Flag introduced in 2.1.45 (last absent: 2.1.44).
+    statusline      [fix] Multi-line truncation (Ink wrap prop regression).
+                    Anchor: ``statusLine?.padding`` (stable since 2.0.0).
+                    Regression introduced in 2.1.51 (last clean: 2.1.50).
+                    https://github.com/anthropics/claude-code/issues/28750
 
 Version-Agnostic Patterns:
     Gate function names (``Tq``, ``lT``, ``Jq``) change per build. Patches
@@ -104,16 +130,17 @@ References:
     https://github.com/marckrenn/claude-code-changelog (feature flag tracking)
     https://gist.github.com/gastonmorixe/9c596b6de1095b6bd3b746ca3a1fd3d7
 
-Anchor Presence Survey (2026-03-24, 22+ versions via CDN)::
+Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-22)::
 
-    Anchor                    First version   Last absent
-    statusLine?.padding       2.0.0           never absent
-    outputSchema?.safeParse   2.1.87          2.1.86 (anchor exists in 2.1.87 but bug absent)
-    tengu_session_memory      2.0.64          2.0.62
-    tengu_coral_fern          2.1.21          2.1.20
-    tengu_sm_compact          2.0.64          2.0.62 (co-introduced with session-memory)
-    tengu_scratch             2.1.45          2.1.44
-    Remote agent launched     2.1.63          2.1.62 (let T=H pattern stable from 2.1.85+)
+    Anchor                                                   First version   Last absent
+    statusLine?.padding                                      2.0.0           never absent
+    outputSchema?.safeParse                                  2.1.87          2.1.86 (anchor exists in 2.1.87 but bug absent)
+    tengu_session_memory                                     2.0.64          2.0.62
+    tengu_coral_fern                                         2.1.21          2.1.20
+    tengu_sm_compact                                         2.0.64          2.0.62 (co-introduced with session-memory)
+    tengu_scratch                                            2.1.45          2.1.44
+    Remote agent launched                                    2.1.63          2.1.62 (let T=H pattern stable from 2.1.85+)
+    ask rule/safety check requires full permission pipeline  2.1.109         2.1.92 (pre-diagnostic; scanned across 9 local originals)
 
 Site Count Evolution::
 
@@ -234,13 +261,14 @@ class PatchDef:
 
 PATCHES: Sequence[PatchDef] = (
     PatchDef(
-        name='statusline',
-        description='Restore multi-line statusline wrapping (fix truncation)',
+        name='hook-ask-no-override',
+        description='Prevent auto-mode classifier from silently overriding a hook-emitted permission ask',
         kind=PatchKind.FIX,
-        anchor=b'statusLine?.padding',
-        old=b'wrap:"truncate"',
-        new=b'wrap:"wrap"    ',
-        min_version='2.1.51',
+        anchor=b'ask rule/safety check requires full permission pipeline',
+        old=b'behavior==="ask"',
+        new=b'behavior==="xsk"',
+        window=200,
+        min_version='2.1.109',
     ),
     PatchDef(
         name='mcp-tool-results',
@@ -253,16 +281,6 @@ PATCHES: Sequence[PatchDef] = (
         min_version='2.1.110',
     ),
     PatchDef(
-        name='session-memory',
-        description='Enable background session memory extraction',
-        kind=PatchKind.FEATURE,
-        anchor=b'tengu_session_memory',
-        old=b'("tengu_session_memory",!1)',
-        new=b'("tengu_session_memory",!0)',
-        window=50,
-        min_version='2.0.64',
-    ),
-    PatchDef(
         name='remember-skill',
         description='Enable /remember skill for session memory search',
         kind=PatchKind.FEATURE,
@@ -271,6 +289,26 @@ PATCHES: Sequence[PatchDef] = (
         new=b'("tengu_coral_fern",!0)',
         window=50,
         min_version='2.1.21',
+    ),
+    PatchDef(
+        name='scratchpad',
+        description='Enable session-scoped scratchpad directory with auto-permissions',
+        kind=PatchKind.FEATURE,
+        anchor=b'tengu_scratch',
+        old=b'("tengu_scratch")',
+        new=b'||!0/*_scratch_*/',
+        window=50,
+        min_version='2.1.45',
+    ),
+    PatchDef(
+        name='session-memory',
+        description='Enable background session memory extraction',
+        kind=PatchKind.FEATURE,
+        anchor=b'tengu_session_memory',
+        old=b'("tengu_session_memory",!1)',
+        new=b'("tengu_session_memory",!0)',
+        window=50,
+        min_version='2.0.64',
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
@@ -283,14 +321,13 @@ PATCHES: Sequence[PatchDef] = (
         min_version='2.1.114',
     ),
     PatchDef(
-        name='scratchpad',
-        description='Enable session-scoped scratchpad directory with auto-permissions',
-        kind=PatchKind.FEATURE,
-        anchor=b'tengu_scratch',
-        old=b'("tengu_scratch")',
-        new=b'||!0/*_scratch_*/',
-        window=50,
-        min_version='2.1.45',
+        name='statusline',
+        description='Restore multi-line statusline wrapping (fix truncation)',
+        kind=PatchKind.FIX,
+        anchor=b'statusLine?.padding',
+        old=b'wrap:"truncate"',
+        new=b'wrap:"wrap"    ',
+        min_version='2.1.51',
     ),
 )
 
