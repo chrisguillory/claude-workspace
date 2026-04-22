@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "bm25-rs"
-version = "0.1.0"
+dynamic = ["version"]
 description = "BM25 sparse embedding compatible with fastembed Qdrant/bm25, using rayon for parallel computation"
 requires-python = ">=3.13"
 
