@@ -69,9 +69,15 @@ def main() -> None:
         print('No config found. Run: claude-remote-bash-daemon --init', file=sys.stderr)
         sys.exit(1)
 
+    # `--name <alias>` is a config-only operation that exits after saving,
+    # matching the UX of --init and --join. Starting the daemon is always
+    # the bare invocation (no flags).
     if name:
         config.name = name
         save_config(config)
+        print(f'Name set: {name}')
+        print('Start the daemon: claude-remote-bash-daemon')
+        return
 
     if not config.auth_key:
         print('No auth key configured. Run: claude-remote-bash-daemon --init', file=sys.stderr)
