@@ -128,16 +128,17 @@ References:
     https://github.com/marckrenn/claude-code-changelog (feature flag tracking)
     https://gist.github.com/gastonmorixe/9c596b6de1095b6bd3b746ca3a1fd3d7
 
-Anchor Presence Survey (2026-03-24, 22+ versions via CDN)::
+Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-22)::
 
-    Anchor                    First version   Last absent
-    statusLine?.padding       2.0.0           never absent
-    outputSchema?.safeParse   2.1.87          2.1.86 (anchor exists in 2.1.87 but bug absent)
-    tengu_session_memory      2.0.64          2.0.62
-    tengu_coral_fern          2.1.21          2.1.20
-    tengu_sm_compact          2.0.64          2.0.62 (co-introduced with session-memory)
-    tengu_scratch             2.1.45          2.1.44
-    Remote agent launched     2.1.63          2.1.62 (let T=H pattern stable from 2.1.85+)
+    Anchor                                                   First version   Last absent
+    statusLine?.padding                                      2.0.0           never absent
+    outputSchema?.safeParse                                  2.1.87          2.1.86 (anchor exists in 2.1.87 but bug absent)
+    tengu_session_memory                                     2.0.64          2.0.62
+    tengu_coral_fern                                         2.1.21          2.1.20
+    tengu_sm_compact                                         2.0.64          2.0.62 (co-introduced with session-memory)
+    tengu_scratch                                            2.1.45          2.1.44
+    Remote agent launched                                    2.1.63          2.1.62 (let T=H pattern stable from 2.1.85+)
+    ask rule/safety check requires full permission pipeline  2.1.109         2.1.92 (pre-diagnostic; scanned across 9 local originals)
 
 Site Count Evolution::
 
