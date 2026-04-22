@@ -8,12 +8,14 @@ Hierarchy
 ---------
 
     Exception
-    └── RemoteBashError          # library root (all our errors subclass this)
-        ├── ProtocolError        # wire-format errors (raised by daemon + CLI)
-        ├── AuthError            # no PSK or authentication rejected
-        ├── HostNotFoundError    # mDNS didn't find the alias
-        ├── HostUnreachableError # all advertised IPs failed to connect
-        └── DaemonError          # daemon returned an ErrorResponse
+    └── RemoteBashError           # library root (all our errors subclass this)
+        ├── ProtocolError         # wire-format errors (raised by daemon + CLI)
+        ├── AuthError             # no PSK or authentication rejected
+        ├── HostNotFoundError     # mDNS didn't find the alias
+        ├── HostUnreachableError  # all advertised IPs failed to connect
+        ├── DaemonError           # daemon returned an ErrorResponse
+        ├── ConfigError           # daemon config missing/incomplete
+        └── FirewallApprovalError # --allow-firewall could not complete
 
 Subclasses set the ``prefix`` class attribute to prepend a label (e.g. "Daemon
 error: ...") via ``__str__``; classes with no prefix print the bare message.
@@ -28,7 +30,9 @@ from typing import ClassVar
 
 __all__ = [
     'AuthError',
+    'ConfigError',
     'DaemonError',
+    'FirewallApprovalError',
     'HostNotFoundError',
     'HostUnreachableError',
     'ProtocolError',
@@ -74,3 +78,13 @@ class DaemonError(RemoteBashError):
     """Daemon returned an error response."""
 
     prefix = 'Daemon error'
+
+
+class ConfigError(RemoteBashError):
+    """Daemon config is missing or incomplete (no PSK, no alias, etc.)."""
+
+
+class FirewallApprovalError(RemoteBashError):
+    """macOS Application Firewall approval could not be performed."""
+
+    prefix = 'Firewall approval failed'

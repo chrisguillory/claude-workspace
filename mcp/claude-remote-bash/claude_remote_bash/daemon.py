@@ -17,10 +17,17 @@ __all__ = [
     'main',
 ]
 
+from cc_lib.error_boundary import ErrorBoundary
+
 from claude_remote_bash.auth import DaemonConfig, generate_key, load_config, save_config, verify_key
 from claude_remote_bash.context import SessionContextStore
 from claude_remote_bash.discovery import register_service, unregister_service
-from claude_remote_bash.exceptions import ProtocolError
+from claude_remote_bash.exceptions import (
+    ConfigError,
+    FirewallApprovalError,
+    ProtocolError,
+    RemoteBashError,
+)
 from claude_remote_bash.executor import execute_command
 from claude_remote_bash.models import (
     AuthFail,
@@ -39,7 +46,10 @@ logger = logging.getLogger(__name__)
 
 VERSION = '0.1.0'
 
+error_boundary = ErrorBoundary(exit_code=1)
 
+
+@error_boundary
 def main() -> None:
     """CLI entry point for claude-remote-bash-daemon."""
     logging.basicConfig(
@@ -57,17 +67,19 @@ def main() -> None:
     if '--join' in args:
         idx = args.index('--join')
         if idx + 1 >= len(args):
-            print('Usage: claude-remote-bash-daemon --join <key>', file=sys.stderr)
-            sys.exit(1)
+            raise ConfigError('Usage: claude-remote-bash-daemon --join <key>')
         _cmd_join(args[idx + 1])
+        return
+
+    if '--allow-firewall' in args:
+        _cmd_allow_firewall()
         return
 
     name = _extract_flag(args, '--name')
 
     config = load_config()
     if config is None:
-        print('No config found. Run: claude-remote-bash-daemon --init', file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError('No config found. Run: claude-remote-bash-daemon --init')
 
     # `--name <alias>` is a config-only operation that exits after saving,
     # matching the UX of --init and --join. Starting the daemon is always
@@ -80,12 +92,10 @@ def main() -> None:
         return
 
     if not config.auth_key:
-        print('No auth key configured. Run: claude-remote-bash-daemon --init', file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError('No auth key configured. Run: claude-remote-bash-daemon --init')
 
     if not config.name:
-        print('No name configured. Run: claude-remote-bash-daemon --name <alias>', file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError('No name configured. Run: claude-remote-bash-daemon --name <alias>')
 
     asyncio.run(run_daemon(config))
 
@@ -268,6 +278,41 @@ def _cmd_join(key: str) -> None:
         print('Set a name: claude-remote-bash-daemon --name <alias>')
 
 
+def _cmd_allow_firewall() -> None:
+    """Approve this daemon's python binary in the macOS Application Firewall.
+
+    On first run the daemon triggers an "Allow python3.13 to accept incoming
+    connections" dialog. Users who dismiss it or run headless need a
+    codified way to grant approval — this flag wraps the two required
+    ``socketfilterfw`` calls against ``sys.executable`` (the actual binary
+    the daemon runs under, not whatever ``python3`` resolves to in $PATH).
+
+    Requires sudo; macOS-only.
+    """
+    if sys.platform != 'darwin':
+        raise FirewallApprovalError(f'macOS-only (current platform: {sys.platform})')
+
+    socketfilterfw = '/usr/libexec/ApplicationFirewall/socketfilterfw'
+    if not Path(socketfilterfw).is_file():
+        raise FirewallApprovalError(
+            f'{socketfilterfw} not found — macOS Application Firewall is unavailable on this host.'
+        )
+
+    binary = sys.executable
+    print(f'Approving binary in Application Firewall: {binary}')
+    print('(will prompt for sudo)')
+
+    for cmd in (['--add', binary], ['--unblockapp', binary]):
+        result = subprocess.run(  # noqa: S603 — path is a fixed system utility
+            ['sudo', socketfilterfw, *cmd],
+            check=False,
+        )
+        if result.returncode != 0:
+            raise FirewallApprovalError(f'socketfilterfw {cmd[0]} exited with code {result.returncode}')
+
+    print('Approved. Restart of the daemon is NOT required — existing socket is unblocked.')
+
+
 def _extract_flag(args: Sequence[str], flag: str) -> str | None:
     """Extract a flag value from argv-style args. Returns None if not present."""
     if flag in args:
@@ -275,6 +320,21 @@ def _extract_flag(args: Sequence[str], flag: str) -> str | None:
         if idx + 1 < len(args):
             return args[idx + 1]
     return None
+
+
+# -- Error boundary handlers --------------------------------------------------
+
+
+@error_boundary.handler(RemoteBashError)
+def _handle_user_facing(exc: RemoteBashError) -> None:
+    """Every expected exception self-formats via ``__str__``; just print it."""
+    print(exc, file=sys.stderr)
+
+
+@error_boundary.handler(Exception)
+def _handle_unexpected(exc: Exception) -> None:
+    """Unexpected exceptions get the class name prepended for diagnostic clarity."""
+    print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
 
 
 if __name__ == '__main__':

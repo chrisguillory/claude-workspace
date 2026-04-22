@@ -272,11 +272,8 @@ async def _authenticate(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             '  - Look for an "Allow python3.13 to accept incoming network\n'
             '    connections" dialog (may be hidden behind other windows) and\n'
             '    click Allow, OR\n'
-            '  - Pre-approve via terminal:\n'
-            '      sudo /usr/libexec/ApplicationFirewall/socketfilterfw \\\n'
-            '        --add "$(which python3)"\n'
-            '      sudo /usr/libexec/ApplicationFirewall/socketfilterfw \\\n'
-            '        --unblockapp "$(which python3)"\n'
+            '  - Approve via terminal (no dialog needed):\n'
+            '      claude-remote-bash-daemon --allow-firewall\n'
             '  - Verify on the target: does the daemon log show\n'
             '    "Connection from (ip, port)"? If yes the firewall is not the\n'
             "    cause; if no, it's confirmed."
