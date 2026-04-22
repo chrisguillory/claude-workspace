@@ -102,6 +102,11 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> Sequence[Disc
         if not addresses or info.port is None:
             return
 
+        # Sort client-side: zeroconf does not preserve the address order the
+        # daemon registered, so the connect-attempt preference (LAN before
+        # VPN) has to be re-applied here.
+        addresses = sorted(addresses, key=_ipv4_rank)
+
         props = info.properties or {}
         hosts.append(
             DiscoveredHost(

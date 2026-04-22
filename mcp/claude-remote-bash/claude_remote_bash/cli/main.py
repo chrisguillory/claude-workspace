@@ -105,6 +105,12 @@ def discover() -> None:
 
     if not hosts:
         typer.echo('No daemons found on the network.')
+        typer.echo('')
+        typer.echo('If a daemon should be visible:')
+        typer.echo('  - Verify the daemon is running on the target:')
+        typer.echo('      `pgrep -f claude-remote-bash-daemon`')
+        typer.echo('  - Verify network reachability: `ping <target>.local`')
+        typer.echo("  - Ensure client and target are on the same LAN segment (mDNS doesn't cross subnets).")
         return
 
     typer.echo(f'Found {len(hosts)} daemon(s):\n')
@@ -189,7 +195,7 @@ async def _open_connection_any(ips: Sequence[str], port: int) -> tuple[asyncio.S
     We attempt each with a short timeout so an unreachable VPN address fails
     fast and we fall through to the LAN address.
     """
-    errors: list[str] = []
+    errors: list[tuple[str, Exception]] = []
     for ip in ips:
         try:
             return await asyncio.wait_for(
@@ -197,18 +203,84 @@ async def _open_connection_any(ips: Sequence[str], port: int) -> tuple[asyncio.S
                 timeout=CONNECT_TIMEOUT_SECONDS,
             )
         except (TimeoutError, OSError) as exc:
-            errors.append(f'{ip}:{port} ({type(exc).__name__}: {exc})')
-    raise HostUnreachableError('Could not connect to any advertised address:\n  ' + '\n  '.join(errors))
+            errors.append((ip, exc))
+
+    attempt_lines = '\n  '.join(f'{ip}:{port} ({type(exc).__name__}: {exc})' for ip, exc in errors)
+    hint = _reachability_hint(errors)
+    raise HostUnreachableError(f'Could not connect to any advertised address:\n  {attempt_lines}{hint}')
+
+
+def _reachability_hint(errors: Sequence[tuple[str, Exception]]) -> str:
+    """Suggest a likely cause based on the failure signatures of the attempts.
+
+    TimeoutError → packets never reached a listener at that ip:port. Typically
+        a stale cache (daemon restarted on a different port), target on a
+        different network, or packet filtering between client and target.
+    ConnectionRefusedError → TCP reached the host but the port was closed;
+        the daemon is not running (or crashed). The macOS Application
+        Firewall, notably, does *not* produce this signature — it lets TCP
+        complete and then silently blocks the process from reading data,
+        which surfaces as an auth-read hang (see _authenticate).
+    """
+    if errors and all(isinstance(exc, TimeoutError) for _, exc in errors):
+        return (
+            '\n\nAll attempts timed out. Likely causes:\n'
+            '  - Stale cache: daemon may have restarted on a different port.\n'
+            '    Run `claude-remote-bash discover` to refresh.\n'
+            '  - Target machine is offline or on a different network.\n'
+            '  - Packet filtering between client and target.'
+        )
+    if errors and all(isinstance(exc, ConnectionRefusedError) for _, exc in errors):
+        return (
+            "\n\nEvery address actively refused the connection — the daemon isn't\n"
+            'running on that port. On the target machine, check:\n'
+            '  `pgrep -f claude-remote-bash-daemon`'
+        )
+    return ''
+
+
+AUTH_TIMEOUT_SECONDS = 5.0
 
 
 async def _authenticate(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Perform PSK authentication."""
+    """Perform PSK authentication.
+
+    TCP connect succeeding but auth hanging is the signature of the macOS
+    Application Firewall in its default state: the kernel completes the TCP
+    handshake, but the daemon process never receives the auth payload
+    because the firewall has not yet been granted permission for the
+    python3.13 binary. We time out the read so that state surfaces as an
+    actionable error instead of an indefinite hang.
+    """
     cfg = load_config()
     if cfg is None or not cfg.auth_key:
         raise AuthError('No auth key configured. Run: claude-remote-bash-daemon --init')
 
     await write_message(writer, AuthRequest(key=cfg.auth_key))
-    response = await read_message(reader)
+
+    try:
+        response = await asyncio.wait_for(read_message(reader), timeout=AUTH_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        raise AuthError(
+            f'TCP connected but the daemon did not respond to auth within {AUTH_TIMEOUT_SECONDS:.0f}s.\n'
+            '\n'
+            'This is the signature of a pending macOS Application Firewall prompt\n'
+            'on the target: the kernel accepts the TCP handshake, but the firewall\n'
+            'silently blocks the daemon process from receiving the data.\n'
+            '\n'
+            'On the target machine:\n'
+            '  - Look for an "Allow python3.13 to accept incoming network\n'
+            '    connections" dialog (may be hidden behind other windows) and\n'
+            '    click Allow, OR\n'
+            '  - Pre-approve via terminal:\n'
+            '      sudo /usr/libexec/ApplicationFirewall/socketfilterfw \\\n'
+            '        --add "$(which python3)"\n'
+            '      sudo /usr/libexec/ApplicationFirewall/socketfilterfw \\\n'
+            '        --unblockapp "$(which python3)"\n'
+            '  - Verify on the target: does the daemon log show\n'
+            '    "Connection from (ip, port)"? If yes the firewall is not the\n'
+            "    cause; if no, it's confirmed."
+        ) from exc
 
     if isinstance(response, AuthFail):
         raise AuthError(f'Authentication failed: {response.reason}')
@@ -243,7 +315,15 @@ async def _resolve_host(host: str) -> tuple[Sequence[str], int]:
 
     found = resolve_host(hosts, host)
     if found is None:
-        raise HostNotFoundError(f'Host not found: {host}\nRun `claude-remote-bash discover` to see available hosts.')
+        raise HostNotFoundError(
+            f'Host not found: {host}\n'
+            'Run `claude-remote-bash discover` to see available hosts.\n'
+            '\n'
+            'Common causes:\n'
+            "  - The daemon isn't running on the target.\n"
+            '  - Alias typo — check the output of `discover`.\n'
+            "  - Target is on a different LAN segment (mDNS doesn't cross subnets)."
+        )
 
     return found.ips, found.port
 
