@@ -2199,21 +2199,28 @@ async function generatePdf() {
 
     if (opts.pageless) {
       // ── Two-pass pageless approach ─────────────────────────────────────────
-      // Pass 1: Measure where the last visible element ends.
+      // Pass 1: Measure the total content height.
       // Pass 2: Generate the PDF at that exact height.
 
+      // Measure the body's full rendered height. Prior versions iterated
+      // document.body.children and took Math.max of each child's
+      // getBoundingClientRect().bottom — that misses two contributions
+      // Chromium DOES honor when laying out the PDF page:
+      //   1. body's own padding-bottom
+      //   2. the last child's margin-bottom (not absorbed by margin collapse
+      //      at the body boundary with non-zero body padding)
+      // Together these are ~31pt on our themes; underreporting that much made
+      // Chromium paginate content that measured as fitting. body's bottom rect
+      // includes both.
       const contentBottom = await page.evaluate(() => {
-        const children = Array.from(document.body.children);
-        let lastBottom = 0;
-        for (const el of children) {
-          const rect = el.getBoundingClientRect();
-          if (rect.height > 0 && rect.bottom > lastBottom) {
-            lastBottom = rect.bottom;
-          }
-        }
-        return Math.ceil(lastBottom);
+        // Force a final layout pass in case any late reflow is pending.
+        void document.body.offsetHeight;
+        return Math.ceil(document.body.getBoundingClientRect().bottom);
       });
 
+      // Tiny buffer to absorb sub-pixel rounding between CSS px and Chromium's
+      // PDF layout. 0 works in practice, but 10 CSS px (~7.5 pt in the PDF)
+      // provides a small safety net without visible whitespace.
       const pdfHeight = contentBottom + 10;
 
       await page.pdf({

@@ -250,14 +250,23 @@ abbr {
 /* === TASK LISTS === */
 
 /* marked v15 outputs bare <li><input type="checkbox"> with no classes.
- * Use :has() to target the actual DOM structure (Chromium 105+). */
-li:has(> input[type="checkbox"]) {
+ * Tight lists produce <li><input>, loose lists produce <li><p><input>.
+ * Style both structures identically. (Chromium 105+ for :has.) */
+li:has(> input[type="checkbox"]:first-child),
+li:has(> p:first-child > input[type="checkbox"]:first-child) {
     position: relative;
     list-style-type: none;
     padding-left: 34px;
 }
 
-li > input[type="checkbox"] {
+/* Collapse the paragraph margin in the loose-list case so spacing matches. */
+li > p:first-child:has(> input[type="checkbox"]:first-child) {
+    margin: 0;
+    display: inline;
+}
+
+li > input[type="checkbox"]:first-child,
+li > p:first-child > input[type="checkbox"]:first-child {
     width: 1.25rem;
     height: 1.25rem;
     display: block;
@@ -271,13 +280,15 @@ li > input[type="checkbox"] {
     border: none;
 }
 
-li > input[type="checkbox"]:focus {
+li > input[type="checkbox"]:first-child:focus,
+li > p:first-child > input[type="checkbox"]:first-child:focus {
     outline: none;
     box-shadow: none;
 }
 
 /* Unchecked state: empty circle */
-li > input[type="checkbox"]::before {
+li > input[type="checkbox"]:first-child::before,
+li > p:first-child > input[type="checkbox"]:first-child::before {
     border: 1px solid #555;
     border-radius: 1.5rem;
     width: 1.5rem;
@@ -288,14 +299,16 @@ li > input[type="checkbox"]::before {
 }
 
 /* Checked state: filled dark circle */
-li > input[type="checkbox"]:checked::before {
+li > input[type="checkbox"]:first-child:checked::before,
+li > p:first-child > input[type="checkbox"]:first-child:checked::before {
     background: #333;
     border-width: 2px;
     display: inline-block;
 }
 
 /* Checkmark (hidden by default, visible when checked) */
-li > input[type="checkbox"]::after {
+li > input[type="checkbox"]:first-child::after,
+li > p:first-child > input[type="checkbox"]:first-child::after {
     -webkit-transform: rotate(-45deg);
     transform: rotate(-45deg);
     position: absolute;
@@ -310,7 +323,8 @@ li > input[type="checkbox"]::after {
     opacity: 0;
 }
 
-li > input[type="checkbox"]:checked::after {
+li > input[type="checkbox"]:first-child:checked::after,
+li > p:first-child > input[type="checkbox"]:first-child:checked::after {
     opacity: 1;
 }
 
