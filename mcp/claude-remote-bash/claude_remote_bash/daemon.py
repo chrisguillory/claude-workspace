@@ -1,4 +1,9 @@
-"""Daemon entry point: TCP server + mDNS registration + command dispatch."""
+"""Daemon entry point: TCP server + mDNS registration + command dispatch.
+
+The CLI is built on typer: bare invocation starts the daemon; setup actions
+are subcommands. Typer auto-generates per-command ``--help`` and safely parses
+argv.
+"""
 
 from __future__ import annotations
 
@@ -11,16 +16,19 @@ import signal
 import socket
 import subprocess
 import sys
-from collections.abc import Sequence
 from pathlib import Path
+from typing import Annotated
+
+import typer
+import typer.completion
+from cc_lib.cli import add_completion_command
+from cc_lib.error_boundary import ErrorBoundary
 
 __all__ = [
     'main',
 ]
 
-from cc_lib.error_boundary import ErrorBoundary
-
-from claude_remote_bash.auth import CONFIG_FILE, DaemonConfig, generate_key, load_config, save_config, verify_key
+from claude_remote_bash.auth import DaemonConfig, generate_key, load_config, save_config, verify_key
 from claude_remote_bash.context import SessionContextStore
 from claude_remote_bash.discovery import register_service, unregister_service
 from claude_remote_bash.exceptions import (
@@ -47,11 +55,28 @@ from claude_remote_bash.protocol import read_message, write_message
 logger = logging.getLogger(__name__)
 
 VERSION = '0.1.0'
+LAUNCHD_LABEL = 'com.claude-remote-bash.daemon'
 
 error_boundary = ErrorBoundary(exit_code=1)
 
+app = typer.Typer(
+    help=(
+        'Cross-machine shell daemon — TCP server + mDNS registration.\n\n'
+        'Bare invocation starts the daemon. Use subcommands for setup:\n'
+        '  init               Generate a new PSK and save config.\n'
+        '  join KEY           Save a shared PSK from another machine.\n'
+        "  set-name ALIAS     Set this daemon's alias.\n"
+        '  allow-firewall     Approve daemon in macOS Application Firewall (sudo).\n'
+        '  install-service    Install launchd LaunchAgent — run at login, auto-restart.\n'
+        '  uninstall-service  Remove the launchd LaunchAgent.\n'
+    ),
+    add_completion=False,
+    no_args_is_help=False,
+)
+typer.completion.completion_init()
+add_completion_command(app)
 
-@error_boundary
+
 def main() -> None:
     """CLI entry point for claude-remote-bash-daemon."""
     logging.basicConfig(
@@ -59,59 +84,181 @@ def main() -> None:
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
         stream=sys.stderr,
     )
+    app(prog_name='claude-remote-bash-daemon')
 
-    args = sys.argv[1:]
 
-    if '--help' in args or '-h' in args:
-        _cmd_help()
-        return
+@app.command()
+@error_boundary
+def init(
+    name: Annotated[str | None, typer.Option('--name', '-n', help="Set this daemon's alias during init.")] = None,
+) -> None:
+    """Generate a new PSK and save config."""
+    key = generate_key()
+    config = DaemonConfig(
+        name=name or '',
+        auth_key=key,
+        shell=os.environ.get('SHELL', '/bin/zsh'),
+    )
+    path = save_config(config)
 
-    if '--init' in args:
-        _cmd_init()
-        return
+    try:
+        subprocess.run(['pbcopy'], input=key.encode(), check=True)  # noqa: S603, S607 — pbcopy is a trusted macOS utility
+        clipboard_msg = ' (copied to clipboard)'
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        clipboard_msg = ''
 
-    if '--join' in args:
-        idx = args.index('--join')
-        if idx + 1 >= len(args):
-            raise ConfigError('Usage: claude-remote-bash-daemon --join <key>')
-        _cmd_join(args[idx + 1])
-        return
+    print(f'Initialized: {path}')
+    print(f'Auth key: {key}{clipboard_msg}')
+    if not name:
+        print('Set a name: claude-remote-bash-daemon set-name <alias>')
+    print(f'On other machines: claude-remote-bash-daemon join {key}')
 
-    if '--allow-firewall' in args:
-        _cmd_allow_firewall()
-        return
 
-    if '--install-service' in args:
-        _cmd_install_service()
-        return
-
-    if '--uninstall-service' in args:
-        _cmd_uninstall_service()
-        return
-
-    name = _extract_flag(args, '--name')
-
-    config = load_config()
-    if config is None:
-        raise ConfigError('No config found. Run: claude-remote-bash-daemon --init')
-
-    # `--name <alias>` is a config-only operation that exits after saving,
-    # matching the UX of --init and --join. Starting the daemon is always
-    # the bare invocation (no flags).
+@app.command()
+@error_boundary
+def join(
+    key: Annotated[str, typer.Argument(help='Shared PSK printed by `init` on the first machine.')],
+    name: Annotated[str | None, typer.Option('--name', '-n', help="Set this daemon's alias during join.")] = None,
+) -> None:
+    """Save a shared PSK from another machine."""
+    config = load_config() or DaemonConfig()
+    config.auth_key = key
     if name:
         config.name = name
-        save_config(config)
-        print(f'Name set: {name}')
-        print('Start the daemon: claude-remote-bash-daemon')
+    config.shell = os.environ.get('SHELL', '/bin/zsh')
+    path = save_config(config)
+
+    print(f'Joined: {path}')
+    print('Auth key saved')
+    if config.name:
+        print(f'Name: {config.name}')
+    else:
+        print('Set a name: claude-remote-bash-daemon set-name <alias>')
+
+
+@app.command(name='set-name')
+@error_boundary
+def set_name(
+    alias: Annotated[str, typer.Argument(help="This daemon's alias (shown to peers via mDNS).")],
+) -> None:
+    """Set this daemon's alias."""
+    config = load_config()
+    if config is None:
+        raise ConfigError('No config found. Run: claude-remote-bash-daemon init')
+    config.name = alias
+    save_config(config)
+    print(f'Name set: {alias}')
+    print('Start the daemon: claude-remote-bash-daemon')
+
+
+@app.command(name='allow-firewall')
+@error_boundary
+def allow_firewall() -> None:
+    """Approve daemon's python binary in the macOS Application Firewall (sudo).
+
+    The daemon triggers an "Allow python3.13 to accept incoming connections"
+    dialog on first run. Headless hosts or dismissed dialogs need this codified
+    approval path. Targets ``sys.executable`` specifically — the binary the
+    daemon actually runs under, not whatever ``python3`` resolves to on PATH.
+    """
+    if sys.platform != 'darwin':
+        raise FirewallApprovalError(f'macOS-only (current platform: {sys.platform})')
+
+    socketfilterfw = '/usr/libexec/ApplicationFirewall/socketfilterfw'
+    if not Path(socketfilterfw).is_file():
+        raise FirewallApprovalError(
+            f'{socketfilterfw} not found — macOS Application Firewall is unavailable on this host.'
+        )
+
+    binary = sys.executable
+    print(f'Approving binary in Application Firewall: {binary}')
+    print('(will prompt for sudo)')
+
+    for cmd in (['--add', binary], ['--unblockapp', binary]):
+        result = subprocess.run(  # noqa: S603 — path is a fixed system utility
+            ['sudo', socketfilterfw, *cmd],
+            check=False,
+        )
+        if result.returncode != 0:
+            raise FirewallApprovalError(f'socketfilterfw {cmd[0]} exited with code {result.returncode}')
+
+    print('Approved. Restart of the daemon is NOT required — existing socket is unblocked.')
+
+
+@app.command(name='install-service')
+@error_boundary
+def install_service() -> None:
+    """Install a launchd LaunchAgent — daemon runs at login and auto-restarts.
+
+    Writes ~/Library/LaunchAgents/<label>.plist and calls ``launchctl load``.
+    Replaces any existing installation (unload + rewrite + load) so config
+    changes propagate. Requires a complete config (auth_key + name).
+    """
+    if sys.platform != 'darwin':
+        raise LaunchdError(f'macOS-only (current platform: {sys.platform})')
+
+    config = load_config()
+    if config is None or not config.auth_key or not config.name:
+        raise ConfigError(
+            'Cannot install service — config is incomplete.\n'
+            'Run: claude-remote-bash-daemon init  (or join <key>)\n'
+            '     claude-remote-bash-daemon set-name <alias>'
+        )
+
+    binary = _resolve_daemon_binary()
+    plist_path = _launchd_plist_path()
+    log_path = _launchd_log_path()
+
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    plist_path.write_text(_render_launchd_plist(binary=binary, log_path=log_path))
+
+    # If already loaded, unload first so the rewritten plist takes effect.
+    subprocess.run(  # noqa: S603, S607 — launchctl is a fixed system utility
+        ['launchctl', 'unload', str(plist_path)],
+        check=False,
+        capture_output=True,
+    )
+
+    result = subprocess.run(  # noqa: S603, S607 — launchctl is a fixed system utility
+        ['launchctl', 'load', str(plist_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise LaunchdError(f'launchctl load exited with code {result.returncode}\n{result.stderr.strip()}')
+
+    print(f'Installed: {plist_path}')
+    print(f'Binary:    {binary}')
+    print(f'Logs:      {log_path}')
+    print(f'Status:    launchctl list | grep {LAUNCHD_LABEL}')
+
+
+@app.command(name='uninstall-service')
+@error_boundary
+def uninstall_service() -> None:
+    """Remove the launchd LaunchAgent and unload the daemon.
+
+    Idempotent: reports cleanly if the plist is not installed.
+    """
+    if sys.platform != 'darwin':
+        raise LaunchdError(f'macOS-only (current platform: {sys.platform})')
+
+    plist_path = _launchd_plist_path()
+    if not plist_path.exists():
+        print(f'Not installed (no plist at {plist_path}).')
         return
 
-    if not config.auth_key:
-        raise ConfigError('No auth key configured. Run: claude-remote-bash-daemon --init')
-
-    if not config.name:
-        raise ConfigError('No name configured. Run: claude-remote-bash-daemon --name <alias>')
-
-    asyncio.run(run_daemon(config))
+    # Unload if loaded. Ignore non-zero exit — it just means it wasn't loaded.
+    subprocess.run(  # noqa: S603, S607 — launchctl is a fixed system utility
+        ['launchctl', 'unload', str(plist_path)],
+        check=False,
+        capture_output=True,
+    )
+    plist_path.unlink()
+    print(f'Uninstalled: {plist_path}')
 
 
 async def run_daemon(config: DaemonConfig) -> None:
@@ -249,81 +396,26 @@ class _Daemon:
         )
 
 
-def _cmd_init() -> None:
-    """Generate a new PSK and save config."""
-    key = generate_key()
-    name_flag = _extract_flag(sys.argv, '--name')
-
-    config = DaemonConfig(
-        name=name_flag or '',
-        auth_key=key,
-        shell=os.environ.get('SHELL', '/bin/zsh'),
-    )
-    path = save_config(config)
-
-    try:
-        subprocess.run(['pbcopy'], input=key.encode(), check=True)  # noqa: S603, S607 — pbcopy is a trusted macOS utility
-        clipboard_msg = ' (copied to clipboard)'
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        clipboard_msg = ''
-
-    print(f'Initialized: {path}')
-    print(f'Auth key: {key}{clipboard_msg}')
-    if not name_flag:
-        print('Set a name: claude-remote-bash-daemon --name <alias>')
-    print(f'On other machines: claude-remote-bash-daemon --join {key}')
+@app.callback(invoke_without_command=True)
+@error_boundary
+def _default(ctx: typer.Context) -> None:
+    """Start the daemon on bare invocation; delegate to subcommand handlers otherwise."""
+    if ctx.invoked_subcommand is not None:
+        return
+    config = _require_complete_config()
+    asyncio.run(run_daemon(config))
 
 
-def _cmd_join(key: str) -> None:
-    """Join an existing cluster by saving the shared key."""
-    name_flag = _extract_flag(sys.argv, '--name')
-
-    config = load_config() or DaemonConfig()
-    config.auth_key = key
-    if name_flag:
-        config.name = name_flag
-    config.shell = os.environ.get('SHELL', '/bin/zsh')
-    path = save_config(config)
-
-    print(f'Joined: {path}')
-    print('Auth key saved (from --join)')
-    if config.name:
-        print(f'Name: {config.name}')
-    else:
-        print('Set a name: claude-remote-bash-daemon --name <alias>')
-
-
-def _cmd_help() -> None:
-    """Print usage. Printed to stdout so `--help | less` works."""
-    print(f"""\
-claude-remote-bash-daemon v{VERSION} — TCP server + mDNS registration for cross-machine shell execution.
-
-Usage:
-  claude-remote-bash-daemon                     Start the daemon (bare invocation)
-  claude-remote-bash-daemon --init              Generate a new PSK and save config
-  claude-remote-bash-daemon --join <key>        Save a shared PSK from another machine
-  claude-remote-bash-daemon --name <alias>      Set this daemon's alias (saves + exits)
-  claude-remote-bash-daemon --allow-firewall    Approve daemon's python binary in macOS Application Firewall (sudo)
-  claude-remote-bash-daemon --install-service   Install a launchd LaunchAgent — daemon runs at login + auto-restarts
-  claude-remote-bash-daemon --uninstall-service Remove the launchd LaunchAgent
-  claude-remote-bash-daemon --help              Show this message
-
-First-time setup:
-  First machine:
-    claude-remote-bash-daemon --init            # generates and prints PSK
-    claude-remote-bash-daemon --name M1
-    claude-remote-bash-daemon                   # start — click Allow on firewall dialog
-  Additional machines:
-    claude-remote-bash-daemon --join <PSK>      # same PSK as above
-    claude-remote-bash-daemon --name M2
-    claude-remote-bash-daemon --allow-firewall  # optional: skip the firewall dialog
-    claude-remote-bash-daemon                   # start
-
-Config file: {CONFIG_FILE}
-""")
-
-
-LAUNCHD_LABEL = 'com.claude-remote-bash.daemon'
+def _require_complete_config() -> DaemonConfig:
+    """Load the config or raise ConfigError with the next-step command."""
+    config = load_config()
+    if config is None:
+        raise ConfigError('No config found. Run: claude-remote-bash-daemon init')
+    if not config.auth_key:
+        raise ConfigError('No auth key configured. Run: claude-remote-bash-daemon init')
+    if not config.name:
+        raise ConfigError('No name configured. Run: claude-remote-bash-daemon set-name <alias>')
+    return config
 
 
 def _launchd_plist_path() -> Path:
@@ -349,78 +441,6 @@ def _resolve_daemon_binary() -> Path:
             "Couldn't find `claude-remote-bash-daemon` on PATH.\nInstall it first: uv tool install <this package>."
         )
     return Path(which).resolve()
-
-
-def _cmd_install_service() -> None:
-    """Install a per-user LaunchAgent so the daemon runs at login + auto-restarts.
-
-    Writes ~/Library/LaunchAgents/<label>.plist and calls ``launchctl load``.
-    Existing installations are replaced (unload + rewrite + load) so config
-    changes propagate. Requires a complete config (auth_key + name).
-    """
-    if sys.platform != 'darwin':
-        raise LaunchdError(f'macOS-only (current platform: {sys.platform})')
-
-    config = load_config()
-    if config is None or not config.auth_key or not config.name:
-        raise ConfigError(
-            'Cannot install service — config is incomplete.\n'
-            'Run: claude-remote-bash-daemon --init  (or --join <key>)\n'
-            '     claude-remote-bash-daemon --name <alias>'
-        )
-
-    binary = _resolve_daemon_binary()
-    plist_path = _launchd_plist_path()
-    log_path = _launchd_log_path()
-
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-
-    plist_path.write_text(_render_launchd_plist(binary=binary, log_path=log_path))
-
-    # If already loaded, unload first so the rewritten plist takes effect.
-    subprocess.run(  # noqa: S603 — launchctl is a fixed system utility
-        ['launchctl', 'unload', str(plist_path)],
-        check=False,
-        capture_output=True,
-    )
-
-    result = subprocess.run(  # noqa: S603 — launchctl is a fixed system utility
-        ['launchctl', 'load', str(plist_path)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise LaunchdError(f'launchctl load exited with code {result.returncode}\n{result.stderr.strip()}')
-
-    print(f'Installed: {plist_path}')
-    print(f'Binary:    {binary}')
-    print(f'Logs:      {log_path}')
-    print(f'Status:    launchctl list | grep {LAUNCHD_LABEL}')
-
-
-def _cmd_uninstall_service() -> None:
-    """Remove the LaunchAgent plist and unload the daemon from launchd.
-
-    Idempotent: reports cleanly if the plist is not installed.
-    """
-    if sys.platform != 'darwin':
-        raise LaunchdError(f'macOS-only (current platform: {sys.platform})')
-
-    plist_path = _launchd_plist_path()
-    if not plist_path.exists():
-        print(f'Not installed (no plist at {plist_path}).')
-        return
-
-    # Unload if loaded. Ignore non-zero exit — it just means it wasn't loaded.
-    subprocess.run(  # noqa: S603 — launchctl is a fixed system utility
-        ['launchctl', 'unload', str(plist_path)],
-        check=False,
-        capture_output=True,
-    )
-    plist_path.unlink()
-    print(f'Uninstalled: {plist_path}')
 
 
 def _render_launchd_plist(*, binary: Path, log_path: Path) -> str:
@@ -453,50 +473,6 @@ def _render_launchd_plist(*, binary: Path, log_path: Path) -> str:
 </dict>
 </plist>
 """
-
-
-def _cmd_allow_firewall() -> None:
-    """Approve this daemon's python binary in the macOS Application Firewall.
-
-    On first run the daemon triggers an "Allow python3.13 to accept incoming
-    connections" dialog. Users who dismiss it or run headless need a
-    codified way to grant approval — this flag wraps the two required
-    ``socketfilterfw`` calls against ``sys.executable`` (the actual binary
-    the daemon runs under, not whatever ``python3`` resolves to in $PATH).
-
-    Requires sudo; macOS-only.
-    """
-    if sys.platform != 'darwin':
-        raise FirewallApprovalError(f'macOS-only (current platform: {sys.platform})')
-
-    socketfilterfw = '/usr/libexec/ApplicationFirewall/socketfilterfw'
-    if not Path(socketfilterfw).is_file():
-        raise FirewallApprovalError(
-            f'{socketfilterfw} not found — macOS Application Firewall is unavailable on this host.'
-        )
-
-    binary = sys.executable
-    print(f'Approving binary in Application Firewall: {binary}')
-    print('(will prompt for sudo)')
-
-    for cmd in (['--add', binary], ['--unblockapp', binary]):
-        result = subprocess.run(  # noqa: S603 — path is a fixed system utility
-            ['sudo', socketfilterfw, *cmd],
-            check=False,
-        )
-        if result.returncode != 0:
-            raise FirewallApprovalError(f'socketfilterfw {cmd[0]} exited with code {result.returncode}')
-
-    print('Approved. Restart of the daemon is NOT required — existing socket is unblocked.')
-
-
-def _extract_flag(args: Sequence[str], flag: str) -> str | None:
-    """Extract a flag value from argv-style args. Returns None if not present."""
-    if flag in args:
-        idx = args.index(flag)
-        if idx + 1 < len(args):
-            return args[idx + 1]
-    return None
 
 
 # -- Error boundary handlers --------------------------------------------------
