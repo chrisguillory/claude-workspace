@@ -18,7 +18,6 @@ import logging
 import time
 from collections import Counter, deque
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -28,6 +27,7 @@ import tenacity
 from cc_lib import ConcurrencyTracker
 from cc_lib.schemas.base import OpenModel
 from cc_lib.types import JsonObject
+from cc_lib.utils import get_claude_workspace_config_home_dir
 from numpy.typing import NDArray
 
 from document_search.clients import _retry
@@ -348,7 +348,7 @@ _models_response_adapter: pydantic.TypeAdapter[_ModelsApiResponse] = pydantic.Ty
 
 def _load_api_key() -> str:
     """Load API key from standard location."""
-    key_path = Path.home() / '.claude-workspace' / 'secrets' / 'openrouter_api_key'
+    key_path = get_claude_workspace_config_home_dir() / 'secrets' / 'openrouter_api_key'
     if not key_path.exists():
         raise FileNotFoundError(f'OpenRouter API key not found at {key_path}')
     return key_path.read_text().strip()

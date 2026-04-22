@@ -116,6 +116,7 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.session_tracker import find_claude_pid
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 # Credential Models — External Data (login files, config, keychain)
 #
@@ -288,6 +289,7 @@ class WorkspaceInfo(StrictModel):
     current_dir: str
     project_dir: str
     added_dirs: Sequence[str] = ()  # Added in v2.1.47
+    git_worktree: str | None = None  # Added in v2.1.97
 
 
 class CostInfo(StrictModel):
@@ -532,12 +534,12 @@ def _classify_cwd(cwd: str, project_dir: str, added_dirs: Sequence[str]) -> CwdL
 
 CONFIG_PATH = Path.home() / '.claude.json'
 SCRIPT_PATH = Path(__file__).resolve()
-STATUSLINE_DIR = Path.home() / '.claude-workspace' / 'statusline'
+STATUSLINE_DIR = get_claude_workspace_config_home_dir() / 'statusline'
 CACHE_PATH = STATUSLINE_DIR / 'cache.json'
 SNAPSHOT_DIR = STATUSLINE_DIR / 'snapshots'
 ERROR_LOG_PATH = STATUSLINE_DIR / 'error.log'
-SWITCH_PENDING_PATH = Path.home() / '.claude-workspace' / '.switch-pending'
-LOGINS_DIR = Path.home() / '.claude-workspace' / 'logins'
+SWITCH_PENDING_PATH = get_claude_workspace_config_home_dir() / '.switch-pending'
+LOGINS_DIR = get_claude_workspace_config_home_dir() / 'logins'
 CACHE_TTL_SECONDS = 300  # 5 minutes
 
 SUBSCRIPTION_DISPLAY: Mapping[str, str] = {
@@ -1667,6 +1669,11 @@ def main() -> None:
         for d in data.workspace.added_dirs
         if not cwd_n.startswith(d.rstrip('/'))
     )
+
+    # LOUD warning if claude-exec wasn't used — hooks reference
+    # $CLAUDE_EXEC_LAUNCH_DIR and will misbehave without it.
+    if not os.environ.get('CLAUDE_EXEC_LAUNCH_DIR'):
+        line3.append(f'{BOLD}{RED}⚠ NOT LAUNCHED VIA claude-exec{RESET}')
 
     # Venv provenance — where did .venv/bin on PATH come from?
     line3.append(_detect_venv_provenance(data.cwd))

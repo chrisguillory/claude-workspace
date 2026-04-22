@@ -1,0 +1,29 @@
+[project]
+name = "claude-remote-bash"
+version = "0.1.0"
+description = "Cross-machine shell execution for Claude Code via mDNS-discovered daemons"
+requires-python = ">=3.13"
+dependencies = [
+    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
+    "filelock>=3.20.0",
+    "pydantic>=2.12.0",
+    "typer>=0.20.0",
+    "zeroconf>=0.140.0",
+]
+
+[project.scripts]
+claude-remote-bash = "claude_remote_bash.cli.main:main"
+claude-remote-bash-daemon = "claude_remote_bash.daemon:main"
+
+[tool.uv.sources]
+cc-lib = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["claude_remote_bash/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

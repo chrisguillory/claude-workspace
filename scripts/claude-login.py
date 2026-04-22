@@ -129,6 +129,7 @@ from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.schemas import StrictModel
 from cc_lib.types import JsonObject
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 # -- Pydantic Models -----------------------------------------------------------
 
@@ -199,7 +200,7 @@ class LoginFile(StrictModel):
 # -- Constants -----------------------------------------------------------------
 
 CONFIG_PATH = Path.home() / '.claude.json'
-WORKSPACE_DIR = Path.home() / '.claude-workspace'
+WORKSPACE_DIR = get_claude_workspace_config_home_dir()
 LOGINS_DIR = WORKSPACE_DIR / 'logins'
 MCP_AUTHS_PATH = WORKSPACE_DIR / 'mcp-auths.json'
 SWITCH_PENDING_PATH = WORKSPACE_DIR / '.switch-pending'

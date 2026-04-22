@@ -41,8 +41,8 @@ Patches:
                     Anchor: ``outputSchema?.safeParse`` (stable property chain).
                     Regression introduced in 2.1.89 (last clean: 2.1.87).
                     No 2.1.88 was published.
-                    Minified vars (M, P, H) may change per build — framework
-                    reports ``changed`` status when they do.
+                    Minified vars drift per build: was ``M`` through 2.1.90,
+                    renamed to ``J`` at 2.1.110 (patch bumped to target 2.1.110+).
                     https://github.com/anthropics/claude-code/issues/41361
 
     session-memory  [feature] Enable background session memory extraction. Claude
@@ -59,20 +59,6 @@ Patches:
                     Statsig gate ``tengu_coral_fern``, default false.
                     Not publicly documented or mentioned in any changelog.
                     Flag introduced in 2.1.21 (last absent: 2.1.20).
-
-    sm-compact      [feature] Use session memory for auto-compaction instead of LLM
-                    summarization. When the context window fills, Claude
-                    normally calls the LLM to summarize the conversation
-                    (expensive, slow). With sm-compact enabled, auto-compact
-                    uses the existing session memory summary directly --
-                    no extra API call, faster, and more deterministic.
-                    Requires session-memory patch (gate checks both flags).
-                    Statsig gate ``tengu_sm_compact``, default false.
-                    Env var override: ``ENABLE_CLAUDE_CODE_SM_COMPACT=1``.
-                    Config: ``tengu_sm_compact_config`` (minTokens: 10000,
-                    minTextBlockMessages: 5, maxTokens: 40000).
-                    Present in all versions with session-memory (2.0.64+),
-                    verified in 2.1.45, 2.1.74, 2.1.80, 2.1.81.
 
     show-subagent-prompt-tools-response
                     [tweak] Expand completed subagent to show prompt, tool
@@ -92,10 +78,11 @@ Patches:
 
                     Tool calls appear as one-line summaries (tool name + args),
                     not full input/output.
-                    Reassigns isTranscriptMode = isTranscriptMode || verbose
-                    in renderToolResultMessage (let T=H → $=$||K + 3 refs).
+                    Makes isTranscriptMode default to verbose by flipping the
+                    destructured-parameter default from ``!1`` to ``K``.
                     Anchor: ``Remote agent launched`` (stable UI text, 2.1.63+).
-                    Minified vars (T, H, K, N6, K6) stable from 2.1.85+.
+                    Prior strategy (``let T=H`` reassignment) invalidated at
+                    2.1.114 when isTranscriptMode moved to destructured param.
                     https://github.com/anthropics/claude-code/issues/14511
                     https://github.com/anthropics/claude-code/issues/5974
 
@@ -146,6 +133,19 @@ Site Count Evolution::
 
 Version Log::
 
+    2.1.114 (2026-04-18)
+        mcp-tool-results: 2 sites, unpatched (vars: J, P, H after rename)
+        show-subagent-prompt-tools-response: 2 sites, unpatched
+        (function refactored to destructured param; patch rewritten)
+        statusline, session-memory, remember-skill, scratchpad: clean apply
+
+    2.1.109 (2026-04)
+        sm-compact: feature removed (tengu_sm_compact flag deleted,
+        consolidated into session-memory)
+
+    2.1.110 (2026-04)
+        mcp-tool-results: minifier renamed M → J in guard site
+
     2.1.90 (2026-04-02)
         mcp-tool-results: 2 sites, unpatched (vars: M, P, H)
         statusline: 2 sites, applied
@@ -178,8 +178,10 @@ from enum import Enum
 from typing import Literal
 
 from cc_lib.types import CCVersion
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 __all__ = [
+    'ORIGINALS_DIR',
     'PATCHES',
     'PATCHES_BY_KIND',
     'PATCHES_BY_NAME',
@@ -188,6 +190,8 @@ __all__ = [
     'PatchScanResult',
     'scan_binary',
 ]
+
+ORIGINALS_DIR = get_claude_workspace_config_home_dir() / 'binary-patcher' / 'originals'
 
 
 class PatchKind(str, Enum):
@@ -243,10 +247,10 @@ PATCHES: Sequence[PatchDef] = (
         description='Fix MCP tool result rendering (outputSchema safeParse regression)',
         kind=PatchKind.FIX,
         anchor=b'outputSchema?.safeParse',
-        old=b'if(M&&!M.success)return null;let P=M?.data??H.toolUseResult',
-        new=b'if(M&&!M.success)M=null;     let P=M?.data??H.toolUseResult',
+        old=b'if(J&&!J.success)return null;let P=J?.data??H.toolUseResult',
+        new=b'if(J&&!J.success)J=null;     let P=J?.data??H.toolUseResult',
         window=100,
-        min_version='2.1.89',
+        min_version='2.1.110',
     ),
     PatchDef(
         name='session-memory',
@@ -269,24 +273,14 @@ PATCHES: Sequence[PatchDef] = (
         min_version='2.1.21',
     ),
     PatchDef(
-        name='sm-compact',
-        description='Use session memory for auto-compaction (no LLM summary call)',
-        kind=PatchKind.FEATURE,
-        anchor=b'tengu_sm_compact',
-        old=b'("tengu_sm_compact",!1)',
-        new=b'("tengu_sm_compact",!0)',
-        window=50,
-        min_version='2.0.64',
-    ),
-    PatchDef(
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.TWEAK,
         anchor=b'Remote agent launched',
-        old=b'let T=H;if(T.status==="remote_launched")return N6.createElement(m,{flexDirection:"column"},N6.createElement(K6,{height:1},N6.createElement(L,null,"Remote agent launched"," ",N6.createElement(L,{dimColor:!0},"\\xB7 ",T.taskId," \\xB7 ",T.sessionUrl',
-        new=b'$=$||K; if(H.status==="remote_launched")return N6.createElement(m,{flexDirection:"column"},N6.createElement(K6,{height:1},N6.createElement(L,null,"Remote agent launched"," ",N6.createElement(L,{dimColor:!0},"\\xB7 ",H.taskId," \\xB7 ",H.sessionUrl',
+        old=b'{tools:q,verbose:K,theme:O,isTranscriptMode:T=!1}',
+        new=b'{tools:q,verbose:K,theme:O,isTranscriptMode:T=K }',
         window=300,
-        min_version='2.1.85',
+        min_version='2.1.114',
     ),
     PatchDef(
         name='scratchpad',

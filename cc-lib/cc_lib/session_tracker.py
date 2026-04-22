@@ -15,6 +15,7 @@ from filelock import FileLock
 from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import JsonDatetime, SessionSource, SessionState
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 __all__ = [
     'Session',
@@ -26,8 +27,8 @@ __all__ = [
 ]
 
 # Path configuration
-SESSIONS_PATH = Path('~/.claude-workspace/sessions.json').expanduser()
-LOCK_PATH = Path('~/.claude-workspace/.sessions.json.lock').expanduser()
+SESSIONS_PATH = get_claude_workspace_config_home_dir() / 'sessions.json'
+LOCK_PATH = get_claude_workspace_config_home_dir() / '.sessions.json.lock'
 
 
 class SessionDatabase(ClosedModel):

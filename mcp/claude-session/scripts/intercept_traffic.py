@@ -96,6 +96,7 @@ from urllib.parse import parse_qs
 
 import psutil
 from cc_lib.session_tracker import Session, SessionDatabase
+from cc_lib.utils import get_claude_workspace_config_home_dir
 from expiringdict import ExpiringDict
 from mitmproxy import addonmanager, connection, http
 from pydantic import TypeAdapter
@@ -106,7 +107,7 @@ CAPTURE_VERSION = 2  # Increment when capture format changes
 
 SCRIPT_DIR = Path(__file__).parent.parent
 CAPTURES_BASE = SCRIPT_DIR / 'captures'
-SESSIONS_PATH = Path.home() / '.claude-workspace' / 'sessions.json'
+SESSIONS_PATH = get_claude_workspace_config_home_dir() / 'sessions.json'
 LOG_FILE = CAPTURES_BASE / 'traffic.log'
 
 # Track sessions that have had manifests written (in-memory, resets on proxy restart)
