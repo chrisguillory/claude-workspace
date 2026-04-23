@@ -62,8 +62,9 @@ Patches (alphabetical by name):
                     Anchor: ``outputSchema?.safeParse`` (stable property chain).
                     Regression introduced in 2.1.89 (last clean: 2.1.87).
                     No 2.1.88 was published.
-                    Minified vars drift per build: was ``M`` through 2.1.90,
-                    renamed to ``J`` at 2.1.110 (patch bumped to target 2.1.110+).
+                    Minified vars drift per build: ``M`` through 2.1.90,
+                    renamed to ``J`` at 2.1.110, renamed back to ``M`` at 2.1.117
+                    (patch bumped to target 2.1.117+).
                     https://github.com/anthropics/claude-code/issues/41361
 
     remember-skill  [feature] Enable /remember skill for session memory search.
@@ -159,6 +160,10 @@ Site Count Evolution::
     2.1.90    —            2                  —                —                —
 
 Version Log::
+
+    2.1.117 (2026-04-22)
+        mcp-tool-results: 2 sites, unpatched (vars: M, P, H after rollback from J)
+        hook-ask-no-override, statusline: already applied (stable)
 
     2.1.114 (2026-04-18)
         mcp-tool-results: 2 sites, unpatched (vars: J, P, H after rename)
@@ -275,10 +280,10 @@ PATCHES: Sequence[PatchDef] = (
         description='Fix MCP tool result rendering (outputSchema safeParse regression)',
         kind=PatchKind.FIX,
         anchor=b'outputSchema?.safeParse',
-        old=b'if(J&&!J.success)return null;let P=J?.data??H.toolUseResult',
-        new=b'if(J&&!J.success)J=null;     let P=J?.data??H.toolUseResult',
+        old=b'if(M&&!M.success)return null;let P=M?.data??H.toolUseResult',
+        new=b'if(M&&!M.success)M=null;     let P=M?.data??H.toolUseResult',
         window=100,
-        min_version='2.1.110',
+        min_version='2.1.117',
     ),
     PatchDef(
         name='remember-skill',
