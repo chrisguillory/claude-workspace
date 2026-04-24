@@ -65,11 +65,17 @@ class ExecuteRequest(ClosedModel):
 
 
 class ExecuteResult(ClosedModel):
-    """Daemon → Client: command execution result."""
+    """Daemon → Client: command execution result.
+
+    stdout and stderr are distinct fields so clients can route each to its
+    matching local descriptor — tools that key error detection off stderr
+    continue to work across the wire.
+    """
 
     type: Literal['result'] = 'result'
     id: str
     stdout: str
+    stderr: str
     exit_code: int
     cwd: str
 

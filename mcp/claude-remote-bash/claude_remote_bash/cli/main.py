@@ -92,6 +92,8 @@ def execute(
 
     if result.stdout:
         typer.echo(result.stdout)
+    if result.stderr:
+        typer.echo(result.stderr, err=True)
 
     raise SystemExit(result.exit_code)
 
@@ -254,7 +256,7 @@ async def _authenticate(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
     """
     cfg = load_config()
     if cfg is None or not cfg.auth_key:
-        raise AuthError('No auth key configured. Run: claude-remote-bash-daemon --init')
+        raise AuthError('No auth key configured. Run: claude-remote-bash-daemon init')
 
     await write_message(writer, AuthRequest(key=cfg.auth_key))
 
@@ -273,7 +275,7 @@ async def _authenticate(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             '    connections" dialog (may be hidden behind other windows) and\n'
             '    click Allow, OR\n'
             '  - Approve via terminal (no dialog needed):\n'
-            '      claude-remote-bash-daemon --allow-firewall\n'
+            '      claude-remote-bash-daemon allow-firewall\n'
             '  - Verify on the target: does the daemon log show\n'
             '    "Connection from (ip, port)"? If yes the firewall is not the\n'
             "    cause; if no, it's confirmed."
