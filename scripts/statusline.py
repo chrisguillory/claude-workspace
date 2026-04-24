@@ -404,6 +404,17 @@ BOLD = '\033[1m'
 RESET = '\033[0m'
 
 
+# Effort level colors — max is the expected default state (dim so it blends),
+# any demotion gets YELLOW (attention) and the most severe gets RED.
+EFFORT_COLORS: Mapping[EffortLevel, str] = {
+    'max': DIM,
+    'xhigh': YELLOW,
+    'high': YELLOW,
+    'medium': YELLOW,
+    'low': RED,
+}
+
+
 # Health Monitoring Thresholds
 #
 # Calibrated against observed Claude Code behavior on macOS (Apple Silicon).
@@ -850,7 +861,13 @@ def _get_active_credentials(
 
 
 def _cleanup_orphan_snapshots(current_session_id: str) -> None:
-    """Remove snapshot and health sidecar files whose Claude PID is no longer running."""
+    """Remove snapshot and health sidecar files whose Claude PID is no longer running.
+
+    This is the only place that tolerates corrupt JSON / schema drift: a file we
+    can't parse to check liveness IS an orphan (by definition — we have no way to
+    verify it belongs to a live process). Delete and move on. Callers that load
+    the current session's own files keep the fail-fast policy.
+    """
     if not SNAPSHOT_DIR.exists():
         return
     for path in SNAPSHOT_DIR.glob('*.json'):
@@ -863,7 +880,7 @@ def _cleanup_orphan_snapshots(current_session_id: str) -> None:
             else:
                 pid = CredentialSnapshot.model_validate_json(path.read_text()).claude_pid
             os.kill(pid, 0)
-        except (ProcessLookupError, OSError):  # ValidationError/JSONDecodeError: fail-fast (our data)
+        except (ProcessLookupError, OSError, pydantic.ValidationError, json.JSONDecodeError):
             path.unlink(missing_ok=True)
         except PermissionError:
             pass  # Process exists but owned by another user
@@ -1569,8 +1586,16 @@ def main() -> None:
     if session_title:
         parts.append(f'{MAGENTA_BOLD}{session_title}{RESET}')
 
-    # Model + Version
-    parts.append(f'{CYAN}{data.model.id}{RESET} {DIM}v{data.version}{RESET}')
+    # Model [effort] [⚡fast] Version
+    # effort shows always (dim when max, yellow/red when demoted); fast shows only when on.
+    model_parts = [f'{CYAN}{data.model.id}{RESET}']
+    if data.effort is not None:
+        effort_color = EFFORT_COLORS.get(data.effort.level, YELLOW)
+        model_parts.append(f'{effort_color}effort:{data.effort.level}{RESET}')
+    if data.fast_mode:
+        model_parts.append(f'{YELLOW}⚡fast{RESET}')
+    model_parts.append(f'{DIM}v{data.version}{RESET}')
+    parts.append(' '.join(model_parts))
 
     # PID + uptime + Session ID + age
     transcript_url = f'file://{data.transcript_path}'
