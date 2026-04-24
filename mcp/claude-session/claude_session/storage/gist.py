@@ -79,10 +79,22 @@ class GistStorage:
         # Check file size (100MB hard limit)
         size_mb = len(data) / (1024 * 1024)
         if size_mb > self.MAX_FILE_SIZE_MB:
+            already_compressed = filename.endswith('.zst')
+            if already_compressed:
+                hint = (
+                    'The archive is already zstd-compressed. '
+                    'Save to a local file instead: '
+                    '`claude-session archive --format zst <path.zst>`.'
+                )
+            else:
+                hint = (
+                    'Retry with zstd compression (typically 5-10x smaller): '
+                    '`claude-session archive --format zst`. '
+                    'Or save to a local file: `claude-session archive <path.json>`.'
+                )
             raise ValueError(
                 f'File too large for Gist: {size_mb:.2f}MB. '
-                f'GitHub Gist files are limited to {self.MAX_FILE_SIZE_MB}MB. '
-                f'Consider splitting the archive or using local storage.'
+                f'GitHub Gist files are limited to {self.MAX_FILE_SIZE_MB}MB. ' + hint
             )
 
         # Gists are text-based. Try UTF-8 first, fall back to base64 for binary.
