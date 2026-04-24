@@ -8,7 +8,6 @@ argv.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import shutil
@@ -43,12 +42,10 @@ from claude_remote_bash.models import (
     AuthFail,
     AuthOk,
     AuthRequest,
-    ConfigContent,
     ErrorResponse,
     ExecuteRequest,
     ExecuteResult,
     Message,
-    ReadConfigRequest,
 )
 from claude_remote_bash.protocol import read_message, write_message
 
@@ -363,8 +360,6 @@ class _Daemon:
         """Dispatch a message to the appropriate handler."""
         if isinstance(msg, ExecuteRequest):
             return await self._handle_execute(msg)
-        if isinstance(msg, ReadConfigRequest):
-            return self._handle_read_config()
         return ErrorResponse(message=f'unexpected message type: {msg.type}')
 
     async def _handle_execute(self, msg: ExecuteRequest) -> ExecuteResult | ErrorResponse:
@@ -388,13 +383,6 @@ class _Daemon:
             cwd=result.cwd,
         )
 
-    def _handle_read_config(self) -> ConfigContent:
-        """Read Claude Code configuration files."""
-        return ConfigContent(
-            claude_json=json.loads((Path.home() / '.claude.json').read_text()),
-            settings_json=json.loads((Path.home() / '.claude' / 'settings.json').read_text()),
-        )
-
 
 @app.callback(invoke_without_command=True)
 @error_boundary
@@ -412,7 +400,11 @@ def _require_complete_config() -> DaemonConfig:
     if config is None:
         raise ConfigError('No config found. Run: claude-remote-bash-daemon init')
     if not config.auth_key:
-        raise ConfigError('No auth key configured. Run: claude-remote-bash-daemon init')
+        raise ConfigError(
+            'No auth key configured. Run one of:\n'
+            '  claude-remote-bash-daemon init          # new mesh (this machine mints the PSK)\n'
+            '  claude-remote-bash-daemon join <key>    # existing mesh (paste PSK from another machine)'
+        )
     if not config.name:
         raise ConfigError('No name configured. Run: claude-remote-bash-daemon set-name <alias>')
     return config
@@ -438,7 +430,9 @@ def _resolve_daemon_binary() -> Path:
     which = shutil.which('claude-remote-bash-daemon')
     if which is None:
         raise LaunchdError(
-            "Couldn't find `claude-remote-bash-daemon` on PATH.\nInstall it first: uv tool install <this package>."
+            "Couldn't find `claude-remote-bash-daemon` on PATH.\n"
+            'Install it first:\n'
+            '  uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-remote-bash'
         )
     return Path(which).resolve()
 
