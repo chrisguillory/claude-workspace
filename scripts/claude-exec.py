@@ -204,8 +204,10 @@ def _activate_venv(venv_path: Path) -> None:
 
     Removes stale ``.venv/bin`` entries from other projects (e.g., PyCharm's
     JediTerm auto-activates the main project's venv, which is wrong in a
-    worktree) and IDE-specific paths that shouldn't leak into Claude's
-    subprocess environment.
+    worktree). IDE application paths themselves (``/Applications/PyCharm.app/
+    Contents/MacOS`` etc.) are left alone — they're legitimate user PATH
+    entries exporting binaries the user expects to invoke (``pycharm``,
+    Cursor CLI tooling).
     """
     venv_bin = str(venv_path / 'bin')
     os.environ['VIRTUAL_ENV'] = str(venv_path)
@@ -214,7 +216,7 @@ def _activate_venv(venv_path: Path) -> None:
 
 
 def _clean_path(keep: str) -> str:
-    """Remove stale .venv/bin entries and IDE-injected paths from PATH."""
+    """Remove stale .venv/bin entries from PATH."""
     entries = os.environ.get('PATH', '').split(':')
     removed: list[str] = []
     cleaned: list[str] = []
@@ -231,14 +233,15 @@ def _clean_path(keep: str) -> str:
 
 
 def _is_stale_path(entry: str) -> bool:
-    """True if this PATH entry should be removed during venv activation."""
-    if '/.venv/bin' in entry:
-        return True
-    if '/PyCharm.app/' in entry or '/WebStorm.app/' in entry:
-        return True
-    if '/.cursor/' in entry:
-        return True
-    return False
+    """True if this PATH entry should be removed during venv activation.
+
+    Only strips ``.venv/bin`` — typically an IDE-injected path from a
+    different project (e.g. PyCharm's JediTerm auto-activates the main
+    repo's venv, which is wrong when Claude Code runs in a worktree).
+    User-exported IDE application paths (``/PyCharm.app/``, ``/.cursor/``)
+    are intentionally preserved.
+    """
+    return '/.venv/bin' in entry
 
 
 # -- Effort flag injection -----------------------------------------------------
