@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated, Literal
 
 import pydantic
@@ -12,12 +11,10 @@ __all__ = [
     'AuthFail',
     'AuthOk',
     'AuthRequest',
-    'ConfigContent',
     'ErrorResponse',
     'ExecuteRequest',
     'ExecuteResult',
     'Message',
-    'ReadConfigRequest',
 ]
 
 
@@ -80,23 +77,6 @@ class ExecuteResult(ClosedModel):
     cwd: str
 
 
-# -- Config operations --------------------------------------------------------
-
-
-class ReadConfigRequest(ClosedModel):
-    """Client → Daemon: read Claude Code configuration."""
-
-    type: Literal['read_config'] = 'read_config'
-
-
-class ConfigContent(ClosedModel):
-    """Daemon → Client: Claude Code configuration."""
-
-    type: Literal['config'] = 'config'
-    claude_json: Mapping[str, object] | None = None
-    settings_json: Mapping[str, object] | None = None
-
-
 # -- Error --------------------------------------------------------------------
 
 
@@ -111,13 +91,6 @@ class ErrorResponse(ClosedModel):
 # -- Discriminated union ------------------------------------------------------
 
 Message = Annotated[
-    AuthRequest
-    | AuthOk
-    | AuthFail
-    | ExecuteRequest
-    | ExecuteResult
-    | ReadConfigRequest
-    | ConfigContent
-    | ErrorResponse,
+    AuthRequest | AuthOk | AuthFail | ExecuteRequest | ExecuteResult | ErrorResponse,
     pydantic.Discriminator('type'),
 ]

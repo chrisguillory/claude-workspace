@@ -15,7 +15,7 @@ Hierarchy
         ├── HostUnreachableError  # all advertised IPs failed to connect
         ├── DaemonError           # daemon returned an ErrorResponse
         ├── ConfigError           # daemon config missing/incomplete
-        ├── FirewallApprovalError # --allow-firewall could not complete
+        ├── FirewallApprovalError # allow-firewall subcommand could not complete
         └── LaunchdError          # launchd service install/uninstall failed
 
 Subclasses set the ``prefix`` class attribute to prepend a label (e.g. "Daemon
