@@ -92,6 +92,15 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   originalCwd, worktreePath, worktreeBranch, message, plus discardedFiles/
                   discardedCommits when action='remove'). ExitWorktreeToolResult precedes
                   EnterWorktreeToolResult in the ToolResult union so the more-specific shape wins.
+- Schema v0.2.26: Added InvokedSkillsAttachment for the 'invoked_skills' attachment type
+                  surfacing user-invoked skills with their injected content (Claude Code 2.1.119,
+                  stabilizing the skill-invocation path fixed by the 'skills invoked before
+                  auto-compaction re-executed' changelog note). Widened McpMeta._meta from
+                  EmptyDict to a typed McpMetaMetadata namespace containing FastMcpMeta
+                  (wrap_result), after observing fastmcp-framework metadata surfacing on MCP
+                  tool results from 2.1.118+ (likely coincident with hooks gaining the
+                  `type: "mcp_tool"` invocation path). Extended CLAUDE_CODE_MAX_VERSION to
+                  2.1.119.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -155,7 +164,7 @@ from typing import Annotated, Any, Literal
 import pydantic
 
 from claude_session.schemas.session.markers import PathField, PathListField
-from claude_session.schemas.types import BaseStrictModel, EmptyDict, EmptySequence, ModelId, PermissiveModel
+from claude_session.schemas.types import BaseStrictModel, EmptySequence, ModelId, PermissiveModel
 
 __all__ = [
     'CLAUDE_CODE_MAX_VERSION',
@@ -226,6 +235,7 @@ __all__ = [
     'ExitPlanModeToolResult',
     'ExitWorktreeToolInput',
     'ExitWorktreeToolResult',
+    'FastMcpMeta',
     'FileAttachment',
     'FileAttachmentContent',
     'FileAttachmentFileContent',
@@ -250,6 +260,8 @@ __all__ = [
     'ImageFileInfo',
     'ImageSource',
     'InformationalSystemRecord',
+    'InvokedSkill',
+    'InvokedSkillsAttachment',
     'KillShellMessageResult',
     'KillShellToolInput',
     'KillShellToolResult',
@@ -266,6 +278,7 @@ __all__ = [
     'MalformedWriteToolInput',
     'McpInstructionsDeltaAttachment',
     'McpMeta',
+    'McpMetaMetadata',
     'McpProgressCompletedData',
     'McpProgressFailedData',
     'McpProgressStartedData',
@@ -392,11 +405,11 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.25'
+SCHEMA_VERSION = '0.2.26'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.114'
-LAST_VALIDATED = '2026-04-18'
-VALIDATION_RECORD_COUNT = 490_121
+CLAUDE_CODE_MAX_VERSION = '2.1.119'
+LAST_VALIDATED = '2026-04-24'
+VALIDATION_RECORD_COUNT = 153_275
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1442,6 +1455,27 @@ class MCPStructuredContent(PermissiveModel):
     """
 
 
+class FastMcpMeta(StrictModel):
+    """fastmcp-framework metadata surfaced on MCP tool results (Claude Code 2.1.118+).
+
+    Written by Python MCP servers built on the fastmcp library. Claude Code
+    forwards these `_meta.fastmcp` keys through to the session record.
+    """
+
+    wrap_result: bool
+
+
+class McpMetaMetadata(StrictModel):
+    """Implementation-framework metadata namespace on MCP tool results.
+
+    Corresponds to the MCP spec's `_meta` field, which servers use to
+    attach implementation-specific data. Currently only fastmcp is observed;
+    other MCP frameworks (FastMCP-TS, mcp-go, etc.) may add sibling keys here.
+    """
+
+    fastmcp: FastMcpMeta | None = None
+
+
 class McpMeta(StrictModel):
     """MCP tool metadata wrapper (Claude Code 2.1.19+).
 
@@ -1458,9 +1492,13 @@ class McpMeta(StrictModel):
 
     Only populated for MCP tools returning JSON - tools returning plain text
     (like Perplexity) do not populate this field.
+
+    In 2.1.118+ the `_meta` field is no longer always empty: Claude Code began
+    forwarding framework-level metadata (e.g. fastmcp.wrap_result) written
+    by the MCP server into the session record.
     """
 
-    meta: EmptyDict | None = pydantic.Field(None, alias='_meta')  # Always {} when present
+    meta: McpMetaMetadata | None = pydantic.Field(None, alias='_meta')
     structuredContent: MCPStructuredContent | None = None
 
 
@@ -3045,6 +3083,27 @@ class SkillListingAttachment(StrictModel):
     isInitial: bool
 
 
+class InvokedSkill(StrictModel):
+    """A skill invocation record inside an InvokedSkillsAttachment."""
+
+    name: str
+    path: str  # e.g., 'userSettings:review-pr-comments' (source:slug)
+    content: str
+
+
+class InvokedSkillsAttachment(StrictModel):
+    """Skills that were actually invoked for this turn (Claude Code 2.1.119+).
+
+    Distinct from dynamic_skill (discovery of a skill dir under cwd) and
+    skill_listing (periodic catalog of available skills): this attachment is
+    emitted when the user invokes one or more skills via /<skill-name>, and
+    carries the full skill content that was injected into the conversation.
+    """
+
+    type: Literal['invoked_skills']
+    skills: Sequence[InvokedSkill]
+
+
 class NestedMemoryContent(StrictModel):
     """Nested CLAUDE.md content payload."""
 
@@ -3232,6 +3291,7 @@ AttachmentData = Annotated[
     | QueuedCommandAttachment
     | DynamicSkillAttachment
     | SkillListingAttachment
+    | InvokedSkillsAttachment
     | NestedMemoryAttachment
     | FileAttachment
     | EditedTextFileAttachment
