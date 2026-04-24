@@ -752,20 +752,35 @@ def _detect_consecutive_messages(
 ) -> SessionScanResult:
     """Detect message structure corruption via synthetic record markers.
 
-    Any assistant record with model='<synthetic>' (except transient 500
-    errors) indicates corruption — interrupted responses, error loops, or
-    forced stops that leave invalid message sequences in the history. The
-    API validates the entire history on each request, so even old
-    corruption zones cause 400 rejections on resume.
+    Any assistant record with model='<synthetic>' except those matching
+    BENIGN_SYNTHETIC_PATTERNS (below) indicates corruption — interrupted
+    responses, error loops, or forced stops that leave invalid message
+    sequences in the history. The API validates the entire history on each
+    request, so even old corruption zones cause 400 rejections on resume.
 
-    Finds the FIRST non-500 synthetic record and walks backwards to the
+    Finds the FIRST non-benign synthetic record and walks backwards to the
     last pure tool_result user record (a clean mid-exchange state with no
     interrupt text mixed in).
 
     Does NOT flag consecutive type=user JSONL records, which are normal
     for parallel tool results, user interrupts, and Agent task notifications.
     """
-    # Phase 1: Find all non-transient synthetic records
+    # Phase 1: Find all non-transient synthetic records.
+    # Synthetic records (model='<synthetic>') are emitted by the harness for
+    # multiple reasons; only some indicate real protocol corruption. Patterns
+    # below are benign no-ops or transient errors the session recovers from
+    # without leaving the message history in a broken state. Treating them as
+    # corruption causes catastrophic over-truncation: a single benign
+    # 'No response requested.' marker mid-session would cause the detector to
+    # walk back from there and truncate everything after, deleting thousands
+    # of valid records.
+    BENIGN_SYNTHETIC_PATTERNS = (
+        'No response requested.',  # Marker: model returned no text (e.g. for system reminders)
+        'API Error: 500',  # Transient server error
+        'API Error: Server is temporarily limiting requests',  # Rate limit, recovers on retry
+        "You've hit your limit",  # Hourly/daily cap, recovers when it resets
+        'Prompt is too long',  # Auto-recovers via /compact
+    )
     synthetic_lines: list[int] = []
     for i, rec in enumerate(analyzer._records):
         if rec is None:
@@ -775,14 +790,16 @@ def _detect_consecutive_messages(
         msg = rec.get('message', {})
         if msg.get('model') != '<synthetic>':
             continue
-        # Skip transient 500 errors (session recovers from these)
         content = msg.get('content', [])
-        is_500 = False
+        is_benign = False
         for block in content if isinstance(content, list) else []:
-            if isinstance(block, dict) and 'API Error: 500' in block.get('text', ''):
-                is_500 = True
+            if not isinstance(block, dict):
+                continue
+            text = block.get('text', '')
+            if any(pattern in text for pattern in BENIGN_SYNTHETIC_PATTERNS):
+                is_benign = True
                 break
-        if not is_500:
+        if not is_benign:
             synthetic_lines.append(i + 1)
 
     if not synthetic_lines:
