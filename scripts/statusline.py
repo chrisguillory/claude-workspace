@@ -347,6 +347,9 @@ class StatusLineInput(StrictModel):
     session_name: str | None = None  # Added in v2.1.41
     rate_limits: RateLimits | None = None  # Added in v2.1.80
     worktree: WorktreeInfo | None = None  # Added in v2.1.69
+    fast_mode: bool | None = None  # Added in v2.1.119
+    effort: EffortInfo | None = None  # Added in v2.1.119
+    thinking: ThinkingInfo | None = None  # Added in v2.1.119
     vim: Mapping[str, str] | None = None
     agent: Mapping[str, str] | None = None
     output_style: Mapping[str, str] | None = None
@@ -374,6 +377,21 @@ class WorktreeInfo(StrictModel):
     branch: str | None = None
     original_cwd: str
     original_branch: str | None = None
+
+
+type EffortLevel = Literal['low', 'medium', 'high', 'xhigh', 'max']
+
+
+class EffortInfo(StrictModel):
+    """Reasoning effort level. Added in v2.1.119."""
+
+    level: EffortLevel
+
+
+class ThinkingInfo(StrictModel):
+    """Extended thinking state. Added in v2.1.119."""
+
+    enabled: bool
 
 
 # -- ANSI Colors ---------------------------------------------------------------
