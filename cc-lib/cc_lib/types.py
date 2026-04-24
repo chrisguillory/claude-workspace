@@ -32,6 +32,7 @@ from __future__ import annotations
 
 __all__ = [
     'CCVersion',
+    'EffortLevel',
     'JsonDatetime',
     'JsonObject',
     'JsonUuid',
@@ -52,6 +53,10 @@ from pydantic import JsonValue
 
 type SessionState = Literal['active', 'exited', 'completed', 'crashed']
 type SessionSource = Literal['startup', 'resume', 'compact', 'clear']
+
+# -- Reasoning effort ---------------------------------------------------------
+
+type EffortLevel = Literal['low', 'medium', 'high', 'xhigh', 'max']
 
 # -- Claude Code versioning ---------------------------------------------------
 

@@ -50,7 +50,7 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 import pydantic
 import rich.console
@@ -60,6 +60,7 @@ from cc_lib.cli import LauncherInstaller, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import CamelModel
 from cc_lib.schemas.base import ClosedModel
+from cc_lib.types import EffortLevel
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 boundary = ErrorBoundary(exit_code=1)
@@ -274,9 +275,6 @@ def _inject_effort_flag(args: Sequence[str]) -> Sequence[str]:
         raise LaunchError(f'CLAUDE_CODE_EFFORT_LEVEL={effort!r}: {e.errors()[0]["msg"]}') from None
 
     return [*args, '--effort', effort]
-
-
-type EffortLevel = Literal['low', 'medium', 'high', 'xhigh', 'max']
 
 
 def _read_settings_effort() -> EffortLevel | str:

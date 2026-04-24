@@ -1520,14 +1520,43 @@ def _collect_import_time_refs(tree: ast.Module) -> Set[str]:
     return refs
 
 
+def _collect_private_base_refs(tree: ast.Module) -> Set[str]:
+    """Collect private class names used as bases of module-level classes.
+
+    Python requires a base class to be defined before its subclass. A private
+    base class declared first in the module (ahead of its public subclasses) is
+    a legitimate pattern — exempt from "private after public" ordering.
+    """
+    # Collect all private class names first
+    private_classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef) and node.name.startswith('_')}
+    if not private_classes:
+        return set()
+
+    # Scan every module-level ClassDef's .bases list for references to private classes.
+    refs: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for base in node.bases:
+            for child in ast.walk(base):
+                if isinstance(child, ast.Name) and child.id in private_classes:
+                    refs.add(child.id)
+
+    return refs
+
+
 def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequence[Definition]:
     """Extract top-level class and function definitions."""
     definitions = []
     all_names = all_names or set()
     import_time_refs = _collect_import_time_refs(tree)
+    private_base_refs = _collect_private_base_refs(tree)
 
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
+            # Skip private classes used as bases for public subclasses (subclass requires base first)
+            if node.name in private_base_refs:
+                continue
             definitions.append(
                 Definition(
                     name=node.name,
