@@ -116,6 +116,7 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.session_tracker import find_claude_pid
+from cc_lib.types import EffortLevel
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
 # Credential Models — External Data (login files, config, keychain)
@@ -377,9 +378,6 @@ class WorktreeInfo(StrictModel):
     branch: str | None = None
     original_cwd: str
     original_branch: str | None = None
-
-
-type EffortLevel = Literal['low', 'medium', 'high', 'xhigh', 'max']
 
 
 class EffortInfo(StrictModel):
