@@ -1170,6 +1170,7 @@
               "hook_blocking_error": "#/$defs/HookBlockingErrorAttachment",
               "hook_non_blocking_error": "#/$defs/HookNonBlockingErrorAttachment",
               "hook_success": "#/$defs/HookSuccessAttachment",
+              "invoked_skills": "#/$defs/InvokedSkillsAttachment",
               "mcp_instructions_delta": "#/$defs/McpInstructionsDeltaAttachment",
               "nested_memory": "#/$defs/NestedMemoryAttachment",
               "opened_file_in_ide": "#/$defs/OpenedFileInIdeAttachment",
@@ -1214,6 +1215,9 @@
             },
             {
               "$ref": "#/$defs/SkillListingAttachment"
+            },
+            {
+              "$ref": "#/$defs/InvokedSkillsAttachment"
             },
             {
               "$ref": "#/$defs/NestedMemoryAttachment"
@@ -3117,13 +3121,6 @@
       "title": "EditedTextFileAttachment",
       "type": "object"
     },
-    "EmptyDict": {
-      "additionalProperties": false,
-      "description": "Marker type for empty JSON object {} in API traffic.\n\nWith extra='forbid', a model with no fields will only validate against\nan empty dict. Used for fields that are always {} in observed captures.\n\nExample:\n    sdk_params: EmptyDict  # Always {} in API traffic",
-      "properties": {},
-      "title": "EmptyDict",
-      "type": "object"
-    },
     "EmptyError": {
       "additionalProperties": false,
       "description": "Empty error object for unknown/unspecified API errors (Claude Code 2.0.76+).",
@@ -3409,6 +3406,21 @@
         "message"
       ],
       "title": "ExitWorktreeToolResult",
+      "type": "object"
+    },
+    "FastMcpMeta": {
+      "additionalProperties": false,
+      "description": "fastmcp-framework metadata surfaced on MCP tool results (Claude Code 2.1.118+).\n\nWritten by Python MCP servers built on the fastmcp library. Claude Code\nforwards these `_meta.fastmcp` keys through to the session record.",
+      "properties": {
+        "wrap_result": {
+          "title": "Wrap Result",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "wrap_result"
+      ],
+      "title": "FastMcpMeta",
       "type": "object"
     },
     "FileAttachment": {
@@ -4675,6 +4687,55 @@
       "title": "InformationalSystemRecord",
       "type": "object"
     },
+    "InvokedSkill": {
+      "additionalProperties": false,
+      "description": "A skill invocation record inside an InvokedSkillsAttachment.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "content"
+      ],
+      "title": "InvokedSkill",
+      "type": "object"
+    },
+    "InvokedSkillsAttachment": {
+      "additionalProperties": false,
+      "description": "Skills that were actually invoked for this turn (Claude Code 2.1.119+).\n\nDistinct from dynamic_skill (discovery of a skill dir under cwd) and\nskill_listing (periodic catalog of available skills): this attachment is\nemitted when the user invokes one or more skills via /<skill-name>, and\ncarries the full skill content that was injected into the conversation.",
+      "properties": {
+        "type": {
+          "const": "invoked_skills",
+          "title": "Type",
+          "type": "string"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/InvokedSkill"
+          },
+          "title": "Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "skills"
+      ],
+      "title": "InvokedSkillsAttachment",
+      "type": "object"
+    },
     "KillShellMessageResult": {
       "additionalProperties": false,
       "description": "Alternative KillShell result with message format (snake_case shell_id).",
@@ -5129,12 +5190,12 @@
     },
     "McpMeta": {
       "additionalProperties": false,
-      "description": "MCP tool metadata wrapper (Claude Code 2.1.19+).\n\nNew in 2.1.19: Claude Code extracts structured content from MCP tool\nresults that return valid JSON and surfaces it here for easier access.\n\nDUPLICATION: The same data appears both here (as parsed dict) AND in\ntool_result.content (as JSON string). This is a convenience feature\nfor programmatic access without parsing.\n\nNOT BACKFILLED: Old sessions retain the old format (mcpMeta=None).\nWhen you resume an old session, new tool calls get mcpMeta but old\nrecords are not updated. Both patterns can coexist in the same file.\n\nOnly populated for MCP tools returning JSON - tools returning plain text\n(like Perplexity) do not populate this field.",
+      "description": "MCP tool metadata wrapper (Claude Code 2.1.19+).\n\nNew in 2.1.19: Claude Code extracts structured content from MCP tool\nresults that return valid JSON and surfaces it here for easier access.\n\nDUPLICATION: The same data appears both here (as parsed dict) AND in\ntool_result.content (as JSON string). This is a convenience feature\nfor programmatic access without parsing.\n\nNOT BACKFILLED: Old sessions retain the old format (mcpMeta=None).\nWhen you resume an old session, new tool calls get mcpMeta but old\nrecords are not updated. Both patterns can coexist in the same file.\n\nOnly populated for MCP tools returning JSON - tools returning plain text\n(like Perplexity) do not populate this field.\n\nIn 2.1.118+ the `_meta` field is no longer always empty: Claude Code began\nforwarding framework-level metadata (e.g. fastmcp.wrap_result) written\nby the MCP server into the session record.",
       "properties": {
         "_meta": {
           "anyOf": [
             {
-              "$ref": "#/$defs/EmptyDict"
+              "$ref": "#/$defs/McpMetaMetadata"
             },
             {
               "type": "null"
@@ -5155,6 +5216,25 @@
         }
       },
       "title": "McpMeta",
+      "type": "object"
+    },
+    "McpMetaMetadata": {
+      "additionalProperties": false,
+      "description": "Implementation-framework metadata namespace on MCP tool results.\n\nCorresponds to the MCP spec's `_meta` field, which servers use to\nattach implementation-specific data. Currently only fastmcp is observed;\nother MCP frameworks (FastMCP-TS, mcp-go, etc.) may add sibling keys here.",
+      "properties": {
+        "fastmcp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FastMcpMeta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "McpMetaMetadata",
       "type": "object"
     },
     "McpProgressCompletedData": {
@@ -10635,11 +10715,11 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.25",
+  "x-schema-version": "0.2.26",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.114",
-    "last_validated": "2026-04-18",
-    "validation_record_count": 489917
+    "max": "2.1.119",
+    "last_validated": "2026-04-24",
+    "validation_record_count": 152992
   }
 }
