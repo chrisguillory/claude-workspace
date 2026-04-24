@@ -31,8 +31,6 @@ from claude_remote_bash.models import (
     ErrorResponse,
     ExecuteRequest,
     ExecuteResult,
-    Message,
-    ReadConfigRequest,
 )
 from claude_remote_bash.protocol import read_message, write_message
 
@@ -121,19 +119,6 @@ def discover() -> None:
         typer.echo(f'  {h.alias:<12} {ips_str}:{h.port}  ({h.hostname})  v{h.version}')
 
 
-@app.command()
-@error_boundary
-def config(
-    host: Annotated[str, typer.Option('--host', '-h', help='Host alias or hostname')] = '',
-) -> None:
-    """Read Claude Code configuration from a remote host."""
-    if not host:
-        raise RemoteBashError('--host is required')
-
-    result = asyncio.run(_send_message(host, ReadConfigRequest()))
-    typer.echo(json.dumps(result.model_dump(), indent=2))
-
-
 # -- Async internals -----------------------------------------------------------
 
 
@@ -169,19 +154,6 @@ async def _execute_remote(
             raise DaemonError(f'unexpected response type: {response.type}')
 
         return response
-    finally:
-        writer.close()
-        await writer.wait_closed()
-
-
-async def _send_message(host: str, msg: Message) -> Message:
-    """Connect, authenticate, send a message, and return the response."""
-    ips, port = await _resolve_host(host)
-    reader, writer = await _open_connection_any(ips, port)
-    try:
-        await _authenticate(reader, writer)
-        await write_message(writer, msg)
-        return await read_message(reader)
     finally:
         writer.close()
         await writer.wait_closed()

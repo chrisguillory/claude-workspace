@@ -84,7 +84,7 @@ sequenceDiagram
     U->>M1: claude-remote-bash-daemon set-name M1
     U->>M1: claude-remote-bash-daemon
     Note over M1: macOS Application Firewall dialog<br/>"Allow python3.13 to accept connections?"
-    U->>M1: Click Allow (or --allow-firewall separately)
+    U->>M1: Click Allow (or allow-firewall separately)
     M1-->>U: Listening on port 63276<br/>(mDNS advertised)
 
     U->>M2: claude-remote-bash-daemon join a3f8c1e9...
@@ -108,7 +108,7 @@ claude-remote-bash-daemon set-name M1             # aliases this daemon
 claude-remote-bash-daemon                       # starts the daemon; keep terminal open
 ```
 
-The first start on macOS triggers an **Application Firewall dialog** ("Allow python3.13 to accept incoming connections"). Click Allow. If you dismissed the dialog or run headless, use the `--allow-firewall` branch below.
+The first start on macOS triggers an **Application Firewall dialog** ("Allow python3.13 to accept incoming connections"). Click Allow. If you dismissed the dialog or run headless, use the `allow-firewall` branch below.
 
 **On every other machine (M2, M3, …):**
 
@@ -127,21 +127,21 @@ claude-remote-bash execute --host M1 'hostname'  # smoke test
 ```
 
 > [!IMPORTANT]
-> `--init`, `--join <key>`, and `--name <alias>` are **config-only** operations — they save state and exit. Starting the daemon is always the bare invocation `claude-remote-bash-daemon` with no positional subcommands. This makes each config step a distinct, auditable action.
+> `init`, `join <key>`, and `set-name <alias>` are **config-only** subcommands — they save state and exit. Starting the daemon is always the bare invocation `claude-remote-bash-daemon` (no subcommand). This makes each config step a distinct, auditable action.
 
 ---
 
 ## Daemon reference
 
-| Flag | Effect |
+| Subcommand | Effect |
 |---|---|
 | *(bare invocation)* | Start the daemon. Requires `auth_key` and `name` already configured. |
-| `--init` | Generate a new 256-bit PSK, write it to config with `0600` perms, copy to clipboard. |
-| `--join <key>` | Save a PSK shared from another machine. |
-| `--name <alias>` | Set this daemon's mDNS alias (e.g. `M2`). Save-and-exit. |
-| `--allow-firewall` | Approve this daemon's Python binary in the macOS Application Firewall (requires sudo). |
-| `--install-service` | Install a launchd `LaunchAgent` so the daemon runs at login and auto-restarts. |
-| `--uninstall-service` | Remove the `LaunchAgent` plist and unload it from launchd. |
+| `init` | Generate a new 256-bit PSK, write it to config with `0600` perms, copy to clipboard. |
+| `join <key>` | Save a PSK shared from another machine. |
+| `set-name <alias>` | Set this daemon's mDNS alias (e.g. `M2`). Save-and-exit. |
+| `allow-firewall` | Approve this daemon's Python binary in the macOS Application Firewall (requires sudo). |
+| `install-service` | Install a launchd `LaunchAgent` so the daemon runs at login and auto-restarts. |
+| `uninstall-service` | Remove the `LaunchAgent` plist and unload it from launchd. |
 | `--help`, `-h` | Print usage. |
 
 Config file: `~/.claude-workspace/claude-remote-bash/config.json` (mode `0600`).
@@ -154,8 +154,7 @@ Config file: `~/.claude-workspace/claude-remote-bash/config.json` (mode `0600`).
 |---|---|
 | `execute --host <alias> <cmd>` | Run a command on a remote host. Supports heredoc on stdin when `<cmd>` is omitted. |
 | `discover` | Browse mDNS for 3s and print every daemon found. Refreshes the cache. |
-| `config --host <alias>` | Fetch `~/.claude.json` and `~/.claude/settings.json` from the remote. |
-| `install-completions` | Install shell tab completion (zsh/bash/fish) — inherited from `cc_lib.cli`. |
+| `install-completions` | Install shell tab completion (zsh/bash) — inherited from `cc_lib.cli`. |
 | `uninstall-completions` | Remove shell tab completion. |
 
 `execute` accepts the host as either an alias (`M2`), a substring of the hostname, or a literal `ip:port`.
@@ -175,9 +174,6 @@ BASH
 
 # Discovery
 claude-remote-bash discover
-
-# Remote Claude Code config (JSON)
-claude-remote-bash config --host M2
 ```
 
 <details><summary>Permission integration with Claude Code</summary>
@@ -252,7 +248,7 @@ macOS's Application Firewall has a behavior that's subtle enough to deserve its 
 | Path | When to use | Mechanism |
 |---|---|---|
 | **GUI dialog** | First daemon run on a machine you're sitting in front of. | macOS pops up "Allow python3.13 to accept incoming network connections?" Click Allow. |
-| **`--allow-firewall` flag** | Headless install, dismissed dialog, or scripted setup. | Wraps `socketfilterfw --add` and `--unblockapp` against `sys.executable`. Requires sudo. |
+| **`allow-firewall` flag** | Headless install, dismissed dialog, or scripted setup. | Wraps `socketfilterfw --add` and `--unblockapp` against `sys.executable`. Requires sudo. |
 
 ```bash
 claude-remote-bash-daemon allow-firewall
@@ -289,9 +285,9 @@ Each failure mode has a distinct shape. This table maps what you observe to what
 | Immediate "Host not found: M2" | `HostNotFoundError` | mDNS browse returned zero daemons (or no alias match). Daemon not running, wrong LAN segment, or alias typo. |
 | Fast "ConnectionRefusedError" on every address | `HostUnreachableError` (all `ConnectionRefusedError`) | TCP reached the host but nothing is listening on that port. Daemon crashed, or cache is stale (daemon restarted on a different port). |
 | ~2s "TimeoutError" on every address | `HostUnreachableError` (all `TimeoutError`) | Packets never reached a listener. Target offline, different network, or packet filtering. Reachability hint in the error suggests `discover` to refresh. |
-| TCP connects, then hangs 5s, then fails | `AuthError` ("did not respond to auth within 5s") | macOS Application Firewall silently dropping data until the user clicks Allow or `--allow-firewall` is run on the target. |
-| "Authentication failed: invalid key" | `AuthError` | PSK mismatch. The target was initialized with `--init` on a different origin, or `--join` was run with a bad key. |
-| "No auth key configured" | `AuthError` (client) or `ConfigError` (daemon) | Config file is missing or has an empty `auth_key`. Run `--init` (origin) or `--join <key>` (joiner). |
+| TCP connects, then hangs 5s, then fails | `AuthError` ("did not respond to auth within 5s") | macOS Application Firewall silently dropping data until the user clicks Allow or `allow-firewall` is run on the target. |
+| "Authentication failed: invalid key" | `AuthError` | PSK mismatch. The target was initialized with `init` on a different origin, or `join` was run with a bad key. |
+| "No auth key configured" | `AuthError` (client) or `ConfigError` (daemon) | Config file is missing or has an empty `auth_key`. Run `init` (origin) or `join <key>` (joiner). |
 
 > [!TIP]
 > **Stale cache is a common gotcha.** `hosts-cache.json` has a 30-second TTL. After a daemon restart, the cached port is stale until the next `discover` or TTL expiry. If `execute` fails with `ConnectionRefusedError` right after you restarted a daemon, run `claude-remote-bash discover` and retry.
@@ -308,7 +304,7 @@ ping <target-hostname>.local             # basic mDNS reachability
 
 ## launchd persistence
 
-Running `claude-remote-bash-daemon` manually in a terminal is fine for a test run, but for day-to-day use you want it to start at login and survive crashes. `--install-service` writes a per-user `LaunchAgent` plist.
+Running `claude-remote-bash-daemon` manually in a terminal is fine for a test run, but for day-to-day use you want it to start at login and survive crashes. `install-service` writes a per-user `LaunchAgent` plist.
 
 ```bash
 claude-remote-bash-daemon install-service
@@ -357,7 +353,7 @@ claude-remote-bash-daemon uninstall-service
 - `ProgramArguments` uses the absolute path resolved via `shutil.which('claude-remote-bash-daemon')` — launchd runs with a minimal `$PATH`, so relative lookups would fail.
 - stdout and stderr both go to one file; the daemon prints its banner to stdout and its `logging` output to stderr, and keeping them together in one log matches the terminal-running UX.
 
-Re-running `--install-service` calls `launchctl unload` before rewriting — config changes (e.g., a new alias) propagate cleanly without manual unload/load.
+Re-running `install-service` calls `launchctl unload` before rewriting — config changes (e.g., a new alias) propagate cleanly without manual unload/load.
 
 </details>
 
@@ -369,7 +365,7 @@ Re-running `--install-service` calls `launchctl unload` before rewriting — con
 |---|---|
 | Authentication | Pre-shared key (PSK), 256-bit, generated via `secrets.token_hex(32)` |
 | Key storage | `~/.claude-workspace/claude-remote-bash/config.json`, mode `0600` |
-| Key distribution | Out-of-band (user copies PSK from `--init` output to `--join` on each target) |
+| Key distribution | Out-of-band (user copies PSK from `init` output to `join` on each target) |
 | Key comparison | `secrets.compare_digest` (constant-time) |
 | Transport | Plaintext TCP. No TLS. |
 | Network scope | LAN trust model — any device on the same mDNS subnet can attempt to connect; only the PSK gates execution. |
@@ -378,7 +374,7 @@ Re-running `--install-service` calls `launchctl unload` before rewriting — con
 > **This is a LAN-trust model, not zero-trust.** The PSK is stored in plaintext on every machine in the mesh. Anyone who reads `config.json` (or sniffs the TCP bytes on an unencrypted LAN) and guesses a target hostname can execute arbitrary shell as your user on your machines. Appropriate for a home network with trusted devices. **Not** appropriate for shared Wi-Fi, coworking spaces, or any environment where you don't physically control every machine on the subnet.
 
 > [!WARNING]
-> If the PSK leaks, rotate it immediately: run `--init` on one machine and `--join <new-key>` on every other. There is no "revoke" — the old key will keep working until it's overwritten everywhere.
+> If the PSK leaks, rotate it immediately: run `init` on one machine and `join <new-key>` on every other. There is no "revoke" — the old key will keep working until it's overwritten everywhere.
 
 ---
 
@@ -395,13 +391,13 @@ Exception
     ├── HostUnreachableError     # every advertised IP failed to connect
     ├── DaemonError              # daemon returned an ErrorResponse
     ├── ConfigError              # daemon config missing or incomplete
-    ├── FirewallApprovalError    # --allow-firewall could not complete
-    └── LaunchdError             # --install-service / --uninstall-service failed
+    ├── FirewallApprovalError    # allow-firewall subcommand could not complete
+    └── LaunchdError             # install-service / uninstall-service failed
 ```
 
 Source: [`claude_remote_bash/exceptions.py`](claude_remote_bash/exceptions.py).
 
-Each subclass sets a `prefix` class attribute to prepend a label in `__str__` (e.g. "Daemon error: …"). Handlers stay formatting-free — they just print the exception.
+Some subclasses set a `prefix` class attribute to prepend a label in `__str__` (e.g. "Daemon error: …"); classes without a prefix print the bare message. Handlers stay formatting-free — they just print the exception.
 
 ---
 
