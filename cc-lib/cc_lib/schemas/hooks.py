@@ -1,5 +1,10 @@
 """Claude Code hook input/output schemas.
 
+Attribute docstrings are taken verbatim from Anthropic's zod `.describe(...)`
+calls in the Claude Code binary — the authoritative source for each field's
+meaning. Pydantic exposes these via `use_attribute_docstrings=True` on the
+base models.
+
 See: https://code.claude.com/docs/en/hooks
 """
 
@@ -8,6 +13,7 @@ from __future__ import annotations
 __all__ = [
     'BashToolInput',
     'EditToolInput',
+    'PostToolUseFailureHookInput',
     'PostToolUseHookInput',
     'PostToolUseHookOutput',
     'PostToolUseSpecificOutput',
@@ -48,74 +54,103 @@ type PermissionMode = Literal[
 # -- Hook inputs --------------------------------------------------------------
 
 
-class SessionStartHookInput(StrictModel):
+class _HookInputBase(StrictModel):
+    """Fields shared by every hook input (Anthropic's ``cz()`` composition base).
+
+    Every hook schema in the Claude Code binary is defined as
+    ``cz().and(h.object({hook_event_name: ..., ...specific fields...}))``.
+    This class mirrors that composition so per-hook subclasses only declare
+    what's unique to them.
+    """
+
+    session_id: str
+    cwd: str
+    transcript_path: str
+    permission_mode: PermissionMode | None = None
+    agent_id: str | None = None
+    """Subagent identifier.
+
+    Present only when the hook fires from within a subagent (e.g., a tool called
+    by an AgentTool worker). Absent for the main thread, even in --agent
+    sessions. Use this field (not agent_type) to distinguish subagent calls from
+    main-thread calls.
+    """
+    agent_type: str | None = None
+    """Agent type name (e.g., "general-purpose", "code-reviewer").
+
+    Present when the hook fires from within a subagent (alongside agent_id), or
+    on the main thread of a session started with --agent (without agent_id).
+    """
+
+
+class SessionStartHookInput(_HookInputBase):
     """SessionStart hook input schema.
 
     See: https://code.claude.com/docs/en/hooks#sessionstart
     """
 
-    session_id: str
-    cwd: str
-    transcript_path: str
     hook_event_name: Literal['SessionStart']
     source: Literal['startup', 'resume', 'compact', 'clear']
     model: str | None = None
-    permission_mode: PermissionMode | None = None
-    agent_id: str | None = None
-    agent_type: str | None = None
 
 
-class SessionEndHookInput(StrictModel):
+class SessionEndHookInput(_HookInputBase):
     """SessionEnd hook input schema.
 
     See: https://code.claude.com/docs/en/hooks#sessionend
     """
 
-    session_id: str
-    cwd: str
-    transcript_path: str
     hook_event_name: Literal['SessionEnd']
-    reason: Literal['prompt_input_exit', 'clear', 'logout', 'bypass_permissions_disabled', 'other']
-    permission_mode: PermissionMode | None = None
-    agent_id: str | None = None
-    agent_type: str | None = None
+    reason: Literal['clear', 'resume', 'logout', 'prompt_input_exit', 'other', 'bypass_permissions_disabled']
 
 
-class PreToolUseHookInput(StrictModel):
+class PreToolUseHookInput(_HookInputBase):
     """PreToolUse hook input schema.
 
     See: https://code.claude.com/docs/en/hooks#pretooluse
     """
 
-    session_id: str
-    cwd: str
-    transcript_path: str
     hook_event_name: Literal['PreToolUse']
     tool_name: str
     tool_input: JsonObject
     tool_use_id: str
-    permission_mode: PermissionMode | None = None
-    agent_id: str | None = None
-    agent_type: str | None = None
 
 
-class PostToolUseHookInput(StrictModel):
+class PostToolUseHookInput(_HookInputBase):
     """PostToolUse hook input schema.
 
     See: https://code.claude.com/docs/en/hooks#posttooluse
     """
 
-    session_id: str
-    cwd: str
-    transcript_path: str
     hook_event_name: Literal['PostToolUse']
     tool_name: str
     tool_input: JsonObject
     tool_response: JsonValue | None = None
     tool_use_id: str
-    permission_mode: PermissionMode | None = None
-    agent_id: str | None = None
-    agent_type: str | None = None
+    duration_ms: int | None = None
+    """Tool execution time in milliseconds.
+
+    Excludes permission-prompt and hook time.
+    """
+
+
+class PostToolUseFailureHookInput(_HookInputBase):
+    """PostToolUseFailure hook input schema.
+
+    Fires after a tool invocation errors. Added in v2.1.119.
+    """
+
+    hook_event_name: Literal['PostToolUseFailure']
+    tool_name: str
+    tool_input: JsonObject
+    tool_use_id: str
+    error: str
+    is_interrupt: bool | None = None
+    duration_ms: int | None = None
+    """Tool execution time in milliseconds.
+
+    Excludes permission-prompt and hook time.
+    """
 
 
 # -- Tool input types ---------------------------------------------------------
