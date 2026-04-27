@@ -1,6 +1,6 @@
 [project]
 name = "claude-remote-bash"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-machine shell execution for Claude Code via mDNS-discovered daemons"
 requires-python = ">=3.13"
 dependencies = [

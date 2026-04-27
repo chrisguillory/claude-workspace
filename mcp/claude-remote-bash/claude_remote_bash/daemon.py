@@ -92,8 +92,8 @@ def init(
     """Generate a new PSK and save config."""
     key = generate_key()
     config = DaemonConfig(
-        name=name or '',
         auth_key=key,
+        name=name or '',
         shell=os.environ.get('SHELL', '/bin/zsh'),
     )
     path = save_config(config)
@@ -118,11 +118,22 @@ def join(
     name: Annotated[str | None, typer.Option('--name', '-n', help="Set this daemon's alias during join.")] = None,
 ) -> None:
     """Save a shared PSK from another machine."""
-    config = load_config() or DaemonConfig()
-    config.auth_key = key
-    if name:
-        config.name = name
-    config.shell = os.environ.get('SHELL', '/bin/zsh')
+    existing = load_config()
+    shell = os.environ.get('SHELL', '/bin/zsh')
+    new_name = name or (existing.name if existing else '')
+    config = (
+        existing.__replace__(
+            auth_key=key,
+            name=new_name,
+            shell=shell,
+        )
+        if existing is not None
+        else DaemonConfig(
+            auth_key=key,
+            name=new_name,
+            shell=shell,
+        )
+    )
     path = save_config(config)
 
     print(f'Joined: {path}')
@@ -139,10 +150,10 @@ def set_name(
     alias: Annotated[str, typer.Argument(help="This daemon's alias (shown to peers via mDNS).")],
 ) -> None:
     """Set this daemon's alias."""
-    config = load_config()
-    if config is None:
+    existing = load_config()
+    if existing is None:
         raise ConfigError('No config found. Run: claude-remote-bash-daemon init')
-    config.name = alias
+    config = existing.__replace__(name=alias)
     save_config(config)
     print(f'Name set: {alias}')
     print('Start the daemon: claude-remote-bash-daemon')
