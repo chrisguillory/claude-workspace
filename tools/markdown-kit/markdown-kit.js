@@ -1194,6 +1194,19 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     );
   }
 
+  // ── Post-process emoji shortcodes in HTML blocks ──────────────────────────
+  // marked's emoji extension only runs on inline markdown content. HTML blocks
+  // (<details>, <summary>, <div>, etc.) pass through as-is per CommonMark spec,
+  // leaving :shortcode: text unconverted. This post-pass catches survivors,
+  // but skips <pre> and <code> regions where shortcodes are literal text.
+  processedBody = processedBody.replace(
+    /<pre[\s>][\s\S]*?<\/pre>|<code[\s>][\s\S]*?<\/code>|:([a-z0-9_+-]+):/g,
+    (match, name) => {
+      if (!name) return match;              // matched <pre> or <code> — pass through
+      return emojiMap[name] || match;       // matched :shortcode: — convert if known
+    }
+  );
+
   // ── Server-side diagram/chart rendering ────────────────────────────────────
   // Graphviz DOT and Vega-Lite code blocks are rendered to SVG server-side
   // before the HTML is passed to Puppeteer. This avoids browser-side WASM
