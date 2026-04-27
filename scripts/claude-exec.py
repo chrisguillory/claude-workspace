@@ -60,6 +60,7 @@ from cc_lib.cli import LauncherInstaller, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import CamelModel
 from cc_lib.schemas.base import ClosedModel
+from cc_lib.settings_env import get_cc_env_var
 from cc_lib.types import EffortLevel
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
@@ -248,11 +249,7 @@ def _is_stale_path(entry: str) -> bool:
 
 
 def _inject_effort_flag(args: Sequence[str]) -> Sequence[str]:
-    """Pass ``--effort`` if configured in settings.json and not already on the command line.
-
-    Reads ``CLAUDE_CODE_EFFORT_LEVEL`` from the settings.json env block
-    directly, because the env block isn't applied to ``process.env`` until
-    inside the Claude binary — our launcher runs before that.
+    """Pass ``--effort`` if ``CLAUDE_CODE_EFFORT_LEVEL`` is set and not already on the command line.
 
     The settings.json env block correctly sets the env var for API inference,
     but ``appState.effortValue`` is populated from the top-level
@@ -268,7 +265,7 @@ def _inject_effort_flag(args: Sequence[str]) -> Sequence[str]:
     if '--effort' in args:
         return args
 
-    effort = os.environ.get('CLAUDE_CODE_EFFORT_LEVEL', '') or _read_settings_effort()
+    effort = get_cc_env_var('CLAUDE_CODE_EFFORT_LEVEL')
     if not effort:
         return args
 
@@ -278,24 +275,6 @@ def _inject_effort_flag(args: Sequence[str]) -> Sequence[str]:
         raise LaunchError(f'CLAUDE_CODE_EFFORT_LEVEL={effort!r}: {e.errors()[0]["msg"]}') from None
 
     return [*args, '--effort', effort]
-
-
-def _read_settings_effort() -> EffortLevel | str:
-    """Read and validate CLAUDE_CODE_EFFORT_LEVEL from ~/.claude/settings.json env block."""
-    settings_path = Path.home() / '.claude' / 'settings.json'
-    if not settings_path.exists():
-        return ''
-    data = json.loads(settings_path.read_text())
-    env_block = data.get('env')
-    if not isinstance(env_block, dict):
-        return ''
-    value = str(env_block.get('CLAUDE_CODE_EFFORT_LEVEL', ''))
-    if not value:
-        return ''
-    try:
-        return pydantic.TypeAdapter(EffortLevel).validate_python(value)
-    except pydantic.ValidationError as e:
-        raise LaunchError(f'CLAUDE_CODE_EFFORT_LEVEL={value!r} in {settings_path}: {e.errors()[0]["msg"]}') from None
 
 
 # -- Allow-dangerous flag injection --------------------------------------------
@@ -412,9 +391,9 @@ def _inject_visible_reasoning_prompt(args: Sequence[str]) -> Sequence[str]:
     the thinking-block channel — that choice is for end-user coding UX,
     not for debugging the model.)
 
-    Gated on ``CLAUDE_EXEC_VISIBLE_REASONING=1`` in the process
-    environment. Set it inline (``CLAUDE_EXEC_VISIBLE_REASONING=1
-    claude-exec``) or via ``export`` in the shell.
+    Gated on ``CLAUDE_EXEC_VISIBLE_REASONING=1``. Set it inline
+    (``CLAUDE_EXEC_VISIBLE_REASONING=1 claude-exec``), via ``export`` in
+    the shell, or in the env block of ``~/.claude/settings.json``.
 
     Per user preference, uses ``## Reasoning`` / ``## Answer`` markdown
     headings (vs the Anthropic-canonical ``<thinking>`` / ``<answer>``
@@ -438,7 +417,7 @@ def _inject_visible_reasoning_prompt(args: Sequence[str]) -> Sequence[str]:
         Chen, Benton et al. (Anthropic) 2025, faithfulness caveat:
             https://arxiv.org/abs/2505.05410
     """
-    if os.environ.get('CLAUDE_EXEC_VISIBLE_REASONING') != '1':
+    if get_cc_env_var('CLAUDE_EXEC_VISIBLE_REASONING') != '1':
         return args
 
     collision_flags = (
