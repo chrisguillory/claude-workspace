@@ -14,6 +14,7 @@ autocomplete.
 - `fitz/` - PyMuPDF Document/Page types (supplements incomplete pymupdf-stubs, see [#3361](https://github.com/pymupdf/PyMuPDF/issues/3361))
 - `google/` - google-genai Client for Gemini API
 - `langchain_text_splitters/` - Text splitters for chunking
+- `onnxruntime/` - NoSuchFile exception only (used by reranker cache self-heal path)
 - `pdfplumber/` - PDF table extraction (py.typed missing from wheel, see [#698](https://github.com/jsvine/pdfplumber/issues/698))
 - `qdrant_client/` - Qdrant vector database client
 - `tenacity/` - Retry decorators

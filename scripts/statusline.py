@@ -671,11 +671,13 @@ def _read_config_identity(config_mtime: float) -> tuple[str, str, str] | None:
     brace_start = raw.find(b'{', pos + len(marker))
     if brace_start == -1:
         return None
-    # oauthAccount is a flat object (no nested {}) — find the closing brace
-    brace_end = raw.find(b'}', brace_start)
-    if brace_end == -1:
+    # raw_decode parses a single JSON object starting at index 0, handling
+    # nested braces (oauthAccount has ccOnboardingFlags: {}), quoted strings,
+    # and escapes. Returns (object, end_index); we discard end_index.
+    oa_obj, _ = json.JSONDecoder().raw_decode(raw[brace_start:].decode('utf-8'))
+    if not isinstance(oa_obj, dict):
         return None
-    oa: dict[str, object] = json.loads(raw[brace_start : brace_end + 1])
+    oa: dict[str, object] = oa_obj
     email = oa.get('emailAddress', '')
     org = oa.get('organizationUuid', '')
     billing = oa.get('billingType', '')
@@ -1528,8 +1530,14 @@ def _handle_validation(exc: StatusLineValidationError) -> None:
 
 @boundary.handler(json.JSONDecodeError)
 def _handle_json_error(exc: json.JSONDecodeError) -> None:
-    """Bad input — show decode error, clickable link to error log."""
-    _write_error_log(f'{datetime.now(UTC).isoformat()}\nJSON decode failed: {exc}\n')
+    """Bad input — show decode error, clickable link to error log.
+
+    The offending input (typically piped from Claude Code on stdin) is captured
+    from ``exc.doc`` and written to the log so a recurring decode failure can
+    be diagnosed without reproducing it.
+    """
+    raw = exc.doc if hasattr(exc, 'doc') else '<unavailable>'
+    _write_error_log(f'{datetime.now(UTC).isoformat()}\nJSON decode failed: {exc}\nInput ({len(raw)} chars):\n{raw}\n')
     link = _osc8_link(f'file://{ERROR_LOG_PATH}', 'details')
     print(f'{RED}⚠ StatusLine: invalid JSON — {link}{RESET}')
     print(f'{DIM}  {exc}{RESET}')
