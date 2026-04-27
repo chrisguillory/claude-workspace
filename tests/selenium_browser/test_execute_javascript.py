@@ -96,7 +96,9 @@ def _execute_js(driver: webdriver.Chrome, code: str) -> dict[str, Any]:
     """
     escaped_code = json.dumps(code)
     async_script = build_execute_javascript_async_script(escaped_code)
-    return driver.execute_async_script(async_script)
+    result = driver.execute_async_script(async_script)
+    assert isinstance(result, dict), f'Expected dict, got {type(result).__name__}'
+    return result
 
 
 def _navigate_to_fixture(driver: webdriver.Chrome, spec: dict[str, Any]) -> None:

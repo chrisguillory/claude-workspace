@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Literal
 
 import httpx
@@ -24,7 +24,6 @@ from google.genai.types import EmbedContentConfig, HttpOptions
 from vertexai.preview import tokenization
 
 from document_search.clients import _retry
-from document_search.clients._retry.gemini import GeminiTransientErrorCategory
 from document_search.clients.protocols import TransientErrorCategory
 from document_search.schemas.embeddings import TaskIntent
 
@@ -126,7 +125,8 @@ class GeminiClient:
 
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._tracker = ConcurrencyTracker('GEMINI')
-        self.transient_errors: Counter[GeminiTransientErrorCategory] = Counter()
+        self.transient_errors: Counter[TransientErrorCategory] = Counter()
+        self.on_transient_error: Callable[[TransientErrorCategory], None] = lambda _: None
 
     # Gemini task type mapping from generic intent
     INTENT_TO_GEMINI_TASK: Mapping[TaskIntent, GeminiTaskType] = {
@@ -245,9 +245,6 @@ class GeminiClient:
     def http_p99_ms(self) -> float:
         """Not tracked for Gemini (uses google-genai SDK)."""
         return 0.0
-
-    def on_transient_error(self, category: TransientErrorCategory) -> None:
-        """Called from before_sleep on categorized transient errors. No-op by default."""
 
     async def close(self) -> None:
         """No-op: google-genai Client manages its own HTTP lifecycle."""
