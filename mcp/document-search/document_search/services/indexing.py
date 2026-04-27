@@ -158,7 +158,9 @@ class IndexingService:
                 raise ValueError(f'Path not found: {p}')
 
         # Capture baseline transient error counts for delta calculation
-        transient_errors_start: Mapping[str, int] = dict(embedding_client.transient_errors) if embedding_client else {}
+        transient_errors_start: Mapping[str, int] = (
+            {str(k): v for k, v in embedding_client.transient_errors.items()} if embedding_client else {}
+        )
 
         # Setup progress writer (attaches FileHandler to root logger)
         progress_writer = ProgressWriter(owner_pid=owner_pid)
@@ -1430,7 +1432,7 @@ async def _monitor_progress(
             if embedding_client:
                 current = embedding_client.transient_errors
                 transient_errors_delta = {
-                    k: current[k] - transient_errors_start.get(k, 0)
+                    str(k): current[k] - transient_errors_start.get(k, 0)
                     for k in current
                     if current[k] - transient_errors_start.get(k, 0) > 0
                 }
