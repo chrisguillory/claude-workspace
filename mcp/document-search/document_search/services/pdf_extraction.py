@@ -21,7 +21,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-import fitz  # PyMuPDF
+import fitz
 import pdfplumber
 
 __all__ = [

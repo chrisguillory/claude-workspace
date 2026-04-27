@@ -17,7 +17,7 @@ import json
 import logging
 import time
 from collections import Counter, deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
 import httpx
@@ -144,6 +144,7 @@ class OpenRouterClient:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._tracker = ConcurrencyTracker('OPENROUTER')
         self.transient_errors: Counter[OpenRouterTransientErrorCategory] = Counter()
+        self.on_transient_error: Callable[[TransientErrorCategory], None] = lambda _: None
 
     @_retry.openrouter_breaker
     @tenacity.retry(
@@ -269,9 +270,6 @@ class OpenRouterClient:
             model=self._model,
         )
         return result.data
-
-    def on_transient_error(self, category: TransientErrorCategory) -> None:
-        """Called from before_sleep on categorized transient errors. No-op by default."""
 
     async def close(self) -> None:
         """Close HTTP client and release resources."""

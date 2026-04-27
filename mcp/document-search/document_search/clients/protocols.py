@@ -7,7 +7,7 @@ All embedding clients implement this protocol.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Literal, Protocol
 
 from document_search.schemas.embeddings import EmbeddingVector, TaskIntent
@@ -55,13 +55,12 @@ class EmbeddingClient(Protocol):
         """Embed texts into vectors."""
         ...
 
-    def on_transient_error(self, category: TransientErrorCategory) -> None:
-        """Called from before_sleep on any categorized transient error.
+    on_transient_error: Callable[[TransientErrorCategory], None]
+    """Hook fired from the retry loop's ``before_sleep`` on any categorized
+    transient error — before the retry sleep, not after the call returns.
 
-        Fires inside the retry loop — before the retry sleep, not after
-        the call returns. Override to wire adaptive behavior.
-        """
-        ...
+    Reassign per-instance to wire adaptive behavior (e.g. AIMD batch sizing).
+    """
 
     async def close(self) -> None:
         """Release resources. No-op for clients without external connections."""

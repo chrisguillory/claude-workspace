@@ -30,12 +30,13 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Callable[..., Any]] = {}
 
-    def register_tool(
-        self, fn: Callable[..., Any]
-    ) -> Callable[
-        ..., Any
-    ]:  # strict_typing_linter.py: loose-typing — generic decorator factory, accepts arbitrary callables
-        """Decorator: register a method as a dispatchable tool."""
+    def register_tool[F: Callable[..., Any]](self, fn: F) -> F:
+        """Decorator: register a method as a dispatchable tool.
+
+        Generic ``F`` preserves the decorated function's full signature so
+        mypy sees e.g. ``async def resize_window(...) -> ResizeWindowResult``
+        after decoration, not ``Callable[..., Any]``.
+        """
         self._tools[fn.__name__] = fn
         return fn
 

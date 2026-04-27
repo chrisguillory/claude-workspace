@@ -382,7 +382,7 @@ def main() -> None:
 # -- Private helpers (used by async implementations below) --
 
 
-def _resolve_path(path: str | None) -> str | None:
+def _resolve_path(path: str | None) -> str:
     """Resolve path argument: '**' for global, None for CWD, else expand."""
     if path == '**':
         return '**'
@@ -565,7 +565,7 @@ async def _clear_async(
             if file_state is not None:
                 chunk_ids = list(file_state.chunk_ids)
                 if chunk_ids:
-                    await repository.delete([UUID(cid) for cid in chunk_ids])
+                    await repository.delete(chunk_ids)
                 await state_store.delete_file_state(resolved_path)
                 result = ClearResult(files_removed=1, chunks_removed=len(chunk_ids), path=resolved_path)
             else:
