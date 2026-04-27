@@ -20,11 +20,12 @@ __all__ = [
     'SubsetModel',
 ]
 
-import os
 from typing import Any
 
 import pydantic
 from pydantic.alias_generators import to_camel
+
+from cc_lib.settings_env import get_cc_env_var
 
 
 class ClosedModel(pydantic.BaseModel):
@@ -58,7 +59,7 @@ class StrictModel(pydantic.BaseModel):
     """
 
     model_config = pydantic.ConfigDict(
-        extra='forbid' if os.environ.get('CC_STRICT_MODEL_EXTRA_FORBID') == '1' else 'allow',
+        extra='forbid' if get_cc_env_var('CC_STRICT_MODEL_EXTRA_FORBID') == '1' else 'allow',
         frozen=True,
         strict=True,
         validate_default=True,
@@ -118,7 +119,7 @@ class OpenModel(pydantic.BaseModel):
     """
 
     model_config = pydantic.ConfigDict(
-        extra='forbid' if os.environ.get('CC_OPEN_MODEL_EXTRA_FORBID') == '1' else 'allow',
+        extra='forbid' if get_cc_env_var('CC_OPEN_MODEL_EXTRA_FORBID') == '1' else 'allow',
         frozen=True,
         strict=True,
         validate_default=True,
