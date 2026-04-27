@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import logging
 import os
@@ -17,6 +18,12 @@ from cc_lib.cli import add_completion_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 
 from claude_remote_bash.auth import load_config
+from claude_remote_bash.diagnose import (
+    format_report,
+    request_local_network_grant,
+    run_diagnose,
+    vector_names,
+)
 from claude_remote_bash.discovery import DiscoveredHost, browse_hosts, resolve_host
 from claude_remote_bash.exceptions import (
     AuthError,
@@ -94,6 +101,31 @@ def execute(
         typer.echo(result.stderr, err=True)
 
     raise SystemExit(result.exit_code)
+
+
+@app.command()
+@error_boundary
+def diagnose(
+    vector: Annotated[
+        str | None,
+        typer.Option('--vector', help='Run a single vector by name (default: run all).'),
+    ] = None,
+    request_local_network: Annotated[
+        bool,
+        typer.Option(
+            '--request-local-network',
+            help='Fire the macOS Local Network Privacy prompt for the current Python interpreter.',
+        ),
+    ] = False,
+) -> None:
+    """Diagnose first-run failures: config, interpreter, LN privacy, sockets."""
+    if request_local_network:
+        request_local_network_grant()
+        return
+    if vector is not None and vector not in vector_names():
+        valid = ', '.join(vector_names())
+        raise RemoteBashError(f'Unknown vector {vector!r}. Valid: {valid}')
+    typer.echo(format_report(run_diagnose(vector)))
 
 
 @app.command()
@@ -210,7 +242,18 @@ def _reachability_hint(errors: Sequence[tuple[str, Exception]]) -> str:
             'running on that port. On the target machine, check:\n'
             '  `pgrep -f claude-remote-bash-daemon`'
         )
+    if errors and all(_is_ehostunreach(exc) for _, exc in errors):
+        return (
+            '\n\nEvery address returned "no route to host" — the signature of macOS\n'
+            'Local Network Privacy blocking this Python interpreter from reaching\n'
+            'private-range addresses. Run `claude-remote-bash diagnose` to inspect.'
+        )
     return ''
+
+
+def _is_ehostunreach(exc: Exception) -> bool:
+    """True when exc is the OSError macOS raises on Local Network Privacy denial."""
+    return isinstance(exc, OSError) and exc.errno == errno.EHOSTUNREACH
 
 
 AUTH_TIMEOUT_SECONDS = 5.0
@@ -250,7 +293,10 @@ async def _authenticate(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             '      claude-remote-bash-daemon allow-firewall\n'
             '  - Verify on the target: does the daemon log show\n'
             '    "Connection from (ip, port)"? If yes the firewall is not the\n'
-            "    cause; if no, it's confirmed."
+            "    cause; if no, it's confirmed.\n"
+            '\n'
+            'On the caller machine, run `claude-remote-bash diagnose` to inspect\n'
+            'the local side.'
         ) from exc
 
     if isinstance(response, AuthFail):
