@@ -43,6 +43,7 @@ Records with `type='attachment'` (discriminated by `attachment.type` field). Att
 |-----------------|---------|------------|
 | `companion_intro` | Companion creature introduction (`/buddy` feature) (v0.2.20) | `name`, `species` |
 | `mcp_instructions_delta` | MCP server instruction changes (added/removed tool descriptions) (v0.2.20) | `addedNames`, `addedBlocks`, `removedNames` |
+| `deferred_tools_delta` | Deferred-tool registration changes for the tool-search system (v0.2.27, Claude Code 2.1.120+) | `addedNames`, `addedLines`, `removedNames` |
 | `task_reminder` | Task-list reminder injected into conversation (v0.2.22) | `content` (Sequence[TaskReminderItem]), `itemCount` |
 | `hook_success` | Hook executed successfully — stdout/exit injected (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `content`, `stdout`, `stderr`, `exitCode`, `command`, `durationMs` |
 | `hook_blocking_error` | Hook returned a blocking error; tool execution halted (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `blockingError` |
@@ -581,12 +582,10 @@ They are **not** for accommodating client-side bugs in the upstream emitter.
 Iterate steps 2-4 until all records validate. Multiple rounds are normal.
 
 ### 5. Bump version (ONLY after 100% pass rate)
-Update four constants in `models.py`:
+Update the version constants in `models.py`:
 ```python
 SCHEMA_VERSION = '0.2.XX'
 CLAUDE_CODE_MAX_VERSION = '2.1.XX'
-LAST_VALIDATED = 'YYYY-MM-DD'
-VALIDATION_RECORD_COUNT = NNN_NNN
 ```
 Add a changelog line to the module docstring header.
 

@@ -101,6 +101,13 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   tool results from 2.1.118+ (likely coincident with hooks gaining the
                   `type: "mcp_tool"` invocation path). Extended CLAUDE_CODE_MAX_VERSION to
                   2.1.119.
+- Schema v0.2.27: Added DeferredToolsDeltaAttachment for the 'deferred_tools_delta' attachment
+                  type (Claude Code 2.1.120+) emitted by the tool-search/deferred-tools system
+                  — shape mirrors McpInstructionsDeltaAttachment but with addedLines instead of
+                  addedBlocks (a flat list of registered tool names, one per line). Made
+                  LastPromptRecord.lastPrompt optional (str | None = None): 2.1.120+ also writes
+                  a placeholder last-prompt record near session start where the prompt text is
+                  absent until the first user input. Extended CLAUDE_CODE_MAX_VERSION to 2.1.121.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -169,9 +176,7 @@ from claude_session.schemas.types import BaseStrictModel, EmptySequence, ModelId
 __all__ = [
     'CLAUDE_CODE_MAX_VERSION',
     'CLAUDE_CODE_MIN_VERSION',
-    'LAST_VALIDATED',
     'SCHEMA_VERSION',
-    'VALIDATION_RECORD_COUNT',
     'AgentNameRecord',
     'AgentOutputToolInput',
     'AgentProgressData',
@@ -215,6 +220,7 @@ __all__ = [
     'CronListToolInput',
     'CustomTitleRecord',
     'DateChangeAttachment',
+    'DeferredToolsDeltaAttachment',
     'DiagnosticFile',
     'DiagnosticItem',
     'DiagnosticPosition',
@@ -405,11 +411,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.26'
+SCHEMA_VERSION = '0.2.27'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.119'
-LAST_VALIDATED = '2026-04-24'
-VALIDATION_RECORD_COUNT = 153_275
+CLAUDE_CODE_MAX_VERSION = '2.1.121'
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -2912,10 +2916,14 @@ class AgentNameRecord(StrictModel):
 
 
 class LastPromptRecord(StrictModel):
-    """Records the user's last prompt text, always the final record in a session file."""
+    """Records the user's last prompt text.
+
+    Typically the final record in a session file. Claude Code 2.1.120+ also writes a
+    placeholder near session start with `lastPrompt` absent until the first user input.
+    """
 
     type: Literal['last-prompt']
-    lastPrompt: str
+    lastPrompt: str | None = None
     sessionId: str
 
 
@@ -2977,6 +2985,15 @@ class McpInstructionsDeltaAttachment(StrictModel):
     type: Literal['mcp_instructions_delta']
     addedNames: Sequence[str]
     addedBlocks: Sequence[str]
+    removedNames: Sequence[str]
+
+
+class DeferredToolsDeltaAttachment(StrictModel):
+    """Deferred-tool registration changes for the tool-search system (Claude Code 2.1.120+)."""
+
+    type: Literal['deferred_tools_delta']
+    addedNames: Sequence[str]
+    addedLines: Sequence[str]
     removedNames: Sequence[str]
 
 
@@ -3283,6 +3300,7 @@ class AutoModeExitAttachment(StrictModel):
 AttachmentData = Annotated[
     CompanionIntroAttachment
     | McpInstructionsDeltaAttachment
+    | DeferredToolsDeltaAttachment
     | TaskReminderAttachment
     | HookSuccessAttachment
     | HookBlockingErrorAttachment
