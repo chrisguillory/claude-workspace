@@ -2,7 +2,7 @@
 name = "claude-remote-bash"
 version = "0.1.0"
 description = "Cross-machine shell execution for Claude Code via mDNS-discovered daemons"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
     "filelock>=3.20.0",
