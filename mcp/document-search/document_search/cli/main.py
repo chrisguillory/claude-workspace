@@ -40,6 +40,7 @@ from document_search.schemas.vectors import (
     SearchQuery,
     SearchResult,
 )
+from document_search.search_path import resolve_search_path
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +216,14 @@ def info(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[str | None, typer.Option('--path', '-p', help='Scope to path ("**" for global).')] = None,
+    path: Annotated[
+        str | None,
+        typer.Option(
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
+        ),
+    ] = None,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Show collection info.
@@ -239,7 +247,14 @@ def list_docs(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[str | None, typer.Option('--path', '-p', help='Scope to path ("**" for global).')] = None,
+    path: Annotated[
+        str | None,
+        typer.Option(
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
+        ),
+    ] = None,
     file_type: Annotated[str | None, typer.Option('--type', '-t', help='Filter by file type.')] = None,
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max files to return.')] = 50,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -301,7 +316,14 @@ def search(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[str | None, typer.Option('--path', '-p', help='Scope to path ("**" for global).')] = None,
+    path: Annotated[
+        str | None,
+        typer.Option(
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
+        ),
+    ] = None,
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
     search_type: Annotated[
         Literal['hybrid', 'lexical', 'embedding'], typer.Option('--type', '-t', help='Search strategy.')
@@ -382,15 +404,6 @@ def main() -> None:
 # -- Private helpers (used by async implementations below) --
 
 
-def _resolve_path(path: str | None) -> str:
-    """Resolve path argument: '**' for global, None for CWD, else expand."""
-    if path == '**':
-        return '**'
-    if path is None:
-        return str(Path.cwd())
-    return str(Path(path).expanduser().resolve())
-
-
 @dataclass
 class InfraContext:
     qdrant: QdrantClient
@@ -430,7 +443,7 @@ async def _info_async(collection_name: str, path: str | None, format: Literal['t
             typer.secho('Collection not initialized in Qdrant — run index first.', fg=typer.colors.YELLOW, err=True)
             raise typer.Exit(1)
 
-        resolved_path = _resolve_path(path)
+        resolved_path = resolve_search_path(path)
         content = await repository.get_content_stats(resolved_path)
 
         dashboard_port = DashboardStateManager().get_dashboard_port()
@@ -498,7 +511,7 @@ async def _list_async(
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        resolved_path = _resolve_path(path)
+        resolved_path = resolve_search_path(path)
         # list_indexed_files uses None for "no filter", not "**"
         filter_path = None if resolved_path == '**' else resolved_path
 
@@ -534,7 +547,7 @@ async def _clear_async(
 
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
-        resolved_path = _resolve_path(path)
+        resolved_path = resolve_search_path(path)
 
         if resolved_path == '**':
             if clear_cache:
@@ -647,7 +660,7 @@ async def _search_async(
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
 
-            resolved_path = _resolve_path(path)
+            resolved_path = resolve_search_path(path)
             filter_path = None if resolved_path == '**' else resolved_path
             resolved_excludes = [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else None
 
