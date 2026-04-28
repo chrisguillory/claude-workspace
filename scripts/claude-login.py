@@ -121,6 +121,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+import pydantic
 import rich.console
 import rich.panel
 import typer
@@ -151,6 +152,12 @@ class OAuthAccount(StrictModel):
     organization_role: str | None = None
     workspace_role: str | None = None
     account_created_at: str | None = None
+
+    # Claude Code trial / onboarding fields. Unused here but declared so
+    # CC_STRICT_MODEL_EXTRA_FORBID=1 round-trips clean.
+    cc_onboarding_flags: Mapping[str, object] = pydantic.Field(default_factory=dict)
+    claude_code_trial_ends_at: str | None = None
+    claude_code_trial_duration_days: int | None = None
 
 
 class ClaudeAiOAuth(StrictModel):
@@ -348,6 +355,9 @@ _OAUTH_CAMEL_TO_SNAKE: Mapping[str, str] = {
     'organizationRole': 'organization_role',
     'workspaceRole': 'workspace_role',
     'accountCreatedAt': 'account_created_at',
+    'ccOnboardingFlags': 'cc_onboarding_flags',
+    'claudeCodeTrialEndsAt': 'claude_code_trial_ends_at',
+    'claudeCodeTrialDurationDays': 'claude_code_trial_duration_days',
 }
 
 

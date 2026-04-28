@@ -194,7 +194,7 @@ def create_bridge_app(service: BrowserService, lock: asyncio.Lock) -> fastapi.Fa
                     break
 
         total_elapsed = int((time.perf_counter() - t0) * 1000)
-        status = 'completed' if completed == len(request.steps) else 'partial'
+        status: PipelineStatus = 'completed' if completed == len(request.steps) else 'partial'
 
         return PipelineResponse(
             status=status,

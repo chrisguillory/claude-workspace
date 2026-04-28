@@ -77,6 +77,7 @@ class Manifest(OpenModel):
     """CDN manifest.json for a specific version."""
 
     version: CCVersion
+    commit: str | None = None  # added in 2.1.116; absent in 2.1.114 and earlier
     build_date: str = pydantic.Field(alias='buildDate')
     platforms: Mapping[str, PlatformInfo]
 
@@ -163,7 +164,15 @@ def cli_list(
 
 @app.command('fetch')
 @error_boundary
-def cli_fetch(version: str = typer.Argument(..., help='Version number, "latest", or "stable"')) -> None:
+def cli_fetch(
+    version: str = typer.Argument(..., help='Version number, "latest", or "stable"'),
+    activate: bool = typer.Option(
+        False,
+        '--activate',
+        '-a',
+        help='Repoint ~/.local/bin/claude to this version after fetching.',
+    ),
+) -> None:
     """Fetch a version from CDN (with SHA-256 verification)."""
     store = VersionStore()
     cdn = CDNClient()
@@ -175,11 +184,25 @@ def cli_fetch(version: str = typer.Argument(..., help='Version number, "latest",
 
     if store.is_installed(version):
         print(f'Already installed: {store.path_for(version)}')
-        return
+    else:
+        VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
+        path = cdn.download(version, VERSIONS_DIR)
+        print(f'Installed: {path}')
 
-    VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    path = cdn.download(version, VERSIONS_DIR)
-    print(f'Installed: {path}')
+    if activate:
+        target = store.path_for(version)
+        if not target.is_file():
+            print(f'ERROR: target missing or corrupt: {target}', file=sys.stderr)
+            raise SystemExit(1)
+        if SYMLINK_PATH.is_symlink() and SYMLINK_PATH.resolve() == target.resolve():
+            print(f'Already active: {version}')
+            return
+        SYMLINK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SYMLINK_PATH.with_suffix('.new')
+        tmp.unlink(missing_ok=True)
+        tmp.symlink_to(target)
+        tmp.replace(SYMLINK_PATH)  # atomic rename
+        print(f'Active: {version} → {target}')
 
 
 @app.command('clean')

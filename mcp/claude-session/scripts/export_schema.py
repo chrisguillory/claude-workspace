@@ -20,9 +20,7 @@ from typing import Any
 from claude_session.schemas.session import (
     CLAUDE_CODE_MAX_VERSION,
     CLAUDE_CODE_MIN_VERSION,
-    LAST_VALIDATED,
     SCHEMA_VERSION,
-    VALIDATION_RECORD_COUNT,
     SessionRecordAdapter,
 )
 
@@ -56,8 +54,6 @@ def export_schema(
     schema['x-claude-code-compatibility'] = {
         'min': CLAUDE_CODE_MIN_VERSION,
         'max': CLAUDE_CODE_MAX_VERSION,
-        'last_validated': LAST_VALIDATED,
-        'validation_record_count': VALIDATION_RECORD_COUNT,
     }
 
     # Write to file

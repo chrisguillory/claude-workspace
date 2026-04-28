@@ -101,6 +101,24 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   tool results from 2.1.118+ (likely coincident with hooks gaining the
                   `type: "mcp_tool"` invocation path). Extended CLAUDE_CODE_MAX_VERSION to
                   2.1.119.
+- Schema v0.2.27: Added DeferredToolsDeltaAttachment for the 'deferred_tools_delta' attachment
+                  type (Claude Code 2.1.120+) emitted by the tool-search/deferred-tools system
+                  — shape mirrors McpInstructionsDeltaAttachment but with addedLines instead of
+                  addedBlocks (a flat list of registered tool names, one per line). Made
+                  LastPromptRecord.lastPrompt optional (str | None = None): 2.1.120+ also writes
+                  a placeholder last-prompt record near session start where the prompt text is
+                  absent until the first user input. Extended CLAUDE_CODE_MAX_VERSION to 2.1.121.
+- Schema v0.2.28: Modeled message-level cache-miss diagnostics emitted on assistant messages
+                  from Claude Code 2.1.119+ via the `cache-diagnosis-2026-04-07` Anthropic API
+                  beta header: Message.diagnostics: MessageDiagnostics | None, with a
+                  CacheMissReason discriminated union over three observed type variants —
+                  CacheMissReasonPreviousMessageNotFound, CacheMissReasonSystemChanged (carries
+                  cache_missed_input_tokens: int), and CacheMissReasonUnavailable. Added
+                  AssistantRecord.attributionAgent (str | None) introduced 2.1.121+ for sub-agent
+                  record attribution; typed str (matching agentName/teamName precedent) since
+                  values are drawn from the user's agent registry rather than a Claude Code
+                  internal enum. Added LastPromptRecord.leafUuid (str | None) — optional pointer
+                  to the latest branch leaf UUID, parallel to SummaryRecord.leafUuid.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -169,9 +187,7 @@ from claude_session.schemas.types import BaseStrictModel, EmptySequence, ModelId
 __all__ = [
     'CLAUDE_CODE_MAX_VERSION',
     'CLAUDE_CODE_MIN_VERSION',
-    'LAST_VALIDATED',
     'SCHEMA_VERSION',
-    'VALIDATION_RECORD_COUNT',
     'AgentNameRecord',
     'AgentOutputToolInput',
     'AgentProgressData',
@@ -201,6 +217,10 @@ __all__ = [
     'BashToolResult',
     'BridgeStatusSystemRecord',
     'CacheCreation',
+    'CacheMissReason',
+    'CacheMissReasonPreviousMessageNotFound',
+    'CacheMissReasonSystemChanged',
+    'CacheMissReasonUnavailable',
     'ClearThinkingEdit',
     'CommandPermissionsAttachment',
     'CompactBoundarySystemRecord',
@@ -215,6 +235,7 @@ __all__ = [
     'CronListToolInput',
     'CustomTitleRecord',
     'DateChangeAttachment',
+    'DeferredToolsDeltaAttachment',
     'DiagnosticFile',
     'DiagnosticItem',
     'DiagnosticPosition',
@@ -286,6 +307,7 @@ __all__ = [
     'McpResourceContent',
     'Message',
     'MessageContent',
+    'MessageDiagnostics',
     'MicrocompactBoundarySystemRecord',
     'MicrocompactMetadata',
     'MonitorToolInput',
@@ -405,11 +427,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.26'
+SCHEMA_VERSION = '0.2.28'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.119'
-LAST_VALIDATED = '2026-04-24'
-VALIDATION_RECORD_COUNT = 153_275
+CLAUDE_CODE_MAX_VERSION = '2.1.121'
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1227,6 +1247,48 @@ class ContextManagement(StrictModel):
     applied_edits: Sequence[AppliedEdit]  # Can be empty or contain edit records
 
 
+# -- Message Diagnostics (Claude Code 2.1.119+) --------------------------------
+
+
+class CacheMissReasonPreviousMessageNotFound(StrictModel):
+    """Cache miss because the previous message couldn't be located in the cache."""
+
+    type: Literal['previous_message_not_found']
+
+
+class CacheMissReasonSystemChanged(StrictModel):
+    """Cache miss because the system prompt or tool definitions changed.
+
+    Carries the count of input tokens that were not served from cache.
+    """
+
+    type: Literal['system_changed']
+    cache_missed_input_tokens: int
+
+
+class CacheMissReasonUnavailable(StrictModel):
+    """Cache miss because cache lookup was unavailable for this request."""
+
+    type: Literal['unavailable']
+
+
+CacheMissReason = Annotated[
+    CacheMissReasonPreviousMessageNotFound | CacheMissReasonSystemChanged | CacheMissReasonUnavailable,
+    pydantic.Field(discriminator='type'),
+]
+
+
+class MessageDiagnostics(StrictModel):
+    """Diagnostic metadata about request handling (Claude Code 2.1.119+).
+
+    Emitted via the `cache-diagnosis-2026-04-07` Anthropic API beta header.
+    Currently always reports prompt-cache outcome. May expand to other
+    diagnostic categories in future versions.
+    """
+
+    cache_miss_reason: CacheMissReason
+
+
 # -- Message Structure ---------------------------------------------------------
 
 
@@ -1259,6 +1321,10 @@ class Message(StrictModel):
     )
     context_management: ContextManagement | None = pydantic.Field(
         None, description='Context management metadata (Claude Code 2.0.51+)'
+    )
+    diagnostics: MessageDiagnostics | None = pydantic.Field(
+        None,
+        description='Cache-miss diagnostics (Claude Code 2.1.119+); null when cache hit or unavailable',
     )
 
 
@@ -2394,6 +2460,13 @@ class AssistantRecord(BaseRecord):
     apiErrorStatus: int | None = pydantic.Field(
         None, description='HTTP status code for API errors (e.g., 400, 529) (Claude Code 2.1.100+)'
     )
+    attributionAgent: str | None = pydantic.Field(
+        None,
+        description='Agent type attribution for assistant records emitted under a specific agent '
+        '(Claude Code 2.1.121+); references the running agent name (e.g., "unrestricted-worker"). '
+        'Typed str (not Literal) since values come from the user agent registry, matching the '
+        'agentName/teamName precedent.',
+    )
 
 
 # -- Summary Record (does NOT inherit from BaseRecord - different schema) ------
@@ -2912,11 +2985,18 @@ class AgentNameRecord(StrictModel):
 
 
 class LastPromptRecord(StrictModel):
-    """Records the user's last prompt text, always the final record in a session file."""
+    """Records the user's last prompt text.
+
+    Typically the final record in a session file. Claude Code 2.1.120+ also writes a
+    placeholder near session start with `lastPrompt` absent until the first user input.
+    Claude Code 2.1.121+ adds `leafUuid` referencing the latest message UUID in this
+    conversation branch (parallels SummaryRecord.leafUuid).
+    """
 
     type: Literal['last-prompt']
-    lastPrompt: str
+    lastPrompt: str | None = None
     sessionId: str
+    leafUuid: str | None = None
 
 
 # -- Worktree State Record (Claude Code 2.1.81+) ------------------------------
@@ -2977,6 +3057,15 @@ class McpInstructionsDeltaAttachment(StrictModel):
     type: Literal['mcp_instructions_delta']
     addedNames: Sequence[str]
     addedBlocks: Sequence[str]
+    removedNames: Sequence[str]
+
+
+class DeferredToolsDeltaAttachment(StrictModel):
+    """Deferred-tool registration changes for the tool-search system (Claude Code 2.1.120+)."""
+
+    type: Literal['deferred_tools_delta']
+    addedNames: Sequence[str]
+    addedLines: Sequence[str]
     removedNames: Sequence[str]
 
 
@@ -3283,6 +3372,7 @@ class AutoModeExitAttachment(StrictModel):
 AttachmentData = Annotated[
     CompanionIntroAttachment
     | McpInstructionsDeltaAttachment
+    | DeferredToolsDeltaAttachment
     | TaskReminderAttachment
     | HookSuccessAttachment
     | HookBlockingErrorAttachment

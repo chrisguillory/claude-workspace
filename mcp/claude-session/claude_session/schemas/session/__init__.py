@@ -14,10 +14,8 @@ from claude_session.schemas.session.markers import PathField, PathListField, Pat
 from claude_session.schemas.session.models import (
     CLAUDE_CODE_MAX_VERSION,
     CLAUDE_CODE_MIN_VERSION,
-    LAST_VALIDATED,
     # Schema version
     SCHEMA_VERSION,
-    VALIDATION_RECORD_COUNT,
     # Record types
     AgentNameRecord,
     # Tool inputs (alphabetical)
@@ -195,8 +193,6 @@ __all__ = [
     'SCHEMA_VERSION',
     'CLAUDE_CODE_MIN_VERSION',
     'CLAUDE_CODE_MAX_VERSION',
-    'LAST_VALIDATED',
-    'VALIDATION_RECORD_COUNT',
     # Base
     'StrictModel',
     'validated_copy',
