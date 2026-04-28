@@ -56,6 +56,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
+from document_search.search_path import resolve_search_path
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.indexing import IndexingService
@@ -290,11 +291,11 @@ Returns:
 
         logger.info('Using collection: %s (%s)', collection_name, collection.provider)
 
-        # Default to current working directory
-        if path is None:
-            resolved_path = Path.cwd()
-        else:
-            resolved_path = Path(path).expanduser().resolve()
+        # "**" rejected — indexing requires a concrete path
+        resolved_str = resolve_search_path(path)
+        if resolved_str == '**':
+            raise ValueError('index_documents requires a concrete path; "**" is not supported.')
+        resolved_path = Path(resolved_str)
 
         # Ensure Qdrant collection exists with correct dimensions
         repository = state.get_repository(collection_name)
@@ -426,15 +427,14 @@ Returns:
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 200)
 
-        # Resolve paths (defaults to CWD, "**" means no filter)
-        if path == '**' or (not isinstance(path, str) and path is not None and '**' in path):
-            resolved_paths: Sequence[str] | None = None
-        elif path is None:
-            resolved_paths = [str(Path.cwd())]
-        elif isinstance(path, str):
-            resolved_paths = [str(Path(path).expanduser().resolve())]
+        # Resolve via shared validator. "**" anywhere collapses to no filter.
+        resolved_paths: Sequence[str] | None
+        if path is None or isinstance(path, str):
+            resolved = resolve_search_path(path)
+            resolved_paths = None if resolved == '**' else [resolved]
         else:
-            resolved_paths = [str(Path(p).expanduser().resolve()) for p in path]
+            resolved_list = [resolve_search_path(p) for p in path]
+            resolved_paths = None if '**' in resolved_list else resolved_list
 
         resolved_excludes = [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else None
 
@@ -509,16 +509,11 @@ Returns:
 
         logger.info('Clearing from collection: %s (%s)', collection_name, collection.provider)
 
-        # Resolve path (defaults to CWD)
-        if path == '**':
-            resolved_path = '**'
+        resolved_path = resolve_search_path(path)
+        if resolved_path == '**':
             logger.info('Clearing entire collection')
-        elif path:
-            resolved_path = str(Path(path).expanduser().resolve())
-            logger.info('Clearing documents: %s', resolved_path)
         else:
-            resolved_path = str(Path.cwd())
-            logger.info('Clearing documents under: %s', resolved_path)
+            logger.info('Clearing documents: %s', resolved_path)
 
         if clear_cache:
             logger.info('Clearing embedding cache via reverse index')
@@ -570,13 +565,8 @@ Returns:
 
         logger.debug('Listing documents in collection: %s', collection_name)
 
-        # Resolve path (defaults to CWD, "**" for global)
-        if path == '**':
-            resolved_path = None
-        elif path is None:
-            resolved_path = str(Path.cwd())
-        else:
-            resolved_path = str(Path(path).expanduser().resolve())
+        resolved = resolve_search_path(path)
+        resolved_path: str | None = None if resolved == '**' else resolved
 
         files = await repository.list_indexed_files(
             path_prefix=resolved_path,
@@ -624,15 +614,10 @@ Returns:
 
         logger.debug('Getting info for collection: %s', collection_name)
 
-        # Resolve path (defaults to CWD, "**" for global)
-        if path == '**':
-            resolved_path: str | None = '**'
+        resolved_path = resolve_search_path(path)
+        if resolved_path == '**':
             logger.debug('Getting global collection info')
-        elif path is None:
-            resolved_path = str(Path.cwd())
-            logger.debug('Getting info for: %s', resolved_path)
         else:
-            resolved_path = str(Path(path).expanduser().resolve())
             logger.debug('Getting info for: %s', resolved_path)
 
         # Build embedding info from collection
