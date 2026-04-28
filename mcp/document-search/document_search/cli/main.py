@@ -219,7 +219,9 @@ def info(
     path: Annotated[
         str | None,
         typer.Option(
-            '--path', '-p', help='Path scope (must exist on disk). Use "**" alone for global; globs are not supported.'
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
     ] = None,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -248,7 +250,9 @@ def list_docs(
     path: Annotated[
         str | None,
         typer.Option(
-            '--path', '-p', help='Path scope (must exist on disk). Use "**" alone for global; globs are not supported.'
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
     ] = None,
     file_type: Annotated[str | None, typer.Option('--type', '-t', help='Filter by file type.')] = None,
@@ -315,7 +319,9 @@ def search(
     path: Annotated[
         str | None,
         typer.Option(
-            '--path', '-p', help='Path scope (must exist on disk). Use "**" alone for global; globs are not supported.'
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
     ] = None,
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
