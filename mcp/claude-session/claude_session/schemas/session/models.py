@@ -119,6 +119,15 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   values are drawn from the user's agent registry rather than a Claude Code
                   internal enum. Added LastPromptRecord.leafUuid (str | None) — optional pointer
                   to the latest branch leaf UUID, parallel to SummaryRecord.leafUuid.
+- Schema v0.2.29: Added AiTitleRecord for the `ai-title` record type written by Claude Code
+                  2.1.122+ when generating session titles for the `/resume` UI (shape: type,
+                  aiTitle, sessionId). Split the CacheMissReason discriminated union to cover
+                  two new variants observed in the wild: CacheMissReasonMessagesChanged and
+                  CacheMissReasonToolsChanged (both carry cache_missed_input_tokens: int) —
+                  the prior CacheMissReasonSystemChanged is now narrowly the system-prompt
+                  case. Added NestedMemoryContent.rawContent (str | None) capturing the
+                  unprocessed CLAUDE.md text (front matter + body) alongside the parsed body.
+                  Extended CLAUDE_CODE_MAX_VERSION to 2.1.123.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -194,6 +203,7 @@ __all__ = [
     'AgentState',
     'AgentTeammateSpawnedResult',
     'AgentsRetrievalResult',
+    'AiTitleRecord',
     'ApiError',
     'ApiErrorDetail',
     'ApiErrorResponse',
@@ -218,8 +228,10 @@ __all__ = [
     'BridgeStatusSystemRecord',
     'CacheCreation',
     'CacheMissReason',
+    'CacheMissReasonMessagesChanged',
     'CacheMissReasonPreviousMessageNotFound',
     'CacheMissReasonSystemChanged',
+    'CacheMissReasonToolsChanged',
     'CacheMissReasonUnavailable',
     'ClearThinkingEdit',
     'CommandPermissionsAttachment',
@@ -427,9 +439,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.28'
+SCHEMA_VERSION = '0.2.29'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.121'
+CLAUDE_CODE_MAX_VERSION = '2.1.123'
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1250,6 +1262,16 @@ class ContextManagement(StrictModel):
 # -- Message Diagnostics (Claude Code 2.1.119+) --------------------------------
 
 
+class CacheMissReasonMessagesChanged(StrictModel):
+    """Cache miss because messages earlier in the conversation changed.
+
+    Carries the count of input tokens that were not served from cache.
+    """
+
+    type: Literal['messages_changed']
+    cache_missed_input_tokens: int
+
+
 class CacheMissReasonPreviousMessageNotFound(StrictModel):
     """Cache miss because the previous message couldn't be located in the cache."""
 
@@ -1257,12 +1279,22 @@ class CacheMissReasonPreviousMessageNotFound(StrictModel):
 
 
 class CacheMissReasonSystemChanged(StrictModel):
-    """Cache miss because the system prompt or tool definitions changed.
+    """Cache miss because the system prompt changed.
 
     Carries the count of input tokens that were not served from cache.
     """
 
     type: Literal['system_changed']
+    cache_missed_input_tokens: int
+
+
+class CacheMissReasonToolsChanged(StrictModel):
+    """Cache miss because tool definitions changed.
+
+    Carries the count of input tokens that were not served from cache.
+    """
+
+    type: Literal['tools_changed']
     cache_missed_input_tokens: int
 
 
@@ -1273,7 +1305,11 @@ class CacheMissReasonUnavailable(StrictModel):
 
 
 CacheMissReason = Annotated[
-    CacheMissReasonPreviousMessageNotFound | CacheMissReasonSystemChanged | CacheMissReasonUnavailable,
+    CacheMissReasonPreviousMessageNotFound
+    | CacheMissReasonSystemChanged
+    | CacheMissReasonMessagesChanged
+    | CacheMissReasonToolsChanged
+    | CacheMissReasonUnavailable,
     pydantic.Field(discriminator='type'),
 ]
 
@@ -2981,6 +3017,17 @@ class AgentNameRecord(StrictModel):
     sessionId: str
 
 
+# -- AI Title Record (Claude Code 2.1.122+) ------------------------------------
+
+
+class AiTitleRecord(StrictModel):
+    """AI-generated session title shown in the `/resume` UI."""
+
+    type: Literal['ai-title']
+    aiTitle: str
+    sessionId: str
+
+
 # -- Last Prompt Record (Claude Code 2.1.69+) ----------------------------------
 
 
@@ -3200,6 +3247,7 @@ class NestedMemoryContent(StrictModel):
     type: str  # e.g., "Project"
     content: str
     contentDiffersFromDisk: bool | None = None
+    rawContent: str | None = None
 
 
 class NestedMemoryAttachment(StrictModel):
@@ -3448,6 +3496,7 @@ SessionRecord = Annotated[
     | PrLinkRecord
     | SavedHookContextRecord
     | AgentNameRecord
+    | AiTitleRecord
     | LastPromptRecord
     | WorktreeStateRecord
     | PermissionModeRecord
@@ -3528,7 +3577,7 @@ def validated_copy[T: pydantic.BaseModel](
 
 # -- Fast Dispatch Validation --------------------------------------------------
 
-# Per-type TypeAdapters bypass the 26-member left-to-right union scan.
+# Per-type TypeAdapters bypass the SessionRecord left-to-right union scan.
 # When adding a new record type to SessionRecord, also add a branch below.
 _user_adapter = pydantic.TypeAdapter(UserRecord)
 _assistant_adapter = pydantic.TypeAdapter(AssistantRecord)
@@ -3544,6 +3593,7 @@ _progress_adapter = pydantic.TypeAdapter(ProgressRecord)
 _pr_link_adapter = pydantic.TypeAdapter(PrLinkRecord)
 _saved_hook_context_adapter = pydantic.TypeAdapter(SavedHookContextRecord)
 _agent_name_adapter = pydantic.TypeAdapter(AgentNameRecord)
+_ai_title_adapter = pydantic.TypeAdapter(AiTitleRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
 _worktree_state_adapter = pydantic.TypeAdapter(WorktreeStateRecord)
 _permission_mode_adapter = pydantic.TypeAdapter(PermissionModeRecord)
@@ -3556,7 +3606,7 @@ def validate_session_record(
     """Validate a session record dict using type-dispatch for performance.
 
     Dispatches to per-type TypeAdapters based on the 'type' field, avoiding
-    the full 26-member left-to-right union scan. Branches are ordered by
+    the full SessionRecord left-to-right union scan. Branches are ordered by
     frequency (assistant 33%, queue-operation 27%, user 22%, progress 17%).
 
     For 'system' records, uses SystemSubtypeRecord (discriminator='subtype')
@@ -3601,6 +3651,8 @@ def validate_session_record(
         return _saved_hook_context_adapter.validate_python(data)
     elif record_type == 'agent-name':
         return _agent_name_adapter.validate_python(data)
+    elif record_type == 'ai-title':
+        return _ai_title_adapter.validate_python(data)
     elif record_type == 'last-prompt':
         return _last_prompt_adapter.validate_python(data)
     elif record_type == 'worktree-state':
