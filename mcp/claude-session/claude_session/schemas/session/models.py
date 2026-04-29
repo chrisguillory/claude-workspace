@@ -128,6 +128,8 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   case. Added NestedMemoryContent.rawContent (str | None) capturing the
                   unprocessed CLAUDE.md text (front matter + body) alongside the parsed body.
                   Extended CLAUDE_CODE_MAX_VERSION to 2.1.123.
+- Schema v0.2.30: Added AssistantRecord.attributionSkill (str | None) for assistant records
+                  emitted while a skill is active; mirrors attributionAgent.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -439,7 +441,7 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.29'
+SCHEMA_VERSION = '0.2.30'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
 CLAUDE_CODE_MAX_VERSION = '2.1.123'
 
@@ -2502,6 +2504,10 @@ class AssistantRecord(BaseRecord):
         '(Claude Code 2.1.121+); references the running agent name (e.g., "unrestricted-worker"). '
         'Typed str (not Literal) since values come from the user agent registry, matching the '
         'agentName/teamName precedent.',
+    )
+    attributionSkill: str | None = pydantic.Field(
+        None,
+        description='Active skill name (e.g., "recover-session"); mirrors attributionAgent.',
     )
 
 
