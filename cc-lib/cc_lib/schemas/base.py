@@ -8,6 +8,12 @@ Terminology follows JSON Schema: "closed" rejects additional properties,
 - OpenModel: external data (Chrome, CDP). extra='allow' by default.
 - SubsetModel: subset of external data. extra='ignore' always.
 - CamelModel: StrictModel with camelCase JSON serialization.
+
+Literal escape hatch: set ``CC_LITERAL_RELAX=1`` to globally relax
+``Literal[...]`` validation on all of the model bases above — accept any
+string, log novel values. Use as an emergency lever when upstream adds an
+enum value and code needs to keep running before the literal set can be
+graduated.
 """
 
 from __future__ import annotations
@@ -23,8 +29,11 @@ __all__ = [
 from typing import Any
 
 import pydantic
+from pydantic import GetCoreSchemaHandler
 from pydantic.alias_generators import to_camel
+from pydantic_core import CoreSchema
 
+from cc_lib.schemas._literal_relax import maybe_relax_literals
 from cc_lib.settings_env import get_cc_env_var
 
 
@@ -45,6 +54,10 @@ class ClosedModel(pydantic.BaseModel):
         validate_by_name=True,
         serialize_by_alias=True,
     )
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+        return maybe_relax_literals(handler(source_type))
 
 
 class StrictModel(pydantic.BaseModel):
@@ -68,6 +81,10 @@ class StrictModel(pydantic.BaseModel):
         validate_by_name=True,
         serialize_by_alias=True,
     )
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+        return maybe_relax_literals(handler(source_type))
 
 
 class CamelModel(StrictModel):
@@ -129,6 +146,10 @@ class OpenModel(pydantic.BaseModel):
         serialize_by_alias=True,
     )
 
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+        return maybe_relax_literals(handler(source_type))
+
 
 class SubsetModel(pydantic.BaseModel):
     """Subset model for reading specific fields from external data.
@@ -152,3 +173,7 @@ class SubsetModel(pydantic.BaseModel):
         validate_by_name=True,
         serialize_by_alias=True,
     )
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+        return maybe_relax_literals(handler(source_type))
