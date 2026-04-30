@@ -30,17 +30,6 @@ Session corruption falls into two categories:
     Fixes truncate the corrupt tail back to the last clean exchange.
 
 Patches:
-    consecutive-messages  User interrupt + late Agent task notifications
-                        create message structure corruption. API rejects
-                        with 400; each retry appends a synthetic error
-                        record, creating a positive feedback loop. Session
-                        is completely unusable. Fix: truncate from first
-                        non-transient synthetic record back to last clean
-                        exchange.
-                        https://github.com/anthropics/claude-code/issues/6836
-                        https://github.com/anthropics/claude-code/issues/3003
-                        https://github.com/anthropics/claude-code/issues/39830
-
     duplicate-uuid      saved_hook_context entries share a UUID derived from
                         toolUseID "SessionStart". Creates cycles or dangling
                         refs in the UUID index. Session shows empty on
@@ -66,8 +55,11 @@ Patches:
                         record is appended, creating a growing error tail.
                         Fix: redact the oversized image block in place
                         (replace with a text placeholder preserving the
-                        tool_result structure) AND truncate the synthetic
-                        error tail back to the last clean exchange.
+                        tool_result structure) AND drop the dim-error
+                        synthetic record and everything after it. The
+                        pending user message that triggered the rejection
+                        is preserved, since after redaction the same
+                        request will succeed on replay.
                         https://github.com/anthropics/claude-code/issues/34025
                         https://github.com/anthropics/claude-code/issues/16173
                         https://github.com/anthropics/claude-code/issues/13480
@@ -125,7 +117,6 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-import subprocess
 import sys
 import traceback
 from collections.abc import Callable, Mapping, Sequence, Set
@@ -135,7 +126,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
+import psutil
 import typer
+from cc_lib import session_tracker
 from cc_lib.cli import add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import CCVersion
@@ -188,7 +181,7 @@ def scan(
 
     print(f'Scanning {len(sessions)} session files...\n')
 
-    categories: dict[str, list[tuple[SessionFile, PatchPlan]]] = {
+    categories: dict[str, list[tuple[SessionFile, Sequence[SessionScanResult]]]] = {
         'healthy': [],
         'fixable': [],
         'unfixable': [],
@@ -197,22 +190,20 @@ def scan(
 
     for session in sessions:
         try:
-            analyzer = SessionAnalyzer(session.read_lines())
-            results = analyzer.scan(sidechain_resolver=session.sidechain_resolver())
-            plan = analyzer.build_patch_plan(results)
+            analyzer = SessionAnalyzer(session.read_lines(), sidechain_resolver=session.sidechain_resolver())
+            results = analyzer.scan()
 
             detected = [r for r in results if r.status == 'detected']
             unfixable = [r for r in results if r.status == 'unfixable']
 
-            if detected and plan.fixable:
-                categories['fixable'].append((session, plan))
+            if detected and not unfixable:
+                categories['fixable'].append((session, results))
             elif detected or unfixable:
-                categories['unfixable'].append((session, plan))
+                categories['unfixable'].append((session, results))
             else:
-                categories['healthy'].append((session, plan))
+                categories['healthy'].append((session, results))
         except json.JSONDecodeError as e:
-            plan = PatchPlan(results=(), fixable=False, total_affected_lines=0, rewire_map={}, truncate_to=None)
-            categories['error'].append((session, plan))
+            categories['error'].append((session, ()))
             if not json_output:
                 print(f'  [ERROR] {session.session_id}: {e}', file=sys.stderr)
 
@@ -249,24 +240,21 @@ def check(
     else:
         raise SessionPatchError('Provide a session ID or use --file')
 
-    analyzer = SessionAnalyzer(session.read_lines())
-    results = analyzer.scan(sidechain_resolver=session.sidechain_resolver())
-    plan = analyzer.build_patch_plan(results)
+    analyzer = SessionAnalyzer(session.read_lines(), sidechain_resolver=session.sidechain_resolver())
+    results = analyzer.scan()
 
     if json_output:
-        _print_check_json(results, plan, session)
+        _print_check_json(results, session)
     else:
-        _print_check(results, plan, session)
+        _print_check(results, session)
 
     detected = [r for r in results if r.status == 'detected']
     unfixable = [r for r in results if r.status == 'unfixable']
 
-    if detected and plan.fixable:
-        raise FixableFound(f'{len(detected)} fixable patch(es)')
-    if detected and not plan.fixable:
-        raise UnfixableFound(f'{len(detected)} detected but combined fix fails simulation')
     if unfixable:
         raise UnfixableFound(f'{len(unfixable)} unfixable issue(s)')
+    if detected:
+        raise FixableFound(f'{len(detected)} fixable patch(es)')
 
 
 @app.command()
@@ -295,45 +283,44 @@ def fix(
     if session.is_active():
         raise ActiveSessionError(session.session_id)
 
-    analyzer = SessionAnalyzer(session.read_lines())
-    results = analyzer.scan(sidechain_resolver=session.sidechain_resolver())
-    plan = analyzer.build_patch_plan(results)
+    analyzer = SessionAnalyzer(session.read_lines(), sidechain_resolver=session.sidechain_resolver())
+    preview_results = analyzer.scan()
+    detected = [r for r in preview_results if r.status == 'detected']
+    pre_unfixable = [r for r in preview_results if r.status == 'unfixable']
 
-    detected = [r for r in results if r.status == 'detected']
     if not detected:
-        unfixable = [r for r in results if r.status == 'unfixable']
-        if unfixable:
+        if pre_unfixable:
             print(f'Session {session.session_id} has unfixable issues:')
-            for r in unfixable:
+            for r in pre_unfixable:
                 print(f'  {r.patch.name}: {r.details}')
-            raise UnfixableFound(f'{len(unfixable)} unfixable issue(s)')
+            raise UnfixableFound(f'{len(pre_unfixable)} unfixable issue(s)')
         print(f'Session {session.session_id} is healthy, nothing to fix.')
         return
 
     if dry_run:
-        _print_check(results, plan, session)
+        _print_check(preview_results, session)
         print('\n(dry run — no changes made)')
         raise FixableFound(f'{len(detected)} fixable patch(es)')
 
     backup_mgr = BackupManager()
-    backup_path = backup_mgr.create(session, plan)
+    backup_path = backup_mgr.create(session)
     print(f'Backup: {backup_path}')
 
-    _apply_patch(session, plan)
+    runner = PatchRunner(session)
+    try:
+        run_result = runner.run()
+    except Exception:
+        backup_mgr.rollback(session)
+        raise
 
-    # Verify: our applied patches must now be clean, and no previously-clean patch
-    # should have regressed. Pre-existing unfixable issues in OTHER patches are
-    # not our responsibility and don't trigger rollback.
-    verify_analyzer = SessionAnalyzer(session.read_lines())
-    verify_results = verify_analyzer.scan()
-    applied = {r.patch.name for r in detected}
-    before_status = {r.patch.name: r.status for r in results}
-    verify_bad = [
-        r
-        for r in verify_results
-        if r.status in ('detected', 'unfixable')
-        and (r.patch.name in applied or before_status.get(r.patch.name) == 'clean')
-    ]
+    # Verify: nothing detected or unfixable on the post-run file. Anything that
+    # remains is either a regression or an unfixable that the runner couldn't
+    # clear; rollback in either case.
+    verify_results = SessionAnalyzer(
+        session.read_lines(),
+        sidechain_resolver=session.sidechain_resolver(),
+    ).scan()
+    verify_bad = [r for r in verify_results if r.status in ('detected', 'unfixable')]
 
     if verify_bad:
         print('Verification FAILED — restoring from backup', file=sys.stderr)
@@ -342,8 +329,8 @@ def fix(
         backup_mgr.rollback(session)
         raise SystemExit(EXIT_ERROR)
 
-    patch_names = ', '.join(r.patch.name for r in detected)
-    print(f'Fixed {session.session_id}: {patch_names}')
+    backup_mgr.record_applied(session, run_result.applied, run_result.iterations)
+    print(f'Fixed {session.session_id}: {", ".join(run_result.applied)}')
 
 
 @app.command()
@@ -351,11 +338,20 @@ def fix(
 def restore(
     session_id: str | None = typer.Argument(None, help='Session ID or prefix'),
     list_: bool = typer.Option(False, '--list', '-l', help='List available backups'),
+    force: bool = typer.Option(
+        False,
+        '--force',
+        '-f',
+        help='Discard appended content; required when the live session has been modified since backup',
+    ),
 ) -> None:
     """Restore a session from backup.
 
     \b
     Searches both patcher-backups and legacy chain-backups directories.
+    Refuses to overwrite a session with a live Claude process attached, or
+    one that has been appended to since backup (use --force to override the
+    latter).
     """
     backup_mgr = BackupManager()
 
@@ -375,7 +371,7 @@ def restore(
     if not session_id:
         raise SessionPatchError('Provide a session ID or use --list')
 
-    original_path = backup_mgr.restore(session_id)
+    original_path = backup_mgr.restore(session_id, force=force)
     print(f'Restored {session_id}')
     print(f'  -> {original_path}')
 
@@ -394,25 +390,24 @@ class PatchKind(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class SessionPatchDef:
-    """A known session patch with detection and fix logic."""
+    """A known session patch with detection and fix logic.
+
+    `deps` declares which other patches must complete before this one runs.
+    The runner topologically orders patches by deps and uses alphabetical
+    name as deterministic tiebreak among equally-runnable patches.
+    """
 
     name: str
     description: str
     kind: PatchKind
+    detector: Callable[[SessionAnalyzer, SessionPatchDef], SessionScanResult]
+    deps: Sequence[str] = ()
     min_version: CCVersion | None = None
     max_version: CCVersion | None = None
 
 
 class FixDataType:
     """Namespace for per-patch fix data shapes."""
-
-    @dataclass(frozen=True, slots=True)
-    class Truncate:
-        """Patches that truncate the session tail."""
-
-        truncate_to: int
-        error_loop_start: int | None
-        records_to_remove: int
 
     @dataclass(frozen=True, slots=True)
     class Rewire:
@@ -452,9 +447,7 @@ class FixDataType:
         records_to_remove: int
 
 
-type FixData = (
-    FixDataType.Truncate | FixDataType.DuplicateUuid | FixDataType.OrphanSidechain | FixDataType.RedactImageAndTruncate
-)
+type FixData = FixDataType.DuplicateUuid | FixDataType.OrphanSidechain | FixDataType.RedactImageAndTruncate
 
 
 @dataclass(frozen=True, slots=True)
@@ -466,63 +459,6 @@ class SessionScanResult:
     details: str
     affected_lines: Sequence[int] = ()
     fix_data: FixData | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class PatchPlan:
-    """Composed plan for which patches to apply and how.
-
-    Session patches interact (duplicate-uuid must run before
-    orphan-sidechain; rewires before truncation), so we need
-    a composition step.
-    """
-
-    results: Sequence[SessionScanResult]
-    fixable: bool
-    total_affected_lines: int
-    rewire_map: Mapping[int, str]  # line -> new parentUuid (union from fix_data)
-    truncate_to: int | None  # line to truncate to (from fix_data)
-    image_redactions: Sequence[FixDataType.ImageRedaction] = ()  # image blocks to replace in place
-
-
-# -- Patch registry (alphabetical) --------------------------------------------
-
-PATCHES: Sequence[SessionPatchDef] = (
-    SessionPatchDef(
-        name='consecutive-messages',
-        description='Message structure corruption from interrupts/Agent notifications causes API 400 error loop. Session completely unusable.',
-        kind=PatchKind.FIX,
-    ),
-    SessionPatchDef(
-        name='duplicate-uuid',
-        description='saved_hook_context entries share UUIDs, creating cycles in UUID index. Session shows empty on resume.',
-        kind=PatchKind.FIX,
-        min_version='2.1.27',
-        max_version='2.1.27',
-    ),
-    SessionPatchDef(
-        name='orphan-sidechain',
-        description='SubAgent/hook progress entries create parentUuid orphans pointing into sidechain files. Session shows empty on resume.',
-        kind=PatchKind.FIX,
-        min_version='2.1.24',
-    ),
-    SessionPatchDef(
-        name='oversized-image',
-        description=(
-            'An image >2000px triggers an API 400 loop on sessions with >20 images. '
-            'Fix: redact the image in place + truncate the synthetic error tail.'
-        ),
-        kind=PatchKind.FIX,
-    ),
-    SessionPatchDef(
-        name='stale-parent',
-        description='Resume latches onto old compaction segment, skipping newer compact_boundary records. Session works but missing recent context. Detect-only.',
-        kind=PatchKind.FIX,
-        min_version='2.1.85',
-    ),
-)
-
-PATCHES_BY_NAME: Mapping[str, SessionPatchDef] = {p.name: p for p in PATCHES}
 
 
 # -- Session analyzer ----------------------------------------------------------
@@ -538,11 +474,17 @@ class SessionAnalyzer:
     Pure — no I/O. File reading is the caller's responsibility.
     """
 
-    def __init__(self, lines: Sequence[str]) -> None:
+    def __init__(
+        self,
+        lines: Sequence[str],
+        *,
+        sidechain_resolver: SidechainResolver | None = None,
+    ) -> None:
         self._records: list[dict[str, Any] | None] = []
         self._uuid_index: dict[str, int] = {}
         self._uuid_counts: dict[str, int] = {}
         self._duplicate_uuids: dict[str, int] = {}
+        self._sidechain_resolver = sidechain_resolver
         self._build_index(lines)
 
     @property
@@ -573,115 +515,12 @@ class SessionAnalyzer:
         self,
         *,
         patches: Sequence[SessionPatchDef] | None = None,
-        sidechain_resolver: SidechainResolver | None = None,
     ) -> Sequence[SessionScanResult]:
         """Run all detectors and return results."""
         if patches is None:
             patches = PATCHES
 
-        results: list[SessionScanResult] = []
-        for patch in sorted(patches, key=lambda p: _DETECTOR_ORDER.get(p.name, 99)):
-            detector = _DETECTORS.get(patch.name)
-            if detector is None:
-                results.append(
-                    SessionScanResult(
-                        patch=patch,
-                        status='clean',
-                        details=f'No detector for {patch.name}',
-                    )
-                )
-                continue
-
-            if patch.name == 'orphan-sidechain':
-                results.append(detector(self, patch, sidechain_resolver=sidechain_resolver))
-            else:
-                results.append(detector(self, patch))
-
-        return results
-
-    def build_patch_plan(self, results: Sequence[SessionScanResult]) -> PatchPlan:
-        """Compose scan results into a unified patch application plan.
-
-        Merges rewire maps from all detected patches, then runs a holistic
-        chain simulation to verify the combined fix works. Individual detectors
-        do not simulate — they report what they found and their rewire targets.
-        The holistic simulation here sees all rewires together, catching
-        interactions that per-detector simulation would miss.
-        """
-        merged_rewire: dict[int, str] = {}
-        truncate_to: int | None = None
-        image_redactions: list[FixDataType.ImageRedaction] = []
-        total_affected = 0
-        has_detected = False
-
-        for r in results:
-            total_affected += len(r.affected_lines)
-            if r.status != 'detected' or r.fix_data is None:
-                continue
-            has_detected = True
-            match r.fix_data:
-                case FixDataType.Rewire(rewire_map=m):
-                    # Matches DuplicateUuid and OrphanSidechain subclasses too.
-                    merged_rewire.update(m)
-                case FixDataType.Truncate(truncate_to=t):
-                    if truncate_to is None or t < truncate_to:
-                        truncate_to = t
-                case FixDataType.RedactImageAndTruncate(redactions=reds, truncate_to=t):
-                    image_redactions.extend(reds)
-                    if t is not None and (truncate_to is None or t < truncate_to):
-                        truncate_to = t
-
-        # Holistic simulation: verify the combined rewire map produces a clean chain
-        fixable = has_detected
-        if has_detected and merged_rewire and self.tail_uuid:
-            fixable = self._simulate_rewire(merged_rewire)
-
-        return PatchPlan(
-            results=results,
-            fixable=fixable,
-            total_affected_lines=total_affected,
-            rewire_map=merged_rewire,
-            truncate_to=truncate_to,
-            image_redactions=tuple(image_redactions),
-        )
-
-    def _simulate_rewire(self, rewire_map: Mapping[int, str]) -> bool:
-        """Simulate applying a rewire map and walk the chain to verify integrity.
-
-        Returns True if the chain reaches root cleanly after rewiring.
-
-        Note: walks from the current tail_uuid, which is the pre-truncation
-        tail. If a plan includes both rewires and truncation, the post-
-        truncation tail may differ. Not triggerable with current detectors
-        (rewire and truncation come from different patches). The fix command's
-        verify-then-rollback loop is the authoritative correctness gate.
-        """
-        sim_parents: dict[str, str | None] = {}
-        for rec in self._records:
-            if rec is None:
-                continue
-            uuid = rec.get('uuid')
-            if uuid and uuid in self._uuid_index:
-                sim_parents[uuid] = rec.get('parentUuid') or None
-
-        for line_num, new_parent in rewire_map.items():
-            rec = self._records[line_num - 1]
-            if rec is not None:
-                uuid = rec.get('uuid')
-                if uuid:
-                    sim_parents[uuid] = new_parent
-
-        current: str | None = self.tail_uuid
-        visited: set[str] = set()
-        while current:
-            if current in visited:
-                return False  # cycle
-            visited.add(current)
-            if current in self._uuid_index:
-                current = sim_parents.get(current)
-            else:
-                return False  # broken link
-        return True
+        return [patch.detector(self, patch) for patch in sorted(patches, key=lambda p: p.name)]
 
     def walk_chain(self, start_uuid: str) -> tuple[Set[str], str | None, int]:
         """Walk parentUuid chain from start.
@@ -726,8 +565,14 @@ class SessionAnalyzer:
         return None
 
     def _build_index(self, lines: Sequence[str]) -> None:
-        """Parse JSONL lines and build UUID index."""
-        for i, line in enumerate(lines):
+        """Parse JSONL lines and build the UUID index, excluding duplicates.
+
+        Records with duplicate UUIDs are kept in `_records` (data preserved)
+        but excluded from `_uuid_index`, so `find_rewire_target` and
+        `walk_chain` cannot recommend or traverse ambiguous UUIDs. Duplicate
+        metadata lives in `_duplicate_uuids` for the duplicate-uuid detector.
+        """
+        for line in lines:
             if not line.strip():
                 self._records.append(None)
                 continue
@@ -736,129 +581,21 @@ class SessionAnalyzer:
             uuid = rec.get('uuid')
             if uuid:
                 self._uuid_counts[uuid] = self._uuid_counts.get(uuid, 0) + 1
-                self._uuid_index[uuid] = i
 
         self._duplicate_uuids = {u: c for u, c in self._uuid_counts.items() if c > 1}
+
+        for i, rec in enumerate(self._records):
+            if rec is None:
+                continue
+            uuid = rec.get('uuid')
+            if uuid and uuid not in self._duplicate_uuids:
+                self._uuid_index[uuid] = i
 
 
 # -- Detector functions --------------------------------------------------------
 # Each detector takes (analyzer, patch, **kwargs) and returns SessionScanResult.
-# Execution order is controlled by _DETECTOR_ORDER, not definition order.
-
-
-def _detect_consecutive_messages(
-    analyzer: SessionAnalyzer,
-    patch: SessionPatchDef,
-) -> SessionScanResult:
-    """Detect message structure corruption via synthetic record markers.
-
-    Any assistant record with model='<synthetic>' except those matching
-    BENIGN_SYNTHETIC_PATTERNS (below) indicates corruption — interrupted
-    responses, error loops, or forced stops that leave invalid message
-    sequences in the history. The API validates the entire history on each
-    request, so even old corruption zones cause 400 rejections on resume.
-
-    Finds the FIRST non-benign synthetic record and walks backwards to the
-    last pure tool_result user record (a clean mid-exchange state with no
-    interrupt text mixed in).
-
-    Does NOT flag consecutive type=user JSONL records, which are normal
-    for parallel tool results, user interrupts, and Agent task notifications.
-    """
-    # Phase 1: Find all non-transient synthetic records.
-    # Synthetic records (model='<synthetic>') are emitted by the harness for
-    # multiple reasons; only some indicate real protocol corruption. Patterns
-    # below are benign no-ops or transient errors the session recovers from
-    # without leaving the message history in a broken state. Treating them as
-    # corruption causes catastrophic over-truncation: a single benign
-    # 'No response requested.' marker mid-session would cause the detector to
-    # walk back from there and truncate everything after, deleting thousands
-    # of valid records.
-    BENIGN_SYNTHETIC_PATTERNS = (
-        'No response requested.',  # Marker: model returned no text (e.g. for system reminders)
-        'API Error: 500',  # Transient server error
-        'API Error: Server is temporarily limiting requests',  # Rate limit, recovers on retry
-        "You've hit your limit",  # Hourly/daily cap, recovers when it resets
-        'Prompt is too long',  # Auto-recovers via /compact
-    )
-    synthetic_lines: list[int] = []
-    for i, rec in enumerate(analyzer._records):
-        if rec is None:
-            continue
-        if rec.get('type') != 'assistant':
-            continue
-        msg = rec.get('message', {})
-        if msg.get('model') != '<synthetic>':
-            continue
-        content = msg.get('content', [])
-        is_benign = False
-        for block in content if isinstance(content, list) else []:
-            if not isinstance(block, dict):
-                continue
-            text = block.get('text', '')
-            if any(pattern in text for pattern in BENIGN_SYNTHETIC_PATTERNS):
-                is_benign = True
-                break
-        if not is_benign:
-            synthetic_lines.append(i + 1)
-
-    if not synthetic_lines:
-        return SessionScanResult(patch=patch, status='clean', details='No synthetic corruption markers')
-
-    first_synthetic_idx = synthetic_lines[0] - 1  # 0-based
-
-    # Phase 2: Walk backwards from the first error to find last clean record.
-    # Skip past synthetic records and any records between the last real
-    # assistant response and the error loop (interrupts, task notifications,
-    # metadata). The last clean record is the last tool_result or the last
-    # non-synthetic assistant response before the cascade.
-    truncate_idx = first_synthetic_idx - 1  # 0-based, start one before the error
-    while truncate_idx >= 0:
-        rec = analyzer._records[truncate_idx]
-        if rec is None:
-            truncate_idx -= 1
-            continue
-        rec_type = rec.get('type')
-        # Stop at a tool_result (last part of a clean exchange)
-        if rec_type == 'user':
-            msg = rec.get('message', {})
-            content = msg.get('content', [])
-            if isinstance(content, list):
-                has_tool_result = any(isinstance(b, dict) and b.get('type') == 'tool_result' for b in content)
-                if has_tool_result:
-                    break
-        # Stop at a non-synthetic assistant response
-        if rec_type == 'assistant':
-            msg = rec.get('message', {})
-            if msg.get('model') != '<synthetic>':
-                break
-        # Keep walking past everything else (metadata, synthetic, user text, etc.)
-        truncate_idx -= 1
-
-    # truncate_idx points to the last clean record (0-based), or -1 if none found
-    # We want to keep this record and everything before it
-    truncate_to = truncate_idx + 1  # 1-based line count to keep
-
-    if truncate_to <= 0:
-        return SessionScanResult(
-            patch=patch,
-            status='unfixable',
-            details=f'Synthetic corruption at L{synthetic_lines[0]} but no clean record found before it',
-            affected_lines=tuple(synthetic_lines),
-        )
-
-    records_to_remove = len(analyzer._records) - truncate_to
-    return SessionScanResult(
-        patch=patch,
-        status='detected',
-        details=f'{len(synthetic_lines)} synthetic corruption markers starting at L{synthetic_lines[0]}; truncate to L{truncate_to} (remove {records_to_remove} records)',
-        affected_lines=tuple(synthetic_lines),
-        fix_data=FixDataType.Truncate(
-            truncate_to=truncate_to,
-            error_loop_start=synthetic_lines[0],
-            records_to_remove=records_to_remove,
-        ),
-    )
+# Execution order at apply-time is determined by `SessionPatchDef.deps` (DAG)
+# resolved by PatchRunner. scan() iterates alphabetically since it's read-only.
 
 
 def _detect_duplicate_uuid(
@@ -867,17 +604,11 @@ def _detect_duplicate_uuid(
 ) -> SessionScanResult:
     """Detect and handle duplicate UUIDs from saved_hook_context.
 
-    Excludes duplicate UUIDs from the index and rewires affected orphans.
-
-    IMPORTANT: This detector modifies the analyzer's uuid_index by removing
-    duplicates. It must run before orphan-sidechain and stale-parent.
+    Reads `_duplicate_uuids` to find parent pointers targeting duplicate
+    UUIDs and computes a rewire map redirecting them to valid predecessors.
     """
     if not analyzer._duplicate_uuids:
         return SessionScanResult(patch=patch, status='clean', details='No duplicate UUIDs')
-
-    # Remove duplicates from index
-    for u in analyzer._duplicate_uuids:
-        analyzer._uuid_index.pop(u, None)
 
     # Find records orphaned by the exclusion
     rewire_map: dict[int, str] = {}
@@ -914,8 +645,6 @@ def _detect_duplicate_uuid(
 def _detect_orphan_sidechain(
     analyzer: SessionAnalyzer,
     patch: SessionPatchDef,
-    *,
-    sidechain_resolver: SidechainResolver | None = None,
 ) -> SessionScanResult:
     """Detect parentUuid orphans pointing into sidechain agent files.
 
@@ -931,8 +660,6 @@ def _detect_orphan_sidechain(
         parent = rec.get('parentUuid')
         if not parent or parent in analyzer._uuid_index:
             continue
-        if parent in analyzer._duplicate_uuids:
-            continue  # Handled by duplicate-uuid detector
 
         target = analyzer.find_rewire_target(i)
         rewire_uuid = target[0] if target else None
@@ -952,9 +679,9 @@ def _detect_orphan_sidechain(
 
     # Attribute orphans to sidechain files
     attributions: dict[str, str] = {}
-    if sidechain_resolver:
+    if analyzer._sidechain_resolver:
         orphan_uuids = {parent for _, parent, _ in orphans}
-        attributions = dict(sidechain_resolver(orphan_uuids))
+        attributions = dict(analyzer._sidechain_resolver(orphan_uuids))
 
     unfixable_count = sum(1 for _, _, rw in orphans if rw is None)
 
@@ -1131,9 +858,25 @@ def _detect_oversized_image(
             affected_lines=tuple(r.record_index + 1 for r in redactions),
         )
 
-    # Both conditions met — compute truncation point
+    # Both conditions met — compute truncation point.
+    #
+    # The dim-error fires synchronously when the API rejects a request
+    # containing oversized images. After redaction, those images are text
+    # placeholders and the same request would succeed on replay, so the
+    # synthetic error record no longer represents a real condition and
+    # must be removed. But the user message that triggered the rejection
+    # is real input the user expects to see honored.
+    #
+    # Surgical rule: truncate to (first dim-error synthetic - 1). This
+    # drops every dim-error synthetic and everything after them (heartbeat
+    # system records, additional retry-loop iterations) while preserving
+    # the user message(s) that came before. Walking back to the last clean
+    # tool_result/assistant — the previous behavior — discarded any pending
+    # user message authored between the last assistant turn and the error,
+    # which on a typical session means losing the message that made the
+    # user run the patcher in the first place.
     error_loop_start = dim_error_lines[0]
-    truncate_to = _walk_back_to_clean(analyzer._records, error_loop_start - 1)
+    truncate_to = error_loop_start - 1
 
     if truncate_to <= 0:
         return SessionScanResult(
@@ -1141,7 +884,7 @@ def _detect_oversized_image(
             status='unfixable',
             details=(
                 f'{len(redactions)} oversized image(s) and error loop at L{error_loop_start}, '
-                f'but no clean record precedes the error loop'
+                f'but no records precede the error loop'
             ),
             affected_lines=tuple(r.record_index + 1 for r in redactions),
         )
@@ -1169,22 +912,166 @@ def _detect_oversized_image(
     )
 
 
-# Detector dispatch — execution order matters (duplicate-uuid modifies index)
-_DETECTORS: Mapping[str, Callable[..., SessionScanResult]] = {
-    'consecutive-messages': _detect_consecutive_messages,
-    'duplicate-uuid': _detect_duplicate_uuid,
-    'orphan-sidechain': _detect_orphan_sidechain,
-    'oversized-image': _detect_oversized_image,
-    'stale-parent': _detect_stale_parent,
-}
+PATCHES: Sequence[SessionPatchDef] = (
+    SessionPatchDef(
+        name='duplicate-uuid',
+        description='saved_hook_context entries share UUIDs, creating cycles in UUID index. Session shows empty on resume.',
+        kind=PatchKind.FIX,
+        detector=_detect_duplicate_uuid,
+        deps=(),
+        min_version='2.1.27',
+        max_version='2.1.27',
+    ),
+    SessionPatchDef(
+        name='orphan-sidechain',
+        description='SubAgent/hook progress entries create parentUuid orphans pointing into sidechain files. Session shows empty on resume.',
+        kind=PatchKind.FIX,
+        detector=_detect_orphan_sidechain,
+        # Both upstream patches mutate parent chains; orphan-sidechain must see the post-fix file.
+        deps=('duplicate-uuid', 'oversized-image'),
+        min_version='2.1.24',
+    ),
+    SessionPatchDef(
+        name='oversized-image',
+        description=(
+            'An image >2000px triggers an API 400 loop on sessions with >20 images. '
+            'Fix: redact the image in place + truncate the synthetic error tail.'
+        ),
+        kind=PatchKind.FIX,
+        detector=_detect_oversized_image,
+        deps=(),
+    ),
+    SessionPatchDef(
+        name='stale-parent',
+        description='Resume latches onto old compaction segment, skipping newer compact_boundary records. Session works but missing recent context. Detect-only.',
+        kind=PatchKind.FIX,
+        detector=_detect_stale_parent,
+        # Walks the chain; needs post-fix file from chain-mutating patches.
+        deps=('duplicate-uuid', 'oversized-image'),
+        min_version='2.1.85',
+    ),
+)
 
-_DETECTOR_ORDER: Mapping[str, int] = {
-    'duplicate-uuid': 0,
-    'orphan-sidechain': 1,
-    'stale-parent': 2,
-    'consecutive-messages': 3,
-    'oversized-image': 4,
-}
+PATCHES_BY_NAME: Mapping[str, SessionPatchDef] = {p.name: p for p in PATCHES}
+
+
+@dataclass(frozen=True, slots=True)
+class RunResult:
+    """Outcome of a PatchRunner.run() invocation."""
+
+    iterations: int
+    applied: Sequence[str]  # patch names whose fix was applied, in apply order
+    unfixable: Sequence[str]  # patch names that reported 'unfixable'
+
+
+@dataclass(frozen=True, slots=True)
+class _PassResult:
+    """Outcome of one DAG sweep within PatchRunner.run()."""
+
+    applied: Sequence[str]
+    unfixable: Sequence[str]
+
+
+class PatchRunner:
+    """DAG-ordered patch application against a session file.
+
+    Each iteration is a topological sweep. A patch is runnable when all its
+    `deps` have completed in this iteration; alphabetical name order is the
+    deterministic tiebreak among equally-runnable patches. For each runnable
+    patch the runner re-reads the file, builds a fresh `SessionAnalyzer`, runs
+    the detector, and applies the fix to the file if `status == 'detected'`.
+
+    The loop terminates when an iteration applies zero fixes (convergence) or
+    when MAX_ITERATIONS is reached (signals a non-idempotent patch — failure).
+    """
+
+    MAX_ITERATIONS = 10
+
+    def __init__(self, session: SessionFile, patches: Sequence[SessionPatchDef] = PATCHES) -> None:
+        self._session = session
+        self._patches = patches
+
+    def run(self) -> RunResult:
+        applied: list[str] = []
+        unfixable_seen: list[str] = []
+        for iteration in range(1, self.MAX_ITERATIONS + 1):
+            pass_result = self._run_one_pass()
+            applied.extend(pass_result.applied)
+            for name in pass_result.unfixable:
+                if name not in unfixable_seen:
+                    unfixable_seen.append(name)
+            if not pass_result.applied:
+                return RunResult(iterations=iteration, applied=applied, unfixable=unfixable_seen)
+        raise SessionPatchError(
+            f'Patcher did not converge after {self.MAX_ITERATIONS} iterations '
+            f'(applied: {applied}); a patch may be non-idempotent.',
+        )
+
+    def _run_one_pass(self) -> _PassResult:
+        completed: set[str] = set()
+        applied: list[str] = []
+        unfixable: list[str] = []
+        while True:
+            patch = self._next_runnable(completed)
+            if patch is None:
+                return _PassResult(applied=applied, unfixable=unfixable)
+            completed.add(patch.name)
+            outcome = self._run_patch(patch)
+            if outcome == 'applied':
+                applied.append(patch.name)
+            elif outcome == 'unfixable':
+                unfixable.append(patch.name)
+
+    def _next_runnable(self, completed: Set[str]) -> SessionPatchDef | None:
+        candidates = [p for p in self._patches if p.name not in completed and all(dep in completed for dep in p.deps)]
+        return min(candidates, key=lambda p: p.name) if candidates else None
+
+    def _run_patch(self, patch: SessionPatchDef) -> str:
+        """Run patch's detector against a fresh analyzer; apply fix if detected.
+
+        Returns one of: 'applied', 'clean', 'unfixable'.
+        """
+        analyzer = SessionAnalyzer(
+            self._session.read_lines(),
+            sidechain_resolver=self._session.sidechain_resolver(),
+        )
+        result = patch.detector(analyzer, patch)
+        if result.status == 'unfixable':
+            return 'unfixable'
+        if result.status != 'detected' or result.fix_data is None:
+            return 'clean'
+        _apply_single_patch(self._session, result.fix_data)
+        return 'applied'
+
+
+def _apply_single_patch(session: SessionFile, fix_data: FixData) -> None:
+    """Apply one patch's fix data to the session file."""
+    lines = list(session.read_lines())
+
+    match fix_data:
+        case FixDataType.RedactImageAndTruncate(
+            redactions=redactions,
+            truncate_to=truncate_to,
+        ):
+            redactions_by_line: dict[int, list[FixDataType.ImageRedaction]] = {}
+            for r in redactions:
+                redactions_by_line.setdefault(r.record_index, []).append(r)
+            for idx, reds in redactions_by_line.items():
+                rec = json.loads(lines[idx])
+                for r in reds:
+                    _apply_image_redaction(rec, r)
+                lines[idx] = json.dumps(rec) + '\n'
+            if truncate_to is not None:
+                lines = lines[:truncate_to]
+        case FixDataType.Rewire(rewire_map=rewire_map):
+            # Matches DuplicateUuid and OrphanSidechain subclasses too.
+            for line_num, new_parent in rewire_map.items():
+                idx = line_num - 1
+                rec = json.loads(lines[idx])
+                rec['parentUuid'] = new_parent
+                lines[idx] = json.dumps(rec) + '\n'
+
+    session.write_lines(lines)
 
 
 # -- Domain classes ------------------------------------------------------------
@@ -1215,18 +1102,18 @@ class SessionFile:
         atomic_write(self._path, ''.join(lines).encode(), reference=self._path)
 
     def is_active(self) -> bool:
-        """Check if Claude has this session file open."""
-        try:
-            result = subprocess.run(
-                ['lsof', str(self._path)],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return False
+        """Check if a Claude process is currently running on this session.
+
+        Looks up the session in `cc_lib.session_tracker`'s database and
+        verifies the tracked `claude_pid` via `psutil.pid_exists`. Catches
+        sessions whether they're actively writing or sitting idle awaiting
+        input — both states matter for safety.
+        """
+        db = session_tracker.load_sessions(str(self._path.parent))
+        for session in db.sessions:
+            if session.session_id == self.session_id and session.state == 'active':
+                return psutil.pid_exists(session.metadata.claude_pid)
+        return False
 
     def sidechain_resolver(self) -> SidechainResolver:
         """Return a resolver callback for sidechain UUID attribution."""
@@ -1280,27 +1167,36 @@ class BackupManager:
     def __init__(self, backup_dir: Path = BACKUP_DIR) -> None:
         self._dir = backup_dir
 
-    def create(self, session: SessionFile, plan: PatchPlan) -> Path:
-        """Create backup + meta sidecar. Returns backup path."""
+    def create(self, session: SessionFile) -> Path:
+        """Create backup + skeleton meta. Returns backup path.
+
+        Meta is finalized via `record_applied` after the run completes.
+        """
         self._dir.mkdir(parents=True, exist_ok=True)
         backup_path = self._dir / f'{session.session_id}.jsonl'
         meta_path = self._dir / f'{session.session_id}.meta.json'
         if backup_path.exists():
             raise BackupExistsError(backup_path, session.session_id)
         atomic_write(backup_path, session.path.read_bytes(), reference=session.path)
-        detected = [r.patch.name for r in plan.results if r.status == 'detected']
         meta = {
             'session_id': session.session_id,
             'original_path': str(session.path),
             'backup_path': str(backup_path),
-            'fixed_at': datetime.now(UTC).isoformat(),
+            'created_at': datetime.now(UTC).isoformat(),
             'tool_version': 'claude-session-patcher v1',
-            'patches_applied': detected,
-            'total_rewires': len(plan.rewire_map),
-            'truncate_to': plan.truncate_to,
+            'patches_applied': [],
         }
         atomic_write(meta_path, (json.dumps(meta, indent=2) + '\n').encode())
         return backup_path
+
+    def record_applied(self, session: SessionFile, applied: Sequence[str], iterations: int) -> None:
+        """Update meta after a successful run with applied patches and iteration count."""
+        _backup_path, meta_path, meta = self._find_backup(session.session_id)
+        updated = dict(meta)
+        updated['fixed_at'] = datetime.now(UTC).isoformat()
+        updated['patches_applied'] = list(applied)
+        updated['iterations'] = iterations
+        atomic_write(meta_path, (json.dumps(updated, indent=2) + '\n').encode())
 
     def rollback(self, session: SessionFile) -> None:
         """Restore from backup and clean up. Used on fix verification failure."""
@@ -1309,10 +1205,28 @@ class BackupManager:
         backup_path.unlink(missing_ok=True)
         meta_path.unlink(missing_ok=True)
 
-    def restore(self, session_id: str) -> Path:
-        """Restore and clean up. Returns original path."""
+    def restore(self, session_id: str, *, force: bool = False) -> Path:
+        """Restore and clean up. Returns original path.
+
+        Refuses if a Claude process is currently running on the target session.
+        Refuses (with a hazard message) if the live file has been modified after
+        the backup was taken — set `force=True` to discard the appended content.
+        """
         backup_path, meta_path, meta = self._find_backup(session_id)
         original_path = Path(meta['original_path'])
+
+        if original_path.exists():
+            candidate = SessionFile(original_path)
+            if candidate.is_active():
+                raise ActiveSessionError(candidate.session_id)
+            # File size differs => content differs. mtime is unreliable here
+            # because atomic_write preserves it via reference=, so size is the
+            # cheap, robust signal that the live file diverged from the backup.
+            if not force and original_path.stat().st_size != backup_path.stat().st_size:
+                live_lines = sum(1 for _ in original_path.open())
+                backup_lines = sum(1 for _ in backup_path.open())
+                raise RestoreOverwriteError(candidate.session_id, live_lines, backup_lines)
+
         atomic_write(original_path, backup_path.read_bytes(), reference=backup_path)
         if not original_path.exists() or original_path.stat().st_size != backup_path.stat().st_size:
             raise SessionPatchError(f'Restore verification failed, backup preserved at {backup_path}')
@@ -1444,35 +1358,6 @@ def _walk_image_blocks(
     return found
 
 
-def _walk_back_to_clean(records: Sequence[Any], first_bad_idx: int) -> int:
-    """Walk backwards from first_bad_idx-1 to find the last clean record.
-
-    Clean = user record carrying a tool_result, or a non-synthetic assistant
-    response. Matches the semantics used by consecutive-messages.
-    Returns 1-based line count to keep (0 if no clean record found).
-    """
-    idx = first_bad_idx - 1
-    while idx >= 0:
-        rec = records[idx]
-        if rec is None:
-            idx -= 1
-            continue
-        rec_type = rec.get('type')
-        if rec_type == 'user':
-            msg = rec.get('message', {})
-            content = msg.get('content', [])
-            if isinstance(content, list):
-                has_tool_result = any(isinstance(b, dict) and b.get('type') == 'tool_result' for b in content)
-                if has_tool_result:
-                    break
-        if rec_type == 'assistant':
-            msg = rec.get('message', {})
-            if msg.get('model') != '<synthetic>':
-                break
-        idx -= 1
-    return idx + 1
-
-
 def _sample_image_dimensions(b64_data: Any) -> tuple[str, int, int] | None:
     """Decode a sample of base64 and parse image header dimensions.
 
@@ -1538,51 +1423,19 @@ def _attribute_orphans(file_path: Path, orphan_uuids: Set[str]) -> Mapping[str, 
     return attribution
 
 
-def _apply_patch(session: SessionFile, plan: PatchPlan) -> None:
-    """Apply patch plan to session file atomically.
-
-    1. Apply image_redactions (replace image blocks with text placeholders)
-    2. Apply rewire_map (modify parentUuid on affected lines)
-    3. Apply truncate_to (remove lines from that point)
-    """
-    lines = list(session.read_lines())
-
-    # Batch redactions by line so a record with multiple oversized images gets
-    # one json.loads / json.dumps round trip.
-    redactions_by_line: dict[int, list[FixDataType.ImageRedaction]] = {}
-    for r in plan.image_redactions:
-        redactions_by_line.setdefault(r.record_index, []).append(r)
-
-    for idx, redactions in redactions_by_line.items():
-        rec = json.loads(lines[idx])
-        for r in redactions:
-            _apply_image_redaction(rec, r)
-        lines[idx] = json.dumps(rec) + '\n'
-
-    for line_num, new_parent in plan.rewire_map.items():
-        idx = line_num - 1
-        rec = json.loads(lines[idx])
-        rec['parentUuid'] = new_parent
-        lines[idx] = json.dumps(rec) + '\n'
-
-    if plan.truncate_to is not None:
-        lines = lines[: plan.truncate_to]
-
-    session.write_lines(lines)
-
-
 def _fix_all(*, dry_run: bool) -> None:
     """Fix all fixable sessions."""
     sessions = SessionFile.find_all()
-    targets: list[tuple[SessionFile, PatchPlan]] = []
+    targets: list[tuple[SessionFile, Sequence[SessionScanResult]]] = []
 
     for session in sessions:
         try:
-            analyzer = SessionAnalyzer(session.read_lines())
-            results = analyzer.scan(sidechain_resolver=session.sidechain_resolver())
-            plan = analyzer.build_patch_plan(results)
-            if plan.fixable:
-                targets.append((session, plan))
+            analyzer = SessionAnalyzer(session.read_lines(), sidechain_resolver=session.sidechain_resolver())
+            results = analyzer.scan()
+            detected = [r for r in results if r.status == 'detected']
+            unfixable = [r for r in results if r.status == 'unfixable']
+            if detected and not unfixable:
+                targets.append((session, results))
         except json.JSONDecodeError:
             continue
 
@@ -1592,9 +1445,8 @@ def _fix_all(*, dry_run: bool) -> None:
 
     if dry_run:
         print(f'{len(targets)} fixable sessions:\n')
-        for session, plan in targets:
-            detected = [r for r in plan.results if r.status == 'detected']
-            names = ', '.join(r.patch.name for r in detected)
+        for session, results in targets:
+            names = ', '.join(r.patch.name for r in results if r.status == 'detected')
             print(f'  {session.session_id}  [{names}]')
         print('\n(dry run — no changes made)')
         raise FixableFound(f'{len(targets)} fixable session(s)')
@@ -1603,38 +1455,30 @@ def _fix_all(*, dry_run: bool) -> None:
     backup_mgr = BackupManager()
     failed = 0
 
-    for session, plan in targets:
+    for session, _results in targets:
         try:
             if session.is_active():
                 print(f'  [SKIP] {session.session_id}  (in active use)', file=sys.stderr)
                 failed += 1
                 continue
 
-            backup_mgr.create(session, plan)
+            backup_mgr.create(session)
             try:
-                applied = {r.patch.name for r in plan.results if r.status == 'detected'}
-                before_status = {r.patch.name: r.status for r in plan.results}
+                run_result = PatchRunner(session).run()
 
-                _apply_patch(session, plan)
-
-                # Verify: applied patches must clear, previously-clean must stay clean
-                verify_analyzer = SessionAnalyzer(session.read_lines())
-                verify_results = verify_analyzer.scan()
-                verify_bad = [
-                    r
-                    for r in verify_results
-                    if r.status in ('detected', 'unfixable')
-                    and (r.patch.name in applied or before_status.get(r.patch.name) == 'clean')
-                ]
+                verify_results = SessionAnalyzer(
+                    session.read_lines(),
+                    sidechain_resolver=session.sidechain_resolver(),
+                ).scan()
+                verify_bad = [r for r in verify_results if r.status in ('detected', 'unfixable')]
 
                 if verify_bad:
                     backup_mgr.rollback(session)
                     print(f'  [FAILED] {session.session_id}  verification failed, rolled back', file=sys.stderr)
                     failed += 1
                 else:
-                    detected = [r for r in plan.results if r.status == 'detected']
-                    names = ', '.join(r.patch.name for r in detected)
-                    print(f'  [OK] {session.session_id}  [{names}]')
+                    backup_mgr.record_applied(session, run_result.applied, run_result.iterations)
+                    print(f'  [OK] {session.session_id}  [{", ".join(run_result.applied)}]')
             except Exception:
                 backup_mgr.rollback(session)
                 raise
@@ -1655,7 +1499,6 @@ def _fix_all(*, dry_run: bool) -> None:
 
 def _print_check(
     results: Sequence[SessionScanResult],
-    plan: PatchPlan,
     session: SessionFile,
 ) -> None:
     """Print detailed check output."""
@@ -1672,11 +1515,7 @@ def _print_check(
         print(f'  {r.patch.name:<24s} {tag:<8s} {status_str}')
         if r.status in ('detected', 'unfixable'):
             print(f'    {r.details}')
-            if isinstance(r.fix_data, FixDataType.Truncate):
-                print(
-                    f'    Patch: truncate to L{r.fix_data.truncate_to} (remove {r.fix_data.records_to_remove} records)'
-                )
-            elif isinstance(r.fix_data, FixDataType.RedactImageAndTruncate):
+            if isinstance(r.fix_data, FixDataType.RedactImageAndTruncate):
                 print(f'    Patch: redact {len(r.fix_data.redactions)} oversized image block(s)')
                 for red in r.fix_data.redactions:
                     w, h = red.original_dimensions
@@ -1694,12 +1533,10 @@ def _print_check(
                 print(f'    Patch: rewire {len(r.fix_data.rewire_map)} parentUuid pointer(s)')
         print()
 
-    if detected and plan.fixable and unfixable:
+    if detected and unfixable:
         print(f'Status: PARTIALLY FIXABLE ({len(detected)} fixable, {len(unfixable)} unfixable)')
-    elif detected and plan.fixable:
+    elif detected:
         print(f'Status: FIXABLE ({len(detected)} patch{"es" if len(detected) != 1 else ""} to apply)')
-    elif detected and not plan.fixable:
-        print('Status: UNFIXABLE (detected but combined fix fails simulation)')
     elif unfixable:
         print(f'Status: UNFIXABLE ({len(unfixable)} issue{"s" if len(unfixable) != 1 else ""})')
     else:
@@ -1708,14 +1545,15 @@ def _print_check(
 
 def _print_check_json(
     results: Sequence[SessionScanResult],
-    plan: PatchPlan,
     session: SessionFile,
 ) -> None:
     """Print machine-readable JSON check output."""
+    detected = [r for r in results if r.status == 'detected']
+    unfixable = [r for r in results if r.status == 'unfixable']
     output = {
         'session_id': session.session_id,
         'file': str(session.path),
-        'fixable': plan.fixable,
+        'fixable': bool(detected) and not unfixable,
         'results': [
             {
                 'patch': r.patch.name,
@@ -1731,7 +1569,7 @@ def _print_check_json(
 
 
 def _print_scan_summary(
-    categories: Mapping[str, Sequence[tuple[SessionFile, PatchPlan]]],
+    categories: Mapping[str, Sequence[tuple[SessionFile, Sequence[SessionScanResult]]]],
 ) -> None:
     """Print human-readable scan summary."""
     print(f'Healthy:    {len(categories["healthy"]):>4d}')
@@ -1741,24 +1579,22 @@ def _print_scan_summary(
 
     if categories['fixable']:
         print('\nFixable sessions:')
-        for session, plan in categories['fixable']:
-            detected = [r for r in plan.results if r.status == 'detected']
-            names = ', '.join(r.patch.name for r in detected)
+        for session, results in categories['fixable']:
+            names = ', '.join(r.patch.name for r in results if r.status == 'detected')
             proj = session.project_dir.name
             print(f'  {session.session_id}  [{names}]  ({proj})')
         print(f"\nRun 'claude-session-patcher fix --all' to fix all {len(categories['fixable'])} sessions.")
 
     if categories['unfixable']:
         print('\nUnfixable sessions:')
-        for session, plan in categories['unfixable']:
-            unfixable = [r for r in plan.results if r.status == 'unfixable']
-            names = ', '.join(r.patch.name for r in unfixable)
+        for session, results in categories['unfixable']:
+            names = ', '.join(r.patch.name for r in results if r.status == 'unfixable')
             proj = session.project_dir.name
             print(f'  {session.session_id}  [{names}]  ({proj})')
 
 
 def _print_scan_json(
-    categories: Mapping[str, Sequence[tuple[SessionFile, PatchPlan]]],
+    categories: Mapping[str, Sequence[tuple[SessionFile, Sequence[SessionScanResult]]]],
 ) -> None:
     """Print machine-readable scan summary."""
     output = {
@@ -1768,9 +1604,9 @@ def _print_scan_json(
                 {
                     'session_id': session.session_id,
                     'file': str(session.path),
-                    'patches': [r.patch.name for r in plan.results if r.status != 'clean'],
+                    'patches': [r.patch.name for r in results if r.status != 'clean'],
                 }
-                for session, plan in items
+                for session, results in items
             ]
             for cat, items in categories.items()
             if items
@@ -1804,6 +1640,23 @@ class ActiveSessionError(SessionPatchError):
     def __init__(self, session_id: str) -> None:
         super().__init__(
             f'Session {session_id} appears to be in active use by Claude. Exit Claude Code first, then retry.',
+        )
+
+
+class RestoreOverwriteError(SessionPatchError):
+    """Raised when the live file has been modified since the backup was taken."""
+
+    def __init__(self, session_id: str, live_lines: int, backup_lines: int) -> None:
+        delta = live_lines - backup_lines
+        if delta > 0:
+            change = f'{delta} record(s) appended'
+        elif delta < 0:
+            change = f'{-delta} record(s) removed'
+        else:
+            change = 'records modified in place'
+        super().__init__(
+            f'Restoring {session_id} would discard live changes ({change}; '
+            f'live: {live_lines}, backup: {backup_lines}). Use --force to overwrite anyway.',
         )
 
 
