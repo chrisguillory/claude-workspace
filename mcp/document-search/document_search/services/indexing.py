@@ -135,6 +135,7 @@ class IndexingService:
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
         embed_workers: int = NUM_EMBED_WORKERS,
+        chunk_timeout_seconds: int = FILE_CHUNK_TIMEOUT_SECONDS,
         embedding_client: EmbeddingClient | None = None,
         redis_client: RedisClient | None = None,
     ) -> IndexingResult:
@@ -150,6 +151,9 @@ class IndexingService:
             respect_gitignore: Git ignore filtering (directories only).
             stop_after: Stop pipeline at a stage boundary.
             embed_workers: Number of embed workers.
+            chunk_timeout_seconds: Per-file chunking timeout in seconds.
+                Raise for table-heavy PDFs — pdfplumber's table extraction is
+                the slow path, scaling roughly linearly with page count.
             embedding_client: For transient error delta tracking (optional).
             redis_client: For connection HWM tracking (optional).
         """
@@ -180,6 +184,7 @@ class IndexingService:
                 respect_gitignore=respect_gitignore,
                 stop_after=stop_after,
                 embed_workers=embed_workers,
+                chunk_timeout_seconds=chunk_timeout_seconds,
             ),
         )
 
@@ -372,18 +377,19 @@ class IndexingService:
         self._chunking.shutdown()
         self._sparse_embedding.shutdown()
 
-    async def clear_documents(self, path: str, *, clear_cache: bool) -> ClearResult:
+    async def clear_documents(self, paths: Sequence[str], *, clear_cache: bool) -> ClearResult:
         """Clear documents from the index.
 
         Args:
-            path: Resolved path to clear. Use "**" for entire index.
+            paths: Resolved paths to clear. Use ['**'] for entire index.
             clear_cache: Also delete cached embeddings via reverse index.
                 Decoupled from Qdrant — uses Redis reverse index only.
 
         Returns:
-            ClearResult with counts of files and chunks removed.
+            ClearResult with aggregated counts. paths=None when the entire
+            index was dropped, else the list of paths actually cleared.
         """
-        if path == '**':
+        if any(p == '**' for p in paths):
             if clear_cache:
                 # Empty prefix matches all embed-idx:file:* keys
                 await self._embedding.invalidate_path_cache('')
@@ -391,8 +397,19 @@ class IndexingService:
             chunks_count = await self._repo.count()
             await self._repo.delete_collection()
             await self._state_store.clear_collection()
-            return ClearResult(files_removed=0, chunks_removed=chunks_count, path=None)
+            return ClearResult(files_removed=0, chunks_removed=chunks_count, paths=None)
 
+        total_files = 0
+        total_chunks = 0
+        for path in paths:
+            files_removed, chunks_removed = await self._clear_single_path(path, clear_cache=clear_cache)
+            total_files += files_removed
+            total_chunks += chunks_removed
+
+        return ClearResult(files_removed=total_files, chunks_removed=total_chunks, paths=list(paths))
+
+    async def _clear_single_path(self, path: str, *, clear_cache: bool) -> tuple[int, int]:
+        """Clear one path. Returns (files_removed, chunks_removed)."""
         # Single lookup, reused for both cache invalidation and chunk retrieval
         file_state = await self._state_store.get_file_state(path)
 
@@ -410,7 +427,7 @@ class IndexingService:
             if chunk_ids:
                 await self._repo.delete(chunk_ids)
             await self._state_store.delete_file_state(path)
-            return ClearResult(files_removed=1, chunks_removed=len(chunk_ids), path=path)
+            return 1, len(chunk_ids)
 
         # Directory prefix — get all chunk IDs under path from Redis
         all_chunk_ids_str = await self._state_store.get_chunk_ids_under_path(path)
@@ -419,8 +436,7 @@ class IndexingService:
         files_under = await self._state_store.get_files_under_path(path)
         files_removed = len(files_under)
         await self._state_store.delete_files_under_path(path)
-
-        return ClearResult(files_removed=files_removed, chunks_removed=len(all_chunk_ids_str), path=path)
+        return files_removed, len(all_chunk_ids_str)
 
     async def _discover_files(
         self,
@@ -497,6 +513,7 @@ class IndexingService:
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
         embed_workers: int = NUM_EMBED_WORKERS,
+        chunk_timeout_seconds: int = FILE_CHUNK_TIMEOUT_SECONDS,
     ) -> IndexingResult:
         """Run the indexing pipeline (scan → chunk → embed → store).
 
@@ -686,7 +703,15 @@ class IndexingService:
         counters = self._operation.counters
         chunk_tasks = [
             asyncio.create_task(
-                self._pipeline_chunk_worker(file_queue, embed_queue, results, results_lock, counters, tracer),
+                self._pipeline_chunk_worker(
+                    file_queue,
+                    embed_queue,
+                    results,
+                    results_lock,
+                    counters,
+                    tracer,
+                    chunk_timeout_seconds,
+                ),
             )
             for _ in range(min(NUM_CHUNK_WORKERS, len(files_to_index)))
         ]
@@ -908,6 +933,7 @@ class IndexingService:
         results_lock: asyncio.Lock,
         counters: PipelineCounters,
         tracer: PipelineTracer,
+        chunk_timeout_seconds: int,
     ) -> None:
         """Stage 1: Chunk files and push to embed queue.
 
@@ -922,7 +948,7 @@ class IndexingService:
             try:
                 chunks, skipped_lines = await asyncio.wait_for(
                     self._chunking.chunk_file(file_path),
-                    timeout=FILE_CHUNK_TIMEOUT_SECONDS,
+                    timeout=chunk_timeout_seconds,
                 )
 
                 if skipped_lines > 0:
