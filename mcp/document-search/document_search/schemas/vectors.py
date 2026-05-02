@@ -258,4 +258,4 @@ class ClearResult(StrictModel):
 
     files_removed: int
     chunks_removed: int
-    path: str | None  # None means entire index was cleared
+    paths: Sequence[str] | None  # None means entire index was cleared
