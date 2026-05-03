@@ -274,11 +274,11 @@ def list_docs(
 @error_boundary
 def clear(
     paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
-        list[str] | None,
+        list[str],
         typer.Argument(
             help='Paths to clear. Default: current directory. Must exist on disk. Use "**" alone for entire collection; globs are not supported.',
         ),
-    ] = None,
+    ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     collection: Annotated[
         str | None,
         typer.Option(
@@ -300,10 +300,9 @@ def clear(
         document-search clear /old/docs /more/docs -c my-collection
     """
     resolved = _resolve_collection(collection)
-    scopes = paths or ['.']
-    scope_str = ', '.join(scopes)
+    scope_str = ', '.join(paths)
     typer.confirm(f'Clear documents from {resolved} (paths: {scope_str})?', abort=True)
-    asyncio.run(_clear_async(resolved, scopes, clear_cache, format))
+    asyncio.run(_clear_async(resolved, paths, clear_cache, format))
 
 
 # -- Commands: full-stack tier --
