@@ -55,17 +55,60 @@ Patches (alphabetical by name):
                     introduced this patch):
                     https://gist.github.com/chrisguillory/8d5d401ac356b47ec078940080726b83
 
-    mcp-tool-results [fix] MCP tool result rendering. outputSchema safeParse
-                    guard returns null on schema mismatch, killing the React
-                    component. Patch nullifies the safeParse result instead
-                    of returning null, allowing fallthrough to raw toolUseResult.
-                    Anchor: ``outputSchema?.safeParse`` (stable property chain).
-                    Regression introduced in 2.1.89 (last clean: 2.1.87).
-                    No 2.1.88 was published.
-                    Minified vars drift per build: ``M`` through 2.1.90,
-                    renamed to ``J`` at 2.1.110, renamed back to ``M`` at 2.1.117
-                    (patch bumped to target 2.1.117+).
+    mcp-array-content-to-string
+                    [fix] MCP tool results without ``structuredContent``
+                    (slack-mcp-server and other servers that return plain
+                    text blocks) render as blank below the ⏺ tool-call line.
+
+                    Before::
+
+                        ⏺ slack - get_current_user (MCP)
+                                                  ← blank, no result block
+
+                    After::
+
+                        ⏺ slack - get_current_user (MCP)
+                          ⎿ [
+                              {
+                                "type": "text",
+                                "text": "user_id,user_name,..."
+                              }
+                            ]
+
+                    Patches ``transformMCPResult`` to JSON-stringify the
+                    array branch so ``toolUseResult`` is always a string,
+                    matching the path that already works for
+                    ``structuredContent``-emitting tools. Tradeoff: renders
+                    as raw JSON rather than extracted text. Full
+                    investigation in
+                    ``scratch/claude-code-rendering-fixes-pr-description.md``.
                     https://github.com/anthropics/claude-code/issues/41361
+
+    reject-show-comment
+                    [fix] When the user rejects a tool call with a comment,
+                    the comment text is silently dropped — only "Tool use
+                    rejected" renders.
+
+                    Before::
+
+                        ⏺ Bash(open https://example.com)
+                          ⎿ Tool use rejected
+                                                ← user's comment gone
+
+                    After::
+
+                        ⏺ Bash(open https://example.com)
+                          ⎿ Error: The user doesn't want to proceed with
+                            this tool use. ... To tell you how to proceed,
+                            the user said:
+                            No, please don't run that.
+
+                    Falsifies the prefix check in ``UserToolErrorMessage``
+                    so the message falls through to the generic
+                    content-renderer. Tradeoff: includes the verbose
+                    system-prompt prefix that the model sees. Full
+                    investigation in
+                    ``scratch/claude-code-rendering-fixes-pr-description.md``.
 
     remember-skill  [feature] Enable /remember skill for session memory search.
                     Statsig gate ``tengu_coral_fern``, default false.
@@ -92,7 +135,7 @@ Patches (alphabetical by name):
                     https://giuseppegurgone.com/claude-memory
 
     show-subagent-prompt-tools-response
-                    [tweak] Expand completed subagent to show prompt, tool
+                    [visibility] Expand completed subagent to show prompt, tool
                     calls, and response when verbose=true. Without this patch,
                     subagent output is collapsed to a single "Done" line with
                     "(ctrl+o to expand)". With it, verbose mode shows::
@@ -131,11 +174,11 @@ References:
     https://github.com/marckrenn/claude-code-changelog (feature flag tracking)
     https://gist.github.com/gastonmorixe/9c596b6de1095b6bd3b746ca3a1fd3d7
 
-Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-22)::
+Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-29)::
 
     Anchor                                                   First version   Last absent
     statusLine?.padding                                      2.0.0           never absent
-    outputSchema?.safeParse                                  2.1.87          2.1.86 (anchor exists in 2.1.87 but bug absent)
+    "contentArray"                                           2.1.107         2.1.106 (when contentArray type was added)
     tengu_session_memory                                     2.0.64          2.0.62
     tengu_coral_fern                                         2.1.21          2.1.20
     tengu_sm_compact                                         2.0.64          2.0.62 (co-introduced with session-memory)
@@ -145,28 +188,33 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-22)::
 
 Site Count Evolution::
 
-    Version   statusline   mcp-tool-results   session-memory   remember-skill   sm-compact
-    2.0.64    0            —                  6                0                —
-    2.0.70    0            —                  9                0                —
-    2.1.0     0            —                  9                0                —
-    2.1.21    0            —                  —                3                —
-    2.1.40    0            —                  18               3                —
-    2.1.45    —            —                  —                —                2
-    2.1.51    2            —                  18               9                —
-    2.1.74    2            —                  18               3                2
-    2.1.80    2            —                  18               3                2
-    2.1.81    2            —                  18               3                2
-    2.1.89    —            2                  —                —                —
-    2.1.90    —            2                  —                —                —
+    Version   statusline   mcp-array-content-to-string   session-memory   remember-skill   sm-compact
+    2.0.64    0            —                             6                0                —
+    2.0.70    0            —                             9                0                —
+    2.1.0     0            —                             9                0                —
+    2.1.21    0            —                             —                3                —
+    2.1.40    0            —                             18               3                —
+    2.1.45    —            —                             —                —                2
+    2.1.51    2            —                             18               9                —
+    2.1.74    2            —                             18               3                2
+    2.1.80    2            —                             18               3                2
+    2.1.81    2            —                             18               3                2
+    2.1.123   2            2                             —                —                —
 
 Version Log::
 
+    2.1.123 (2026-04-29)
+        mcp-array-content-to-string: 2 sites, clean apply.
+        Replaces previous mcp-tool-results patch (downstream safeParse
+        null-return) which was empirically unreachable for array-content
+        MCP results — removed as dead code. Root cause was upstream in
+        transformMCPResult, not in the renderer. See scratch/ for full
+        debugging writeup.
+
     2.1.117 (2026-04-22)
-        mcp-tool-results: 2 sites, unpatched (vars: M, P, H after rollback from J)
         hook-ask-no-override, statusline: already applied (stable)
 
     2.1.114 (2026-04-18)
-        mcp-tool-results: 2 sites, unpatched (vars: J, P, H after rename)
         show-subagent-prompt-tools-response: 2 sites, unpatched
         (function refactored to destructured param; patch rewritten)
         statusline, session-memory, remember-skill, scratchpad: clean apply
@@ -174,16 +222,6 @@ Version Log::
     2.1.109 (2026-04)
         sm-compact: feature removed (tengu_sm_compact flag deleted,
         consolidated into session-memory)
-
-    2.1.110 (2026-04)
-        mcp-tool-results: minifier renamed M → J in guard site
-
-    2.1.90 (2026-04-02)
-        mcp-tool-results: 2 sites, unpatched (vars: M, P, H)
-        statusline: 2 sites, applied
-
-    2.1.89 (2026-04-02)
-        mcp-tool-results: 2 sites, unpatched (vars: M, P, H)
 
     2.1.81 (2026-03-24)
         statusline: 2 sites, applied
@@ -229,16 +267,23 @@ ORIGINALS_DIR = get_claude_workspace_config_home_dir() / 'binary-patcher' / 'ori
 class PatchKind(str, Enum):
     """Classification of what a patch does.
 
-    FIX:     Restores broken functionality (regression, rendering bug).
-             Low risk — returns to known-good behavior.
-    FEATURE: Enables gated/disabled functionality (Statsig gate flip).
-             Medium risk — may have unknown side effects.
-    TWEAK:   Behavioral adjustment (telemetry, config, UX change).
-             Variable risk — neither a fix nor a feature unlock.
+    FIX:        Restores broken functionality (regression, rendering bug).
+                Low risk — returns to known-good behavior.
+    FEATURE:    Enables gated/disabled functionality (Statsig gate flip).
+                Medium risk — may have unknown side effects.
+    VISIBILITY: Exposes information that the model receives but the user's UI
+                hides via collapse, summarization, or curation. The author's
+                design intent is "tidy display"; the user wants UI parity with
+                the model. Side effect: more verbose terminal output.
+                Variable risk — output volume increases.
+    TWEAK:      Behavioral adjustment that doesn't fit the categories above
+                (telemetry, config, UX change with no clear theme).
+                Variable risk — case-by-case.
     """
 
     FIX = 'fix'
     FEATURE = 'feature'
+    VISIBILITY = 'visibility'
     TWEAK = 'tweak'
 
 
@@ -276,14 +321,24 @@ PATCHES: Sequence[PatchDef] = (
         min_version='2.1.109',
     ),
     PatchDef(
-        name='mcp-tool-results',
-        description='Fix MCP tool result rendering (outputSchema safeParse regression)',
+        name='mcp-array-content-to-string',
+        description='Render MCP tool results returning content arrays without structuredContent',
         kind=PatchKind.FIX,
-        anchor=b'outputSchema?.safeParse',
-        old=b'if(M&&!M.success)return null;let P=M?.data??H.toolUseResult',
-        new=b'if(M&&!M.success)M=null;     let P=M?.data??H.toolUseResult',
+        anchor=b'"contentArray"',
+        old=b'return{content:T,type:"contentArray",schema:Q36(Yj_(T))}',
+        new=b'return{content:q!=="ide"?NH(T):T,type:"contentArray"}   ',
         window=100,
-        min_version='2.1.117',
+        min_version='2.1.126',
+    ),
+    PatchDef(
+        name='reject-show-comment',
+        description='Show user comment when rejecting a tool call (instead of just "Tool use rejected")',
+        kind=PatchKind.FIX,
+        anchor=b'){let Y;if(_[5]===Symbol.for("react.memo_cache_sen',
+        old=b'T.content.startsWith(e76)',
+        new=b'T.content.startsWith("Z")',
+        window=100,
+        min_version='2.1.126',
     ),
     PatchDef(
         name='remember-skill',
@@ -317,13 +372,29 @@ PATCHES: Sequence[PatchDef] = (
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
-        description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
-        kind=PatchKind.TWEAK,
-        anchor=b'Remote agent launched',
-        old=b'{tools:q,verbose:K,theme:O,isTranscriptMode:T=!1}',
-        new=b'{tools:q,verbose:K,theme:O,isTranscriptMode:T=K }',
-        window=300,
-        min_version='2.1.114',
+        description=('Expand completed subagent to show prompt, tool calls, and response when verbose=true'),
+        kind=PatchKind.VISIBILITY,
+        anchor=b'!1,T&&J&&_8.createElement',
+        old=(
+            b'!1,T&&J&&_8.createElement(M6,null,_8.createElement(FY_,{prompt:J,theme:O})),'
+            b'T?_8.createElement(p1_,null,_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'T&&j&&j.length>0&&_8.createElement(M6,null,_8.createElement(XM8,{content:j,theme:O})),'
+            b'_8.createElement(M6,{height:1},_8.createElement(iF,{message:X,lookups:G9H,addMargin:!1,tools:q,'
+            b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
+            b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
+            b'!T&&_8.createElement(v,{dimColor:!0},"  ",_8.createElement(aM,null)))'
+        ),
+        new=(
+            b'!1,K&&J&&_8.createElement(M6,null,_8.createElement(FY_,{prompt:J,theme:O})),'
+            b'K?_8.createElement(p1_,null,_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'K&&j&&j.length>0&&_8.createElement(M6,null,_8.createElement(XM8,{content:j,theme:O})),'
+            b'_8.createElement(M6,{height:1},_8.createElement(iF,{message:X,lookups:G9H,addMargin:!1,tools:q,'
+            b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
+            b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
+            b'!K&&_8.createElement(v,{dimColor:!0},"  ",_8.createElement(aM,null)))'
+        ),
+        window=800,
+        min_version='2.1.126',
     ),
     PatchDef(
         name='statusline',
