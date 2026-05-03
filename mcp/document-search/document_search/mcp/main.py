@@ -59,7 +59,7 @@ from document_search.schemas.vectors import (
 from document_search.search_path import resolve_search_path
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
-from document_search.services.indexing import IndexingService
+from document_search.services.indexing import FILE_CHUNK_TIMEOUT_SECONDS, IndexingService
 from document_search.services.reranker import RerankerService
 from document_search.services.sparse_embedding import SparseEmbeddingService
 
@@ -248,10 +248,11 @@ Returns:
     )
     async def index_documents(
         collection_name: str,
-        path: str | None = None,
+        path: str | Sequence[str] | None = None,
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
         embed_workers: int = 64,
+        chunk_timeout_seconds: int = FILE_CHUNK_TIMEOUT_SECONDS,
         include_timing: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
@@ -264,12 +265,16 @@ Returns:
             collection_name: Name of the collection to index into.
             path: Path to file or directory to index. Defaults to current working
                 directory if not specified. Supports absolute, relative, or ~ expansion.
+                Accepts a single path string or a list of paths.
                 Note: "**" is not supported (indexing requires a specific path).
             respect_gitignore: Control .gitignore filtering behavior:
                 - None (default): Auto-detect git repos, respect gitignore if found.
                 - True: Strictly respect gitignore, fail if not a git repo.
                 - False: Ignore gitignore, index all supported files.
             stop_after: Stop pipeline at a stage boundary (directories only).
+            chunk_timeout_seconds: Per-file chunking timeout in seconds. Raise
+                for table-heavy PDFs — pdfplumber's table extraction is the slow
+                path, scaling roughly linearly with page count.
             include_timing: Include pipeline timing data in the response. Defaults
                 to False because timing grows ~90 bytes/file/stage and dominates
                 the response at scale. Dashboard always receives full timing
@@ -281,8 +286,16 @@ Returns:
         if not ctx:
             raise ValueError('MCP context required')
 
-        # "**" not supported - indexing requires a specific path
-        if path == '**':
+        # Normalize path → list[str]
+        path_inputs: Sequence[str]
+        if path is None:
+            path_inputs = [str(Path.cwd())]
+        elif isinstance(path, str):
+            path_inputs = [path]
+        else:
+            path_inputs = path
+
+        if any(p == '**' for p in path_inputs):
             raise ValueError("index_documents does not support '**'. Specify a file or directory path.")
 
         # Get collection and indexing service
@@ -291,23 +304,25 @@ Returns:
 
         logger.info('Using collection: %s (%s)', collection_name, collection.provider)
 
-        resolved_path = Path(resolve_search_path(path))
+        resolved_paths = [Path(resolve_search_path(p)) for p in path_inputs]
 
         # Ensure Qdrant collection exists with correct dimensions
         repository = state.get_repository(collection_name)
         await repository.ensure_collection(collection.dimensions)
 
-        if not resolved_path.is_file() and not resolved_path.is_dir():
-            raise ValueError(f'Path not found: {resolved_path}')
+        for rp in resolved_paths:
+            if not rp.is_file() and not rp.is_dir():
+                raise ValueError(f'Path not found: {rp}')
 
         embedding_client = state.get_embedding_client(collection)
         result = await indexing_service.index(
-            [resolved_path],
+            resolved_paths,
             collection_name=collection_name,
             owner_pid=os.getpid(),
             respect_gitignore=respect_gitignore,
             stop_after=stop_after,
             embed_workers=embed_workers,
+            chunk_timeout_seconds=chunk_timeout_seconds,
             embedding_client=embedding_client,
             redis_client=state.redis_client,
         )
@@ -473,6 +488,7 @@ Args:
     collection_name: Name of the collection to clear documents from.
     path: Path to clear. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
+        Accepts a single path string or a list of paths (clears all of them).
     clear_cache: Also delete cached embeddings for the cleared files.
         Uses a Redis reverse index (decoupled from Qdrant). Next re-index
         will call the embedding API instead of serving from cache.
@@ -492,7 +508,7 @@ Returns:
     )
     async def clear_documents(
         collection_name: str,
-        path: str | None = None,
+        path: str | Sequence[str] | None = None,
         clear_cache: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
@@ -505,16 +521,19 @@ Returns:
 
         logger.info('Clearing from collection: %s (%s)', collection_name, collection.provider)
 
-        resolved_path = resolve_search_path(path)
-        if resolved_path == '**':
-            logger.info('Clearing entire collection')
+        if path is None:
+            resolved_paths: Sequence[str] = [str(Path.cwd())]
+        elif isinstance(path, str):
+            resolved_paths = [resolve_search_path(path)]
         else:
-            logger.info('Clearing documents: %s', resolved_path)
+            resolved_paths = [resolve_search_path(p) for p in path]
+
+        logger.info('Clearing documents: %s', resolved_paths)
 
         if clear_cache:
             logger.info('Clearing embedding cache via reverse index')
 
-        result = await indexing_service.clear_documents(resolved_path, clear_cache=clear_cache)
+        result = await indexing_service.clear_documents(resolved_paths, clear_cache=clear_cache)
 
         logger.info('Cleared: %s files, %s chunks', result.files_removed, result.chunks_removed)
 

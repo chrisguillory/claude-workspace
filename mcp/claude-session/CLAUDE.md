@@ -17,6 +17,7 @@ Record types found in session files (schema v0.2.9):
 | `file-history-snapshot` | Document/file state tracking | `messageId`, `snapshot`, `isSnapshotUpdate` | **No** |
 | `queue-operation` | Queue management events | `operation`, `timestamp`, `sessionId`, `content` | **No** (no uuid) |
 | `custom-title` | User-defined session names (v0.1.9) | `customTitle`, `sessionId`, `timestamp` | **No** |
+| `ai-title` | AI-generated session title for `/resume` UI (v0.2.29, Claude Code 2.1.122+) | `aiTitle`, `sessionId` | **No** |
 | `progress` | Long-running operation tracking (v0.2.4) | `data`, `parentToolUseID`, `toolUseID` | **No** (own schema) |
 | `pr-link` | PR creation tracking (v0.2.9) | `prNumber`, `prUrl`, `prRepository` | **No** |
 | `saved_hook_context` | Persisted hook output (v0.2.9) | `content`, `hookName`, `hookEvent`, `toolUseID` | **No** (own schema) |

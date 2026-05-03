@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal, TypedDict, cast
 from uuid import UUID
 
 import typer
@@ -273,19 +273,19 @@ def list_docs(
 @app.command()
 @error_boundary
 def clear(
-    collection: Annotated[
-        str | None,
+    paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str] | None,
         typer.Argument(
-            help='Collection name (optional if only one exists).',
-            autocompletion=_complete_collection_name,
+            help='Paths to clear. Default: current directory. Must exist on disk. Use "**" alone for entire collection; globs are not supported.',
         ),
     ] = None,
-    path: Annotated[
+    collection: Annotated[
         str | None,
         typer.Option(
-            '--path',
-            '-p',
-            help='Path to clear. Default: current directory. Must exist on disk. Use "**" alone for entire collection; globs are not supported.',
+            '--collection',
+            '-c',
+            help='Collection name (optional if only one exists).',
+            autocompletion=_complete_collection_name,
         ),
     ] = None,
     clear_cache: Annotated[bool, typer.Option('--clear-cache', help='Also delete cached embeddings.')] = False,
@@ -296,13 +296,14 @@ def clear(
     \b
     Examples:
         document-search clear
-        document-search clear --path "**" --clear-cache
-        document-search clear my-collection --path /old/docs
+        document-search clear "**" --clear-cache
+        document-search clear /old/docs /more/docs -c my-collection
     """
     resolved = _resolve_collection(collection)
-    scope = path or str(Path.cwd())
-    typer.confirm(f'Clear documents from {resolved} (path: {scope})?', abort=True)
-    asyncio.run(_clear_async(resolved, path, clear_cache, format))
+    scopes = paths if paths else [str(Path.cwd())]
+    scope_str = ', '.join(scopes)
+    typer.confirm(f'Clear documents from {resolved} (paths: {scope_str})?', abort=True)
+    asyncio.run(_clear_async(resolved, scopes, clear_cache, format))
 
 
 # -- Commands: full-stack tier --
@@ -385,6 +386,13 @@ def index(
             help='Stop pipeline at stage: scan, chunk, embed.',
         ),
     ] = None,
+    chunk_timeout: Annotated[
+        int | None,
+        typer.Option(
+            '--chunk-timeout',
+            help='Per-file chunking timeout in seconds. Raise for table-heavy PDFs.',
+        ),
+    ] = None,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Index documents for search.
@@ -395,7 +403,9 @@ def index(
         document-search index /docs /api /guides
         document-search index ./docs/**/*.md -c other-collection
     """
-    asyncio.run(_index_async(paths, _resolve_collection(collection), gitignore, stop_after, format))
+    asyncio.run(
+        _index_async(paths, _resolve_collection(collection), gitignore, stop_after, chunk_timeout, format),
+    )
 
 
 # -- Entry point --
@@ -540,7 +550,7 @@ async def _list_async(
 
 async def _clear_async(
     collection_name: str,
-    path: str | None,
+    paths: Sequence[str],
     clear_cache: bool,
     format: Literal['text', 'json'],
 ) -> None:
@@ -552,9 +562,9 @@ async def _clear_async(
 
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
-        resolved_path = resolve_search_path(path)
+        resolved_paths = [resolve_search_path(p) for p in paths]
 
-        if resolved_path == '**':
+        if any(p == '**' for p in resolved_paths):
             if clear_cache:
                 total_invalidated = 0
                 async for index_key in ctx.redis.scan_iter(match='embed-idx:file:*'):
@@ -567,36 +577,39 @@ async def _clear_async(
             chunks_count = await repository.count()
             await repository.delete_collection()
             await state_store.clear_collection()
-            result = ClearResult(files_removed=0, chunks_removed=chunks_count, path=None)
+            result = ClearResult(files_removed=0, chunks_removed=chunks_count, paths=None)
         else:
-            if clear_cache:
-                prefix = resolved_path
-                if prefix and not prefix.endswith('/'):
-                    prefix += '/'
-                pattern = f'embed-idx:file:{prefix}*'
-                async for index_key in ctx.redis.scan_iter(match=pattern):
-                    cache_keys = await ctx.redis.smembers(index_key)
-                    if cache_keys:
-                        await ctx.redis.unlink(*cache_keys, index_key)
+            total_files = 0
+            total_chunks = 0
+            for resolved_path in resolved_paths:
+                if clear_cache:
+                    prefix = resolved_path
+                    if prefix and not prefix.endswith('/'):
+                        prefix += '/'
+                    pattern = f'embed-idx:file:{prefix}*'
+                    async for index_key in ctx.redis.scan_iter(match=pattern):
+                        cache_keys = await ctx.redis.smembers(index_key)
+                        if cache_keys:
+                            await ctx.redis.unlink(*cache_keys, index_key)
 
-            file_state = await state_store.get_file_state(resolved_path)
-            if file_state is not None:
-                chunk_ids = list(file_state.chunk_ids)
-                if chunk_ids:
-                    await repository.delete(chunk_ids)
-                await state_store.delete_file_state(resolved_path)
-                result = ClearResult(files_removed=1, chunks_removed=len(chunk_ids), path=resolved_path)
-            else:
-                all_chunk_ids = await state_store.get_chunk_ids_under_path(resolved_path)
-                if all_chunk_ids:
-                    await repository.delete([UUID(cid) for cid in all_chunk_ids])
-                files_under = await state_store.get_files_under_path(resolved_path)
-                await state_store.delete_files_under_path(resolved_path)
-                result = ClearResult(
-                    files_removed=len(files_under),
-                    chunks_removed=len(all_chunk_ids),
-                    path=resolved_path,
-                )
+                file_state = await state_store.get_file_state(resolved_path)
+                if file_state is not None:
+                    chunk_ids = list(file_state.chunk_ids)
+                    if chunk_ids:
+                        await repository.delete(chunk_ids)
+                    await state_store.delete_file_state(resolved_path)
+                    total_files += 1
+                    total_chunks += len(chunk_ids)
+                else:
+                    all_chunk_ids = await state_store.get_chunk_ids_under_path(resolved_path)
+                    if all_chunk_ids:
+                        await repository.delete([UUID(cid) for cid in all_chunk_ids])
+                    files_under = await state_store.get_files_under_path(resolved_path)
+                    await state_store.delete_files_under_path(resolved_path)
+                    total_files += len(files_under)
+                    total_chunks += len(all_chunk_ids)
+
+            result = ClearResult(files_removed=total_files, chunks_removed=total_chunks, paths=resolved_paths)
 
         if format == 'json':
             typer.echo(result.model_dump_json(indent=2))
@@ -716,8 +729,12 @@ async def _index_async(
     collection_name: str,
     gitignore: bool | None,
     stop_after: str | None,
+    chunk_timeout: int | None,
     format: Literal['text', 'json'],
 ) -> None:
+    class _IndexOverrides(TypedDict, total=False):
+        chunk_timeout_seconds: int
+
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -791,6 +808,10 @@ async def _index_async(
                 typer.secho('No valid paths to index.', fg=typer.colors.RED, err=True)
                 raise typer.Exit(1)
 
+            index_overrides: _IndexOverrides = {}
+            if chunk_timeout is not None:
+                index_overrides['chunk_timeout_seconds'] = chunk_timeout
+
             result = await indexing_service.index(
                 resolved_paths,
                 collection_name=collection_name,
@@ -799,6 +820,7 @@ async def _index_async(
                 stop_after=stop,
                 embedding_client=embedding_client,
                 redis_client=ctx.redis,
+                **index_overrides,
             )
 
             if format == 'json':

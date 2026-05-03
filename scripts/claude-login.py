@@ -118,7 +118,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import click
 import pydantic
@@ -158,6 +158,7 @@ class OAuthAccount(StrictModel):
     cc_onboarding_flags: Mapping[str, object] = pydantic.Field(default_factory=dict)
     claude_code_trial_ends_at: str | None = None
     claude_code_trial_duration_days: int | None = None
+    seat_tier: Literal['team_tier_1'] | None = None
 
 
 class ClaudeAiOAuth(StrictModel):
@@ -358,6 +359,7 @@ _OAUTH_CAMEL_TO_SNAKE: Mapping[str, str] = {
     'ccOnboardingFlags': 'cc_onboarding_flags',
     'claudeCodeTrialEndsAt': 'claude_code_trial_ends_at',
     'claudeCodeTrialDurationDays': 'claude_code_trial_duration_days',
+    'seatTier': 'seat_tier',
 }
 
 
