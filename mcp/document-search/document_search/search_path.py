@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Set
 from pathlib import Path
 
 __all__ = [
     'resolve_search_path',
 ]
-
-_GLOB_CHARS = frozenset('*?[]')
 
 
 def resolve_search_path(path: str | None) -> str:
@@ -34,7 +33,7 @@ def resolve_search_path(path: str | None) -> str:
     if path is None:
         return str(Path.cwd())
 
-    if any(c in _GLOB_CHARS for c in path):
+    if any(c in GLOB_CHARS for c in path):
         raise ValueError(f'Glob characters not supported in path filter: {path!r}. Use "**" for global scope.')
 
     expanded = Path(path).expanduser()
@@ -42,3 +41,11 @@ def resolve_search_path(path: str | None) -> str:
         raise ValueError(f'Path does not exist: {path!r}.')
 
     return str(expanded.resolve())
+
+
+GLOB_CHARS: Set[str] = {
+    '*',
+    '?',
+    '[',
+    ']',
+}
