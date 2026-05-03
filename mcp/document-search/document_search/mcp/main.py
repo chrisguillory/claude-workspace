@@ -248,7 +248,7 @@ Returns:
     )
     async def index_documents(
         collection_name: str,
-        path: str | Sequence[str] | None = None,
+        path: str | Sequence[str] = '.',
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
         embed_workers: int = 64,
@@ -286,14 +286,7 @@ Returns:
         if not ctx:
             raise ValueError('MCP context required')
 
-        # Normalize path → list[str]
-        path_inputs: Sequence[str]
-        if path is None:
-            path_inputs = [str(Path.cwd())]
-        elif isinstance(path, str):
-            path_inputs = [path]
-        else:
-            path_inputs = path
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
 
         if any(p == '**' for p in path_inputs):
             raise ValueError("index_documents does not support '**'. Specify a file or directory path.")
@@ -370,7 +363,7 @@ Returns:
     async def search_documents(
         query: str,
         collection_name: str,
-        path: str | Sequence[str] | None = None,
+        path: str | Sequence[str] = '.',
         limit: int = 10,
         search_type: SearchType = 'hybrid',
         file_types: Sequence[str] | None = None,
@@ -438,16 +431,14 @@ Returns:
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 200)
 
-        # Resolve via shared validator. "**" anywhere collapses to no filter.
-        resolved_paths: Sequence[str] | None
-        if path is None or isinstance(path, str):
-            resolved = resolve_search_path(path)
-            resolved_paths = None if resolved == '**' else [resolved]
-        else:
-            resolved_list = [resolve_search_path(p) for p in path]
-            resolved_paths = None if '**' in resolved_list else resolved_list
+        # "**" anywhere collapses to no filter (empty Sequence).
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        resolved_list = [resolve_search_path(p) for p in path_inputs]
+        resolved_paths: Sequence[str] = [] if '**' in resolved_list else resolved_list
 
-        resolved_excludes = [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else None
+        resolved_excludes: Sequence[str] = (
+            [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else []
+        )
 
         # Build search query
         search_query = SearchQuery(
@@ -508,7 +499,7 @@ Returns:
     )
     async def clear_documents(
         collection_name: str,
-        path: str | Sequence[str] | None = None,
+        path: str | Sequence[str] = '.',
         clear_cache: bool = False,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
@@ -521,12 +512,8 @@ Returns:
 
         logger.info('Clearing from collection: %s (%s)', collection_name, collection.provider)
 
-        if path is None:
-            resolved_paths: Sequence[str] = [str(Path.cwd())]
-        elif isinstance(path, str):
-            resolved_paths = [resolve_search_path(path)]
-        else:
-            resolved_paths = [resolve_search_path(p) for p in path]
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        resolved_paths: Sequence[str] = [resolve_search_path(p) for p in path_inputs]
 
         logger.info('Clearing documents: %s', resolved_paths)
 
@@ -566,7 +553,7 @@ Returns:
     )
     async def list_documents(
         collection_name: str,
-        path: str | None = None,
+        path: str = '.',
         file_type: str | None = None,
         limit: int = 50,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
@@ -581,10 +568,10 @@ Returns:
         logger.debug('Listing documents in collection: %s', collection_name)
 
         resolved = resolve_search_path(path)
-        resolved_path: str | None = None if resolved == '**' else resolved
+        filter_path = '' if resolved == '**' else resolved
 
         files = await repository.list_indexed_files(
-            path_prefix=resolved_path,
+            path_prefix=filter_path,
             file_type=file_type,
             limit=limit,
         )
@@ -617,7 +604,7 @@ Returns:
     )
     async def get_info(
         collection_name: str,
-        path: str | None = None,
+        path: str = '.',
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexInfo:
         if ctx is None:
@@ -629,11 +616,12 @@ Returns:
 
         logger.debug('Getting info for collection: %s', collection_name)
 
-        resolved_path = resolve_search_path(path)
-        if resolved_path == '**':
-            logger.debug('Getting global collection info')
+        resolved = resolve_search_path(path)
+        filter_path = '' if resolved == '**' else resolved
+        if filter_path:
+            logger.debug('Getting info for: %s', filter_path)
         else:
-            logger.debug('Getting info for: %s', resolved_path)
+            logger.debug('Getting global collection info')
 
         # Build embedding info from collection
         embedding_info = EmbeddingInfo.from_collection(collection)
@@ -643,8 +631,8 @@ Returns:
         if storage is None:
             raise ValueError('Collection not initialized in Qdrant - run index_documents first')
 
-        # Get content stats (scoped by path)
-        content = await repository.get_content_stats(resolved_path)
+        # Get content stats (scoped by path; empty = global)
+        content = await repository.get_content_stats(filter_path)
 
         # Dashboard URL (live check — dashboard can restart on different port)
         dashboard_port = DashboardStateManager().get_dashboard_port()
@@ -661,7 +649,7 @@ Returns:
             embedding=embedding_info,
             storage=storage,
             content=content,
-            path=resolved_path,
+            path=resolved,
             dashboard_url=dashboard_url,
         )
 

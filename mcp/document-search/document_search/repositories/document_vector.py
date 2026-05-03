@@ -242,23 +242,17 @@ class DocumentVectorRepository:
 
     # Visibility methods for index introspection
 
-    async def get_content_stats(self, path: str | None = None) -> ContentStats:
+    async def get_content_stats(self, path: str = '') -> ContentStats:
         """Get content breakdown statistics from Redis state store.
 
         Args:
-            path: Scope stats to this path. Use "**" or None for global stats.
+            path: Scope stats to this path. Empty string for global stats.
 
         Returns:
             ContentStats with total chunks, breakdown by file type,
             unique file count, and list of supported types.
         """
-        # Get file states from Redis (SCAN for scoped, or get all for global)
-        if path is None or path == '**':
-            # Global: SCAN all idx:{collection}:* keys
-            file_states = await self._state_store.get_files_under_path('')
-        else:
-            # Scoped: SCAN idx:{collection}:{path}/*
-            file_states = await self._state_store.get_files_under_path(path)
+        file_states = await self._state_store.get_files_under_path(path)
 
         # Aggregate stats
         total_chunks = sum(state.chunk_count for _, state in file_states)
@@ -319,25 +313,21 @@ class DocumentVectorRepository:
 
     async def list_indexed_files(
         self,
-        path_prefix: str | None = None,
+        path_prefix: str = '',
         file_type: str | None = None,
         limit: int = 50,
     ) -> Sequence[IndexedFile]:
         """List files in the index via Redis state store.
 
         Args:
-            path_prefix: Filter to files under this path prefix.
+            path_prefix: Filter to files under this path prefix. Empty string for global.
             file_type: Filter to this file type.
             limit: Maximum number of files to return.
 
         Returns:
             List of IndexedFile sorted by chunk count descending.
         """
-        # Get file states from Redis
-        if path_prefix:
-            file_states = await self._state_store.get_files_under_path(path_prefix)
-        else:
-            file_states = await self._state_store.get_files_under_path('')
+        file_states = await self._state_store.get_files_under_path(path_prefix)
 
         # Build IndexedFile objects with file_type derived from extension
         indexed_files: list[IndexedFile] = []

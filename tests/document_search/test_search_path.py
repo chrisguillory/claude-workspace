@@ -12,8 +12,8 @@ class TestSentinels:
     def test_double_star_returns_global_sentinel(self) -> None:
         assert resolve_search_path('**') == '**'
 
-    def test_none_defaults_to_cwd(self) -> None:
-        assert resolve_search_path(None) == str(Path.cwd())
+    def test_dot_resolves_to_cwd(self) -> None:
+        assert resolve_search_path('.') == str(Path.cwd())
 
 
 class TestResolution:

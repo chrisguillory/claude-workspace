@@ -217,13 +217,13 @@ def info(
         ),
     ] = None,
     path: Annotated[
-        str | None,
+        str,
         typer.Option(
             '--path',
             '-p',
             help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
-    ] = None,
+    ] = '.',
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Show collection info.
@@ -248,13 +248,13 @@ def list_docs(
         ),
     ] = None,
     path: Annotated[
-        str | None,
+        str,
         typer.Option(
             '--path',
             '-p',
             help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
-    ] = None,
+    ] = '.',
     file_type: Annotated[str | None, typer.Option('--type', '-t', help='Filter by file type.')] = None,
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max files to return.')] = 50,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -300,7 +300,7 @@ def clear(
         document-search clear /old/docs /more/docs -c my-collection
     """
     resolved = _resolve_collection(collection)
-    scopes = paths if paths else [str(Path.cwd())]
+    scopes = paths or ['.']
     scope_str = ', '.join(scopes)
     typer.confirm(f'Clear documents from {resolved} (paths: {scope_str})?', abort=True)
     asyncio.run(_clear_async(resolved, scopes, clear_cache, format))
@@ -323,13 +323,13 @@ def search(
         ),
     ] = None,
     path: Annotated[
-        str | None,
+        str,
         typer.Option(
             '--path',
             '-p',
             help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
-    ] = None,
+    ] = '.',
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
     search_type: Annotated[
         Literal['hybrid', 'lexical', 'embedding'], typer.Option('--type', '-t', help='Search strategy.')
@@ -442,7 +442,7 @@ async def infrastructure() -> AsyncIterator[InfraContext]:
 # -- Private async implementations --
 
 
-async def _info_async(collection_name: str, path: str | None, format: Literal['text', 'json']) -> None:
+async def _info_async(collection_name: str, path: str, format: Literal['text', 'json']) -> None:
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -512,7 +512,7 @@ async def _info_async(collection_name: str, path: str | None, format: Literal['t
 
 async def _list_async(
     collection_name: str,
-    path: str | None,
+    path: str,
     file_type: str | None,
     limit: int,
     format: Literal['text', 'json'],
@@ -526,9 +526,8 @@ async def _list_async(
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        resolved_path = resolve_search_path(path)
-        # list_indexed_files uses None for "no filter", not "**"
-        filter_path = None if resolved_path == '**' else resolved_path
+        resolved = resolve_search_path(path)
+        filter_path = '' if resolved == '**' else resolved
 
         files = await repository.list_indexed_files(
             path_prefix=filter_path,
@@ -623,7 +622,7 @@ async def _clear_async(
 async def _search_async(
     query: str,
     collection_name: str,
-    path: str | None,
+    path: str,
     limit: int,
     search_type: Literal['hybrid', 'lexical', 'embedding'],
     exclude_paths: Sequence[str] | None,
@@ -678,9 +677,11 @@ async def _search_async(
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
 
-            resolved_path = resolve_search_path(path)
-            filter_path = None if resolved_path == '**' else resolved_path
-            resolved_excludes = [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else None
+            resolved = resolve_search_path(path)
+            source_prefixes: Sequence[str] = [] if resolved == '**' else [resolved]
+            resolved_excludes: Sequence[str] = (
+                [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else []
+            )
 
             effective_limit = min(max(limit, 1), 100)
             rerank_candidates = min(effective_limit * 3, 200)
@@ -691,7 +692,7 @@ async def _search_async(
                 sparse_indices=sparse_indices,
                 sparse_values=sparse_values,
                 limit=rerank_candidates,
-                source_path_prefixes=[filter_path] if filter_path else None,
+                source_path_prefixes=source_prefixes,
                 exclude_path_prefixes=resolved_excludes,
             )
 

@@ -8,16 +8,15 @@ __all__ = [
 ]
 
 
-def resolve_search_path(path: str | None) -> str:
-    """Resolve and validate a user-supplied search path.
+def resolve_search_path(path: str) -> str:
+    """Validate and resolve a user-supplied search path.
 
-    Centralizes the ``--path`` / ``path`` contract for the CLI and MCP server.
-    Fail-fast on globs and missing paths so callers see an actionable error
-    instead of qdrant silently filtering out every result.
+    Pure validator. Defaults (e.g. cwd when no path is supplied) are a UX
+    policy decision and belong to the caller; this function deals only
+    with concrete strings.
 
     Args:
-        path: Raw input. ``None`` defaults to the current working directory.
-            ``"**"`` is the explicit global-scope sentinel.
+        path: Raw input string. ``"**"`` is the explicit global-scope sentinel.
 
     Returns:
         Resolved absolute path string for prefix matching, or the literal
@@ -30,8 +29,6 @@ def resolve_search_path(path: str | None) -> str:
     """
     if path == '**':
         return '**'
-    if path is None:
-        return str(Path.cwd())
 
     if any(c in GLOB_CHARS for c in path):
         raise ValueError(f'Glob characters not supported in path filter: {path!r}. Use "**" for global scope.')
