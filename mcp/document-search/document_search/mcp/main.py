@@ -291,11 +291,7 @@ Returns:
 
         logger.info('Using collection: %s (%s)', collection_name, collection.provider)
 
-        # "**" rejected — indexing requires a concrete path
-        resolved_str = resolve_search_path(path)
-        if resolved_str == '**':
-            raise ValueError('index_documents requires a concrete path; "**" is not supported.')
-        resolved_path = Path(resolved_str)
+        resolved_path = Path(resolve_search_path(path))
 
         # Ensure Qdrant collection exists with correct dimensions
         repository = state.get_repository(collection_name)

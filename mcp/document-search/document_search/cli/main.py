@@ -281,7 +281,12 @@ def clear(
         ),
     ] = None,
     path: Annotated[
-        str | None, typer.Option('--path', '-p', help='Path to clear ("**" for entire collection).')
+        str | None,
+        typer.Option(
+            '--path',
+            '-p',
+            help='Path to clear. Default: current directory. Must exist on disk. Use "**" alone for entire collection; globs are not supported.',
+        ),
     ] = None,
     clear_cache: Annotated[bool, typer.Option('--clear-cache', help='Also delete cached embeddings.')] = False,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
