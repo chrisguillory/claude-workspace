@@ -400,7 +400,7 @@ def index(
     Examples:
         document-search index .
         document-search index /docs /api /guides
-        document-search index ./docs/**/*.md -c other-collection
+        document-search index ./docs ./api -c other-collection
     """
     asyncio.run(
         _index_async(paths, _resolve_collection(collection), gitignore, stop_after, chunk_timeout, format),
@@ -561,6 +561,14 @@ async def _clear_async(
 
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
+
+        if '**' in paths and len(paths) > 1:
+            typer.secho(
+                '"**" cannot be mixed with other paths. Pass "**" alone to clear the entire collection.',
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(1)
         resolved_paths = [resolve_search_path(p) for p in paths]
 
         if any(p == '**' for p in resolved_paths):
@@ -677,6 +685,15 @@ async def _search_async(
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
 
+            # "**" is a global sentinel and must stand alone — mixing it with concrete
+            # paths has no coherent semantics, so reject rather than silently collapse.
+            if '**' in path and len(path) > 1:
+                typer.secho(
+                    '"**" cannot be mixed with other paths. Pass "**" alone for global scope.',
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+                raise typer.Exit(1)
             resolved_list = [resolve_search_path(p) for p in path]
             source_prefixes: Sequence[str] = [] if '**' in resolved_list else resolved_list
             resolved_excludes: Sequence[str] = (

@@ -289,6 +289,8 @@ Returns:
             raise ValueError('MCP context required')
 
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        if not path_inputs:
+            raise ValueError('path cannot be empty. Provide at least one path.')
 
         if any(p == '**' for p in path_inputs):
             raise ValueError("index_documents does not support '**'. Specify a file or directory path.")
@@ -333,6 +335,7 @@ Args:
     path: Filter to files under this path. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
         Accepts a single path string or a list of paths (matches files under ANY).
+        "**" must be standalone — cannot be mixed with concrete paths.
     limit: Maximum number of results to return (1-100).
     search_type: Search strategy:
         - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
@@ -433,8 +436,13 @@ Returns:
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 200)
 
-        # "**" anywhere collapses to no filter (empty Sequence).
+        # "**" is a global sentinel and must stand alone — mixing it with concrete
+        # paths has no coherent semantics, so reject rather than silently collapse.
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        if not path_inputs:
+            raise ValueError('path cannot be empty. Provide at least one path or "**" for global.')
+        if '**' in path_inputs and len(path_inputs) > 1:
+            raise ValueError('"**" cannot be mixed with other paths. Pass "**" alone for global scope.')
         resolved_list = [resolve_search_path(p) for p in path_inputs]
         source_prefixes: Sequence[str] = [] if '**' in resolved_list else resolved_list
 
@@ -482,6 +490,7 @@ Args:
     path: Path to clear. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
         Accepts a single path string or a list of paths (clears all of them).
+        "**" must be standalone — cannot be mixed with concrete paths.
     clear_cache: Also delete cached embeddings for the cleared files.
         Uses a Redis reverse index (decoupled from Qdrant). Next re-index
         will call the embedding API instead of serving from cache.
@@ -515,6 +524,10 @@ Returns:
         logger.info('Clearing from collection: %s (%s)', collection_name, collection.provider)
 
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        if not path_inputs:
+            raise ValueError('path cannot be empty. Provide at least one path or "**" for entire collection.')
+        if '**' in path_inputs and len(path_inputs) > 1:
+            raise ValueError('"**" cannot be mixed with other paths. Pass "**" alone to clear the entire collection.')
         resolved_paths: Sequence[str] = [resolve_search_path(p) for p in path_inputs]
 
         logger.info('Clearing documents: %s', resolved_paths)
