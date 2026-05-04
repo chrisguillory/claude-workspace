@@ -321,14 +321,14 @@ def search(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[
-        str,
+    path: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str],
         typer.Option(
             '--path',
             '-p',
-            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
+            help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
-    ] = '.',
+    ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
     search_type: Annotated[
         Literal['hybrid', 'lexical', 'embedding'], typer.Option('--type', '-t', help='Search strategy.')
@@ -621,7 +621,7 @@ async def _clear_async(
 async def _search_async(
     query: str,
     collection_name: str,
-    path: str,
+    path: Sequence[str],
     limit: int,
     search_type: Literal['hybrid', 'lexical', 'embedding'],
     exclude_paths: Sequence[str] | None,
@@ -676,8 +676,8 @@ async def _search_async(
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
 
-            resolved = resolve_search_path(path)
-            source_prefixes: Sequence[str] = [] if resolved == '**' else [resolved]
+            resolved_list = [resolve_search_path(p) for p in path]
+            source_prefixes: Sequence[str] = [] if '**' in resolved_list else resolved_list
             resolved_excludes: Sequence[str] = (
                 [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else []
             )
