@@ -56,7 +56,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
-from document_search.search_path import resolve_search_path
+from document_search.search_path import resolve_search_path, resolve_search_paths, to_repo_filter
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.indexing import FILE_CHUNK_TIMEOUT_SECONDS, IndexingService
@@ -380,6 +380,11 @@ Returns:
         if not ctx:
             raise ValueError('MCP context required')
 
+        # Validate path inputs up front — fail fast before any embedding cost.
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        source_prefixes = to_repo_filter(resolve_search_paths(path_inputs, scope_hint='global scope'))
+        resolved_excludes: Sequence[str] = [resolve_search_path(p) for p in exclude_paths] if exclude_paths else []
+
         # Get collection and services
         collection = state.get_collection(collection_name)
         embedding_client = state.get_embedding_client(collection)
@@ -435,20 +440,6 @@ Returns:
         # Fetch more candidates for reranking (3x over-fetch for quality, cap at 200)
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 200)
-
-        # "**" is a global sentinel and must stand alone — mixing it with concrete
-        # paths has no coherent semantics, so reject rather than silently collapse.
-        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
-        if not path_inputs:
-            raise ValueError('path cannot be empty. Provide at least one path or "**" for global.')
-        if '**' in path_inputs and len(path_inputs) > 1:
-            raise ValueError('"**" cannot be mixed with other paths. Pass "**" alone for global scope.')
-        resolved_list = [resolve_search_path(p) for p in path_inputs]
-        source_prefixes: Sequence[str] = [] if '**' in resolved_list else resolved_list
-
-        resolved_excludes: Sequence[str] = (
-            [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else []
-        )
 
         # Build search query
         search_query = SearchQuery(
@@ -524,11 +515,7 @@ Returns:
         logger.info('Clearing from collection: %s (%s)', collection_name, collection.provider)
 
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
-        if not path_inputs:
-            raise ValueError('path cannot be empty. Provide at least one path or "**" for entire collection.')
-        if '**' in path_inputs and len(path_inputs) > 1:
-            raise ValueError('"**" cannot be mixed with other paths. Pass "**" alone to clear the entire collection.')
-        resolved_paths: Sequence[str] = [resolve_search_path(p) for p in path_inputs]
+        resolved_paths = resolve_search_paths(path_inputs, scope_hint='entire collection')
 
         logger.info('Clearing documents: %s', resolved_paths)
 
@@ -582,8 +569,7 @@ Returns:
 
         logger.debug('Listing documents in collection: %s', collection_name)
 
-        resolved = resolve_search_path(path)
-        filter_path = '' if resolved == '**' else resolved
+        filter_path = to_repo_filter(resolve_search_path(path))
 
         files = await repository.list_indexed_files(
             path_prefix=filter_path,
@@ -632,7 +618,7 @@ Returns:
         logger.debug('Getting info for collection: %s', collection_name)
 
         resolved = resolve_search_path(path)
-        filter_path = '' if resolved == '**' else resolved
+        filter_path = to_repo_filter(resolved)
         if filter_path:
             logger.debug('Getting info for: %s', filter_path)
         else:

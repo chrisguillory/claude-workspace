@@ -40,7 +40,7 @@ from document_search.schemas.vectors import (
     SearchQuery,
     SearchResult,
 )
-from document_search.search_path import resolve_search_path
+from document_search.search_path import resolve_search_path, resolve_search_paths, to_repo_filter
 
 logger = logging.getLogger(__name__)
 
@@ -458,7 +458,7 @@ async def _info_async(collection_name: str, path: str, format: Literal['text', '
             raise typer.Exit(1)
 
         resolved_path = resolve_search_path(path)
-        filter_path = '' if resolved_path == '**' else resolved_path
+        filter_path = to_repo_filter(resolved_path)
         content = await repository.get_content_stats(filter_path)
 
         dashboard_port = DashboardStateManager().get_dashboard_port()
@@ -526,8 +526,7 @@ async def _list_async(
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        resolved = resolve_search_path(path)
-        filter_path = '' if resolved == '**' else resolved
+        filter_path = to_repo_filter(resolve_search_path(path))
 
         files = await repository.list_indexed_files(
             path_prefix=filter_path,
@@ -562,14 +561,7 @@ async def _clear_async(
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        if '**' in paths and len(paths) > 1:
-            typer.secho(
-                '"**" cannot be mixed with other paths. Pass "**" alone to clear the entire collection.',
-                fg=typer.colors.RED,
-                err=True,
-            )
-            raise typer.Exit(1)
-        resolved_paths = [resolve_search_path(p) for p in paths]
+        resolved_paths = resolve_search_paths(paths, scope_hint='entire collection')
 
         if any(p == '**' for p in resolved_paths):
             if clear_cache:
@@ -672,6 +664,10 @@ async def _search_async(
         await sparse_service.embed_batch(['warmup'])
         reranker = RerankerService()
 
+        # Validate path inputs up front — fail fast before any embedding cost.
+        source_prefixes = to_repo_filter(resolve_search_paths(path, scope_hint='global scope'))
+        resolved_excludes: Sequence[str] = [resolve_search_path(p) for p in exclude_paths] if exclude_paths else []
+
         try:
             dense_vector: list[float] | None = None
             sparse_indices: list[int] | None = None
@@ -684,21 +680,6 @@ async def _search_async(
                 np_indices, np_values = await sparse_service.embed(query)
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
-
-            # "**" is a global sentinel and must stand alone — mixing it with concrete
-            # paths has no coherent semantics, so reject rather than silently collapse.
-            if '**' in path and len(path) > 1:
-                typer.secho(
-                    '"**" cannot be mixed with other paths. Pass "**" alone for global scope.',
-                    fg=typer.colors.RED,
-                    err=True,
-                )
-                raise typer.Exit(1)
-            resolved_list = [resolve_search_path(p) for p in path]
-            source_prefixes: Sequence[str] = [] if '**' in resolved_list else resolved_list
-            resolved_excludes: Sequence[str] = (
-                [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else []
-            )
 
             effective_limit = min(max(limit, 1), 100)
             rerank_candidates = min(effective_limit * 3, 200)
