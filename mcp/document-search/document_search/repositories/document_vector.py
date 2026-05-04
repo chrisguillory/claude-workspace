@@ -243,11 +243,11 @@ class DocumentVectorRepository:
 
     # Visibility methods for index introspection
 
-    async def get_content_stats(self, paths: Sequence[str] = ()) -> ContentStats:
+    async def get_content_stats(self, path_prefixes: Sequence[str] = ()) -> ContentStats:
         """Get content breakdown statistics from Redis state store.
 
         Args:
-            paths: Scope stats to files under these path prefixes. Each file is
+            path_prefixes: Scope stats to files under these path prefixes. Each file is
                 counted once even if it matches multiple prefixes. Empty
                 Sequence for global stats (no path filter).
 
@@ -256,11 +256,11 @@ class DocumentVectorRepository:
             unique file count, and list of supported types.
         """
         # Empty Sequence = global; non-empty = union across prefixes (dedup by path).
-        if not paths:
+        if not path_prefixes:
             file_states = await self._state_store.get_files_under_path('')
         else:
             seen: dict[str, FileIndexState] = {}
-            for prefix in paths:
+            for prefix in path_prefixes:
                 for file_path, state in await self._state_store.get_files_under_path(prefix):
                     seen.setdefault(file_path, state)
             file_states = list(seen.items())

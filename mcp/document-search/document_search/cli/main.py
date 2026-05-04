@@ -216,7 +216,7 @@ def info(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+    paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str],
         typer.Option(
             '--path',
@@ -234,7 +234,7 @@ def info(
         document-search info my-collection --path "**"
         document-search info -f json
     """
-    asyncio.run(_info_async(_resolve_collection(collection), path, format))
+    asyncio.run(_info_async(_resolve_collection(collection), paths, format))
 
 
 @app.command('list')
@@ -247,7 +247,7 @@ def list_docs(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+    paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str],
         typer.Option(
             '--path',
@@ -267,7 +267,7 @@ def list_docs(
         document-search list --type markdown --limit 10
         document-search list my-collection --path "**"
     """
-    asyncio.run(_list_async(_resolve_collection(collection), path, file_type, limit, format))
+    asyncio.run(_list_async(_resolve_collection(collection), paths, file_type, limit, format))
 
 
 @app.command()
@@ -321,7 +321,7 @@ def search(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+    paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str],
         typer.Option(
             '--path',
@@ -333,7 +333,7 @@ def search(
     search_type: Annotated[
         Literal['hybrid', 'lexical', 'embedding'], typer.Option('--type', '-t', help='Search strategy.')
     ] = 'hybrid',
-    exclude_path: Annotated[
+    exclude_paths: Annotated[
         list[str] | None, typer.Option('--exclude', '-x', help='Exclude files under these paths.')
     ] = None,  # strict_typing_linter.py: mutable-type — typer requires list
     min_score: Annotated[
@@ -352,7 +352,9 @@ def search(
         document-search search "retry logic" --min-score 0.0
     """
     asyncio.run(
-        _search_async(query, _resolve_collection(collection), path, limit, search_type, exclude_path, min_score, format)
+        _search_async(
+            query, _resolve_collection(collection), paths, limit, search_type, exclude_paths, min_score, format
+        )
     )
 
 
@@ -441,7 +443,7 @@ async def infrastructure() -> AsyncIterator[InfraContext]:
 # -- Private async implementations --
 
 
-async def _info_async(collection_name: str, path: Sequence[str], format: Literal['text', 'json']) -> None:
+async def _info_async(collection_name: str, paths: Sequence[str], format: Literal['text', 'json']) -> None:
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -457,7 +459,7 @@ async def _info_async(collection_name: str, path: Sequence[str], format: Literal
             typer.secho('Collection not initialized in Qdrant — run index first.', fg=typer.colors.YELLOW, err=True)
             raise typer.Exit(1)
 
-        resolved_paths = resolve_search_paths(path, scope_hint='global scope')
+        resolved_paths = resolve_search_paths(paths, scope_hint='global scope')
         content = await repository.get_content_stats(to_repo_filter(resolved_paths))
 
         dashboard_port = DashboardStateManager().get_dashboard_port()
@@ -511,7 +513,7 @@ async def _info_async(collection_name: str, path: Sequence[str], format: Literal
 
 async def _list_async(
     collection_name: str,
-    path: Sequence[str],
+    paths: Sequence[str],
     file_type: str | None,
     limit: int,
     format: Literal['text', 'json'],
@@ -525,7 +527,7 @@ async def _list_async(
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        filter_paths = to_repo_filter(resolve_search_paths(path, scope_hint='global scope'))
+        filter_paths = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
 
         files = await repository.list_indexed_files(
             path_prefixes=filter_paths,
@@ -621,7 +623,7 @@ async def _clear_async(
 async def _search_async(
     query: str,
     collection_name: str,
-    path: Sequence[str],
+    paths: Sequence[str],
     limit: int,
     search_type: Literal['hybrid', 'lexical', 'embedding'],
     exclude_paths: Sequence[str] | None,
@@ -630,7 +632,7 @@ async def _search_async(
 ) -> None:
     # Validate path inputs up front — fail fast before infrastructure setup
     # and ML model loading (lazy imports + sparse warmup + reranker init).
-    source_prefixes = to_repo_filter(resolve_search_paths(path, scope_hint='global scope'))
+    source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
     resolved_excludes: Sequence[str] = [resolve_search_path(p) for p in exclude_paths] if exclude_paths else []
 
     async with infrastructure() as ctx:
