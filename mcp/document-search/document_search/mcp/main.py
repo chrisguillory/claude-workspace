@@ -436,7 +436,7 @@ Returns:
         # "**" anywhere collapses to no filter (empty Sequence).
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
         resolved_list = [resolve_search_path(p) for p in path_inputs]
-        resolved_paths: Sequence[str] = [] if '**' in resolved_list else resolved_list
+        source_prefixes: Sequence[str] = [] if '**' in resolved_list else resolved_list
 
         resolved_excludes: Sequence[str] = (
             [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else []
@@ -450,7 +450,7 @@ Returns:
             sparse_values=sparse_values,
             limit=rerank_candidates,
             file_types=[typing.cast(FileType, ft) for ft in file_types] if file_types else None,
-            source_path_prefixes=resolved_paths,
+            source_path_prefixes=source_prefixes,
             exclude_path_prefixes=resolved_excludes,
         )
 

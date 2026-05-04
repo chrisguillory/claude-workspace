@@ -458,7 +458,8 @@ async def _info_async(collection_name: str, path: str, format: Literal['text', '
             raise typer.Exit(1)
 
         resolved_path = resolve_search_path(path)
-        content = await repository.get_content_stats(resolved_path)
+        filter_path = '' if resolved_path == '**' else resolved_path
+        content = await repository.get_content_stats(filter_path)
 
         dashboard_port = DashboardStateManager().get_dashboard_port()
         dashboard_url = f'http://127.0.0.1:{dashboard_port}' if dashboard_port else None
