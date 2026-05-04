@@ -218,7 +218,9 @@ since the last indexing run. Supports markdown, text, JSON, and PDF files.
 Args:
     collection_name: Name of the collection to index into.
     path: Path to file or directory to index. Defaults to current working
-        directory if not specified. Note: "**" is not supported.
+        directory if not specified. Supports absolute, relative, or ~ expansion.
+        Accepts a single path string or a list of paths.
+        Note: "**" is not supported - indexing requires concrete paths.
     respect_gitignore: Control .gitignore filtering behavior:
         - None (default): Auto-detect git repos, respect gitignore if found.
         - True: Strictly respect gitignore, fail if not a git repo.

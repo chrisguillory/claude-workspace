@@ -15,6 +15,12 @@ class TestSentinels:
     def test_dot_resolves_to_cwd(self) -> None:
         assert resolve_search_path('.') == str(Path.cwd())
 
+    def test_empty_string_resolves_to_cwd(self) -> None:
+        # Python's pathlib treats Path('') as Path('.'), so empty string
+        # silently resolves to cwd. Pinned so a future "reject empty"
+        # change is an explicit decision, not a regression.
+        assert resolve_search_path('') == str(Path.cwd())
+
 
 class TestResolution:
     def test_existing_absolute_path(self, tmp_path: Path) -> None:
