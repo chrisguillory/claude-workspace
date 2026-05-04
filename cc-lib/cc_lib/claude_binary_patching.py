@@ -24,9 +24,10 @@ Same-Length Constraint:
     corrected segment offsets).
 
 Patch Kinds:
-    fix       Restores broken functionality (regression, rendering bug).
-    feature   Enables gated/disabled functionality (Statsig gate flip).
-    tweak     Behavioral adjustment (telemetry, config, UX change).
+    fix         Restores broken functionality (regression, rendering bug).
+    feature     Enables gated/disabled functionality (Statsig gate flip).
+    visibility  Exposes UI-hidden content the model already receives.
+    tweak       Behavioral adjustment (telemetry, config, UX change).
 
 Patches (alphabetical by name):
 
@@ -152,11 +153,19 @@ Patches (alphabetical by name):
 
                     Tool calls appear as one-line summaries (tool name + args),
                     not full input/output.
-                    Makes isTranscriptMode default to verbose by flipping the
-                    destructured-parameter default from ``!1`` to ``K``.
-                    Anchor: ``Remote agent launched`` (stable UI text, 2.1.63+).
-                    Prior strategy (``let T=H`` reassignment) invalidated at
-                    2.1.114 when isTranscriptMode moved to destructured param.
+                    Substitutes the four standalone ``T`` (isTranscriptMode)
+                    usages in IR7's JSX body with ``K`` (the verbose param):
+                    ``T&&J&&`` → ``K&&J&&`` (prompt), ``T?`` → ``K?`` (tools),
+                    ``T&&j&&`` → ``K&&j&&`` (response), ``!T&&`` → ``!K&&``
+                    (suppresses the "(ctrl+o to expand)" hint). The verbose
+                    tree follows the verbose param directly.
+                    Anchor: ``_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})``
+                    (the verbose-tree React element invocation — interior
+                    fragment that's stable across the substitution, so
+                    patcher status detection works post-apply).
+                    Strategy history: ``let T=H`` reassignment (pre-2.1.114),
+                    destructured-param default flip ``T=!1`` → ``T=K``
+                    (2.1.114..2.1.125), body T→K substitution (2.1.126+).
                     https://github.com/anthropics/claude-code/issues/14511
                     https://github.com/anthropics/claude-code/issues/5974
 
@@ -181,9 +190,7 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-29)::
     "contentArray"                                           2.1.107         2.1.106 (when contentArray type was added)
     tengu_session_memory                                     2.0.64          2.0.62
     tengu_coral_fern                                         2.1.21          2.1.20
-    tengu_sm_compact                                         2.0.64          2.0.62 (co-introduced with session-memory)
     tengu_scratch                                            2.1.45          2.1.44
-    Remote agent launched                                    2.1.63          2.1.62 (let T=H pattern stable from 2.1.85+)
     ask rule/safety check requires full permission pipeline  2.1.109         2.1.92 (pre-diagnostic; scanned across 9 local originals)
 
 Site Count Evolution::
@@ -200,8 +207,26 @@ Site Count Evolution::
     2.1.80    2            —                             18               3                2
     2.1.81    2            —                             18               3                2
     2.1.123   2            2                             —                —                —
+    2.1.126   2            2                             2                2                —
 
 Version Log::
+
+    2.1.126 (2026-05-03)
+        Patches re-derived for new minifier scheme:
+        - mcp-array-content-to-string: 2 sites, IDE-safe via q!=="ide"
+          discriminator (replaces previous unconditional stringify
+          which broke the JetBrains plugin's openDiff path)
+        - reject-show-comment: 2 sites (e76 prefix ID, stable
+          post-context anchor)
+        - show-subagent-prompt-tools-response: 2 sites, strategy
+          rewritten from destructured-default flip to body T→K
+          substitution (default flip defeated by callers passing
+          isTranscriptMode explicitly)
+        New PatchKind.VISIBILITY enum value introduced;
+        show-subagent-prompt-tools-response recategorized
+        TWEAK → VISIBILITY.
+        Full debugging writeup:
+        https://gisthost.github.io/?9018ee3bbc37a7acf95852ab25fe9100
 
     2.1.123 (2026-04-29)
         mcp-array-content-to-string: 2 sites, clean apply.
@@ -372,9 +397,9 @@ PATCHES: Sequence[PatchDef] = (
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
-        description=('Expand completed subagent to show prompt, tool calls, and response when verbose=true'),
+        description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'!1,T&&J&&_8.createElement',
+        anchor=b'_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})',
         old=(
             b'!1,T&&J&&_8.createElement(M6,null,_8.createElement(FY_,{prompt:J,theme:O})),'
             b'T?_8.createElement(p1_,null,_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})):null,'
