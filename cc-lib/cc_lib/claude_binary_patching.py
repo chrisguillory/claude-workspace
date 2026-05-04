@@ -80,8 +80,8 @@ Patches (alphabetical by name):
                     matching the path that already works for
                     ``structuredContent``-emitting tools. Tradeoff: renders
                     as raw JSON rather than extracted text. Full
-                    investigation in
-                    ``scratch/claude-code-rendering-fixes-pr-description.md``.
+                    investigation:
+                    https://gisthost.github.io/?9018ee3bbc37a7acf95852ab25fe9100
                     https://github.com/anthropics/claude-code/issues/41361
 
     reject-show-comment
@@ -107,8 +107,8 @@ Patches (alphabetical by name):
                     so the message falls through to the generic
                     content-renderer. Tradeoff: includes the verbose
                     system-prompt prefix that the model sees. Full
-                    investigation in
-                    ``scratch/claude-code-rendering-fixes-pr-description.md``.
+                    investigation:
+                    https://gisthost.github.io/?9018ee3bbc37a7acf95852ab25fe9100
 
     remember-skill  [feature] Enable /remember skill for session memory search.
                     Statsig gate ``tengu_coral_fern``, default false.
@@ -208,8 +208,8 @@ Version Log::
         Replaces previous mcp-tool-results patch (downstream safeParse
         null-return) which was empirically unreachable for array-content
         MCP results — removed as dead code. Root cause was upstream in
-        transformMCPResult, not in the renderer. See scratch/ for full
-        debugging writeup.
+        transformMCPResult, not in the renderer. Full debugging writeup:
+        https://gisthost.github.io/?9018ee3bbc37a7acf95852ab25fe9100
 
     2.1.117 (2026-04-22)
         hook-ask-no-override, statusline: already applied (stable)
