@@ -628,6 +628,11 @@ async def _search_async(
     min_score: float | None,
     format: Literal['text', 'json'],
 ) -> None:
+    # Validate path inputs up front — fail fast before infrastructure setup
+    # and ML model loading (lazy imports + sparse warmup + reranker init).
+    source_prefixes = to_repo_filter(resolve_search_paths(path, scope_hint='global scope'))
+    resolved_excludes: Sequence[str] = [resolve_search_path(p) for p in exclude_paths] if exclude_paths else []
+
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -662,10 +667,6 @@ async def _search_async(
         sparse_service = await SparseEmbeddingService.create()
         await sparse_service.embed_batch(['warmup'])
         reranker = RerankerService()
-
-        # Validate path inputs up front — fail fast before any embedding cost.
-        source_prefixes = to_repo_filter(resolve_search_paths(path, scope_hint='global scope'))
-        resolved_excludes: Sequence[str] = [resolve_search_path(p) for p in exclude_paths] if exclude_paths else []
 
         try:
             dense_vector: list[float] | None = None
