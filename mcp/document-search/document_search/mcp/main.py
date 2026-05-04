@@ -255,7 +255,6 @@ Returns:
         embed_workers: int = 64,
         chunk_timeout_seconds: int = FILE_CHUNK_TIMEOUT_SECONDS,
         include_timing: bool = False,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
         """Index documents for semantic search (file or directory auto-detected).
 
@@ -284,9 +283,6 @@ Returns:
         Returns:
             IndexingResult with counts and stopped_after indicator.
         """
-        if not ctx:
-            raise ValueError('MCP context required')
-
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
         resolved_paths = resolve_index_paths(path_inputs)
 
@@ -364,11 +360,7 @@ Returns:
         exclude_paths: Sequence[str] = (),
         min_score: float | None = None,
         search_timeout: int | None = None,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
-        if not ctx:
-            raise ValueError('MCP context required')
-
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
         source_prefixes = to_repo_filter(resolve_search_paths(path_inputs, scope_hint='global scope'))
         resolved_excludes = resolve_filter_paths(exclude_paths)
@@ -491,11 +483,7 @@ Returns:
         collection_name: str,
         path: str | Sequence[str] = '.',
         clear_cache: bool = False,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
-        if not ctx:
-            raise ValueError('MCP context required')
-
         # Verify collection exists
         collection = state.get_collection(collection_name)
         indexing_service = await state.get_indexing_service(collection_name)
@@ -548,11 +536,7 @@ Returns:
         path: str | Sequence[str] = '.',
         file_type: str | None = None,
         limit: int = 50,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> Sequence[IndexedFile]:
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         # Verify collection exists and get repository
         state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
@@ -600,11 +584,7 @@ Returns:
     async def get_info(
         collection_name: str,
         path: str | Sequence[str] = '.',
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexInfo:
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         # Get collection metadata from registry
         collection = state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
@@ -672,7 +652,6 @@ Returns:
         provider: EmbeddingProvider,
         model: str | None = None,
         dimensions: int | None = None,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> Collection:
         """Create a new document collection.
 
@@ -689,9 +668,6 @@ Returns:
         Returns:
             The created Collection with name, provider, model, and dimensions.
         """
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         # Validate name
         if name == '**':
             raise ValueError("Collection name '**' is reserved")
@@ -717,17 +693,12 @@ Returns:
             openWorldHint=False,
         ),
     )
-    async def list_collections(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
-    ) -> Sequence[Collection]:
+    async def list_collections() -> Sequence[Collection]:
         """List all document collections.
 
         Returns:
             List of all collections with their names, providers, and descriptions.
         """
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         collections = state.collection_registry.list_collections()
 
         return collections
@@ -743,7 +714,6 @@ Returns:
     )
     async def delete_collection(
         name: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> bool:
         """Delete a document collection.
 
@@ -755,9 +725,6 @@ Returns:
         Returns:
             True if deleted successfully.
         """
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         # Verify collection exists and delete from Qdrant
         state.get_collection(name)
         await state.qdrant_client.delete_collection(name)
