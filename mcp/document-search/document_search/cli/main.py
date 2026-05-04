@@ -40,7 +40,7 @@ from document_search.schemas.vectors import (
     SearchQuery,
     SearchResult,
 )
-from document_search.search_path import resolve_search_path, resolve_search_paths, to_repo_filter
+from document_search.search_path import resolve_index_paths, resolve_search_path, resolve_search_paths, to_repo_filter
 
 logger = logging.getLogger(__name__)
 
@@ -216,14 +216,14 @@ def info(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[
-        str,
+    path: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str],
         typer.Option(
             '--path',
             '-p',
-            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
+            help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
-    ] = '.',
+    ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Show collection info.
@@ -247,14 +247,14 @@ def list_docs(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[
-        str,
+    path: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str],
         typer.Option(
             '--path',
             '-p',
-            help='Path scope. Default: current directory. Must exist on disk. Use "**" alone for global; globs are not supported.',
+            help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
-    ] = '.',
+    ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     file_type: Annotated[str | None, typer.Option('--type', '-t', help='Filter by file type.')] = None,
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max files to return.')] = 50,
     format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -441,7 +441,7 @@ async def infrastructure() -> AsyncIterator[InfraContext]:
 # -- Private async implementations --
 
 
-async def _info_async(collection_name: str, path: str, format: Literal['text', 'json']) -> None:
+async def _info_async(collection_name: str, path: Sequence[str], format: Literal['text', 'json']) -> None:
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -457,9 +457,8 @@ async def _info_async(collection_name: str, path: str, format: Literal['text', '
             typer.secho('Collection not initialized in Qdrant — run index first.', fg=typer.colors.YELLOW, err=True)
             raise typer.Exit(1)
 
-        resolved_path = resolve_search_path(path)
-        filter_path = to_repo_filter(resolved_path)
-        content = await repository.get_content_stats(filter_path)
+        resolved_paths = resolve_search_paths(path, scope_hint='global scope')
+        content = await repository.get_content_stats(to_repo_filter(resolved_paths))
 
         dashboard_port = DashboardStateManager().get_dashboard_port()
         dashboard_url = f'http://127.0.0.1:{dashboard_port}' if dashboard_port else None
@@ -474,7 +473,7 @@ async def _info_async(collection_name: str, path: str, format: Literal['text', '
             embedding=embedding_info,
             storage=storage,
             content=content,
-            path=resolved_path,
+            paths=resolved_paths,
             dashboard_url=dashboard_url,
         )
 
@@ -512,7 +511,7 @@ async def _info_async(collection_name: str, path: str, format: Literal['text', '
 
 async def _list_async(
     collection_name: str,
-    path: str,
+    path: Sequence[str],
     file_type: str | None,
     limit: int,
     format: Literal['text', 'json'],
@@ -526,10 +525,10 @@ async def _list_async(
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        filter_path = to_repo_filter(resolve_search_path(path))
+        filter_paths = to_repo_filter(resolve_search_paths(path, scope_hint='global scope'))
 
         files = await repository.list_indexed_files(
-            path_prefix=filter_path,
+            path_prefixes=filter_paths,
             file_type=file_type,
             limit=limit,
         )
@@ -734,6 +733,10 @@ async def _index_async(
     class _IndexOverrides(TypedDict, total=False):
         chunk_timeout_seconds: int
 
+    # Validate path inputs up front — fail fast before any infrastructure
+    # setup (collection lookup, ML service warmup, dashboard lifecycle).
+    resolved_paths = resolve_index_paths([str(p) for p in paths])
+
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -794,19 +797,6 @@ async def _index_async(
         )
 
         try:
-            # Validate all paths upfront
-            resolved_paths: list[Path] = []
-            for p in paths:
-                resolved = p.expanduser().resolve()
-                if not resolved.is_file() and not resolved.is_dir():
-                    typer.secho(f'Path not found: {resolved}', fg=typer.colors.RED, err=True)
-                    continue
-                resolved_paths.append(resolved)
-
-            if not resolved_paths:
-                typer.secho('No valid paths to index.', fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
-
             index_overrides: _IndexOverrides = {}
             if chunk_timeout is not None:
                 index_overrides['chunk_timeout_seconds'] = chunk_timeout

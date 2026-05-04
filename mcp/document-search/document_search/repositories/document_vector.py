@@ -21,6 +21,7 @@ from document_search.clients.qdrant import QdrantClient
 from document_search.repositories.index_state import IndexStateStore
 from document_search.schemas.chunking import EXTENSION_MAP, FileType
 from document_search.schemas.embeddings import EmbeddingVector, SparseIndices, SparseValues
+from document_search.schemas.indexing import FileIndexState
 from document_search.schemas.vectors import (
     ContentStats,
     FileIndexStatus,
@@ -242,17 +243,27 @@ class DocumentVectorRepository:
 
     # Visibility methods for index introspection
 
-    async def get_content_stats(self, path: str = '') -> ContentStats:
+    async def get_content_stats(self, paths: Sequence[str] = ()) -> ContentStats:
         """Get content breakdown statistics from Redis state store.
 
         Args:
-            path: Scope stats to this path. Empty string for global stats.
+            paths: Scope stats to files under these path prefixes. Each file is
+                counted once even if it matches multiple prefixes. Empty
+                Sequence for global stats (no path filter).
 
         Returns:
             ContentStats with total chunks, breakdown by file type,
             unique file count, and list of supported types.
         """
-        file_states = await self._state_store.get_files_under_path(path)
+        # Empty Sequence = global; non-empty = union across prefixes (dedup by path).
+        if not paths:
+            file_states = await self._state_store.get_files_under_path('')
+        else:
+            seen: dict[str, FileIndexState] = {}
+            for prefix in paths:
+                for file_path, state in await self._state_store.get_files_under_path(prefix):
+                    seen.setdefault(file_path, state)
+            file_states = list(seen.items())
 
         # Aggregate stats
         total_chunks = sum(state.chunk_count for _, state in file_states)
@@ -313,21 +324,30 @@ class DocumentVectorRepository:
 
     async def list_indexed_files(
         self,
-        path_prefix: str = '',
+        path_prefixes: Sequence[str] = (),
         file_type: str | None = None,
         limit: int = 50,
     ) -> Sequence[IndexedFile]:
         """List files in the index via Redis state store.
 
         Args:
-            path_prefix: Filter to files under this path prefix. Empty string for global.
+            path_prefixes: Filter to files under any of these path prefixes.
+                Each file appears once even if matched by multiple prefixes.
+                Empty Sequence for global (no path filter).
             file_type: Filter to this file type.
             limit: Maximum number of files to return.
 
         Returns:
             List of IndexedFile sorted by chunk count descending.
         """
-        file_states = await self._state_store.get_files_under_path(path_prefix)
+        if not path_prefixes:
+            file_states = await self._state_store.get_files_under_path('')
+        else:
+            seen: dict[str, FileIndexState] = {}
+            for prefix in path_prefixes:
+                for file_path, state in await self._state_store.get_files_under_path(prefix):
+                    seen.setdefault(file_path, state)
+            file_states = list(seen.items())
 
         # Build IndexedFile objects with file_type derived from extension
         indexed_files: list[IndexedFile] = []

@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
-from document_search.search_path import resolve_search_path, resolve_search_paths, to_repo_filter
+from document_search.search_path import (
+    resolve_index_paths,
+    resolve_search_path,
+    resolve_search_paths,
+    to_repo_filter,
+)
 
 
 class TestSentinels:
@@ -91,6 +97,58 @@ class TestResolveSearchPaths:
     def test_scope_hint_appears_in_mix_message(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match='entire collection'):
             resolve_search_paths(['**', str(tmp_path)], scope_hint='entire collection')
+
+    def test_allow_global_false_rejects_lone_global(self) -> None:
+        with pytest.raises(ValueError, match='not supported here'):
+            resolve_search_paths(['**'], allow_global=False)
+
+    def test_allow_global_false_rejects_mixed_global(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match='not supported here'):
+            resolve_search_paths(['**', str(tmp_path)], allow_global=False)
+
+    def test_allow_global_false_empty_message_omits_global(self) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            resolve_search_paths([], allow_global=False)
+        assert '**' not in str(exc_info.value)
+
+    def test_allow_global_false_passes_through_concrete_paths(self, tmp_path: Path) -> None:
+        result = resolve_search_paths([str(tmp_path)], allow_global=False)
+        assert result == [str(tmp_path.resolve())]
+
+
+class TestResolveIndexPaths:
+    def test_directory_accepted(self, tmp_path: Path) -> None:
+        assert resolve_index_paths([str(tmp_path)]) == [tmp_path.resolve()]
+
+    def test_file_accepted(self, tmp_path: Path) -> None:
+        f = tmp_path / 'doc.md'
+        f.write_text('hi')
+        assert resolve_index_paths([str(f)]) == [f.resolve()]
+
+    def test_returns_path_objects(self, tmp_path: Path) -> None:
+        # Caller doesn't have to redo Path-wrapping.
+        result = resolve_index_paths([str(tmp_path)])
+        assert all(isinstance(rp, Path) for rp in result)
+
+    def test_global_sentinel_rejected(self) -> None:
+        with pytest.raises(ValueError, match='not supported here'):
+            resolve_index_paths(['**'])
+
+    def test_empty_rejected(self) -> None:
+        with pytest.raises(ValueError, match='path cannot be empty'):
+            resolve_index_paths([])
+
+    def test_glob_rejected(self) -> None:
+        with pytest.raises(ValueError, match='Glob characters not supported'):
+            resolve_index_paths(['/tmp/*.py'])
+
+    def test_fifo_rejected(self, tmp_path: Path) -> None:
+        # FIFOs exist (resolve_search_path's .exists() passes) but are
+        # not regular files or directories — indexing can't consume them.
+        fifo_path = tmp_path / 'fifo'
+        os.mkfifo(fifo_path)
+        with pytest.raises(ValueError, match='not a file or directory'):
+            resolve_index_paths([str(fifo_path)])
 
 
 class TestToRepoFilter:

@@ -22,7 +22,6 @@ import time
 import typing
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 import mcp.server.fastmcp
 import mcp.types
@@ -56,7 +55,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
-from document_search.search_path import resolve_search_path, resolve_search_paths, to_repo_filter
+from document_search.search_path import resolve_index_paths, resolve_search_path, resolve_search_paths, to_repo_filter
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.indexing import FILE_CHUNK_TIMEOUT_SECONDS, IndexingService
@@ -288,12 +287,9 @@ Returns:
         if not ctx:
             raise ValueError('MCP context required')
 
+        # Validate path inputs up front — fail fast before any infrastructure setup.
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
-        if not path_inputs:
-            raise ValueError('path cannot be empty. Provide at least one path.')
-
-        if any(p == '**' for p in path_inputs):
-            raise ValueError("index_documents does not support '**'. Specify a file or directory path.")
+        resolved_paths = resolve_index_paths(path_inputs)
 
         # Get collection and indexing service
         collection = state.get_collection(collection_name)
@@ -301,15 +297,9 @@ Returns:
 
         logger.info('Using collection: %s (%s)', collection_name, collection.provider)
 
-        resolved_paths = [Path(resolve_search_path(p)) for p in path_inputs]
-
         # Ensure Qdrant collection exists with correct dimensions
         repository = state.get_repository(collection_name)
         await repository.ensure_collection(collection.dimensions)
-
-        for rp in resolved_paths:
-            if not rp.is_file() and not rp.is_dir():
-                raise ValueError(f'Path not found: {rp}')
 
         embedding_client = state.get_embedding_client(collection)
         result = await indexing_service.index(
@@ -537,6 +527,8 @@ Args:
     collection_name: Name of the collection to list documents from.
     path: Filter to files under this path. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
+        Accepts a single path string or a list of paths (matches files under ANY).
+        "**" must be standalone — cannot be mixed with concrete paths.
     file_type: Filter to this file type (e.g., 'markdown', 'pdf').
     limit: Maximum number of files to return (default 50).
 
@@ -555,7 +547,7 @@ Returns:
     )
     async def list_documents(
         collection_name: str,
-        path: str = '.',
+        path: str | Sequence[str] = '.',
         file_type: str | None = None,
         limit: int = 50,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
@@ -569,10 +561,11 @@ Returns:
 
         logger.debug('Listing documents in collection: %s', collection_name)
 
-        filter_path = to_repo_filter(resolve_search_path(path))
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        filter_paths = to_repo_filter(resolve_search_paths(path_inputs, scope_hint='global scope'))
 
         files = await repository.list_indexed_files(
-            path_prefix=filter_path,
+            path_prefixes=filter_paths,
             file_type=file_type,
             limit=limit,
         )
@@ -589,6 +582,9 @@ Args:
     collection_name: Name of the collection to get info for.
     path: Scope content stats to files under this path. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
+        Accepts a single path string or a list of paths (each file counted once
+        if matched by any prefix).
+        "**" must be standalone — cannot be mixed with concrete paths.
 
 Returns:
     IndexInfo with collection metadata, embedding config, storage stats, and content breakdown."""
@@ -605,7 +601,7 @@ Returns:
     )
     async def get_info(
         collection_name: str,
-        path: str = '.',
+        path: str | Sequence[str] = '.',
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexInfo:
         if ctx is None:
@@ -617,10 +613,11 @@ Returns:
 
         logger.debug('Getting info for collection: %s', collection_name)
 
-        resolved = resolve_search_path(path)
-        filter_path = to_repo_filter(resolved)
-        if filter_path:
-            logger.debug('Getting info for: %s', filter_path)
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        resolved_paths = resolve_search_paths(path_inputs, scope_hint='global scope')
+        filter_paths = to_repo_filter(resolved_paths)
+        if filter_paths:
+            logger.debug('Getting info for: %s', filter_paths)
         else:
             logger.debug('Getting global collection info')
 
@@ -632,8 +629,8 @@ Returns:
         if storage is None:
             raise ValueError('Collection not initialized in Qdrant - run index_documents first')
 
-        # Get content stats (scoped by path; empty = global)
-        content = await repository.get_content_stats(filter_path)
+        # Get content stats (scoped by paths; empty Sequence = global)
+        content = await repository.get_content_stats(filter_paths)
 
         # Dashboard URL (live check — dashboard can restart on different port)
         dashboard_port = DashboardStateManager().get_dashboard_port()
@@ -650,7 +647,7 @@ Returns:
             embedding=embedding_info,
             storage=storage,
             content=content,
-            path=resolved,
+            paths=resolved_paths,
             dashboard_url=dashboard_url,
         )
 

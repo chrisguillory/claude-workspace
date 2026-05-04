@@ -249,7 +249,7 @@ class IndexInfo(StrictModel):
     embedding: EmbeddingInfo
     storage: StorageStats
     content: ContentStats
-    path: str
+    paths: Sequence[str]
     dashboard_url: str | None = None
 
 
