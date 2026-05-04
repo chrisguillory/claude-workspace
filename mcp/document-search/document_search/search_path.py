@@ -12,24 +12,21 @@ __all__ = [
 
 
 def resolve_search_paths(paths: Sequence[str], *, scope_hint: str = 'global scope') -> Sequence[str]:
-    """Validate paths that define a *search scope* — must specify what to look at.
+    """Validate paths that define a search scope.
 
-    Used for ``--path`` style inputs (search/list/info/clear). The caller
-    must pick a scope: one or more concrete paths, or ``"**"`` alone for
-    the entire collection.
+    The caller must pick a scope: one or more concrete paths, or ``"**"``
+    alone for the entire collection. Empty input is rejected.
 
-    Most callers feeding the result to a repository method or ``SearchQuery``
-    should compose with ``to_repo_filter`` to collapse ``["**"]`` into the
-    repository's empty-list sentinel ``[]``. Use this function directly only
-    when ``"**"`` should be preserved (e.g. propagating to
-    ``IndexingService.clear_documents``).
+    Composes with ``to_repo_filter`` when feeding a repository method or
+    ``SearchQuery`` — the translator collapses ``["**"]`` into the empty-list
+    sentinel the repository expects. Use this function alone when ``"**"``
+    must be preserved (e.g. ``IndexingService.clear_documents``).
 
     Args:
-        paths: User-supplied path inputs. Already shape-normalized by the
-            caller (single strings should be wrapped in a list before calling).
-        scope_hint: Wording used in error messages to describe what ``"**"``
-            means for the calling tool (e.g. ``"global scope"`` for search,
-            ``"entire collection"`` for clear).
+        paths: User-supplied path inputs. Single strings should be wrapped
+            in a list before calling.
+        scope_hint: Wording for error messages describing what ``"**"`` means
+            for the caller (e.g. ``"global scope"``, ``"entire collection"``).
 
     Raises:
         ValueError: ``paths`` is empty; ``"**"`` mixed with concrete paths;
@@ -44,11 +41,10 @@ def resolve_search_paths(paths: Sequence[str], *, scope_hint: str = 'global scop
 
 
 def resolve_filter_paths(paths: Sequence[str]) -> Sequence[str]:
-    """Validate paths that *refine* a result set — empty means "no filter".
+    """Validate paths that refine a result set.
 
-    Used for ``--exclude`` style inputs and any other optional path-based
-    refinement. Empty input is the natural identity (no filter); ``"**"``
-    is meaningless here (excluding everything is a no-op) and rejected.
+    Empty input returns ``[]`` (no filter). ``"**"`` is rejected — excluding
+    everything is a no-op.
 
     Raises:
         ValueError: any ``"**"`` in the input; or any individual path
@@ -65,13 +61,11 @@ def resolve_filter_paths(paths: Sequence[str]) -> Sequence[str]:
 def resolve_index_paths(paths: Sequence[str]) -> Sequence[Path]:
     """Validate paths for indexing: concrete files or directories only.
 
-    Wraps ``resolve_filter_paths`` and additionally rejects empty input
-    (indexing nothing is meaningless) and non-regular filesystem entries
-    (sockets, FIFOs, devices) that ``.exists()`` accepts but
-    ``IndexingService.index`` cannot consume.
+    Empty input is rejected. ``"**"`` is rejected. Non-regular filesystem
+    entries (sockets, FIFOs, devices) that ``.exists()`` accepts but
+    ``IndexingService.index`` cannot consume are also rejected.
 
-    Returns a list of resolved ``Path`` objects so the caller doesn't have
-    to redo the ``[Path(p) for p in ...]`` wrap.
+    Returns ``Path`` objects so the caller doesn't repeat ``[Path(p) for p in ...]``.
 
     Raises:
         ValueError: ``paths`` is empty; any individual path fails per-element
@@ -90,9 +84,8 @@ def resolve_index_paths(paths: Sequence[str]) -> Sequence[Path]:
 def to_repo_filter(value: Sequence[str]) -> Sequence[str]:
     """Translate the user-facing ``"**"`` sentinel to the repository's empty-list form.
 
-    Pure translator. Validation belongs to ``resolve_search_paths``; this
-    function trusts that its input has already been validated and just
-    performs the boundary swap so the repository layer never sees ``"**"``.
+    Pure translator — does not validate. Performs the boundary swap so the
+    repository layer never sees ``"**"``.
 
     Compose at the boundary::
 
@@ -100,20 +93,17 @@ def to_repo_filter(value: Sequence[str]) -> Sequence[str]:
             resolve_search_paths(paths, scope_hint='global scope'),
         )
 
-    Use when feeding a repository method (``get_content_stats``,
-    ``list_indexed_files``) or constructing a ``SearchQuery``. Not needed
-    for ``resolve_filter_paths`` results (they can never contain ``"**"``)
-    or ``resolve_index_paths`` (same reason).
+    Not needed after ``resolve_filter_paths`` or ``resolve_index_paths``
+    (their outputs can never contain ``"**"``).
     """
     return [] if '**' in value else list(value)
 
 
 def _resolve_search_path(path: str) -> str:
-    """Validate and resolve one user-supplied path, preserving ``"**"``.
+    """Validate and resolve one path string, preserving ``"**"``.
 
-    Shared per-element helper. Not part of the public interface — callers
-    pick one of the plural functions above based on whether the path list
-    defines a scope, refines results, or targets indexing.
+    Rejects glob characters and paths that do not exist on disk. Returns
+    the resolved absolute path, or the ``"**"`` sentinel unchanged.
     """
     if path == '**':
         return '**'

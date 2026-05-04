@@ -630,8 +630,6 @@ async def _search_async(
     min_score: float | None,
     format: Literal['text', 'json'],
 ) -> None:
-    # Validate path inputs up front — fail fast before infrastructure setup
-    # and ML model loading (lazy imports + sparse warmup + reranker init).
     source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
     resolved_excludes = resolve_filter_paths(exclude_paths)
 
@@ -725,6 +723,10 @@ async def _search_async(
             await embedding_client.close()
 
 
+class _IndexOverrides(TypedDict, total=False):
+    chunk_timeout_seconds: int
+
+
 async def _index_async(
     paths: Sequence[Path],
     collection_name: str,
@@ -733,11 +735,6 @@ async def _index_async(
     chunk_timeout: int | None,
     format: Literal['text', 'json'],
 ) -> None:
-    class _IndexOverrides(TypedDict, total=False):
-        chunk_timeout_seconds: int
-
-    # Validate path inputs up front — fail fast before any infrastructure
-    # setup (collection lookup, ML service warmup, dashboard lifecycle).
     resolved_paths = resolve_index_paths([str(p) for p in paths])
 
     async with infrastructure() as ctx:

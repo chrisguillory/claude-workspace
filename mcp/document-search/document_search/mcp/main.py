@@ -287,7 +287,6 @@ Returns:
         if not ctx:
             raise ValueError('MCP context required')
 
-        # Validate path inputs up front — fail fast before any infrastructure setup.
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
         resolved_paths = resolve_index_paths(path_inputs)
 
@@ -370,7 +369,6 @@ Returns:
         if not ctx:
             raise ValueError('MCP context required')
 
-        # Validate path inputs up front — fail fast before any embedding cost.
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
         source_prefixes = to_repo_filter(resolve_search_paths(path_inputs, scope_hint='global scope'))
         resolved_excludes = resolve_filter_paths(exclude_paths)
