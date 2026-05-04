@@ -195,6 +195,11 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-29)::
 
 Site Count Evolution::
 
+    Tracks longitudinal site counts for the patch families with
+    multi-version history. Patches first introduced in a single
+    version (e.g., reject-show-comment, show-subagent-prompt-tools-response
+    at 2.1.126) are documented in the Version Log below, not here.
+
     Version   statusline   mcp-array-content-to-string   session-memory   remember-skill   sm-compact
     2.0.64    0            —                             6                0                —
     2.0.70    0            —                             9                0                —
