@@ -55,7 +55,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
-from document_search.search_path import resolve_index_paths, resolve_search_path, resolve_search_paths, to_repo_filter
+from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.indexing import FILE_CHUNK_TIMEOUT_SECONDS, IndexingService
@@ -362,7 +362,7 @@ Returns:
         limit: int = 10,
         search_type: SearchType = 'hybrid',
         file_types: Sequence[str] | None = None,
-        exclude_paths: Sequence[str] | None = None,
+        exclude_paths: Sequence[str] = (),
         min_score: float | None = None,
         search_timeout: int | None = None,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
@@ -373,7 +373,7 @@ Returns:
         # Validate path inputs up front — fail fast before any embedding cost.
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
         source_prefixes = to_repo_filter(resolve_search_paths(path_inputs, scope_hint='global scope'))
-        resolved_excludes: Sequence[str] = [resolve_search_path(p) for p in exclude_paths] if exclude_paths else []
+        resolved_excludes = resolve_filter_paths(exclude_paths)
 
         # Get collection and services
         collection = state.get_collection(collection_name)

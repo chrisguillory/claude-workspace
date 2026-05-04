@@ -40,7 +40,7 @@ from document_search.schemas.vectors import (
     SearchQuery,
     SearchResult,
 )
-from document_search.search_path import resolve_index_paths, resolve_search_path, resolve_search_paths, to_repo_filter
+from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
 
 logger = logging.getLogger(__name__)
 
@@ -333,9 +333,9 @@ def search(
     search_type: Annotated[
         Literal['hybrid', 'lexical', 'embedding'], typer.Option('--type', '-t', help='Search strategy.')
     ] = 'hybrid',
-    exclude_paths: Annotated[
-        list[str] | None, typer.Option('--exclude', '-x', help='Exclude files under these paths.')
-    ] = None,  # strict_typing_linter.py: mutable-type — typer requires list
+    exclude_paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str], typer.Option('--exclude', '-x', help='Exclude files under these paths.')
+    ] = [],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     min_score: Annotated[
         float | None, typer.Option('--min-score', help='Minimum relevance score (0.0 = relevant).')
     ] = None,
@@ -626,14 +626,14 @@ async def _search_async(
     paths: Sequence[str],
     limit: int,
     search_type: Literal['hybrid', 'lexical', 'embedding'],
-    exclude_paths: Sequence[str] | None,
+    exclude_paths: Sequence[str],
     min_score: float | None,
     format: Literal['text', 'json'],
 ) -> None:
     # Validate path inputs up front — fail fast before infrastructure setup
     # and ML model loading (lazy imports + sparse warmup + reranker init).
     source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
-    resolved_excludes: Sequence[str] = [resolve_search_path(p) for p in exclude_paths] if exclude_paths else []
+    resolved_excludes = resolve_filter_paths(exclude_paths)
 
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
