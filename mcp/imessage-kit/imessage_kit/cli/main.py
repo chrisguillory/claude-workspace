@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 
 from imessage_kit.attachments import AttachmentHandler
@@ -23,6 +23,7 @@ from imessage_kit.system import detect_root_app
 
 app = create_app(help='imessage-kit — Read, search, and send iMessages via macOS chat.db.')
 add_completion_command(app)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 

@@ -53,7 +53,7 @@ import httpx
 import pydantic
 import typer
 from cc_lib.claude_binary_patching import ORIGINALS_DIR, scan_binary
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import ClosedModel, OpenModel
 from cc_lib.types import CCVersion
@@ -96,6 +96,7 @@ class LocalVersion(ClosedModel):
 
 
 app = create_app(help='Claude Code version manager.')
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 

@@ -20,7 +20,7 @@ from typing import Annotated, Literal, TypeGuard
 
 import httpx
 import typer
-from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.session_tracker import load_sessions
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 app = create_app(help='Archive and restore Claude Code sessions.')
 add_completion_command(app)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 

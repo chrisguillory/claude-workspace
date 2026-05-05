@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 
 from claude_remote_bash.auth import load_config
@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 app = create_app(help='Cross-machine shell execution for Claude Code.')
 add_completion_command(app)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 CACHE_DIR = Path.home() / '.claude-workspace' / 'claude-remote-bash'
