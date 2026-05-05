@@ -111,9 +111,96 @@ Patches (alphabetical by name):
                     investigation:
                     https://gisthost.github.io/?9018ee3bbc37a7acf95852ab25fe9100
 
-    remember-skill  [feature] Enable /remember skill for session memory search.
-                    Statsig gate ``tengu_coral_fern``, default false.
-                    Not publicly documented or mentioned in any changelog.
+    inject-searching-past-context-prompt
+                    [feature] Inject the "## Searching past context"
+                    section into Claude's system prompt — explicit
+                    grep-paths for the user's auto-memory directory and
+                    project session transcripts. Without this section,
+                    Claude is told *when* to search memory but not
+                    *where*; with it, Claude has copy-paste-ready
+                    commands. Patch short-circuits the gate check
+                    inside ``buildSearchingPastContextSection`` (minified
+                    ``iLH``) so the section always renders.
+
+                    Verbatim prompt text injected (with paths resolved
+                    for the user's home + project)::
+
+                        ## Searching past context
+
+                        When looking for past context:
+                        1. Search topic files in your memory directory:
+                        ```
+                        Grep with pattern="<search term>" path="<autoMemDir>" glob="*.md"
+                        ```
+                        2. Session transcript logs (last resort — large files, slow):
+                        ```
+                        Grep with pattern="<search term>" path="<projectDir>/" glob="*.jsonl"
+                        ```
+                        Use narrow search terms (error messages, file paths, function names) rather than broad keywords.
+
+                    (In ant-internal builds and REPL mode, the Grep-tool
+                    invocations switch to raw ``grep -rn`` shell calls
+                    against the same paths.)
+
+                    Where this section sits in the broader memory prompt
+                    (Piebald-AI prompt-archive, v2.1.126 tag-pinned, MIT;
+                    shows the surrounding sections so you see what's
+                    above/below the gated insertion point):
+                    https://github.com/Piebald-AI/claude-code-system-prompts/blob/v2.1.126/system-prompts/system-prompt-memory-instructions.md#L24
+                    Note: that file shows the placeholder
+                    ``${SEARCHING_PAST_CONTEXT_INSTRUCTIONS}`` because
+                    Anthropic ships the gate at default-false — what's
+                    visible on most users' systems is the placeholder
+                    collapsing to empty.
+
+                    For the expanded body — the actual prompt strings
+                    Claude sees when the gate is open — see the builder
+                    function in the claude-code-best source mirror:
+                    https://github.com/claude-code-best/claude-code/blob/main/src/memdir/memdir.ts#L375-L407
+
+                    Statsig gate ``tengu_coral_fern``, default false in
+                    Anthropic upstream. Not publicly documented by
+                    Anthropic — official memory docs at
+                    https://code.claude.com/docs/en/memory describe the
+                    auto-memory feature but omit the search-prompt
+                    injection mechanism. The flag is invisible to users
+                    from official sources; visible only via the 2026-03-31
+                    source leak and downstream mirrors. Note:
+                    ``LOCAL_GATE_DEFAULTS`` in ``claude-code-best`` shows
+                    ``tengu_coral_fern: true`` — that's the mirror's
+                    override, not Anthropic's intent.
+
+                    Why users want this: github.com/anthropics/claude-code
+                    issue #51116 (open) — users asking for cross-session
+                    memory persistence, unaware it already exists behind
+                    this gate. Issues #48783 and #44820 surface adjacent
+                    auto-memory pain.
+
+                    Related layers (separate, NOT gated by this flag):
+                    - Auto-memory *writer* (extractMemories background
+                      agent) — gated by Statsig flag
+                      ``tengu_passport_quail`` (no env var override).
+                    - Whole auto-memory feature (read + write) — gated by
+                      ``isAutoMemoryEnabled()`` via env
+                      ``CLAUDE_CODE_DISABLE_AUTO_MEMORY`` (1/true → off,
+                      0/false → on; default on). This IS publicly
+                      documented.
+                    - ``/remember`` slash command — gates on
+                      ``isAutoMemoryEnabled()``, NOT on
+                      ``tengu_coral_fern``.
+
+                    Cache-override caveat: same as ``scratchpad`` and
+                    ``write-session-summary`` — cached ``tengu_coral_fern: false``
+                    in ``~/.claude.json`` overrides any default. The
+                    short-circuit makes the cache irrelevant.
+
+                    Requires: ``autoMemoryEnabled: true`` in ``~/.claude/settings.json``
+                    (top-level, not ``env`` block). Without it ``P4()``
+                    returns false and the patched ``iLH()`` is never
+                    called — the patch is applied but inert.
+
+                    Peer project: github.com/Piebald-AI/tweakcc has a UI
+                    for bypassing this and ``tengu_session_memory``.
                     Flag introduced in 2.1.21 (last absent: 2.1.20).
 
     scratchpad      [feature] Enable session-scoped scratchpad directory. Creates
@@ -121,17 +208,49 @@ Patches (alphabetical by name):
                     permissions for reading and writing. Claude uses this
                     instead of ``/tmp`` for intermediate files.
                     Statsig gate ``tengu_scratch``, default false.
-                    Uses different gate mechanism (no default arg) — patched
-                    by replacing call ``("tengu_scratch")`` with ``||!0``.
-                    Flag introduced in 2.1.45 (last absent: 2.1.44).
+                    Short-circuits the gate-check function ``at()`` (which
+                    is the dedup'd ``isScratchpadEnabled``/``isScratchpadGateEnabled``
+                    JS site) to always return true, bypassing
+                    ``getFeatureValue_CACHED_MAY_BE_STALE``'s cache lookup.
+                    The standard gate-flip pattern (``!1`` → ``!0``) is
+                    insufficient here because ``cachedGrowthBookFeatures``
+                    in ``~/.claude.json`` typically has ``tengu_scratch:
+                    false``, which short-circuits to false BEFORE the
+                    patched default is consulted. The short-circuit
+                    replaces the entire function body with ``return!0``
+                    plus a length-padding comment.
+                    Flag introduced in 2.1.45 (last absent: 2.1.44). Call
+                    signature standardized to two-arg form between 2.1.114
+                    and 2.1.121 (verified). The same cache-override
+                    limitation applies to ``remember-skill`` (still ships
+                    with the simple gate-flip; switch to short-circuit if
+                    it doesn't activate). ``write-session-summary`` was
+                    switched to short-circuit in 2.1.126.
 
-    session-memory  [feature] Enable background session memory extraction. Claude
-                    writes summaries to session-memory/summary.md, loaded
-                    at the start of future sessions for cross-session context.
+    write-session-summary
+                    [feature] Enable background session summary extraction.
+                    Claude writes summaries to session-memory/summary.md,
+                    loaded at the start of future sessions for cross-session
+                    context.
                     Statsig gate ``tengu_session_memory``, default false.
                     Not publicly documented — companion to auto-memory (GA 2.1.59).
                     Flag introduced in 2.0.64 (last absent: 2.0.62).
-                    Related flags: ``tengu_sm_compact``, ``tengu_sm_config``.
+                    Short-circuits the gate-check function ``kI3()`` (the
+                    minified ``isSessionMemoryGateEnabled``) to always
+                    return true, bypassing ``cachedGrowthBookFeatures``
+                    which has ``tengu_session_memory: false`` and would
+                    otherwise short-circuit to false BEFORE the gate's
+                    patched default is consulted (same cache-override
+                    pattern as ``scratchpad``).
+                    Requires: ``autoCompactEnabled: true`` in ``~/.claude/settings.json``
+                    (top-level, not ``env`` block). Background extraction
+                    is registered as a hook on the autocompact path; with
+                    autocompact off the hook is never registered and the
+                    patched gate is never reached — patch is applied but inert.
+                    Related flags: ``tengu_sm_compact``, ``tengu_sm_config``
+                    (NOT bundled in 2.1.126; the compaction integration
+                    code is not present in this build, so only ``kI3``
+                    needs short-circuiting).
                     https://claudefa.st/blog/guide/mechanics/session-memory
                     https://giuseppegurgone.com/claude-memory
 
@@ -200,7 +319,7 @@ Site Count Evolution::
     version (e.g., reject-show-comment, show-subagent-prompt-tools-response
     at 2.1.126) are documented in the Version Log below, not here.
 
-    Version   statusline   mcp-array-content-to-string   session-memory   remember-skill   sm-compact
+    Version   statusline   mcp-array-content-to-string   write-session-summary   inject-searching-past-context-prompt   sm-compact
     2.0.64    0            —                             6                0                —
     2.0.70    0            —                             9                0                —
     2.1.0     0            —                             9                0                —
@@ -227,6 +346,25 @@ Version Log::
           rewritten from destructured-default flip to body T→K
           substitution (default flip defeated by callers passing
           isTranscriptMode explicitly)
+        - scratchpad: 2 sites, switched to short-circuit pattern
+          (replace ``at()`` body with ``return!0``) because the
+          simple gate-flip is defeated by ``cachedGrowthBookFeatures``.
+          min_version bumped 2.1.45 → 2.1.121.
+        - write-session-summary: 2 sites, switched to short-circuit
+          pattern (replace ``kI3()`` body with ``return!0``) for the
+          same cache-override reason as scratchpad. ``tengu_sm_compact``
+          compaction integration is not bundled in 2.1.126; only
+          ``kI3`` needs short-circuiting. min_version bumped
+          2.0.64 → 2.1.126.
+        - inject-searching-past-context-prompt: 2 sites,
+          renamed from ``remember-skill`` (the old name implied
+          the ``/remember`` slash command, which is actually gated
+          by ``isAutoMemoryEnabled()`` not ``tengu_coral_fern``).
+          Switched from simple gate-flip to short-circuit
+          (replace ``if(!G_("tengu_coral_fern",!1))return[]`` with
+          ``if(0/*coral_fern_gate_check*/)return[]``) for the same
+          cache-override reason as scratchpad/write-session-summary.
+          min_version bumped 2.1.21 → 2.1.126.
         New PatchKind.VISIBILITY enum value introduced;
         show-subagent-prompt-tools-response recategorized
         TWEAK → VISIBILITY.
@@ -247,36 +385,38 @@ Version Log::
     2.1.114 (2026-04-18)
         show-subagent-prompt-tools-response: 2 sites, unpatched
         (function refactored to destructured param; patch rewritten)
-        statusline, session-memory, remember-skill, scratchpad: clean apply
+        statusline, write-session-summary, remember-skill, scratchpad: clean apply
 
     2.1.109 (2026-04)
         sm-compact: feature removed (tengu_sm_compact flag deleted,
-        consolidated into session-memory)
+        consolidated into write-session-summary)
 
     2.1.81 (2026-03-24)
         statusline: 2 sites, applied
-        session-memory: 4 sites, unpatched (gate: lT)
+        write-session-summary: 4 sites, unpatched (gate: lT)
         remember-skill: 2 sites, unpatched (gate: lT)
         sm-compact: 2 sites, unpatched (gate: lT)
 
     2.1.80 (2026-03-24)
         statusline: 2 sites, applied
-        session-memory: 4 sites (gate: Tq)
+        write-session-summary: 4 sites (gate: Tq)
         remember-skill: 2 sites (gate: Tq)
 
     2.1.74 (2026-03-24)
         statusline: N/A (predates regression)
-        session-memory: present (gate: Jq)
+        write-session-summary: present (gate: Jq)
         remember-skill: present (gate: Jq)
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
+from cc_lib.settings_env import get_cc_setting, is_env_truthy
 from cc_lib.types import CCVersion
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
@@ -288,6 +428,7 @@ __all__ = [
     'PatchDef',
     'PatchKind',
     'PatchScanResult',
+    'RequiredSetting',
     'scan_binary',
 ]
 
@@ -318,6 +459,65 @@ class PatchKind(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class RequiredSetting:
+    """A top-level ``settings.json`` key + value the patch needs at runtime.
+
+    Models the binary's actual gate logic so the patcher's INERT warnings
+    don't false-positive when the user hasn't set the key but the binary
+    would default to a satisfying value.
+
+    Out-of-scope (limitations the patcher won't detect):
+
+    - ``managed-settings.json`` (MDM precedence): the patcher only reads
+      ``~/.claude/settings.json`` and ``.claude/settings.json``.
+    - Runtime toggles (e.g. ``/memory off``): file-undetectable.
+    - Org-policy Statsig flags (``fg_()`` etc.): server-side, not on disk.
+    - ``CLAUDE_CODE_SIMPLE`` / ``CLAUDE_CODE_REMOTE`` launch modes.
+    - Force-enable env vars (e.g. ``CLAUDE_CODE_DISABLE_AUTO_MEMORY=0``
+      overriding ``autoMemoryEnabled: false``): rare; unmodeled.
+    """
+
+    key: str
+    expected_value: object
+    default_value: object
+    """Value the binary uses when ``key`` is absent from settings.json.
+
+    The patcher treats an absent key as satisfied when ``default_value``
+    matches ``expected_value`` (eliminates false-positive INERT warnings
+    for users who never set the key).
+    """
+    disable_env_vars: Sequence[str] = ()
+    """Env vars whose truthy presence forces the feature off in the binary.
+
+    Checked before settings — a truthy env var overrides any settings
+    value and makes the patch inert regardless of ``key``.
+    """
+
+    def is_satisfied(self) -> bool:
+        """Whether the setting + env state currently makes the patch effective."""
+        for env_var in self.disable_env_vars:
+            if is_env_truthy(os.environ.get(env_var)):
+                return False
+        actual = get_cc_setting(self.key)
+        if actual is None:
+            actual = self.default_value
+        return actual == self.expected_value
+
+    def unsatisfied_reason(self) -> str | None:
+        """Human-readable reason why this requirement isn't met, or None if it is."""
+        for env_var in self.disable_env_vars:
+            env_value = os.environ.get(env_var)
+            if is_env_truthy(env_value):
+                return f'env var {env_var}={env_value!r} is disabling the feature (overrides settings.json)'
+        actual = get_cc_setting(self.key)
+        if actual is None:
+            actual = self.default_value
+        if actual != self.expected_value:
+            return f'requires {self.key!r}: {self.expected_value!r} in ~/.claude/settings.json (currently: {actual!r})'
+        return None
+
+
+@dataclass(frozen=True, slots=True)
 class PatchDef:
     """A binary patch definition: same-length byte replacement near an anchor."""
 
@@ -330,6 +530,14 @@ class PatchDef:
     window: int = 200
     min_version: CCVersion | None = None
     max_version: CCVersion | None = None
+    required_setting: Sequence[RequiredSetting] = ()
+    """Top-level ``settings.json`` keys the patch needs to be effective.
+
+    Each entry's ``key`` is checked against ``~/.claude/settings.json`` (via
+    ``cc_lib.settings_env.get_cc_setting``); the patcher warns when the
+    actual value doesn't match ``expected_value``. Empty default — most
+    patches are self-contained at the byte level.
+    """
 
     def __post_init__(self) -> None:
         if len(self.old) != len(self.new):
@@ -371,34 +579,53 @@ PATCHES: Sequence[PatchDef] = (
         min_version='2.1.126',
     ),
     PatchDef(
-        name='remember-skill',
-        description='Enable /remember skill for session memory search',
+        name='inject-searching-past-context-prompt',
+        description=(
+            'Inject the "## Searching past context" system-prompt section that tells Claude how to grep '
+            "the user's memory directory and session transcripts for past context"
+        ),
         kind=PatchKind.FEATURE,
-        anchor=b'tengu_coral_fern',
-        old=b'("tengu_coral_fern",!1)',
-        new=b'("tengu_coral_fern",!0)',
-        window=50,
-        min_version='2.1.21',
+        anchor=b'coral_fern',
+        old=b'if(!G_("tengu_coral_fern",!1))return[]',
+        new=b'if(0/*coral_fern_gate_check*/)return[]',
+        window=80,
+        min_version='2.1.126',
+        required_setting=[
+            RequiredSetting(
+                key='autoMemoryEnabled',
+                expected_value=True,
+                default_value=True,
+                disable_env_vars=['CLAUDE_CODE_DISABLE_AUTO_MEMORY'],
+            ),
+        ],
     ),
     PatchDef(
         name='scratchpad',
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
-        anchor=b'tengu_scratch',
-        old=b'("tengu_scratch")',
-        new=b'||!0/*_scratch_*/',
+        anchor=b'function at(){return',
+        old=b'function at(){return G_("tengu_scratch",!1)}',
+        new=b'function at(){return!0/*scratchpad always*/}',
         window=50,
-        min_version='2.1.45',
+        min_version='2.1.121',
     ),
     PatchDef(
-        name='session-memory',
-        description='Enable background session memory extraction',
+        name='write-session-summary',
+        description='Enable background extraction that writes <sid>/session-memory/summary.md for cross-session context',
         kind=PatchKind.FEATURE,
-        anchor=b'tengu_session_memory',
-        old=b'("tengu_session_memory",!1)',
-        new=b'("tengu_session_memory",!0)',
-        window=50,
-        min_version='2.0.64',
+        anchor=b'function kI3(){return',
+        old=b'function kI3(){return G_("tengu_session_memory",!1)}',
+        new=b'function kI3(){return!0/*("tengu_session_memory")*/}',
+        window=80,
+        min_version='2.1.126',
+        required_setting=[
+            RequiredSetting(
+                key='autoCompactEnabled',
+                expected_value=True,
+                default_value=True,
+                disable_env_vars=['DISABLE_AUTO_COMPACT', 'DISABLE_COMPACT'],
+            ),
+        ],
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
