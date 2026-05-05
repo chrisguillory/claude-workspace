@@ -17,13 +17,16 @@ from typing import Annotated, Literal
 
 import httpx
 import typer
-from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+
+from ..models import Browser
 
 logger = logging.getLogger(__name__)
 
 app = create_app(help='Selenium browser automation CLI — operates on the running MCP server browser.')
 add_completion_command(app)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
@@ -32,7 +35,7 @@ error_boundary = ErrorBoundary(exit_code=1)
 def navigate(
     url: Annotated[str, typer.Argument(help='URL to navigate to.')],
     fresh: Annotated[bool, typer.Option('--fresh', help='Close and reopen browser.')] = False,
-    browser: Annotated[str | None, typer.Option('--browser', '-b', help='chrome or chromium.')] = None,
+    browser: Annotated[Browser | None, typer.Option('--browser', '-b', help='chrome or chromium.')] = None,
     har: Annotated[bool, typer.Option('--har', help='Enable HAR capture (requires --fresh).')] = False,
     init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')
@@ -272,7 +275,7 @@ def navigate_with_profile_state(
             '--live-session-storage/--no-live-session-storage', help='Extract live sessionStorage via AppleScript.'
         ),
     ] = False,
-    browser: Annotated[str | None, typer.Option('--browser', '-b', help='chrome or chromium.')] = None,
+    browser: Annotated[Browser | None, typer.Option('--browser', '-b', help='chrome or chromium.')] = None,
     har: Annotated[bool, typer.Option('--har', help='Enable HAR capture.')] = False,
     init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')

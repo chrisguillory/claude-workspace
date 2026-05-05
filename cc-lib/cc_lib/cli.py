@@ -7,6 +7,7 @@ Provides:
     create_app                  Build a Typer app with standard conventions
     add_install_command         Register install/uninstall/completion subcommands (standalone scripts)
     add_completion_command      Register completion-only subcommands (uv tool install packages)
+    add_help_command            Register a `help` subcommand for top-level / per-subcommand / recursive help
     run_app                     Entry-point helper: derives prog_name from sys.argv[0]
 """
 
@@ -14,21 +15,25 @@ from __future__ import annotations
 
 __all__ = [
     'add_completion_command',
+    'add_help_command',
     'add_install_command',
     'create_app',
     'run_app',
 ]
 
+import difflib
 import os
 import re
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any, Literal, TypeAliasType, get_args, get_origin
 
 import click
 import rich.console
 import typer
 import typer.completion
+import typer.main
 
 from cc_lib.utils.atomic_write import atomic_write
 
@@ -39,7 +44,9 @@ def create_app(*, help: str) -> typer.Typer:  # noqa: A002 — standard CLI para
     - ``add_completion=False`` (disables typer's broken ``--install-completion``)
     - Calls ``typer.completion.completion_init()`` for runtime tab completion
     - Registers a callback that prints help on bare invocation
+    - Installs the PEP 695 alias patch (idempotent, lazy)
     """
+    Pep695AliasPatcher.install()
     app = typer.Typer(help=help, add_completion=False)
     typer.completion.completion_init()
 
@@ -180,6 +187,79 @@ def add_completion_command(app: typer.Typer) -> None:
         click.echo(completions.script(prog_name, shell_name))
 
 
+def add_help_command(app: typer.Typer) -> None:
+    """Register a ``help`` subcommand: top-level / per-subcommand / recursive.
+
+    Usage::
+
+        <cli> help                  # bare → top-level help (same as `--help`)
+        <cli> help <subcmd>         # subcommand help (same as `<subcmd> --help`)
+        <cli> help --recursive      # full tree: top-level + every subcommand
+        <cli> help -R               # short form
+
+    The recursive form is the one-shot artifact AI consumers use to discover
+    a CLI's full surface without round-tripping through `<cli> <subcmd> --help`
+    for every subcommand.
+
+    Args:
+        app: The Typer app to add the ``help`` command to.
+    """
+
+    @app.command('help', rich_help_panel='Documentation')
+    def help_cmd(
+        subcommand: str | None = typer.Argument(
+            None,
+            help='Show help for a specific subcommand. If omitted, shows top-level help.',
+        ),
+        recursive: bool = typer.Option(
+            False,
+            '--recursive',
+            '-R',
+            help="Show top-level help plus every non-hidden subcommand's --help in one shot.",
+        ),
+    ) -> None:
+        """Show help — bare for top-level, with subcommand for one, --recursive for all."""
+        ctx = click.get_current_context()
+        if subcommand and recursive:
+            raise click.UsageError(
+                'Cannot combine --recursive with a subcommand argument.',
+                ctx=ctx,
+            )
+
+        click_obj = typer.main.get_command(app)
+        info_name = ctx.find_root().info_name
+
+        with click.Context(click_obj, info_name=info_name) as root_ctx:
+            if subcommand:
+                if not isinstance(click_obj, click.Group):
+                    raise click.UsageError(
+                        f'No subcommands available; cannot show help for {subcommand!r}.',
+                        ctx=ctx,
+                    )
+                cmd = click_obj.get_command(root_ctx, subcommand)
+                if cmd is None:
+                    suggestions = difflib.get_close_matches(
+                        subcommand,
+                        list(click_obj.commands.keys()),
+                        n=1,
+                        cutoff=0.6,
+                    )
+                    suffix = f' Did you mean {suggestions[0]!r}?' if suggestions else ''
+                    raise click.UsageError(
+                        f'No such command {subcommand!r}.{suffix}',
+                        ctx=ctx,
+                    )
+                with click.Context(cmd, info_name=subcommand, parent=root_ctx) as sub_ctx:
+                    typer.echo(sub_ctx.get_help())
+                return
+
+            if recursive and isinstance(click_obj, click.Group):
+                _print_recursive_help(click_obj, root_ctx)
+                return
+
+            typer.echo(root_ctx.get_help())
+
+
 def run_app(app: typer.Typer) -> None:
     """Run the app with a clean prog_name derived from sys.argv[0].
 
@@ -187,6 +267,95 @@ def run_app(app: typer.Typer) -> None:
     launcher name regardless of invocation method.
     """
     app(prog_name=os.path.basename(sys.argv[0]).removesuffix('.py'))
+
+
+class Pep695AliasPatcher:
+    """Patch Typer to recognize PEP 695 aliases (``type X = Literal[...]``).
+
+    Typer 0.23.x raises ``RuntimeError: Type not yet supported`` when it
+    encounters a PEP 695 type alias at command registration. This patcher
+    teaches Typer's ``is_literal_type`` and ``literal_values`` helpers to
+    unwrap aliases via ``__value__`` until exhausted.
+
+    Lifecycle: installed lazily from ``create_app()`` so non-CLI consumers
+    of ``cc_lib`` (hooks, tests, MCP server runtime) do not mutate Typer's
+    global state. Idempotent across repeat ``create_app()`` calls via the
+    ``MARKER`` sentinel attribute.
+
+    Convergence: detects when upstream lands the fix via an end-to-end
+    registration probe. If the probe succeeds without our patch, raises
+    ``RuntimeError`` with a "remove this" message. See fastapi/typer#970.
+
+    Patches ``typer.main`` (not ``typer._typing``) because ``typer.main``
+    does ``from ._typing import is_literal_type, literal_values`` at import
+    time, capturing the names into its own namespace; patching only
+    ``typer._typing`` is insufficient.
+    """
+
+    MARKER = '__cc_lib_pep695_patch__'
+    type ProbeAlias = Literal['__cc_lib_probe__']
+
+    @classmethod
+    def install(cls) -> None:
+        """Install the patch (idempotent). Raises if upstream has fixed PEP 695."""
+        if getattr(typer.main.is_literal_type, cls.MARKER, False):  # type: ignore[attr-defined]  # Typer runtime attr
+            return  # already installed
+
+        if cls._vanilla_typer_handles_pep695():
+            raise RuntimeError(
+                'Typer now handles PEP 695 aliases natively (registration smoke '
+                'test passed without our patch). Remove Pep695AliasPatcher.install() '
+                'from cc_lib.cli.create_app() — see fastapi/typer#970.'
+            )
+
+        cls._apply()
+
+    @staticmethod
+    def _vanilla_typer_handles_pep695() -> bool:
+        """End-to-end probe: register a command using a PEP 695 alias.
+
+        Returns True iff Typer registers it without RuntimeError — catches
+        any plausible shape of the upstream fix, not just one specific
+        implementation.
+        """
+        probe_app = typer.Typer()
+
+        @probe_app.command()
+        def _probe(value: Pep695AliasPatcher.ProbeAlias = '__cc_lib_probe__') -> None:  # noqa: ARG001 — typer needs a callback
+            pass
+
+        try:
+            typer.main.get_command(probe_app)
+        except RuntimeError:
+            return False
+        return True
+
+    @classmethod
+    def _apply(cls) -> None:
+        """Install the patched functions onto ``typer.main``.
+
+        ``Any`` annotations below are intentional: Typer hands the patched
+        functions arbitrary user annotations at command registration; there
+        is no narrower type that's both correct and useful.
+        """
+
+        def _resolve(t: Any) -> Any:
+            # isinstance(TypeAliasType) matches PR #970's actual approach;
+            # avoids unwrapping non-PEP-695 user classes that happen to have __value__.
+            while isinstance(t, TypeAliasType):
+                t = t.__value__
+            return t
+
+        def patched_is_literal_type(t: Any) -> bool:  # strict_typing_linter.py: loose-typing — Typer types
+            return get_origin(_resolve(t)) is Literal
+
+        def patched_literal_values(t: Any) -> tuple[Any, ...]:  # strict_typing_linter.py: loose-typing — Typer types
+            return get_args(_resolve(t))
+
+        setattr(patched_is_literal_type, cls.MARKER, True)
+        setattr(patched_literal_values, cls.MARKER, True)
+        typer.main.is_literal_type = patched_is_literal_type  # type: ignore[attr-defined,assignment]  # Typer runtime attr
+        typer.main.literal_values = patched_literal_values  # type: ignore[attr-defined,assignment]  # Typer runtime attr
 
 
 class LauncherInstaller:
@@ -326,3 +495,21 @@ def _prog_name_from_context() -> str:
     """Derive prog_name from the current click context."""
     ctx = click.get_current_context()
     return ctx.find_root().info_name or 'unknown'
+
+
+def _print_recursive_help(group: click.Group, root_ctx: click.Context) -> None:
+    """Print top-level help, then `<sub> --help` for every non-hidden subcommand.
+
+    Hidden subcommands are skipped to match what `--help` displays. Nested
+    subgroups are not currently expanded (no workspace CLI has them today).
+    """
+    typer.echo(root_ctx.get_help())
+    for name in sorted(group.commands.keys()):
+        cmd = group.commands[name]
+        if getattr(cmd, 'hidden', False):
+            continue
+        typer.echo()
+        typer.echo(f'━━━ {root_ctx.info_name} {name} ━━━')
+        typer.echo()
+        with click.Context(cmd, info_name=name, parent=root_ctx) as sub_ctx:
+            typer.echo(sub_ctx.get_help())
