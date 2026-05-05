@@ -25,7 +25,7 @@ import difflib
 import os
 import re
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, TypeAliasType, get_args, get_origin
 
@@ -46,7 +46,7 @@ def create_app(*, help: str) -> typer.Typer:  # noqa: A002 — standard CLI para
     - Registers a callback that prints help on bare invocation
     - Installs the PEP 695 alias patch (idempotent, lazy)
     """
-    Pep695AliasPatcher.install()
+    Pep695AliasPatcher().install()
     app = typer.Typer(help=help, add_completion=False)
     typer.completion.completion_init()
 
@@ -205,10 +205,17 @@ def add_help_command(app: typer.Typer) -> None:
         app: The Typer app to add the ``help`` command to.
     """
 
+    def _complete_subcommand(incomplete: str) -> Sequence[str]:
+        click_obj = typer.main.get_command(app)
+        if not isinstance(click_obj, click.Group):
+            return []
+        return [name for name, cmd in click_obj.commands.items() if name.startswith(incomplete) and not cmd.hidden]
+
     @app.command('help', rich_help_panel='Documentation')
     def help_cmd(
         subcommand: str | None = typer.Argument(
             None,
+            autocompletion=_complete_subcommand,
             help='Show help for a specific subcommand. If omitted, shows top-level help.',
         ),
         recursive: bool = typer.Option(
@@ -295,23 +302,21 @@ class Pep695AliasPatcher:
     MARKER = '__cc_lib_pep695_patch__'
     type ProbeAlias = Literal['__cc_lib_probe__']
 
-    @classmethod
-    def install(cls) -> None:
+    def install(self) -> None:
         """Install the patch (idempotent). Raises if upstream has fixed PEP 695."""
-        if getattr(typer.main.is_literal_type, cls.MARKER, False):  # type: ignore[attr-defined]  # Typer runtime attr
+        if getattr(typer.main.is_literal_type, self.MARKER, False):  # type: ignore[attr-defined]  # Typer runtime attr
             return  # already installed
 
-        if cls._vanilla_typer_handles_pep695():
+        if self._vanilla_typer_handles_pep695():
             raise RuntimeError(
                 'Typer now handles PEP 695 aliases natively (registration smoke '
-                'test passed without our patch). Remove Pep695AliasPatcher.install() '
+                'test passed without our patch). Remove Pep695AliasPatcher().install() '
                 'from cc_lib.cli.create_app() — see fastapi/typer#970.'
             )
 
-        cls._apply()
+        self._apply()
 
-    @staticmethod
-    def _vanilla_typer_handles_pep695() -> bool:
+    def _vanilla_typer_handles_pep695(self) -> bool:
         """End-to-end probe: register a command using a PEP 695 alias.
 
         Returns True iff Typer registers it without RuntimeError — catches
@@ -330,8 +335,7 @@ class Pep695AliasPatcher:
             return False
         return True
 
-    @classmethod
-    def _apply(cls) -> None:
+    def _apply(self) -> None:
         """Install the patched functions onto ``typer.main``.
 
         ``Any`` annotations below are intentional: Typer hands the patched
@@ -352,8 +356,8 @@ class Pep695AliasPatcher:
         def patched_literal_values(t: Any) -> tuple[Any, ...]:  # strict_typing_linter.py: loose-typing — Typer types
             return get_args(_resolve(t))
 
-        setattr(patched_is_literal_type, cls.MARKER, True)
-        setattr(patched_literal_values, cls.MARKER, True)
+        setattr(patched_is_literal_type, self.MARKER, True)
+        setattr(patched_literal_values, self.MARKER, True)
         typer.main.is_literal_type = patched_is_literal_type  # type: ignore[attr-defined,assignment]  # Typer runtime attr
         typer.main.literal_values = patched_literal_values  # type: ignore[attr-defined,assignment]  # Typer runtime attr
 
