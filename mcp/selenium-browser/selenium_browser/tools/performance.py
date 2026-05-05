@@ -4,12 +4,13 @@ __all__ = [
     'register_tools',
 ]
 
-from typing import Any, Literal
+from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
+    ConsoleLogLevelFilter,
     ConsoleLogsResult,
     CoreWebVitals,
     HARExportResult,
@@ -139,7 +140,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     )
     async def get_console_logs(
         ctx: Context[Any, Any, Any],
-        level_filter: Literal['ALL', 'SEVERE', 'WARNING', 'INFO'] | None = None,
+        level_filter: ConsoleLogLevelFilter | None = None,
         pattern: str | None = None,
     ) -> ConsoleLogsResult:
         """Get browser console logs (console.log, console.error, etc.).

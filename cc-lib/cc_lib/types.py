@@ -36,6 +36,7 @@ __all__ = [
     'JsonDatetime',
     'JsonObject',
     'JsonUuid',
+    'OutputFormat',
     'SessionSource',
     'SessionState',
     'StrictJsonObject',
@@ -57,6 +58,10 @@ type SessionSource = Literal['startup', 'resume', 'compact', 'clear']
 # -- Reasoning effort ---------------------------------------------------------
 
 type EffortLevel = Literal['low', 'medium', 'high', 'xhigh', 'max']
+
+# -- CLI output format --------------------------------------------------------
+
+type OutputFormat = Literal['text', 'json']
 
 # -- Claude Code versioning ---------------------------------------------------
 

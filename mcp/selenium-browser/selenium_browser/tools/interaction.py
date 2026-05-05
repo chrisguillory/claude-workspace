@@ -4,12 +4,13 @@ __all__ = [
     'register_tools',
 ]
 
-from typing import Any, Literal
+from typing import Any
 
 from cc_lib.types import JsonObject
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
+from ..models import ScrollBehavior, ScrollDirection, ScrollPosition
 from ..service import BrowserService
 
 
@@ -122,11 +123,11 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     )
     async def scroll(
         ctx: Context[Any, Any, Any],
-        direction: Literal['up', 'down', 'left', 'right'] | None = None,
+        direction: ScrollDirection | None = None,
         scroll_amount: int = 3,
         css_selector: str | None = None,
-        behavior: Literal['instant', 'smooth'] = 'instant',
-        position: Literal['top', 'bottom', 'left', 'right'] | None = None,
+        behavior: ScrollBehavior = 'instant',
+        position: ScrollPosition | None = None,
     ) -> JsonObject:
         """Scroll the page, a container, or an element into view.
 
