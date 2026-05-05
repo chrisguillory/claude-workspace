@@ -332,8 +332,46 @@ Site Count Evolution::
     2.1.81    2            —                             18               3                2
     2.1.123   2            2                             —                —                —
     2.1.126   2            2                             2                2                —
+    2.1.128   2            2                             0 (removed)      2                —
 
 Version Log::
+
+    2.1.128 (2026-05-05)
+        Major upstream change: Anthropic removed the session-memory
+        feature entirely. ``tengu_session_memory``, ``summary.md``,
+        and the ``session-memory/`` directory are gone from the binary.
+        ``/dream`` survives but now writes into auto-memory typed files
+        instead. Likely driven by data-loss bugs (issues #42542, #47959,
+        #50694), the April 23 caching-regression postmortem, and the
+        ``Memory on Managed Agents`` architectural pivot toward
+        filesystem-mounted ``/mnt/memory/``. 2.1.127 was apparently a
+        failed kill build that got pulled before tagging.
+
+        Patch updates:
+        - write-session-summary: marked obsolete via
+          ``max_version='2.1.126'``. The patch's underlying feature
+          no longer exists in 2.1.128+.
+        - hook-ask-no-override: clean apply (anchor + bytes stable).
+        - statusline: clean apply (anchor + bytes stable since 2.0.0).
+        - inject-searching-past-context-prompt: 2 sites, accessor
+          renamed ``G_`` → ``Z_`` (Statsig accessor minified
+          differently). Function holding ``iLH`` is now ``RkH``.
+          Anchor stable.
+        - scratchpad: 2 sites, function ``at()`` renamed to ``Me()``,
+          accessor ``G_`` → ``Z_``. Anchor updated to match.
+        - mcp-array-content-to-string: 2 sites, schema-build chain
+          changed from ``Q36(Yj_(T))`` to ``$D_(TQH(T))``;
+          JSON.stringify alias changed from ``NH`` to ``SH`` (a
+          tracing-decorated wrapper at the patch site).
+        - reject-show-comment: 2 sites, prefix identifier ``e76`` →
+          ``EK6``. Anchor stable.
+        - show-subagent-prompt-tools-response: 2 sites, every
+          identifier in the JSX block was minified to a different
+          name (``IL5``→``JN5``, ``_8``→``q8``, ``M6``→``X6``,
+          ``FY_``→``Gw_``, ``p1_``→``P5_``, ``XM8``→``qf8``,
+          ``iF``→``MU``, ``G9H``→``d9H``, ``aM``→``wf``,
+          local vars ``J``→``D``, ``j``→``J``, ``X``→``P``).
+          Strategy unchanged: 4-site T→K substitution.
 
     2.1.126 (2026-05-03)
         Patches re-derived for new minifier scheme:
@@ -562,20 +600,20 @@ PATCHES: Sequence[PatchDef] = (
         description='Render MCP tool results returning content arrays without structuredContent',
         kind=PatchKind.FIX,
         anchor=b'"contentArray"',
-        old=b'return{content:T,type:"contentArray",schema:Q36(Yj_(T))}',
-        new=b'return{content:q!=="ide"?NH(T):T,type:"contentArray"}   ',
+        old=b'return{content:T,type:"contentArray",schema:$D_(TQH(T))}',
+        new=b'return{content:q!=="ide"?SH(T):T,type:"contentArray"}   ',
         window=100,
-        min_version='2.1.126',
+        min_version='2.1.128',
     ),
     PatchDef(
         name='reject-show-comment',
         description='Show user comment when rejecting a tool call (instead of just "Tool use rejected")',
         kind=PatchKind.FIX,
         anchor=b'){let Y;if(_[5]===Symbol.for("react.memo_cache_sen',
-        old=b'T.content.startsWith(e76)',
+        old=b'T.content.startsWith(EK6)',
         new=b'T.content.startsWith("Z")',
         window=100,
-        min_version='2.1.126',
+        min_version='2.1.128',
     ),
     PatchDef(
         name='inject-searching-past-context-prompt',
@@ -585,10 +623,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FEATURE,
         anchor=b'coral_fern',
-        old=b'if(!G_("tengu_coral_fern",!1))return[]',
+        old=b'if(!Z_("tengu_coral_fern",!1))return[]',
         new=b'if(0/*coral_fern_gate_check*/)return[]',
         window=80,
-        min_version='2.1.126',
+        min_version='2.1.128',
         required_setting=[
             RequiredSetting(
                 key='autoMemoryEnabled',
@@ -602,21 +640,27 @@ PATCHES: Sequence[PatchDef] = (
         name='scratchpad',
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
-        anchor=b'function at(){return',
-        old=b'function at(){return G_("tengu_scratch",!1)}',
-        new=b'function at(){return!0/*scratchpad always*/}',
+        anchor=b'function Me(){return',
+        old=b'function Me(){return Z_("tengu_scratch",!1)}',
+        new=b'function Me(){return!0/*scratchpad always*/}',
         window=50,
-        min_version='2.1.121',
+        min_version='2.1.128',
     ),
     PatchDef(
         name='write-session-summary',
-        description='Enable background extraction that writes <sid>/session-memory/summary.md for cross-session context',
+        description=(
+            'Enable background extraction that writes <sid>/session-memory/summary.md for '
+            'cross-session context. Obsolete in 2.1.128+ — Anthropic removed the underlying '
+            'feature (tengu_session_memory and the summary.md write path) and reattached '
+            '/dream to write into auto-memory typed files instead.'
+        ),
         kind=PatchKind.FEATURE,
         anchor=b'function kI3(){return',
         old=b'function kI3(){return G_("tengu_session_memory",!1)}',
         new=b'function kI3(){return!0/*("tengu_session_memory")*/}',
         window=80,
         min_version='2.1.126',
+        max_version='2.1.126',
         required_setting=[
             RequiredSetting(
                 key='autoCompactEnabled',
@@ -630,27 +674,27 @@ PATCHES: Sequence[PatchDef] = (
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})',
+        anchor=b'q8.createElement(JN5,{progressMessages:_,tools:q,verbose:K})',
         old=(
-            b'!1,T&&J&&_8.createElement(M6,null,_8.createElement(FY_,{prompt:J,theme:O})),'
-            b'T?_8.createElement(p1_,null,_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'T&&j&&j.length>0&&_8.createElement(M6,null,_8.createElement(XM8,{content:j,theme:O})),'
-            b'_8.createElement(M6,{height:1},_8.createElement(iF,{message:X,lookups:G9H,addMargin:!1,tools:q,'
+            b'!1,T&&D&&q8.createElement(X6,null,q8.createElement(Gw_,{prompt:D,theme:O})),'
+            b'T?q8.createElement(P5_,null,q8.createElement(JN5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'T&&J&&J.length>0&&q8.createElement(X6,null,q8.createElement(qf8,{content:J,theme:O})),'
+            b'q8.createElement(X6,{height:1},q8.createElement(MU,{message:P,lookups:d9H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!T&&_8.createElement(v,{dimColor:!0},"  ",_8.createElement(aM,null)))'
+            b'!T&&q8.createElement(v,{dimColor:!0},"  ",q8.createElement(wf,null)))'
         ),
         new=(
-            b'!1,K&&J&&_8.createElement(M6,null,_8.createElement(FY_,{prompt:J,theme:O})),'
-            b'K?_8.createElement(p1_,null,_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'K&&j&&j.length>0&&_8.createElement(M6,null,_8.createElement(XM8,{content:j,theme:O})),'
-            b'_8.createElement(M6,{height:1},_8.createElement(iF,{message:X,lookups:G9H,addMargin:!1,tools:q,'
+            b'!1,K&&D&&q8.createElement(X6,null,q8.createElement(Gw_,{prompt:D,theme:O})),'
+            b'K?q8.createElement(P5_,null,q8.createElement(JN5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'K&&J&&J.length>0&&q8.createElement(X6,null,q8.createElement(qf8,{content:J,theme:O})),'
+            b'q8.createElement(X6,{height:1},q8.createElement(MU,{message:P,lookups:d9H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!K&&_8.createElement(v,{dimColor:!0},"  ",_8.createElement(aM,null)))'
+            b'!K&&q8.createElement(v,{dimColor:!0},"  ",q8.createElement(wf,null)))'
         ),
         window=800,
-        min_version='2.1.126',
+        min_version='2.1.128',
     ),
     PatchDef(
         name='statusline',
