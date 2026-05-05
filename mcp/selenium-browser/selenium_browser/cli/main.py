@@ -21,7 +21,6 @@ from cc_lib.cli import add_completion_command, add_help_command, create_app, run
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import OutputFormat
 
-from ..bridge import OnErrorPolicy
 from ..models import (
     Browser,
     ConsoleLogLevelFilter,
@@ -30,6 +29,7 @@ from ..models import (
     ScrollPosition,
     WaitForSelectorState,
 )
+from ..wire import OnErrorPolicy
 
 logger = logging.getLogger(__name__)
 

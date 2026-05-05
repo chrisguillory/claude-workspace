@@ -297,6 +297,12 @@ class Pep695AliasPatcher:
     does ``from ._typing import is_literal_type, literal_values`` at import
     time, capturing the names into its own namespace; patching only
     ``typer._typing`` is insufficient.
+
+    Coverage: only ``type X = Literal[...]`` is unwrapped. Use ``X | None``
+    at the call site, not inside the alias — ``type X = Literal[...] | None``
+    fails with the same ``RuntimeError: Type not yet supported`` because
+    ``Optional[Literal[...]]`` is a Union after unwrap, not a Literal, and
+    Typer's outer Union handling can't see inside the alias.
     """
 
     MARKER = '__cc_lib_pep695_patch__'
@@ -346,9 +352,13 @@ class Pep695AliasPatcher:
         def _resolve(t: Any) -> Any:
             # isinstance(TypeAliasType) matches PR #970's actual approach;
             # avoids unwrapping non-PEP-695 user classes that happen to have __value__.
-            while isinstance(t, TypeAliasType):
+            # Depth cap guards against mutually-recursive aliases (`type A = B; type B = A`)
+            # which would otherwise hang at module-load time inside create_app().
+            for _ in range(32):
+                if not isinstance(t, TypeAliasType):
+                    return t
                 t = t.__value__
-            return t
+            raise TypeError(f'PEP 695 alias chain exceeds depth 32 (possible recursion): {t!r}')
 
         def patched_is_literal_type(t: Any) -> bool:  # strict_typing_linter.py: loose-typing — Typer types
             return get_origin(_resolve(t)) is Literal
