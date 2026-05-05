@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Literal
 
 import pydantic
 
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.session.models import SessionRecord, Task
 from claude_session.schemas.types import Base64JsonBytes, JsonDatetime, ToolResultExtension
+from claude_session.types import ArchiveFormat
 
 __all__ = [
     'ARCHIVE_FORMAT_VERSION',
@@ -67,7 +67,7 @@ class ArchiveMetadata(StrictModel):
 
     file_path: str
     session_id: str
-    format: Literal['json', 'zst']
+    format: ArchiveFormat
     size_mb: float  # Size in megabytes, rounded to 2 decimal places
     archived_at: datetime
     session_records: int  # Records in main {session_id}.jsonl file

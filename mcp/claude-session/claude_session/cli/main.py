@@ -42,7 +42,7 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
-from claude_session.types import GistVisibility
+from claude_session.types import ArchiveFormat, GistVisibility
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +75,6 @@ def _configure_logging(
         os.environ['CLAUDE_CONFIG_DIR'] = str(claude_dir)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
-
-
-ArchiveFormat = Literal['json', 'zst']
 
 
 def _format_age(dt: datetime | None) -> str:
@@ -593,7 +590,7 @@ def _handle_user_error(exc: Exception) -> None:
 async def _archive_async(
     session_id: str,
     output: str,
-    format: Literal['json', 'zst'] | None,
+    format: ArchiveFormat | None,
     gist_token: str | None,
     gist_visibility: GistVisibility,
     gist_description: str,

@@ -51,7 +51,7 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
-from claude_session.types import GistVisibility
+from claude_session.types import ArchiveFormat, GistVisibility
 
 __all__ = [
     'ClaudeContext',
@@ -194,7 +194,7 @@ def register_tools(state: ServerState) -> None:
     @server.tool()
     async def save_current_session(
         output_path: str | None = None,
-        format: Literal['json', 'zst'] | None = None,
+        format: ArchiveFormat | None = None,
         storage_backend: Literal['local'] = 'local',
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ArchiveMetadata:

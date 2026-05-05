@@ -41,6 +41,7 @@ from document_search.schemas.vectors import (
     IndexInfo,
     SearchQuery,
     SearchResult,
+    SearchType,
 )
 
 logger = logging.getLogger(__name__)
@@ -310,9 +311,7 @@ def search(
     ] = None,
     path: Annotated[str | None, typer.Option('--path', '-p', help='Scope to path ("**" for global).')] = None,
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
-    search_type: Annotated[
-        Literal['hybrid', 'lexical', 'embedding'], typer.Option('--type', '-t', help='Search strategy.')
-    ] = 'hybrid',
+    search_type: Annotated[SearchType, typer.Option('--type', '-t', help='Search strategy.')] = 'hybrid',
     exclude_path: Annotated[
         list[str] | None, typer.Option('--exclude', '-x', help='Exclude files under these paths.')
     ] = None,  # strict_typing_linter.py: mutable-type — typer requires list
@@ -613,7 +612,7 @@ async def _search_async(
     collection_name: str,
     path: str | None,
     limit: int,
-    search_type: Literal['hybrid', 'lexical', 'embedding'],
+    search_type: SearchType,
     exclude_paths: Sequence[str] | None,
     min_score: float | None,
     format: OutputFormat,
