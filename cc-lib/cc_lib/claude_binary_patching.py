@@ -410,13 +410,12 @@ Version Log::
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
-from cc_lib.settings_env import get_cc_setting, is_env_truthy
+from cc_lib.settings_env import get_cc_env_var, get_cc_setting, is_env_truthy
 from cc_lib.types import CCVersion
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
@@ -496,7 +495,7 @@ class RequiredSetting:
     def is_satisfied(self) -> bool:
         """Whether the setting + env state currently makes the patch effective."""
         for env_var in self.disable_env_vars:
-            if is_env_truthy(os.environ.get(env_var)):
+            if is_env_truthy(get_cc_env_var(env_var)):
                 return False
         actual = get_cc_setting(self.key)
         if actual is None:
@@ -506,7 +505,7 @@ class RequiredSetting:
     def unsatisfied_reason(self) -> str | None:
         """Human-readable reason why this requirement isn't met, or None if it is."""
         for env_var in self.disable_env_vars:
-            env_value = os.environ.get(env_var)
+            env_value = get_cc_env_var(env_var)
             if is_env_truthy(env_value):
                 return f'env var {env_var}={env_value!r} is disabling the feature (overrides settings.json)'
         actual = get_cc_setting(self.key)
