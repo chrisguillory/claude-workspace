@@ -372,7 +372,7 @@ Returns:
         path: str | Sequence[str] | None = None,
         limit: int = 10,
         search_type: SearchType = 'hybrid',
-        file_types: Sequence[str] | None = None,
+        file_types: Sequence[FileType] | None = None,
         exclude_paths: Sequence[str] | None = None,
         min_score: float | None = None,
         search_timeout: int | None = None,
@@ -456,7 +456,7 @@ Returns:
             sparse_indices=sparse_indices,
             sparse_values=sparse_values,
             limit=rerank_candidates,
-            file_types=[typing.cast(FileType, ft) for ft in file_types] if file_types else None,
+            file_types=file_types,
             source_path_prefixes=resolved_paths,
             exclude_path_prefixes=resolved_excludes,
         )

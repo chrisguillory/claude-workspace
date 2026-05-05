@@ -20,7 +20,7 @@ from typing import Annotated
 
 import typer
 import typer.completion
-from cc_lib.cli import add_completion_command
+from cc_lib.cli import add_completion_command, add_help_command
 from cc_lib.error_boundary import ErrorBoundary
 
 __all__ = [
@@ -72,6 +72,7 @@ app = typer.Typer(
 )
 typer.completion.completion_init()
 add_completion_command(app)
+add_help_command(app)
 
 
 def main() -> None:
