@@ -58,13 +58,14 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 
 GATE_DIR = Path.home() / '.claude-workspace' / 'ask-before-auto-approval'
 
 app = create_app(help="Toggle the ask-before-auto-approval hook's per-session marker.")
 add_install_command(app, script_path=__file__)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 

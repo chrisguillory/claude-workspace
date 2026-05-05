@@ -19,7 +19,7 @@ from typing import Annotated, Literal, TypedDict
 from uuid import UUID
 
 import typer
-from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import OutputFormat
 
@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 app = create_app(help='Document search CLI — semantic search over local documents.')
 add_completion_command(app)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 

@@ -53,7 +53,7 @@ from cc_lib.claude_binary_patching import (
     scan_binary,
 )
 from cc_lib.claude_process import kill_and_copy_resume
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.utils.atomic_write import atomic_write
@@ -74,6 +74,7 @@ class CodesignError(PatchError):
 
 
 app = create_app(help='Claude Code binary patcher.')
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 

@@ -56,7 +56,7 @@ import pydantic
 import rich.console
 import typer
 from cc_lib import claude_cli_introspection
-from cc_lib.cli import LauncherInstaller, create_app, run_app
+from cc_lib.cli import LauncherInstaller, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import CamelModel
 from cc_lib.schemas.base import ClosedModel
@@ -66,6 +66,7 @@ from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 boundary = ErrorBoundary(exit_code=1)
 ext_app = create_app(help='Claude exec management commands.')
+add_help_command(ext_app)
 
 COMPLETION_DIR = Path.home() / '.config' / 'zsh' / 'completions'
 
