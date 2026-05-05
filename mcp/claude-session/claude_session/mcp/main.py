@@ -51,6 +51,7 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
+from claude_session.types import GistVisibility
 
 __all__ = [
     'ClaudeContext',
@@ -738,7 +739,7 @@ def register_tools(state: ServerState) -> None:
     async def save_session_to_gist(
         session_id: str | None = None,
         gist_id: str | None = None,
-        visibility: Literal['public', 'secret'] = 'secret',
+        visibility: GistVisibility = 'secret',
         description: str = 'Claude Code Session Archive',
         source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,

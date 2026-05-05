@@ -20,6 +20,7 @@ from imessage_kit.sender import MessageSender
 from imessage_kit.service import IMessageService, ServerState
 from imessage_kit.sources import SourceRegistry
 from imessage_kit.system import detect_root_app
+from imessage_kit.types import AttachmentMode, SendService
 
 app = create_app(help='imessage-kit — Read, search, and send iMessages via macOS chat.db.')
 add_completion_command(app)
@@ -149,7 +150,9 @@ def list_attachments(
 @error_boundary
 def get_attachment(
     attachment_id: Annotated[int, typer.Argument(help='Attachment ROWID from list-attachments')],
-    mode: Annotated[str, typer.Option('--mode', help="'view' (base64 inline) or 'save' (temp file path)")] = 'save',
+    mode: Annotated[
+        AttachmentMode, typer.Option('--mode', help="'view' (base64 inline) or 'save' (temp file path)")
+    ] = 'save',
 ) -> None:
     """Retrieve an attachment by ID.
 
@@ -158,7 +161,7 @@ def get_attachment(
     --mode save: native file copied to a temp dir, returns absolute path
     """
     service = _make_service()
-    _print_json(service.get_attachment(attachment_id, mode))  # type: ignore[arg-type]  # service validates mode against AttachmentMode Literal
+    _print_json(service.get_attachment(attachment_id, mode))
 
 
 @app.command('send', rich_help_panel='Sending')
@@ -171,7 +174,8 @@ def send(
         str | None, typer.Option('--chat-guid', help='Chat GUID for group chats (from list-chats)')
     ] = None,
     service_type: Annotated[
-        str, typer.Option('--service', help='"auto" / "iMessage" / "SMS" — ignored when --chat-guid is supplied')
+        SendService,
+        typer.Option('--service', help='Service to send via — ignored when --chat-guid is supplied'),
     ] = 'auto',
     attachment: Annotated[  # strict_typing_linter.py: mutable-type — Typer requires list[T] for repeatable options; Sequence raises RuntimeError at command registration
         list[str] | None,
@@ -192,7 +196,7 @@ def send(
         text,
         handle=handle,
         chat_guid=chat_guid,
-        service=service_type,  # type: ignore[arg-type]  # service validates service_type against SendService Literal
+        service=service_type,
         confirm=confirm,
         attachments=attachment,
     )

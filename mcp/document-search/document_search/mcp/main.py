@@ -570,7 +570,7 @@ Returns:
     async def list_documents(
         collection_name: str,
         path: str | None = None,
-        file_type: str | None = None,
+        file_type: FileType | None = None,
         limit: int = 50,
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> Sequence[IndexedFile]:
