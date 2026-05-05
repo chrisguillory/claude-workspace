@@ -364,7 +364,19 @@ Version Log::
           JSON.stringify alias changed from ``NH`` to ``SH`` (a
           tracing-decorated wrapper at the patch site).
         - reject-show-comment: 2 sites, prefix identifier ``e76`` →
-          ``EK6``. Anchor stable.
+          ``EK6``. Anchor stable. Empirically confirmed dead alone in
+          2.1.128: the rendering pipeline was redesigned and the
+          dispatcher (``aR7``) routes rejection-with-comment content
+          to a dedicated rejection handler (``gR7``) BEFORE the
+          error-renderer (``pR7``) where this patch lives. New
+          companion patch ``reject-show-comment-dispatcher`` falsifies
+          the dispatcher's UZH-prefix check so rejection content falls
+          through to the error renderer where this patch can take effect.
+        - reject-show-comment-dispatcher: 2 sites, new patch.
+          Falsifies ``q.content.startsWith(UZH)`` in the result-message
+          dispatcher so rejection-with-comment content reaches the
+          patched error renderer instead of the dedicated rejection
+          handler that renders "Tool use rejected" with no comment.
         - show-subagent-prompt-tools-response: 2 sites, every
           identifier in the JSX block was minified to a different
           name (``IL5``→``JN5``, ``_8``→``q8``, ``M6``→``X6``,
@@ -607,12 +619,30 @@ PATCHES: Sequence[PatchDef] = (
     ),
     PatchDef(
         name='reject-show-comment',
-        description='Show user comment when rejecting a tool call (instead of just "Tool use rejected")',
+        description=(
+            'Show user comment when rejecting a tool call (instead of just "Tool use rejected"). '
+            'Falsifies the error-renderer prefix check; pairs with reject-show-comment-dispatcher '
+            'on 2.1.128+ where the dispatcher routes rejections away from the error renderer.'
+        ),
         kind=PatchKind.FIX,
         anchor=b'){let Y;if(_[5]===Symbol.for("react.memo_cache_sen',
         old=b'T.content.startsWith(EK6)',
         new=b'T.content.startsWith("Z")',
         window=100,
+        min_version='2.1.128',
+    ),
+    PatchDef(
+        name='reject-show-comment-dispatcher',
+        description=(
+            'Make the result-message dispatcher route rejection-with-comment content through '
+            'the error renderer (so reject-show-comment can show the comment) instead of the '
+            'dedicated rejection handler (which only renders "Tool use rejected" with no comment).'
+        ),
+        kind=PatchKind.FIX,
+        anchor=b'||q.content===Hk',
+        old=b'q.content.startsWith(UZH)',
+        new=b'q.content.startsWith("Z")',
+        window=60,
         min_version='2.1.128',
     ),
     PatchDef(
