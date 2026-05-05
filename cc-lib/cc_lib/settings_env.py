@@ -2,15 +2,26 @@ from __future__ import annotations
 
 __all__ = [
     'get_cc_env_var',
+    'get_cc_setting',
+    'is_env_truthy',
 ]
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from functools import cache
 from pathlib import Path
 
 from cc_lib.utils import get_claude_config_home_dir
+
+
+def is_env_truthy(value: str | None) -> bool:
+    """Mirror Claude Code's ``yH()`` env-truthiness check.
+
+    Truthy values: ``'1'``, ``'true'``, ``'yes'`` (case-insensitive).
+    Anything else (``'0'``, ``'false'``, empty string, ``None``) is falsy.
+    """
+    return value is not None and value.lower() in ('1', 'true', 'yes')
 
 
 def get_cc_env_var(key: str) -> str | None:
@@ -30,12 +41,53 @@ def get_cc_env_var(key: str) -> str | None:
     """
     if (value := os.environ.get(key)) is not None:
         return value
-    return _merged_settings().get(key)
+    return _merged_env_settings().get(key)
+
+
+def get_cc_setting(key: str) -> object | None:
+    """Read a top-level Claude Code settings.json key (NOT under env block).
+
+    Use for top-level config keys like ``autoMemoryEnabled``,
+    ``autoCompactEnabled``, ``permissions``, etc. — distinct from
+    ``get_cc_env_var`` which reads the ``env`` sub-block.
+
+    Precedence matches ``get_cc_env_var`` for the settings.json chain:
+    user > user local > project > project local (later files override).
+
+    Returns the raw value (any JSON type — caller must narrow with
+    ``isinstance`` or equality) or None if unset everywhere.
+    """
+    return _merged_top_level_settings().get(key)
 
 
 @cache
-def _merged_settings() -> Mapping[str, str]:
+def _merged_env_settings() -> Mapping[str, str]:
     """Merge env blocks from settings.json files. Cached for process lifetime."""
+    merged: dict[str, str] = {}
+    for data in _settings_data():
+        env_block = data.get('env')
+        if not isinstance(env_block, dict):
+            continue
+        for k, v in env_block.items():
+            if isinstance(k, str):
+                merged[k] = str(v)
+    return merged
+
+
+@cache
+def _merged_top_level_settings() -> Mapping[str, object]:
+    """Merge top-level keys from settings.json files. Cached for process lifetime."""
+    merged: dict[str, object] = {}
+    for data in _settings_data():
+        for k, v in data.items():
+            if k == 'env':
+                continue  # handled by _merged_env_settings
+            merged[k] = v
+    return merged
+
+
+def _settings_data() -> Sequence[Mapping[str, object]]:
+    """Load and parse all settings.json files in precedence order (low → high)."""
     config_home = get_claude_config_home_dir()
     cwd = Path.cwd()
     paths = (
@@ -44,16 +96,9 @@ def _merged_settings() -> Mapping[str, str]:
         cwd / '.claude' / 'settings.json',
         cwd / '.claude' / 'settings.local.json',
     )
-
-    merged: dict[str, str] = {}
+    out: list[Mapping[str, object]] = []
     for path in paths:
         if not path.is_file():
             continue
-        data = json.loads(path.read_text())
-        env_block = data.get('env')
-        if not isinstance(env_block, dict):
-            continue
-        for k, v in env_block.items():
-            if isinstance(k, str):
-                merged[k] = str(v)
-    return merged
+        out.append(json.loads(path.read_text()))
+    return out

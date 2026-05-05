@@ -20,6 +20,9 @@ Also fixes environment issues that the bare ``claude`` binary doesn't handle:
     - Activates ``$PWD/.venv/`` and cleans stale/IDE-injected PATH entries
     - Detects worktree state on resume (repairs trailing-NULL worktreeSession
       records so Claude Code re-chdirs into the worktree)
+    - Sets ``DEBUG=1`` so per-session debug logs land at
+      ``~/.claude/debug/<session>.txt`` from process start (restores
+      pre-v2.1.71 default-on behavior)
     - Injects ``--effort`` from settings.json env block
     - Injects ``--thinking-display summarized`` (Opus 4.7 default is
       ``omitted``; makes thinking-block content visible in JSONL)
@@ -77,6 +80,8 @@ def main() -> None:
         sys.argv = [sys.argv[0], *sys.argv[2:]]  # strip 'ext' so typer sees subcommands
         run_app(ext_app)
         return
+
+    _enable_debug_logging()
 
     raw_args = sys.argv[1:]
     if _is_subcommand_invocation(raw_args):
@@ -195,6 +200,39 @@ def _first_positional(args: Sequence[str]) -> str | None:
             continue
         i += 2 if takes_value.get(tok, False) else 1
     return None
+
+
+# -- Debug logging -------------------------------------------------------------
+
+
+def _enable_debug_logging() -> None:
+    """Set ``DEBUG=1`` so Claude Code writes per-session debug logs to disk.
+
+    Restores pre-v2.1.71 default-on behavior for ``~/.claude/debug/<session>.txt``.
+    v2.1.71 flipped the default off and didn't expose a settings.json key to
+    set it on persistently — Anthropic's only options are repeating ``--debug``
+    every launch, running ``/debug`` per-session (forward-only), or setting
+    ``DEBUG=1`` at startup. By the time you know you needed logs for an
+    unpredictable error, it's too late.
+
+    ``setdefault`` respects an explicit override (``DEBUG=0 claude-exec ...``
+    or ``env -u DEBUG claude-exec ...``).
+
+    Tradeoff: ``~/.claude/debug/`` grows unbounded — periodic cleanup
+    (``find ~/.claude/debug -mtime +30 -delete``) keeps it bounded. The
+    "right" upstream fix is the rolling in-memory buffer proposal in
+    https://github.com/anthropics/claude-code/issues/55217.
+
+    Removable: delete this function and the call in ``main()`` when
+    Anthropic restores default-on behavior or ships a settings.json key.
+
+    Related complaints (open):
+        https://github.com/anthropics/claude-code/issues/55217
+        https://github.com/anthropics/claude-code/issues/13865
+        https://github.com/anthropics/claude-code/issues/34394
+        https://github.com/anthropics/claude-code/issues/37035
+    """
+    os.environ.setdefault('DEBUG', '1')
 
 
 # -- Venv activation -----------------------------------------------------------
