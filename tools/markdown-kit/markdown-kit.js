@@ -1380,8 +1380,30 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
   <script>
     (function() {
       if (!location.hash) return;
-      var target = document.querySelector(location.hash);
-      if (target) target.scrollIntoView();
+      // querySelector rejects IDs that start with a digit (invalid CSS);
+      // getElementById accepts any HTML id.
+      var id = decodeURIComponent(location.hash.slice(1));
+      function scroll() {
+        var target = document.getElementById(id);
+        if (target) target.scrollIntoView();
+      }
+      // Initial attempt — fast path for static pages and early anchors.
+      scroll();
+      // Re-scroll once document size stops changing. Catches images decoding,
+      // fonts loading, and any dynamic content injection generically — no need
+      // to enumerate causes. Debounce 200ms after the last size change.
+      if (!window.ResizeObserver) return;
+      var timer;
+      var observer = new ResizeObserver(function() {
+        clearTimeout(timer);
+        timer = setTimeout(function() {
+          scroll();
+          observer.disconnect();
+        }, 200);
+      });
+      observer.observe(document.documentElement);
+      // Failsafe: don't observe forever if size never settles.
+      setTimeout(function() { observer.disconnect(); }, 10000);
     })();
   </script>` : '';
 
