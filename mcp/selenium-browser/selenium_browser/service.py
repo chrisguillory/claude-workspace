@@ -18,7 +18,7 @@ import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Literal, TypeVar, cast
+from typing import Any, ClassVar, TypeVar, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
 import fastmcp.exceptions
@@ -54,6 +54,7 @@ from .models import (
     CLSMetric,
     ConfigureProxyResult,
     ConsoleLogEntry,
+    ConsoleLogLevelFilter,
     ConsoleLogsResult,
     CoreWebVitals,
     DownloadResourceResult,
@@ -76,12 +77,16 @@ from .models import (
     RequestTiming,
     ResizeWindowResult,
     SaveProfileStateResult,
+    ScrollBehavior,
+    ScrollDirection,
+    ScrollPosition,
     SetBlockedURLsResult,
     SleepResult,
     SlowestRequestSummary,
     SmartExtractionInfo,
     TTFBMetric,
     WaitForSelectorResult,
+    WaitForSelectorState,
 )
 from .scripts import (
     ARIA_SNAPSHOT_SCRIPT,
@@ -1280,11 +1285,11 @@ class BrowserService:
     @tool_registry.register_tool
     async def scroll(
         self,
-        direction: Literal['up', 'down', 'left', 'right'] | None = None,
+        direction: ScrollDirection | None = None,
         scroll_amount: int = 3,
         css_selector: str | None = None,
-        behavior: Literal['instant', 'smooth'] = 'instant',
-        position: Literal['top', 'bottom', 'left', 'right'] | None = None,
+        behavior: ScrollBehavior = 'instant',
+        position: ScrollPosition | None = None,
     ) -> JsonObject:
         """Scroll the page, a container, or an element into view.
 
@@ -1418,7 +1423,7 @@ class BrowserService:
     async def wait_for_selector(
         self,
         css_selector: str,
-        state: Literal['visible', 'hidden', 'attached', 'detached'] = 'visible',
+        state: WaitForSelectorState = 'visible',
         timeout: int = 30000,
     ) -> WaitForSelectorResult:
         """Wait for an element matching the selector to reach a desired state.
@@ -1847,7 +1852,7 @@ class BrowserService:
     @tool_registry.register_tool
     async def get_console_logs(
         self,
-        level_filter: Literal['ALL', 'SEVERE', 'WARNING', 'INFO'] | None = None,
+        level_filter: ConsoleLogLevelFilter | None = None,
         pattern: str | None = None,
     ) -> ConsoleLogsResult:
         """Get browser console logs (console.log, console.error, etc.).
