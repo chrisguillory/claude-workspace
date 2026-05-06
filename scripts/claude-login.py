@@ -126,7 +126,7 @@ import rich.console
 import rich.panel
 import typer
 from cc_lib.claude_process import kill_and_copy_resume
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.schemas import CamelModel, StrictModel
 from cc_lib.types import JsonObject
@@ -1176,6 +1176,7 @@ def _complete_setup_token_login_id(incomplete: str) -> Sequence[tuple[str, str]]
 # -- CLI -----------------------------------------------------------------------
 
 app = create_app(help='Claude Code login and MCP auth manager.')
+add_help_command(app)
 
 
 @app.callback(invoke_without_command=True)

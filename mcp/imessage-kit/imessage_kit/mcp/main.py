@@ -35,6 +35,7 @@ from imessage_kit.types import (
     DiagnosticResult,
     Message,
     SendResult,
+    SendService,
 )
 
 logger = logging.getLogger(__name__)
@@ -262,7 +263,7 @@ def register_tools(service: IMessageService) -> None:
         text: str = '',
         handle: str | None = None,
         chat_guid: str | None = None,
-        service_type: str = 'auto',
+        service_type: SendService = 'auto',
         attachments: Sequence[str] | None = None,
     ) -> SendResult:
         """Send text and/or attachments to a handle (1:1) or chat GUID (group).
@@ -296,7 +297,7 @@ def register_tools(service: IMessageService) -> None:
             text,
             handle=handle,
             chat_guid=chat_guid,
-            service=service_type,  # type: ignore[arg-type]  # MCP signature is plain str; service.send_message validates against SendService Literal at boundary
+            service=service_type,
             confirm=confirm,
             attachments=attachments,
         )

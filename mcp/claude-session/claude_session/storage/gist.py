@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Literal
 
 import httpx
+
+from claude_session.types import GistVisibility
 
 __all__ = [
     'GistStorage',
@@ -36,7 +37,7 @@ class GistStorage:
         self,
         token: str,
         gist_id: str | None = None,
-        visibility: Literal['public', 'secret'] = 'secret',
+        visibility: GistVisibility = 'secret',
         description: str = 'Claude Code Session Archive',
     ) -> None:
         """

@@ -12,7 +12,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import ClassVar
 
 import zstandard as zstd
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
@@ -52,6 +52,7 @@ from claude_session.services.lineage import get_machine_id
 from claude_session.services.parser import SessionParserService
 from claude_session.services.version import get_version
 from claude_session.storage.protocol import StorageBackend
+from claude_session.types import ArchiveFormat
 
 __all__ = [
     'FormatDetector',
@@ -71,14 +72,14 @@ class FormatDetector:
     SUPPORTED_FORMATS: ClassVar[frozenset[str]] = frozenset({'json', 'zst'})  # 'zst' = JSON with zstd compression
 
     # Extension to format mapping
-    EXTENSION_MAP: ClassVar[Mapping[str, Literal['json', 'zst']]] = {
+    EXTENSION_MAP: ClassVar[Mapping[str, ArchiveFormat]] = {
         '.json': 'json',
         '.json.zst': 'zst',
         '.zst': 'zst',
     }
 
     @classmethod
-    def detect_format(cls, output_path: Path, format_param: Literal['json', 'zst'] | None) -> Literal['json', 'zst']:
+    def detect_format(cls, output_path: Path, format_param: ArchiveFormat | None) -> ArchiveFormat:
         """
         Detect archive format from path and validate against format parameter.
 
@@ -125,7 +126,7 @@ class FormatDetector:
             )
 
     @classmethod
-    def _detect_from_extension(cls, output_path: Path) -> Literal['json', 'zst'] | None:
+    def _detect_from_extension(cls, output_path: Path) -> ArchiveFormat | None:
         """
         Detect format from file extension.
 
@@ -200,7 +201,7 @@ class SessionArchiveService:
         self,
         storage: StorageBackend,
         output_path: str | None,
-        format_param: Literal['json', 'zst'] | None,
+        format_param: ArchiveFormat | None,
         skip_cross_session_artifacts: bool = False,
     ) -> ArchiveMetadata:
         """

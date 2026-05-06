@@ -129,7 +129,7 @@ from typing import Any, Literal
 import psutil
 import typer
 from cc_lib import session_tracker
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import CCVersion
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
@@ -149,6 +149,7 @@ EXIT_ERROR = 3
 # -- App + ErrorBoundary -------------------------------------------------------
 
 app = create_app(help='Claude Code session patcher -- diagnose and repair session corruption.')
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=EXIT_ERROR)
 
 
