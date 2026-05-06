@@ -333,6 +333,7 @@ Site Count Evolution::
     2.1.123   2            2                             —                —                —
     2.1.126   2            2                             2                2                —
     2.1.128   2            2                             0 (removed)      2                —
+    2.1.131   2            2                             0 (removed)      2                —
 
 Empirical verification on 2.1.128 (2026-05-06)::
 
@@ -343,6 +344,36 @@ Empirical verification on 2.1.128 (2026-05-06)::
       original "Tool use rejected" bug no longer exists
 
 Version Log::
+
+    2.1.131 (2026-05-06)
+        Routine release with bug fixes (VS Code activation, Mantle
+        endpoint auth, /clear tab title, /context grid leak, several
+        UI regressions). No architectural changes affecting patches.
+
+        Patch updates:
+        - hook-ask-no-override: clean apply (anchor + bytes stable since 2.1.109).
+        - statusline: clean apply (anchor + bytes stable since 2.0.0).
+        - mcp-array-content-to-string: 2 sites, schema-build chain
+          changed from ``$D_(TQH(T))`` to ``RD_(WcH(T))``;
+          JSON.stringify alias changed from ``SH`` to ``EH``.
+        - inject-searching-past-context-prompt: 2 sites, accessor
+          renamed back ``Z_`` → ``G_`` (oscillates per release).
+          Function holding the gate is now ``nkH``.
+        - scratchpad: 2 sites, function ``Me()`` renamed to ``ve()``.
+          Accessor stable as ``G_``.
+        - show-subagent-prompt-tools-response: 2 sites, every JSX
+          identifier minified to a different name again
+          (``JN5``→``hv5``, ``q8``→``O8``, ``X6``→``G6``,
+          ``Gw_``→``bw_``, ``P5_``→``N5_``, ``qf8``→``Nf8``,
+          ``MU``→``SU``, ``d9H``→``t9H``, ``v``→``V``,
+          ``wf``→``Xf``; local var ``P``→``X``).
+          Strategy unchanged: 4-site T→K substitution.
+        - write-session-summary: still obsolete
+          (``max_version='2.1.126'``); ``tengu_session_memory``
+          remains absent from the binary.
+        - reject-show-comment: still obsolete
+          (``max_version='2.1.126'``); rejection rendering remains
+          silent in vanilla.
 
     2.1.128 (2026-05-05)
         Major upstream change: Anthropic removed the session-memory
@@ -615,10 +646,10 @@ PATCHES: Sequence[PatchDef] = (
         description='Render MCP tool results returning content arrays without structuredContent',
         kind=PatchKind.FIX,
         anchor=b'"contentArray"',
-        old=b'return{content:T,type:"contentArray",schema:$D_(TQH(T))}',
-        new=b'return{content:q!=="ide"?SH(T):T,type:"contentArray"}   ',
+        old=b'return{content:T,type:"contentArray",schema:RD_(WcH(T))}',
+        new=b'return{content:q!=="ide"?EH(T):T,type:"contentArray"}   ',
         window=100,
-        min_version='2.1.128',
+        min_version='2.1.131',
     ),
     PatchDef(
         name='reject-show-comment',
@@ -644,10 +675,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FEATURE,
         anchor=b'coral_fern',
-        old=b'if(!Z_("tengu_coral_fern",!1))return[]',
+        old=b'if(!G_("tengu_coral_fern",!1))return[]',
         new=b'if(0/*coral_fern_gate_check*/)return[]',
         window=80,
-        min_version='2.1.128',
+        min_version='2.1.131',
         required_setting=[
             RequiredSetting(
                 key='autoMemoryEnabled',
@@ -661,11 +692,11 @@ PATCHES: Sequence[PatchDef] = (
         name='scratchpad',
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
-        anchor=b'function Me(){return',
-        old=b'function Me(){return Z_("tengu_scratch",!1)}',
-        new=b'function Me(){return!0/*scratchpad always*/}',
+        anchor=b'function ve(){return',
+        old=b'function ve(){return G_("tengu_scratch",!1)}',
+        new=b'function ve(){return!0/*scratchpad always*/}',
         window=50,
-        min_version='2.1.128',
+        min_version='2.1.131',
     ),
     PatchDef(
         name='write-session-summary',
@@ -695,27 +726,27 @@ PATCHES: Sequence[PatchDef] = (
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'q8.createElement(JN5,{progressMessages:_,tools:q,verbose:K})',
+        anchor=b'O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})',
         old=(
-            b'!1,T&&D&&q8.createElement(X6,null,q8.createElement(Gw_,{prompt:D,theme:O})),'
-            b'T?q8.createElement(P5_,null,q8.createElement(JN5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'T&&J&&J.length>0&&q8.createElement(X6,null,q8.createElement(qf8,{content:J,theme:O})),'
-            b'q8.createElement(X6,{height:1},q8.createElement(MU,{message:P,lookups:d9H,addMargin:!1,tools:q,'
+            b'!1,T&&D&&O8.createElement(G6,null,O8.createElement(bw_,{prompt:D,theme:O})),'
+            b'T?O8.createElement(N5_,null,O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'T&&J&&J.length>0&&O8.createElement(G6,null,O8.createElement(Nf8,{content:J,theme:O})),'
+            b'O8.createElement(G6,{height:1},O8.createElement(SU,{message:X,lookups:t9H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!T&&q8.createElement(v,{dimColor:!0},"  ",q8.createElement(wf,null)))'
+            b'!T&&O8.createElement(V,{dimColor:!0},"  ",O8.createElement(Xf,null)))'
         ),
         new=(
-            b'!1,K&&D&&q8.createElement(X6,null,q8.createElement(Gw_,{prompt:D,theme:O})),'
-            b'K?q8.createElement(P5_,null,q8.createElement(JN5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'K&&J&&J.length>0&&q8.createElement(X6,null,q8.createElement(qf8,{content:J,theme:O})),'
-            b'q8.createElement(X6,{height:1},q8.createElement(MU,{message:P,lookups:d9H,addMargin:!1,tools:q,'
+            b'!1,K&&D&&O8.createElement(G6,null,O8.createElement(bw_,{prompt:D,theme:O})),'
+            b'K?O8.createElement(N5_,null,O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'K&&J&&J.length>0&&O8.createElement(G6,null,O8.createElement(Nf8,{content:J,theme:O})),'
+            b'O8.createElement(G6,{height:1},O8.createElement(SU,{message:X,lookups:t9H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!K&&q8.createElement(v,{dimColor:!0},"  ",q8.createElement(wf,null)))'
+            b'!K&&O8.createElement(V,{dimColor:!0},"  ",O8.createElement(Xf,null)))'
         ),
         window=800,
-        min_version='2.1.128',
+        min_version='2.1.131',
     ),
     PatchDef(
         name='statusline',
