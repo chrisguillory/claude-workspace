@@ -1,0 +1,512 @@
+openapi: 3.1.0
+info:
+  title: grok.com Internal REST API (Reverse-Engineered)
+  summary: Empirically observed grok.com web-app REST endpoints
+  description: |
+    UNOFFICIAL spec describing the REST surface of grok.com's web app, captured via HAR
+    on 2026-05-06 against the authenticated user's account. NOT a contract; xAI may
+    change shape at any time. Schemas reflect *what we observed*, not what is promised.
+
+    Auth: cookie-based via X SSO. Three load-bearing cookies (`sso`, `sso-rw`,
+    `x-userid`) plus Cloudflare bot-management cookies (`cf_clearance`, `__cf_bm`).
+    The HAR exporter strips Cookie headers; cookies are pulled from the browser
+    profile state separately.
+  version: 0.1.0
+  contact:
+    name: grok-kit (claude-workspace)
+    url: https://github.com/chrisguillory/claude-workspace
+servers:
+  - url: https://grok.com
+    description: Production grok.com; no other environments observed.
+
+security:
+  - cookieHeader: []
+
+components:
+  securitySchemes:
+    cookieHeader:
+      type: apiKey
+      in: header
+      name: Cookie
+      description: |
+        Pre-formatted HTTP `Cookie:` header value. The 5 load-bearing cookies
+        (`sso`, `sso-rw`, `x-userid`, `cf_clearance`, `__cf_bm`) must be
+        concatenated `name=value; name=value; ...` form. The auth layer in
+        grok-kit (consumer of this SDK) formats this from the browser-extracted
+        Playwright storageState; the SDK itself receives a single opaque string.
+
+        Speakeasy's runtime (1.762.0) supports `apiKey in: header`/`in: query`
+        but not `in: cookie` for apiKey schemes; modeling the auth as a single
+        `Cookie:` header sidesteps that limitation while remaining wire-correct
+        (browsers send cookies as one Cookie header anyway).
+
+  schemas:
+
+    # ----- Enums (rendered as Literal unions per gen.yaml enumFormat: union) -----
+
+    MessageSender:
+      type: string
+      enum: [human, assistant]
+      description: Originator of a message.
+
+    MediaType:
+      type: string
+      enum: [audio, text, image, video]
+      description: Media type tags on a conversation. Observed values; xAI may add more.
+
+    # ----- Conversation summary + list -----
+
+    ConversationSummary:
+      type: object
+      required:
+        - conversationId
+        - title
+        - starred
+        - createTime
+        - modifyTime
+        - systemPromptName
+        - temporary
+        - mediaTypes
+        - workspaces
+        - taskResult
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+          example: f8b93762-c5b5-40df-9d3c-4990ba9746b6
+        title:
+          type: string
+          example: Tesla App Door Unlatch
+        starred:
+          type: boolean
+        createTime:
+          type: string
+          format: date-time
+        modifyTime:
+          type: string
+          format: date-time
+        systemPromptName:
+          type: string
+          description: Name of the system prompt used; empty string when default.
+        temporary:
+          type: boolean
+          description: True for "incognito"/private chats not persisted to history.
+        mediaTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MediaType'
+        workspaces:
+          type: array
+          description: Workspace memberships; observed empty in personal-tier accounts.
+          items:
+            type: object
+            additionalProperties: true
+        taskResult:
+          type: object
+          additionalProperties: true
+          description: Result payload for tasks; observed empty for chat conversations.
+
+    ConversationListResponse:
+      type: object
+      required: [conversations]
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationSummary'
+        nextPageToken:
+          type: string
+          description: Page cursor; empty string when last page.
+        textSearchMatches:
+          type: array
+          description: Text-search match metadata; observed empty when no query.
+          items:
+            type: object
+            additionalProperties: true
+
+    ConversationDetailResponse:
+      type: object
+      required: [conversation]
+      properties:
+        conversation:
+          $ref: '#/components/schemas/ConversationSummary'
+
+    # ----- Response tree (parent-pointer linked list) -----
+
+    ResponseNode:
+      type: object
+      required: [responseId, sender]
+      properties:
+        responseId:
+          type: string
+          format: uuid
+        sender:
+          $ref: '#/components/schemas/MessageSender'
+        parentResponseId:
+          type: string
+          format: uuid
+          description: Parent message in the conversation tree; null/absent on root.
+
+    ResponseTreeResponse:
+      type: object
+      required: [responseNodes]
+      properties:
+        responseNodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResponseNode'
+
+    # ----- Message bodies (full payloads via load-responses) -----
+
+    MessageBody:
+      type: object
+      required:
+        - responseId
+        - message
+        - sender
+        - createTime
+        - manual
+        - partial
+        - shared
+      properties:
+        responseId:
+          type: string
+          format: uuid
+        message:
+          type: string
+          description: Full message text. Empty string allowed.
+        sender:
+          $ref: '#/components/schemas/MessageSender'
+        createTime:
+          type: string
+          format: date-time
+        parentResponseId:
+          type: string
+          format: uuid
+        manual:
+          type: boolean
+        partial:
+          type: boolean
+        shared:
+          type: boolean
+        query:
+          type: string
+        queryType:
+          type: string
+        model:
+          type: string
+        mediaTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MediaType'
+        webSearchResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        xpostIds:
+          type: array
+          items:
+            type: string
+        xposts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        generatedImageUrls:
+          type: array
+          items:
+            type: string
+        imageAttachments:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        fileAttachments:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        cardAttachmentsJson:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        fileUris:
+          type: array
+          items:
+            type: string
+        fileAttachmentsMetadata:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        isControl:
+          type: boolean
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        imageEditUris:
+          type: array
+          items:
+            type: string
+        webpageUrls:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        citedWebSearchResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        toolResponses:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        ragResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        citedRagResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        searchProductResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        connectorSearchResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        collectionSearchResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        streamErrors:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        citedXposts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        citedConnectorSearchResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        citedCollectionSearchResults:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    LoadResponsesRequest:
+      type: object
+      required: [responseIds]
+      properties:
+        responseIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+
+    LoadResponsesResponse:
+      type: object
+      required: [responses]
+      properties:
+        responses:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageBody'
+
+    # ----- Share links -----
+
+    ShareLink:
+      type: object
+      description: Public share link for a conversation. Schema TBD — observed empty array.
+      additionalProperties: true
+
+    ShareLinksResponse:
+      type: object
+      required: [shareLinks]
+      properties:
+        shareLinks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShareLink'
+
+paths:
+
+  /rest/app-chat/conversations:
+    get:
+      summary: List conversations
+      description: |
+        Returns a page of conversation summaries, ordered by modifyTime descending.
+        Pagination via `pageToken`; `nextPageToken` in the response is the cursor for
+        the next page (empty string when last page).
+      operationId: listConversations
+      tags: [Conversations]
+      parameters:
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 60
+            maximum: 60
+            minimum: 1
+          description: Server caps observed at 60.
+        - name: pageToken
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Cursor from a prior response's `nextPageToken`.
+        - name: filterIsStarred
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Restrict to starred conversations only.
+      responses:
+        '200':
+          description: Page of conversations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationListResponse'
+
+  /rest/app-chat/conversations_v2/{conversationId}:
+    get:
+      summary: Get conversation metadata
+      description: Returns metadata for a single conversation. Note `_v2` suffix.
+      operationId: getConversation
+      tags: [Conversations]
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: includeWorkspaces
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+        - name: includeTaskResult
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Conversation metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationDetailResponse'
+
+  /rest/app-chat/conversations/{conversationId}/response-node:
+    get:
+      summary: Get conversation message tree
+      description: |
+        Returns the response-tree for a conversation: a flat array of nodes, each with
+        responseId + sender + parentResponseId. Reconstruct the conversation thread by
+        following parent links from leaves up.
+      operationId: getResponseTree
+      tags: [Messages]
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: includeThreads
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Response tree
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseTreeResponse'
+
+  /rest/app-chat/conversations/{conversationId}/load-responses:
+    post:
+      summary: Load full message bodies for given responseIds
+      description: |
+        Returns the full payload (text + metadata) for the supplied responseIds.
+        Server cap on responseIds per call has not been empirically determined;
+        observed working with up to 30 in a single request.
+      operationId: loadMessages
+      tags: [Messages]
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadResponsesRequest'
+      responses:
+        '200':
+          description: Message bodies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadResponsesResponse'
+
+  /rest/app-chat/share_links:
+    get:
+      summary: List share links for a conversation
+      operationId: listShareLinks
+      tags: [Conversations]
+      parameters:
+        - name: conversationId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Share links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLinksResponse'

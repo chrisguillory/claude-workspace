@@ -1,0 +1,243 @@
+lockVersion: 2.0.0
+id: c4e2d005-d1ef-401d-b751-a6a95ee6ec62
+management:
+  docChecksum: ba5a63c71131e62fe7cd820a669d389f
+  docVersion: 0.1.0
+  speakeasyVersion: 1.762.0
+  generationVersion: 2.882.0
+  releaseVersion: 0.1.0
+  configChecksum: 23d9e9da5989fb5cafa81001edc9b411
+features:
+  python:
+    additionalDependencies: 1.0.0
+    constsAndDefaults: 1.0.7
+    core: 6.0.21
+    defaultEnabledRetries: 0.2.0
+    enumUnions: 0.1.1
+    envVarSecurityUsage: 0.3.2
+    flatRequests: 1.0.1
+    flattening: 3.1.1
+    globalSecurity: 3.0.7
+    globalSecurityCallbacks: 1.0.0
+    globalSecurityFlattening: 1.0.0
+    globalServerURLs: 3.2.1
+    methodArguments: 1.0.2
+    responseFormat: 1.1.0
+    retries: 3.0.5
+    sdkHooks: 1.2.1
+trackedFiles:
+  .gitattributes:
+    last_write_checksum: sha1:53134de3ada576f37c22276901e1b5b6d85cd2da
+  .vscode/settings.json:
+    last_write_checksum: sha1:f84632c81029fcdda8c3b0c768d02b836fc80526
+  USAGE.md:
+    last_write_checksum: sha1:9333617ecf404128ef26738b9d772bf5abf5b991
+  docs/models/conversationdetailresponse.md:
+    last_write_checksum: sha1:672f37ef0a23321ede002b658c7a06457583f27e
+  docs/models/conversationlistresponse.md:
+    last_write_checksum: sha1:29e377e94a029869731939f62d7fa96942b28e93
+  docs/models/conversationsummary.md:
+    last_write_checksum: sha1:4a1a75b2900c542223694202e4bc01f6b3fd64da
+  docs/models/getconversationrequest.md:
+    last_write_checksum: sha1:8ab49ebb04d37d96eed0fb2ecd796326ae2cd32c
+  docs/models/getresponsetreerequest.md:
+    last_write_checksum: sha1:1f9b7aeb2e7f6962e91f95639b6d5d52d159915e
+  docs/models/listconversationsrequest.md:
+    last_write_checksum: sha1:09aa995cc11328bc73b60d2e5f185e4147c39607
+  docs/models/listsharelinksrequest.md:
+    last_write_checksum: sha1:da80dfbdd7a9dd0754692e79c9081c7f3005ddd5
+  docs/models/loadmessagesrequest.md:
+    last_write_checksum: sha1:d16b0141dcd8b8577df8dfc0e5f91edf1cb8ddbe
+  docs/models/loadresponsesrequest.md:
+    last_write_checksum: sha1:46f66aff0ea0a012831392e46835cde5f94d1bc9
+  docs/models/loadresponsesresponse.md:
+    last_write_checksum: sha1:b330bb98456920a27d609df2950b7ef527f08d7f
+  docs/models/mediatype.md:
+    last_write_checksum: sha1:c32e5ace08e62b7a090aaffb1603dadb6c1deb86
+  docs/models/messagebody.md:
+    last_write_checksum: sha1:baa7bb78cdb8c2daa823448f9d3041c9e7c36d4c
+  docs/models/messagesender.md:
+    last_write_checksum: sha1:8c3709d8cae0e3fa01f2c28b878650702211ba6d
+  docs/models/responsenode.md:
+    last_write_checksum: sha1:35c98ac45d1ce5211c7d7ce19a2cd6629b584c92
+  docs/models/responsetreeresponse.md:
+    last_write_checksum: sha1:488c2e76ddb027be8dd838d687bb11ee127695d2
+  docs/models/security.md:
+    last_write_checksum: sha1:e09da3b7285053b5460d76c9f246996818cfac97
+  docs/models/sharelinksresponse.md:
+    last_write_checksum: sha1:3e93e4e203475b897b8739be0c55ea32d9b6f6a9
+  docs/models/utils/retryconfig.md:
+    last_write_checksum: sha1:562c0f21e308ad10c27f85f75704c15592c6929d
+  docs/sdks/conversations/README.md:
+    last_write_checksum: sha1:e76e6af6c49fb8b61652bf14a9988ae33eeeae97
+  docs/sdks/messages/README.md:
+    last_write_checksum: sha1:24fdd5f6c9cc5226b0103ee84f1c773bb5390ddb
+  py.typed:
+    last_write_checksum: sha1:8efc425ffe830805ffcc0f3055871bdcdc542c60
+  pylintrc:
+    last_write_checksum: sha1:569685936b1a2bc488656fad8eea806797bb0ad2
+  pyproject.toml:
+    last_write_checksum: sha1:99feadce2421d68ef17dce7b5045f5f3f7ea2a99
+  scripts/publish.sh:
+    last_write_checksum: sha1:adc9b741c12ad1591ab4870eabe20f0d0a86cd1a
+  src/grok_kit_sdk/__init__.py:
+    last_write_checksum: sha1:da077c0bdfcef64a4a5aea91a17292f72fa2b088
+  src/grok_kit_sdk/_hooks/__init__.py:
+    last_write_checksum: sha1:45a380490e968d8d95994dd97554ac60eeb6ae60
+  src/grok_kit_sdk/_hooks/sdkhooks.py:
+    last_write_checksum: sha1:ca27d9e3980e4bdc4dda871f2509ce602001e4be
+  src/grok_kit_sdk/_hooks/types.py:
+    last_write_checksum: sha1:46dec281b592a4693aa8bbb769089e57628d6f9e
+  src/grok_kit_sdk/_version.py:
+    last_write_checksum: sha1:af8ea5ce08ea8941a89f3bbb4d2c885eb64f87a3
+  src/grok_kit_sdk/basesdk.py:
+    last_write_checksum: sha1:bad5a91270b46080496caface1a5f0bdadebdfa6
+  src/grok_kit_sdk/conversations.py:
+    last_write_checksum: sha1:fa883d693b0989fce3289f7a0d5095e57f87b5cd
+  src/grok_kit_sdk/errors/__init__.py:
+    last_write_checksum: sha1:edad4ea682c278b633079b2cc064635de2c3c105
+  src/grok_kit_sdk/errors/grokkitdefaulterror.py:
+    last_write_checksum: sha1:14f6191266e5868653a40a27271a738349a97949
+  src/grok_kit_sdk/errors/grokkiterror.py:
+    last_write_checksum: sha1:c465e070daed1b5afddec6bffda1e2a1a016d392
+  src/grok_kit_sdk/errors/no_response_error.py:
+    last_write_checksum: sha1:7f326424a7d5ae1bcd5c89a0d6b3dbda9138942f
+  src/grok_kit_sdk/errors/responsevalidationerror.py:
+    last_write_checksum: sha1:eff273d9bf655abd2a18c9dba2e27c048d25a7f0
+  src/grok_kit_sdk/httpclient.py:
+    last_write_checksum: sha1:5e55338d6ee9f01ab648cad4380201a8a3da7dd7
+  src/grok_kit_sdk/messages.py:
+    last_write_checksum: sha1:870e9811ee63b37f0b79d8fa952fdb8959a7802b
+  src/grok_kit_sdk/models/__init__.py:
+    last_write_checksum: sha1:5b4e95d8ebde8acf8cb198f216f7235b6e32b464
+  src/grok_kit_sdk/models/conversationdetailresponse.py:
+    last_write_checksum: sha1:6508b8b6b6db951bff74f66413bd00f44f30c9e8
+  src/grok_kit_sdk/models/conversationlistresponse.py:
+    last_write_checksum: sha1:cb6708da5e9f802fe88021f49807dd5b476d5432
+  src/grok_kit_sdk/models/conversationsummary.py:
+    last_write_checksum: sha1:1f0e9232d5174d0f3adfae6b24d151028c3235b9
+  src/grok_kit_sdk/models/getconversationop.py:
+    last_write_checksum: sha1:e8d6ab47536db9c45a25aad974d7a971951872e2
+  src/grok_kit_sdk/models/getresponsetreeop.py:
+    last_write_checksum: sha1:b87c617218c7f1a3e3ff1c9fd11de3ef70692686
+  src/grok_kit_sdk/models/listconversationsop.py:
+    last_write_checksum: sha1:fb460e5aca891c09c0c6dc642e733ef0c814b48b
+  src/grok_kit_sdk/models/listsharelinksop.py:
+    last_write_checksum: sha1:9cb908eee6c6e8d323bdf2c2bd9e97e8c47d5ad1
+  src/grok_kit_sdk/models/loadmessagesop.py:
+    last_write_checksum: sha1:1a0a33f7bc394d2329f6213e2b2eefd31878d965
+  src/grok_kit_sdk/models/loadresponsesrequest.py:
+    last_write_checksum: sha1:60aa4363a6dcf89f642a6eca969a487404d5a91f
+  src/grok_kit_sdk/models/loadresponsesresponse.py:
+    last_write_checksum: sha1:ce9f989cc9c14a46ded1798b7fb59bd60153dbc0
+  src/grok_kit_sdk/models/mediatype.py:
+    last_write_checksum: sha1:f4df1cbb10bc94b073807d64778394fd7a1e1df8
+  src/grok_kit_sdk/models/messagebody.py:
+    last_write_checksum: sha1:4f1e484864342dc1e9b8d884701d6c4599cd1f94
+  src/grok_kit_sdk/models/messagesender.py:
+    last_write_checksum: sha1:425f0c88bc81aecd68586eca5d23f062c86e51ca
+  src/grok_kit_sdk/models/responsenode.py:
+    last_write_checksum: sha1:dc83a0abcbf9ec33d504e45b19f553489bbffe13
+  src/grok_kit_sdk/models/responsetreeresponse.py:
+    last_write_checksum: sha1:e574b9b62d1473e631c619535e978f2c0f9699da
+  src/grok_kit_sdk/models/security.py:
+    last_write_checksum: sha1:fb0c808087c9d2870d54ccca6ec661b3f25b4558
+  src/grok_kit_sdk/models/sharelinksresponse.py:
+    last_write_checksum: sha1:885264bc14f37cab4b9a01dd80cea81b068e821b
+  src/grok_kit_sdk/py.typed:
+    last_write_checksum: sha1:8efc425ffe830805ffcc0f3055871bdcdc542c60
+  src/grok_kit_sdk/sdk.py:
+    last_write_checksum: sha1:bd1e0312a4d9a58c22ec2946ae9c400369d68ee8
+  src/grok_kit_sdk/sdkconfiguration.py:
+    last_write_checksum: sha1:c04ffd3c4d942dde2271395e88df1bb993f66a73
+  src/grok_kit_sdk/types/__init__.py:
+    last_write_checksum: sha1:140ebdd01a46f92ffc710c52c958c4eba3cf68ed
+  src/grok_kit_sdk/types/basemodel.py:
+    last_write_checksum: sha1:10d84aedeb9d35edfdadf2c3020caa1d24d8b584
+  src/grok_kit_sdk/utils/__init__.py:
+    last_write_checksum: sha1:1970816f2234ecb8785798240b0edced961de971
+  src/grok_kit_sdk/utils/annotations.py:
+    last_write_checksum: sha1:a4824ad65f730303e4e1e3ec1febf87b4eb46dbc
+  src/grok_kit_sdk/utils/datetimes.py:
+    last_write_checksum: sha1:c721e4123000e7dc61ec52b28a739439d9e17341
+  src/grok_kit_sdk/utils/dynamic_imports.py:
+    last_write_checksum: sha1:a1940c63feb8eddfd8026de53384baf5056d5dcc
+  src/grok_kit_sdk/utils/enums.py:
+    last_write_checksum: sha1:bc8c3c1285ae09ba8a094ee5c3d9c7f41fa1284d
+  src/grok_kit_sdk/utils/eventstreaming.py:
+    last_write_checksum: sha1:620d78a8b4e3b854e08d136e02e40a01a786bd70
+  src/grok_kit_sdk/utils/forms.py:
+    last_write_checksum: sha1:0ca31459b99f761fcc6d0557a0a38daac4ad50f4
+  src/grok_kit_sdk/utils/headers.py:
+    last_write_checksum: sha1:7c6df233ee006332b566a8afa9ce9a245941d935
+  src/grok_kit_sdk/utils/logger.py:
+    last_write_checksum: sha1:f3fdb154a3f09b8cc43d74c7e9c02f899f8086e4
+  src/grok_kit_sdk/utils/metadata.py:
+    last_write_checksum: sha1:e703e5cbb5255144aacf86898d1420529afaaff8
+  src/grok_kit_sdk/utils/queryparams.py:
+    last_write_checksum: sha1:b94c3f314fd3da0d1d215afc2731f48748e2aa59
+  src/grok_kit_sdk/utils/requestbodies.py:
+    last_write_checksum: sha1:41e2d2d2d3ecc394c8122ca4d4b85e1c3e03f054
+  src/grok_kit_sdk/utils/retries.py:
+    last_write_checksum: sha1:471372f5c5d1dd5583239c9cf3c75f1b636e5d87
+  src/grok_kit_sdk/utils/security.py:
+    last_write_checksum: sha1:c11eef495b6aaa249178c24c796940cc540b7a00
+  src/grok_kit_sdk/utils/serializers.py:
+    last_write_checksum: sha1:61009f2e4ef6613a1a5af813fe020373dae5a492
+  src/grok_kit_sdk/utils/unmarshal_json_response.py:
+    last_write_checksum: sha1:ff230377aa1a3f79d84a803cdea1cf047e500ec3
+  src/grok_kit_sdk/utils/url.py:
+    last_write_checksum: sha1:6479961baa90432ca25626f8e40a7bbc32e73b41
+  src/grok_kit_sdk/utils/values.py:
+    last_write_checksum: sha1:acaa178a7c41ddd000f58cc691e4632d925b2553
+examples:
+  listConversations:
+    speakeasy-default-list-conversations:
+      parameters:
+        query:
+          pageSize: 60
+      responses:
+        "200":
+          application/json: {"conversations": []}
+  getConversation:
+    speakeasy-default-get-conversation:
+      parameters:
+        path:
+          conversationId: "d30826bd-a574-4f2f-a65e-a43a766ba3cd"
+        query:
+          includeWorkspaces: true
+          includeTaskResult: true
+      responses:
+        "200":
+          application/json: {"conversation": {"conversationId": "f8b93762-c5b5-40df-9d3c-4990ba9746b6", "title": "Tesla App Door Unlatch", "starred": true, "createTime": "2026-03-15T07:55:25.360Z", "modifyTime": "2025-03-03T22:19:11.076Z", "systemPromptName": "<value>", "temporary": true, "mediaTypes": [], "workspaces": [{}, {"key": "<value>", "key1": "<value>"}, {"key": "<value>", "key1": "<value>", "key2": "<value>"}], "taskResult": {"key": "<value>", "key1": "<value>"}}}
+  listShareLinks:
+    speakeasy-default-list-share-links:
+      parameters:
+        query:
+          conversationId: "4f822020-28b1-42f7-86ec-1d1972e87bec"
+          pageSize: 100
+      responses:
+        "200":
+          application/json: {"shareLinks": [{}, {"key": "<value>", "key1": "<value>"}, {"key": "<value>", "key1": "<value>"}]}
+  getResponseTree:
+    speakeasy-default-get-response-tree:
+      parameters:
+        path:
+          conversationId: "b80bd10d-200c-4ba6-a6b6-2dd13a18b548"
+        query:
+          includeThreads: true
+      responses:
+        "200":
+          application/json: {"responseNodes": [{"responseId": "63594595-306e-4bd0-8eb3-b118ce90fe68", "sender": "assistant"}]}
+  loadMessages:
+    speakeasy-default-load-messages:
+      parameters:
+        path:
+          conversationId: "313d13f6-ba44-422b-8294-0adaf4fa7757"
+      requestBody:
+        application/json: {"responseIds": ["5ed3eb56-95f6-4332-9beb-e129f7e07ab0", "45579eb3-868a-404e-b53f-3a5390ee1912", "2ee7b7a2-846e-4fe4-9ef5-7a4acd6e2a39"]}
+      responses:
+        "200":
+          application/json: {"responses": [{"responseId": "645bb054-3519-49da-9ea5-24020a56849e", "message": "<value>", "sender": "assistant", "createTime": "2025-03-04T22:04:28.023Z", "manual": false, "partial": false, "shared": false}]}
+examplesVersion: 1.0.2
+generatedTests: {}

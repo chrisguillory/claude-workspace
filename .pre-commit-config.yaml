@@ -39,7 +39,7 @@ repos:
       - id: strict-typing-linter
         name: strict-typing-linter
         description: Check for mutable/loose types in annotations
-        entry: ./linters/strict_typing_linter.py --report-unused-directives .
+        entry: ./linters/strict_typing_linter.py --report-unused-directives --exclude=grok-kit-sdk .
         language: system
         pass_filenames: false
         always_run: true
@@ -47,7 +47,7 @@ repos:
       - id: exception-safety-linter
         name: exception-safety-linter
         description: Check for exception handling anti-patterns
-        entry: ./linters/exception_safety_linter.py --report-unused-directives .
+        entry: ./linters/exception_safety_linter.py --report-unused-directives --exclude=grok-kit-sdk .
         language: system
         pass_filenames: false
         always_run: true
@@ -55,7 +55,7 @@ repos:
       - id: reexport-linter
         name: reexport-linter
         description: Check for re-exported symbols via __all__
-        entry: ./linters/reexport_linter.py --report-unused-directives .
+        entry: ./linters/reexport_linter.py --report-unused-directives --exclude=grok-kit-sdk .
         language: system
         pass_filenames: false
         always_run: true
@@ -63,7 +63,7 @@ repos:
       - id: suppression-rationale-linter
         name: suppression-rationale-linter
         description: Check that lint suppression directives include rationale
-        entry: ./linters/suppression_rationale_linter.py .
+        entry: ./linters/suppression_rationale_linter.py --exclude=grok-kit-sdk .
         language: system
         pass_filenames: false
         always_run: true
@@ -71,7 +71,7 @@ repos:
       - id: uv-script-linter
         name: uv-script-linter
         description: Lint uv script shebangs and PEP 723 inline metadata
-        entry: ./linters/uv_script_linter.py .
+        entry: ./linters/uv_script_linter.py --exclude=grok-kit-sdk .
         language: system
         pass_filenames: false
         always_run: true

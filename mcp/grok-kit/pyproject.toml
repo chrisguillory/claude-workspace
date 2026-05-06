@@ -1,0 +1,31 @@
+[project]
+name = "grok-kit"
+version = "0.1.0"
+description = "MCP server + CLI for mirroring grok.com conversations into the workspace"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastmcp>=2.12.5",
+    "httpx",
+    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
+    "grok-kit-sdk",
+    "pydantic>=2.0.0",
+    "typer>=0.16.0",
+]
+
+[project.scripts]
+grok-kit = "grok_kit.cli.main:main"
+grok-kit-mcp = "grok_kit.mcp.main:main"
+
+[tool.uv.sources]
+cc-lib = { workspace = true }
+grok-kit-sdk = { path = "grok-kit-sdk", editable = true }
+
+[tool.hatch.build]
+include = ["grok_kit/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

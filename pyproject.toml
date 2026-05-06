@@ -18,6 +18,7 @@ members = [
     "mcp/claude-remote-bash",
     "mcp/claude-session",
     "mcp/document-search",
+    "mcp/grok-kit",
     "mcp/imessage-kit",
     "mcp/playwright-browser",
     "mcp/python-interpreter",
@@ -35,6 +36,9 @@ build-backend = "hatchling.build"
 [tool.ruff]
 line-length = 120
 target-version = "py313"
+extend-exclude = [
+    "mcp/grok-kit/grok-kit-sdk",  # Speakeasy-generated; has own conventions
+]
 
 [tool.ruff.lint]
 select = [
@@ -129,6 +133,7 @@ disallow_any_generics = true
 mypy_path = "$MYPY_CONFIG_FILE_DIR/stubs"
 exclude = [
     ".venv",
+    "mcp/grok-kit/grok-kit-sdk",  # Speakeasy-generated; has own type conventions
     "scratch",
     "tests/linters/edge_cases",  # intentionally bad code — linter test inputs
 ]
