@@ -5,6 +5,7 @@ from __future__ import annotations
 __all__ = [
     'Timer',
     'encode_project_path',
+    'get_active_cc_version',
     'get_claude_config_home_dir',
     'get_claude_exec_launch_dir',
     'get_claude_workspace_config_home_dir',
@@ -12,11 +13,13 @@ __all__ = [
     'load_module_from_path',
     'temporary_module',
     'validate_hook_tree',
+    'version_in_range',
 ]
 
 import importlib.util
 import os
 import re
+import subprocess
 import sys
 import time
 import unittest.mock
@@ -25,7 +28,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 
+from packaging.version import Version
+
 from cc_lib.exceptions import HookTreeMismatchError
+from cc_lib.types import CCVersion
 
 
 class Timer:
@@ -99,6 +105,30 @@ def encode_project_path(path: Path | str) -> str:
             h //= 36
         hash_str = ''.join(reversed(parts))
     return f'{sanitized[:MAX_SANITIZED_PATH_LENGTH]}-{hash_str}'
+
+
+def get_active_cc_version() -> CCVersion | None:
+    """Return the active Claude Code version, e.g. ``'2.1.131'``.
+
+    Runs ``claude --version`` and parses the first whitespace-separated token
+    from stdout (full output is ``'2.1.131 (Claude Code)'``). Returns
+    ``None`` when the CLI is missing, fails, or outputs an unparseable line —
+    callers can fall back to scanning all patches.
+    """
+    try:
+        result = subprocess.run(
+            ['claude', '--version'],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    parts = result.stdout.strip().split(maxsplit=1)
+    return parts[0] if parts else None
 
 
 def get_claude_config_home_dir() -> Path:
@@ -188,6 +218,25 @@ def validate_hook_tree(script_path: Path) -> Path:
     if actual != expected:
         raise HookTreeMismatchError(actual=actual, expected=expected)
     return launch_dir
+
+
+def version_in_range(
+    version: CCVersion,
+    min_version: CCVersion | None,
+    max_version: CCVersion | None,
+) -> bool:
+    """True if ``version`` falls within the (inclusive) ``[min, max]`` range.
+
+    ``None`` bounds are unbounded on that side. Comparison uses
+    ``packaging.version.Version`` so dotted-numeric strings sort correctly
+    (``2.1.10 > 2.1.9``, unlike string comparison).
+    """
+    v = Version(version)
+    if min_version is not None and v < Version(min_version):
+        return False
+    if max_version is not None and v > Version(max_version):
+        return False
+    return True
 
 
 def humanize_seconds(seconds: float) -> str:

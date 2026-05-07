@@ -252,7 +252,7 @@ def cli_info(
 
         if adhoc:
             data = path.read_bytes()
-            results = scan_binary(data)
+            results = scan_binary(data, current_version=version)
             applied = [n for n, r in results.items() if r.status == 'applied']
             unpatched = [n for n, r in results.items() if r.status == 'unpatched']
             changed = [n for n, r in results.items() if r.status == 'changed']
@@ -420,7 +420,7 @@ class VersionStore:
                 adhoc = MachOSignature.is_adhoc(entry)
                 if adhoc:
                     data = entry.read_bytes()
-                    results = scan_binary(data)
+                    results = scan_binary(data, current_version=version)
                     patches = [patch_name for patch_name, r in results.items() if r.status == 'applied']
 
             versions.append(
