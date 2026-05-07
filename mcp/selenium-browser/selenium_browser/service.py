@@ -3297,7 +3297,10 @@ class BrowserService:
         indexeddb_records_count = 0
 
         for origin in tracked_origins:
-            if origin.startswith(('chrome://', 'about:', 'data:', 'blob:', 'file://')):
+            # Opaque origins (about:blank, file pages, sandboxed iframes) report
+            # window.location.origin as the string "null"; CDP DOMStorage rejects
+            # it with SecurityError. Filter alongside the unsupported schemes.
+            if origin == 'null' or origin.startswith(('chrome://', 'about:', 'data:', 'blob:', 'file://')):
                 continue
 
             # Capture localStorage: cache for departed origins, CDP for current
