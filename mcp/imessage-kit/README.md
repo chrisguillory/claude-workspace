@@ -105,7 +105,11 @@ Send text and/or attachments to a handle (1:1) or chat GUID (group) via AppleScr
 
 ### `lookup_contact`
 
-Search macOS AddressBook by name (fuzzy via thefuzz), phone, or email. Returns all handles for matched contacts — use a handle from the results with `get_messages`, `send_message`, etc.
+Search macOS AddressBook by name, phone, or email. Returns all handles for matched contacts — use a handle from the results with `get_messages`, `send_message`, etc.
+
+By default, returns contacts deduplicated across all sync sources (Google, iCloud, iCloud CloudKit) with phones/emails unioned. Pass `source="Google"` (or another source display name) to get only that source's view of the contact — useful for diagnosing which fields come from which sync source.
+
+Name-match strictness is set by `match_mode` — defaults to `exact_or_substring` (exact name OR query-as-substring of name). Phone digit and email substring matching are always active. Opt into fuzzy name matching with `match_mode="exact_or_substring_or_fuzzy"` when you want typo-tolerance (it catches false positives like `Francisco` → `Francis`, so it's opt-in).
 
 ### `get_unread`
 
