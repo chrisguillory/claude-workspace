@@ -132,7 +132,13 @@ from cc_lib import session_tracker
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import CCVersion
-from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
+from cc_lib.utils import (
+    encode_project_path,
+    get_active_cc_version,
+    get_claude_config_home_dir,
+    get_claude_workspace_config_home_dir,
+    version_in_range,
+)
 from cc_lib.utils.atomic_write import atomic_write
 
 # -- Constants -----------------------------------------------------------------
@@ -182,6 +188,7 @@ def scan(
 
     print(f'Scanning {len(sessions)} session files...\n')
 
+    current_version = get_active_cc_version()
     categories: dict[str, list[tuple[SessionFile, Sequence[SessionScanResult]]]] = {
         'healthy': [],
         'fixable': [],
@@ -192,7 +199,7 @@ def scan(
     for session in sessions:
         try:
             analyzer = SessionAnalyzer(session.read_lines(), sidechain_resolver=session.sidechain_resolver())
-            results = analyzer.scan()
+            results = analyzer.scan(current_version=current_version)
 
             detected = [r for r in results if r.status == 'detected']
             unfixable = [r for r in results if r.status == 'unfixable']
@@ -242,7 +249,7 @@ def check(
         raise SessionPatchError('Provide a session ID or use --file')
 
     analyzer = SessionAnalyzer(session.read_lines(), sidechain_resolver=session.sidechain_resolver())
-    results = analyzer.scan()
+    results = analyzer.scan(current_version=get_active_cc_version())
 
     if json_output:
         _print_check_json(results, session)
@@ -284,8 +291,9 @@ def fix(
     if session.is_active():
         raise ActiveSessionError(session.session_id)
 
+    current_version = get_active_cc_version()
     analyzer = SessionAnalyzer(session.read_lines(), sidechain_resolver=session.sidechain_resolver())
-    preview_results = analyzer.scan()
+    preview_results = analyzer.scan(current_version=current_version)
     detected = [r for r in preview_results if r.status == 'detected']
     pre_unfixable = [r for r in preview_results if r.status == 'unfixable']
 
@@ -320,7 +328,7 @@ def fix(
     verify_results = SessionAnalyzer(
         session.read_lines(),
         sidechain_resolver=session.sidechain_resolver(),
-    ).scan()
+    ).scan(current_version=current_version)
     verify_bad = [r for r in verify_results if r.status in ('detected', 'unfixable')]
 
     if verify_bad:
@@ -456,7 +464,12 @@ class SessionScanResult:
     """Per-patch scan outcome for one session."""
 
     patch: SessionPatchDef
-    status: Literal['clean', 'detected', 'unfixable']
+    status: Literal['clean', 'detected', 'unfixable', 'out_of_range']
+    # clean        = detector ran, nothing to fix
+    # detected     = detector ran, fixable corruption found
+    # unfixable    = detector ran, corruption found but cannot be auto-fixed
+    # out_of_range = patch's [min_version, max_version] excludes the active CC
+    #                version (detector skipped, no scanning performed)
     details: str
     affected_lines: Sequence[int] = ()
     fix_data: FixData | None = None
@@ -516,12 +529,38 @@ class SessionAnalyzer:
         self,
         *,
         patches: Sequence[SessionPatchDef] | None = None,
+        current_version: CCVersion | None = None,
     ) -> Sequence[SessionScanResult]:
-        """Run all detectors and return results."""
+        """Run all detectors and return results.
+
+        When ``current_version`` is provided, patches whose declared
+        ``[min_version, max_version]`` range excludes it short-circuit to
+        ``status='out_of_range'`` without invoking the detector. ``None``
+        (default) preserves prior behavior — every detector runs.
+        """
         if patches is None:
             patches = PATCHES
 
-        return [patch.detector(self, patch) for patch in sorted(patches, key=lambda p: p.name)]
+        results: list[SessionScanResult] = []
+        for patch in sorted(patches, key=lambda p: p.name):
+            if current_version is not None and not version_in_range(
+                current_version, patch.min_version, patch.max_version
+            ):
+                bound = (
+                    f'max_version={patch.max_version}'
+                    if patch.max_version is not None
+                    else f'min_version={patch.min_version}'
+                )
+                results.append(
+                    SessionScanResult(
+                        patch=patch,
+                        status='out_of_range',
+                        details=f'Skipped: out of range ({bound}; active version: {current_version})',
+                    ),
+                )
+                continue
+            results.append(patch.detector(self, patch))
+        return results
 
     def walk_chain(self, start_uuid: str) -> tuple[Set[str], str | None, int]:
         """Walk parentUuid chain from start.
@@ -1428,11 +1467,12 @@ def _fix_all(*, dry_run: bool) -> None:
     """Fix all fixable sessions."""
     sessions = SessionFile.find_all()
     targets: list[tuple[SessionFile, Sequence[SessionScanResult]]] = []
+    current_version = get_active_cc_version()
 
     for session in sessions:
         try:
             analyzer = SessionAnalyzer(session.read_lines(), sidechain_resolver=session.sidechain_resolver())
-            results = analyzer.scan()
+            results = analyzer.scan(current_version=current_version)
             detected = [r for r in results if r.status == 'detected']
             unfixable = [r for r in results if r.status == 'unfixable']
             if detected and not unfixable:
@@ -1470,7 +1510,7 @@ def _fix_all(*, dry_run: bool) -> None:
                 verify_results = SessionAnalyzer(
                     session.read_lines(),
                     sidechain_resolver=session.sidechain_resolver(),
-                ).scan()
+                ).scan(current_version=current_version)
                 verify_bad = [r for r in verify_results if r.status in ('detected', 'unfixable')]
 
                 if verify_bad:
@@ -1511,9 +1551,11 @@ def _print_check(
     unfixable = [r for r in results if r.status == 'unfixable']
 
     for r in results:
-        status_str = r.status.upper()
+        status_str = 'SKIPPED' if r.status == 'out_of_range' else r.status.upper()
         tag = f'[{r.patch.kind.value}]'
         print(f'  {r.patch.name:<24s} {tag:<8s} {status_str}')
+        if r.status == 'out_of_range':
+            print(f'    {r.details}')
         if r.status in ('detected', 'unfixable'):
             print(f'    {r.details}')
             if isinstance(r.fix_data, FixDataType.RedactImageAndTruncate):

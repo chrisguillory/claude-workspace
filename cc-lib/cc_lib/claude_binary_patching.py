@@ -501,7 +501,7 @@ from typing import Literal
 
 from cc_lib.settings_env import get_cc_env_var, get_cc_setting, is_env_truthy
 from cc_lib.types import CCVersion
-from cc_lib.utils import get_claude_workspace_config_home_dir
+from cc_lib.utils import get_claude_workspace_config_home_dir, version_in_range
 
 __all__ = [
     'ORIGINALS_DIR',
@@ -771,22 +771,31 @@ class PatchScanResult:
 
     patch: PatchDef
     sites: Sequence[int]
-    status: Literal['unpatched', 'applied', 'changed', 'missing']
-    # unpatched = anchor found, old bytes found -> patch not yet applied
-    # applied   = anchor found, new bytes found -> patch is applied
-    # changed   = anchor found, neither old nor new bytes found -> code changed
-    # missing   = anchor NOT found (binary structure changed)
+    status: Literal['unpatched', 'applied', 'changed', 'missing', 'out_of_range']
+    # unpatched    = anchor found, old bytes found -> patch not yet applied
+    # applied      = anchor found, new bytes found -> patch is applied
+    # changed      = anchor found, neither old nor new bytes found -> code changed
+    # missing      = anchor NOT found (binary structure changed)
+    # out_of_range = patch's [min_version, max_version] excludes current binary
+    #                version (anchor + bytes not even checked)
 
 
 def scan_binary(
     data: bytes,
     patches: Sequence[PatchDef] | None = None,
+    current_version: CCVersion | None = None,
 ) -> Mapping[str, PatchScanResult]:
     """Scan binary data for patch status. Pure function, no I/O.
 
     Args:
         data: Raw binary content.
         patches: Patches to check. Defaults to all PATCHES.
+        current_version: Binary version (e.g. ``'2.1.131'``). When provided,
+            patches whose ``[min_version, max_version]`` range excludes this
+            version short-circuit to status ``'out_of_range'`` without any
+            byte scanning. Pass ``None`` (default) to scan every patch
+            unconditionally — preserved for callers that don't have a
+            version handy.
 
     Returns:
         Mapping of patch name to scan result.
@@ -795,6 +804,9 @@ def scan_binary(
         patches = PATCHES
     results: dict[str, PatchScanResult] = {}
     for patch in patches:
+        if current_version is not None and not _patch_applies_to_version(patch, current_version):
+            results[patch.name] = PatchScanResult(patch=patch, sites=(), status='out_of_range')
+            continue
         old_sites = _find_sites(data, patch, patch.old)
         if old_sites:
             results[patch.name] = PatchScanResult(patch=patch, sites=old_sites, status='unpatched')
@@ -834,3 +846,8 @@ def _find_sites(data: bytes, patch: PatchDef, target: bytes) -> Sequence[int]:
 def _has_anchor(data: bytes, patch: PatchDef) -> bool:
     """Check whether the anchor pattern exists anywhere in the data."""
     return data.find(patch.anchor) != -1
+
+
+def _patch_applies_to_version(patch: PatchDef, current: CCVersion) -> bool:
+    """True if ``current`` falls within the patch's declared version range."""
+    return version_in_range(current, patch.min_version, patch.max_version)
