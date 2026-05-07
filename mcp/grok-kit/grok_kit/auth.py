@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cc_lib.schemas.base import ClosedModel, SubsetModel
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 __all__ = [
     'DEFAULT_COOKIE_PATH',
@@ -44,7 +45,7 @@ __all__ = [
 ]
 
 
-DEFAULT_COOKIE_PATH = Path.home() / '.config' / 'grok-kit' / 'cookies.json'
+DEFAULT_COOKIE_PATH = get_claude_workspace_config_home_dir() / 'mcp' / 'grok-kit' / 'cookies.json'
 
 LOAD_BEARING_COOKIES: Sequence[str] = (
     'sso',

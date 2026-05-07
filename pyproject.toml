@@ -142,6 +142,11 @@ exclude = [
 module = "typer.completion"
 no_implicit_reexport = false
 
+[[tool.mypy.overrides]]
+module = "grok_kit_sdk.*"
+ignore_errors = true
+follow_imports = "skip"
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
