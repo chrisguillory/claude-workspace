@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 
 from thefuzz import fuzz  # type: ignore[import-untyped]  # no py.typed marker, stubs unpublished
 
-from imessage_kit.types import Contact, ContactSource
+from imessage_kit.types import Contact, ContactMatchMode, ContactSource
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ class ContactResolver:
     def __init__(self, sources: Sequence[ContactSource]) -> None:
         self._sources = sources
         self._contacts: Sequence[Contact] | None = None
+        self._per_source_contacts: dict[str, Sequence[Contact]] | None = None
         self._handle_to_name: dict[str, str] = {}
         self._cache_time: float = 0.0
 
@@ -60,38 +61,51 @@ class ContactResolver:
             for rowid, identifier in handle_map.items()
         }
 
-    def lookup(self, query: str, *, source: str | None = None) -> Sequence[Contact]:
+    def lookup(
+        self,
+        query: str,
+        *,
+        source: str | None = None,
+        match_mode: ContactMatchMode = 'exact_or_substring',
+    ) -> Sequence[Contact]:
         """Search contacts by name, phone, or email.
 
+        When `source` is None, searches the merged-across-sources contact list
+        (deduplicated; phones/emails unioned across every source).
+
+        When `source` is set, searches only that source's raw contacts and
+        returns records with only that source's fields populated. The
+        returned `Contact.sources` list contains exactly that one source.
+
+        Phone digit and email substring matching are always active. The
+        `match_mode` controls name matching:
+          - 'exact_only': name must equal the query.
+          - 'exact_or_substring' (default): query may also be a substring of
+            the name (e.g., 'Anna' matches 'Anna Tu').
+          - 'exact_or_substring_or_fuzzy': also fall back to fuzzy
+            token_sort_ratio ≥ 70% (e.g., 'Francisco' would match 'Francis').
+
         Args:
-            query: Name (fuzzy), phone number, or email to search for.
-            source: Display name of a source to filter by (e.g., 'Google',
-                'iCloud'). Matches case-insensitively against any of the
-                contact's merged sources. Raises ValueError if the source
-                does not exist in the registry.
+            query: Name, phone number, or email to search for.
+            source: Display name of a source (e.g., 'Google', 'iCloud').
+                Case-insensitive. Raises ValueError if the source does not
+                exist in the registry.
+            match_mode: Name-matching strictness. Default 'exact_or_substring'.
         """
         self._ensure_cache()
-        if self._contacts is None:
-            return []
-
-        if source is not None:
-            source_lower = source.lower()
-            known = {s.display_name.lower() for s in self._sources}
-            if source_lower not in known:
-                available = ', '.join(s.display_name for s in self._sources)
-                msg = f'Unknown source {source!r}. Available: {available}'
-                raise ValueError(msg)
 
         query_lower = query.lower()
         query_digits = _normalize_phone(query)
-        results: list[tuple[float, Contact]] = []
 
-        for contact in self._contacts:
-            if source is not None:
-                contact_sources_lower = {s.lower() for s in contact.sources}
-                if source.lower() not in contact_sources_lower:
-                    continue
-            score = self._match_score(contact, query_lower, query_digits)
+        if source is None:
+            haystack: Sequence[Contact] = self._contacts or ()
+        else:
+            assert self._per_source_contacts is not None
+            haystack = self._resolve_source(source)
+
+        results: list[tuple[float, Contact]] = []
+        for contact in haystack:
+            score = self._match_score(contact, query_lower, query_digits, match_mode=match_mode)
             if score > 0.0:
                 results.append((score, contact))
 
@@ -109,6 +123,20 @@ class ContactResolver:
         self._ensure_cache()
         return len(self._contacts) if self._contacts else 0
 
+    def _resolve_source(self, source: str) -> Sequence[Contact]:
+        """Look up a source's raw contact list by case-insensitive display name.
+
+        Raises ValueError if the source does not exist.
+        """
+        assert self._per_source_contacts is not None
+        source_lower = source.lower()
+        for display_name, contacts in self._per_source_contacts.items():
+            if display_name.lower() == source_lower:
+                return contacts
+        available = ', '.join(self._per_source_contacts.keys())
+        msg = f'Unknown source {source!r}. Available: {available}'
+        raise ValueError(msg)
+
     def _ensure_cache(self) -> None:
         """Refresh contact cache if stale."""
         if self._contacts is not None and (time.monotonic() - self._cache_time) < self.CACHE_TTL_S:
@@ -116,11 +144,16 @@ class ContactResolver:
         self._load_all()
 
     def _load_all(self) -> None:
-        """Load contacts from every source, dedup, and build the handle→name index."""
+        """Load contacts from every source, dedup, and build the handle→name index.
+
+        Single writer for both the canonical per-source map and the derived
+        merged view. Both populated atomically so they cannot drift.
+        """
         per_source: list[tuple[ContactSource, Sequence[Contact]]] = [
             (source, _load_from_db(source)) for source in self._sources
         ]
 
+        self._per_source_contacts = {source.display_name: contacts for source, contacts in per_source}
         contacts = _dedup_across_sources(per_source)
 
         handle_to_name: dict[str, str] = {}
@@ -144,8 +177,19 @@ class ContactResolver:
             len(self._sources),
         )
 
-    def _match_score(self, contact: Contact, query_lower: str, query_digits: str) -> float:
-        """Score a contact against a search query. Returns 0.0 for no match."""
+    def _match_score(
+        self,
+        contact: Contact,
+        query_lower: str,
+        query_digits: str,
+        *,
+        match_mode: ContactMatchMode,
+    ) -> float:
+        """Score a contact against a search query. Returns 0.0 for no match.
+
+        Phone digit and email substring matching are always active. Name
+        matching strictness is gated by `match_mode`.
+        """
         # Phone match
         if query_digits and len(query_digits) >= 4:
             for phone in contact.phone_numbers:
@@ -164,21 +208,26 @@ class ContactResolver:
 
         name_lower = name.lower()
 
-        # Exact name match
+        # Layer A — exact equality (always active)
         if query_lower == name_lower:
             return 1.0
 
-        # First or last name exact match
         first = (contact.first_name or '').lower()
         last = (contact.last_name or '').lower()
         if query_lower in (first, last):
             return self.SCORE_EXACT_NAME_PART
 
-        # Substring match
+        if match_mode == 'exact_only':
+            return 0.0
+
+        # Layer B — substring (active in 'exact_or_substring' and beyond)
         if query_lower in name_lower:
             return self.SCORE_SUBSTRING_IN_NAME
 
-        # Fuzzy match (token_sort_ratio avoids substring false positives)
+        if match_mode == 'exact_or_substring':
+            return 0.0
+
+        # Layer C — fuzzy token_sort_ratio (only in 'exact_or_substring_or_fuzzy')
         ratio: int = fuzz.token_sort_ratio(query_lower, name_lower)
         if ratio >= self.FUZZY_MATCH_MIN_RATIO:
             return ratio / 100.0

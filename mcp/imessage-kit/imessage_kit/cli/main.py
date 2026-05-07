@@ -20,7 +20,7 @@ from imessage_kit.sender import MessageSender
 from imessage_kit.service import IMessageService, ServerState
 from imessage_kit.sources import SourceRegistry
 from imessage_kit.system import detect_root_app
-from imessage_kit.types import AttachmentMode, SendService
+from imessage_kit.types import AttachmentMode, ContactMatchMode, SendService
 
 app = create_app(help='imessage-kit — Read, search, and send iMessages via macOS chat.db.')
 add_completion_command(app)
@@ -211,18 +211,34 @@ def lookup_contact(
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max matches')] = 10,
     source: Annotated[
         str | None,
-        typer.Option('--source', help="Filter by source display name (e.g., 'Google', 'iCloud')"),
+        typer.Option('--source', help="Show only this source's view (e.g., 'Google', 'iCloud')"),
     ] = None,
+    match_mode: Annotated[
+        ContactMatchMode,
+        typer.Option('--match-mode', help='Name-matching strictness'),
+    ] = 'exact_or_substring',
 ) -> None:
     """Search macOS AddressBook for a contact.
 
     \b
-    Results are deduplicated across all AddressBook sync sources
-    (Google, iCloud, iCloud CloudKit). Each result lists the sources
-    it was merged from. Use --source to restrict to a single source.
+    Default: returns contacts deduplicated across all AddressBook sync
+    sources, with phones/emails unioned. Each result lists the sources
+    it was merged from.
+
+    \b
+    With --source: returns that source's view of matching contacts —
+    only the phones, emails, and names recorded in that source. Useful
+    for diagnosing which fields come from which sync source.
+
+    \b
+    --match-mode controls name-match strictness (phone/email always substring):
+      exact_only:                    name must equal query
+      exact_or_substring (default):  query may be a substring of name
+      exact_or_substring_or_fuzzy:   also fuzzy fallback (catches typos
+                                     and near-misses, opt-in)
     """
     service = _make_service()
-    _print_json(service.lookup_contact(query, limit=limit, source=source))
+    _print_json(service.lookup_contact(query, limit=limit, source=source, match_mode=match_mode))
 
 
 def main() -> None:
