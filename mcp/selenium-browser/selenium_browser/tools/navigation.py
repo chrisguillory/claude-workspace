@@ -204,30 +204,44 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
 
         PERMISSION SCOPE: This tool reuses on-disk auth state (cookies,
         localStorage, IndexedDB including non-extractable WebCrypto keys) from
-        a Chromium profile directory. Equivalent privilege to
+        a browser profile directory. Equivalent privilege to
         navigate_with_profile_state — both import authenticated session state.
         Requires separate approval from navigate().
 
         Use this for long-lived persistent profiles where the directory IS the
-        portable artifact. The same Chromium binary always opens the same dir,
-        so on-disk state round-trips natively (no save/restore JSON serialization
+        portable artifact. The same binary always opens the same dir, so
+        on-disk state round-trips natively (no save/restore JSON serialization
         in the path that would destroy non-extractable WebCrypto keys — the
         bug that breaks Proton-style auth via navigate_with_profile_state).
 
+        macOS keychain caveat: the directory and the chosen `browser` form a
+        binding pair. Chrome and Chromium use different macOS Keychain entries
+        ("Chrome Safe Storage" vs "Chromium Safe Storage") to encrypt cookie
+        blobs and the os_crypt key in Local State. Reusing a directory with the
+        other binary will silently fail to decrypt cookies (localStorage and
+        IndexedDB survive). Pick a binary at first use and stick with it.
+        For pseudonymous identities, prefer `browser="chromium"` — Homebrew
+        Chromium has no Google Sync, no enterprise policy plist, and no Gaia
+        identity propagation across origins. Do NOT point Chrome at
+        ~/Library/Application Support/Google/Chrome/ — it's locked by your
+        running Chrome and Sync would pollute the identity boundary.
+
         Workflow:
             1. First time: navigate_with_user_data_dir(url, user_data_dir=path)
-               where path is empty or new — Chromium creates the profile.
-               Log in manually if needed; Chromium persists the auth.
+               where path is empty or new — the browser creates the profile.
+               Log in manually if needed; the browser persists the auth.
             2. Subsequent runs: navigate_with_user_data_dir(url, user_data_dir=path)
-               with the same path — Chromium reuses the saved state.
+               with the same path AND the same `browser` value — state reused.
 
         Args:
             url: URL to navigate to
             user_data_dir: Persistent profile directory path. Created on first
-                use. Must NOT be in simultaneous use by another Chromium process
-                (Chromium uses an exclusive LOCK file in the directory).
+                use. Must NOT be in simultaneous use by another instance of the
+                same binary (exclusive SingletonLock in the directory).
             browser: Which browser to use - "chrome" or "chromium". Defaults to
                 the currently running browser, or "chromium" if none is running.
+                See macOS keychain caveat above — switching this value mid-life
+                of a directory silently breaks cookie decryption.
             enable_har_capture: Enable performance logging for HAR export.
             init_scripts: JavaScript to inject before every page load.
 

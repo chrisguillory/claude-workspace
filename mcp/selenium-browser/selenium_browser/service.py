@@ -167,13 +167,27 @@ class BrowserService:
                     Use "chromium" to avoid AppleScript targeting conflicts when
                     your personal Chrome is running (different bundle ID).
             user_data_dir: Optional persistent profile directory. When provided,
-                    Chromium uses this path as its --user-data-dir, so cookies,
-                    localStorage, IndexedDB (including non-extractable WebCrypto
-                    keys stored on disk) survive across browser launches. The
-                    directory is created on first use. Caller must call
+                    the chosen browser uses this path as its --user-data-dir, so
+                    cookies, localStorage, IndexedDB (including non-extractable
+                    WebCrypto keys stored on disk) survive across launches.
+
+                    macOS keychain caveat: a directory and a binary form a
+                    binding pair. Chrome and Chromium use different macOS
+                    Keychain entries ("Chrome Safe Storage" vs "Chromium Safe
+                    Storage") to encrypt cookie blobs and the os_crypt key in
+                    Local State. Once a directory has been populated by one
+                    binary, opening it with the other will silently fail to
+                    decrypt cookies and saved passwords (localStorage and
+                    IndexedDB still survive). Pick a binary at first use and
+                    keep using it — for pseudonymous identities prefer
+                    `browser="chromium"` since Homebrew Chromium has no Google
+                    Sync, no enterprise policy plist, and no Gaia identity
+                    propagation across origins.
+
+                    The directory is created on first use. Caller must call
                     close_browser() before changing user_data_dir mid-session,
-                    and must not run a second Chromium against the same dir
-                    (Chromium uses an exclusive LOCK file).
+                    and must not run a second instance of the same binary
+                    against the same dir (exclusive SingletonLock).
 
         Returns:
             WebDriver instance
