@@ -183,3 +183,72 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             enable_har_capture=enable_har_capture,
             init_scripts=init_scripts,
         )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title='Navigate with User Data Dir',
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    async def navigate_with_user_data_dir(
+        url: str,
+        user_data_dir: str,
+        browser: Browser | None = None,
+        enable_har_capture: bool = False,
+        init_scripts: Sequence[str] | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> NavigationResult:
+        """Launch fresh browser using a persistent --user-data-dir and navigate.
+
+        PERMISSION SCOPE: This tool reuses on-disk auth state (cookies,
+        localStorage, IndexedDB including non-extractable WebCrypto keys) from
+        a Chromium profile directory. Equivalent privilege to
+        navigate_with_profile_state — both import authenticated session state.
+        Requires separate approval from navigate().
+
+        Use this for long-lived persistent profiles where the directory IS the
+        portable artifact. The same Chromium binary always opens the same dir,
+        so on-disk state round-trips natively (no save/restore JSON serialization
+        in the path that would destroy non-extractable WebCrypto keys — the
+        bug that breaks Proton-style auth via navigate_with_profile_state).
+
+        Workflow:
+            1. First time: navigate_with_user_data_dir(url, user_data_dir=path)
+               where path is empty or new — Chromium creates the profile.
+               Log in manually if needed; Chromium persists the auth.
+            2. Subsequent runs: navigate_with_user_data_dir(url, user_data_dir=path)
+               with the same path — Chromium reuses the saved state.
+
+        Args:
+            url: URL to navigate to
+            user_data_dir: Persistent profile directory path. Created on first
+                use. Must NOT be in simultaneous use by another Chromium process
+                (Chromium uses an exclusive LOCK file in the directory).
+            browser: Which browser to use - "chrome" or "chromium". Defaults to
+                the currently running browser, or "chromium" if none is running.
+            enable_har_capture: Enable performance logging for HAR export.
+            init_scripts: JavaScript to inject before every page load.
+
+        Returns:
+            NavigationResult with current_url and title
+
+        Note:
+            This tool always starts a fresh browser process (implicit
+            fresh_browser=True) so the new user_data_dir takes effect.
+
+        Security:
+            The user_data_dir contains sensitive auth tokens after login.
+            Treat the directory as credentials:
+            - Never commit to version control
+            - Restrict permissions (chmod 700) for sensitive identities
+            - Different identities should use different user_data_dirs
+        """
+        return await service.navigate_with_user_data_dir(
+            url=url,
+            user_data_dir=user_data_dir,
+            browser=browser,
+            enable_har_capture=enable_har_capture,
+            init_scripts=init_scripts,
+        )

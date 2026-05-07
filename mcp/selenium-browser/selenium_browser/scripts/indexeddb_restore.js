@@ -11,6 +11,14 @@
  * Handles schema creation during onupgradeneeded and data insertion after ready.
  * Deserializes complex types using __type markers from capture.
  *
+ * Async deserialization rule
+ * --------------------------
+ * IndexedDB transactions auto-commit when control returns to the event loop.
+ * `await crypto.subtle.importKey()` (used by the CryptoKey case) yields control,
+ * which would silently commit any open transaction and fail subsequent puts.
+ * To work around this we PRE-DESERIALIZE all records before opening the
+ * transaction, then run the puts synchronously inside a fresh transaction.
+ *
  * Returns: Promise<{ success: boolean, databases_restored: number, records_restored: number, errors: string[] }>
  */
 
@@ -33,7 +41,7 @@ return new Promise(async (resolve, reject) => {
         for (const dbExport of indexedDBData) {
             try {
                 // Delete existing database first (clean slate)
-                await new Promise((res, rej) => {
+                await new Promise((res) => {
                     const deleteRequest = indexedDB.deleteDatabase(dbExport.databaseName);
                     deleteRequest.onsuccess = () => res();
                     deleteRequest.onerror = () => res(); // Continue even if delete fails
@@ -99,21 +107,36 @@ return new Promise(async (resolve, reject) => {
                             continue;
                         }
 
+                        // PRE-DESERIALIZE all records before opening the transaction.
+                        // See "Async deserialization rule" in the file header.
+                        const deserialized = [];
+                        for (const record of storeExport.records || []) {
+                            try {
+                                deserialized.push({
+                                    key: await deserializeValue(record.key),
+                                    value: await deserializeValue(record.value),
+                                });
+                            } catch (deserializeError) {
+                                console.warn('Error deserializing record:', deserializeError);
+                                results.errors.push(
+                                    `Failed to deserialize record in ${storeExport.name}: ${deserializeError.message}`
+                                );
+                            }
+                        }
+
+                        // Now run all puts synchronously inside a fresh transaction.
                         const transaction = db.transaction(storeExport.name, 'readwrite');
                         const objectStore = transaction.objectStore(storeExport.name);
 
-                        // Insert all records
-                        for (const record of storeExport.records || []) {
+                        for (const rec of deserialized) {
                             try {
-                                const deserializedValue = deserializeValue(record.value);
-
                                 // Use put() which works for both in-line and out-of-line keys
                                 if (storeExport.keyPath === null) {
                                     // Out-of-line keys - provide key explicitly
-                                    objectStore.put(deserializedValue, record.key);
+                                    objectStore.put(rec.value, rec.key);
                                 } else {
                                     // In-line keys - key is within the value
-                                    objectStore.put(deserializedValue);
+                                    objectStore.put(rec.value);
                                 }
 
                                 results.records_restored++;
@@ -154,9 +177,10 @@ return new Promise(async (resolve, reject) => {
 
     /**
      * Deserialize values with __type markers back to original types.
-     * Reverse of serializeValue from indexeddb_capture.js
+     * Reverse of serializeValue from indexeddb_capture.js.
+     * Async because CryptoKey case uses crypto.subtle.importKey (Promise).
      */
-    function deserializeValue(value) {
+    async function deserializeValue(value) {
         if (value === null || value === undefined) {
             return null;
         }
@@ -167,14 +191,47 @@ return new Promise(async (resolve, reject) => {
                 case 'Date':
                     return new Date(value.__value);
 
-                case 'Map':
-                    return new Map(value.__value.map(([k, v]) => [
-                        deserializeValue(k),
-                        deserializeValue(v)
-                    ]));
+                case 'CryptoKey':
+                    // Extractable keys carry __value (the JWK) and round-trip cleanly.
+                    if (value.__value && value.__format) {
+                        return await crypto.subtle.importKey(
+                            value.__format,
+                            value.__value,
+                            value.__algorithm,
+                            value.__extractable,
+                            value.__usages
+                        );
+                    }
+                    // Non-extractable keys captured with metadata only cannot be
+                    // reconstructed with original bytes via JS API. Return a marker
+                    // so callers can detect the gap. To preserve identity, the caller
+                    // must use the user_data_dir parameter on navigate to keep the
+                    // browser's IndexedDB LevelDB folder intact.
+                    return {
+                        __type: 'CryptoKey',
+                        __unrestored: true,
+                        __reason: value.__exportError || 'non-extractable',
+                        __algorithm: value.__algorithm,
+                        __usages: value.__usages,
+                        __extractable: value.__extractable,
+                        __keyType: value.__keyType,
+                    };
 
-                case 'Set':
-                    return new Set(value.__value.map(v => deserializeValue(v)));
+                case 'Map': {
+                    const entries = [];
+                    for (const [k, v] of value.__value) {
+                        entries.push([await deserializeValue(k), await deserializeValue(v)]);
+                    }
+                    return new Map(entries);
+                }
+
+                case 'Set': {
+                    const items = [];
+                    for (const v of value.__value) {
+                        items.push(await deserializeValue(v));
+                    }
+                    return new Set(items);
+                }
 
                 case 'ArrayBuffer':
                     return new Uint8Array(value.__value).buffer;
@@ -186,9 +243,10 @@ return new Promise(async (resolve, reject) => {
                 case 'Uint32Array':
                 case 'Int32Array':
                 case 'Float32Array':
-                case 'Float64Array':
+                case 'Float64Array': {
                     const TypedArrayConstructor = globalThis[value.__type];
                     return new TypedArrayConstructor(value.__value);
+                }
 
                 case 'Blob':
                 case 'File':
@@ -204,14 +262,18 @@ return new Promise(async (resolve, reject) => {
 
         // Arrays
         if (Array.isArray(value)) {
-            return value.map(v => deserializeValue(v));
+            const out = [];
+            for (const v of value) {
+                out.push(await deserializeValue(v));
+            }
+            return out;
         }
 
         // Plain objects
         if (typeof value === 'object') {
             const result = {};
             for (const [k, v] of Object.entries(value)) {
-                result[k] = deserializeValue(v);
+                result[k] = await deserializeValue(v);
             }
             return result;
         }

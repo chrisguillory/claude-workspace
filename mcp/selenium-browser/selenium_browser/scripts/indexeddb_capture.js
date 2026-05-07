@@ -16,6 +16,16 @@
  * - ArrayBuffer: { __type: 'ArrayBuffer', __value: [byte, ...] }
  * - TypedArrays: { __type: 'Uint8Array', __value: [byte, ...] }
  * - Blob/File: { __type: 'Blob', __size, __mimeType, __note: 'Content not captured' }
+ * - CryptoKey (extractable):
+ *     { __type: 'CryptoKey', __format: 'jwk', __value: <jwk>,
+ *       __algorithm, __usages, __extractable: true, __keyType }
+ * - CryptoKey (non-extractable):
+ *     { __type: 'CryptoKey', __extractable: false,
+ *       __algorithm, __usages, __keyType, __exportError: <reason> }
+ *     Restoring a non-extractable CryptoKey from this metadata-only marker
+ *     requires file-level access (copy IndexedDB LevelDB folder for the
+ *     origin into the target profile dir before browser launch). The JS
+ *     API has no way to extract bytes from non-extractable keys.
  *
  * Returns: Promise<Array<{
  *   databaseName: string,
@@ -100,8 +110,8 @@ return new Promise(async (resolve, reject) => {
 
                         for (let i = 0; i < keys.length; i++) {
                             storeExport.records.push({
-                                key: serializeValue(keys[i]),
-                                value: serializeValue(values[i])
+                                key: await serializeValue(keys[i]),
+                                value: await serializeValue(values[i])
                             });
                         }
 
@@ -126,8 +136,9 @@ return new Promise(async (resolve, reject) => {
     /**
      * Type-aware serialization for complex IndexedDB types.
      * Recursively serializes objects, arrays, and special types.
+     * Async because CryptoKey export uses crypto.subtle.exportKey (Promise).
      */
-    function serializeValue(value) {
+    async function serializeValue(value) {
         // Primitives
         if (value === null || value === undefined) return null;
         if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -139,17 +150,44 @@ return new Promise(async (resolve, reject) => {
             return { __type: 'Date', __value: value.toISOString() };
         }
 
+        // CryptoKey
+        // Detected before generic object handling — Object.entries(cryptoKey) returns []
+        // for these opaque host objects, which would otherwise silently destroy them.
+        if (value instanceof CryptoKey) {
+            const meta = {
+                __type: 'CryptoKey',
+                __algorithm: value.algorithm,
+                __usages: value.usages,
+                __extractable: value.extractable,
+                __keyType: value.type,  // 'secret', 'public', 'private'
+            };
+            if (value.extractable) {
+                try {
+                    meta.__format = 'jwk';
+                    meta.__value = await crypto.subtle.exportKey('jwk', value);
+                } catch (e) {
+                    meta.__exportError = e.name + ': ' + e.message;
+                }
+            } else {
+                meta.__exportError = 'non-extractable: JS API cannot export bytes; use user_data_dir to preserve via LevelDB';
+            }
+            return meta;
+        }
+
         // Map
         if (value instanceof Map) {
-            return {
-                __type: 'Map',
-                __value: Array.from(value.entries()).map(([k, v]) => [serializeValue(k), serializeValue(v)])
-            };
+            const entries = [];
+            for (const [k, v] of value.entries()) {
+                entries.push([await serializeValue(k), await serializeValue(v)]);
+            }
+            return { __type: 'Map', __value: entries };
         }
 
         // Set
         if (value instanceof Set) {
-            return { __type: 'Set', __value: Array.from(value).map(v => serializeValue(v)) };
+            const items = [];
+            for (const v of value) items.push(await serializeValue(v));
+            return { __type: 'Set', __value: items };
         }
 
         // ArrayBuffer
@@ -178,14 +216,16 @@ return new Promise(async (resolve, reject) => {
 
         // Arrays
         if (Array.isArray(value)) {
-            return value.map(v => serializeValue(v));
+            const out = [];
+            for (const v of value) out.push(await serializeValue(v));
+            return out;
         }
 
         // Plain objects
         if (typeof value === 'object') {
             const result = {};
             for (const [k, v] of Object.entries(value)) {
-                result[k] = serializeValue(v);
+                result[k] = await serializeValue(v);
             }
             return result;
         }
