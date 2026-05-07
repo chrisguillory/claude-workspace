@@ -130,6 +130,18 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   Extended CLAUDE_CODE_MAX_VERSION to 2.1.123.
 - Schema v0.2.30: Added AssistantRecord.attributionSkill (str | None) for assistant records
                   emitted while a skill is active; mirrors attributionAgent.
+- Schema v0.2.31: Added HookInfo.durationMs (int) — hook execution duration in milliseconds,
+                  always present in observed JSONL (100% prevalence) and confirmed in binary as
+                  `durationMs:0` initializer; introduced ≤ 2.1.120. Single-field fix collapses
+                  984 union-cascade errors on StopHookSummarySystemRecord (Pydantic left-to-right
+                  union evaluation against a 16-field record). Added AssistantRecord.attributionPlugin
+                  (str | None) paired with attributionSkill when a plugin-installed skill drives
+                  the turn (e.g. "codex"); introduced 2.1.121 alongside attributionAgent /
+                  attributionSkill. Added QueuedCommandAttachment.source_uuid (str | None) —
+                  UUID of the source message that triggered a queued command; rare (1/355
+                  globally), only on commandMode="prompt"; produced by the SDK replay path
+                  (`SDKUserMessageReplay` events, Claude Code 2.1.20+ `replayUserMessages`).
+                  Snake_case in wire schema, anomalous vs surrounding camelCase.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -2509,6 +2521,11 @@ class AssistantRecord(BaseRecord):
         None,
         description='Active skill name (e.g., "recover-session"); mirrors attributionAgent.',
     )
+    attributionPlugin: str | None = pydantic.Field(
+        None,
+        description='Active plugin name (e.g., "codex"); paired with attributionSkill when '
+        'the assistant turn is emitted by a plugin-installed skill (Claude Code 2.1.121+).',
+    )
 
 
 # -- Summary Record (does NOT inherit from BaseRecord - different schema) ------
@@ -2681,6 +2698,7 @@ class HookInfo(StrictModel):
     """Information about a hook execution."""
 
     command: str
+    durationMs: int  # Hook execution duration in milliseconds (Claude Code 2.1.120+)
 
 
 class StopHookSummarySystemRecord(BaseRecord):
@@ -3205,6 +3223,14 @@ class QueuedCommandAttachment(StrictModel):
     prompt: str | Sequence[TextContent | ImageContent]
     commandMode: str
     imagePasteIds: Sequence[int] | None = None  # Present when prompt contains pasted images
+    source_uuid: str | None = pydantic.Field(
+        None,
+        description='UUID of the source message that triggered this queued command. '
+        'Rare (1/355 globally observed); only seen with commandMode="prompt". '
+        'Set by the SDK replay path (Claude Code 2.1.20+ — `SDKUserMessageReplay` events '
+        'when `replayUserMessages` is enabled). Note: snake_case in the wire schema, '
+        'anomalous vs surrounding camelCase fields.',
+    )
 
 
 class DynamicSkillAttachment(StrictModel):
