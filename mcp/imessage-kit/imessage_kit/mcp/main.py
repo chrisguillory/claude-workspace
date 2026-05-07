@@ -31,6 +31,7 @@ from imessage_kit.types import (
     AttachmentView,
     Chat,
     Contact,
+    ContactMatchMode,
     ContactSource,
     DiagnosticResult,
     Message,
@@ -317,8 +318,9 @@ def register_tools(service: IMessageService) -> None:
         ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         limit: int = 10,
         source: str | None = None,
+        match_mode: ContactMatchMode = 'exact_or_substring',
     ) -> Sequence[Contact]:
-        return service.lookup_contact(query, limit=limit, source=source)
+        return service.lookup_contact(query, limit=limit, source=source, match_mode=match_mode)
 
     @server.tool(
         annotations=mcp.types.ToolAnnotations(
@@ -408,15 +410,30 @@ def register_tools(service: IMessageService) -> None:
 
 LOOKUP_CONTACT_BASE = """Search AddressBook contacts by name, phone, or email.
 
-Matches names fuzzily (token_sort_ratio) and handles (phone/email) by exact
-substring. Returns contacts deduplicated across all AddressBook sync sources,
-with each result tagged by the sources it was merged from.
+Phone digit and email substring matching are always active. Name matching
+strictness is set by `match_mode`. Default `exact_or_substring` accepts
+exact name equality OR query-as-substring; opt into fuzzy matching only
+when needed.
+
+Default (no `source`): returns contacts deduplicated across all sync sources,
+with phones/emails unioned and each result tagged by the sources it was
+merged from.
+
+With `source` set: returns that source's view of matching contacts — only the
+phones, emails, and names recorded in that source. Useful for diagnosing
+which fields come from which sync source. Make a separate call per source
+to compare them.
 
 Args:
-    query: Name (fuzzy), phone number, or email.
+    query: Name, phone number, or email.
     limit: Max matches (default 10).
-    source: Restrict to a single source display name (case-insensitive, e.g.,
-        'Google', 'iCloud'). Raises if the source does not exist."""
+    source: Display name of a source (case-insensitive, e.g., 'Google',
+        'iCloud'). Raises if the source does not exist.
+    match_mode: Name-matching strictness. 'exact_only' requires the name
+        to equal the query. 'exact_or_substring' (default) also matches
+        when the query is a substring of the name. 'exact_or_substring_or_fuzzy'
+        falls back to fuzzy token_sort_ratio (≥70%) — opt-in because it
+        catches false positives like 'Francisco' → 'Francis'."""
 
 
 def _format_sources_summary(sources: Sequence[ContactSource]) -> str:
