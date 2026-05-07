@@ -13,7 +13,7 @@ from pathlib import Path
 from cc_lib.schemas.base import ClosedModel
 from grok_kit_sdk import GrokKit, errors, models
 
-from grok_kit.auth import DEFAULT_COOKIE_PATH, format_cookie_header, load_cookies
+from grok_kit.auth import DEFAULT_COOKIE_PATH, format_cookie_header, load_state
 from grok_kit.exceptions import AuthExpiredError
 
 
@@ -42,8 +42,7 @@ class GrokService:
     @classmethod
     def from_cookies(cls, cookie_path: Path = DEFAULT_COOKIE_PATH) -> GrokService:
         """Load cookies and construct a ready service."""
-        cookies = load_cookies(cookie_path)
-        return cls(GrokKit(cookie_header=format_cookie_header(cookies)))
+        return cls(GrokKit(cookie_header=format_cookie_header(load_state(cookie_path))))
 
     def list_conversations(
         self,

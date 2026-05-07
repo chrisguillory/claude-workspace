@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .models import ProfileState
+from cc_lib.schemas.profile_state import ProfileState
 
 ARIA_HIDDEN_REASON_KEYS: Sequence[tuple[str, str]] = [
     ('ariaHidden', 'aria-hidden'),

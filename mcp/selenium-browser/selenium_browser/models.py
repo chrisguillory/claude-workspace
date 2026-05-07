@@ -36,18 +36,10 @@ __all__ = [
     'NetworkCapture',
     'NetworkRequest',
     'PageTextResult',
-    'ProfileState',
-    'ProfileStateCookie',
-    'ProfileStateIndexedDB',
-    'ProfileStateIndexedDBIndex',
-    'ProfileStateIndexedDBObjectStore',
-    'ProfileStateIndexedDBRecord',
-    'ProfileStateOriginStorage',
     'ProxyConfig',
     'RequestTiming',
     'ResizeWindowResult',
     'ResourceCapture',
-    'SameSitePolicy',
     'SaveProfileStateResult',
     'SleepResult',
     'SlowestRequestSummary',
@@ -561,159 +553,6 @@ class PageTextResult(ClosedModel):
 
     # Smart extraction transparency (only present for selector='auto')
     smart_info: SmartExtractionInfo | None = None
-
-
-# -- Profile State Models (Browser state persistence) --------------------------
-
-SameSitePolicy = Literal['Strict', 'Lax', 'None']
-
-
-class ProfileStateCookie(ClosedModel):
-    """Cookie in profile state format.
-
-    Cookies are stored at the top level of ProfileState (not under origins) because
-    they use domain+path scoping, not strict origin scoping. A single cookie for
-    ".example.com" applies to multiple origins: https://example.com,
-    https://www.example.com, https://api.example.com, etc.
-
-    Session cookies use expires=-1, persistent cookies use epoch timestamp.
-    """
-
-    name: str
-    value: str
-    domain: str
-    path: str
-    expires: float  # Epoch seconds, -1 for session cookies
-    http_only: bool
-    secure: bool
-    same_site: SameSitePolicy
-
-
-class ProfileStateIndexedDBRecord(ClosedModel):
-    """IndexedDB record - key/value pair.
-
-    Keys can be strings, numbers, dates (as ISO strings), or arrays (compound keys).
-    Values are JSON-serializable representations of stored objects.
-
-    Complex types (Date, Map, Set, ArrayBuffer) are serialized with __type markers:
-    - Date: {"__type": "Date", "__value": "2024-01-01T00:00:00.000Z"}
-    - Map: {"__type": "Map", "__value": [[key, value], ...]}
-    - Set: {"__type": "Set", "__value": [item, ...]}
-    - ArrayBuffer: {"__type": "ArrayBuffer", "__value": [byte, byte, ...]}
-    """
-
-    model_config = pydantic.ConfigDict(extra='forbid', strict=False)  # Allow flexible JSON values
-
-    key: str | int | float | Sequence[str | int | float] | None
-    value: JsonValue | None = None
-
-
-class ProfileStateIndexedDBIndex(ClosedModel):
-    """IndexedDB object store index metadata.
-
-    Serializes to camelCase for JavaScript compatibility:
-    key_path → keyPath, multi_entry → multiEntry
-    """
-
-    model_config = pydantic.ConfigDict(
-        alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
-    )
-
-    name: str
-    key_path: str | Sequence[str]
-    unique: bool
-    multi_entry: bool
-
-
-class ProfileStateIndexedDBObjectStore(ClosedModel):
-    """IndexedDB object store with schema and data.
-
-    Captures the complete state of an object store including:
-    - Schema: key_path, auto_increment, indexes
-    - Data: all records as key/value pairs
-
-    Serializes to camelCase for JavaScript compatibility:
-    key_path → keyPath, auto_increment → autoIncrement
-    """
-
-    model_config = pydantic.ConfigDict(
-        alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
-    )
-
-    name: str
-    key_path: str | Sequence[str] | None
-    auto_increment: bool
-    indexes: Sequence[ProfileStateIndexedDBIndex]
-    records: Sequence[ProfileStateIndexedDBRecord]
-
-
-class ProfileStateIndexedDB(ClosedModel):
-    """IndexedDB database with version and object stores.
-
-    The version number is critical for schema migrations.
-
-    Serializes to camelCase for JavaScript compatibility:
-    database_name → databaseName, object_stores → objectStores
-    """
-
-    model_config = pydantic.ConfigDict(
-        alias_generator=pydantic.alias_generators.to_camel,
-        populate_by_name=True,
-    )
-
-    database_name: str
-    version: int
-    object_stores: Sequence[ProfileStateIndexedDBObjectStore]
-
-
-class ProfileStateOriginStorage(ClosedModel):
-    """Storage data for a single origin.
-
-    Each origin (scheme://host:port) has isolated storage per the same-origin policy.
-    All storage types for this origin are grouped together.
-
-    Note: session_storage is session-scoped by design. Restored session_storage
-    persists only for the lifetime of the browser context - closing the browser
-    clears it. For cross-session persistence, use local_storage or cookies.
-    """
-
-    local_storage: Mapping[str, str]
-    session_storage: Mapping[str, str] | None = None
-    indexed_db: Sequence[ProfileStateIndexedDB] | None = None
-
-
-class ProfileState(ClosedModel):
-    """Browser profile state for session persistence.
-
-    Captures browser state that maintains authenticated sessions:
-    - Cookies (domain-scoped, stored at top level)
-    - Per-origin storage (localStorage, sessionStorage, IndexedDB)
-
-    Design Principles:
-    - Cookies are top-level because they use domain+path scoping, not origin scoping.
-      A single cookie can match multiple origins.
-    - Storage is origin-keyed because localStorage/sessionStorage/IndexedDB use strict
-      origin scoping (scheme://host:port must match exactly).
-    - Format designed for future expansion: extensions, permissions, preferences.
-
-    See docs/browser-data-taxonomy.md for detailed architecture documentation.
-    """
-
-    schema_version: str = '1.0'
-    captured_at: str | None = None  # ISO 8601 timestamp
-
-    # Cookies: domain+path scoped, top-level (see docstring for rationale)
-    cookies: Sequence[ProfileStateCookie]
-
-    # Storage: origin-scoped, keyed by origin string (e.g., "https://example.com")
-    origins: Mapping[str, ProfileStateOriginStorage]
-
-    # Future expansion slots (not yet implemented)
-    extensions: JsonObject | None = None
-    permissions: JsonObject | None = None
-    preferences: JsonObject | None = None
 
 
 class SaveProfileStateResult(ClosedModel):

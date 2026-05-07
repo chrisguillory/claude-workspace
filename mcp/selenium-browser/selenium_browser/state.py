@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from cc_lib.schemas.profile_state import ProfileState
 from selenium import webdriver
 
-from .models import Browser, ProfileState, ProxyConfig
+from .models import Browser, ProxyConfig
 
 logger = logging.getLogger(__name__)
 

@@ -24,6 +24,12 @@ from urllib.parse import parse_qs, unquote, urlparse
 import fastmcp.exceptions
 import httpx
 from cc_lib.schemas.base import SubsetModel
+from cc_lib.schemas.profile_state import (
+    ProfileState,
+    ProfileStateCookie,
+    ProfileStateIndexedDB,
+    ProfileStateOriginStorage,
+)
 from cc_lib.types import JsonObject
 from cc_lib.utils import Timer
 from selenium import webdriver
@@ -69,10 +75,6 @@ from .models import (
     NetworkCapture,
     NetworkRequest,
     PageTextResult,
-    ProfileState,
-    ProfileStateCookie,
-    ProfileStateIndexedDB,
-    ProfileStateOriginStorage,
     ProxyConfig,
     RequestTiming,
     ResizeWindowResult,

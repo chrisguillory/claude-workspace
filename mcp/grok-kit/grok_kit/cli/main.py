@@ -20,7 +20,8 @@ from grok_kit.auth import (
     DEFAULT_COOKIE_PATH,
     LOAD_BEARING_COOKIES,
     expired_load_bearing,
-    load_cookies,
+    import_state,
+    load_state,
     missing_load_bearing,
 )
 from grok_kit.service import GrokService
@@ -88,15 +89,15 @@ def auth_status(
     """Report cookie file presence, load-bearing-cookie coverage, and expirations."""
     if not cookie_path.exists():
         typer.echo(f'No cookie file at {cookie_path}')
-        typer.echo('Run `grok-kit auth-login` to bootstrap.')
+        typer.echo('Run the `grok-kit-auth` skill to bootstrap.')
         raise typer.Exit(2)
 
-    cookies = load_cookies(cookie_path)
-    missing = missing_load_bearing(cookies)
-    expired = expired_load_bearing(cookies)
+    state = load_state(cookie_path)
+    missing = missing_load_bearing(state)
+    expired = expired_load_bearing(state)
 
     typer.echo(f'Cookie file: {cookie_path}')
-    typer.echo(f'Total cookies: {len(cookies.cookies)}')
+    typer.echo(f'Total cookies: {len(state.cookies)}')
     typer.echo(f'Load-bearing required: {", ".join(LOAD_BEARING_COOKIES)}')
     typer.echo(f'Missing: {", ".join(missing) if missing else "none ✓"}')
     typer.echo(f'Expired: {", ".join(expired) if expired else "none ✓"}')
@@ -118,30 +119,26 @@ def auth_logout(
         typer.echo(f'No cookie file at {cookie_path} (nothing to do)')
 
 
-@app.command('auth-login', rich_help_panel='Auth')
+@app.command('auth-import', rich_help_panel='Auth')
 @error_boundary
-def auth_login(
-    username: Annotated[str, typer.Option('--username', help='X username or email.')],
-    password_stdin: Annotated[
-        bool,
-        typer.Option('--password-stdin', help='Read password from stdin (avoids argv leak).'),
-    ] = False,
-    totp_stdin: Annotated[
-        bool,
-        typer.Option('--totp-stdin', help='Read TOTP from stdin (alongside password).'),
-    ] = False,
+def auth_import(
+    state_file: Annotated[Path, typer.Argument(help='Profile-state JSON to import.')],
+    cookie_path: Annotated[
+        Path,
+        typer.Option('--cookie-path', help='Where to write the imported cookies.'),
+    ] = DEFAULT_COOKIE_PATH,
 ) -> None:
-    """Drive a fresh-Chromium X SSO login and save the resulting grok.com cookies.
-
-    NOT YET IMPLEMENTED — the Chromium-driving + X login form-fill flow is
-    its own work item. For now, manually save state via the selenium-browser
-    MCP against an authenticated grok.com session.
-    """
-    _ = (username, password_stdin, totp_stdin)
-    raise NotImplementedError(
-        'auth-login (fresh-Chromium X SSO drive) not yet implemented. '
-        f'For now, manually save state via the selenium-browser MCP to {DEFAULT_COOKIE_PATH}.'
+    """Import a profile-state JSON into grok-kit's cookie store."""
+    result = import_state(state_file, target_path=cookie_path)
+    typer.echo(f'Imported {result.cookie_count} cookies → {result.cookie_path}')
+    typer.echo(
+        f'Missing load-bearing: {", ".join(result.missing_load_bearing) if result.missing_load_bearing else "none ✓"}'
     )
+    typer.echo(
+        f'Expired load-bearing: {", ".join(result.expired_load_bearing) if result.expired_load_bearing else "none ✓"}'
+    )
+    if result.missing_load_bearing:
+        raise typer.Exit(2)
 
 
 # Register documentation and shell-completion commands last so their panels

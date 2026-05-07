@@ -54,6 +54,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from cc_lib.schemas.profile_state import (
+    ProfileState,
+    ProfileStateCookie,
+    ProfileStateIndexedDB,
+    ProfileStateIndexedDBIndex,
+    ProfileStateIndexedDBObjectStore,
+    ProfileStateIndexedDBRecord,
+    ProfileStateOriginStorage,
+)
 from ccl_chromium_reader import (
     ccl_chromium_localstorage,
     ccl_chromium_sessionstorage,
@@ -67,16 +76,7 @@ from .applescript_session_storage import (
     is_chrome_running,
 )
 from .indexeddb_dfindexeddb import export_indexeddb_with_schema
-from .models import (
-    ChromeProfileStateExportResult,
-    ProfileState,
-    ProfileStateCookie,
-    ProfileStateIndexedDB,
-    ProfileStateIndexedDBIndex,
-    ProfileStateIndexedDBObjectStore,
-    ProfileStateIndexedDBRecord,
-    ProfileStateOriginStorage,
-)
+from .models import ChromeProfileStateExportResult
 
 
 @dataclass
