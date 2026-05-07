@@ -5,45 +5,48 @@
 #   "cc_lib",
 #   "httpx",
 #   "pydantic>=2.0.0",
+#   "typer>=0.16.0",
 # ]
 #
 # [tool.uv.sources]
 # cc_lib = { path = "../cc-lib/", editable = true }
 # ///
-"""Upload local files to GitHub issues/PRs using saved browser session cookies.
+"""GitHub upload + session management via saved browser cookies.
 
-GitHub's file upload endpoint requires web session auth — gh CLI OAuth tokens
-don't work. This script uses browser cookies saved via Selenium MCP profile state.
-
-Usage:
-    gh_upload.py <file_path> [<file_path2> ...]
-    # Outputs markdown links: [file.csv](https://github.com/user-attachments/files/...)
-
-Prerequisites:
-    1. Navigate to github.com in Chromium via Selenium MCP with profile state
-    2. save_profile_state("~/.claude-workspace/scripts/gh_upload_session.json")
-    3. Session cookies last ~2 weeks. Re-save if uploads start failing (422).
+GitHub's file-upload endpoint requires web-session auth (gh CLI OAuth tokens
+don't work on /upload/policies/assets). This script consumes a profile-state
+JSON captured by selenium-browser to drive that endpoint.
 """
 
 from __future__ import annotations
 
+__all__ = ['app', 'main']
+
+import logging
 import re
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Annotated
 
 import httpx
+import typer
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import SubsetModel
-from cc_lib.types import JsonDatetime
+from cc_lib.schemas.profile_state import ProfileState
 from cc_lib.utils import get_claude_workspace_config_home_dir
+from cc_lib.utils.atomic_write import atomic_write
 
 # Hardcoded for personal use with mainstay-io/monorepo
 REPO_SLUG = 'mainstay-io/monorepo'
 REPO_ID = '839989396'
 SESSION_FILE = get_claude_workspace_config_home_dir() / 'scripts' / 'gh_upload_session.json'
 
-# MIME type mapping for common file extensions
+# GitHub session cookies required for /upload/policies/assets. Empirically:
+# `user_session` is the primary auth cookie; `_gh_sess` carries CSRF state.
+LOAD_BEARING_COOKIES: Sequence[str] = ('user_session', '_gh_sess')
+
 MIME_TYPES: Mapping[str, str] = {
     '.csv': 'text/csv',
     '.html': 'text/html',
@@ -55,29 +58,6 @@ MIME_TYPES: Mapping[str, str] = {
     '.jpeg': 'image/jpeg',
 }
 DEFAULT_MIME_TYPE = 'application/octet-stream'
-
-
-class UploadError(Exception):
-    """File upload to GitHub failed."""
-
-
-class SessionExpiredError(UploadError):
-    """GitHub session cookies are expired or invalid."""
-
-
-class BrowserCookie(SubsetModel):
-    """Cookie from saved browser profile state."""
-
-    name: str
-    value: str
-    domain: str = ''
-
-
-class BrowserState(SubsetModel):
-    """Saved browser session state from Selenium save_profile_state."""
-
-    cookies: Sequence[BrowserCookie]
-    saved_at: JsonDatetime | None = None
 
 
 class UploadAsset(SubsetModel):
@@ -96,54 +76,103 @@ class UploadPolicy(SubsetModel):
     asset: UploadAsset
 
 
+app = create_app(help='gh-upload — GitHub file uploads via saved browser cookies.')
 boundary = ErrorBoundary(exit_code=1)
 
 
-def main() -> None:
-    """Entry point: validate file paths and upload."""
-    if len(sys.argv) < 2:
-        print(f'Usage: {sys.argv[0]} <file> [<file2> ...]', file=sys.stderr)
-        sys.exit(1)
-
-    # Validate all file paths up front (fail-fast)
-    file_paths = [Path(arg) for arg in sys.argv[1:]]
-    for path in file_paths:
-        if not path.is_file():
-            print(f'ERROR: {path} not found or not a regular file', file=sys.stderr)
-            sys.exit(1)
-
-    upload_files(file_paths)
+@app.callback(invoke_without_command=True)
+def _configure_logging(
+    ctx: typer.Context,
+    verbose: Annotated[bool, typer.Option('--verbose', '-v', help='Show detailed output.')] = False,
+) -> None:
+    """Configure logging and show help when no command given."""
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(message)s', stream=sys.stderr, force=True)
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
 
 
+@app.command('upload', rich_help_panel='Upload')
 @boundary
-def upload_files(file_paths: Sequence[Path]) -> None:
-    """Load session and upload files. ErrorBoundary catches exceptions."""
-    session = load_session()
-    nonce = get_fresh_nonce(session)
+def upload(
+    files: Annotated[
+        list[Path], typer.Argument(help='Files to upload.')
+    ],  # strict_typing_linter.py: mutable-type — typer requires list
+) -> None:
+    """Upload one or more files to GitHub; print markdown links to stdout."""
+    for path in files:
+        if not path.is_file():
+            typer.echo(f'ERROR: {path} not found or not a regular file', err=True)
+            raise typer.Exit(1)
+    client = _load_session()
+    nonce = _fetch_nonce(client)
+    for path in files:
+        url = _upload_one(client, nonce, path)
+        typer.echo(f'[{path.name}]({url})')
 
-    for file_path in file_paths:
-        url = upload_file(session, nonce, file_path)
-        print(f'[{file_path.name}]({url})')
+
+@app.command('auth-status', rich_help_panel='Auth')
+@boundary
+def auth_status(
+    cookie_path: Annotated[Path, typer.Option('--cookie-path', help='Cookie file location.')] = SESSION_FILE,
+) -> None:
+    """Report cookie file presence and load-bearing-cookie coverage."""
+    if not cookie_path.exists():
+        typer.echo(f'No cookie file at {cookie_path}')
+        typer.echo('Run the `gh-upload-auth` skill to bootstrap.')
+        raise typer.Exit(2)
+    state = ProfileState.model_validate_json(cookie_path.read_text())
+    github = [c for c in state.cookies if c.domain in ('github.com', '.github.com')]
+    present = {c.name for c in github}
+    missing = tuple(name for name in LOAD_BEARING_COOKIES if name not in present)
+    typer.echo(f'Cookie file: {cookie_path}')
+    typer.echo(f'github.com cookies: {len(github)} (of {len(state.cookies)} total)')
+    typer.echo(f'Load-bearing required: {", ".join(LOAD_BEARING_COOKIES)}')
+    typer.echo(f'Missing: {", ".join(missing) if missing else "none ✓"}')
 
 
-def load_session() -> httpx.Client:
-    """Load GitHub session from saved browser profile state.
+@app.command('auth-logout', rich_help_panel='Auth')
+@boundary
+def auth_logout(
+    cookie_path: Annotated[Path, typer.Option('--cookie-path', help='Cookie file to delete.')] = SESSION_FILE,
+) -> None:
+    """Delete the cookie file."""
+    if cookie_path.exists():
+        cookie_path.unlink()
+        typer.echo(f'Deleted {cookie_path}')
+    else:
+        typer.echo(f'No cookie file at {cookie_path} (nothing to do)')
 
-    GitHub's /upload/policies/assets endpoint requires:
-      - Session cookies (not OAuth tokens — web endpoint, not API)
-      - Browser-like headers (Origin, sec-fetch-site, sec-fetch-mode, sec-fetch-dest)
-      - X-Fetch-Nonce CSRF token (fetched per-session via get_fresh_nonce)
 
-    Without these headers → 422. The endpoint validates requests came from a browser.
+@app.command('auth-import', rich_help_panel='Auth')
+@boundary
+def auth_import(
+    state_file: Annotated[Path, typer.Argument(help='Profile-state JSON to import.')],
+    cookie_path: Annotated[Path, typer.Option('--cookie-path', help='Where to write.')] = SESSION_FILE,
+) -> None:
+    """Import a profile-state JSON into gh-upload's cookie store."""
+    state = ProfileState.model_validate_json(state_file.read_text())
+    cookie_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    atomic_write(cookie_path, state.model_dump_json().encode(), mode=0o600)
+    github = [c for c in state.cookies if c.domain in ('github.com', '.github.com')]
+    present = {c.name for c in github}
+    missing = tuple(name for name in LOAD_BEARING_COOKIES if name not in present)
+    typer.echo(f'Imported {len(state.cookies)} cookies → {cookie_path}')
+    typer.echo(f'github.com cookies: {len(github)}')
+    typer.echo(f'Missing load-bearing: {", ".join(missing) if missing else "none ✓"}')
+    if missing:
+        raise typer.Exit(2)
 
-    Raises FileNotFoundError if session file doesn't exist, ValidationError if malformed.
-    """
-    state = BrowserState.model_validate_json(SESSION_FILE.read_text())
 
-    github_cookies = {c.name: c.value for c in state.cookies if c.domain in ('github.com', '.github.com')}
+# -- Upload helpers (private) -------------------------------------------------
 
+
+def _load_session() -> httpx.Client:
+    """Build an authenticated httpx client from the saved profile state."""
+    state = ProfileState.model_validate_json(SESSION_FILE.read_text())
+    cookies = {c.name: c.value for c in state.cookies if c.domain in ('github.com', '.github.com')}
     return httpx.Client(
-        cookies=github_cookies,
+        cookies=cookies,
         headers={
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
             'Accept': 'application/json',
@@ -162,16 +191,8 @@ def load_session() -> httpx.Client:
     )
 
 
-def get_fresh_nonce(client: httpx.Client) -> str:
-    """Fetch issues/new page to extract CSRF nonce tied to this session.
-
-    The X-Fetch-Nonce is cryptographically bound to the session cookies. Each
-    session needs a fresh nonce — reusing a stale one or one from a different
-    session → 422.
-
-    Raises SessionExpiredError if redirected to login (cookies expired).
-    Raises UploadError if nonce cannot be extracted from page.
-    """
+def _fetch_nonce(client: httpx.Client) -> str:
+    """Extract the per-session X-Fetch-Nonce from issues/new HTML."""
     resp = client.get(
         f'https://github.com/{REPO_SLUG}/issues/new',
         headers={
@@ -181,39 +202,21 @@ def get_fresh_nonce(client: httpx.Client) -> str:
             'sec-fetch-dest': 'document',
         },
     )
-    print(f'DEBUG: Page fetch status={resp.status_code}, length={len(resp.text)}', file=sys.stderr)
-
     nonce_match = re.search(r'name="fetch-nonce"\s+content="([^"]+)"', resp.text)
     if not nonce_match:
         if 'login' in str(resp.url):
             raise SessionExpiredError('Session expired — redirected to login page')
         raise UploadError(f'Could not extract fetch-nonce from {resp.url}')
-
-    nonce = nonce_match.group(1)
-    print(f'DEBUG: Got nonce={nonce[:20]}...', file=sys.stderr)
-    return nonce
+    return nonce_match.group(1)
 
 
-def upload_file(client: httpx.Client, nonce: str, file_path: Path) -> str:
-    """Upload file to GitHub via 3-step flow.
-
-    GitHub's file upload flow (captured via HAR from browser):
-      1. POST /upload/policies/assets with file metadata → returns S3 signed URL,
-         form fields for S3 upload, and authenticity token (201 expected)
-      2. POST file to S3 signed URL using form fields from step 1 → 204 expected
-      3. PUT /upload/repository-files/{asset_id} with authenticity token to confirm
-         → 200 expected, returns permanent github.com URL
-
-    All three steps must succeed. A 422 on step 1 indicates expired session.
-
-    Returns permanent GitHub URL for the uploaded file.
-    Raises UploadError for any step failure, SessionExpiredError if session invalid.
-    """
+def _upload_one(client: httpx.Client, nonce: str, file_path: Path) -> str:
+    """Run GitHub's 3-step upload flow for one file; return the permanent URL."""
     file_name = file_path.name
     file_size = file_path.stat().st_size
     mime = MIME_TYPES.get(file_path.suffix.lower(), DEFAULT_MIME_TYPE)
 
-    # Step 1: Get upload policy from GitHub
+    # Step 1: get upload policy
     resp = client.post(
         'https://github.com/upload/policies/assets',
         data={
@@ -224,52 +227,60 @@ def upload_file(client: httpx.Client, nonce: str, file_path: Path) -> str:
         },
         headers={'X-Fetch-Nonce': nonce},
     )
-
     if resp.status_code == 422:
         raise SessionExpiredError(f'Policy request returned 422 — session likely expired: {resp.text[:200]}')
     if resp.status_code != 201:
         raise UploadError(f'Policy request failed ({resp.status_code}): {resp.text[:200]}')
-
     policy = UploadPolicy.model_validate(resp.json())
 
-    # Step 2: Upload to S3 (bare httpx.post — S3 shouldn't receive GitHub cookies/headers)
+    # Step 2: upload to S3 (bare httpx — S3 must not see GitHub cookies)
     with file_path.open('rb') as f:
-        files = {'file': (file_name, f, mime)}
-        s3_resp = httpx.post(policy.upload_url, data=policy.form, files=files)
-
+        s3_resp = httpx.post(policy.upload_url, data=policy.form, files={'file': (file_name, f, mime)})
     if s3_resp.status_code != 204:
         raise UploadError(f'S3 upload failed ({s3_resp.status_code})')
 
-    # Step 3: Confirm upload with GitHub
-    confirm_resp = client.put(
+    # Step 3: confirm with GitHub
+    confirm = client.put(
         f'https://github.com{policy.asset_upload_url}',
         data={'authenticity_token': policy.upload_authenticity_token},
         headers={'X-Fetch-Nonce': nonce},
     )
-
-    if confirm_resp.status_code != 200:
-        raise UploadError(f'Confirm failed ({confirm_resp.status_code})')
-
+    if confirm.status_code != 200:
+        raise UploadError(f'Confirm failed ({confirm.status_code})')
     return policy.asset.href
 
 
-# Exception handlers — translate exceptions to user-friendly stderr messages
+# Register documentation and shell-completion commands last so their panels
+# appear after Upload and Auth in --help output.
+add_help_command(app)
+add_completion_command(app)
+
+
+def main() -> None:
+    """CLI entry point."""
+    run_app(app)
+
+
+# -- Exception types + handlers (file bottom per workspace convention) -------
+
+
+class UploadError(Exception):
+    """File upload to GitHub failed."""
+
+
+class SessionExpiredError(UploadError):
+    """GitHub session cookies are expired or invalid."""
 
 
 @boundary.handler(SessionExpiredError)
 def _handle_session_expired(exc: SessionExpiredError) -> None:
-    print(f'ERROR: {exc}', file=sys.stderr)
-    print(f'Re-save browser session: save_profile_state("{SESSION_FILE}")', file=sys.stderr)
+    typer.echo(f'ERROR: {exc}', err=True)
+    typer.echo('Re-run the gh-upload-auth skill or `gh-upload auth-import <state.json>` to refresh.', err=True)
 
 
 @boundary.handler(UploadError)
 def _handle_upload_error(exc: UploadError) -> None:
-    print(f'ERROR: {exc}', file=sys.stderr)
-
-
-@boundary.handler(Exception)
-def _handle_unexpected(exc: Exception) -> None:
-    print(f'ERROR: Unexpected failure: {exc!r}', file=sys.stderr)
+    typer.echo(f'ERROR: {exc}', err=True)
 
 
 if __name__ == '__main__':
