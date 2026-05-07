@@ -202,12 +202,29 @@ class BrowserService:
         opts = Options()
 
         # Persistent profile directory — must come before driver creation so
-        # Chromium opens the correct profile on first launch.
+        # the browser opens the correct profile on first launch.
         if user_data_dir is not None:
             udd_path = Path(user_data_dir).expanduser()
             udd_path.mkdir(parents=True, exist_ok=True)
+            # Detect binary swap. macOS keychain asymmetry: opening a directory
+            # populated by one binary with the other silently fails to decrypt
+            # cookies (verified empirically). Stamp the dir on first use; refuse
+            # to launch if a later request asks for a different binary.
+            sentinel = udd_path / '.selenium-browser-binary'
+            if sentinel.exists():
+                prev = sentinel.read_text().strip()
+                if prev and prev != browser:
+                    raise fastmcp.exceptions.ToolError(
+                        f'user_data_dir {udd_path} was last opened by browser={prev!r}, '
+                        f'but browser={browser!r} was requested. On macOS, Chrome and '
+                        f'Chromium use different Keychain entries to encrypt cookies; '
+                        f'mixing binaries against the same dir silently destroys auth '
+                        f'state. Either reuse browser={prev!r} or point at a fresh '
+                        f'user_data_dir.',
+                    )
+            sentinel.write_text(browser)
             opts.add_argument(f'--user-data-dir={udd_path}')
-            logger.info('Using persistent user_data_dir: %s', udd_path)
+            logger.info('Using persistent user_data_dir: %s (binary=%s)', udd_path, browser)
 
         # Set binary location for Chromium (macOS-specific for now)
         # TODO: Add cross-platform support (Linux: /usr/bin/chromium-browser, Windows: shutil.which)
