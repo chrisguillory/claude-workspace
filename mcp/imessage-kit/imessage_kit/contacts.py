@@ -154,7 +154,7 @@ class ContactResolver:
         ]
 
         self._per_source_contacts = {source.display_name: contacts for source, contacts in per_source}
-        contacts = _dedup_across_sources(per_source)
+        contacts = [c.__replace__(record_pk=None) for c in _dedup_across_sources(per_source)]
 
         handle_to_name: dict[str, str] = {}
         for contact in contacts:
@@ -287,6 +287,7 @@ def _load_from_db(source: ContactSource) -> Sequence[Contact]:
                     phone_numbers=phones_by_owner.get(pk, []),
                     emails=emails_by_owner.get(pk, []),
                     sources=[source.display_name],
+                    record_pk=pk,
                 )
             )
 

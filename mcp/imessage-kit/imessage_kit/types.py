@@ -112,6 +112,9 @@ class Contact(ClosedModel):
     sources: Sequence[str]
     """Display names of sources this contact was merged from. e.g., ['Google', 'iCloud']."""
 
+    record_pk: int | None = None
+    """Per-source SQLite primary key (ZABCDRECORD.Z_PK). None on merged contacts."""
+
 
 class AttachmentMeta(ClosedModel):
     """Metadata for a message attachment (no file content)."""

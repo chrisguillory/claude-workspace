@@ -1159,7 +1159,7 @@ wheels = [
 
 [[package]]
 name = "imessage-kit"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "mcp/imessage-kit" }
 dependencies = [
     { name = "cc-lib" },
