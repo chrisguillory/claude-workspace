@@ -142,6 +142,21 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   globally), only on commandMode="prompt"; produced by the SDK replay path
                   (`SDKUserMessageReplay` events, Claude Code 2.1.20+ `replayUserMessages`).
                   Snake_case in wire schema, anomalous vs surrounding camelCase.
+- Schema v0.2.32: Added EditedTextFileAttachment.displayPath (str | None) — display-relative
+                  path alongside absolute filename, mirrors the displayPath field already modeled
+                  on FileAttachment / SelectedLinesInIdeAttachment / CompactFileReferenceAttachment.
+                  Modeled optional (~2% prevalence in observed JSONL, 2/107 records); confirmed in
+                  binary (14 occurrences in 2.1.123 through 2.1.131 — pre-existing schema gap).
+                  Added CacheMissReasonParamsChanged variant (type: 'params_changed', carries
+                  cache_missed_input_tokens: int) to the CacheMissReason discriminated union;
+                  server-emitted via the cache-diagnosis-2026-04-07 Anthropic API beta header,
+                  not present in client binary (consistent with the other CacheMissReason
+                  variants). Extended CLAUDE_CODE_MAX_VERSION to 2.1.131. Verified via parallel
+                  changelog + binary diff workers that no new record types, system subtypes,
+                  attachment types, message content types, or tool inputs were introduced
+                  between 2.1.124 and 2.1.131; binary-only candidates (claude-sonnet-4-6-20251114
+                  dated alias, service_tier='priority'/'batch' Zod widening, pause_turn
+                  stop_reason) deferred per empirical-only modeling rule until observed in JSONL.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -243,6 +258,7 @@ __all__ = [
     'CacheCreation',
     'CacheMissReason',
     'CacheMissReasonMessagesChanged',
+    'CacheMissReasonParamsChanged',
     'CacheMissReasonPreviousMessageNotFound',
     'CacheMissReasonSystemChanged',
     'CacheMissReasonToolsChanged',
@@ -453,9 +469,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.30'
+SCHEMA_VERSION = '0.2.32'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.123'
+CLAUDE_CODE_MAX_VERSION = '2.1.131'
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1286,6 +1302,16 @@ class CacheMissReasonMessagesChanged(StrictModel):
     cache_missed_input_tokens: int
 
 
+class CacheMissReasonParamsChanged(StrictModel):
+    """Cache miss because request parameters changed.
+
+    Carries the count of input tokens that were not served from cache.
+    """
+
+    type: Literal['params_changed']
+    cache_missed_input_tokens: int
+
+
 class CacheMissReasonPreviousMessageNotFound(StrictModel):
     """Cache miss because the previous message couldn't be located in the cache."""
 
@@ -1322,6 +1348,7 @@ CacheMissReason = Annotated[
     CacheMissReasonPreviousMessageNotFound
     | CacheMissReasonSystemChanged
     | CacheMissReasonMessagesChanged
+    | CacheMissReasonParamsChanged
     | CacheMissReasonToolsChanged
     | CacheMissReasonUnavailable,
     pydantic.Field(discriminator='type'),
@@ -3318,11 +3345,16 @@ class FileAttachment(StrictModel):
 
 
 class EditedTextFileAttachment(StrictModel):
-    """File edited externally — snippet with line numbers shown to Claude."""
+    """File edited externally — snippet with line numbers shown to Claude.
+
+    displayPath is rare (~2% of observed records, only on more recent
+    Claude Code versions when the file is outside cwd); modeled optional.
+    """
 
     type: Literal['edited_text_file']
     filename: PathField
     snippet: str
+    displayPath: str | None = None
 
 
 class OpenedFileInIdeAttachment(StrictModel):
