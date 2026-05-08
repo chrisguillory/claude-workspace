@@ -203,6 +203,10 @@ class BrowserService:
 
         # Persistent profile directory — must come before driver creation so
         # the browser opens the correct profile on first launch.
+        # Sentinel write is deferred until after successful driver creation
+        # (see below) so a launch failure doesn't leave a misleading "claim"
+        # on the directory.
+        sentinel: Path | None = None
         if user_data_dir is not None:
             udd_path = Path(user_data_dir).expanduser()
             udd_path.mkdir(parents=True, exist_ok=True)
@@ -222,7 +226,6 @@ class BrowserService:
                         f'state. Either reuse browser={prev!r} or point at a fresh '
                         f'user_data_dir.',
                     )
-            sentinel.write_text(browser)
             opts.add_argument(f'--user-data-dir={udd_path}')
             logger.info('Using persistent user_data_dir: %s (binary=%s)', udd_path, browser)
 
@@ -275,6 +278,13 @@ class BrowserService:
         # Initialize driver in thread pool (blocking operation)
         self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
         self.state.current_browser = browser
+
+        # Stamp the user_data_dir sentinel only after the launch succeeds, so
+        # a failure between the mismatch-check above and webdriver.Chrome()
+        # returning doesn't leave a misleading "claim" on the directory by a
+        # binary that never actually opened it.
+        if sentinel is not None:
+            sentinel.write_text(browser)
 
         # CRITICAL: CDP injection AFTER driver creation but BEFORE first navigation
         # This is what makes Selenium bypass Cloudflare where Playwright fails
@@ -2729,27 +2739,25 @@ class BrowserService:
 
         PERMISSION SCOPE: This tool reuses on-disk auth state (cookies,
         localStorage, IndexedDB including non-extractable WebCrypto keys) from
-        a Chromium profile directory. Treat as equivalent privilege to
+        a browser profile directory. Equivalent privilege to
         navigate_with_profile_state — both import authenticated session state.
         Requires separate approval from navigate().
 
         Use this for long-lived persistent profiles where the directory IS the
-        portable artifact. The same Chromium binary always opens the same dir,
-        so on-disk state round-trips natively (no save/restore JSON serialization
-        in the path that destroys non-extractable WebCrypto keys).
+        portable artifact. The same browser binary always opens the same dir,
+        so on-disk state round-trips natively without crossing a serialization
+        boundary that would destroy non-extractable WebCrypto keys.
 
-        Workflow:
-            1. First time: navigate_with_user_data_dir(url, user_data_dir=path)
-               where path is empty or new — Chromium creates the profile.
-               Log in manually if needed.
-            2. Subsequent runs: navigate_with_user_data_dir(url, user_data_dir=path)
-               with the same path — Chromium reuses the saved state.
+        See get_browser for the macOS keychain caveat: the directory and the
+        chosen `browser` value form a binding pair, enforced by a sentinel
+        file in the dir. Mixing Chrome and Chromium against the same dir is
+        refused at launch.
 
         Args:
             url: URL to navigate to
             user_data_dir: Persistent profile directory path. Created on first
-                use. Must not be in simultaneous use by another Chromium process
-                (Chromium uses an exclusive LOCK file in the directory).
+                use. Must not be in simultaneous use by another instance of
+                the same binary (exclusive SingletonLock in the directory).
             browser: Which browser to use - "chrome" or "chromium". Defaults to
                 the currently running browser, or "chromium" if none is running.
             enable_har_capture: Enable performance logging for HAR export.
