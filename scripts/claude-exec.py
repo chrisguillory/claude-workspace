@@ -798,15 +798,11 @@ class SessionIndex:
 # -- Worktree resolution on resume --------------------------------------------
 
 
-class WorktreeSession(CamelSubsetModel):
-    """Claude Code's ``worktreeSession`` payload from session JSONL.
+class WorktreeSessionDataSubset(CamelSubsetModel):
+    """Subset of Claude Code's ``worktreeSession`` payload — reads only ``worktreePath``.
 
-    Only ``worktreePath`` is parsed — that's the field the resolver needs
-    to decide where to chdir. The full payload (``originalCwd``,
-    ``worktreeName``, ``worktreeBranch``, ``originalBranch``,
-    ``originalHeadCommit``, ``sessionId``, ``enteredExisting``, and any
-    fields Claude Code adds later) is preserved opaquely via ``raw_record``
-    on ``WorktreeScan`` for byte-faithful repair-append.
+    Full schema: :class:`~claude_session.schemas.session.models.WorktreeSessionData`.
+    Unread fields are round-tripped via ``WorktreeScan.raw_record``.
     """
 
     worktree_path: str
@@ -834,7 +830,7 @@ class WorktreeScan:
         the worktree — overrides ``saw_null_after``, do NOT repair.
     """
 
-    worktree_session: WorktreeSession | None
+    worktree_session: WorktreeSessionDataSubset | None
     raw_record: Mapping[str, object] | None
     saw_null_after: bool
     explicitly_exited: bool
@@ -954,7 +950,7 @@ class WorktreeResolver:
                     continue
                 session_dict = rec.get('worktreeSession')
                 if isinstance(session_dict, dict):
-                    parsed = WorktreeSession.model_validate(session_dict)
+                    parsed = WorktreeSessionDataSubset.model_validate(session_dict)
                     if (Path(parsed.worktree_path) / '.git').is_file():
                         explicitly_exited = mm.find(cls.EXIT_WORKTREE_NEEDLE, line_end) != -1
                         return WorktreeScan(
