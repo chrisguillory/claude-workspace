@@ -801,18 +801,12 @@ class SessionIndex:
 class WorktreeSession(CamelSubsetModel):
     """Claude Code's ``worktreeSession`` payload from session JSONL.
 
-    We only read ``worktreePath`` to decide where to chdir on resume.
-    The rest of the payload (``originalCwd``, ``worktreeName``,
-    ``worktreeBranch``, ``originalBranch``, ``originalHeadCommit``,
-    ``sessionId``, ``enteredExisting``, and anything Claude Code adds in
-    future versions) is preserved opaquely via ``raw_record`` on
-    ``WorktreeScan`` for byte-faithful repair-append.
-
-    ``CamelSubsetModel`` gives us ``alias_generator=to_camel`` (so JSON
-    ``worktreePath`` populates Python ``worktree_path``) plus
-    ``extra='ignore'`` (so unknown fields are silently dropped, immune to
-    ``CC_STRICT_MODEL_EXTRA_FORBID``). This is intentionally a *subset* of
-    Claude Code's protocol — we don't track upstream additions here.
+    Only ``worktreePath`` is parsed — that's the field the resolver needs
+    to decide where to chdir. The full payload (``originalCwd``,
+    ``worktreeName``, ``worktreeBranch``, ``originalBranch``,
+    ``originalHeadCommit``, ``sessionId``, ``enteredExisting``, and any
+    fields Claude Code adds later) is preserved opaquely via ``raw_record``
+    on ``WorktreeScan`` for byte-faithful repair-append.
     """
 
     worktree_path: str
@@ -823,10 +817,8 @@ class WorktreeScan:
     """Result of scanning a session JSONL for the current worktree state.
 
     ``worktree_session``
-        Typed view of the field claude-exec reads (``worktreePath``), or
-        ``None`` if no populated record was found. ``SubsetModel``/``OpenModel``
-        drops/preserves unknown fields on dump — for round-trip fidelity use
-        ``raw_record``.
+        Typed view of the parsed field (``worktreePath``), or ``None`` if
+        no populated record was found. Use ``raw_record`` for round-trip.
     ``raw_record``
         The full original ``worktreeSession`` dict from Claude Code's
         JSONL (with ``originalCwd``, ``originalBranch``, ``worktreeName``,
