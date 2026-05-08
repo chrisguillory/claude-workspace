@@ -26,6 +26,7 @@ from claude_session.schemas.session.models import (
     # Tool results (alphabetical)
     AgentState,
     AgentTeammateSpawnedResult,
+    AiTitleRecord,
     # API errors
     ApiError,
     ApiErrorDetail,
@@ -346,6 +347,7 @@ __all__ = [
     'FileHistorySnapshotRecord',
     'QueueOperationRecord',
     'CustomTitleRecord',
+    'AiTitleRecord',
     'ProgressRecord',
     'PrLinkRecord',
     'SavedHookContextRecord',
