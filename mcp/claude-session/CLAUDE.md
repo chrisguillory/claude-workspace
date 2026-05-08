@@ -635,7 +635,7 @@ Update the version constants in `models.py`:
 SCHEMA_VERSION = '0.2.XX'
 CLAUDE_CODE_MAX_VERSION = '2.1.XX'
 ```
-Add a changelog line to the module docstring header. Bump `pyproject.toml` version (patch for additive optional fields, minor for new record types or breaking changes).
+Add a changelog line to the module docstring header. The `CLAUDE CODE VERSION COMPATIBILITY:` block is **chronological** (oldest at top, latest at bottom) — append new entries **after** the most recent existing entry, not above it. Bump `pyproject.toml` version (patch for additive optional fields, minor for new record types or breaking changes).
 
 ### 7. Commit
 ```bash
