@@ -61,7 +61,7 @@ import typer
 from cc_lib import claude_cli_introspection
 from cc_lib.cli import LauncherInstaller, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas import CamelModel
+from cc_lib.schemas import CamelSubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.settings_env import get_cc_env_var
 from cc_lib.types import EffortLevel
@@ -798,16 +798,14 @@ class SessionIndex:
 # -- Worktree resolution on resume --------------------------------------------
 
 
-class WorktreeSession(CamelModel):
-    """Claude Code's ``worktreeSession`` payload from session JSONL.
+class WorktreeSessionDataSubset(CamelSubsetModel):
+    """Subset of Claude Code's ``worktreeSession`` payload — reads only ``worktreePath``.
 
-    Claude Code protocol data — we declare only the field ``claude-exec``
-    reads. ``CamelModel``'s ``alias_generator=to_camel`` maps Python
-    ``worktree_path`` to JSON ``worktreePath``. The inherited ``extra='allow'``
-    default preserves the rest (``originalCwd``, ``worktreeName``,
-    ``worktreeBranch``, ``originalBranch``, ``originalHeadCommit``,
-    ``sessionId``, ``enteredExisting``, and anything Claude Code adds in
-    future versions) so the repair step round-trips byte-for-byte.
+    Full schema: claude_session.schemas.session.models.WorktreeSessionData.
+    Unread fields are round-tripped via ``WorktreeScan.raw_record``.
+
+    >>> # noinspection PyUnresolvedReferences
+    >>> from claude_session.schemas.session.models import WorktreeSessionData
     """
 
     worktree_path: str
@@ -818,10 +816,8 @@ class WorktreeScan:
     """Result of scanning a session JSONL for the current worktree state.
 
     ``worktree_session``
-        Typed view of the field claude-exec reads (``worktreePath``), or
-        ``None`` if no populated record was found. ``SubsetModel``/``OpenModel``
-        drops/preserves unknown fields on dump — for round-trip fidelity use
-        ``raw_record``.
+        Typed view of the parsed field (``worktreePath``), or ``None`` if
+        no populated record was found. Use ``raw_record`` for round-trip.
     ``raw_record``
         The full original ``worktreeSession`` dict from Claude Code's
         JSONL (with ``originalCwd``, ``originalBranch``, ``worktreeName``,
@@ -837,7 +833,7 @@ class WorktreeScan:
         the worktree — overrides ``saw_null_after``, do NOT repair.
     """
 
-    worktree_session: WorktreeSession | None
+    worktree_session: WorktreeSessionDataSubset | None
     raw_record: Mapping[str, object] | None
     saw_null_after: bool
     explicitly_exited: bool
@@ -957,11 +953,7 @@ class WorktreeResolver:
                     continue
                 session_dict = rec.get('worktreeSession')
                 if isinstance(session_dict, dict):
-                    try:
-                        parsed = WorktreeSession.model_validate(session_dict)
-                    except pydantic.ValidationError:
-                        end = line_start
-                        continue
+                    parsed = WorktreeSessionDataSubset.model_validate(session_dict)
                     if (Path(parsed.worktree_path) / '.git').is_file():
                         explicitly_exited = mm.find(cls.EXIT_WORKTREE_NEEDLE, line_end) != -1
                         return WorktreeScan(
