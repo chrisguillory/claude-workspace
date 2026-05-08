@@ -801,8 +801,11 @@ class SessionIndex:
 class WorktreeSessionDataSubset(CamelSubsetModel):
     """Subset of Claude Code's ``worktreeSession`` payload — reads only ``worktreePath``.
 
-    Full schema: :class:`~claude_session.schemas.session.models.WorktreeSessionData`.
+    Full schema: claude_session.schemas.session.models.WorktreeSessionData.
     Unread fields are round-tripped via ``WorktreeScan.raw_record``.
+
+    >>> # noinspection PyUnresolvedReferences
+    >>> from claude_session.schemas.session.models import WorktreeSessionData
     """
 
     worktree_path: str
