@@ -61,7 +61,7 @@ import typer
 from cc_lib import claude_cli_introspection
 from cc_lib.cli import LauncherInstaller, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas import CamelModel
+from cc_lib.schemas import CamelSubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.settings_env import get_cc_env_var
 from cc_lib.types import EffortLevel
@@ -798,16 +798,21 @@ class SessionIndex:
 # -- Worktree resolution on resume --------------------------------------------
 
 
-class WorktreeSession(CamelModel):
+class WorktreeSession(CamelSubsetModel):
     """Claude Code's ``worktreeSession`` payload from session JSONL.
 
-    Claude Code protocol data — we declare only the field ``claude-exec``
-    reads. ``CamelModel``'s ``alias_generator=to_camel`` maps Python
-    ``worktree_path`` to JSON ``worktreePath``. The inherited ``extra='allow'``
-    default preserves the rest (``originalCwd``, ``worktreeName``,
+    We only read ``worktreePath`` to decide where to chdir on resume.
+    The rest of the payload (``originalCwd``, ``worktreeName``,
     ``worktreeBranch``, ``originalBranch``, ``originalHeadCommit``,
     ``sessionId``, ``enteredExisting``, and anything Claude Code adds in
-    future versions) so the repair step round-trips byte-for-byte.
+    future versions) is preserved opaquely via ``raw_record`` on
+    ``WorktreeScan`` for byte-faithful repair-append.
+
+    ``CamelSubsetModel`` gives us ``alias_generator=to_camel`` (so JSON
+    ``worktreePath`` populates Python ``worktree_path``) plus
+    ``extra='ignore'`` (so unknown fields are silently dropped, immune to
+    ``CC_STRICT_MODEL_EXTRA_FORBID``). This is intentionally a *subset* of
+    Claude Code's protocol — we don't track upstream additions here.
     """
 
     worktree_path: str
@@ -957,11 +962,7 @@ class WorktreeResolver:
                     continue
                 session_dict = rec.get('worktreeSession')
                 if isinstance(session_dict, dict):
-                    try:
-                        parsed = WorktreeSession.model_validate(session_dict)
-                    except pydantic.ValidationError:
-                        end = line_start
-                        continue
+                    parsed = WorktreeSession.model_validate(session_dict)
                     if (Path(parsed.worktree_path) / '.git').is_file():
                         explicitly_exited = mm.find(cls.EXIT_WORKTREE_NEEDLE, line_end) != -1
                         return WorktreeScan(
