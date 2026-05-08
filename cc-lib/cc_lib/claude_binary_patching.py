@@ -31,6 +31,79 @@ Patch Kinds:
 
 Patches (alphabetical by name):
 
+    force-429-retry-header
+                    [fix] Restore retry on the ``x-should-retry: true`` header
+                    for Pro/Max OAuth users. Companion to
+                    ``force-429-retry-status``. The custom ``shouldRetry`` in
+                    ``services/api/withRetry.ts`` (minified ``fo5``) has two
+                    OAuth-tier gates that disable retry for subscription
+                    accounts on shared-capacity 429s. This patch handles the
+                    header-driven gate; ``force-429-retry-status`` handles
+                    the status-code gate. Apply both — applying only one
+                    leaves a path that still fails fast.
+                    Anchor: ``"x-should-retry"`` (stable, +21 bytes from
+                    site).
+                    13-byte same-length replacement: ``!vq()||$U_()`` →
+                    ``!0/*vq||$U*/`` (always-true with comment padding).
+                    https://github.com/anthropics/claude-code/issues/50841
+                    https://github.com/anthropics/claude-code/issues/57134
+
+    force-429-retry-status
+                    [fix] Restore retry on shared-capacity 429s for Pro/Max
+                    OAuth users. The custom ``shouldRetry`` in
+                    ``services/api/withRetry.ts`` (minified ``fo5``) gates
+                    429 retry on
+                    ``!isClaudeAISubscriber()||isEnterpriseSubscriber()``,
+                    so subscription accounts NEVER retry "Server is
+                    temporarily limiting requests (not your usage limit) ·
+                    Rate limited" — the loop bails on the first occurrence
+                    and auto-mode dies. The deobfuscated source comment
+                    rationale is "for Max and Pro users, should-retry is
+                    true, but in several hours, so we shouldn't" — but that
+                    logic only holds for user-quota 429s, not shared-
+                    capacity throttles where the retry-after window is
+                    seconds. Both error classes hit the same gate.
+
+                    Effect: 429s join the existing exponential-backoff
+                    retry loop (``Js()``: 500ms doubling, capped at 32s,
+                    respects ``retry-after`` header via ``Lo5()``).
+                    Inherits ``CLAUDE_CODE_MAX_RETRIES`` env var (default
+                    10). Surfaces the existing visible UI
+                    ``"Retrying in Ns · attempt N/M"``.
+
+                    Anchor: ``"x-should-retry"`` (stable, +278 bytes from
+                    site, well within window=600).
+                    37-byte same-length replacement:
+                    ``if(H.status===429)return!vq()||$U_();`` →
+                    ``if(H.status===429)return!0;/*vq||$U*/`` (always-true
+                    with trailing comment).
+
+                    Companion: ``force-429-retry-header`` handles the
+                    parallel ``x-should-retry: true`` gate. Apply both
+                    together; applying only one leaves a path that still
+                    fails fast.
+
+                    Note: also affects user-quota 429s (where Anthropic's
+                    "wait hours" comment was correct). Mitigation: 429s
+                    with a ``retry-after`` header still respect it via
+                    ``Lo5()`` / ``Ro5()`` so a quota 429 with
+                    ``retry-after: 3600`` sleeps 1 hour. The retry-budget
+                    cap (``CLAUDE_CODE_MAX_RETRIES``, default 10) bounds
+                    damage even with no header.
+
+                    Future-proofing context: v2.2.1 source mirror at
+                    ``claude-code-best/claude-code/src/services/api/withRetry.ts``
+                    introduces ``isPersistentRetryEnabled()`` reading
+                    ``CLAUDE_CODE_UNATTENDED_RETRY``, gated by Statsig
+                    ``UNATTENDED_RETRY``. Source comment marks it
+                    "ant-only". Not yet shipped to subscribers; not
+                    present in 2.1.131. This patch is the local
+                    equivalent until/unless that gate is opened.
+                    https://github.com/anthropics/claude-code/issues/50841
+                    https://github.com/anthropics/claude-code/issues/57134
+                    https://github.com/anthropics/claude-code/issues/53915
+                    https://github.com/anthropics/claude-code/issues/53922
+
     hook-ask-no-override
                     [fix] Prevent auto-mode LLM classifier from silently
                     overriding a PreToolUse hook's ``permissionDecision: "ask"``
@@ -350,6 +423,17 @@ Version Log::
         endpoint auth, /clear tab title, /context grid leak, several
         UI regressions). No architectural changes affecting patches.
 
+        New patches added 2026-05-08:
+        - force-429-retry-status: 2 sites, addresses the OAuth-tier
+          gate in fo5() (custom shouldRetry) that disables 429 retry
+          for Pro/Max subscription accounts. Anchor "x-should-retry"
+          at offsets 81874259 and 206412939 (one per __BUN segment).
+          Patch sites at +278 bytes from each anchor.
+        - force-429-retry-header: 2 sites, companion patch addressing
+          the parallel x-should-retry:true header gate. Patch sites at
+          +21 bytes from each anchor. Both patches required together;
+          applying only one leaves a fail-fast path.
+
         Patch updates:
         - hook-ask-no-override: clean apply (anchor + bytes stable since 2.1.109).
         - statusline: clean apply (anchor + bytes stable since 2.0.0).
@@ -631,6 +715,40 @@ class PatchDef:
 
 
 PATCHES: Sequence[PatchDef] = (
+    PatchDef(
+        name='force-429-retry-header',
+        description=(
+            'Honor x-should-retry: true header for Pro/Max OAuth users. Companion to '
+            'force-429-retry-status. Without this, even when the server explicitly '
+            'sends x-should-retry: true with a short retry window, subscription '
+            'accounts ignore it and fail-fast on shared-capacity 429s. Apply both '
+            'companion patches together.'
+        ),
+        kind=PatchKind.FIX,
+        anchor=b'"x-should-retry"',
+        old=b'_==="true"&&(!vq()||$U_())',
+        new=b'_==="true"&&(!0/*vq||$U*/)',
+        window=200,
+        min_version='2.1.131',
+    ),
+    PatchDef(
+        name='force-429-retry-status',
+        description=(
+            'Restore retry on shared-capacity 429s for Pro/Max OAuth users. The '
+            'custom shouldRetry function (minified fo5 in 2.1.131) gates 429 retry '
+            'on !isClaudeAISubscriber()||isEnterpriseSubscriber(), so subscription '
+            'accounts never retry "Server is temporarily limiting requests (not '
+            'your usage limit) · Rate limited" — auto-mode dies on first 429. '
+            'Restores retry behavior identical to API-key users. Companion: '
+            'force-429-retry-header.'
+        ),
+        kind=PatchKind.FIX,
+        anchor=b'"x-should-retry"',
+        old=b'if(H.status===429)return!vq()||$U_();',
+        new=b'if(H.status===429)return!0;/*vq||$U*/',
+        window=600,
+        min_version='2.1.131',
+    ),
     PatchDef(
         name='hook-ask-no-override',
         description='Prevent auto-mode classifier from silently overriding a hook-emitted permission ask',
