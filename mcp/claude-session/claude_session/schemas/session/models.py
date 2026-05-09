@@ -157,6 +157,19 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   between 2.1.124 and 2.1.131; binary-only candidates (claude-sonnet-4-6-20251114
                   dated alias, service_tier='priority'/'batch' Zod widening, pause_turn
                   stop_reason) deferred per empirical-only modeling rule until observed in JSONL.
+- Schema v0.2.33: Added AlreadyReadFileAttachment for the 'already_read_file' attachment type —
+                  reminder injected when Claude re-Reads an unchanged file in the same session.
+                  Shape mirrors FileAttachment exactly (filename, displayPath, FileAttachmentContent
+                  wrapping FileAttachmentFileContent), so the nested types are reused directly.
+                  Added CompactMetadata.preservedSegment (PreservedCompactSegment with
+                  headUuid/anchorUuid/tailUuid) — anchor pointers identifying the conversation
+                  segment preserved across an auto-compact; introduced 2.1.76. Single-field fix
+                  collapsed 14 union-cascade errors on CompactBoundarySystemRecord (Pydantic
+                  left-to-right union evaluation against a 16-field record). Corrected
+                  preCompactDiscoveredTools annotation 2.1.81 → 2.1.76 from per-version binary
+                  diff. Added DeferredToolsDeltaAttachment.readdedNames (tools removed then
+                  re-registered) and pendingMcpServers (MCP servers still connecting at emit
+                  time); both introduced in 2.1.128. Extended CLAUDE_CODE_MAX_VERSION to 2.1.138.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -233,6 +246,7 @@ __all__ = [
     'AgentTeammateSpawnedResult',
     'AgentsRetrievalResult',
     'AiTitleRecord',
+    'AlreadyReadFileAttachment',
     'ApiError',
     'ApiErrorDetail',
     'ApiErrorResponse',
@@ -366,6 +380,7 @@ __all__ = [
     'PlanModeExitAttachment',
     'PlanModeReentryAttachment',
     'PrLinkRecord',
+    'PreservedCompactSegment',
     'ProgressData',
     'ProgressRecord',
     'PromptPermission',
@@ -469,9 +484,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.32'
+SCHEMA_VERSION = '0.2.33'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.131'
+CLAUDE_CODE_MAX_VERSION = '2.1.138'
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1515,9 +1530,21 @@ class CompactMetadata(StrictModel):
 
     trigger: Literal['auto', 'manual']  # auto=24, manual=18 across all sessions
     preTokens: int
-    preCompactDiscoveredTools: Sequence[str] | None = None  # Tools discovered before compaction (2.1.81+)
+    preCompactDiscoveredTools: Sequence[str] | None = None  # Tools discovered before compaction (2.1.76+)
     postTokens: int | None = None  # Token count after compaction (Claude Code 2.1.100+)
     durationMs: int | None = None  # Compaction runtime in milliseconds (Claude Code 2.1.100+)
+    preservedSegment: PreservedCompactSegment | None = None  # Anchor pointers preserved across compaction
+
+
+class PreservedCompactSegment(StrictModel):
+    """Anchor UUIDs identifying the conversation segment preserved across an auto-compact.
+
+    Pydantic resolves the forward reference from CompactMetadata.preservedSegment.
+    """
+
+    headUuid: str  # Earliest preserved record
+    anchorUuid: str  # Anchor record within the preserved segment
+    tailUuid: str  # Most recent preserved record (typically the new logicalParentUuid)
 
 
 class MicrocompactMetadata(StrictModel):
@@ -3165,6 +3192,8 @@ class DeferredToolsDeltaAttachment(StrictModel):
     addedNames: Sequence[str]
     addedLines: Sequence[str]
     removedNames: Sequence[str]
+    readdedNames: Sequence[str] | None = None  # Tools that were removed and then re-registered (2.1.128+)
+    pendingMcpServers: Sequence[str] | None = None  # MCP servers still connecting at emit time (2.1.128+)
 
 
 class TaskReminderItem(StrictModel):
@@ -3344,6 +3373,20 @@ class FileAttachment(StrictModel):
     displayPath: str
 
 
+class AlreadyReadFileAttachment(StrictModel):
+    """Reminder injected when Claude re-Reads an unchanged file in the same session.
+
+    Carries the cached snapshot the model has already seen so it can skip re-issuing
+    the Read tool. Shape mirrors FileAttachment exactly (filename + displayPath +
+    wrapped FileAttachmentContent), so the nested types are reused directly.
+    """
+
+    type: Literal['already_read_file']
+    filename: PathField
+    content: FileAttachmentContent
+    displayPath: str
+
+
 class EditedTextFileAttachment(StrictModel):
     """File edited externally — snippet with line numbers shown to Claude.
 
@@ -3496,6 +3539,7 @@ AttachmentData = Annotated[
     | InvokedSkillsAttachment
     | NestedMemoryAttachment
     | FileAttachment
+    | AlreadyReadFileAttachment
     | EditedTextFileAttachment
     | OpenedFileInIdeAttachment
     | SelectedLinesInIdeAttachment
