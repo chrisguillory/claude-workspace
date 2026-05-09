@@ -61,7 +61,7 @@ import typer
 from cc_lib import claude_cli_introspection
 from cc_lib.cli import LauncherInstaller, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas import CamelModel
+from cc_lib.schemas import CamelSubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.settings_env import get_cc_env_var
 from cc_lib.types import EffortLevel
@@ -691,7 +691,22 @@ class SessionIndex:
     incremental updates based on file mtime + size.
     """
 
-    TITLE_NEEDLE = b'"custom-title"'
+    # Claude Code emits two title record types — `custom-title` (user-set
+    # via `/rename`, field `customTitle`) and `ai-title` (auto-generated,
+    # field `aiTitle`, Claude Code 2.1.122+). Custom titles always win over
+    # AI titles regardless of file position; this matches Claude Code's own
+    # resume picker, which resolves the two independently and prefers
+    # customTitle. The order matters because the `generateSessionTitle` SDK
+    # control request can append a fresh `ai-title` AFTER the user has run
+    # `/rename` — a plain latest-by-position approach would return the AI
+    # title in that case while Claude Code's UI continues to show the user's
+    # name. JSON-escaped quotes ensure the needles only match record-type
+    # markers, not user-message text content. Listed in precedence order:
+    # custom first (preferred), then ai (fallback).
+    TITLE_NEEDLES: Sequence[tuple[bytes, str]] = (
+        (b'"custom-title"', 'customTitle'),
+        (b'"ai-title"', 'aiTitle'),
+    )
     CACHE_FRESHNESS_SECONDS = 10.0
 
     def __init__(self, project_path: str) -> None:
@@ -771,20 +786,39 @@ class SessionIndex:
 
     @classmethod
     def _extract_title(cls, path: Path) -> str | None:
-        """Extract the last custom-title from a JSONL file using mmap rfind."""
+        """Extract the displayable session title from a JSONL file using mmap rfind.
+
+        Searches for ``custom-title`` (user-set via ``/rename``, field
+        ``customTitle``) and falls back to ``ai-title`` (auto-generated,
+        field ``aiTitle``, Claude Code 2.1.122+). Custom titles always
+        take precedence regardless of file position — matches Claude Code's
+        own resume picker, which resolves both record types independently
+        and prefers customTitle. Required because the
+        ``generateSessionTitle`` SDK control request can append a fresh
+        ``ai-title`` AFTER the user has run ``/rename``; a position-based
+        latest-wins would incorrectly return the AI title in that case.
+
+        For each needle the latest occurrence (rfind) gives the most recent
+        record of that type — so re-renames and re-runs of auto-titling
+        both resolve to their newest value.
+        """
         try:
             if path.stat().st_size == 0:
                 return None
             with open(path, 'rb') as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                pos = mm.rfind(cls.TITLE_NEEDLE)
-                if pos == -1:
-                    return None
-                line_start = mm.rfind(b'\n', 0, pos) + 1
-                line_end = mm.find(b'\n', pos)
-                if line_end == -1:
-                    line_end = len(mm)
-                rec: dict[str, str] = json.loads(mm[line_start:line_end])
-                return rec.get('customTitle') or None
+                for needle, field in cls.TITLE_NEEDLES:
+                    pos = mm.rfind(needle)
+                    if pos == -1:
+                        continue
+                    line_start = mm.rfind(b'\n', 0, pos) + 1
+                    line_end = mm.find(b'\n', pos)
+                    if line_end == -1:
+                        line_end = len(mm)
+                    rec: dict[str, str] = json.loads(mm[line_start:line_end])
+                    title = rec.get(field)
+                    if title:
+                        return title
+                return None
         except (OSError, json.JSONDecodeError, ValueError):
             return None
 
@@ -798,16 +832,14 @@ class SessionIndex:
 # -- Worktree resolution on resume --------------------------------------------
 
 
-class WorktreeSession(CamelModel):
-    """Claude Code's ``worktreeSession`` payload from session JSONL.
+class WorktreeSessionDataSubset(CamelSubsetModel):
+    """Subset of Claude Code's ``worktreeSession`` payload — reads only ``worktreePath``.
 
-    Claude Code protocol data — we declare only the field ``claude-exec``
-    reads. ``CamelModel``'s ``alias_generator=to_camel`` maps Python
-    ``worktree_path`` to JSON ``worktreePath``. The inherited ``extra='allow'``
-    default preserves the rest (``originalCwd``, ``worktreeName``,
-    ``worktreeBranch``, ``originalBranch``, ``originalHeadCommit``,
-    ``sessionId``, ``enteredExisting``, and anything Claude Code adds in
-    future versions) so the repair step round-trips byte-for-byte.
+    Full schema: claude_session.schemas.session.models.WorktreeSessionData.
+    Unread fields are round-tripped via ``WorktreeScan.raw_record``.
+
+    >>> # noinspection PyUnresolvedReferences
+    >>> from claude_session.schemas.session.models import WorktreeSessionData
     """
 
     worktree_path: str
@@ -818,10 +850,8 @@ class WorktreeScan:
     """Result of scanning a session JSONL for the current worktree state.
 
     ``worktree_session``
-        Typed view of the field claude-exec reads (``worktreePath``), or
-        ``None`` if no populated record was found. ``SubsetModel``/``OpenModel``
-        drops/preserves unknown fields on dump — for round-trip fidelity use
-        ``raw_record``.
+        Typed view of the parsed field (``worktreePath``), or ``None`` if
+        no populated record was found. Use ``raw_record`` for round-trip.
     ``raw_record``
         The full original ``worktreeSession`` dict from Claude Code's
         JSONL (with ``originalCwd``, ``originalBranch``, ``worktreeName``,
@@ -837,7 +867,7 @@ class WorktreeScan:
         the worktree — overrides ``saw_null_after``, do NOT repair.
     """
 
-    worktree_session: WorktreeSession | None
+    worktree_session: WorktreeSessionDataSubset | None
     raw_record: Mapping[str, object] | None
     saw_null_after: bool
     explicitly_exited: bool
@@ -957,11 +987,7 @@ class WorktreeResolver:
                     continue
                 session_dict = rec.get('worktreeSession')
                 if isinstance(session_dict, dict):
-                    try:
-                        parsed = WorktreeSession.model_validate(session_dict)
-                    except pydantic.ValidationError:
-                        end = line_start
-                        continue
+                    parsed = WorktreeSessionDataSubset.model_validate(session_dict)
                     if (Path(parsed.worktree_path) / '.git').is_file():
                         explicitly_exited = mm.find(cls.EXIT_WORKTREE_NEEDLE, line_end) != -1
                         return WorktreeScan(

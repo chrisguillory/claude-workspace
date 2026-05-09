@@ -228,6 +228,13 @@ def _format_status(result: PatchScanResult) -> str:
         return 'applied'
     if result.status == 'changed':
         return 'changed    (anchor found, code different)'
+    if result.status == 'out_of_range':
+        bound = (
+            f'max_version={result.patch.max_version}'
+            if result.patch.max_version is not None
+            else f'min_version={result.patch.min_version}'
+        )
+        return f'skipped    (out of range, {bound})'
     return 'missing    (anchor not found)'
 
 
@@ -383,7 +390,7 @@ class BinaryPatcher:
 
     def scan(self, patches: Sequence[PatchDef]) -> Mapping[str, PatchScanResult]:
         """Scan binary for all patches."""
-        return scan_binary(self._data, patches)
+        return scan_binary(self._data, patches, current_version=self.version)
 
     def apply(self, patches: Sequence[PatchDef]) -> None:
         """Apply patches in a single read-modify-write-sign cycle."""
@@ -393,8 +400,12 @@ class BinaryPatcher:
         applied_names: list[str] = []
         missing_names: list[str] = []
         unknown_names: list[str] = []
+        skipped_names: list[str] = []
 
         for name, result in scan_results.items():
+            if result.status == 'out_of_range':
+                skipped_names.append(name)
+                continue
             if result.status == 'unpatched':
                 pending_sites[name] = result.sites
                 self._report_sites(result.patch, result.sites)
@@ -410,7 +421,12 @@ class BinaryPatcher:
 
         if not pending_sites:
             if applied_names:
-                print('\nAll requested patches already applied.')
+                suffix = (
+                    f'\nSkipped {len(skipped_names)} out-of-range patch(es): {", ".join(skipped_names)}'
+                    if skipped_names
+                    else ''
+                )
+                print(f'\nAll requested patches already applied.{suffix}')
                 return
             raise PatchError('No patches could be applied (all anchors missing or code changed)')
 
@@ -436,6 +452,8 @@ class BinaryPatcher:
             suffix += f'\nWARNING: anchor not found for: {", ".join(missing_names)}'
         if unknown_names:
             suffix += f'\nWARNING: code changed for: {", ".join(unknown_names)}'
+        if skipped_names:
+            suffix += f'\nSkipped {len(skipped_names)} out-of-range patch(es): {", ".join(skipped_names)}'
 
         print(f'\nPatched {total_sites} site(s) across {len(pending_sites)} patch(es).{suffix}')
 

@@ -523,26 +523,70 @@ When Claude Code updates or new session data introduces schema drift:
 ./scripts/validate_models.py -e path/to/file    # Single file investigation
 ```
 
-### 2. Research & Inspect (parallel)
+If errors are found, launch the parallel investigation in step 2 immediately. Workers have their own context windows — investigating in main context burns through 60-80% of context on schema validation work that can be parallelized.
 
-**Run these concurrently** when errors are found or `CLAUDE_CODE_MAX_VERSION` is behind `claude --version`:
+### 2. Research & Inspect (parallel investigation)
 
-**a) Research changelog delta** (launch as unrestricted-worker subagent):
+**Run all three concurrently** when errors are found or `CLAUDE_CODE_MAX_VERSION` is behind `claude --version`:
+
+**a) Inspect failing records** (main context — single targeted lookups):
+```bash
+cd ~/.claude/projects && find . -name "<session-id>.jsonl" \
+  -exec sed -n "<line>p" {} \; | jq .
+```
+For broad enumeration ("how often does this field appear?"), launch as a worker.
+
+**b) Research changelog delta** (launch as unrestricted-worker subagent):
 - Fetch official changelog: `gh api repos/anthropics/claude-code/contents/CHANGELOG.md --jq '.content' | base64 -d`
 - Fetch community changelog: `https://www.claudelog.com/claude-code-changelog/`
 - Focus on versions between `CLAUDE_CODE_MAX_VERSION` (in models.py) and current `claude --version`
 - Summarize: new features, new tools, behavioral changes, anything schema-relevant
 - Map each validation error to its likely feature origin (e.g., "bridge_status → /remote-control feature")
 
-**b) Inspect failing records** (in main context):
+**c) Verify in binary** (main context for small fixes; worker for broad multi-version diff):
 ```bash
-cd ~/.claude/projects && find . -name "<session-id>.jsonl" \
-  -exec sed -n "<line>p" {} \; | jq .
+strings $(which claude) > /tmp/claude-strings.txt
+for term in fieldA fieldB fieldC; do
+    echo "$term: $(grep -c "$term" /tmp/claude-strings.txt)"
+done
+```
+For per-version diffing — to determine *when* a field was introduced, not just *whether* it exists today — use `claude-version-manager` to fetch the binaries instead of relying on whatever versions happen to be cached:
+```bash
+claude-version-manager list                   # local versions + applied patches
+claude-version-manager list --remote --last 20  # available on CDN
+claude-version-manager fetch 2.1.120          # download to ~/.local/share/claude/versions/
+claude-version-manager fetch 2.1.121
+
+# Diff field presence across versions
+for v in 2.1.119 2.1.120 2.1.121 2.1.123; do
+    echo -n "$v: "
+    grep -c "fieldName" ~/.local/share/claude/versions/$v/claude
+done
+# Look for the version where count goes 0 → N. That's the introduction.
 ```
 
-The research context informs better fixes: knowing a field is from a major feature (model carefully) vs. a one-off patch (optional field) changes the modeling approach.
+### 3. Binary Verification Gate (BEFORE applying any model edit)
 
-### 3. Fix models
+Every proposed field MUST be confirmed via binary string analysis before being added to the schema. The MAIN agent gates fix application on (a)+(c) being aligned — JSONL alone is insufficient evidence.
+
+JSONL can contain:
+- Malformed records (model hallucinations from SDK clients)
+- Stale fields from older binary versions
+- Test artifacts
+- Records produced by plugins that have since been uninstalled
+
+**Decision rule:**
+
+| JSONL prevalence | Binary presence | Action |
+|---|---|---|
+| Yes | Yes | Model the field. High confidence. |
+| Yes | No | **Do not model.** Treat as hallucination candidate — use lenient mode + `sed`-delete the bad line. |
+| No | Yes | Don't model yet (no observed shape evidence). Note as "future field" if relevant. |
+| No | No | Not in scope. |
+
+If workers (a) and (c) disagree on a field's status, **trust binary**.
+
+### 4. Fix models
 Edit `claude_session/schemas/session/models.py`. Common fixes:
 - New optional fields: `fieldName: Type | None = None`
 - New record/tool types: add model class + wire into discriminated union + add dispatch branch in `validate_session_record()`
@@ -550,9 +594,12 @@ Edit `claude_session/schemas/session/models.py`. Common fixes:
 - Union ordering: ensure more-specific types come before less-specific
 
 **Rules:**
-- Only model fields/values actually observed in data (no speculation)
+- Only model fields/values **observed in JSONL AND confirmed in binary** (no speculation, no JSONL-only)
 - Always use fully typed models, never `dict` fallbacks
-- Minimize churn -- don't reorganize existing fields
+- Minimize churn — don't reorganize existing fields
+- For anomalous wire formats (e.g., snake_case field next to camelCase neighbors), cite the binary literal in the docstring as evidence — saves future readers from "should we camelCase this?" cleanup PRs
+
+**Version annotation sourcing.** Field descriptions saying `(Claude Code X.Y.Z+)` must be sourced from binary diff via `claude-version-manager fetch`, not from "I'm currently on X.Y.Z so it must be new in X.Y.Z." If unsure, **omit the version range** — a wrong version annotation is worse than no annotation, and the constraint is non-load-bearing comment text. Run the per-version diff in step 2c before writing the description.
 
 **Schema is the source of truth — not the session data.**
 
@@ -576,26 +623,48 @@ Reserve schema change for observed **intended** structural evolution (new fields
 
 They are **not** for accommodating client-side bugs in the upstream emitter.
 
-### 4. Verify 100% pass rate
+### 5. Verify 100% pass rate
 ```bash
-./scripts/validate_models.py --fast
+CC_STRICT_MODEL_EXTRA_FORBID=1 ./scripts/validate_models.py --fast
 ```
-Iterate steps 2-4 until all records validate. Multiple rounds are normal.
+Iterate steps 2-5 until all records validate. Multiple rounds are normal.
 
-### 5. Bump version (ONLY after 100% pass rate)
+### 6. Bump version (ONLY after 100% pass rate)
 Update the version constants in `models.py`:
 ```python
 SCHEMA_VERSION = '0.2.XX'
 CLAUDE_CODE_MAX_VERSION = '2.1.XX'
 ```
-Add a changelog line to the module docstring header.
+Add a changelog line to the module docstring header. The `CLAUDE CODE VERSION COMPATIBILITY:` block is **chronological** (oldest at top, latest at bottom) — append new entries **after** the most recent existing entry, not above it. Bump `pyproject.toml` version (patch for additive optional fields, minor for new record types or breaking changes).
 
-### 6. Commit
+### 7. Commit
 ```bash
 uv run pre-commit run --all-files
-git add claude_session/schemas/session/models.py
+git add claude_session/schemas/session/models.py mcp/claude-session/pyproject.toml
 git commit -m "Schema vX.Y.Z: Fix validation for Claude Code X.Y.Z"
 ```
+
+### Common Patterns
+
+**Union-cascade noise.** When errors with identical counts appear across many fields of the same record type, suspect a single missing nested field is causing left-to-right union evaluation to fall through to a wider union member. *Concrete example: 16 fields × 53 records = 848 reported errors collapsed to a single one-line fix when `HookInfo.durationMs: int` was added — `StopHookSummarySystemRecord` already modeled all 16 fields, but Pydantic was bouncing the records into `BaseRecord` because the nested `HookInfo.durationMs` wasn't accepted.* Always check `error_count_per_field == constant_across_many_fields` for the cascade signature before treating the fields as independent issues.
+
+**Strict vs Lenient mode.** `BaseStrictModel` (cc-lib's `StrictModel`) is env-controlled:
+
+| Mode | Env Var | `extra` | Use For |
+|------|---------|---------|---------|
+| Strict | `CC_STRICT_MODEL_EXTRA_FORBID=1` | `forbid` | Validation scripts, schema development |
+| Lenient | `CC_STRICT_MODEL_EXTRA_FORBID=0` (or unset) | `allow` | Operations: archive, clone, delete, restore |
+
+This resolves the catch-22 where archive/move couldn't handle sessions with unknown fields. When archiving a genuinely malformed session for cleanup:
+1. Archive with lenient mode: `CC_STRICT_MODEL_EXTRA_FORBID=0 claude-session archive <id> ~/.claude-workspace/claude-session/deleted/<id>-backup.json`
+2. Delete the bad line: `sed -i '' '<line>d' <file>`
+3. Re-validate to confirm 100%
+
+**Worker scope decision.** Launch a worker when investigation needs >3 tool calls, multiple independent investigations can parallelize, or work involves repetitive file/record inspection. Stay in main context for single targeted lookups, when the fix is already known, or for binary spot-checks (`strings $(which claude) | grep <field>` is one command — main context is fine).
+
+**Worker prompt tips.** Effective worker prompts include specific file paths + line numbers from validation output, numbered investigation sections (one per error category), bash command templates for complex jq/grep queries, explicit read-only instruction, current model definitions for failing types (so worker can propose exact diffs), and version context (`CLAUDE_CODE_MAX_VERSION` vs current `claude --version`).
+
+**Empirical-only modeling.** Every type/value in models.py must trace to BOTH observed JSONL data AND confirmed binary presence. Never speculate. If a boolean field has only been seen as `false`, model as `Literal['false']`, not `bool`. The schema detects drift — speculative values silently accept new patterns we should notice. If JSONL says one thing and binary says another, the binary wins.
 
 ## Model Definition Ordering
 

@@ -75,8 +75,9 @@ Each patch reports one of:
 | `unpatched (N sites)` | Anchor + old bytes match | Apply (no re-derivation) |
 | `changed (anchor found, code different)` | Anchor still matches but bytes drifted | **Re-derive** (Phase 2a) |
 | `missing (anchor not found)` | Anchor itself is gone | **Investigate** (Phase 2b) |
+| `skipped (out of range, max_version=X)` | Patch's `[min_version, max_version]` excludes the active CC version | Skip — no action needed |
 
-**Obsolete patches still appear in `check` output** with `changed` or `missing`. Cross-reference each patch's `max_version` field — if set to a previous version, the report is informational. Don't action them; they'll be skipped by `apply --all` with a warning.
+Obsolete patches (those with `max_version` set to a prior release) automatically report as `skipped`, and `apply --all` filters them out of per-patch output entirely — they appear only as a single end-of-output summary line. No manual cross-referencing required.
 
 Categorize all patches before doing any work.
 
@@ -292,7 +293,7 @@ PatchDef(
 
 3. Document in the Version Log entry with the upstream rationale (cite issues, postmortems, community signals).
 
-`apply --all` skips obsoleted patches with informational warnings. Don't delete the PatchDef — keep it for historical reference and users on older versions.
+`apply --all` silently filters obsoleted patches out of per-patch output and reports them in a single end-of-output summary line. Don't delete the PatchDef — keep it for historical reference and users on older versions.
 
 ## Phase 5: Documentation
 
@@ -464,7 +465,7 @@ grep -aoE '\b\w+\("flag_name"[^)]*\)' "$PATCHED" | sort -u
 
 ## Antipatterns
 
-- **Don't apply --all blindly without `check` first.** The 4-state table tells you what's needed.
+- **Don't apply --all blindly without `check` first.** The 5-state table tells you what's needed.
 - **Don't add NEW patches in a version-migration PR.** That's scope creep. Re-derive existing patches; new patches go in their own PR.
 - **Don't skip vanilla-vs-patched comparison when behavior is ambiguous.** `reject-show-comment` looked broken on 2.1.128 but vanilla was also "broken" — Anthropic had silently changed the rendering. Saved by the comparison.
 - **Don't reflexively spawn subagents for `missing` patches.** Routine bug-fix releases solve with the four Phase 2b quick checks. Reserve subagents for architectural changes.
@@ -478,7 +479,7 @@ grep -aoE '\b\w+\("flag_name"[^)]*\)' "$PATCHED" | sort -u
 ## Phases checklist
 
 - [ ] Phase 0: `claude-version-manager fetch <ver> --activate` + read changelog + branch off main
-- [ ] Phase 1: `claude-binary-patcher check --all` + categorize statuses (note `max_version` on obsolete patches)
+- [ ] Phase 1: `claude-binary-patcher check --all` + categorize statuses (out-of-range patches auto-report as `skipped` — no manual cross-reference)
 - [ ] Phase 2a: re-derive each `changed` patch (context → renames → same-length new bytes → uniqueness check)
 - [ ] Phase 2b: investigate each `missing` patch (4 quick checks → subagents if needed → rename / refactor / removed)
 - [ ] Phase 3: apply + empirical-verify in fresh `claude-exec` session (vanilla comparison if ambiguous)

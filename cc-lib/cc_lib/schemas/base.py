@@ -20,6 +20,7 @@ from __future__ import annotations
 
 __all__ = [
     'CamelModel',
+    'CamelSubsetModel',
     'ClosedModel',
     'OpenModel',
     'StrictModel',
@@ -177,3 +178,18 @@ class SubsetModel(pydantic.BaseModel):
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
         return maybe_relax_literals(handler(source_type))
+
+
+class CamelSubsetModel(SubsetModel):
+    """SubsetModel with camelCase JSON alias generation.
+
+    Reads specific fields from camelCase protocol data (Claude Code, MCP)
+    where the rest of the payload is intentionally not modeled. Inherits
+    ``extra='ignore'`` from ``SubsetModel`` so unknown fields are dropped.
+
+    For full-payload round-trip (consume + produce), use ``CamelModel``
+    and declare every field — that path surfaces upstream schema drift
+    instead of dropping it.
+    """
+
+    model_config = pydantic.ConfigDict(alias_generator=to_camel)
