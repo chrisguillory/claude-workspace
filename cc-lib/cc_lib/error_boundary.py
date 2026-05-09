@@ -47,9 +47,8 @@ Patterns:
 
 
         @boundary
-        async def handle_request(
-            request: Request,
-        ) -> JSONResponse: ...  # on error, handler's return value IS the function's return value
+        async def handle_request(request: Request) -> JSONResponse:
+            '''On error, the handler's return value IS this function's return value.'''
 
     Side-effect-only handlers (CLI tools, task runners)::
 
@@ -62,7 +61,8 @@ Patterns:
 
 
         @boundary
-        def main() -> None: ...
+        def main() -> None:
+            '''Real entry-point logic here.'''
 
     Subprocess error handling (hooks, scripts)::
 
@@ -109,8 +109,8 @@ Patterns:
 
         @boundary
         def main() -> None:
-            ...  # FixableIssue -> exit 10, UnfixableIssue -> exit 20,
-            # unhandled Exception -> exit 1 (boundary default)
+            '''FixableIssue -> exit 10, UnfixableIssue -> exit 20,
+            unhandled Exception -> exit 1 (boundary default).'''
 
     This works because ``sys.exit()`` raises ``SystemExit`` (a BaseException),
     which propagates out of ``_handle`` before the boundary's default
@@ -204,12 +204,14 @@ class ErrorBoundary:
 
 
             @boundary
-            async def handle_request(request: Request) -> Response: ...  # if DatabaseError, returns the ErrorResponse
+            async def handle_request(request: Request) -> Response:
+                '''If DatabaseError, returns the ErrorResponse from the handler above.'''
 
         Entry point with simple handler::
 
             @ErrorBoundary(exit_code=1, handler=log_error)
-            def main() -> None: ...
+            def main() -> None:
+                '''Real entry-point logic here.'''
 
         Scope boundary (context manager, suppress and continue)::
 
