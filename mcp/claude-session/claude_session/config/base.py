@@ -1,5 +1,4 @@
-"""
-Base configuration for Claude Session services.
+"""Base configuration for Claude Session services.
 
 Shared settings and helper functions for all service types (MCP, HTTP).
 
@@ -86,8 +85,7 @@ def ensure_data_dir() -> pathlib.Path:
 
 
 def get_settings[T: 'BaseSessionSettings'](settings_class: type[T], env_file: str | None = None) -> T:
-    """
-    Factory for creating settings with dynamic .env file loading.
+    """Factory for creating settings with dynamic .env file loading.
 
     LOAD_ENV_FILE environment variable specifies custom .env file path.
     When unset (production), loads from environment variables only.

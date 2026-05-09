@@ -1148,7 +1148,9 @@ class BrowserService:
 
         Args:
             key: Key name or combination. Common keys:
-                - Single keys: 'ESCAPE', 'ENTER', 'TAB', 'BACKSPACE', 'DELETE', 'ARROW_UP', 'ARROW_DOWN', 'ARROW_LEFT', 'ARROW_RIGHT'
+                - Single keys:
+                    'ESCAPE', 'ENTER', 'TAB', 'BACKSPACE', 'DELETE',
+                    'ARROW_UP', 'ARROW_DOWN', 'ARROW_LEFT', 'ARROW_RIGHT'
                 - Special keys: 'F1' through 'F12', 'HOME', 'END', 'PAGE_UP', 'PAGE_DOWN'
                 - Modifiers: Use + for combinations like 'CONTROL+A', 'META+V'
 
@@ -1453,7 +1455,6 @@ class BrowserService:
         Returns:
             Dict with slept_ms confirming the sleep duration
         """
-
         # Validation
         if duration_ms < 0:
             raise ValueError('duration_ms cannot be negative')
@@ -2279,7 +2280,6 @@ class BrowserService:
             Output file created with 0o600 permissions (owner read/write only).
             Contains sensitive auth tokens - treat as credentials.
         """
-
         logger.info("Exporting Chrome profile state from profile '%s' to %s", chrome_profile, output_file)
 
         # Convert Sequence to list for the export function
@@ -3265,7 +3265,6 @@ class BrowserService:
         Limitations:
             - Tokens may expire between save and restore - re-authenticate if needed
         """
-
         driver = self.state.driver
         if driver is None:
             raise fastmcp.exceptions.ToolError('Browser not initialized. Call navigate() first to establish a session.')

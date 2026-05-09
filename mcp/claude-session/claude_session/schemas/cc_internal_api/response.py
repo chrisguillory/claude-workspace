@@ -1,5 +1,4 @@
-"""
-Response schemas for Claude Code internal API.
+"""Response schemas for Claude Code internal API.
 
 These model the response payloads Claude Code receives from the API.
 Validated against mitmproxy captures of actual Claude Code traffic.
@@ -49,8 +48,7 @@ StopReason = Literal[
 
 
 class ResponseTextContent(StrictModel):
-    """
-    Text content block in API response.
+    """Text content block in API response.
 
     VALIDATION STATUS: VALIDATED
     Observed in response.content[].
@@ -63,8 +61,7 @@ class ResponseTextContent(StrictModel):
 
 
 class ThinkingContent(StrictModel):
-    """
-    Thinking content block in API response.
+    """Thinking content block in API response.
 
     VALIDATION STATUS: INFERRED from session schemas
     Not directly observed in captured traffic (quota check response was minimal).
@@ -82,8 +79,7 @@ class ThinkingContent(StrictModel):
 
 
 class ToolUseContent(StrictModel):
-    """
-    Tool use content block in API response.
+    """Tool use content block in API response.
 
     VALIDATION STATUS: INFERRED from session schemas
     Not directly observed in captured traffic (quota check response had no tool use).
@@ -113,8 +109,7 @@ ResponseContent = ResponseTextContent | ThinkingContent | ToolUseContent
 
 
 class AppliedEdit(StrictModel):
-    """
-    Applied context management edit in response.
+    """Applied context management edit in response.
 
     VALIDATION STATUS: INFERRED
     Based on request-side ContextManagementEdit structure.
@@ -125,8 +120,7 @@ class AppliedEdit(StrictModel):
 
 
 class ResponseContextManagement(StrictModel):
-    """
-    Context management in API response.
+    """Context management in API response.
 
     VALIDATION STATUS: VALIDATED
     Observed in response.context_management.
@@ -141,8 +135,7 @@ class ResponseContextManagement(StrictModel):
 
 
 class MessagesResponse(StrictModel):
-    """
-    Complete response payload from /v1/messages.
+    """Complete response payload from /v1/messages.
 
     VALIDATION STATUS: VALIDATED
     Observed in non-streaming quota check response.

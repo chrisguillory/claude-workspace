@@ -8,8 +8,7 @@
 # ]
 # ///
 
-"""
-Validate API schemas against captured Claude Code traffic.
+"""Validate API schemas against captured Claude Code traffic.
 
 This script validates mitmproxy captures in captures/ against the
 cc_internal_api Pydantic schemas to ensure complete schema coverage.

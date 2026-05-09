@@ -1,5 +1,4 @@
-"""
-Session context operation schemas.
+"""Session context operation schemas.
 
 Models for session context information returned by get_session_info tool.
 """
@@ -24,8 +23,7 @@ SessionState = Literal['active', 'exited', 'completed', 'crashed', 'unknown']
 
 
 class SessionContext(StrictModel):
-    """
-    Comprehensive information about a Claude Code session.
+    """Comprehensive information about a Claude Code session.
 
     Returned by get_session_info MCP tool and info CLI command.
     Combines data from multiple sources:

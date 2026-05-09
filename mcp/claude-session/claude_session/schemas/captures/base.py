@@ -1,5 +1,4 @@
-"""
-Base capture classes for HTTP traffic modeling.
+"""Base capture classes for HTTP traffic modeling.
 
 This module defines the foundational classes for capturing HTTP requests
 and responses from the Claude Code observability platform.
@@ -110,8 +109,7 @@ class ServerConnection(StrictModel):
 
 
 class RequestCapture(StrictModel):
-    """
-    Base for all HTTP request captures.
+    """Base for all HTTP request captures.
 
     Contains fields that are meaningful for requests. Response-specific fields
     (status_code, reason, duration_seconds) are NOT included - they exist in
@@ -152,8 +150,7 @@ class RequestCapture(StrictModel):
 
 
 class ResponseCapture(StrictModel):
-    """
-    Base for all HTTP response captures.
+    """Base for all HTTP response captures.
 
     Contains fields that are meaningful for responses. Response-specific fields
     (status_code, reason, duration_seconds) are REQUIRED - no None allowed.

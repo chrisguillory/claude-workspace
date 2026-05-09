@@ -35,39 +35,45 @@ Patterns:
 
         boundary = ErrorBoundary()
 
+
         @boundary.handler(ValidationError)
         def handle_validation(exc: ValidationError) -> JSONResponse:
             return JSONResponse({'error': str(exc)}, status_code=422)
+
 
         @boundary.handler(Exception)
         def handle_crash(exc: Exception) -> JSONResponse:
             return JSONResponse({'error': 'Internal error'}, status_code=500)
 
+
         @boundary
         async def handle_request(request: Request) -> JSONResponse:
-            ...  # on error, handler's return value IS the function's return value
+            '''On error, the handler's return value IS this function's return value.'''
 
     Side-effect-only handlers (CLI tools, task runners)::
 
         boundary = ErrorBoundary(exit_code=1)
 
+
         @boundary.handler(ValidationError)
         def handle_validation(exc: ValidationError) -> None:
             show_field_errors(exc)
 
+
         @boundary
         def main() -> None:
-            ...
+            '''Real entry-point logic here.'''
 
     Subprocess error handling (hooks, scripts)::
 
         boundary = ErrorBoundary(exit_code=2)
 
+
         @boundary
         def main() -> int:
-            subprocess.run([...], stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, check=True)
+            subprocess.run([...], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
             return 0
+
 
         @boundary.handler(subprocess.CalledProcessError)
         def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
@@ -80,26 +86,31 @@ Patterns:
 
         boundary = ErrorBoundary(exit_code=1)  # default for unhandled errors
 
+
         class FixableIssue(Exception):
             pass
 
+
         class UnfixableIssue(Exception):
             pass
+
 
         @boundary.handler(FixableIssue)
         def handle_fixable(exc: FixableIssue) -> None:
             print(f'Fixable: {exc}', file=sys.stderr)
             sys.exit(10)  # overrides boundary's exit_code
 
+
         @boundary.handler(UnfixableIssue)
         def handle_unfixable(exc: UnfixableIssue) -> None:
             print(f'Unfixable: {exc}', file=sys.stderr)
             sys.exit(20)
 
+
         @boundary
         def main() -> None:
-            ...  # FixableIssue -> exit 10, UnfixableIssue -> exit 20,
-                 # unhandled Exception -> exit 1 (boundary default)
+            '''FixableIssue -> exit 10, UnfixableIssue -> exit 20,
+            unhandled Exception -> exit 1 (boundary default).'''
 
     This works because ``sys.exit()`` raises ``SystemExit`` (a BaseException),
     which propagates out of ``_handle`` before the boundary's default
@@ -112,6 +123,7 @@ Patterns:
                 self.error = error
                 self.raw = raw
                 super().__init__(str(error))
+
 
         try:
             data = validate(raw_input)
@@ -126,7 +138,7 @@ Cross-language equivalents:
     Rust panic::set_hook(), Elixir supervisor trees,
     Trio cancel scopes, Java UncaughtExceptionHandler.
 
-See also:
+See Also:
     - ``functools.singledispatch``: Powers the type-based handler dispatch
       internally. Handlers are matched by MRO.
     - ``sys.excepthook``: Global process-level hook, no scoping. Use as a
@@ -185,19 +197,21 @@ class ErrorBoundary:
 
             boundary = ErrorBoundary()
 
+
             @boundary.handler(DatabaseError)
             def handle_db(exc: DatabaseError) -> Response:
                 return ErrorResponse(str(exc))
 
+
             @boundary
             async def handle_request(request: Request) -> Response:
-                ...  # if DatabaseError, returns the ErrorResponse
+                '''If DatabaseError, returns the ErrorResponse from the handler above.'''
 
         Entry point with simple handler::
 
             @ErrorBoundary(exit_code=1, handler=log_error)
             def main() -> None:
-                ...
+                '''Real entry-point logic here.'''
 
         Scope boundary (context manager, suppress and continue)::
 

@@ -1,5 +1,4 @@
-"""
-Session delete service - atomic deletion with rollback on failure.
+"""Session delete service - atomic deletion with rollback on failure.
 
 Implements strong exception safety guarantee:
 - Operations either complete successfully or leave system in original state
@@ -85,8 +84,7 @@ logger = logging.getLogger(__name__)
 
 
 class SessionDeleteService:
-    """
-    Service for atomic session deletion with rollback on failure.
+    """Service for atomic session deletion with rollback on failure.
 
     Implements strong exception safety guarantee:
     - Either all artifacts are deleted successfully
@@ -122,8 +120,7 @@ class SessionDeleteService:
     }
 
     def __init__(self, *, project_path: Path | None = None, session_folder: Path | None = None) -> None:
-        """
-        Initialize delete service.
+        """Initialize delete service.
 
         Args:
             project_path: Project directory (used to find session folder via encoding)
@@ -142,8 +139,7 @@ class SessionDeleteService:
         self._session_folder: Path | None = session_folder
 
     async def discover_artifacts(self, session_id: str) -> DeleteManifest:
-        """
-        Find all artifacts for a session with explicit file enumeration.
+        """Find all artifacts for a session with explicit file enumeration.
 
         Discovers and validates:
         - Session JSONL files (main + agents)
@@ -420,8 +416,7 @@ class SessionDeleteService:
         terminate_pid_before_delete: int | None = None,
         delete_cross_session_artifacts: bool | None = None,
     ) -> DeleteResult:
-        """
-        Delete session artifacts with atomic rollback on failure.
+        """Delete session artifacts with atomic rollback on failure.
 
         Args:
             session_id: Session to delete
@@ -661,8 +656,7 @@ class SessionDeleteService:
         )
 
     def _get_session_dir(self) -> Path:
-        """
-        Get the session directory in ~/.claude/projects/.
+        """Get the session directory in ~/.claude/projects/.
 
         If session_folder was provided directly, returns it.
         Otherwise, computes from project_path via encoding.
@@ -710,8 +704,7 @@ class SessionDeleteService:
 
     @asynccontextmanager
     async def _atomic_deletion(self, backup_path: Path) -> AsyncGenerator[None]:
-        """
-        Error boundary ensuring atomic deletion with rollback on any failure.
+        """Error boundary ensuring atomic deletion with rollback on any failure.
 
         This context manager provides strong exception safety:
         - On ANY exception within the context, rollback is performed
@@ -770,8 +763,7 @@ class SessionDeleteService:
             raise
 
     async def _create_backup(self, session_id: str, *, skip_cross_session_artifacts: bool = False) -> str:
-        """
-        Create a backup archive for rollback capability.
+        """Create a backup archive for rollback capability.
 
         Uses SessionArchiveService to create a consistent archive format
         that can be restored with restore --in-place.
@@ -809,8 +801,7 @@ class SessionDeleteService:
         return SessionArchive.model_validate(data)
 
     async def _rollback_from_backup(self, backup_path: Path) -> None:
-        """
-        Restore session from backup after failed deletion.
+        """Restore session from backup after failed deletion.
 
         Reads the backup archive and writes files back to their original
         locations (in-place restoration with original session ID).
@@ -916,8 +907,7 @@ class SessionDeleteService:
 
     @staticmethod
     def _compute_artifact_counts(manifest: DeleteManifest) -> Mapping[str, int]:
-        """
-        Compute per-artifact-type counts from manifest.
+        """Compute per-artifact-type counts from manifest.
 
         Returns:
             Dict with per-artifact-type counts.
@@ -951,8 +941,7 @@ class ArtifactCounts(TypedDict):
 
 
 def is_native_session(session_id: str) -> bool:
-    """
-    Check if session is native (UUIDv4) vs cloned/restored (UUIDv7).
+    """Check if session is native (UUIDv4) vs cloned/restored (UUIDv7).
 
     Native Claude sessions use UUIDv4 (random).
     Cloned/restored sessions use UUIDv7 (time-ordered).
@@ -966,8 +955,7 @@ def is_native_session(session_id: str) -> bool:
 
 
 def get_restoration_timestamp(session_id: str) -> datetime | None:
-    """
-    Extract the restoration timestamp from a restored session ID.
+    """Extract the restoration timestamp from a restored session ID.
 
     UUIDv7 embeds a Unix timestamp in the first 48 bits.
     """

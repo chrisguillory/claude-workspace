@@ -1,5 +1,4 @@
-"""
-Session lineage tracking service.
+"""Session lineage tracking service.
 
 Records parent-child relationships when sessions are cloned or restored.
 Stores lineage in ~/.claude-workspace/claude-session/lineage.json with thread-safe access.

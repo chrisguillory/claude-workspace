@@ -1,5 +1,4 @@
-"""
-Session clone service - direct session-to-session cloning.
+"""Session clone service - direct session-to-session cloning.
 
 Clones a session directly without creating an intermediate archive file.
 Faster than archive+restore for local cloning operations.
@@ -67,8 +66,7 @@ logger = logging.getLogger(__name__)
 
 
 class SessionCloneService:
-    """
-    Service for direct session-to-session cloning.
+    """Service for direct session-to-session cloning.
 
     Reads source session JSONL files directly, transforms them
     (new session ID, path translation), and writes to target location.
@@ -81,8 +79,7 @@ class SessionCloneService:
         discovery_service: SessionDiscoveryService | None = None,
         parser_service: SessionParserService | None = None,
     ) -> None:
-        """
-        Initialize clone service.
+        """Initialize clone service.
 
         Args:
             target_project_path: Target project directory for cloned session
@@ -101,8 +98,7 @@ class SessionCloneService:
         project_filter: Path | None = None,
         include_debug_log: bool = True,
     ) -> RestoreResult:
-        """
-        Clone a session directly without creating an archive file.
+        """Clone a session directly without creating an archive file.
 
         Args:
             source_session_id: Session ID to clone (full UUID or prefix)
@@ -435,8 +431,7 @@ class SessionCloneService:
         )
 
     async def _resolve_session(self, session_id_or_prefix: str, *, project_filter: Path | None = None) -> SessionInfo:
-        """
-        Resolve a session ID or prefix to a full session.
+        """Resolve a session ID or prefix to a full session.
 
         Delegates to SessionDiscoveryService which handles both exact matches
         and prefix matching.

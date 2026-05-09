@@ -1,5 +1,4 @@
-"""
-Agent ID handling for clone/restore operations.
+"""Agent ID handling for clone/restore operations.
 
 Handles:
 - Agent ID extraction from session files
@@ -85,8 +84,7 @@ def collect_agent_file_info(
     files_data: Mapping[str, Sequence[SessionRecord]],
     agent_structure: Mapping[str, bool],
 ) -> Sequence[AgentFileInfo]:
-    """
-    Collect agent file information from loaded session data.
+    """Collect agent file information from loaded session data.
 
     Combines filename parsing with structure detection results.
     Replaces pattern: `for filename in files_data: if startswith('agent-'): ...`
@@ -115,8 +113,7 @@ def collect_agent_file_info(
 
 
 def extract_base_agent_id(agent_id: str) -> str:
-    """
-    Extract the base ID from an agent ID.
+    """Extract the base ID from an agent ID.
 
     For native IDs, returns the ID unchanged.
     For cloned IDs, returns the portion before '-clone-'.
@@ -142,8 +139,7 @@ def extract_base_agent_id(agent_id: str) -> str:
 
 
 def extract_agent_ids_from_files(files_data: Mapping[str, Sequence[SessionRecord]]) -> Set[str]:
-    """
-    Extract agent IDs from loaded session files.
+    """Extract agent IDs from loaded session files.
 
     Agent IDs are extracted from filenames, not record content.
     Handles native (hex and typed) and cloned filename patterns.
@@ -170,8 +166,7 @@ def extract_agent_ids_from_files(files_data: Mapping[str, Sequence[SessionRecord
 
 
 def generate_clone_agent_id(old_agent_id: str, new_session_id: str) -> str:
-    """
-    Generate new agent ID with provenance.
+    """Generate new agent ID with provenance.
 
     Format: {base_id}-clone-{session_prefix}
 
@@ -197,8 +192,7 @@ def generate_clone_agent_id(old_agent_id: str, new_session_id: str) -> str:
 
 
 def generate_agent_id_mapping(agent_ids: Set[str], new_session_id: str) -> Mapping[str, str]:
-    """
-    Generate mapping of old agent IDs to new cloned agent IDs.
+    """Generate mapping of old agent IDs to new cloned agent IDs.
 
     Applies generate_clone_agent_id to each agent ID.
 
@@ -213,8 +207,7 @@ def generate_agent_id_mapping(agent_ids: Set[str], new_session_id: str) -> Mappi
 
 
 def transform_agent_filename(old_filename: str, agent_id_mapping: Mapping[str, str]) -> str:
-    """
-    Transform an agent filename using the agent ID mapping.
+    """Transform an agent filename using the agent ID mapping.
 
     Pattern: agent-{old_id}.jsonl -> agent-{new_id}.jsonl
 
@@ -246,8 +239,7 @@ def transform_agent_filename(old_filename: str, agent_id_mapping: Mapping[str, s
 
 
 def apply_agent_id_mapping(json_str: str, agent_id_mapping: Mapping[str, str]) -> str:
-    """
-    Replace all old agent IDs with new agent IDs in serialized JSON.
+    """Replace all old agent IDs with new agent IDs in serialized JSON.
 
     This catches:
     - References in isSidechain records pointing to agent files
@@ -274,8 +266,7 @@ def apply_agent_id_mapping(json_str: str, agent_id_mapping: Mapping[str, str]) -
 
 
 def detect_agent_structure(agent_path: Path, session_id: str, project_folder: Path) -> bool:
-    """
-    Detect if agent file is nested (subagents/) or flat.
+    """Detect if agent file is nested (subagents/) or flat.
 
     Expected structures:
     - Flat: <project>/agent-*.jsonl

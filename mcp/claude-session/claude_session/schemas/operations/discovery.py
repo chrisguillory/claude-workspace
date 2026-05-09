@@ -1,5 +1,4 @@
-"""
-Discovery operation schemas.
+"""Discovery operation schemas.
 
 Models for session discovery results.
 Extracted from services/discovery.py for reuse.
@@ -17,8 +16,7 @@ __all__ = [
 
 
 class SessionInfo(StrictModel):
-    """
-    Information about a discovered Claude Code session.
+    """Information about a discovered Claude Code session.
 
     Note: The project path cannot be reliably determined from the folder name
     due to lossy encoding (/, ., ' ', ~ all become -). Use extract_source_project_path()

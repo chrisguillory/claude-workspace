@@ -1,5 +1,4 @@
-"""
-Session JSONL schema models.
+"""Session JSONL schema models.
 
 This package contains Pydantic models for Claude Code session JSONL records.
 All models are currently in models.py - see README.md for planned structure.

@@ -48,6 +48,7 @@ import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import httpx
 import pydantic
@@ -68,7 +69,7 @@ PLATFORM = 'darwin-arm64'
 class PlatformInfo(OpenModel):
     """Single platform entry from CDN manifest.json."""
 
-    binary: str
+    binary: Literal['claude', 'claude.exe'] | None = None  # absent in manifests before ~2.1.50
     checksum: str
     size: int
 
@@ -513,7 +514,8 @@ class CDNClient:
             msg = f'Platform {PLATFORM} not in manifest for {version}'
             raise KeyError(msg)
 
-        binary_url = f'{CDN_BASE}/{version}/{PLATFORM}/{platform.binary}'
+        binary_filename = platform.binary or 'claude'  # PLATFORM hardcoded to darwin-arm64; old manifests omit field
+        binary_url = f'{CDN_BASE}/{version}/{PLATFORM}/{binary_filename}'
         dest = dest_dir / version
         tmp = dest_dir / f'.{version}.tmp'
 

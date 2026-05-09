@@ -1,5 +1,4 @@
-"""
-SSE streaming event schemas for Claude Code internal API.
+"""SSE streaming event schemas for Claude Code internal API.
 
 These model the Server-Sent Events (SSE) that Claude Code receives
 during streaming API responses. Validated against mitmproxy captures.
@@ -56,8 +55,7 @@ __all__ = [
 
 
 class TextDelta(StrictModel):
-    """
-    Text delta in streaming response.
+    """Text delta in streaming response.
 
     VALIDATION STATUS: VALIDATED
     Observed in content_block_delta events.
@@ -68,8 +66,7 @@ class TextDelta(StrictModel):
 
 
 class ThinkingDelta(StrictModel):
-    """
-    Thinking delta in streaming response.
+    """Thinking delta in streaming response.
 
     VALIDATION STATUS: INFERRED
     Expected based on extended thinking feature.
@@ -80,8 +77,7 @@ class ThinkingDelta(StrictModel):
 
 
 class SignatureDelta(StrictModel):
-    """
-    Signature delta for thinking blocks.
+    """Signature delta for thinking blocks.
 
     VALIDATION STATUS: INFERRED
     Expected for cryptographic signatures on thinking blocks.
@@ -92,8 +88,7 @@ class SignatureDelta(StrictModel):
 
 
 class InputJsonDelta(StrictModel):
-    """
-    Input JSON delta for tool use blocks.
+    """Input JSON delta for tool use blocks.
 
     VALIDATION STATUS: INFERRED
     Expected for streaming tool inputs.
@@ -114,8 +109,7 @@ DeltaContent = Annotated[
 
 
 class TextBlockStart(StrictModel):
-    """
-    Text block start in streaming response.
+    """Text block start in streaming response.
 
     VALIDATION STATUS: VALIDATED
     Observed in content_block_start events.
@@ -126,8 +120,7 @@ class TextBlockStart(StrictModel):
 
 
 class ThinkingBlockStart(StrictModel):
-    """
-    Thinking block start in streaming response.
+    """Thinking block start in streaming response.
 
     VALIDATION STATUS: INFERRED
     Expected based on extended thinking feature.
@@ -139,8 +132,7 @@ class ThinkingBlockStart(StrictModel):
 
 
 class ToolUseBlockStart(StrictModel):
-    """
-    Tool use block start in streaming response.
+    """Tool use block start in streaming response.
 
     VALIDATION STATUS: INFERRED
     Expected based on tool use feature.
@@ -165,8 +157,7 @@ ContentBlockStart = Annotated[
 
 
 class InitialUsage(StrictModel):
-    """
-    Initial usage in message_start event.
+    """Initial usage in message_start event.
 
     VALIDATION STATUS: VALIDATED
     Observed in message_start.message.usage.
@@ -181,8 +172,7 @@ class InitialUsage(StrictModel):
 
 
 class InitialMessage(StrictModel):
-    """
-    Initial message in message_start event.
+    """Initial message in message_start event.
 
     VALIDATION STATUS: VALIDATED
     Observed in message_start.message.
@@ -202,8 +192,7 @@ class InitialMessage(StrictModel):
 
 
 class MessageDeltaUsage(StrictModel):
-    """
-    Usage in message_delta event.
+    """Usage in message_delta event.
 
     VALIDATION STATUS: VALIDATED
     Observed in message_delta.usage.
@@ -218,8 +207,7 @@ class MessageDeltaUsage(StrictModel):
 
 
 class MessageDeltaPayload(StrictModel):
-    """
-    Delta payload in message_delta event.
+    """Delta payload in message_delta event.
 
     VALIDATION STATUS: VALIDATED
     Observed in message_delta.delta.
@@ -230,8 +218,7 @@ class MessageDeltaPayload(StrictModel):
 
 
 class AppliedEdit(StrictModel):
-    """
-    Applied context management edit.
+    """Applied context management edit.
 
     VALIDATION STATUS: INFERRED
     Based on request-side ContextManagementEdit structure.
@@ -242,8 +229,7 @@ class AppliedEdit(StrictModel):
 
 
 class MessageDeltaContextManagement(StrictModel):
-    """
-    Context management in message_delta event.
+    """Context management in message_delta event.
 
     VALIDATION STATUS: VALIDATED
     Observed in message_delta.context_management.
@@ -256,8 +242,7 @@ class MessageDeltaContextManagement(StrictModel):
 
 
 class MessageStartEvent(StrictModel):
-    """
-    message_start SSE event.
+    """message_start SSE event.
 
     VALIDATION STATUS: VALIDATED
     First event in streaming response sequence.
@@ -268,8 +253,7 @@ class MessageStartEvent(StrictModel):
 
 
 class ContentBlockStartEvent(StrictModel):
-    """
-    content_block_start SSE event.
+    """content_block_start SSE event.
 
     VALIDATION STATUS: VALIDATED
     Marks start of a content block.
@@ -281,8 +265,7 @@ class ContentBlockStartEvent(StrictModel):
 
 
 class ContentBlockDeltaEvent(StrictModel):
-    """
-    content_block_delta SSE event.
+    """content_block_delta SSE event.
 
     VALIDATION STATUS: VALIDATED
     Incremental update to a content block.
@@ -294,8 +277,7 @@ class ContentBlockDeltaEvent(StrictModel):
 
 
 class ContentBlockStopEvent(StrictModel):
-    """
-    content_block_stop SSE event.
+    """content_block_stop SSE event.
 
     VALIDATION STATUS: VALIDATED
     Marks end of a content block.
@@ -306,8 +288,7 @@ class ContentBlockStopEvent(StrictModel):
 
 
 class MessageDeltaEvent(StrictModel):
-    """
-    message_delta SSE event.
+    """message_delta SSE event.
 
     VALIDATION STATUS: VALIDATED
     Final update with stop_reason and usage.
@@ -320,8 +301,7 @@ class MessageDeltaEvent(StrictModel):
 
 
 class MessageStopEvent(StrictModel):
-    """
-    message_stop SSE event.
+    """message_stop SSE event.
 
     VALIDATION STATUS: VALIDATED
     Marks end of streaming response.
@@ -331,8 +311,7 @@ class MessageStopEvent(StrictModel):
 
 
 class PingEvent(StrictModel):
-    """
-    ping SSE event.
+    """ping SSE event.
 
     VALIDATION STATUS: VALIDATED
     Keepalive event interspersed in stream.
@@ -342,8 +321,7 @@ class PingEvent(StrictModel):
 
 
 class StreamError(StrictModel):
-    """
-    Error payload in streaming error event.
+    """Error payload in streaming error event.
 
     VALIDATION STATUS: INFERRED
     Based on Anthropic API error structure.
@@ -354,8 +332,7 @@ class StreamError(StrictModel):
 
 
 class ErrorEvent(StrictModel):
-    """
-    error SSE event.
+    """error SSE event.
 
     VALIDATION STATUS: INFERRED
     Expected for streaming errors.

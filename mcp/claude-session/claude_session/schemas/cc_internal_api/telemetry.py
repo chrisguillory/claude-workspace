@@ -1,5 +1,4 @@
-"""
-Telemetry schemas for Claude Code internal API.
+"""Telemetry schemas for Claude Code internal API.
 
 Claude Code reports telemetry to /api/event_logging/batch.
 All events use the "tengu" prefix (Claude Code's internal codename).
@@ -46,8 +45,7 @@ UserType = Literal['external', 'internal']
 
 
 class TelemetryEnv(StrictModel):
-    """
-    Environment information included in telemetry events.
+    """Environment information included in telemetry events.
 
     VALIDATION STATUS: VALIDATED
     Observed in event_data.env.
@@ -74,8 +72,7 @@ class TelemetryEnv(StrictModel):
 
 
 class TelemetryEventData(StrictModel):
-    """
-    Core telemetry event data.
+    """Core telemetry event data.
 
     VALIDATION STATUS: VALIDATED
     Observed in events[].event_data.
@@ -113,8 +110,7 @@ class TelemetryEventData(StrictModel):
 
 
 class TelemetryEvent(StrictModel):
-    """
-    Single telemetry event in a batch.
+    """Single telemetry event in a batch.
 
     VALIDATION STATUS: VALIDATED
     Observed in events[].
@@ -128,8 +124,7 @@ class TelemetryEvent(StrictModel):
 
 
 class TelemetryBatchRequest(StrictModel):
-    """
-    Batch telemetry request to /api/event_logging/batch.
+    """Batch telemetry request to /api/event_logging/batch.
 
     VALIDATION STATUS: VALIDATED
     Observed in request body.
@@ -139,8 +134,7 @@ class TelemetryBatchRequest(StrictModel):
 
 
 class TelemetryBatchResponse(StrictModel):
-    """
-    Response from /api/event_logging/batch.
+    """Response from /api/event_logging/batch.
 
     VALIDATION STATUS: INFERRED
     Expected based on API patterns.

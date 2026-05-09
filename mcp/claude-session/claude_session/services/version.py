@@ -1,5 +1,4 @@
-"""
-Claude Code version detection utilities.
+"""Claude Code version detection utilities.
 
 Provides functions to extract Claude Code version from:
 1. Running process (via PID and executable path)

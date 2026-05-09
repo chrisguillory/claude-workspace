@@ -1,5 +1,4 @@
-"""
-Todos file handling for clone/restore operations.
+"""Todos file handling for clone/restore operations.
 
 Handles:
 - Todos file discovery by session ID
@@ -43,8 +42,7 @@ def get_todos_dir() -> Path:
 
 
 def collect_todos(session_id: str) -> Mapping[str, str]:
-    """
-    Collect todos files for a session.
+    """Collect todos files for a session.
 
     Scans ~/.claude/todos/ for files matching the pattern:
     {session_id}-agent-*.json
@@ -75,8 +73,7 @@ def collect_todos(session_id: str) -> Mapping[str, str]:
 
 
 def transform_todo_filename(old_filename: str, old_session_id: str, new_session_id: str) -> str:
-    """
-    Transform a todo filename to use the new session ID.
+    """Transform a todo filename to use the new session ID.
 
     Only replaces the primary session ID portion (before "agent-").
     The agent session ID portion is preserved.

@@ -35,6 +35,7 @@ Two modes:
         with boundary:
             parts = bashlex.parse(command)
 
+
         @boundary
         async def fetch(url: str) -> Response:
             return await client.get(url)
@@ -59,7 +60,7 @@ Anti-pattern to avoid:
 Cross-language equivalents:
     Rust From trait + ? operator, Go fmt.Errorf("%w") + errors.Is/As.
 
-See also:
+See Also:
     - ``error_boundary.py``: Catches at architectural edges (Layers 3-4).
     - PEP 3134: Exception chaining (``raise X from Y``).
 """

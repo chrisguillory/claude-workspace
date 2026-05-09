@@ -1,6 +1,5 @@
 #!/usr/bin/env -S uv run --no-project
-"""
-Start HTTP servers on multiple ports for multi-origin localStorage testing.
+"""Start HTTP servers on multiple ports for multi-origin localStorage testing.
 
 Usage:
     python tests/serve_test_pages.py

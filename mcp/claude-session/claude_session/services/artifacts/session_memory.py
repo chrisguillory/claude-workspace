@@ -1,5 +1,4 @@
-"""
-Session memory artifact handling.
+"""Session memory artifact handling.
 
 Collects and writes per-session memory summaries stored at
 <project-dir>/<session-id>/session-memory/summary.md.

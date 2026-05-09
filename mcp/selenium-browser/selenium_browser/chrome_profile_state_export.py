@@ -1,5 +1,4 @@
-"""
-Chrome Profile State Export
+"""Chrome Profile State Export.
 
 Exports browser state (cookies, localStorage, sessionStorage, IndexedDB) from
 Chrome profile files for use in Selenium automation.

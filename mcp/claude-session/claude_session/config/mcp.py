@@ -1,5 +1,4 @@
-"""
-MCP server configuration.
+"""MCP server configuration.
 
 Extends base configuration with MCP-specific settings.
 """

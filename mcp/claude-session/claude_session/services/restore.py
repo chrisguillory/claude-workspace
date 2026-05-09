@@ -1,5 +1,4 @@
-"""
-Session restore service - restores archived sessions with new IDs.
+"""Session restore service - restores archived sessions with new IDs.
 
 Similar to Claude's teleport feature, but creates new session IDs and handles
 path translation for cross-machine restoration.
@@ -68,8 +67,7 @@ class PathTranslator:
     """Handles path translation when restoring sessions across machines."""
 
     def __init__(self, from_path: str, to_path: str) -> None:
-        """
-        Initialize path translator.
+        """Initialize path translator.
 
         Args:
             from_path: Original project path from archive
@@ -80,8 +78,7 @@ class PathTranslator:
         self.needs_translation = self.from_path != self.to_path
 
     def translate_record(self, record: SessionRecord) -> SessionRecord:
-        """
-        Translate paths in a record if needed.
+        """Translate paths in a record if needed.
 
         Args:
             record: Session record to translate
@@ -127,15 +124,13 @@ class PathTranslator:
 
 
 class SessionRestoreService:
-    """
-    Service for restoring archived sessions.
+    """Service for restoring archived sessions.
 
     Creates new session IDs (like Claude's teleport) and handles path translation.
     """
 
     def __init__(self, project_path: Path) -> None:
-        """
-        Initialize restore service.
+        """Initialize restore service.
 
         Args:
             project_path: Current project directory for restoration
@@ -149,8 +144,7 @@ class SessionRestoreService:
         translate_paths: bool = True,
         in_place: bool = False,
     ) -> RestoreResult:
-        """
-        Restore a session archive.
+        """Restore a session archive.
 
         Args:
             archive_path: Path to archive file (JSON or .zst)
@@ -573,8 +567,7 @@ class SessionRestoreService:
 
 
 def is_restored_session(session_id: str) -> bool:
-    """
-    Check if a session ID is from a restored session.
+    """Check if a session ID is from a restored session.
 
     Restored sessions use UUIDv7 (time-ordered) while Claude uses UUIDv4 (random).
 
@@ -589,8 +582,7 @@ def is_restored_session(session_id: str) -> bool:
 
 
 def get_restoration_timestamp(session_id: str) -> datetime | None:
-    """
-    Extract the restoration timestamp from a restored session ID.
+    """Extract the restoration timestamp from a restored session ID.
 
     UUIDv7 embeds a Unix timestamp in the first 48 bits.
 

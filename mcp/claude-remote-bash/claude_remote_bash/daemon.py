@@ -433,7 +433,7 @@ def _resolve_daemon_binary() -> Path:
         raise LaunchdError(
             "Couldn't find `claude-remote-bash-daemon` on PATH.\n"
             'Install it first:\n'
-            '  uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-remote-bash'
+            '  uv tool install --editable ~/claude-workspace/mcp/claude-remote-bash'
         )
     return Path(which).resolve()
 

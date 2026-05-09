@@ -14,7 +14,7 @@ dependencies = [
     "google-cloud-aiplatform>=1.135.0",
     "google-genai>=1.59.0",
     "langchain-text-splitters>=1.1.0",
-    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
+    "cc-lib",
     "more-itertools>=10.8.0",
     "pandas>=2.3.3",
     "pdfplumber>=0.11.9",

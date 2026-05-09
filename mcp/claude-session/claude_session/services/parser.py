@@ -1,5 +1,4 @@
-"""
-Session parser service - JSONL file parsing and validation.
+"""Session parser service - JSONL file parsing and validation.
 
 Framework-agnostic service for loading and validating Claude Code session files.
 """
@@ -26,15 +25,13 @@ logger = logging.getLogger(__name__)
 
 
 class SessionParserService:
-    """
-    Service for parsing Claude Code session JSONL files.
+    """Service for parsing Claude Code session JSONL files.
 
     Pure domain logic - loads and validates JSONL files into typed SessionRecord objects.
     """
 
     async def load_session_files(self, session_files: Sequence[Path]) -> Mapping[str, Sequence[SessionRecord]]:
-        """
-        Load and parse session JSONL files.
+        """Load and parse session JSONL files.
 
         Args:
             session_files: Sequence of JSONL file paths
@@ -54,8 +51,7 @@ class SessionParserService:
         return files_data
 
     async def _parse_jsonl_file(self, file_path: Path) -> Sequence[SessionRecord]:
-        """
-        Parse a single JSONL file into validated records.
+        """Parse a single JSONL file into validated records.
 
         Args:
             file_path: Path to JSONL file

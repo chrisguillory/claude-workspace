@@ -1,5 +1,4 @@
-"""
-Session move service - relocate sessions between projects.
+"""Session move service - relocate sessions between projects.
 
 Moves a session from one project to another, preserving the original session ID.
 Path translation is applied to update cwd and tool path references.
@@ -70,8 +69,7 @@ DELETED_SESSIONS_DIR = DATA_DIR / 'deleted'
 
 
 class SessionMoveService:
-    """
-    Service for relocating sessions between projects.
+    """Service for relocating sessions between projects.
 
     Preserves the original session ID, agent IDs, and slugs.
     Only project-specific artifacts are relocated; global artifacts
@@ -98,8 +96,7 @@ class SessionMoveService:
         terminate_pid: int | None = None,
         project_filter: Path | None = None,
     ) -> MoveResult:
-        """
-        Move a session from its current project to the target project.
+        """Move a session from its current project to the target project.
 
         Args:
             session_id: Session ID to move (full UUID or prefix)
