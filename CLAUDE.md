@@ -56,8 +56,29 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 | **Trust event authority**                     | Don't second-guess events with defensive validation                                                            |
 | **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available                                                          |
 | **Assertions only in tests/**                 | Application code raises exceptions explicitly                                                                  |
-| **Ideal state over backwards compat**         | Dev-only project — rename cleanly, no migration shims                                                          |
+| **Ideal state over backwards compat**         | Dev-only repo — fix sources over workarounds; rename cleanly, no migration shims or doc-as-bandaid              |
 | **DI via closures**                           | FastMCP pattern for dependency injection                                                                       |
+
+### Ideal State
+
+**Fix the source, don't paper over with docs.** When a CLI, MCP server, library, or hook produces ambiguous output, surfaces a confusing error, or has any other foot gun — the ideal-state remedy is a code change in the offending tool, not a workflow doc that warns future readers about it. Documentation-as-workaround perpetuates the trap; only a code fix removes it.
+
+```text
+# ❌ Anti-pattern: documenting a foot gun
+# Workflow doc: "Note: claude-version-manager fetch X returns 'not found on
+# CDN' for both never-published and CDN-expired versions — cross-check `list
+# --remote` to disambiguate before assuming the version exists."
+
+# ✅ Correct: make the tool itself disambiguate
+# `claude-version-manager fetch 2.1.127` → "Version 2.1.127 was never
+# published. See `list --remote --last 30`."
+# `claude-version-manager fetch 1.0.30`  → "Version 1.0.30 is no longer on CDN
+# (retention ~9 months, 1.0.37+)."
+```
+
+**When to consider a doc-side note instead of a code fix:** the tool is owned by an upstream you can't change (and a PR is impractical), or the behavior is intentional and a code change would break other consumers. Almost never the case in this repo — when in doubt, fix the source.
+
+**Lead options with the ideal-state choice.** When presenting design alternatives, the option that best matches stated principles goes first. Don't order by smallest-diff or least-disruptive — that's a generic engineering bias that contradicts the dev-only repo's stated values.
 
 ### Exception Handling
 
