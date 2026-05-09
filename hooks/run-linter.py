@@ -15,19 +15,21 @@ and runs the specified linter on that file. If the linter finds
 violations, exits 2 with the linter output on stderr — this is the
 most reliable way to surface feedback to Claude Code.
 
-Usage in .claude/settings.json::
+Usage in .claude/settings.json:
 
-    {
-      "hooks": {
-        "PostToolUse": [{
-          "matcher": "Edit|Write",
-          "hooks": [{
-            "type": "command",
-            "command": "hooks/run-linter.py linters/strict_typing_linter.py"
-          }]
-        }]
-      }
-    }
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{
+        "type": "command",
+        "command": "hooks/run-linter.py linters/strict_typing_linter.py"
+      }]
+    }]
+  }
+}
+```
 
 The linter path is relative to the repository root (cwd of the hook).
 Multiple linters can be configured as separate hook entries.

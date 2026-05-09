@@ -638,8 +638,8 @@ Messages appear in `~/.claude/debug/{session_id}.txt`. Servers with operation lo
 MCP servers are installed via `uv tool install` and registered in `~/.claude.json`:
 
 ```bash
-# Install globally
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
+# Editable install from local workspace clone
+uv tool install --editable ~/claude-workspace/mcp/python-interpreter
 
 # Configure Claude Code
 claude mcp add --scope user python-interpreter -- python-interpreter-mcp
@@ -706,35 +706,16 @@ IMPORTANT: For better user experience, you should typically use the CLI instead:
     PY
 
 If python-interpreter is not found, install via:
-    uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
+    uv tool install --editable ~/claude-workspace/mcp/python-interpreter
 
 Only use this MCP tool directly if the user explicitly requests it or you need structured output."""
 ```
 
 ### Installation Methods
 
-Four installation patterns in order of preference:
+Two installation patterns in order of preference:
 
-**1. Global install** (recommended for users):
-```bash
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/<server>
-claude mcp add --scope user <name> -- <name>-mcp
-```
-- Fast startup (no network call)
-- Version locked until explicit upgrade
-- Works offline after install
-
-**2. uvx** (always-latest, slower startup):
-```bash
-claude mcp add --scope user <name> -- uvx --refresh --from \
-  git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/<server> \
-  <name>-mcp
-```
-- Network call every startup
-- Always gets latest from git
-- No explicit upgrade needed
-
-**3. Local development - editable install** (recommended for developers):
+**1. Editable install** (recommended):
 ```bash
 uv tool install --editable /path/to/claude-workspace/mcp/<server>
 claude mcp add --scope user <name> -- <name>-mcp
@@ -743,7 +724,7 @@ claude mcp add --scope user <name> -- <name>-mcp
 - Changes to source files take effect immediately
 - Best of both worlds for active development
 
-**4. Local development - script mode** (alternative):
+**2. Script mode** (no install required):
 ```bash
 claude mcp add --scope user <name> -- uv run \
   --project "$(git rev-parse --show-toplevel)/mcp/<server>" \

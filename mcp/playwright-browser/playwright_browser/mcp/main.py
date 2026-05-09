@@ -1,10 +1,6 @@
-"""
-Browser Automation MCP Server
+"""Browser Automation MCP Server.
 
 Playwright-based browser control with stealth mode for Claude Code.
-
-Install:
-    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/playwright-browser playwright-browser-mcp
 
 Architecture: Runs locally (not Docker) for visible browser monitoring.
 """
@@ -725,9 +721,13 @@ async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
 
     Args:
         key: Key name or combination. Common keys:
-            - Single keys: 'Escape', 'Enter', 'Tab', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'
+            - Single keys:
+                'Escape', 'Enter', 'Tab', 'Backspace', 'Delete',
+                'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'
             - Function keys: 'F1' through 'F12'
-            - Key combinations: 'Control+A' (Ctrl+A), 'Meta+V' (Cmd+V on Mac), 'Control+Shift+T', 'Alt+F4'
+            - Key combinations:
+                'Control+A' (Ctrl+A), 'Meta+V' (Cmd+V on Mac),
+                'Control+Shift+T', 'Alt+F4'
             - Modifiers: 'Control', 'Shift', 'Alt', 'Meta'
         ctx: MCP context
 

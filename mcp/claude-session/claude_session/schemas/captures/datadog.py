@@ -1,5 +1,4 @@
-"""
-Datadog telemetry endpoint capture classes.
+"""Datadog telemetry endpoint capture classes.
 
 This module contains capture wrappers for Datadog logging endpoints:
 - /api/v2/logs - Log ingestion
@@ -38,8 +37,7 @@ __all__ = [
 
 
 class DatadogLogEntryBase(StrictModel):
-    """
-    Base log entry fields present in ALL Datadog log types.
+    """Base log entry fields present in ALL Datadog log types.
 
     Contains 32 fields that appear in every log entry regardless of type.
     Subclasses add type-specific fields and override `message` with a Literal.
@@ -96,8 +94,7 @@ class DatadogLogEntryBase(StrictModel):
 
 
 class DatadogApiSuccessLogEntry(DatadogLogEntryBase):
-    """
-    API success log entry with full token/cost/timing metrics.
+    """API success log entry with full token/cost/timing metrics.
 
     Discriminated by message="tengu_api_success".
 
@@ -155,8 +152,7 @@ class DatadogApiSuccessLogEntry(DatadogLogEntryBase):
 
 
 class DatadogApiErrorLogEntry(DatadogLogEntryBase):
-    """
-    API error log entry with error details but no token/cost metrics.
+    """API error log entry with error details but no token/cost metrics.
 
     Discriminated by message="tengu_api_error".
     Missing from errors: input_tokens, output_tokens, cached_input_tokens,
@@ -194,8 +190,7 @@ class DatadogApiErrorLogEntry(DatadogLogEntryBase):
 
 
 class DatadogToolUseSuccessLogEntry(DatadogLogEntryBase):
-    """
-    Tool execution log entry - completely different structure from API logs.
+    """Tool execution log entry - completely different structure from API logs.
 
     Discriminated by message="tengu_tool_use_success".
     Does NOT have: token counts, costs, ttft, stop_reason, provider, etc.
@@ -227,8 +222,7 @@ class DatadogToolUseSuccessLogEntry(DatadogLogEntryBase):
 
 
 class DatadogOAuthSuccessLogEntry(DatadogLogEntryBase):
-    """
-    OAuth success log entry - minimal fields beyond base.
+    """OAuth success log entry - minimal fields beyond base.
 
     Discriminated by message="tengu_oauth_success".
     """
@@ -242,8 +236,7 @@ class DatadogOAuthSuccessLogEntry(DatadogLogEntryBase):
 
 
 def _get_datadog_log_entry_type(v: Any) -> str:
-    """
-    Callable discriminator for DatadogLogEntry union.
+    """Callable discriminator for DatadogLogEntry union.
 
     Routes based on `message` field value.
     """
@@ -284,8 +277,7 @@ class DatadogRequestCapture(RequestCapture):
 
 
 class DatadogResponseCapture(ResponseCapture):
-    """
-    Captured POST /api/v2/logs response (202 Accepted).
+    """Captured POST /api/v2/logs response (202 Accepted).
 
     Datadog returns empty JSON on success.
     """

@@ -1,5 +1,4 @@
-"""
-Archive operation schemas.
+"""Archive operation schemas.
 
 Models for session archive creation and format detection.
 
@@ -59,8 +58,7 @@ class FileMetadata(StrictModel):
 
 
 class ArchiveMetadata(StrictModel):
-    """
-    Metadata about created archive.
+    """Metadata about created archive.
 
     Returned by save_current_session MCP tool.
     """
@@ -87,8 +85,7 @@ class ArchiveMetadata(StrictModel):
 
 
 class SessionArchive(StrictModel):
-    """
-    Archive format v2.x - explicit artifact models.
+    """Archive format v2.x - explicit artifact models.
 
     Version history:
     - 2.2: Added session_env, session_memory, and debug_log
@@ -245,8 +242,7 @@ class TodoFileEntry(StrictModel):
 
 
 def parse_agent_metadata(filename: str) -> tuple[str, str | None]:
-    """
-    Parse agent ID and type from filename.
+    """Parse agent ID and type from filename.
 
     Examples:
         "agent-5271c147.jsonl" -> ("5271c147", None)

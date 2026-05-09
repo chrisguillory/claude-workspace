@@ -103,8 +103,7 @@ class PermissiveModel(StrictModel):
 
 
 class EmptyDict(BaseStrictModel):
-    """
-    Marker type for empty JSON object {} in API traffic.
+    """Marker type for empty JSON object {} in API traffic.
 
     With extra='forbid', a model with no fields will only validate against
     an empty dict. Used for fields that are always {} in observed captures.

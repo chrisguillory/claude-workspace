@@ -79,7 +79,9 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
 
         Args:
             key: Key name or combination. Common keys:
-                - Single keys: 'ESCAPE', 'ENTER', 'TAB', 'BACKSPACE', 'DELETE', 'ARROW_UP', 'ARROW_DOWN', 'ARROW_LEFT', 'ARROW_RIGHT'
+                - Single keys:
+                    'ESCAPE', 'ENTER', 'TAB', 'BACKSPACE', 'DELETE',
+                    'ARROW_UP', 'ARROW_DOWN', 'ARROW_LEFT', 'ARROW_RIGHT'
                 - Special keys: 'F1' through 'F12', 'HOME', 'END', 'PAGE_UP', 'PAGE_DOWN'
                 - Modifiers: Use + for combinations like 'CONTROL+A', 'META+V'
             ctx: MCP context

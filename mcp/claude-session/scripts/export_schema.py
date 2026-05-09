@@ -1,7 +1,6 @@
 #!/usr/bin/env -S uv run
 
-"""
-Export JSON Schema from Pydantic models.
+"""Export JSON Schema from Pydantic models.
 
 This generates a JSON Schema document that other tools can consume:
 - TypeScript type generation
@@ -34,7 +33,6 @@ def export_schema(
     corrupt the JSON file. The JSON itself is written via ``json.dump`` to
     the path argument.
     """
-
     print('=' * 80, file=sys.stderr)
     print('JSON Schema Export', file=sys.stderr)
     print('=' * 80, file=sys.stderr)

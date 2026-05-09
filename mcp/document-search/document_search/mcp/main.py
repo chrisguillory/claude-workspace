@@ -203,7 +203,6 @@ class ServerState:
 
 def register_tools(state: ServerState) -> None:
     """Register MCP tools with closure over server state."""
-
     # Generate collections summary once at registration
     collections = state.collection_registry.list_collections()
     collections_summary = _format_collections_summary(collections)
@@ -810,7 +809,6 @@ Returns:
 @contextlib.asynccontextmanager
 async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
-
     # Configure logging with timestamps to stderr.
     # force=True overrides any prior configuration (e.g., from FastMCP)
     # so that our format and level take effect.

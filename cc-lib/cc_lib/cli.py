@@ -1,5 +1,4 @@
-"""
-Typer CLI factories for claude-workspace scripts.
+"""Typer CLI factories for claude-workspace scripts.
 
 Typer is a dependency of cc-lib (declared in pyproject.toml).
 

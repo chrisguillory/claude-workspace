@@ -1,5 +1,4 @@
-"""
-External service capture classes.
+"""External service capture classes.
 
 This module contains capture wrappers for non-Anthropic API endpoints:
 - console.anthropic.com - OAuth token exchange

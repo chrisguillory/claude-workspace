@@ -1,5 +1,4 @@
-"""
-Segment Analytics capture classes.
+"""Segment Analytics capture classes.
 
 This module contains capture wrappers for api.segment.io endpoints.
 Segment events are discriminated by the `type` field.

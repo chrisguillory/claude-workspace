@@ -120,8 +120,9 @@ class EmbeddingService:
         return EmbedResponse.from_numpy(v) if isinstance(v, np.ndarray) else EmbedResponse(values=v, dimensions=len(v))
 
     async def embed_batch(self, request: EmbedBatchRequest) -> EmbedBatchResponse:
-        """Embed batch of texts. Called by _EmbedLoader._bulk_embed (hot path)
-        and directly by MCP tools (cold path).
+        """Embed batch of texts.
+
+        Called by _EmbedLoader._bulk_embed (hot path) and directly by MCP tools (cold path).
         """
         vectors = await self._client.embed(
             texts=request.texts,

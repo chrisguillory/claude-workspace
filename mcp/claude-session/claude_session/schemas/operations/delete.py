@@ -1,5 +1,4 @@
-"""
-Delete operation schemas.
+"""Delete operation schemas.
 
 Models for session deletion with explicit file enumeration and validation.
 """

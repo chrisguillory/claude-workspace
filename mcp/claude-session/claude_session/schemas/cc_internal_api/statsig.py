@@ -1,5 +1,4 @@
-"""
-Statsig schemas for Claude Code feature flag system.
+"""Statsig schemas for Claude Code feature flag system.
 
 Claude Code uses Statsig (statsig.anthropic.com) for A/B testing and feature flags.
 This is separate from the Anthropic-internal `/api/eval/sdk-*` feature flags.
@@ -252,8 +251,7 @@ class StatsigUser(StrictModel):
 
 
 class StatsigMetadata(StrictModel):
-    """
-    Statsig SDK metadata.
+    """Statsig SDK metadata.
 
     BIFURCATION: fallbackUrl is always present (no default), value is always None.
     """
@@ -602,8 +600,7 @@ StatsigDynamicConfig = StatsigNamedExperimentConfig | StatsigExperimentConfig | 
 
 
 class StatsigInitializeFullResponse(StrictModel):
-    """
-    Full initialize response (initial request, no delta fields).
+    """Full initialize response (initial request, no delta fields).
 
     BIFURCATION: This is the response when is_delta is absent.
     All 18 fields are required, no defaults.
@@ -630,8 +627,7 @@ class StatsigInitializeFullResponse(StrictModel):
 
 
 class StatsigInitializeDeltaResponse(StrictModel):
-    """
-    Delta initialize response (subsequent request with updates).
+    """Delta initialize response (subsequent request with updates).
 
     BIFURCATION: This is the response when is_delta=true.
     Includes all base fields plus delta-specific fields.
@@ -894,8 +890,7 @@ class StatsigOptions(StrictModel):
 
 # Common base for most tengu_* events
 class TenguEventMetadataBase(StrictModel):
-    """
-    Common fields for most tengu_* events.
+    """Common fields for most tengu_* events.
 
     These 13 fields appear in nearly all tengu events.
     """
@@ -1891,8 +1886,7 @@ class TenguFileOperationEvent(StrictModel):
 
 # Fallback for unknown events - keeps loose typing only for truly unknown events
 class UnknownStatsigEventMetadata(StrictModel):
-    """
-    Metadata for unknown/future event types.
+    """Metadata for unknown/future event types.
 
     This is the escape hatch for events not yet modeled.
     All fields are optional to accommodate any structure.

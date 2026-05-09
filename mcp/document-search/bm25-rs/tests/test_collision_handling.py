@@ -86,8 +86,7 @@ def test_no_duplicate_indices_when_stems_match_fastembed_output_length(
     rust_model: bm25_rs.BM25Model,
     fastembed_model: SparseTextEmbedding,
 ) -> None:
-    """Cross-check: for any colliding input, bm25-rs and fastembed emit the
-    same *number* of indices.
+    """Cross-check that bm25-rs and fastembed emit the same number of indices for colliding inputs.
 
     Existing tests compare via `dict(zip(indices, values))` which silently
     collapses duplicate keys, so `len(dict) == len(dict)` passes even when

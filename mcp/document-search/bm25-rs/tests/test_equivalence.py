@@ -18,7 +18,7 @@ from fastembed import SparseTextEmbedding
 
 @pytest.fixture(scope='module')
 def fastembed_model() -> SparseTextEmbedding:
-    """fastembed BM25 model (reference implementation)."""
+    """The fastembed BM25 model (reference implementation)."""
     return SparseTextEmbedding('Qdrant/bm25')
 
 

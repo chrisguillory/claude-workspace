@@ -1,5 +1,4 @@
-"""
-Session info service - retrieves comprehensive context about sessions.
+"""Session info service - retrieves comprehensive context about sessions.
 
 Aggregates data from multiple sources:
 - Session discovery (session files in ~/.claude/projects/)
@@ -41,8 +40,7 @@ CLAUDE_WORKSPACE_SESSIONS = get_claude_workspace_config_home_dir() / 'sessions.j
 
 @dataclass
 class CurrentSessionContext:
-    """
-    Context provided by MCP server for the current session.
+    """Context provided by MCP server for the current session.
 
     These fields are only available when querying the current session
     via the MCP server, not when querying other sessions via CLI.
@@ -62,8 +60,7 @@ class CurrentSessionContext:
 
 # noinspection PyMethodMayBeStatic
 class SessionInfoService:
-    """
-    Service for retrieving comprehensive session context.
+    """Service for retrieving comprehensive session context.
 
     Aggregates data from:
     - Session files (~/.claude/projects/)
@@ -83,8 +80,7 @@ class SessionInfoService:
         current_context: CurrentSessionContext | None = None,
         project_filter: Path | None = None,
     ) -> SessionContext:
-        """
-        Get comprehensive context for a session.
+        """Get comprehensive context for a session.
 
         Args:
             session_id: Session ID (full or prefix) to look up
@@ -186,8 +182,7 @@ class SessionInfoService:
         )
 
     def is_session_running(self, session_id: str, project_folder: Path) -> tuple[bool, int | None]:
-        """
-        Check if a session's Claude process is still running.
+        """Check if a session's Claude process is still running.
 
         Looks up the (session_id, project_folder) entry in sessions.json, then verifies:
         1. Session state is 'active'
@@ -228,8 +223,7 @@ class SessionInfoService:
             return False, None  # Process is gone
 
     async def resolve_session(self, session_id_or_prefix: str, *, project_filter: Path | None = None) -> SessionInfo:
-        """
-        Resolve a session ID or prefix to a full session.
+        """Resolve a session ID or prefix to a full session.
 
         Delegates to SessionDiscoveryService which handles both exact matches
         and prefix matching.
@@ -257,8 +251,7 @@ class SessionInfoService:
         session_folder: Path,
         current_context: CurrentSessionContext | None,
     ) -> Path:
-        """
-        Get project path for a session.
+        """Get project path for a session.
 
         Priority:
         1. Current context (if matching session)
@@ -291,8 +284,7 @@ class SessionInfoService:
         session_file: Path,
         workspace_version: str | None,
     ) -> str | None:
-        """
-        Get Claude Code version with proper fallback chain.
+        """Get Claude Code version with proper fallback chain.
 
         Priority:
         1. Process-based (if PID available and process exists)
@@ -326,8 +318,7 @@ class SessionInfoService:
         return workspace_version
 
     def _get_first_message_timestamp(self, session_file: Path) -> datetime | None:
-        """
-        Extract the first timestamp from a session JSONL file.
+        """Extract the first timestamp from a session JSONL file.
 
         Scans for the first record with a 'timestamp' field, skipping records
         without timestamps (like summary and custom-title records).
@@ -358,8 +349,7 @@ class SessionInfoService:
         return None
 
     def _get_process_created_at(self, pid: int | None, fallback: datetime | None) -> datetime | None:
-        """
-        Get process creation time from OS (authoritative).
+        """Get process creation time from OS (authoritative).
 
         Uses psutil directly when process is running.
         Falls back to sessions.json cached value when process is gone.
@@ -384,8 +374,7 @@ class SessionInfoService:
             return fallback
 
     def _load_workspace_session(self, session_id: str, project_folder: Path) -> Session | None:
-        """
-        Load the sessions.json entry matching (session_id, project_folder).
+        """Load the sessions.json entry matching (session_id, project_folder).
 
         Returns the Session model if found, None otherwise.
         """

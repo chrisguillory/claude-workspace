@@ -31,10 +31,9 @@ The `diagnose` command walks the process tree and reports exactly which `.app` t
 
 ## Installation
 
-### Quick Start
-
 ```bash
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/imessage-kit
+# Editable install from local workspace clone (changes take effect immediately)
+uv tool install --editable ~/claude-workspace/mcp/imessage-kit
 ```
 
 This installs two commands to `~/.local/bin/`:
@@ -51,15 +50,6 @@ claude mcp add --scope user imessage-kit -- imessage-kit-mcp
 
 ```bash
 uv tool upgrade imessage-kit
-```
-
-### Local Development
-
-Editable install (changes take effect immediately):
-
-```bash
-uv tool install --editable /path/to/claude-workspace/mcp/imessage-kit
-claude mcp add --scope user imessage-kit -- imessage-kit-mcp
 ```
 
 ## Tools

@@ -349,9 +349,11 @@ class TestProxyProperties:
         assert proxy.computed == 'computed:default'
 
     def test_failing_property_not_translated(self) -> None:
-        """Property that raises -- the exception happens in getattr(), before
-        the callable check. It propagates as-is because __getattr__ doesn't
-        wrap the getattr() call in a boundary."""
+        """A property that raises is not translated by the boundary.
+
+        The exception happens in getattr(), before the callable check. It propagates as-is because
+        __getattr__ doesn't wrap the getattr() call in a boundary.
+        """
         proxy = LibraryBoundary(AppError).wrap(fake_lib.config)
         with pytest.raises(ValueError) as exc_info:
             _ = proxy.failing_property
@@ -608,8 +610,10 @@ class TestProxyGenerator:
         assert isinstance(exc_info.value.__cause__, ValueError)
 
     def test_generator_wrong_args_translated(self) -> None:
-        """Calling a generator function with wrong args raises TypeError at call
-        time (before a generator object exists). The boundary must catch this."""
+        """Calling a generator function with wrong args raises TypeError at call time.
+
+        The error happens before a generator object exists. The boundary must catch this.
+        """
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
         with pytest.raises(AppError) as exc_info:
             proxy.echo_gen('unexpected_arg')
@@ -727,8 +731,10 @@ class TestProxyAsyncGenerator:
         assert isinstance(exc_info.value.__cause__, ValueError)
 
     async def test_async_generator_wrong_args_translated(self) -> None:
-        """Calling an async generator function with wrong args raises TypeError
-        at call time (before a generator object exists). The boundary must catch this."""
+        """Calling an async generator function with wrong args raises TypeError at call time.
+
+        The error happens before a generator object exists. The boundary must catch this.
+        """
         proxy = LibraryBoundary(AppError).wrap(fake_lib)
         with pytest.raises(AppError) as exc_info:
             proxy.async_echo_gen('unexpected_arg')

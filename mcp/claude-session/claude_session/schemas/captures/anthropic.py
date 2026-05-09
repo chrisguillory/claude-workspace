@@ -1,5 +1,4 @@
-"""
-Anthropic API endpoint capture classes.
+"""Anthropic API endpoint capture classes.
 
 This module contains capture wrappers for all Anthropic API endpoints:
 - /v1/messages - Main conversation API (streaming and non-streaming)
@@ -98,8 +97,7 @@ class MessagesRequestCapture(AnthropicRequestCapture):
 
 
 class MessagesStreamResponseCapture(AnthropicResponseCapture):
-    """
-    Captured POST /v1/messages streaming response (SSE).
+    """Captured POST /v1/messages streaming response (SSE).
 
     Used when request has stream: true (the common case for Claude Code).
     The events field contains parsed SSE events from the stream.
@@ -123,8 +121,7 @@ class ApiErrorDetail(StrictModel):
 
 
 class ApiError(StrictModel):
-    """
-    API error response structure.
+    """API error response structure.
 
     Returned on 4xx/5xx responses instead of a Message.
     """
@@ -135,8 +132,7 @@ class ApiError(StrictModel):
 
 
 class MessagesJsonResponseCapture(AnthropicResponseCapture):
-    """
-    Captured POST /v1/messages non-streaming response (JSON).
+    """Captured POST /v1/messages non-streaming response (JSON).
 
     Used when request has stream: false, OR for error responses (4xx/5xx).
     The body contains either a complete Message or an error object.
