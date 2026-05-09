@@ -8,11 +8,15 @@ Used by claude-binary-patcher (applies patches) and claude-version-manager
 (detects patch status). Adding a new patch: add a PatchDef to PATCHES.
 
 Binary Structure:
-    Claude Code is a Node.js SEA compiled to Mach-O arm64 (~190MB). The
-    minified JS bundle (~10MB) is duplicated in the ``__BUN`` segment from
-    2.1.0+, so each patch has 2 sites. Minified identifiers (2-4 chars)
-    change per build; string literals (flag names, JSX props) are stable
-    and serve as anchors.
+    Claude Code is a Node.js SEA compiled to Mach-O arm64 (~190-220MB).
+    Minified identifiers (2-4 chars) change per build; string literals
+    (flag names, JSX props) are stable and serve as anchors.
+
+    From 2.1.0 to 2.1.137, the minified JS bundle (~10MB) was duplicated
+    in the ``__BUN`` segment, so each patch had 2 sites. From 2.1.138+
+    the duplication was removed (the ``__BUN`` segment is gone) and each
+    patch has 1 site. ``scan_binary`` handles either count automatically
+    via ``data.find()``; no patcher logic depends on a fixed count.
 
 Same-Length Constraint:
     Old and new byte sequences MUST be the same length. Direct byte
@@ -334,6 +338,7 @@ Site Count Evolution::
     2.1.126   2            2                             2                2                —
     2.1.128   2            2                             0 (removed)      2                —
     2.1.131   2            2                             0 (removed)      2                —
+    2.1.138   1            1                             0 (removed)      1                —
 
 Empirical verification on 2.1.128 (2026-05-06)::
 
@@ -344,6 +349,49 @@ Empirical verification on 2.1.128 (2026-05-06)::
       original "Tool use rejected" bug no longer exists
 
 Version Log::
+
+    2.1.138 (2026-05-09)
+        Major architectural change: Anthropic removed the ``__BUN``
+        segment duplication. The minified JS bundle was duplicated
+        in ``__BUN`` from 2.1.0..2.1.137, giving each patch 2 sites.
+        In 2.1.138, ``__BUN`` is gone — the bundle lives once in
+        ``__TEXT``, the binary shrunk ~12 MB (217 → 205 MB), and
+        every patch now has 1 site. The patcher's ``data.find()``
+        handles either count automatically.
+
+        Five releases since 2.1.131 (2.1.132, 2.1.133, 2.1.136,
+        2.1.137, 2.1.138 — all GitHub-tagged, no stealth). The
+        2.1.136 changelog notes "Fixed MCP tool results being
+        invisible when the server returns content blocks", which
+        may be the same code path as ``mcp-array-content-to-string``;
+        empirical vanilla-vs-patched comparison still pending — if
+        upstream now renders correctly without the patch, the patch
+        is redundant and should be marked obsolete in a follow-up.
+
+        Patch updates:
+        - hook-ask-no-override: clean apply (anchor + bytes stable
+          since 2.1.109). 1 site.
+        - statusline: clean apply (anchor + bytes stable since
+          2.0.0). 1 site.
+        - mcp-array-content-to-string: 1 site, schema-build chain
+          changed from ``RD_(WcH(T))`` to ``Vf_(fnH(Y))`` (helper
+          renames + local var ``T``→``Y``); JSON.stringify wrapper
+          changed from ``EH`` to ``hH``.
+        - inject-searching-past-context-prompt: 1 site, accessor
+          renamed back ``G_`` → ``M_`` (continues to oscillate per
+          release). Function holding the gate is now ``DNH``.
+        - scratchpad: 1 site, function ``ve()`` renamed to
+          ``XHH()``, accessor ``G_`` → ``M_``. Anchor updated.
+        - show-subagent-prompt-tools-response: 1 site, every JSX
+          identifier minified again (``hv5``→``vu5``, ``O8``→``w8``,
+          ``G6``→``R6``, ``bw_``→``bj_``, ``N5_``→``XO_``,
+          ``Nf8``→``Z08``, ``SU``→``Mg``, ``t9H``→``F7H``,
+          ``Xf``→``EM``; local var ``J``→``j``). Strategy
+          unchanged: 4-site T→K substitution.
+        - write-session-summary: still obsolete
+          (``max_version='2.1.126'``).
+        - reject-show-comment: still obsolete
+          (``max_version='2.1.126'``).
 
     2.1.131 (2026-05-06)
         Routine release with bug fixes (VS Code activation, Mantle
@@ -646,10 +694,10 @@ PATCHES: Sequence[PatchDef] = (
         description='Render MCP tool results returning content arrays without structuredContent',
         kind=PatchKind.FIX,
         anchor=b'"contentArray"',
-        old=b'return{content:T,type:"contentArray",schema:RD_(WcH(T))}',
-        new=b'return{content:q!=="ide"?EH(T):T,type:"contentArray"}   ',
+        old=b'return{content:Y,type:"contentArray",schema:Vf_(fnH(Y))}',
+        new=b'return{content:q!=="ide"?hH(Y):Y,type:"contentArray"}   ',
         window=100,
-        min_version='2.1.131',
+        min_version='2.1.138',
     ),
     PatchDef(
         name='reject-show-comment',
@@ -675,10 +723,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FEATURE,
         anchor=b'coral_fern',
-        old=b'if(!G_("tengu_coral_fern",!1))return[]',
+        old=b'if(!M_("tengu_coral_fern",!1))return[]',
         new=b'if(0/*coral_fern_gate_check*/)return[]',
         window=80,
-        min_version='2.1.131',
+        min_version='2.1.138',
         required_setting=[
             RequiredSetting(
                 key='autoMemoryEnabled',
@@ -692,11 +740,11 @@ PATCHES: Sequence[PatchDef] = (
         name='scratchpad',
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
-        anchor=b'function ve(){return',
-        old=b'function ve(){return G_("tengu_scratch",!1)}',
-        new=b'function ve(){return!0/*scratchpad always*/}',
+        anchor=b'function XHH(){return',
+        old=b'function XHH(){return M_("tengu_scratch",!1)}',
+        new=b'function XHH(){return!0/*scratchpad always*/}',
         window=50,
-        min_version='2.1.131',
+        min_version='2.1.138',
     ),
     PatchDef(
         name='write-session-summary',
@@ -726,27 +774,27 @@ PATCHES: Sequence[PatchDef] = (
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})',
+        anchor=b'w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})',
         old=(
-            b'!1,T&&D&&O8.createElement(G6,null,O8.createElement(bw_,{prompt:D,theme:O})),'
-            b'T?O8.createElement(N5_,null,O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'T&&J&&J.length>0&&O8.createElement(G6,null,O8.createElement(Nf8,{content:J,theme:O})),'
-            b'O8.createElement(G6,{height:1},O8.createElement(SU,{message:X,lookups:t9H,addMargin:!1,tools:q,'
+            b'!1,T&&D&&w8.createElement(R6,null,w8.createElement(bj_,{prompt:D,theme:O})),'
+            b'T?w8.createElement(XO_,null,w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'T&&j&&j.length>0&&w8.createElement(R6,null,w8.createElement(Z08,{content:j,theme:O})),'
+            b'w8.createElement(R6,{height:1},w8.createElement(Mg,{message:X,lookups:F7H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!T&&O8.createElement(V,{dimColor:!0},"  ",O8.createElement(Xf,null)))'
+            b'!T&&w8.createElement(V,{dimColor:!0},"  ",w8.createElement(EM,null)))'
         ),
         new=(
-            b'!1,K&&D&&O8.createElement(G6,null,O8.createElement(bw_,{prompt:D,theme:O})),'
-            b'K?O8.createElement(N5_,null,O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'K&&J&&J.length>0&&O8.createElement(G6,null,O8.createElement(Nf8,{content:J,theme:O})),'
-            b'O8.createElement(G6,{height:1},O8.createElement(SU,{message:X,lookups:t9H,addMargin:!1,tools:q,'
+            b'!1,K&&D&&w8.createElement(R6,null,w8.createElement(bj_,{prompt:D,theme:O})),'
+            b'K?w8.createElement(XO_,null,w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'K&&j&&j.length>0&&w8.createElement(R6,null,w8.createElement(Z08,{content:j,theme:O})),'
+            b'w8.createElement(R6,{height:1},w8.createElement(Mg,{message:X,lookups:F7H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!K&&O8.createElement(V,{dimColor:!0},"  ",O8.createElement(Xf,null)))'
+            b'!K&&w8.createElement(V,{dimColor:!0},"  ",w8.createElement(EM,null)))'
         ),
         window=800,
-        min_version='2.1.131',
+        min_version='2.1.138',
     ),
     PatchDef(
         name='statusline',
