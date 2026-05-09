@@ -1,5 +1,4 @@
-"""
-Field markers for special serialization handling.
+"""Field markers for special serialization handling.
 
 PathMarker enables runtime discovery of filesystem path fields for cross-machine
 session transfer. Uses Annotated pattern (Pydantic v2 recommended approach).

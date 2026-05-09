@@ -1,5 +1,4 @@
-"""
-JSONL file writing for session clone/restore/delete operations.
+"""JSONL file writing for session clone/restore/delete operations.
 
 Extracted from clone.py and restore.py where it was duplicated identically.
 Handles serialization with slug and agent ID mapping application.

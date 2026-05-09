@@ -1,5 +1,4 @@
-"""
-Rate limit header schemas for Claude Code internal API.
+"""Rate limit header schemas for Claude Code internal API.
 
 Claude Code receives comprehensive rate limit information in response headers.
 This module provides schemas for parsing and extracting these headers.
@@ -36,8 +35,7 @@ RepresentativeClaim = Literal['five_hour', 'seven_day']
 
 
 class RateLimitWindow(StrictModel):
-    """
-    Rate limit status for a specific time window (5h or 7d).
+    """Rate limit status for a specific time window (5h or 7d).
 
     VALIDATION STATUS: VALIDATED
     Observed in response headers.
@@ -52,8 +50,7 @@ class RateLimitWindow(StrictModel):
 
 
 class UnifiedRateLimit(StrictModel):
-    """
-    Complete rate limit information extracted from response headers.
+    """Complete rate limit information extracted from response headers.
 
     VALIDATION STATUS: VALIDATED
     Observed in all /v1/messages response headers.
@@ -91,8 +88,7 @@ class UnifiedRateLimit(StrictModel):
 
     @classmethod
     def from_headers(cls, headers: Mapping[str, str]) -> UnifiedRateLimit:
-        """
-        Extract rate limit information from response headers.
+        """Extract rate limit information from response headers.
 
         Args:
             headers: Response headers dict (case-insensitive keys)
@@ -136,8 +132,7 @@ class UnifiedRateLimit(StrictModel):
 
     @classmethod
     def from_headers_safe(cls, headers: Mapping[str, str]) -> UnifiedRateLimit | None:
-        """
-        Extract rate limit information, returning None if headers are missing.
+        """Extract rate limit information, returning None if headers are missing.
 
         This is useful when processing non-Messages API responses that don't
         include rate limit headers.

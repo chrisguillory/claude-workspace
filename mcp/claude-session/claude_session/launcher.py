@@ -1,5 +1,4 @@
-"""
-Claude Code launcher utility.
+"""Claude Code launcher utility.
 
 Provides functionality to launch Claude Code with a specific session.
 """
@@ -16,8 +15,7 @@ __all__ = [
 
 
 def launch_claude_with_session(session_id: str, extra_args: Sequence[str]) -> None:
-    """
-    Launch Claude Code with --resume, replacing current process.
+    """Launch Claude Code with --resume, replacing current process.
 
     Uses os.execvp() for clean process handoff - the current process
     is replaced by Claude Code, so this function never returns.

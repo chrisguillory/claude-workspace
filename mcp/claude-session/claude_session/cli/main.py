@@ -1,5 +1,4 @@
-"""
-Command-line interface for claude-session.
+"""Command-line interface for claude-session.
 
 Provides commands to archive and restore Claude Code sessions.
 """
@@ -167,7 +166,7 @@ def archive(
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
-    """Archive a Claude Code session to local file or GitHub Gist.
+    r"""Archive a Claude Code session to local file or GitHub Gist.
 
     When run inside Claude Code, session ID is auto-detected if not provided.
     When output is omitted, defaults to uploading to a new GitHub Gist.
@@ -217,7 +216,7 @@ def restore(
     launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after restore')] = False,
     gist_token: Annotated[str | None, typer.Option('--gist-token', help='GitHub token for private gists')] = None,
 ) -> None:
-    """Restore a Claude Code session from local file or GitHub Gist.
+    r"""Restore a Claude Code session from local file or GitHub Gist.
 
     By default, restore creates a new session ID (UUIDv7) for the restored session.
     Use --in-place to restore with the original session ID for verbatim restoration.
@@ -249,7 +248,7 @@ def clone(
     no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
     launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after clone')] = False,
 ) -> None:
-    """Clone a session directly (no archive file needed).
+    r"""Clone a session directly (no archive file needed).
 
     When run inside Claude Code, session ID is auto-detected if not provided.
 
@@ -307,7 +306,7 @@ def delete(
         ),
     ] = None,
 ) -> None:
-    """Delete session artifacts with auto-backup.
+    r"""Delete session artifacts with auto-backup.
 
     By default, only cloned/restored sessions (UUIDv7) can be deleted.
     Native Claude sessions (UUIDv4) require --force.
@@ -377,7 +376,7 @@ def move(
         bool, typer.Option('--launch', '-l', help='Launch Claude Code in target project after move')
     ] = False,
 ) -> None:
-    """Move a session from one project to another.
+    r"""Move a session from one project to another.
 
     Relocates project-specific artifacts (JSONL, tool results, session memory)
     to the target project. Path references are translated. Session ID is preserved.
@@ -444,7 +443,7 @@ def lineage(
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
-    """Show the lineage (parent-child relationships) for a session.
+    r"""Show the lineage (parent-child relationships) for a session.
 
     When run inside Claude Code without a session ID, auto-detects the current session.
 
@@ -474,7 +473,7 @@ def info(
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
-    """Display comprehensive information about a session.
+    r"""Display comprehensive information about a session.
 
     Shows session context including ID, project path, file locations,
     origin (how it was created), state, and characteristics.
@@ -597,7 +596,6 @@ async def _archive_async(
     source_project: Path | None,
 ) -> None:
     """Async implementation of archive command."""
-
     # Find the session
     discovery = SessionDiscoveryService()
     project_filter = _encode_project_filter(source_project)
@@ -713,7 +711,6 @@ async def _restore_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of restore command."""
-
     # Check if it's a Gist URL
     if archive.startswith('gist://'):
         gist_id = archive[7:]
@@ -857,7 +854,6 @@ async def _clone_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of clone command."""
-
     # Determine target project path
     if target_project:
         project_path = target_project.resolve()
@@ -927,7 +923,6 @@ async def _delete_async(
     delete_cross_session_artifacts: bool | None,
 ) -> None:
     """Async implementation of delete command."""
-
     # Resolve session ID prefix to full ID
     # When --source-project is provided, use it to disambiguate discovery
     info_service = SessionInfoService()
@@ -1030,7 +1025,6 @@ async def _move_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of move command."""
-
     # Resolve session ID prefix to full ID
     info_service = SessionInfoService()
     project_filter = _encode_project_filter(source_project)

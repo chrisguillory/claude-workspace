@@ -503,7 +503,7 @@ def pipeline(
     on_error: Annotated[OnErrorPolicy, typer.Option('--on-error', help='Error policy.')] = 'stop',
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    """Execute a batch pipeline of tool calls.
+    r"""Execute a batch pipeline of tool calls.
 
     Accepts JSON from stdin or --file. Two formats supported:
 

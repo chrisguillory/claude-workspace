@@ -1,6 +1,5 @@
 #!/usr/bin/env -S uv run --no-project
-"""
-Intercept Claude Code API traffic via mitmproxy.
+"""Intercept Claude Code API traffic via mitmproxy.
 
 PURE CAPTURE - saves all traffic data to JSON files for later analysis.
 No filtering, no extraction, no analysis at capture time.
@@ -491,8 +490,7 @@ def _save_json_atomic(filename: Path, data: Mapping[str, Any]) -> bool:
 
 
 def _parse_sse_events(content: bytes) -> Sequence[Mapping[str, Any]]:
-    """
-    Parse Server-Sent Events into structured data.
+    """Parse Server-Sent Events into structured data.
 
     Follows WHATWG HTML § 9.2.5:
     - Handles CR, LF, CRLF line endings

@@ -76,13 +76,13 @@ def encode_project_path(path: Path | str) -> str:
         Encoded string for use as directory name in ~/.claude/projects/
 
     Examples:
-        >>> encode_project_path("/Users/chris/project")
+        >>> encode_project_path('/Users/chris/project')
         '-Users-chris-project'
 
-        >>> encode_project_path("/Users/chris/Mobile Documents/com~apple~CloudDocs")
+        >>> encode_project_path('/Users/chris/Mobile Documents/com~apple~CloudDocs')
         '-Users-chris-Mobile-Documents-com-apple-CloudDocs'
 
-        >>> encode_project_path("/Users/chris/my_project.app")
+        >>> encode_project_path('/Users/chris/my_project.app')
         '-Users-chris-my-project-app'
     """
     name = str(path) if isinstance(path, Path) else path
@@ -149,7 +149,7 @@ def get_claude_config_home_dir() -> Path:
 
 
 def get_claude_exec_launch_dir() -> Path:
-    """Return the project root that claude-exec froze at session launch time.
+    r"""Return the project root that claude-exec froze at session launch time.
 
     The canonical source of truth for hooks and scripts that need the session's
     project root. Always points to the active worktree (if in one) or the main

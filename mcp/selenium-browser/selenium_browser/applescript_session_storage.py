@@ -298,7 +298,7 @@ end tell
 
 
 def _get_all_tab_urls() -> Sequence[tuple[int, int, str]]:
-    """Get URLs of all Chrome tabs: [(window_index, tab_index, url), ...]
+    """Get URLs of all Chrome tabs: [(window_index, tab_index, url), ...].
 
     Uses AppleScript to enumerate tabs without executing JavaScript.
     This is fast since it only reads tab properties.

@@ -1,5 +1,4 @@
-"""
-Infrastructure-layer types for the mitmproxy system.
+"""Infrastructure-layer types for the mitmproxy system.
 
 This module contains fully-typed captures representing the proxy
 infrastructure itself, not the HTTP traffic flowing through it.
@@ -49,8 +48,7 @@ class ProxyErrorDetail(StrictModel):
 
 
 class ProxyErrorCapture(StrictModel):
-    """
-    Capture of mitmproxy infrastructure errors.
+    """Capture of mitmproxy infrastructure errors.
 
     These represent failures in the proxy system itself, not in
     the application traffic being proxied. Examples include:

@@ -1,5 +1,4 @@
-"""
-Base classes and type markers for Claude Code internal API schemas.
+"""Base classes and type markers for Claude Code internal API schemas.
 
 This module provides:
 - StrictModel: API-layer strict model (inherits from BaseStrictModel)
@@ -28,8 +27,7 @@ __all__ = [
 
 
 class StrictModel(BaseStrictModel):
-    """
-    API-layer strict model.
+    """API-layer strict model.
 
     Inherits from BaseStrictModel (extra='forbid', strict=True, frozen=True).
     Domain-specific customization can be added here if needed.
@@ -40,8 +38,7 @@ class StrictModel(BaseStrictModel):
 
 
 class EmptyBody(StrictModel):
-    """
-    Marker type for empty HTTP bodies at the capture layer.
+    """Marker type for empty HTTP bodies at the capture layer.
 
     This structure is produced by intercept_traffic.py's _parse_body()
     when HTTP content is empty (size=0). It's an infrastructure convention
@@ -88,8 +85,7 @@ ValidationStatus = Literal['validated', 'inferred', 'reference']
 
 @dataclass(frozen=True)
 class FromSession:
-    """
-    Marks a field as corresponding to a session schema field.
+    """Marks a field as corresponding to a session schema field.
 
     Use in Annotated[] to document the relationship between API types
     and session types (what Claude Code persists to JSONL files).
@@ -113,8 +109,7 @@ class FromSession:
 
 @dataclass(frozen=True)
 class FromSdk:
-    """
-    Marks a field as corresponding to an Anthropic SDK type field.
+    """Marks a field as corresponding to an Anthropic SDK type field.
 
     Use in Annotated[] to document the relationship between our API types
     and the official anthropic-sdk-python types (reference only).

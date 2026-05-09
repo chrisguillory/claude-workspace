@@ -1,7 +1,6 @@
 #!/usr/bin/env -S uv run
 
-"""
-Validate Pydantic models against all Claude Code session files.
+"""Validate Pydantic models against all Claude Code session files.
 
 This script finds all .jsonl session files in ~/.claude/projects/*/ and validates
 them against the Pydantic models to ensure complete schema coverage.
@@ -160,8 +159,7 @@ class TotalStats(TypedDict):
 
 
 def normalize_path(loc: Sequence[str | int]) -> str:
-    """
-    Normalize a Pydantic error location path.
+    """Normalize a Pydantic error location path.
 
     Strips out Union[X, Y] and model name annotations that Pydantic adds
     for discriminated unions, producing a cleaner path for display.
@@ -196,8 +194,7 @@ def normalize_path(loc: Sequence[str | int]) -> str:
 
 
 def generalize_path(loc: Sequence[str | int]) -> str:
-    """
-    Generalize a path by replacing numeric indices with *.
+    """Generalize a path by replacing numeric indices with *.
 
     Used for grouping errors that occur at different array positions.
 
@@ -218,8 +215,7 @@ def generalize_path(loc: Sequence[str | int]) -> str:
 def extract_value_at_path(
     data: Mapping[str, Any], loc: Sequence[str | int]
 ) -> Any:  # strict_typing_linter.py: loose-typing — heterogeneous validation error values
-    """
-    Extract the value at a given path in a nested structure.
+    """Extract the value at a given path in a nested structure.
 
     Handles Pydantic's path annotations gracefully:
     - Skips Union[...] annotations
@@ -279,8 +275,7 @@ def extract_value_at_path(
 def format_value_shape(
     value: Any,
 ) -> str:  # strict_typing_linter.py: loose-typing — heterogeneous validation error values
-    """
-    Describe the shape of a value for grouping and display.
+    """Describe the shape of a value for grouping and display.
 
     Returns strings like:
         "object with keys [a, b, c]"
@@ -317,8 +312,7 @@ def format_value_shape(
 def truncate_value(
     value: Any, full: bool = False
 ) -> str:  # strict_typing_linter.py: loose-typing — heterogeneous validation error values
-    """
-    Format a value for display, with optional truncation.
+    """Format a value for display, with optional truncation.
 
     Args:
         value: The value to format
@@ -380,8 +374,7 @@ def truncate_value(
 
 
 def compute_grouping_key(error: EnrichedFieldError) -> tuple[str, str, str]:
-    """
-    Compute the grouping key for an error.
+    """Compute the grouping key for an error.
 
     Groups by: (error_type, generalized_path, value_shape)
     """
@@ -393,8 +386,7 @@ def compute_grouping_key(error: EnrichedFieldError) -> tuple[str, str, str]:
 
 
 def group_errors(errors: Sequence[EnrichedFieldError]) -> Sequence[ErrorGroup]:
-    """
-    Group errors by their pattern.
+    """Group errors by their pattern.
 
     Returns groups sorted by count (most frequent first).
     """
@@ -454,8 +446,7 @@ def find_fallbacks(
     path: str = '',
     tool_name: str | None = None,
 ) -> Sequence[tuple[str, str, str | None, Mapping[str, str]]]:
-    """
-    Recursively find all PermissiveModel instances in a validated record.
+    """Recursively find all PermissiveModel instances in a validated record.
 
     This detects where typed unions fell back to permissive fallback types
     (MCPToolInput, MCPToolResult).
@@ -513,8 +504,7 @@ def resolve_tool_name_for_result(
     record: UserRecord,
     tool_use_map: Mapping[str, str],
 ) -> str | None:
-    """
-    Look up tool name for a UserRecord's tool result.
+    """Look up tool name for a UserRecord's tool result.
 
     Uses sourceToolUseID or scans ToolResultContent blocks to find the
     corresponding tool_use_id, then looks it up in the map.
@@ -784,7 +774,6 @@ def format_error_group(group: ErrorGroup, full: bool = False) -> str:
 
 def print_errors_mode(all_results: Sequence[FileValidationResult], full: bool = False) -> None:
     """Print output in --errors mode: grouped errors first, summary at end."""
-
     # Collect all enriched errors
     all_errors: list[EnrichedFieldError] = []
     for result in all_results:
@@ -834,7 +823,6 @@ def print_summary_mode(
     total_stats: TotalStats,
 ) -> None:
     """Print output in summary mode (default): stats first, brief error list."""
-
     print('SUMMARY')
     print('-' * 80)
     print(f'Total files processed: {total_stats["files"]}')

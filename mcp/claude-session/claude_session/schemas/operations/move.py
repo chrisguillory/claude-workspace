@@ -1,5 +1,4 @@
-"""
-Move operation schemas.
+"""Move operation schemas.
 
 Models for session move results.
 """

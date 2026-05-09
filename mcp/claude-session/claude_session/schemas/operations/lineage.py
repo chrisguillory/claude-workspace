@@ -1,5 +1,4 @@
-"""
-Lineage operation schemas.
+"""Lineage operation schemas.
 
 Models for session lineage tracking (parent-child relationships).
 Extracted from services/lineage.py for reuse.

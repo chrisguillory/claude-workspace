@@ -1,5 +1,4 @@
-"""
-HTTP traffic capture modeling with type-safe validation.
+"""HTTP traffic capture modeling with type-safe validation.
 
 This module provides Pydantic v2 models for capturing, validating, and
 analyzing HTTP traffic from the Claude Code observability platform.

@@ -5,8 +5,7 @@
 #   "httpx",
 # ]
 # ///
-"""
-HTTP client for python-interpreter MCP server.
+"""HTTP client for python-interpreter MCP server.
 
 Connects to the MCP server via Unix socket.
 

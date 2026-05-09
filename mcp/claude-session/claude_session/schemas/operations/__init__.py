@@ -1,5 +1,4 @@
-"""
-Operation schemas for service results.
+"""Operation schemas for service results.
 
 This package contains Pydantic models for operation results returned by services.
 These are extracted from service files to enable reuse and cleaner separation.

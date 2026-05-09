@@ -10,8 +10,7 @@
 # cc_lib = { path = "../cc-lib/", editable = true }
 # ///
 
-"""
-Claude Code installation diagnostics and introspection.
+"""Claude Code installation diagnostics and introspection.
 
 Reads ALL available configuration, authentication, and session data
 from a Claude Code installation and presents a comprehensive diagnostic report.

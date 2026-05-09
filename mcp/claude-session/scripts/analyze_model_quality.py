@@ -10,8 +10,7 @@
 # cc_lib = { path = "../../../cc-lib/", editable = true }
 # ///
 
-"""
-Comprehensive model quality analysis.
+"""Comprehensive model quality analysis.
 
 This script analyzes the models.py file to identify:
 1. All path fields for translation completeness
@@ -35,7 +34,6 @@ def analyze_actual_values(
     session_files: Sequence[Path],
 ) -> tuple[Mapping[str, Counter[str]], Mapping[str, Set[str]]]:
     """Analyze actual values from real session data."""
-
     analysis: dict[str, Counter[str]] = {
         'stop_reasons': Counter(),
         'user_types': Counter(),

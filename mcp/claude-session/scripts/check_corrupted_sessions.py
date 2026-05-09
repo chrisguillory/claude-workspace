@@ -9,8 +9,7 @@
 # cc_lib = { path = "../../../cc-lib/", editable = true }
 # ///
 
-"""
-Check for corrupted JSONL session files in ~/.claude/projects.
+"""Check for corrupted JSONL session files in ~/.claude/projects.
 
 This script validates that all session files contain valid JSON records.
 Useful for detecting file corruption before running the MCP server.
@@ -26,8 +25,7 @@ from cc_lib.utils import get_claude_config_home_dir
 
 
 def check_file(jsonl_file: Path) -> tuple[bool, int, str | None]:
-    """
-    Check a single JSONL file for corruption.
+    """Check a single JSONL file for corruption.
 
     Returns:
         (is_valid, total_lines, error_message)

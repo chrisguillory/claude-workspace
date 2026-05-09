@@ -15,15 +15,17 @@ auto-install via uv) but takes heredoc input that renders as plain text in
 approval dialogs. See ``~/claude-workspace/CLAUDE.md:749-755`` for the shape.
 
 Scoping: this hook assumes it is only invoked for its target tool. Pin the
-matcher in ``~/.claude/settings.json`` so it doesn't run for anything else::
+matcher in ``~/.claude/settings.json`` so it doesn't run for anything else:
 
-    {
-      "matcher": "^mcp__python-interpreter__execute$",
-      "hooks": [{
-        "type": "command",
-        "command": "/Users/chris/claude-workspace/hooks/deny-mcp-python-interpreter-execute.py"
-      }]
-    }
+```json
+{
+  "matcher": "^mcp__python-interpreter__execute$",
+  "hooks": [{
+    "type": "command",
+    "command": "/Users/chris/claude-workspace/hooks/deny-mcp-python-interpreter-execute.py"
+  }]
+}
+```
 
 Hook docs: https://code.claude.com/docs/en/hooks#pretooluse
 """

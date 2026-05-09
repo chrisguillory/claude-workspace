@@ -1,4 +1,4 @@
-"""Allow running as: python -m document_search.dashboard"""
+"""Allow running as: python -m document_search.dashboard."""
 
 from __future__ import annotations
 

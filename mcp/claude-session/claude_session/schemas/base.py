@@ -1,5 +1,4 @@
-"""
-Shared Pydantic base model for strict validation.
+"""Shared Pydantic base model for strict validation.
 
 All Pydantic schema models in the application should inherit from StrictModel.
 This module re-exports BaseStrictModel as StrictModel for the operations/ package.

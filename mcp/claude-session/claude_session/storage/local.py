@@ -1,5 +1,4 @@
-"""
-Local filesystem storage backend.
+"""Local filesystem storage backend.
 
 Implements StorageBackend protocol for local filesystem storage.
 """
@@ -17,8 +16,7 @@ class LocalFileSystemStorage:
     """Local filesystem storage backend."""
 
     def __init__(self, base_path: pathlib.Path) -> None:
-        """
-        Initialize local filesystem storage.
+        """Initialize local filesystem storage.
 
         Args:
             base_path: Base directory for storing archives
@@ -35,8 +33,7 @@ class LocalFileSystemStorage:
         self.base_path = base_path
 
     async def save(self, filename: str, data: bytes) -> str:
-        """
-        Save archive to local filesystem.
+        """Save archive to local filesystem.
 
         Args:
             filename: Name of archive file
@@ -50,8 +47,7 @@ class LocalFileSystemStorage:
         return str(file_path.absolute())
 
     async def exists(self, filename: str) -> bool:
-        """
-        Check if archive exists in local filesystem.
+        """Check if archive exists in local filesystem.
 
         Args:
             filename: Name of archive file
@@ -63,8 +59,7 @@ class LocalFileSystemStorage:
         return file_path.exists()
 
     async def load(self, filename: str) -> bytes:
-        """
-        Load archive from local filesystem.
+        """Load archive from local filesystem.
 
         Args:
             filename: Name of archive file

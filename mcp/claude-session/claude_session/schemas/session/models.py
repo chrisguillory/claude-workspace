@@ -1,5 +1,4 @@
-"""
-Pydantic models for Claude Code session JSONL records.
+"""Pydantic models for Claude Code session JSONL records.
 
 This module defines strict types for all record types found in Claude Code session files.
 Uses discriminated unions for type-safe parsing of heterogeneous JSONL data.
@@ -1206,8 +1205,8 @@ class ToolUseContent(StrictModel):
     @pydantic.field_validator('input', mode='after')
     @classmethod
     def validate_mcp_tool_fallback(cls, v: ToolInput, info: pydantic.ValidationInfo) -> ToolInput:
-        """
-        Enforce that only MCP tools (starting with 'mcp__') can use MCPToolInput fallback.
+        """Enforce that only MCP tools (starting with 'mcp__') can use MCPToolInput fallback.
+
         All Claude Code built-in tools must have typed models that successfully validate.
 
         This catches both:

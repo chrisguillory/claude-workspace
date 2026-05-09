@@ -1,5 +1,4 @@
-"""
-Artifact handling modules for session clone/archive/restore/delete operations.
+"""Artifact handling modules for session clone/archive/restore/delete operations.
 
 This package contains modules for collecting, transforming, and writing
 session-specific artifacts like tool results, todos, plan files, etc.
