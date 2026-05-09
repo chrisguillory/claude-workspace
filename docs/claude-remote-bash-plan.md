@@ -660,7 +660,7 @@ name = "claude-remote-bash"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
-    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
+    "cc-lib",
     "fastmcp>=2.13.0",
     "typer>=0.20.0",
     "zeroconf>=0.140.0",

@@ -8,7 +8,7 @@ dependencies = [
     "fastmcp>=2.12.5",
     "filelock",
     "httpx>=0.28.1",
-    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
+    "cc-lib",
     "pandas",
     "pydantic",
     "uvicorn",
