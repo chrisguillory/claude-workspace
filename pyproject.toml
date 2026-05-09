@@ -80,6 +80,7 @@ ignore = [
     "D107",    # missing __init__ docstring — cultural decision deferred
     "D203",    # blank-line-before-class — using D211 (no blank) instead
     "D213",    # multi-line-summary-second-line — using D212 (first-line) instead
+    "D301",    # use r""" — auto-fix mangles Click \b markers; r""" only when Python lexer needs it (rare)
     "D400",    # first-line-ends-with-period — using D415 (period or ?/!) instead
     "D401",    # TODO: investigate first-line imperative mood — convention is opinionated; 67 violations
     "D413",    # missing blank line after last section — low value

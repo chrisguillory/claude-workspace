@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-r"""Regression tests for Unicode-handling parity with fastembed.
+"""Regression tests for Unicode-handling parity with fastembed.
 
 Covers four divergences found by an audit after v0.1.1 (collision fix) shipped:
 

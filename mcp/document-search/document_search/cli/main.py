@@ -109,7 +109,7 @@ def dashboard_open(
         Literal['default', 'safari', 'chromium'], typer.Option('--browser', '-b', help='Browser to open with.')
     ] = 'default',
 ) -> None:
-    r"""Open dashboard in browser.
+    """Open dashboard in browser.
 
     \b
     Examples:
@@ -168,7 +168,7 @@ def dashboard_status(
 @dashboard_app.command('url')
 @error_boundary
 def dashboard_url() -> None:
-    r"""Print dashboard URL (for scripting).
+    """Print dashboard URL (for scripting).
 
     \b
     Examples:
@@ -222,7 +222,7 @@ def info(
     path: Annotated[str | None, typer.Option('--path', '-p', help='Scope to path ("**" for global).')] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    r"""Show collection info.
+    """Show collection info.
 
     \b
     Examples:
@@ -248,7 +248,7 @@ def list_docs(
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max files to return.')] = 50,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    r"""List indexed documents.
+    """List indexed documents.
 
     \b
     Examples:
@@ -278,7 +278,7 @@ def clear(
     clear_cache: Annotated[bool, typer.Option('--clear-cache', help='Also delete cached embeddings.')] = False,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    r"""Clear documents from index.
+    """Clear documents from index.
 
     \b
     Examples:
@@ -320,7 +320,7 @@ def search(
     ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    r"""Search documents.
+    """Search documents.
 
     \b
     Examples:
@@ -373,7 +373,7 @@ def index(
     ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    r"""Index documents for search.
+    """Index documents for search.
 
     \b
     Examples:

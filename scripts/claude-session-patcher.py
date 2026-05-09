@@ -173,7 +173,7 @@ def scan(
     ),
     json_output: bool = typer.Option(False, '--json', help='Machine-readable JSON output'),
 ) -> None:
-    r"""Scan all sessions and print summary.
+    """Scan all sessions and print summary.
 
     \b
     Examples:
@@ -235,7 +235,7 @@ def check(
     file: Path | None = typer.Option(None, '--file', '-f', help='Direct path to session JSONL'),
     json_output: bool = typer.Option(False, '--json', help='Machine-readable JSON output'),
 ) -> None:
-    r"""Detailed diagnosis with patch documentation.
+    """Detailed diagnosis with patch documentation.
 
     \b
     Shows per-patch status, affected lines, and fix approach
@@ -272,7 +272,7 @@ def fix(
     all_: bool = typer.Option(False, '--all', help='Fix all fixable sessions'),
     dry_run: bool = typer.Option(False, '--dry-run', '-n', help='Show what would change'),
 ) -> None:
-    r"""Apply patches with backup, verify, rollback on failure.
+    """Apply patches with backup, verify, rollback on failure.
 
     \b
     Rewires are applied first (modify parentUuid in place), then
@@ -354,7 +354,7 @@ def restore(
         help='Discard appended content; required when the live session has been modified since backup',
     ),
 ) -> None:
-    r"""Restore a session from backup.
+    """Restore a session from backup.
 
     \b
     Searches both patcher-backups and legacy chain-backups directories.

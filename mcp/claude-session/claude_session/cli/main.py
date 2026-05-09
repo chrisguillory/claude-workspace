@@ -166,7 +166,7 @@ def archive(
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
-    r"""Archive a Claude Code session to local file or GitHub Gist.
+    """Archive a Claude Code session to local file or GitHub Gist.
 
     When run inside Claude Code, session ID is auto-detected if not provided.
     When output is omitted, defaults to uploading to a new GitHub Gist.
@@ -216,7 +216,7 @@ def restore(
     launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after restore')] = False,
     gist_token: Annotated[str | None, typer.Option('--gist-token', help='GitHub token for private gists')] = None,
 ) -> None:
-    r"""Restore a Claude Code session from local file or GitHub Gist.
+    """Restore a Claude Code session from local file or GitHub Gist.
 
     By default, restore creates a new session ID (UUIDv7) for the restored session.
     Use --in-place to restore with the original session ID for verbatim restoration.
@@ -248,7 +248,7 @@ def clone(
     no_translate: Annotated[bool, typer.Option('--no-translate', help="Don't translate file paths")] = False,
     launch: Annotated[bool, typer.Option('--launch', '-l', help='Launch Claude Code after clone')] = False,
 ) -> None:
-    r"""Clone a session directly (no archive file needed).
+    """Clone a session directly (no archive file needed).
 
     When run inside Claude Code, session ID is auto-detected if not provided.
 
@@ -306,7 +306,7 @@ def delete(
         ),
     ] = None,
 ) -> None:
-    r"""Delete session artifacts with auto-backup.
+    """Delete session artifacts with auto-backup.
 
     By default, only cloned/restored sessions (UUIDv7) can be deleted.
     Native Claude sessions (UUIDv4) require --force.
@@ -376,7 +376,7 @@ def move(
         bool, typer.Option('--launch', '-l', help='Launch Claude Code in target project after move')
     ] = False,
 ) -> None:
-    r"""Move a session from one project to another.
+    """Move a session from one project to another.
 
     Relocates project-specific artifacts (JSONL, tool results, session memory)
     to the target project. Path references are translated. Session ID is preserved.
@@ -443,7 +443,7 @@ def lineage(
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
-    r"""Show the lineage (parent-child relationships) for a session.
+    """Show the lineage (parent-child relationships) for a session.
 
     When run inside Claude Code without a session ID, auto-detects the current session.
 
@@ -473,7 +473,7 @@ def info(
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
 ) -> None:
-    r"""Display comprehensive information about a session.
+    """Display comprehensive information about a session.
 
     Shows session context including ID, project path, file locations,
     origin (how it was created), state, and characteristics.

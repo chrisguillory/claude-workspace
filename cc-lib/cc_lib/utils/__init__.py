@@ -149,7 +149,7 @@ def get_claude_config_home_dir() -> Path:
 
 
 def get_claude_exec_launch_dir() -> Path:
-    r"""Return the project root that claude-exec froze at session launch time.
+    """Return the project root that claude-exec froze at session launch time.
 
     The canonical source of truth for hooks and scripts that need the session's
     project root. Always points to the active worktree (if in one) or the main

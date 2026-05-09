@@ -106,7 +106,7 @@ def cli_list(
     remote: bool = typer.Option(False, '--remote', '-r', help='Query npm for all available versions'),
     last: int = typer.Option(20, '--last', '-n', help='Show last N versions (--remote only)'),
 ) -> None:
-    r"""List installed versions. Use --remote to see all available.
+    """List installed versions. Use --remote to see all available.
 
     Local mode shows binaries in ~/.local/share/claude/versions/ with
     signature and patch status from Mach-O header + manifest detection.
@@ -296,7 +296,7 @@ def cli_run(
         None, help='Arguments to pass to claude'
     ),  # strict_typing_linter.py: mutable-type — typer requires list
 ) -> None:
-    r"""Run a specific Claude Code version (fetches if needed).
+    """Run a specific Claude Code version (fetches if needed).
 
     Replaces the current process via execvp — the launched Claude Code
     inherits the terminal directly for interactive use with the statusline.

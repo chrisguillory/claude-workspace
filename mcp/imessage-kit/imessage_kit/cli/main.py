@@ -43,7 +43,7 @@ def _configure_logging(
 @app.command('diagnose', rich_help_panel='Diagnostics')
 @error_boundary
 def diagnose() -> None:
-    r"""Check FDA, DB access, contacts, and macOS version.
+    """Check FDA, DB access, contacts, and macOS version.
 
     \b
     Always works, even without Full Disk Access — reports exactly what's wrong.
@@ -79,7 +79,7 @@ def get_chat_thread(
     thread_originator_guid: Annotated[str, typer.Argument(help='GUID of the original message')],
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max replies plus originator')] = 50,
 ) -> None:
-    r"""Get an inline reply thread by the originating message's GUID.
+    """Get an inline reply thread by the originating message's GUID.
 
     \b
     Returns the originator plus every message whose thread_originator_guid
@@ -99,7 +99,7 @@ def get_messages(
         bool | None, typer.Option('--has-attachment/--no-attachment', help='Filter by attachment')
     ] = None,
 ) -> None:
-    r"""Get messages from a chat by handle.
+    """Get messages from a chat by handle.
 
     \b
     Examples:
@@ -125,7 +125,7 @@ def search(
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max results')] = 10,
     handle: Annotated[str | None, typer.Option('--handle', help='Scope to chats with this handle')] = None,
 ) -> None:
-    r"""Search messages across all chats.
+    """Search messages across all chats.
 
     \b
     Two-pass search: SQL LIKE on text column, then parses attributedBody
@@ -155,7 +155,7 @@ def get_attachment(
         AttachmentMode, typer.Option('--mode', help="'view' (base64 inline) or 'save' (temp file path)")
     ] = 'save',
 ) -> None:
-    r"""Retrieve an attachment by ID.
+    """Retrieve an attachment by ID.
 
     \b
     --mode view: base64-encoded bytes (HEIC auto-converted to JPEG; 10MB inline cap)
@@ -183,7 +183,7 @@ def send(
         typer.Option('--attachment', '-a', help='Attach file (repeatable)'),
     ] = None,
 ) -> None:
-    r"""Send a message and/or attachments via AppleScript; polls chat.db for delivery status.
+    """Send a message and/or attachments via AppleScript; polls chat.db for delivery status.
 
     \b
     Default is preview — add --confirm to actually dispatch.
@@ -219,7 +219,7 @@ def lookup_contact(
         typer.Option('--match-mode', help='Name-matching strictness'),
     ] = 'exact_or_substring',
 ) -> None:
-    r"""Search macOS AddressBook for a contact.
+    """Search macOS AddressBook for a contact.
 
     \b
     Default: returns contacts deduplicated across all AddressBook sync

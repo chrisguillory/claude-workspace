@@ -19,11 +19,15 @@ matcher in ``~/.claude/settings.json`` so it doesn't run for anything else:
 
 ```json
 {
-  "matcher": "^mcp__python-interpreter__execute$",
-  "hooks": [{
-    "type": "command",
-    "command": "/Users/chris/claude-workspace/hooks/deny-mcp-python-interpreter-execute.py"
-  }]
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "^mcp__python-interpreter__execute$",
+      "hooks": [{
+        "type": "command",
+        "command": "/Users/chris/claude-workspace/hooks/deny-mcp-python-interpreter-execute.py"
+      }]
+    }]
+  }
 }
 ```
 

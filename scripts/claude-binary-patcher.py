@@ -144,7 +144,7 @@ def apply(
     all_: bool = typer.Option(False, '--all', help='Apply all patches'),
     restart: bool = typer.Option(False, '--restart', help='Kill Claude Code and copy resume command to clipboard'),
 ) -> None:
-    r"""Apply patches. Default (no names/flags): fixes only.
+    """Apply patches. Default (no names/flags): fixes only.
 
     \b
     Examples:
@@ -186,7 +186,7 @@ def check(
     tweaks: bool = typer.Option(False, '--tweaks', help='Check tweak patches only'),
     all_: bool = typer.Option(False, '--all', help='Check all patches'),
 ) -> None:
-    r"""Dry run — show per-patch status. Default: fixes only.
+    """Dry run — show per-patch status. Default: fixes only.
 
     \b
     Examples:

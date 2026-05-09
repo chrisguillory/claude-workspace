@@ -1,4 +1,4 @@
-r"""External interpreter driver script.
+"""External interpreter driver script.
 
 This script is injected into external interpreter subprocesses to provide
 a communication bridge with the MCP server. It speaks a length-prefixed
