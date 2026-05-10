@@ -300,9 +300,9 @@ def clear(
         document-search clear /old/docs /more/docs -c my-collection
     """
     resolved = _resolve_collection(collection)
-    scope_str = ', '.join(paths)
-    typer.confirm(f'Clear documents from {resolved} (paths: {scope_str})?', abort=True)
-    asyncio.run(_clear_async(resolved, paths, clear_cache, format))
+    resolved_paths = resolve_search_paths(paths, scope_hint='entire collection')
+    typer.confirm(f'Clear documents from {resolved} (paths: {", ".join(resolved_paths)})?', abort=True)
+    asyncio.run(_clear_async(resolved, resolved_paths, clear_cache, format))
 
 
 # -- Commands: full-stack tier --
@@ -562,9 +562,7 @@ async def _clear_async(
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        resolved_paths = resolve_search_paths(paths, scope_hint='entire collection')
-
-        if any(p == '**' for p in resolved_paths):
+        if any(p == '**' for p in paths):
             if clear_cache:
                 total_invalidated = 0
                 async for index_key in ctx.redis.scan_iter(match='embed-idx:file:*'):
@@ -581,7 +579,7 @@ async def _clear_async(
         else:
             total_files = 0
             total_chunks = 0
-            for resolved_path in resolved_paths:
+            for resolved_path in paths:
                 if clear_cache:
                     prefix = resolved_path
                     if prefix and not prefix.endswith('/'):
@@ -609,7 +607,7 @@ async def _clear_async(
                     total_files += len(files_under)
                     total_chunks += len(all_chunk_ids)
 
-            result = ClearResult(files_removed=total_files, chunks_removed=total_chunks, paths=resolved_paths)
+            result = ClearResult(files_removed=total_files, chunks_removed=total_chunks, paths=paths)
 
         if format == 'json':
             typer.echo(result.model_dump_json(indent=2))
