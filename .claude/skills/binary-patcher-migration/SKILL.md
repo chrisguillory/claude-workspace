@@ -61,6 +61,18 @@ git checkout -b feat/binary-patches-$ARGUMENTS
 
 Stealth releases: proceed with extra caution (Anthropic may pull the build — 2.1.127 was apparently a failed kill build). If user prefers stability, pin to the latest tagged version instead.
 
+**Read the changelog with patch obsoletion in mind.** Watch for entries that match the bug a current patch was created to fix — Anthropic shipping the upstream fix means the patch may now be redundant. Concrete examples:
+- 2.1.128: "rejection rendering changed to silent" → made `reject-show-comment` a no-op
+- 2.1.136: "Fixed MCP tool results being invisible when the server returns content blocks" → made `mcp-array-content-to-string` redundant
+
+When a changelog line lights up a patch like this, flag it for the Phase 3 vanilla-vs-patched comparison. Don't pre-decide — verify empirically — but the changelog signal saves you from "why is this patch silently doing nothing useful" debugging later.
+
+**Worktree workflow.** If you work in a `git worktree` instead of a regular branch, the installed `claude-binary-patcher` launcher hardcodes the main tree's `cc-lib` path and won't pick up your worktree edits. Run the script directly from the worktree instead:
+
+```bash
+uv run --no-project --script ~/claude-workspace/.claude/worktrees/<wt>/scripts/claude-binary-patcher.py check --all
+```
+
 ## Phase 1: Status check
 
 ```bash
@@ -128,13 +140,13 @@ When lengths differ, pad to match:
 - Comment block extension: `if(!G_("tengu_coral_fern",!1))return[]` → `if(0/*coral_fern_gate_check*/)return[]`
 - Drop redundant fields + trailing spaces: `return{...,schema:RD_(WcH(T))}` → `return{...,type:"contentArray"}   ` (3 trailing spaces; schema field dropped)
 
-### Step 4: Verify uniqueness across `__BUN` duplicate
+### Step 4: Verify uniqueness
 
-The JS bundle is duplicated in the `__BUN` segment from 2.1.0+, so each patch has 2 sites. Both must have identical bytes:
+Patch byte counts depend on the binary's bundle layout: 2 sites for 2.1.0..2.1.137 (the `__BUN` segment held a duplicate), 1 site for 2.1.138+ (Anthropic removed the duplication). Whichever count, every site must contain identical bytes:
 
 ```bash
 grep -aoE 'EXPECTED_OLD_BYTES_REGEX' "$PATCHED" | sort -u | wc -l
-# Should print: 1 (one unique sequence appearing twice)
+# Should print: 1 (one unique byte sequence; appears 1× or 2× depending on version)
 ```
 
 ### Step 5: Update PatchDef + apply
@@ -142,7 +154,7 @@ grep -aoE 'EXPECTED_OLD_BYTES_REGEX' "$PATCHED" | sort -u | wc -l
 Edit `cc-lib/cc_lib/claude_binary_patching.py`. Update `old`, `new`, possibly `anchor`, and bump `min_version` to the new version.
 
 ```bash
-claude-binary-patcher check <patch-name>     # expect: unpatched (2 sites)
+claude-binary-patcher check <patch-name>     # expect: unpatched (1 or 2 sites)
 claude-binary-patcher apply <patch-name>
 claude-binary-patcher check <patch-name>     # expect: applied
 ```
@@ -238,16 +250,17 @@ claude-binary-patcher apply --all   # pre-flight refuses if any RequiredSetting 
 claude-binary-patcher check --all   # confirm final state
 ```
 
+If pre-flight refuses, the error names the unsatisfied setting (e.g., `inject-searching-past-context-prompt` requires `autoMemoryEnabled: true` in `~/.claude/settings.json`). Fix the setting and re-run, OR exclude the patch by name and apply the rest. Don't bypass the check — INERT patches (applied bytes that never execute due to a runtime gate) are silent footguns.
+
 Verify each patch with significant runtime behavior in a **fresh `claude-exec` session** (not the current one — the running process has the pre-loaded binary in memory):
 
 | Patch family | How to verify |
 |---|---|
-| `hook-ask-no-override` | `.claude/settings.json` edit in auto-mode + safetyCheck — hook ask not silently overridden |
-| `mcp-array-content-to-string` | Slack-style MCP tool with content array — renders JSON instead of blank |
+| `hook-ask-no-override` | Try editing `.claude/settings.json` in auto-mode — the hook ask should produce a permission prompt, not be silently overridden by the classifier |
 | `statusline` | Bottom statusline wraps multi-line, doesn't truncate with `…` |
-| `inject-searching-past-context-prompt` | Ask "what do you know about my preferences from past sessions?" — Claude spontaneously `Grep`s the project memory dir |
-| `scratchpad` | System prompt has "## Scratchpad Directory" section; dir created on first write |
-| `show-subagent-prompt-tools-response` | Subagent in verbose/transcript mode expands to show prompt + tool calls + response |
+| `inject-searching-past-context-prompt` | System prompt has "## Searching past context" section (introspect via debug log or visible context) |
+| `scratchpad` | System prompt has "## Scratchpad Directory" section pointing to a session-scoped path; dir created on first write |
+| `show-subagent-prompt-tools-response` | Subagent in verbose/transcript mode expands to show prompt + tool calls + response, not collapsed `Done (N tool uses · ...)` |
 
 ### Vanilla-vs-patched comparison protocol
 
@@ -262,38 +275,32 @@ claude-binary-patcher apply --all                # back to patched
 
 | Vanilla | Patched | Conclusion |
 |---|---|---|
-| Wrong / empty | Same wrong / empty | Anthropic changed upstream → mark obsolete |
+| Wrong / empty | Same wrong / empty | Anthropic changed upstream → remove (Phase 4) |
+| Works correctly | Same correctness (or better) | Anthropic shipped the upstream fix → patch redundant → remove (Phase 4) |
 | Works correctly | Wrong | Patch broke something → debug or revert |
 | Wrong | Works correctly | Patch is doing its job → ship |
 
-Real example: in 2.1.128, `reject-show-comment` looked broken because rejection rendering was empty. Vanilla comparison revealed Anthropic had silently changed rendering to be empty in vanilla too — patch became obsolete.
+Real examples:
+- 2.1.128: `reject-show-comment` looked broken because rejection rendering was empty. Vanilla comparison revealed Anthropic had silently changed rendering to be empty in vanilla too — patch became a no-op, removed.
+- 2.1.138: `mcp-array-content-to-string`'s 2.1.136 changelog entry ("Fixed MCP tool results being invisible when the server returns content blocks") flagged the patch as a candidate for obsoletion. Vanilla 2.1.138 rendered the array content as clean CSV text (better than the patch's raw-JSON output) — upstream-fix superseded the patch, removed.
 
-## Phase 4: Mark obsolete patches
+## Phase 4: Remove obsolete patches
 
-When a patch's underlying feature is removed or behavior changed upstream such that the patch is no longer applicable:
+When a patch's underlying feature is removed or behavior changed upstream such that the patch is no longer applicable on currently-supported versions, **remove it from the codebase entirely**. This applies the CLAUDE.md "ideal state over backwards compat" principle — the bytes are preserved in git history; anyone on an older version can pin to an earlier commit.
 
-1. Set `max_version='<previous-supported-version>'` on the PatchDef.
-2. Update the description to explain WHY (factual, no journey residue):
+For each obsolete patch:
 
-```python
-PatchDef(
-    name='write-session-summary',
-    description=(
-        'Enable background extraction that writes <sid>/session-memory/summary.md for '
-        'cross-session context. Obsolete in 2.1.128+ — Anthropic removed the underlying '
-        'feature (tengu_session_memory and the summary.md write path) and reattached '
-        '/dream to write into auto-memory typed files instead.'
-    ),
-    ...
-    min_version='2.1.126',
-    max_version='2.1.126',  # ← THIS LINE
-    ...
-)
-```
+1. **Delete the PatchDef** from the `PATCHES` sequence in `cc-lib/cc_lib/claude_binary_patching.py`.
+2. **Delete the alphabetical entry** from the module docstring's Patches section.
+3. **Drop the column** from the Site Count Evolution table.
+4. **Fix cross-references** — search the file for the patch name (e.g., `grep -n 'patch-name' cc-lib/cc_lib/claude_binary_patching.py`) and remove or rewrite any references in remaining patches' descriptions.
+5. **Document the removal** in the new version's Version Log entry. State the upstream cause (e.g., "Anthropic shipped the fix in 2.1.136") and cite empirical evidence (vanilla-vs-patched comparison from Phase 3).
 
-3. Document in the Version Log entry with the upstream rationale (cite issues, postmortems, community signals).
+Historical Version Log entries that mention the removed patch stay intact — they're a record of what happened at those migrations. Don't retroactively edit them.
 
-`apply --all` silently filters obsoleted patches out of per-patch output and reports them in a single end-of-output summary line. Don't delete the PatchDef — keep it for historical reference and users on older versions.
+If you're unsure whether a patch is truly obsolete vs just broken for the current version, **do the vanilla-vs-patched comparison in Phase 3 first**. The comparison is the deciding evidence — don't remove on speculation.
+
+Historical note: this codebase used to mark obsolete patches with `max_version='<last-applicable-version>'` instead of removing them. That left dead code in `PATCHES` and inconsistent docstring/table state. The shift to outright removal happened in PR #121 (2.1.138 migration).
 
 ## Phase 5: Documentation
 
@@ -301,14 +308,16 @@ Edit `cc-lib/cc_lib/claude_binary_patching.py` module docstring.
 
 ### Site Count Evolution table
 
-Add a row for the new version. Only update columns for patches with multi-version history; new single-version patches go in the Version Log only.
+Add a row for the new version. Only the active multi-version-history patches have columns. When you remove an obsolete patch in Phase 4, drop its column too — historical site counts for the dropped patch live in git history.
 
 ```
-    Version   statusline   mcp-array-content-to-string   write-session-summary   inject-searching-past-context-prompt   sm-compact
-    2.1.128   2            2                             0 (removed)      2                                      —
-    2.1.131   2            2                             0 (removed)      2                                      —
-    <new>     ?            ?                             ?                       ?                                      ?
+    Version   statusline   inject-searching-past-context-prompt
+    2.1.131   2            2
+    2.1.138   1            1
+    <new>     ?            ?
 ```
+
+(Site counts are 2 for 2.1.0..2.1.137 and 1 for 2.1.138+, reflecting the `__BUN` segment removal.)
 
 ### Version Log entry
 
@@ -421,7 +430,7 @@ echo -n "Old: "; printf 'old_bytes_here' | wc -c
 echo -n "New: "; printf 'new_bytes_here' | wc -c
 ```
 
-### Verify both `__BUN` sites have identical bytes
+### Verify all sites have identical bytes (1 site post-2.1.138, 2 sites pre-2.1.138)
 
 ```bash
 grep -aoE 'pattern' "$PATCHED" | sort -u | wc -l
@@ -472,7 +481,7 @@ grep -aoE '\b\w+\("flag_name"[^)]*\)' "$PATCHED" | sort -u
 - **Don't trust subagent verdicts without empirical follow-up.** After a subagent says "this should work," still test in a fresh session.
 - **Don't trust a 100-character preview when verifying constants.** I assumed `UZH` and `EK6` were the same constant because their first 100 chars matched — they diverged at character 152 (`STOP what you...` vs `To tell you how...`). Always extract the FULL constant content before equating.
 - **Don't add patches based on flawed routing analysis.** `reject-show-comment-dispatcher` was added based on misreading the dispatcher's branches. Trace the ACTUAL flow through the function, not the assumed one.
-- **Don't keep dead patches "just in case."** If Anthropic removed the feature, mark obsolete with `max_version`. Don't try to "make it work" when there's nothing to fix.
+- **Don't keep dead patches "just in case."** If Anthropic removed the feature or shipped the fix upstream (verify via Phase 3 vanilla-vs-patched), remove the PatchDef entirely per Phase 4. Don't try to "make it work" when there's nothing to fix; don't preserve dead code with `max_version`.
 - **Don't write journey residue in docstrings or PR descriptions.** Document state, not the path.
 - **Don't forget pre-commit before commit.** Failed pre-commit means a wasted commit message.
 

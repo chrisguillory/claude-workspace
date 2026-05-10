@@ -11,11 +11,15 @@ Used by claude-binary-patcher (applies patches) and claude-version-manager
 (detects patch status). Adding a new patch: add a PatchDef to PATCHES.
 
 Binary Structure:
-    Claude Code is a Node.js SEA compiled to Mach-O arm64 (~190MB). The
-    minified JS bundle (~10MB) is duplicated in the ``__BUN`` segment from
-    2.1.0+, so each patch has 2 sites. Minified identifiers (2-4 chars)
-    change per build; string literals (flag names, JSX props) are stable
-    and serve as anchors.
+    Claude Code is a Node.js SEA compiled to Mach-O arm64 (~190-220MB).
+    Minified identifiers (2-4 chars) change per build; string literals
+    (flag names, JSX props) are stable and serve as anchors.
+
+    From 2.1.0 to 2.1.137, the minified JS bundle (~10MB) was duplicated
+    in the ``__BUN`` segment, so each patch had 2 sites. From 2.1.138+
+    the duplication was removed (the ``__BUN`` segment is gone) and each
+    patch has 1 site. ``scan_binary`` handles either count automatically
+    via ``data.find()``; no patcher logic depends on a fixed count.
 
 Same-Length Constraint:
     Old and new byte sequences MUST be the same length. Direct byte
@@ -132,61 +136,6 @@ Patches (alphabetical by name):
                     introduced this patch):
                     https://gist.github.com/chrisguillory/8d5d401ac356b47ec078940080726b83
 
-    mcp-array-content-to-string
-                    [fix] MCP tool results without ``structuredContent``
-                    (slack-mcp-server and other servers that return plain
-                    text blocks) render as blank below the ⏺ tool-call line.
-
-                    Before::
-
-                        ⏺ slack - get_current_user (MCP)
-                                                  ← blank, no result block
-
-                    After::
-
-                        ⏺ slack - get_current_user (MCP)
-                          ⎿ [
-                              {
-                                "type": "text",
-                                "text": "user_id,user_name,..."
-                              }
-                            ]
-
-                    Patches ``transformMCPResult`` to JSON-stringify the
-                    array branch so ``toolUseResult`` is always a string,
-                    matching the path that already works for
-                    ``structuredContent``-emitting tools. Tradeoff: renders
-                    as raw JSON rather than extracted text. Full
-                    investigation:
-                    https://gisthost.github.io/?9018ee3bbc37a7acf95852ab25fe9100
-                    https://github.com/anthropics/claude-code/issues/41361
-
-    reject-show-comment
-                    [fix] When the user rejects a tool call with a comment,
-                    the comment text is silently dropped — only "Tool use
-                    rejected" renders.
-
-                    Before::
-
-                        ⏺ Bash(open https://example.com)
-                          ⎿ Tool use rejected
-                                                ← user's comment gone
-
-                    After::
-
-                        ⏺ Bash(open https://example.com)
-                          ⎿ Error: The user doesn't want to proceed with
-                            this tool use. ... To tell you how to proceed,
-                            the user said:
-                            No, please don't run that.
-
-                    Falsifies the prefix check in ``UserToolErrorMessage``
-                    so the message falls through to the generic
-                    content-renderer. Tradeoff: includes the verbose
-                    system-prompt prefix that the model sees. Full
-                    investigation:
-                    https://gisthost.github.io/?9018ee3bbc37a7acf95852ab25fe9100
-
     inject-searching-past-context-prompt
                     [feature] Inject the "## Searching past context"
                     section into Claude's system prompt — explicit
@@ -265,10 +214,9 @@ Patches (alphabetical by name):
                       ``isAutoMemoryEnabled()``, NOT on
                       ``tengu_coral_fern``.
 
-                    Cache-override caveat: same as ``scratchpad`` and
-                    ``write-session-summary`` — cached ``tengu_coral_fern: false``
-                    in ``~/.claude.json`` overrides any default. The
-                    short-circuit makes the cache irrelevant.
+                    Cache-override caveat: same as ``scratchpad`` — cached
+                    ``tengu_coral_fern: false`` in ``~/.claude.json`` overrides
+                    any default. The short-circuit makes the cache irrelevant.
 
                     Requires: ``autoMemoryEnabled: true`` in ``~/.claude/settings.json``
                     (top-level, not ``env`` block). Without it ``P4()``
@@ -300,35 +248,7 @@ Patches (alphabetical by name):
                     and 2.1.121 (verified). The same cache-override
                     limitation applies to ``remember-skill`` (still ships
                     with the simple gate-flip; switch to short-circuit if
-                    it doesn't activate). ``write-session-summary`` was
-                    switched to short-circuit in 2.1.126.
-
-    write-session-summary
-                    [feature] Enable background session summary extraction.
-                    Claude writes summaries to session-memory/summary.md,
-                    loaded at the start of future sessions for cross-session
-                    context.
-                    Statsig gate ``tengu_session_memory``, default false.
-                    Not publicly documented — companion to auto-memory (GA 2.1.59).
-                    Flag introduced in 2.0.64 (last absent: 2.0.62).
-                    Short-circuits the gate-check function ``kI3()`` (the
-                    minified ``isSessionMemoryGateEnabled``) to always
-                    return true, bypassing ``cachedGrowthBookFeatures``
-                    which has ``tengu_session_memory: false`` and would
-                    otherwise short-circuit to false BEFORE the gate's
-                    patched default is consulted (same cache-override
-                    pattern as ``scratchpad``).
-                    Requires: ``autoCompactEnabled: true`` in ``~/.claude/settings.json``
-                    (top-level, not ``env`` block). Background extraction
-                    is registered as a hook on the autocompact path; with
-                    autocompact off the hook is never registered and the
-                    patched gate is never reached — patch is applied but inert.
-                    Related flags: ``tengu_sm_compact``, ``tengu_sm_config``
-                    (NOT bundled in 2.1.126; the compaction integration
-                    code is not present in this build, so only ``kI3``
-                    needs short-circuiting).
-                    https://claudefa.st/blog/guide/mechanics/session-memory
-                    https://giuseppegurgone.com/claude-memory
+                    it doesn't activate).
 
     show-subagent-prompt-tools-response
                     [visibility] Expand completed subagent to show prompt, tool
@@ -391,26 +311,29 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-29)::
 
 Site Count Evolution::
 
-    Tracks longitudinal site counts for the patch families with
-    multi-version history. Patches first introduced in a single
-    version (e.g., reject-show-comment, show-subagent-prompt-tools-response
-    at 2.1.126) are documented in the Version Log below, not here.
+    Tracks longitudinal site counts for the active multi-version-history
+    patch families. Single-version patches (e.g., show-subagent-prompt-tools-response
+    at 2.1.126) live in the Version Log below. Patches removed from the
+    codebase (sm-compact, mcp-array-content-to-string, reject-show-comment,
+    write-session-summary) are gone from this table; their byte-level
+    history lives in git.
 
-    Version   statusline   mcp-array-content-to-string   write-session-summary   inject-searching-past-context-prompt   sm-compact
-    2.0.64    0            —                             6                0                —
-    2.0.70    0            —                             9                0                —
-    2.1.0     0            —                             9                0                —
-    2.1.21    0            —                             —                3                —
-    2.1.40    0            —                             18               3                —
-    2.1.45    —            —                             —                —                2
-    2.1.51    2            —                             18               9                —
-    2.1.74    2            —                             18               3                2
-    2.1.80    2            —                             18               3                2
-    2.1.81    2            —                             18               3                2
-    2.1.123   2            2                             —                —                —
-    2.1.126   2            2                             2                2                —
-    2.1.128   2            2                             0 (removed)      2                —
-    2.1.131   2            2                             0 (removed)      2                —
+    Version   statusline   inject-searching-past-context-prompt
+    2.0.64    0            0
+    2.0.70    0            0
+    2.1.0     0            0
+    2.1.21    0            3
+    2.1.40    0            3
+    2.1.45    —            —
+    2.1.51    2            9
+    2.1.74    2            3
+    2.1.80    2            3
+    2.1.81    2            3
+    2.1.123   2            —
+    2.1.126   2            2
+    2.1.128   2            2
+    2.1.131   2            2
+    2.1.138   1            1
 
 Empirical verification on 2.1.128 (2026-05-06)::
 
@@ -421,6 +344,59 @@ Empirical verification on 2.1.128 (2026-05-06)::
       original "Tool use rejected" bug no longer exists
 
 Version Log::
+
+    2.1.138 (2026-05-09)
+        Major architectural change: Anthropic removed the ``__BUN``
+        segment duplication. The minified JS bundle was duplicated
+        in ``__BUN`` from 2.1.0..2.1.137, giving each patch 2 sites.
+        In 2.1.138, ``__BUN`` is gone — the bundle lives once in
+        ``__TEXT``, the binary shrunk ~12 MB (217 → 205 MB), and
+        every patch now has 1 site. The patcher's ``data.find()``
+        handles either count automatically.
+
+        Five releases since 2.1.131 (2.1.132, 2.1.133, 2.1.136,
+        2.1.137, 2.1.138 — all GitHub-tagged, no stealth). The
+        2.1.136 changelog notes "Fixed MCP tool results being
+        invisible when the server returns content blocks" — that
+        is exactly the bug ``mcp-array-content-to-string`` was
+        created to address. Empirical vanilla-vs-patched comparison
+        on 2.1.138 against ``mcp__slack__get_current_user``
+        confirmed: vanilla now renders the array content as clean
+        CSV text (better than the patch's raw-JSON output). The
+        patch is redundant and was removed in this PR.
+
+        Three obsolete patches removed entirely from PATCHES (kept
+        in git history for anyone on older versions): policy shift
+        from ``max_version`` preservation toward ideal-state cleanup
+        per CLAUDE.md "ideal state over backwards compat".
+
+        Patch updates:
+        - hook-ask-no-override: clean apply (anchor + bytes stable
+          since 2.1.109). 1 site.
+        - statusline: clean apply (anchor + bytes stable since
+          2.0.0). 1 site.
+        - inject-searching-past-context-prompt: 1 site, accessor
+          renamed back ``G_`` → ``M_`` (continues to oscillate per
+          release). Function holding the gate is now ``DNH``.
+        - scratchpad: 1 site, function ``ve()`` renamed to
+          ``XHH()``, accessor ``G_`` → ``M_``. Anchor updated.
+        - show-subagent-prompt-tools-response: 1 site, every JSX
+          identifier minified again (``hv5``→``vu5``, ``O8``→``w8``,
+          ``G6``→``R6``, ``bw_``→``bj_``, ``N5_``→``XO_``,
+          ``Nf8``→``Z08``, ``SU``→``Mg``, ``t9H``→``F7H``,
+          ``Xf``→``EM``; local var ``J``→``j``). Strategy
+          unchanged: 4-site T→K substitution.
+        - mcp-array-content-to-string: REMOVED. Anthropic's 2.1.136
+          fix supersedes the patch; vanilla 2.1.138 renders MCP
+          array content correctly.
+        - write-session-summary: REMOVED. Obsolete since 2.1.128
+          (Anthropic removed ``tengu_session_memory`` and the
+          summary.md write path entirely). Successor exploration
+          tracked as session-internal task.
+        - reject-show-comment: REMOVED. Obsolete since 2.1.128
+          (Anthropic silently changed vanilla rejection rendering
+          to empty; the original "Tool use rejected" bug no longer
+          exists).
 
     2.1.131 (2026-05-06)
         Routine release with bug fixes (VS Code activation, Mantle
@@ -764,32 +740,6 @@ PATCHES: Sequence[PatchDef] = (
         min_version='2.1.109',
     ),
     PatchDef(
-        name='mcp-array-content-to-string',
-        description='Render MCP tool results returning content arrays without structuredContent',
-        kind=PatchKind.FIX,
-        anchor=b'"contentArray"',
-        old=b'return{content:T,type:"contentArray",schema:RD_(WcH(T))}',
-        new=b'return{content:q!=="ide"?EH(T):T,type:"contentArray"}   ',
-        window=100,
-        min_version='2.1.131',
-    ),
-    PatchDef(
-        name='reject-show-comment',
-        description=(
-            'Show user comment when rejecting a tool call (instead of just "Tool use rejected"). '
-            'Obsolete in 2.1.128+ — Anthropic changed vanilla rejection rendering to silent: no '
-            '"Tool use rejected" text appears at all; Claude\'s next-turn acknowledgment carries '
-            'the UX. The original bug this patch addressed no longer exists in 2.1.128+.'
-        ),
-        kind=PatchKind.FIX,
-        anchor=b'){let Y;if(_[5]===Symbol.for("react.memo_cache_sen',
-        old=b'T.content.startsWith(e76)',
-        new=b'T.content.startsWith("Z")',
-        window=100,
-        min_version='2.1.126',
-        max_version='2.1.126',
-    ),
-    PatchDef(
         name='inject-searching-past-context-prompt',
         description=(
             'Inject the "## Searching past context" system-prompt section that tells Claude how to grep '
@@ -797,10 +747,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FEATURE,
         anchor=b'coral_fern',
-        old=b'if(!G_("tengu_coral_fern",!1))return[]',
+        old=b'if(!M_("tengu_coral_fern",!1))return[]',
         new=b'if(0/*coral_fern_gate_check*/)return[]',
         window=80,
-        min_version='2.1.131',
+        min_version='2.1.138',
         required_setting=[
             RequiredSetting(
                 key='autoMemoryEnabled',
@@ -814,61 +764,37 @@ PATCHES: Sequence[PatchDef] = (
         name='scratchpad',
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
-        anchor=b'function ve(){return',
-        old=b'function ve(){return G_("tengu_scratch",!1)}',
-        new=b'function ve(){return!0/*scratchpad always*/}',
+        anchor=b'function XHH(){return',
+        old=b'function XHH(){return M_("tengu_scratch",!1)}',
+        new=b'function XHH(){return!0/*scratchpad always*/}',
         window=50,
-        min_version='2.1.131',
-    ),
-    PatchDef(
-        name='write-session-summary',
-        description=(
-            'Enable background extraction that writes <sid>/session-memory/summary.md for '
-            'cross-session context. Obsolete in 2.1.128+ — Anthropic removed the underlying '
-            'feature (tengu_session_memory and the summary.md write path) and reattached '
-            '/dream to write into auto-memory typed files instead.'
-        ),
-        kind=PatchKind.FEATURE,
-        anchor=b'function kI3(){return',
-        old=b'function kI3(){return G_("tengu_session_memory",!1)}',
-        new=b'function kI3(){return!0/*("tengu_session_memory")*/}',
-        window=80,
-        min_version='2.1.126',
-        max_version='2.1.126',
-        required_setting=[
-            RequiredSetting(
-                key='autoCompactEnabled',
-                expected_value=True,
-                default_value=True,
-                disable_env_vars=['DISABLE_AUTO_COMPACT', 'DISABLE_COMPACT'],
-            ),
-        ],
+        min_version='2.1.138',
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})',
+        anchor=b'w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})',
         old=(
-            b'!1,T&&D&&O8.createElement(G6,null,O8.createElement(bw_,{prompt:D,theme:O})),'
-            b'T?O8.createElement(N5_,null,O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'T&&J&&J.length>0&&O8.createElement(G6,null,O8.createElement(Nf8,{content:J,theme:O})),'
-            b'O8.createElement(G6,{height:1},O8.createElement(SU,{message:X,lookups:t9H,addMargin:!1,tools:q,'
+            b'!1,T&&D&&w8.createElement(R6,null,w8.createElement(bj_,{prompt:D,theme:O})),'
+            b'T?w8.createElement(XO_,null,w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'T&&j&&j.length>0&&w8.createElement(R6,null,w8.createElement(Z08,{content:j,theme:O})),'
+            b'w8.createElement(R6,{height:1},w8.createElement(Mg,{message:X,lookups:F7H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!T&&O8.createElement(V,{dimColor:!0},"  ",O8.createElement(Xf,null)))'
+            b'!T&&w8.createElement(V,{dimColor:!0},"  ",w8.createElement(EM,null)))'
         ),
         new=(
-            b'!1,K&&D&&O8.createElement(G6,null,O8.createElement(bw_,{prompt:D,theme:O})),'
-            b'K?O8.createElement(N5_,null,O8.createElement(hv5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'K&&J&&J.length>0&&O8.createElement(G6,null,O8.createElement(Nf8,{content:J,theme:O})),'
-            b'O8.createElement(G6,{height:1},O8.createElement(SU,{message:X,lookups:t9H,addMargin:!1,tools:q,'
+            b'!1,K&&D&&w8.createElement(R6,null,w8.createElement(bj_,{prompt:D,theme:O})),'
+            b'K?w8.createElement(XO_,null,w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'K&&j&&j.length>0&&w8.createElement(R6,null,w8.createElement(Z08,{content:j,theme:O})),'
+            b'w8.createElement(R6,{height:1},w8.createElement(Mg,{message:X,lookups:F7H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!K&&O8.createElement(V,{dimColor:!0},"  ",O8.createElement(Xf,null)))'
+            b'!K&&w8.createElement(V,{dimColor:!0},"  ",w8.createElement(EM,null)))'
         ),
         window=800,
-        min_version='2.1.131',
+        min_version='2.1.138',
     ),
     PatchDef(
         name='statusline',
