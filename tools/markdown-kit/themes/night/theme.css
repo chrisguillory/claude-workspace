@@ -265,8 +265,32 @@ blockquote em {
 
 /* === ABBREVIATIONS === */
 
-abbr {
-    border-bottom: 1px #888 dotted;
+abbr[title] {
+    position: relative;
+    border-bottom: 1px dotted #f78c6c;
+    text-decoration: none;
+    cursor: help;
+}
+abbr[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    color: #222;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: normal;
+    font-style: normal;
+    white-space: nowrap;
+    z-index: 100;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+}
+abbr:not([title]) {
+    border-bottom: 1px dotted #888;
     cursor: help;
 }
 
@@ -380,12 +404,21 @@ li > input[type="checkbox"]:checked::after {
     margin: 0.3em 0;
 }
 
-/* Footnote back-reference arrow */
+/* Footnote back-reference arrow — pill-styled for visibility */
 .footnotes a[data-footnote-backref] {
+    display: inline-block;
     text-decoration: none;
-    font-size: 0.85em;
-    margin-left: 0.25em;
+    font-size: 1em;
+    margin-left: 0.5em;
+    padding: 0.05em 0.5em;
+    background: #2d3748;
     color: #6dc1e7;
+    border-radius: 4px;
+    transition: background-color 0.15s ease;
+}
+.footnotes a[data-footnote-backref]:hover {
+    background: #4a5568;
+    text-decoration: none;
 }
 
 /* Footnote reference superscript in body text */
