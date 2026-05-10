@@ -42,24 +42,25 @@ Patches (alphabetical by name):
                     [fix] Restore retry on the ``x-should-retry: true`` header
                     for Pro/Max OAuth users. Companion to
                     ``force-429-retry-status``. The custom ``shouldRetry`` in
-                    ``services/api/withRetry.ts`` (minified ``fo5``) has two
-                    OAuth-tier gates that disable retry for subscription
-                    accounts on shared-capacity 429s. This patch handles the
-                    header-driven gate; ``force-429-retry-status`` handles
-                    the status-code gate. Apply both — applying only one
-                    leaves a path that still fails fast.
+                    ``services/api/withRetry.ts`` has two OAuth-tier gates
+                    that disable retry for subscription accounts on shared-
+                    capacity 429s. This patch handles the header-driven gate;
+                    ``force-429-retry-status`` handles the status-code gate.
+                    Apply both — applying only one leaves a path that still
+                    fails fast.
                     Anchor: ``"x-should-retry"`` (stable, +21 bytes from
                     site).
-                    13-byte same-length replacement: ``!vq()||$U_()`` →
-                    ``!0/*vq||$U*/`` (always-true with comment padding).
+                    13-byte same-length replacement: ``!Eq()||gQ_()`` →
+                    ``!0/*Eq||gQ*/`` (always-true with comment padding).
+                    Identifiers ``Eq``/``gQ_`` map to ``isClaudeAISubscriber``
+                    / ``isEnterpriseSubscriber`` and re-minify each release.
                     https://github.com/anthropics/claude-code/issues/50841
                     https://github.com/anthropics/claude-code/issues/57134
 
     force-429-retry-status
                     [fix] Restore retry on shared-capacity 429s for Pro/Max
                     OAuth users. The custom ``shouldRetry`` in
-                    ``services/api/withRetry.ts`` (minified ``fo5``) gates
-                    429 retry on
+                    ``services/api/withRetry.ts`` gates 429 retry on
                     ``!isClaudeAISubscriber()||isEnterpriseSubscriber()``,
                     so subscription accounts NEVER retry "Server is
                     temporarily limiting requests (not your usage limit) ·
@@ -72,18 +73,20 @@ Patches (alphabetical by name):
                     seconds. Both error classes hit the same gate.
 
                     Effect: 429s join the existing exponential-backoff
-                    retry loop (``Js()``: 500ms doubling, capped at 32s,
-                    respects ``retry-after`` header via ``Lo5()``).
-                    Inherits ``CLAUDE_CODE_MAX_RETRIES`` env var (default
-                    10). Surfaces the existing visible UI
+                    retry loop (500ms doubling, capped at 32s, respects
+                    ``retry-after`` header). Inherits
+                    ``CLAUDE_CODE_MAX_RETRIES`` env var (default 10).
+                    Surfaces the existing visible UI
                     ``"Retrying in Ns · attempt N/M"``.
 
                     Anchor: ``"x-should-retry"`` (stable, +278 bytes from
                     site, well within window=600).
                     37-byte same-length replacement:
-                    ``if(H.status===429)return!vq()||$U_();`` →
-                    ``if(H.status===429)return!0;/*vq||$U*/`` (always-true
-                    with trailing comment).
+                    ``if(H.status===429)return!Eq()||gQ_();`` →
+                    ``if(H.status===429)return!0;/*Eq||gQ*/`` (always-true
+                    with trailing comment). Identifiers ``Eq``/``gQ_`` map
+                    to ``isClaudeAISubscriber`` / ``isEnterpriseSubscriber``
+                    and re-minify each release.
 
                     Companion: ``force-429-retry-header`` handles the
                     parallel ``x-should-retry: true`` gate. Apply both
@@ -92,11 +95,10 @@ Patches (alphabetical by name):
 
                     Note: also affects user-quota 429s (where Anthropic's
                     "wait hours" comment was correct). Mitigation: 429s
-                    with a ``retry-after`` header still respect it via
-                    ``Lo5()`` / ``Ro5()`` so a quota 429 with
-                    ``retry-after: 3600`` sleeps 1 hour. The retry-budget
-                    cap (``CLAUDE_CODE_MAX_RETRIES``, default 10) bounds
-                    damage even with no header.
+                    with a ``retry-after`` header still respect it, so a
+                    quota 429 with ``retry-after: 3600`` sleeps 1 hour.
+                    The retry-budget cap (``CLAUDE_CODE_MAX_RETRIES``,
+                    default 10) bounds damage even with no header.
 
                     Future-proofing context: v2.2.1 source mirror at
                     ``claude-code-best/claude-code/src/services/api/withRetry.ts``
@@ -104,7 +106,7 @@ Patches (alphabetical by name):
                     ``CLAUDE_CODE_UNATTENDED_RETRY``, gated by Statsig
                     ``UNATTENDED_RETRY``. Source comment marks it
                     "ant-only". Not yet shipped to subscribers; not
-                    present in 2.1.131. This patch is the local
+                    present in 2.1.138. This patch is the local
                     equivalent until/unless that gate is opened.
                     https://github.com/anthropics/claude-code/issues/50841
                     https://github.com/anthropics/claude-code/issues/57134
@@ -371,6 +373,15 @@ Version Log::
         per CLAUDE.md "ideal state over backwards compat".
 
         Patch updates:
+        - force-429-retry-status: 1 site, ``vq()``/``$U_()`` (the
+          ``isClaudeAISubscriber``/``isEnterpriseSubscriber`` gate
+          identifiers) re-minified to ``Eq()``/``gQ_()``. Function
+          ``fo5(H)`` renamed to ``vq3(H)``. Structure unchanged;
+          re-derived bytes for new identifiers.
+        - force-429-retry-header: 1 site, same identifier rename
+          (``vq``/``$U_`` → ``Eq``/``gQ_``) applied to the parallel
+          ``x-should-retry: true`` header gate. Companion to
+          ``force-429-retry-status``.
         - hook-ask-no-override: clean apply (anchor + bytes stable
           since 2.1.109). 1 site.
         - statusline: clean apply (anchor + bytes stable since
@@ -706,10 +717,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'_==="true"&&(!vq()||$U_())',
-        new=b'_==="true"&&(!0/*vq||$U*/)',
+        old=b'_==="true"&&(!Eq()||gQ_())',
+        new=b'_==="true"&&(!0/*Eq||gQ*/)',
         window=200,
-        min_version='2.1.131',
+        min_version='2.1.138',
     ),
     PatchDef(
         name='force-429-retry-status',
@@ -724,10 +735,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'if(H.status===429)return!vq()||$U_();',
-        new=b'if(H.status===429)return!0;/*vq||$U*/',
+        old=b'if(H.status===429)return!Eq()||gQ_();',
+        new=b'if(H.status===429)return!0;/*Eq||gQ*/',
         window=600,
-        min_version='2.1.131',
+        min_version='2.1.138',
     ),
     PatchDef(
         name='hook-ask-no-override',
