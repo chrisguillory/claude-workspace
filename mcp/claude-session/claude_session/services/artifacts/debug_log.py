@@ -1,5 +1,4 @@
-"""
-Debug log artifact handling.
+"""Debug log artifact handling.
 
 Collects and writes per-session debug logs stored at
 ~/.claude/debug/<session-id>.txt.

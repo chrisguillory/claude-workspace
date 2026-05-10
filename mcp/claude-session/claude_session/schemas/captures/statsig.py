@@ -1,5 +1,4 @@
-"""
-Statsig feature flag endpoint capture classes.
+"""Statsig feature flag endpoint capture classes.
 
 This module contains capture wrappers for Statsig endpoints:
 - /v1/rgstr - Event registration/logging
@@ -53,8 +52,7 @@ class StatsigInitializeRequestCapture(StatsigRequestCapture):
 
 
 class StatsigInitializeResponseCapture(StatsigResponseCapture):
-    """
-    Captured POST /v1/initialize response.
+    """Captured POST /v1/initialize response.
 
     Three response types (discriminated union):
     - 204 No Content: Empty response when no updates (EmptyBody)

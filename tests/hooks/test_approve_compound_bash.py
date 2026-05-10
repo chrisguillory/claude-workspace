@@ -124,13 +124,13 @@ class TestAnalyzeCommand:
         assert exc_info.value.args == ('unanalyzable construct (if): if true; then rm -rf /; fi',)
 
     def test_for_loop_visible(self, hook_module: ModuleType) -> None:
-        """for loops raise — unanalyzable construct."""
+        """A for loop raises — unanalyzable construct."""
         with pytest.raises(hook_module.ApproveCompoundBashException) as exc_info:
             hook_module.analyze_command('echo safe && for i in a b; do echo $i; done')
         assert exc_info.value.args == ('unanalyzable construct (for): for i in a b; do echo $i; done',)
 
     def test_while_loop_visible(self, hook_module: ModuleType) -> None:
-        """while loops raise — unanalyzable construct."""
+        """A while loop raises — unanalyzable construct."""
         with pytest.raises(hook_module.ApproveCompoundBashException) as exc_info:
             hook_module.analyze_command('echo safe && while true; do echo test; done')
         assert exc_info.value.args == ('unanalyzable construct (while): while true; do echo test; done',)
@@ -227,7 +227,7 @@ class TestDangerDetection:
         assert exc_info.value.args == ('inline assignment in: VAR=hello echo test',)
 
     def test_eval_base_command_preserved(self, hook_module: ModuleType) -> None:
-        """eval is parsed as a regular command — base_command includes 'eval'."""
+        """The eval keyword is parsed as a regular command — base_command includes 'eval'."""
         assert list(hook_module.analyze_command('eval "rm -rf /" && git log')) == [
             'eval rm -rf /',
             'git log',
@@ -240,19 +240,19 @@ class TestDangerDetection:
         assert exc_info.value.args == ('unanalyzable construct (if): if true; then rm -rf /; fi',)
 
     def test_for_loop_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """for loops are unanalyzable — must raise."""
+        """A for loop is unanalyzable — must raise."""
         with pytest.raises(hook_module.ApproveCompoundBashException) as exc_info:
             hook_module.analyze_command('echo safe && for i in a b; do echo $i; done')
         assert exc_info.value.args == ('unanalyzable construct (for): for i in a b; do echo $i; done',)
 
     def test_while_loop_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """while loops are unanalyzable — must raise."""
+        """A while loop is unanalyzable — must raise."""
         with pytest.raises(hook_module.ApproveCompoundBashException) as exc_info:
             hook_module.analyze_command('echo safe && while true; do echo test; done')
         assert exc_info.value.args == ('unanalyzable construct (while): while true; do echo test; done',)
 
     def test_until_loop_marked_dangerous(self, hook_module: ModuleType) -> None:
-        """until loops are unanalyzable — must raise."""
+        """An until loop is unanalyzable — must raise."""
         with pytest.raises(hook_module.ApproveCompoundBashException) as exc_info:
             hook_module.analyze_command('echo safe && until false; do echo test; done')
         assert exc_info.value.args == ('unanalyzable construct (until): until false; do echo test; done',)
@@ -312,7 +312,7 @@ class TestDangerDetection:
         ]
 
     def test_compound_mixed_fd_then_file_redirect(self, hook_module: ModuleType) -> None:
-        """fd redirect first, file redirect second — file redirect must trigger danger."""
+        """An fd redirect first, then a file redirect — file redirect must trigger danger."""
         with pytest.raises(hook_module.ApproveCompoundBashException) as exc_info:
             hook_module.analyze_command('(echo a; echo b) 2>&1 >/tmp/file && git log')
         assert exc_info.value.args == ('file redirect on compound: (echo a; echo b) 2>&1 >/tmp/file',)
@@ -404,14 +404,14 @@ class TestDangerDetection:
     # -- Code-execution commands (handled by prefix matching, not AST) --
 
     def test_eval_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
-        """eval is plain words at AST level — blocked by prefix matching instead."""
+        """The eval keyword is plain words at AST level — blocked by prefix matching instead."""
         assert list(hook_module.analyze_command('eval "rm -rf /" && git log')) == [
             'eval rm -rf /',
             'git log',
         ]
 
     def test_source_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
-        """source is plain words at AST level — blocked by prefix matching instead."""
+        """The source keyword is plain words at AST level — blocked by prefix matching instead."""
         assert list(hook_module.analyze_command('source /tmp/evil.sh && git log')) == [
             'source /tmp/evil.sh',
             'git log',
@@ -425,21 +425,21 @@ class TestDangerDetection:
         ]
 
     def test_bash_c_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
-        """bash -c is plain words at AST level — blocked by prefix matching instead."""
+        """The bash -c command is plain words at AST level — blocked by prefix matching instead."""
         assert list(hook_module.analyze_command('bash -c "rm -rf /" && echo done')) == [
             'bash -c rm -rf /',
             'echo done',
         ]
 
     def test_trap_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
-        """trap is plain words at AST level — blocked by prefix matching instead."""
+        """The trap keyword is plain words at AST level — blocked by prefix matching instead."""
         assert list(hook_module.analyze_command('trap "rm -rf /" EXIT && echo done')) == [
             'trap rm -rf / EXIT',
             'echo done',
         ]
 
     def test_exec_not_dangerous_at_ast_level(self, hook_module: ModuleType) -> None:
-        """exec is plain words at AST level — blocked by prefix matching instead."""
+        """The exec keyword is plain words at AST level — blocked by prefix matching instead."""
         assert list(hook_module.analyze_command('exec git log && echo done')) == [
             'exec git log',
             'echo done',
@@ -550,7 +550,7 @@ class TestWrapperCommandsPreserved:
         assert result[0] == expected_base
 
     def test_time_raises_bashlex_boundary(self, hook_module: ModuleType) -> None:
-        """bashlex doesn't support 'time' — translated via LibraryBoundary."""
+        """The bashlex parser doesn't support 'time' — translated via LibraryBoundary."""
         with pytest.raises(hook_module.BashlexBoundaryException) as exc_info:
             hook_module.analyze_command('time git log && echo done')
         assert isinstance(exc_info.value.__cause__, NotImplementedError)
@@ -1045,13 +1045,13 @@ class TestBashlexExceptions:
         assert isinstance(exc_info.value.__cause__, bashlex.errors.ParsingError)
 
     def test_arithmetic_expansion(self, hook_module: ModuleType) -> None:
-        """bashlex does not support arithmetic expansion — translated via LibraryBoundary."""
+        """The bashlex parser does not support arithmetic expansion — translated via LibraryBoundary."""
         with pytest.raises(hook_module.BashlexBoundaryException) as exc_info:
             hook_module.analyze_command('echo $((1+2)) && git log')
         assert isinstance(exc_info.value.__cause__, NotImplementedError)
 
     def test_case_statement(self, hook_module: ModuleType) -> None:
-        """bashlex raises NotImplementedError for case syntax — translated via LibraryBoundary."""
+        """The bashlex parser raises NotImplementedError for case syntax — translated via LibraryBoundary."""
         with pytest.raises(hook_module.BashlexBoundaryException) as exc_info:
             hook_module.analyze_command('case $x in a) echo a;; esac && git log')
         assert isinstance(exc_info.value.__cause__, NotImplementedError)

@@ -30,20 +30,16 @@ import asyncio
 import logging
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Any
 
 import fastapi
 import pydantic
 from cc_lib.schemas.base import ClosedModel
 
 from .service import BrowserService
+from .wire import OnErrorPolicy, PipelineStatus, StepStatus, ToolStatus
 
 logger = logging.getLogger(__name__)
-
-type ToolStatus = Literal['ok', 'error']
-type StepStatus = Literal['ok', 'error', 'skipped']
-type PipelineStatus = Literal['completed', 'partial']
-type OnErrorPolicy = Literal['stop', 'continue']
 
 
 # -- Request/Response models --

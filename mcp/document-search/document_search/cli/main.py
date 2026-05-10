@@ -15,12 +15,13 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, TypedDict, cast
+from typing import Annotated, Literal, TypedDict
 from uuid import UUID
 
 import typer
-from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.types import OutputFormat
 
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.redis import RedisClient, discover_redis_port
@@ -29,6 +30,7 @@ from document_search.paths import PROJECT_ROOT
 from document_search.repositories.collection_registry import CollectionRegistryManager
 from document_search.repositories.document_vector import DocumentVectorRepository
 from document_search.repositories.index_state import IndexStateStore
+from document_search.schemas.chunking import FileType
 from document_search.schemas.config import create_config, default_config
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import StopAfterStage
@@ -39,6 +41,7 @@ from document_search.schemas.vectors import (
     IndexInfo,
     SearchQuery,
     SearchResult,
+    SearchType,
 )
 from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
 
@@ -46,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 app = create_app(help='Document search CLI — semantic search over local documents.')
 add_completion_command(app)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
@@ -133,7 +137,7 @@ def dashboard_open(
 @dashboard_app.command('status')
 @error_boundary
 def dashboard_status(
-    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Show dashboard status."""
     manager = DashboardStateManager()
@@ -184,7 +188,7 @@ def dashboard_url() -> None:
 @app.command()
 @error_boundary
 def collections(
-    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """List all collections."""
     registry = CollectionRegistryManager()
@@ -224,7 +228,7 @@ def info(
             help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
     ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
-    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Show collection info.
 
@@ -255,9 +259,9 @@ def list_docs(
             help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
     ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
-    file_type: Annotated[str | None, typer.Option('--type', '-t', help='Filter by file type.')] = None,
+    file_type: Annotated[FileType | None, typer.Option('--type', '-t', help='Filter by file type.')] = None,
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max files to return.')] = 50,
-    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """List indexed documents.
 
@@ -289,7 +293,7 @@ def clear(
         ),
     ] = None,
     clear_cache: Annotated[bool, typer.Option('--clear-cache', help='Also delete cached embeddings.')] = False,
-    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Clear documents from index.
 
@@ -330,16 +334,14 @@ def search(
         ),
     ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
-    search_type: Annotated[
-        Literal['hybrid', 'lexical', 'embedding'], typer.Option('--type', '-t', help='Search strategy.')
-    ] = 'hybrid',
+    search_type: Annotated[SearchType, typer.Option('--type', '-t', help='Search strategy.')] = 'hybrid',
     exclude_paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str], typer.Option('--exclude', '-x', help='Exclude files under these paths.')
     ] = [],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     min_score: Annotated[
         float | None, typer.Option('--min-score', help='Minimum relevance score (0.0 = relevant).')
     ] = None,
-    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Search documents.
 
@@ -381,7 +383,7 @@ def index(
         ),
     ] = None,
     stop_after: Annotated[
-        str | None,
+        StopAfterStage | None,
         typer.Option(
             '--stop-after',
             help='Stop pipeline at stage: scan, chunk, embed.',
@@ -394,7 +396,7 @@ def index(
             help='Per-file chunking timeout in seconds. Raise for table-heavy PDFs.',
         ),
     ] = None,
-    format: Annotated[Literal['text', 'json'], typer.Option('--format', '-f', help='Output format.')] = 'text',
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Index documents for search.
 
@@ -443,7 +445,7 @@ async def infrastructure() -> AsyncIterator[InfraContext]:
 # -- Private async implementations --
 
 
-async def _info_async(collection_name: str, paths: Sequence[str], format: Literal['text', 'json']) -> None:
+async def _info_async(collection_name: str, paths: Sequence[str], format: OutputFormat) -> None:
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -514,9 +516,9 @@ async def _info_async(collection_name: str, paths: Sequence[str], format: Litera
 async def _list_async(
     collection_name: str,
     paths: Sequence[str],
-    file_type: str | None,
+    file_type: FileType | None,
     limit: int,
-    format: Literal['text', 'json'],
+    format: OutputFormat,
 ) -> None:
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
@@ -551,7 +553,7 @@ async def _clear_async(
     collection_name: str,
     paths: Sequence[str],
     clear_cache: bool,
-    format: Literal['text', 'json'],
+    format: OutputFormat,
 ) -> None:
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
@@ -623,10 +625,10 @@ async def _search_async(
     collection_name: str,
     paths: Sequence[str],
     limit: int,
-    search_type: Literal['hybrid', 'lexical', 'embedding'],
+    search_type: SearchType,
     exclude_paths: Sequence[str],
     min_score: float | None,
-    format: Literal['text', 'json'],
+    format: OutputFormat,
 ) -> None:
     source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
     resolved_excludes = resolve_filter_paths(exclude_paths)
@@ -729,9 +731,9 @@ async def _index_async(
     paths: Sequence[Path],
     collection_name: str,
     gitignore: bool | None,
-    stop_after: str | None,
+    stop_after: StopAfterStage | None,
     chunk_timeout: int | None,
-    format: Literal['text', 'json'],
+    format: OutputFormat,
 ) -> None:
     resolved_paths = resolve_index_paths([str(p) for p in paths])
 
@@ -781,8 +783,6 @@ async def _index_async(
             state_store=state_store,
         )
 
-        stop = cast(StopAfterStage, stop_after) if stop_after else None
-
         # Dashboard lifecycle — ensure dashboard is running and register this CLI process
         from document_search.dashboard.launcher import ensure_dashboard  # noqa: PLC0415 — lazy
 
@@ -804,7 +804,7 @@ async def _index_async(
                 collection_name=collection_name,
                 owner_pid=os.getpid(),
                 respect_gitignore=gitignore,
-                stop_after=stop,
+                stop_after=stop_after,
                 embedding_client=embedding_client,
                 redis_client=ctx.redis,
                 **index_overrides,

@@ -31,6 +31,7 @@ from imessage_kit.types import (
     AttachmentView,
     Chat,
     Contact,
+    ContactMatchMode,
     ContactSource,
     DeliveryStatus,
     DiagnosticResult,
@@ -439,16 +440,30 @@ class IMessageService:
         *,
         limit: int = 10,
         source: str | None = None,
+        match_mode: ContactMatchMode = 'exact_or_substring',
     ) -> Sequence[Contact]:
         """Search AddressBook by name, phone, or email.
 
+        When `source` is None, returns merged contacts deduplicated across all
+        sources (phones/emails unioned). When `source` is set, returns that
+        source's view of matching contacts — only the phones, emails, and names
+        recorded in that source.
+
+        Phone digit and email substring matching are always active.
+        `match_mode` controls name-match strictness:
+          - 'exact_only': name must equal the query.
+          - 'exact_or_substring' (default): query may be a substring of the name.
+          - 'exact_or_substring_or_fuzzy': also fall back to fuzzy
+            token_sort_ratio ≥ 70% (catches 'Francisco' → 'Francis').
+
         Args:
-            query: Name (fuzzy), phone, or email.
+            query: Name, phone, or email.
             limit: Max matches to return.
-            source: Filter to a source display name (e.g., 'Google', 'iCloud').
-                Raises ValueError if the source does not exist.
+            source: Display name of a source (e.g., 'Google', 'iCloud').
+                Case-insensitive. Raises ValueError if the source does not exist.
+            match_mode: Name-matching strictness. Default 'exact_or_substring'.
         """
-        results = self._state.contacts.lookup(query, source=source)
+        results = self._state.contacts.lookup(query, source=source, match_mode=match_mode)
         return results[:limit]
 
     def get_unread(self) -> Sequence[Message]:

@@ -602,7 +602,7 @@ def _read_cached_static() -> CachedCredentials | None:
         if _max_mtime() > cached.timestamp:
             return None
         return cached
-    except (pydantic.ValidationError, json.JSONDecodeError, OSError):
+    except OSError:  # ValidationError/JSONDecodeError: fail-fast on schema drift (our data)
         return None
 
 
@@ -1172,17 +1172,13 @@ def _health_sidecar_path(session_id: str) -> Path:
 
 
 def _load_health_sidecar(session_id: str) -> HealthSidecar | None:
-    """Load previous health sidecar, or None if missing/corrupt.
-
-    Returns None on any failure (missing file, corrupt JSON, schema mismatch).
-    Callers treat None as "first invocation" and bootstrap from scratch.
-    """
+    """Load previous health sidecar, or None if missing."""
     path = _health_sidecar_path(session_id)
     if not path.exists():
         return None
     try:
         return HealthSidecar.model_validate_json(path.read_text())
-    except (pydantic.ValidationError, json.JSONDecodeError, OSError):
+    except OSError:  # ValidationError/JSONDecodeError: fail-fast on schema drift (our data)
         return None
 
 

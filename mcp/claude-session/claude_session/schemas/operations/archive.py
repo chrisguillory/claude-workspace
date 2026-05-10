@@ -1,5 +1,4 @@
-"""
-Archive operation schemas.
+"""Archive operation schemas.
 
 Models for session archive creation and format detection.
 
@@ -11,13 +10,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Literal
 
 import pydantic
 
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.session.models import SessionRecord, Task
 from claude_session.schemas.types import Base64JsonBytes, JsonDatetime, ToolResultExtension
+from claude_session.types import ArchiveFormat
 
 __all__ = [
     'ARCHIVE_FORMAT_VERSION',
@@ -59,15 +58,14 @@ class FileMetadata(StrictModel):
 
 
 class ArchiveMetadata(StrictModel):
-    """
-    Metadata about created archive.
+    """Metadata about created archive.
 
     Returned by save_current_session MCP tool.
     """
 
     file_path: str
     session_id: str
-    format: Literal['json', 'zst']
+    format: ArchiveFormat
     size_mb: float  # Size in megabytes, rounded to 2 decimal places
     archived_at: datetime
     session_records: int  # Records in main {session_id}.jsonl file
@@ -87,8 +85,7 @@ class ArchiveMetadata(StrictModel):
 
 
 class SessionArchive(StrictModel):
-    """
-    Archive format v2.x - explicit artifact models.
+    """Archive format v2.x - explicit artifact models.
 
     Version history:
     - 2.2: Added session_env, session_memory, and debug_log
@@ -245,8 +242,7 @@ class TodoFileEntry(StrictModel):
 
 
 def parse_agent_metadata(filename: str) -> tuple[str, str | None]:
-    """
-    Parse agent ID and type from filename.
+    """Parse agent ID and type from filename.
 
     Examples:
         "agent-5271c147.jsonl" -> ("5271c147", None)

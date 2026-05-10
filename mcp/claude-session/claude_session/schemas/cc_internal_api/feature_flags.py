@@ -1,5 +1,4 @@
-"""
-Feature flag schemas for Claude Code internal API.
+"""Feature flag schemas for Claude Code internal API.
 
 This module provides strict per-flag typing for the /api/eval/sdk-* endpoint.
 Each feature flag has its value typed according to observed captures:
@@ -60,8 +59,7 @@ FeatureSource = Literal['force', 'defaultValue', 'experiment']
 
 
 class ExperimentConfig(StrictModel):
-    """
-    Experiment configuration for a feature flag.
+    """Experiment configuration for a feature flag.
 
     VALIDATION STATUS: VALIDATED
     """
@@ -71,8 +69,7 @@ class ExperimentConfig(StrictModel):
 
 
 class ExperimentResult(StrictModel):
-    """
-    Result of experiment assignment.
+    """Result of experiment assignment.
 
     VALIDATION STATUS: VALIDATED
     """
@@ -87,8 +84,7 @@ class ExperimentResult(StrictModel):
 
 
 class FeedbackSurveyConfig(StrictModel):
-    """
-    Config value for tengu_feedback_survey_config flag.
+    """Config value for tengu_feedback_survey_config flag.
 
     VALIDATION STATUS: VALIDATED
     Controls feedback survey timing and probability.
@@ -105,8 +101,7 @@ class FeedbackSurveyConfig(StrictModel):
 
 
 class VersionConfig(StrictModel):
-    """
-    Config value for tengu_version_config flag.
+    """Config value for tengu_version_config flag.
 
     VALIDATION STATUS: VALIDATED
     Specifies minimum required version.
@@ -116,8 +111,7 @@ class VersionConfig(StrictModel):
 
 
 class SpinnerWordsConfig(StrictModel):
-    """
-    Config value for tengu_spinner_words flag.
+    """Config value for tengu_spinner_words flag.
 
     VALIDATION STATUS: VALIDATED
     List of words shown in the CLI spinner during processing.
@@ -127,8 +121,7 @@ class SpinnerWordsConfig(StrictModel):
 
 
 class OffSwitchConfig(StrictModel):
-    """
-    Config value for tengu-off-switch flag.
+    """Config value for tengu-off-switch flag.
 
     VALIDATION STATUS: VALIDATED (2026-01-06)
     Controls whether a feature is activated.
@@ -138,8 +131,7 @@ class OffSwitchConfig(StrictModel):
 
 
 class SmConfig(StrictModel):
-    """
-    Config value for tengu_sm_config flag (session management).
+    """Config value for tengu_sm_config flag (session management).
 
     VALIDATION STATUS: VALIDATED (2026-01-06)
     Controls session/message token thresholds for updates.
@@ -151,8 +143,7 @@ class SmConfig(StrictModel):
 
 
 class EventBatchConfig(StrictModel):
-    """
-    Config value for tengu_1p_event_batch_config flag.
+    """Config value for tengu_1p_event_batch_config flag.
 
     VALIDATION STATUS: VALIDATED (2026-01-06)
     Controls event batching behavior (1p = first-party).
@@ -164,8 +155,7 @@ class EventBatchConfig(StrictModel):
 
 
 class TopOfFeedTipConfig(StrictModel):
-    """
-    Config value for tengu-top-of-feed-tip flag.
+    """Config value for tengu-top-of-feed-tip flag.
 
     VALIDATION STATUS: VALIDATED (2026-01-06)
     Displays a tip at the top of the feed UI.
@@ -179,8 +169,7 @@ class TopOfFeedTipConfig(StrictModel):
 
 
 class BoolFeatureValue(StrictModel):
-    """
-    Feature flag with boolean value.
+    """Feature flag with boolean value.
 
     Used for simple on/off toggle flags like tengu_sumi, tengu_scratch, etc.
     Only observed with source='defaultValue' or 'force' - never 'experiment'.
@@ -195,8 +184,7 @@ class BoolFeatureValue(StrictModel):
 
 
 class StringFeatureValueExperiment(StrictModel):
-    """
-    String feature flag with experiment data (source='experiment').
+    """String feature flag with experiment data (source='experiment').
 
     When source='experiment', experiment and experimentResult are always present.
     """
@@ -210,8 +198,7 @@ class StringFeatureValueExperiment(StrictModel):
 
 
 class StringFeatureValueNonExperiment(StrictModel):
-    """
-    String feature flag without experiment data (source='defaultValue' or 'force').
+    """String feature flag without experiment data (source='defaultValue' or 'force').
 
     When source is not 'experiment', experiment fields are always null.
     """
@@ -390,8 +377,7 @@ FeatureValue = (
 
 
 class EvalAttributes(StrictModel):
-    """
-    Attributes sent with feature flag evaluation request.
+    """Attributes sent with feature flag evaluation request.
 
     VALIDATION STATUS: VALIDATED
     Identifies user/device for feature targeting.
@@ -409,8 +395,7 @@ class EvalAttributes(StrictModel):
 
 
 class EvalRequest(StrictModel):
-    """
-    Request to /api/eval/sdk-{code}.
+    """Request to /api/eval/sdk-{code}.
 
     VALIDATION STATUS: VALIDATED
     Feature flag evaluation request.
@@ -425,8 +410,7 @@ class EvalRequest(StrictModel):
 
 
 class EvalResponse(StrictModel):
-    """
-    Response from /api/eval/sdk-{code}.
+    """Response from /api/eval/sdk-{code}.
 
     VALIDATION STATUS: VALIDATED
     Contains all feature flags for the user with strict per-flag typing.

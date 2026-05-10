@@ -53,7 +53,7 @@ from cc_lib.claude_binary_patching import (
     scan_binary,
 )
 from cc_lib.claude_process import kill_and_copy_resume
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.utils.atomic_write import atomic_write
@@ -73,7 +73,20 @@ class CodesignError(PatchError):
         super().__init__(f'codesign failed: {stderr}')
 
 
+class RequiredSettingsUnsatisfiedError(PatchError):
+    """One or more selected patches' required_setting isn't satisfied — refuse to apply.
+
+    Raised by the apply command's pre-flight check. Carries per-patch reasons
+    so the boundary handler can render a single loud error block.
+    """
+
+    def __init__(self, unsatisfied: Mapping[str, Sequence[str]]) -> None:
+        super().__init__('required settings not satisfied for selected patches')
+        self.unsatisfied = unsatisfied
+
+
 app = create_app(help='Claude Code binary patcher.')
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
@@ -142,6 +155,7 @@ def apply(
         apply --restart      Apply fixes and restart Claude Code
     """
     patches = resolve_patches(names, fixes=fixes, features=features, tweaks=tweaks, all_=all_)
+    _preflight_required_settings(patches)
     patcher = BinaryPatcher(path) if path else BinaryPatcher.detect()
     print(f'Target: {patcher.path} (version {patcher.version})')
     print(f'Size: {patcher.size_mb:.1f} MB')
@@ -208,10 +222,40 @@ def _format_status(result: PatchScanResult) -> str:
     if result.status == 'unpatched':
         return f'unpatched  ({len(result.sites)} sites)'
     if result.status == 'applied':
+        reasons = _unsatisfied_reasons(result.patch)
+        if reasons:
+            return f'applied    (INERT — {"; ".join(reasons)})'
         return 'applied'
     if result.status == 'changed':
         return 'changed    (anchor found, code different)'
+    if result.status == 'out_of_range':
+        bound = (
+            f'max_version={result.patch.max_version}'
+            if result.patch.max_version is not None
+            else f'min_version={result.patch.min_version}'
+        )
+        return f'skipped    (out of range, {bound})'
     return 'missing    (anchor not found)'
+
+
+def _unsatisfied_reasons(patch: PatchDef) -> Sequence[str]:
+    """Return human-readable reasons each required-setting isn't met (empty if all met)."""
+    return [reason for rs in patch.required_setting if (reason := rs.unsatisfied_reason()) is not None]
+
+
+def _preflight_required_settings(patches: Sequence[PatchDef]) -> None:
+    """Raise ``RequiredSettingsUnsatisfiedError`` if any selected patch is inert.
+
+    Runs BEFORE any byte modification so the binary stays untouched on
+    failure. Fail-fast surface for the user: fix settings, then re-run.
+    """
+    unsatisfied: dict[str, Sequence[str]] = {}
+    for patch in patches:
+        reasons = _unsatisfied_reasons(patch)
+        if reasons:
+            unsatisfied[patch.name] = reasons
+    if unsatisfied:
+        raise RequiredSettingsUnsatisfiedError(unsatisfied)
 
 
 @app.command(name='list')
@@ -249,6 +293,22 @@ def restore(
 
 
 add_install_command(app, script_path=__file__)
+
+
+@error_boundary.handler(RequiredSettingsUnsatisfiedError)
+def _handle_required_settings_unsatisfied(exc: RequiredSettingsUnsatisfiedError) -> None:
+    bar = '═' * 70
+    print(f'\n{bar}', file=sys.stderr)
+    print('  REFUSING TO APPLY — required settings not satisfied', file=sys.stderr)
+    print(f'{bar}\n', file=sys.stderr)
+    for name, reasons in exc.unsatisfied.items():
+        print(f'  {name}', file=sys.stderr)
+        for reason in reasons:
+            print(f'    • {reason}', file=sys.stderr)
+        print(file=sys.stderr)
+    print('  To fix: edit ~/.claude/settings.json and set the required keys,', file=sys.stderr)
+    print('  or unset the disabling env vars, then re-run.', file=sys.stderr)
+    print(f'{bar}', file=sys.stderr)
 
 
 @error_boundary.handler(PatchError)
@@ -330,7 +390,7 @@ class BinaryPatcher:
 
     def scan(self, patches: Sequence[PatchDef]) -> Mapping[str, PatchScanResult]:
         """Scan binary for all patches."""
-        return scan_binary(self._data, patches)
+        return scan_binary(self._data, patches, current_version=self.version)
 
     def apply(self, patches: Sequence[PatchDef]) -> None:
         """Apply patches in a single read-modify-write-sign cycle."""
@@ -340,8 +400,12 @@ class BinaryPatcher:
         applied_names: list[str] = []
         missing_names: list[str] = []
         unknown_names: list[str] = []
+        skipped_names: list[str] = []
 
         for name, result in scan_results.items():
+            if result.status == 'out_of_range':
+                skipped_names.append(name)
+                continue
             if result.status == 'unpatched':
                 pending_sites[name] = result.sites
                 self._report_sites(result.patch, result.sites)
@@ -357,7 +421,12 @@ class BinaryPatcher:
 
         if not pending_sites:
             if applied_names:
-                print('\nAll requested patches already applied.')
+                suffix = (
+                    f'\nSkipped {len(skipped_names)} out-of-range patch(es): {", ".join(skipped_names)}'
+                    if skipped_names
+                    else ''
+                )
+                print(f'\nAll requested patches already applied.{suffix}')
                 return
             raise PatchError('No patches could be applied (all anchors missing or code changed)')
 
@@ -383,14 +452,10 @@ class BinaryPatcher:
             suffix += f'\nWARNING: anchor not found for: {", ".join(missing_names)}'
         if unknown_names:
             suffix += f'\nWARNING: code changed for: {", ".join(unknown_names)}'
+        if skipped_names:
+            suffix += f'\nSkipped {len(skipped_names)} out-of-range patch(es): {", ".join(skipped_names)}'
 
         print(f'\nPatched {total_sites} site(s) across {len(pending_sites)} patch(es).{suffix}')
-
-        if 'session-memory' in pending_sites:
-            print(
-                '\nNote: session-memory also requires autocompact enabled at runtime.\n'
-                'Ensure DISABLE_AUTO_COMPACT is not set in ~/.claude/settings.json env.'
-            )
 
         print('\nDone. Restart Claude Code to pick up the changes.')
 

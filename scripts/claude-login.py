@@ -126,16 +126,16 @@ import rich.console
 import rich.panel
 import typer
 from cc_lib.claude_process import kill_and_copy_resume
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.exceptions import ClaudeProcessError
-from cc_lib.schemas import StrictModel
+from cc_lib.schemas import CamelModel, StrictModel
 from cc_lib.types import JsonObject
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
 # -- Pydantic Models -----------------------------------------------------------
 
 
-class OAuthAccount(StrictModel):
+class OAuthAccount(CamelModel):
     """Claude Code oauthAccount from ~/.claude.json."""
 
     # Always present after login
@@ -153,12 +153,15 @@ class OAuthAccount(StrictModel):
     workspace_role: str | None = None
     account_created_at: str | None = None
 
-    # Claude Code trial / onboarding fields. Unused here but declared so
+    # Claude Code state fields. Unused here but declared so
     # CC_STRICT_MODEL_EXTRA_FORBID=1 round-trips clean.
     cc_onboarding_flags: Mapping[str, object] = pydantic.Field(default_factory=dict)
     claude_code_trial_ends_at: str | None = None
     claude_code_trial_duration_days: int | None = None
     seat_tier: Literal['team_tier_1'] | None = None
+    organization_type: Literal['claude_max'] | None = None
+    organization_rate_limit_tier: Literal['default_claude_max_20x'] | None = None
+    user_rate_limit_tier: None = None
 
 
 class ClaudeAiOAuth(StrictModel):
@@ -344,25 +347,6 @@ def delete_api_key_keychain() -> None:
 # -- Config Operations ---------------------------------------------------------
 
 
-_OAUTH_CAMEL_TO_SNAKE: Mapping[str, str] = {
-    'accountUuid': 'account_uuid',
-    'emailAddress': 'email_address',
-    'organizationUuid': 'organization_uuid',
-    'billingType': 'billing_type',
-    'hasExtraUsageEnabled': 'has_extra_usage_enabled',
-    'displayName': 'display_name',
-    'subscriptionCreatedAt': 'subscription_created_at',
-    'organizationName': 'organization_name',
-    'organizationRole': 'organization_role',
-    'workspaceRole': 'workspace_role',
-    'accountCreatedAt': 'account_created_at',
-    'ccOnboardingFlags': 'cc_onboarding_flags',
-    'claudeCodeTrialEndsAt': 'claude_code_trial_ends_at',
-    'claudeCodeTrialDurationDays': 'claude_code_trial_duration_days',
-    'seatTier': 'seat_tier',
-}
-
-
 def read_oauth_account() -> OAuthAccount | None:
     """Read oauthAccount from ~/.claude.json."""
     if not CONFIG_PATH.is_file():
@@ -371,35 +355,13 @@ def read_oauth_account() -> OAuthAccount | None:
     raw = config.get('oauthAccount')
     if not raw:
         return None
-    # Convert known camelCase keys to snake_case; pass unknown keys through
-    # so extra='allow' on PermissiveModel preserves forward-compat fields.
-    converted: dict[str, Any] = {}
-    for camel_key, value in raw.items():
-        snake_key = _OAUTH_CAMEL_TO_SNAKE.get(camel_key)
-        converted[snake_key if snake_key else camel_key] = value
-    return OAuthAccount.model_validate(converted)
-
-
-_OAUTH_SNAKE_TO_CAMEL: Mapping[str, str] = {v: k for k, v in _OAUTH_CAMEL_TO_SNAKE.items()}
+    return OAuthAccount.model_validate(raw)
 
 
 def write_oauth_account(account: OAuthAccount) -> None:
     """Write oauthAccount to ~/.claude.json, preserving all other fields."""
     config = json.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.is_file() else {}
-    dumped = account.model_dump()
-    camel: dict[str, Any] = {}
-    # Convert known snake_case fields back to camelCase
-    for snake_key, value in dumped.items():
-        camel_key = _OAUTH_SNAKE_TO_CAMEL.get(snake_key)
-        if camel_key:
-            # Skip None optional fields to avoid breaking Claude Code
-            if value is not None or snake_key in ('account_uuid', 'email_address', 'organization_uuid'):
-                camel[camel_key] = value
-        else:
-            # Unknown extras (forward-compat) — pass through as-is
-            camel[snake_key] = value
-
-    config['oauthAccount'] = camel
+    config['oauthAccount'] = account.model_dump()
     _write_file_atomically(CONFIG_PATH, json.dumps(config, indent=2))
 
 
@@ -1214,6 +1176,7 @@ def _complete_setup_token_login_id(incomplete: str) -> Sequence[tuple[str, str]]
 # -- CLI -----------------------------------------------------------------------
 
 app = create_app(help='Claude Code login and MCP auth manager.')
+add_help_command(app)
 
 
 @app.callback(invoke_without_command=True)

@@ -642,7 +642,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         return ''
 
     def _has_directive(self, lineno: int, kind: ViolationKind) -> bool:
-        """Check if line (or nearby continuation lines) has suppression directive.
+        r"""Check if line (or nearby continuation lines) has suppression directive.
 
         Scans up to 4 lines forward from the violation to handle cases where
         ruff-format wraps statements across lines (e.g., ``except (\\n Exception\\n):``),

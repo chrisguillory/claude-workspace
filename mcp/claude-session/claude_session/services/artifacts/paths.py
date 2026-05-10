@@ -1,5 +1,4 @@
-"""
-Path utilities for session artifact handling.
+"""Path utilities for session artifact handling.
 
 Provides functions to extract accurate paths from session records,
 avoiding the lossy path encoding used by Claude Code's directory names.
@@ -23,8 +22,7 @@ class MissingCwdError(Exception):
 
 
 def extract_source_project_path(files_data: Mapping[str, Sequence[SessionRecord]]) -> Path:
-    """
-    Extract the source project path from session records.
+    """Extract the source project path from session records.
 
     Claude Code encodes working directory paths for filesystem safety:
     - `/` → `-`

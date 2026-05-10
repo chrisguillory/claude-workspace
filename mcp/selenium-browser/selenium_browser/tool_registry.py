@@ -23,6 +23,7 @@ class ToolRegistry:
             @tool_registry.register_tool
             async def click(self, css_selector: str) -> None: ...
 
+
         # Bridge dispatch:
         await MyService.tool_registry.dispatch('click', service_instance, css_selector='#btn')
     """

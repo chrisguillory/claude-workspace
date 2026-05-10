@@ -36,10 +36,8 @@ brew install tesseract
 
 ## Installation
 
-For users installing from GitHub:
-
 ```bash
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/document-search
+uv tool install --editable ~/claude-workspace/mcp/document-search
 claude mcp add --scope user document-search -- document-search-mcp
 ```
 

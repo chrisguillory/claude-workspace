@@ -1,5 +1,4 @@
-"""
-Session archive service - framework-agnostic domain logic.
+"""Session archive service - framework-agnostic domain logic.
 
 Pure service layer with no MCP/FastAPI dependencies. Handles session discovery,
 archive creation, compression, and format detection.
@@ -12,7 +11,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import ClassVar
 
 import zstandard as zstd
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
@@ -52,6 +51,7 @@ from claude_session.services.lineage import get_machine_id
 from claude_session.services.parser import SessionParserService
 from claude_session.services.version import get_version
 from claude_session.storage.protocol import StorageBackend
+from claude_session.types import ArchiveFormat
 
 __all__ = [
     'FormatDetector',
@@ -71,16 +71,15 @@ class FormatDetector:
     SUPPORTED_FORMATS: ClassVar[frozenset[str]] = frozenset({'json', 'zst'})  # 'zst' = JSON with zstd compression
 
     # Extension to format mapping
-    EXTENSION_MAP: ClassVar[Mapping[str, Literal['json', 'zst']]] = {
+    EXTENSION_MAP: ClassVar[Mapping[str, ArchiveFormat]] = {
         '.json': 'json',
         '.json.zst': 'zst',
         '.zst': 'zst',
     }
 
     @classmethod
-    def detect_format(cls, output_path: Path, format_param: Literal['json', 'zst'] | None) -> Literal['json', 'zst']:
-        """
-        Detect archive format from path and validate against format parameter.
+    def detect_format(cls, output_path: Path, format_param: ArchiveFormat | None) -> ArchiveFormat:
+        """Detect archive format from path and validate against format parameter.
 
         Validates that extension and explicit format parameter don't conflict.
         Handles multi-part extensions like '.json.zst'.
@@ -125,9 +124,8 @@ class FormatDetector:
             )
 
     @classmethod
-    def _detect_from_extension(cls, output_path: Path) -> Literal['json', 'zst'] | None:
-        """
-        Detect format from file extension.
+    def _detect_from_extension(cls, output_path: Path) -> ArchiveFormat | None:
+        """Detect format from file extension.
 
         Handles multi-part extensions like '.json.zst'.
 
@@ -148,8 +146,7 @@ class FormatDetector:
 
 
 class SessionArchiveService:
-    """
-    Service for creating session archives.
+    """Service for creating session archives.
 
     Pure domain logic - no MCP/FastAPI dependencies. Takes session_id and
     discovers all related JSONL files from ~/.claude/projects/.
@@ -165,8 +162,7 @@ class SessionArchiveService:
         session_folder: Path | None = None,
         claude_pid: int | None = None,
     ) -> None:
-        """
-        Initialize archive service.
+        """Initialize archive service.
 
         Args:
             session_id: Current Claude Code session ID
@@ -200,11 +196,10 @@ class SessionArchiveService:
         self,
         storage: StorageBackend,
         output_path: str | None,
-        format_param: Literal['json', 'zst'] | None,
+        format_param: ArchiveFormat | None,
         skip_cross_session_artifacts: bool = False,
     ) -> ArchiveMetadata:
-        """
-        Create archive of current session.
+        """Create archive of current session.
 
         Args:
             storage: Storage backend (call-time parameter!)
@@ -450,8 +445,7 @@ class SessionArchiveService:
         )
 
     def _get_project_folder(self) -> Path:
-        """
-        Get the project folder in ~/.claude/projects/.
+        """Get the project folder in ~/.claude/projects/.
 
         Computes and caches the encoded project path. This is the directory
         containing session JSONL files for this project.
@@ -478,8 +472,7 @@ class SessionArchiveService:
         )
 
     async def _discover_session_files(self, project_folder: Path) -> Sequence[Path]:
-        """
-        Discover all JSONL files for current session.
+        """Discover all JSONL files for current session.
 
         Finds:
         - Main session file: {session_id}.jsonl
@@ -528,8 +521,7 @@ class SessionArchiveService:
     async def _load_session_files(
         self, session_files: Sequence[Path]
     ) -> tuple[Mapping[str, Sequence[SessionRecord]], int]:
-        """
-        Load and parse all session files using parser service.
+        """Load and parse all session files using parser service.
 
         Args:
             session_files: Sequence of JSONL file paths
@@ -550,8 +542,7 @@ class SessionArchiveService:
         return files_data, total_records
 
     async def _extract_claude_code_version(self, files_data: Mapping[str, Sequence[SessionRecord]]) -> str | None:
-        """
-        Extract Claude Code version using best available method.
+        """Extract Claude Code version using best available method.
 
         Fallback chain:
         1. Process-based detection (if claude_pid was provided and process exists)

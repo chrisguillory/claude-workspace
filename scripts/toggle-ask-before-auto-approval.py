@@ -22,7 +22,8 @@ Subcommands:
     status  (default)  Report gate state. With --session, target one
                        session; without, list all active markers.
     off                Touch marker → hook short-circuits for the session
-    on                 Remove marker → hook re-engages
+    on                 Remove marker → hook re-engages. With --all,
+                       remove every disabled marker (bulk reset).
 
 All mutation subcommands accept ``--session <uuid>`` (or ``-s``) to
 target a specific session from an external terminal. Without it, the
@@ -58,13 +59,14 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 
 GATE_DIR = Path.home() / '.claude-workspace' / 'ask-before-auto-approval'
 
 app = create_app(help="Toggle the ask-before-auto-approval hook's per-session marker.")
 add_install_command(app, script_path=__file__)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
@@ -109,9 +111,26 @@ def off(session: SessionOption = None) -> None:
 
 @app.command()
 @error_boundary
-def on(session: SessionOption = None) -> None:
-    """Re-enable the hook for a session (remove marker)."""
+def on(
+    session: SessionOption = None,
+    all_: Annotated[
+        bool,
+        typer.Option('--all', help='Re-enable for every tracked session (remove every marker).'),
+    ] = False,
+) -> None:
+    """Re-enable the hook for a session (remove marker). With --all, remove every marker."""
     _refuse_if_subagent('on')
+    if all_:
+        if session:
+            raise MutuallyExclusiveFlags
+        markers = sorted(GATE_DIR.glob('disabled-*')) if GATE_DIR.exists() else []
+        if not markers:
+            typer.echo('Gate already enabled for all tracked sessions (no markers to remove).')
+            return
+        for marker in markers:
+            marker.unlink(missing_ok=True)
+        typer.echo(f'Gate re-enabled for {len(markers)} session(s).')
+        return
     sid = _resolve_session(session)
     (GATE_DIR / f'disabled-{sid}').unlink(missing_ok=True)
     typer.echo(f'Gate enabled for session {sid}')
@@ -143,32 +162,54 @@ def _resolve_session(session: str | None) -> str:
 # -- Exceptions + handlers ----------------------------------------------------
 
 
-class NoSessionSpecified(Exception):
+class CLIError(Exception):
+    """Base for user-facing CLI errors. Subclasses define their message and ``exit_code``.
+
+    Handled by a single ``error_boundary.handler(CLIError)`` that prints
+    ``str(exc)`` to stderr and exits with ``exc.exit_code``.
+    """
+
+    exit_code: int = 1
+
+
+class NoSessionSpecified(CLIError):
     """Neither ``--session`` nor ``$CLAUDE_CODE_SESSION_ID`` is available."""
 
+    exit_code = 2
 
-class SubagentRefused(Exception):
+    def __init__(self) -> None:
+        super().__init__(
+            'No session specified. Pass --session <uuid> or run from a Claude Code session.',
+        )
+
+
+class SubagentRefused(CLIError):
     """A sub-agent attempted a mutation (``off`` or ``on``)."""
 
+    exit_code = 3
+
     def __init__(self, *, action: str, agent_id: str) -> None:
-        super().__init__(f'Refusing {action!r} from sub-agent (CLAUDE_CODE_AGENT_ID={agent_id}).')
+        super().__init__(
+            f'Refusing {action!r} from sub-agent (CLAUDE_CODE_AGENT_ID={agent_id}). '
+            'Only the user (or main thread) may toggle the gate.',
+        )
         self.action = action
         self.agent_id = agent_id
 
 
-@error_boundary.handler(NoSessionSpecified)
-def _handle_no_session(exc: NoSessionSpecified) -> None:
-    typer.echo(
-        'No session specified. Pass --session <uuid> or run from a Claude Code session.',
-        err=True,
-    )
-    sys.exit(2)
+class MutuallyExclusiveFlags(CLIError):
+    """``--all`` and ``--session`` may not be combined."""
+
+    exit_code = 2
+
+    def __init__(self) -> None:
+        super().__init__('--all and --session are mutually exclusive.')
 
 
-@error_boundary.handler(SubagentRefused)
-def _handle_subagent_refused(exc: SubagentRefused) -> None:
-    typer.echo(f'{exc} Only the user (or main thread) may toggle the gate.', err=True)
-    sys.exit(3)
+@error_boundary.handler(CLIError)
+def _handle_cli_error(exc: CLIError) -> None:
+    typer.echo(str(exc), err=True)
+    sys.exit(exc.exit_code)
 
 
 if __name__ == '__main__':

@@ -82,7 +82,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         Limitations:
             - Tokens may expire between save and restore - re-authenticate if needed
         """
-
         return await service.save_profile_state(filename=filename, include_indexeddb=include_indexeddb)
 
     @mcp.tool(
@@ -149,7 +148,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             Output file created with 0o600 permissions (owner read/write only).
             Contains sensitive auth tokens - treat as credentials.
         """
-
         return await service.export_chrome_profile_state(
             output_file=output_file,
             chrome_profile=chrome_profile,

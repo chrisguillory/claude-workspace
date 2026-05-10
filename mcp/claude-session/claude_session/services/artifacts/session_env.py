@@ -1,5 +1,4 @@
-"""
-Session-env artifact handling.
+"""Session-env artifact handling.
 
 Collects and writes per-session environment files stored at
 ~/.claude/session-env/<session-id>/.

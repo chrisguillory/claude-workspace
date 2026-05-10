@@ -4,12 +4,11 @@ Persistent Python execution environment for Claude Code with automatic package i
 
 ## Installation
 
-### Quick Start (Recommended)
-
-Install the MCP server and client globally:
+### Quick Start
 
 ```bash
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
+# Editable install from local workspace clone (changes take effect immediately)
+uv tool install --editable ~/claude-workspace/mcp/python-interpreter
 ```
 
 This installs two commands to `~/.local/bin/`:
@@ -67,17 +66,6 @@ uv tool upgrade python-interpreter
 ```
 
 ### Local Development
-
-**Editable install** (recommended for developers):
-
-```bash
-uv tool install --editable /path/to/claude-workspace/mcp/python-interpreter
-claude mcp add --scope user python-interpreter -- python-interpreter-mcp
-```
-
-This gives you:
-- Commands in PATH (permission patterns like `Bash(python-interpreter:*)` work)
-- Changes to source files take effect immediately (no reinstall needed)
 
 **Script mode** (alternative, commands not in PATH):
 

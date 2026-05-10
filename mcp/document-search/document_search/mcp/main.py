@@ -203,7 +203,6 @@ class ServerState:
 
 def register_tools(state: ServerState) -> None:
     """Register MCP tools with closure over server state."""
-
     # Generate collections summary once at registration
     collections = state.collection_registry.list_collections()
     collections_summary = _format_collections_summary(collections)
@@ -356,7 +355,7 @@ Returns:
         path: str | Sequence[str] = '.',
         limit: int = 10,
         search_type: SearchType = 'hybrid',
-        file_types: Sequence[str] | None = None,
+        file_types: Sequence[FileType] | None = None,
         exclude_paths: Sequence[str] = (),
         min_score: float | None = None,
         search_timeout: int | None = None,
@@ -428,7 +427,7 @@ Returns:
             sparse_indices=sparse_indices,
             sparse_values=sparse_values,
             limit=rerank_candidates,
-            file_types=[typing.cast(FileType, ft) for ft in file_types] if file_types else None,
+            file_types=file_types,
             source_path_prefixes=source_prefixes,
             exclude_path_prefixes=resolved_excludes,
         )
@@ -534,7 +533,7 @@ Returns:
     async def list_documents(
         collection_name: str,
         path: str | Sequence[str] = '.',
-        file_type: str | None = None,
+        file_type: FileType | None = None,
         limit: int = 50,
     ) -> Sequence[IndexedFile]:
         # Verify collection exists and get repository
@@ -748,7 +747,6 @@ Returns:
 @contextlib.asynccontextmanager
 async def lifespan(mcp_server: mcp.server.fastmcp.FastMCP) -> AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
-
     # Configure logging with timestamps to stderr.
     # force=True overrides any prior configuration (e.g., from FastMCP)
     # so that our format and level take effect.

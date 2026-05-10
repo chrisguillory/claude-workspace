@@ -1,5 +1,4 @@
-"""
-GitHub Gist storage backend for session archives.
+"""GitHub Gist storage backend for session archives.
 
 Provides async storage backend that saves/loads archives to/from GitHub Gists.
 
@@ -11,9 +10,10 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Literal
 
 import httpx
+
+from claude_session.types import GistVisibility
 
 __all__ = [
     'GistStorage',
@@ -21,8 +21,7 @@ __all__ = [
 
 
 class GistStorage:
-    """
-    GitHub Gist storage backend.
+    """GitHub Gist storage backend.
 
     Stores session archives as GitHub Gists. Supports creating new gists
     or updating existing ones.
@@ -36,11 +35,10 @@ class GistStorage:
         self,
         token: str,
         gist_id: str | None = None,
-        visibility: Literal['public', 'secret'] = 'secret',
+        visibility: GistVisibility = 'secret',
         description: str = 'Claude Code Session Archive',
     ) -> None:
-        """
-        Initialize Gist storage backend.
+        """Initialize Gist storage backend.
 
         Args:
             token: GitHub Personal Access Token with 'gist' scope (empty string allowed for read-only)
@@ -58,8 +56,7 @@ class GistStorage:
         self.base_url = 'https://api.github.com'
 
     async def save(self, filename: str, data: bytes) -> str:
-        """
-        Save archive to GitHub Gist.
+        """Save archive to GitHub Gist.
 
         Args:
             filename: Archive filename
@@ -112,8 +109,7 @@ class GistStorage:
             return await self._create_gist(filename, content)
 
     async def exists(self, filename: str) -> bool:
-        """
-        Check if gist exists and contains the specified file.
+        """Check if gist exists and contains the specified file.
 
         Args:
             filename: Archive filename to check
@@ -146,8 +142,7 @@ class GistStorage:
             return False
 
     async def load(self, filename: str) -> bytes:
-        """
-        Load archive from GitHub Gist.
+        """Load archive from GitHub Gist.
 
         Args:
             filename: Archive filename to load

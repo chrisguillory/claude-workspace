@@ -1,5 +1,4 @@
-"""
-Introspection utilities for Pydantic models.
+"""Introspection utilities for Pydantic models.
 
 Enables automated metadata extraction for path translation, reserved fields,
 and schema evolution tracking.
@@ -40,8 +39,7 @@ class ModelSummary(TypedDict):
 
 
 def get_path_fields(model: type[BaseModel]) -> Sequence[str]:
-    """
-    Find all fields marked with PathMarker.
+    """Find all fields marked with PathMarker.
 
     Handles Python 3.12+ type aliases and Union types (e.g., PathField | None).
 
@@ -96,8 +94,7 @@ def get_path_fields(model: type[BaseModel]) -> Sequence[str]:
 
 
 def get_reserved_fields(model: type[BaseModel]) -> Mapping[str, Mapping[str, object]]:
-    """
-    Find all reserved (always-null) fields.
+    """Find all reserved (always-null) fields.
 
     Returns a mapping of field names to their metadata for fields that are
     reserved for future use and always null in current data.
@@ -127,8 +124,7 @@ def get_reserved_fields(model: type[BaseModel]) -> Mapping[str, Mapping[str, obj
 
 
 def get_field_version_info(model: type[BaseModel]) -> Mapping[str, str]:
-    """
-    Get version information for fields that track when they were added.
+    """Get version information for fields that track when they were added.
 
     Args:
         model: Pydantic model class to inspect
@@ -157,8 +153,7 @@ def get_field_version_info(model: type[BaseModel]) -> Mapping[str, str]:
 
 
 def get_literal_values(field_info: FieldInfo) -> Sequence[str | int | bool] | None:
-    """
-    Extract literal values from a field definition.
+    """Extract literal values from a field definition.
 
     Args:
         field_info: Pydantic field info
@@ -178,8 +173,7 @@ def get_literal_values(field_info: FieldInfo) -> Sequence[str | int | bool] | No
 
 
 def model_summary(model: type[BaseModel]) -> ModelSummary:
-    """
-    Generate a comprehensive summary of a model's metadata.
+    """Generate a comprehensive summary of a model's metadata.
 
     Args:
         model: Pydantic model class to inspect
@@ -222,8 +216,7 @@ def model_summary(model: type[BaseModel]) -> ModelSummary:
 
 
 def print_model_summary(model: type[BaseModel]) -> None:
-    """
-    Print a human-readable summary of a model.
+    """Print a human-readable summary of a model.
 
     Args:
         model: Pydantic model class to inspect

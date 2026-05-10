@@ -52,7 +52,7 @@ Each command spawns a fresh `zsh -l` on the target — there is no persistent sh
 ## Installation
 
 ```bash
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-remote-bash
+uv tool install --editable ~/claude-workspace/mcp/claude-remote-bash
 ```
 
 This installs two binaries on `$PATH`:

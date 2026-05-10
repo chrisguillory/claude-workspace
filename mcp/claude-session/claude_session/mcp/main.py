@@ -1,10 +1,6 @@
-"""
-Claude Code Session MCP Server.
+"""Claude Code Session MCP Server.
 
 Provides tools for archiving and managing Claude Code session files.
-
-Setup:
-    claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session claude-session-mcp
 
 Example:
     # Save current session to temp file
@@ -51,6 +47,7 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
+from claude_session.types import ArchiveFormat, GistVisibility
 
 __all__ = [
     'ClaudeContext',
@@ -89,8 +86,7 @@ def _is_same_running_session(session_info: SessionInfo, state: ServerState) -> b
 
 @dataclass(frozen=True)
 class ServerState:
-    """
-    Immutable server state initialized at startup.
+    """Immutable server state initialized at startup.
 
     Contains all services and configuration needed for tool execution.
     """
@@ -116,8 +112,7 @@ class ClaudeContext:
 
 @contextlib.asynccontextmanager
 async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
-    """
-    Manage server lifecycle and state initialization.
+    """Manage server lifecycle and state initialization.
 
     Creates ServerState with all services at startup and cleans up on shutdown.
     """
@@ -183,8 +178,7 @@ server = FastMCP('claude-session', lifespan=lifespan)
 
 
 def register_tools(state: ServerState) -> None:
-    """
-    Register MCP tools with closure over server state.
+    """Register MCP tools with closure over server state.
 
     Args:
         state: Server state containing services
@@ -193,12 +187,11 @@ def register_tools(state: ServerState) -> None:
     @server.tool()
     async def save_current_session(
         output_path: str | None = None,
-        format: Literal['json', 'zst'] | None = None,
+        format: ArchiveFormat | None = None,
         storage_backend: Literal['local'] = 'local',
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ArchiveMetadata:
-        """
-        Save current Claude Code session to archive.
+        """Save current Claude Code session to archive.
 
         Creates a complete archive of the current session including all agent
         sessions. By default, saves to a temporary file that is cleaned up on
@@ -250,8 +243,7 @@ def register_tools(state: ServerState) -> None:
         translate_paths: bool = True,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> RestoreResult:
-        """
-        Restore a saved session archive with a new session ID.
+        """Restore a saved session archive with a new session ID.
 
         Works like Claude's teleport feature - creates a new session ID
         while preserving the full conversation history. Loads the session
@@ -303,8 +295,7 @@ def register_tools(state: ServerState) -> None:
         source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> RestoreResult:
-        """
-        Clone a session directly without creating an archive file.
+        """Clone a session directly without creating an archive file.
 
         Faster alternative to archive+restore when cloning sessions on the
         same machine. Creates a new session with a fresh UUIDv7 session ID,
@@ -373,8 +364,7 @@ def register_tools(state: ServerState) -> None:
         delete_cross_session_artifacts: bool | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> DeleteResult:
-        """
-        Delete session artifacts with auto-backup.
+        """Delete session artifacts with auto-backup.
 
         By default, only cloned/restored sessions (UUIDv7) can be deleted.
         Native Claude sessions (UUIDv4) require force=True.
@@ -518,8 +508,7 @@ def register_tools(state: ServerState) -> None:
         dry_run: bool = False,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> MoveResult:
-        """
-        Move a session from one project to another.
+        """Move a session from one project to another.
 
         Relocates project-specific artifacts (JSONL files, tool results,
         session memory) to the target project directory. Path references
@@ -632,8 +621,7 @@ def register_tools(state: ServerState) -> None:
         source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> LineageTree | None:
-        """
-        Get lineage tree for a session.
+        """Get lineage tree for a session.
 
         Returns the complete lineage tree containing the queried session —
         all ancestors and descendants with full operation metadata per node.
@@ -684,8 +672,7 @@ def register_tools(state: ServerState) -> None:
         source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> SessionContext:
-        """
-        Get comprehensive information about a session.
+        """Get comprehensive information about a session.
 
         Returns context about a session including session ID, project path,
         session files, origin (how it was created), state, and characteristics.
@@ -738,13 +725,12 @@ def register_tools(state: ServerState) -> None:
     async def save_session_to_gist(
         session_id: str | None = None,
         gist_id: str | None = None,
-        visibility: Literal['public', 'secret'] = 'secret',
+        visibility: GistVisibility = 'secret',
         description: str = 'Claude Code Session Archive',
         source_project: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> GistArchiveResult:
-        """
-        Save a session to GitHub Gist.
+        """Save a session to GitHub Gist.
 
         Creates a new gist or updates an existing one with the session archive.
         Requires GitHub authentication via GITHUB_TOKEN env var or gh CLI.
@@ -874,8 +860,7 @@ def main() -> None:
 
 
 def _find_claude_context() -> ClaudeContext:
-    """
-    Find Claude process and extract its context (PID, project directory).
+    """Find Claude process and extract its context (PID, project directory).
 
     Uses shared process tree walk to find Claude, then lsof to determine CWD.
 
@@ -930,8 +915,7 @@ def _find_claude_context() -> ClaudeContext:
 
 
 def _discover_session_id(claude_pid: int) -> str:
-    """
-    Discover Claude Code session ID from claude-workspace sessions.json.
+    """Discover Claude Code session ID from claude-workspace sessions.json.
 
     Delegates to shared session resolution with MCP-specific retry count
     (10 attempts) to handle the startup race with SessionStart hook.
@@ -956,8 +940,7 @@ def _discover_session_id(claude_pid: int) -> str:
 
 
 def _get_github_token() -> str | None:
-    """
-    Get GitHub token from environment or gh CLI.
+    """Get GitHub token from environment or gh CLI.
 
     Checks in order:
     1. GITHUB_TOKEN environment variable

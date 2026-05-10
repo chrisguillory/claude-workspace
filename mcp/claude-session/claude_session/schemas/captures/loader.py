@@ -1,5 +1,4 @@
-"""
-Capture loading and preprocessing utilities.
+"""Capture loading and preprocessing utilities.
 
 This module provides:
 - CapturedTraffic: The discriminated union of all capture types
@@ -184,8 +183,7 @@ CAPTURE_ADAPTER: pydantic.TypeAdapter[CapturedTraffic] = pydantic.TypeAdapter(Ca
 
 
 def load_capture(filepath: Path) -> CapturedTraffic:
-    """
-    Load and validate a capture file.
+    """Load and validate a capture file.
 
     Returns a CapturedTraffic instance, which will be one of:
     - MessagesRequestCapture for /v1/messages requests
@@ -219,8 +217,7 @@ def load_capture(filepath: Path) -> CapturedTraffic:
 def load_captures_batch(
     directory: Path, pattern: str = '*.json'
 ) -> tuple[Sequence[CapturedTraffic], Mapping[Path, Exception]]:
-    """
-    Load and validate multiple captures.
+    """Load and validate multiple captures.
 
     Args:
         directory: Directory containing capture files
@@ -248,8 +245,7 @@ def _preprocess_capture(
     data: dict[str, Any],
     filepath: Path | None = None,  # strict_typing_linter.py: mutable-type — mutates dict in place
 ) -> dict[str, Any]:  # strict_typing_linter.py: mutable-type — returns same mutated dict
-    """
-    Preprocess capture data before Pydantic validation.
+    """Preprocess capture data before Pydantic validation.
 
     NOTE: This function MUTATES the input dict in place for efficiency.
     The return value is the same object, not a copy.

@@ -35,15 +35,9 @@ claude-workspace/
 
 ## Installing MCP Servers
 
-Three installation methods, in order of preference:
+Servers are installed as editable from a local clone — source-file changes take effect immediately. (See [CLAUDE.md](CLAUDE.md#installation-methods) for the script-mode alternative when you don't want to install globally.)
 
-| Method | Best For | Live Code Changes? |
-|--------|----------|--------------------|
-| `uv tool install --editable` | Local development | Yes |
-| `uv tool install` | Remote users | No (upgrade to update) |
-| `uvx` | One-off / always-latest | No (fresh each run) |
-
-### Quick Setup (Local Development)
+### Quick Setup
 
 Install all servers as editable from a local clone. Changes to source files take effect immediately.
 
@@ -102,8 +96,8 @@ Archive, restore, clone, and manage Claude Code sessions.
 | `claude-session` | CLI client |
 
 ```bash
-# Remote install (from GitHub)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session
+# Editable install from local workspace clone
+uv tool install --editable ~/claude-workspace/mcp/claude-session
 claude mcp add --scope user claude-session -- claude-session-mcp
 ```
 
@@ -118,8 +112,8 @@ Semantic search over local documents using Gemini embeddings and Qdrant.
 | `document-search-dashboard` | Observability dashboard |
 
 ```bash
-# Remote install (from GitHub)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/document-search
+# Editable install from local workspace clone
+uv tool install --editable ~/claude-workspace/mcp/document-search
 claude mcp add --scope user document-search -- document-search-mcp
 
 # Start Qdrant
@@ -137,8 +131,8 @@ Playwright-based browser control with stealth mode.
 | `playwright-browser-mcp` | MCP server (stdio) |
 
 ```bash
-# Remote install (from GitHub)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/playwright-browser
+# Editable install from local workspace clone
+uv tool install --editable ~/claude-workspace/mcp/playwright-browser
 claude mcp add --scope user playwright-browser -- playwright-browser-mcp
 ```
 
@@ -154,8 +148,8 @@ Persistent Python execution environment with variable retention across calls and
 | `python-interpreter` | CLI client for heredoc usage |
 
 ```bash
-# Remote install (from GitHub)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/python-interpreter
+# Editable install from local workspace clone
+uv tool install --editable ~/claude-workspace/mcp/python-interpreter
 claude mcp add --scope user python-interpreter -- python-interpreter-mcp
 
 # Check version / Upgrade
@@ -173,8 +167,8 @@ Selenium with CDP stealth injection to bypass Cloudflare bot detection.
 | `selenium-browser` | CLI client |
 
 ```bash
-# Remote install (from GitHub)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser
+# Editable install from local workspace clone
+uv tool install --editable ~/claude-workspace/mcp/selenium-browser
 claude mcp add --scope user selenium-browser -- selenium-browser-mcp
 ```
 
@@ -200,10 +194,8 @@ This repo includes a `uv.lock` file, but whether it's used depends on your insta
 |----------------|--------------|---------------------|
 | `uv sync` / `uv run` (local clone) | Yes | Exact (fully reproducible) |
 | `uv tool install --editable` (local) | No | Resolved fresh, but editable |
-| `uv tool install` (remote) | No | Resolved fresh from constraints |
-| `uvx --from git+...` (remote) | No | Resolved fresh from constraints |
 
-**Why non-sync installs ignore lock files:** This is an architectural limitation, not a bug. Tool installs and `uvx` install from wheels, and wheels cannot contain lock files. The [Astral team has acknowledged this](https://github.com/astral-sh/uv/issues/13410) and is exploring solutions like `uvx --locked`, but none exist yet.
+**Why non-sync installs ignore lock files:** This is an architectural limitation, not a bug. `uv tool install` reads from wheels, and wheels cannot contain lock files. The [Astral team has acknowledged this](https://github.com/astral-sh/uv/issues/13410) and is exploring solutions, but none exist yet.
 
 **For full reproducibility:** Clone the repo and use the lock file:
 ```bash

@@ -1,5 +1,4 @@
-"""
-Tasks file handling for archive/restore/clone operations.
+"""Tasks file handling for archive/restore/clone operations.
 
 Path pattern: ~/.claude/tasks/{session_id}/{id}.json
 
@@ -100,8 +99,7 @@ def iter_task_paths(session_id: str) -> Iterator[Path]:
 
 
 def iter_tasks(session_id: str) -> Iterator[Task]:
-    """
-    Iterate parsed Task objects for a session.
+    """Iterate parsed Task objects for a session.
 
     Delegates to iter_task_paths() for file identification, then parses each.
     """

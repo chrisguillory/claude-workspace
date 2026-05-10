@@ -40,6 +40,7 @@ target-version = "py313"
 select = [
     "B",    # flake8-bugbear (common bugs: mutable defaults, zip strict, closures)
     "C4",   # flake8-comprehensions
+    "D",    # pydocstyle (with selective ignores below)
     "DTZ",  # flake8-datetimez (timezone safety)
     "E",    # pycodestyle errors
     "EXE",  # flake8-executable (shebang/permission checks)
@@ -69,6 +70,21 @@ ignore = [
     "T20",     # flake8-print — scripts legitimately use print() for CLI output
     "TC",      # type-checking imports — 484 violations, deferred (needs batch Pydantic testing)
     # Evaluated and not enforced — individual rules from enabled sets
+    "D100",    # missing module docstring — cultural decision deferred
+    "D101",    # missing class docstring — cultural decision deferred
+    "D102",    # missing method docstring — cultural decision deferred
+    "D103",    # missing function docstring — cultural decision deferred
+    "D104",    # missing package docstring — cultural decision deferred
+    "D105",    # missing magic method docstring — cultural decision deferred
+    "D106",    # missing nested class docstring — cultural decision deferred
+    "D107",    # missing __init__ docstring — cultural decision deferred
+    "D203",    # blank-line-before-class — using D211 (no blank) instead
+    "D213",    # multi-line-summary-second-line — using D212 (first-line) instead
+    "D301",    # use r""" — auto-fix mangles Click \b markers; r""" only when Python lexer needs it (rare)
+    "D400",    # first-line-ends-with-period — using D415 (period or ?/!) instead
+    "D401",    # TODO: investigate first-line imperative mood — convention is opinionated; 67 violations
+    "D413",    # missing blank line after last section — low value
+    "D417",    # missing argument descriptions — cultural decision deferred
     "PT011",   # pytest.raises too broad — our tests already assert on exc_info.value.args
     "RET504",  # unnecessary assignment before return — intermediate assignments aid type narrowing and debugging
     "RET505",  # unnecessary else/elif after return — explicit else communicates mutual exclusivity
@@ -115,7 +131,16 @@ extend-immutable-calls = ["typer.Option", "typer.Argument", "fastapi.Depends"]
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
 
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 120  # W505 — formatter doesn't wrap docstrings; enforce length here to match code
+
 [tool.ruff.format]
+# Format fenced code blocks inside docstrings (does NOT touch prose).
+# Footgun: RST `::` literal blocks and untagged ``` fences are treated as Python
+# and reformatted with quote-style="single" — which mangles JSON examples into
+# invalid pseudo-JSON. For JSON examples in docstrings, always use ```json fences
+# (only `python`/`py`/`pycon` tags trigger reformatting).
+docstring-code-format = true
 quote-style = "single"
 
 # -- Mypy Configuration -------------------------------------------------------

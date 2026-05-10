@@ -1,11 +1,11 @@
 [project]
 name = "claude-session"
-version = "0.3.4"
+version = "0.3.7"
 description = "MCP server for archiving and managing Claude Code sessions"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "cc-lib @ git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=cc-lib",
+    "cc-lib",
     "expiringdict>=1.2.2",
     "fastmcp>=2.13.0.2",
     "filelock>=3.20.1",

@@ -20,7 +20,7 @@ from typing import Annotated
 
 import typer
 import typer.completion
-from cc_lib.cli import add_completion_command
+from cc_lib.cli import add_completion_command, add_help_command
 from cc_lib.error_boundary import ErrorBoundary
 
 __all__ = [
@@ -72,6 +72,7 @@ app = typer.Typer(
 )
 typer.completion.completion_init()
 add_completion_command(app)
+add_help_command(app)
 
 
 def main() -> None:
@@ -432,7 +433,7 @@ def _resolve_daemon_binary() -> Path:
         raise LaunchdError(
             "Couldn't find `claude-remote-bash-daemon` on PATH.\n"
             'Install it first:\n'
-            '  uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-remote-bash'
+            '  uv tool install --editable ~/claude-workspace/mcp/claude-remote-bash'
         )
     return Path(which).resolve()
 

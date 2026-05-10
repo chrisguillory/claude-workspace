@@ -1,5 +1,4 @@
-"""
-Shared exceptions for claude-session.
+"""Shared exceptions for claude-session.
 
 Domain-specific exceptions used across services.
 

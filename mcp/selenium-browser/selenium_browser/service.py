@@ -18,7 +18,7 @@ import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Literal, TypeVar, cast
+from typing import Any, ClassVar, TypeVar, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
 import fastmcp.exceptions
@@ -54,6 +54,7 @@ from .models import (
     CLSMetric,
     ConfigureProxyResult,
     ConsoleLogEntry,
+    ConsoleLogLevelFilter,
     ConsoleLogsResult,
     CoreWebVitals,
     DownloadResourceResult,
@@ -76,12 +77,16 @@ from .models import (
     RequestTiming,
     ResizeWindowResult,
     SaveProfileStateResult,
+    ScrollBehavior,
+    ScrollDirection,
+    ScrollPosition,
     SetBlockedURLsResult,
     SleepResult,
     SlowestRequestSummary,
     SmartExtractionInfo,
     TTFBMetric,
     WaitForSelectorResult,
+    WaitForSelectorState,
 )
 from .scripts import (
     ARIA_SNAPSHOT_SCRIPT,
@@ -147,7 +152,12 @@ class BrowserService:
         # Reset response body capture state - new browser needs interceptor reinstalled
         self.state.response_body_capture_enabled = False
 
-    async def get_browser(self, enable_har_capture: bool = False, browser: Browser | None = None) -> webdriver.Chrome:
+    async def get_browser(
+        self,
+        enable_har_capture: bool = False,
+        browser: Browser | None = None,
+        user_data_dir: str | None = None,
+    ) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
         Args:
@@ -156,6 +166,28 @@ class BrowserService:
                     the currently running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when
                     your personal Chrome is running (different bundle ID).
+            user_data_dir: Optional persistent profile directory. When provided,
+                    the chosen browser uses this path as its --user-data-dir, so
+                    cookies, localStorage, IndexedDB (including non-extractable
+                    WebCrypto keys stored on disk) survive across launches.
+
+                    macOS keychain caveat: a directory and a binary form a
+                    binding pair. Chrome and Chromium use different macOS
+                    Keychain entries ("Chrome Safe Storage" vs "Chromium Safe
+                    Storage") to encrypt cookie blobs and the os_crypt key in
+                    Local State. Once a directory has been populated by one
+                    binary, opening it with the other will silently fail to
+                    decrypt cookies and saved passwords (localStorage and
+                    IndexedDB still survive). Pick a binary at first use and
+                    keep using it — for pseudonymous identities prefer
+                    `browser="chromium"` since Homebrew Chromium has no Google
+                    Sync, no enterprise policy plist, and no Gaia identity
+                    propagation across origins.
+
+                    The directory is created on first use. Caller must call
+                    close_browser() before changing user_data_dir mid-session,
+                    and must not run a second instance of the same binary
+                    against the same dir (exclusive SingletonLock).
 
         Returns:
             WebDriver instance
@@ -168,6 +200,34 @@ class BrowserService:
 
         # CRITICAL: Stealth configuration to bypass Cloudflare bot detection
         opts = Options()
+
+        # Persistent profile directory — must come before driver creation so
+        # the browser opens the correct profile on first launch.
+        # Sentinel write is deferred until after successful driver creation
+        # (see below) so a launch failure doesn't leave a misleading "claim"
+        # on the directory.
+        sentinel: Path | None = None
+        if user_data_dir is not None:
+            udd_path = Path(user_data_dir).expanduser()
+            udd_path.mkdir(parents=True, exist_ok=True)
+            # Detect binary swap. macOS keychain asymmetry: opening a directory
+            # populated by one binary with the other silently fails to decrypt
+            # cookies (verified empirically). Stamp the dir on first use; refuse
+            # to launch if a later request asks for a different binary.
+            sentinel = udd_path / '.selenium-browser-binary'
+            if sentinel.exists():
+                prev = sentinel.read_text().strip()
+                if prev and prev != browser:
+                    raise fastmcp.exceptions.ToolError(
+                        f'user_data_dir {udd_path} was last opened by browser={prev!r}, '
+                        f'but browser={browser!r} was requested. On macOS, Chrome and '
+                        f'Chromium use different Keychain entries to encrypt cookies; '
+                        f'mixing binaries against the same dir silently destroys auth '
+                        f'state. Either reuse browser={prev!r} or point at a fresh '
+                        f'user_data_dir.',
+                    )
+            opts.add_argument(f'--user-data-dir={udd_path}')
+            logger.info('Using persistent user_data_dir: %s (binary=%s)', udd_path, browser)
 
         # Set binary location for Chromium (macOS-specific for now)
         # TODO: Add cross-platform support (Linux: /usr/bin/chromium-browser, Windows: shutil.which)
@@ -218,6 +278,13 @@ class BrowserService:
         # Initialize driver in thread pool (blocking operation)
         self.state.driver = await asyncio.to_thread(webdriver.Chrome, options=opts)
         self.state.current_browser = browser
+
+        # Stamp the user_data_dir sentinel only after the launch succeeds, so
+        # a failure between the mismatch-check above and webdriver.Chrome()
+        # returning doesn't leave a misleading "claim" on the directory by a
+        # binary that never actually opened it.
+        if sentinel is not None:
+            sentinel.write_text(browser)
 
         # CRITICAL: CDP injection AFTER driver creation but BEFORE first navigation
         # This is what makes Selenium bypass Cloudflare where Playwright fails
@@ -1081,7 +1148,9 @@ class BrowserService:
 
         Args:
             key: Key name or combination. Common keys:
-                - Single keys: 'ESCAPE', 'ENTER', 'TAB', 'BACKSPACE', 'DELETE', 'ARROW_UP', 'ARROW_DOWN', 'ARROW_LEFT', 'ARROW_RIGHT'
+                - Single keys:
+                    'ESCAPE', 'ENTER', 'TAB', 'BACKSPACE', 'DELETE',
+                    'ARROW_UP', 'ARROW_DOWN', 'ARROW_LEFT', 'ARROW_RIGHT'
                 - Special keys: 'F1' through 'F12', 'HOME', 'END', 'PAGE_UP', 'PAGE_DOWN'
                 - Modifiers: Use + for combinations like 'CONTROL+A', 'META+V'
 
@@ -1280,11 +1349,11 @@ class BrowserService:
     @tool_registry.register_tool
     async def scroll(
         self,
-        direction: Literal['up', 'down', 'left', 'right'] | None = None,
+        direction: ScrollDirection | None = None,
         scroll_amount: int = 3,
         css_selector: str | None = None,
-        behavior: Literal['instant', 'smooth'] = 'instant',
-        position: Literal['top', 'bottom', 'left', 'right'] | None = None,
+        behavior: ScrollBehavior = 'instant',
+        position: ScrollPosition | None = None,
     ) -> JsonObject:
         """Scroll the page, a container, or an element into view.
 
@@ -1386,7 +1455,6 @@ class BrowserService:
         Returns:
             Dict with slept_ms confirming the sleep duration
         """
-
         # Validation
         if duration_ms < 0:
             raise ValueError('duration_ms cannot be negative')
@@ -1418,7 +1486,7 @@ class BrowserService:
     async def wait_for_selector(
         self,
         css_selector: str,
-        state: Literal['visible', 'hidden', 'attached', 'detached'] = 'visible',
+        state: WaitForSelectorState = 'visible',
         timeout: int = 30000,
     ) -> WaitForSelectorResult:
         """Wait for an element matching the selector to reach a desired state.
@@ -1847,7 +1915,7 @@ class BrowserService:
     @tool_registry.register_tool
     async def get_console_logs(
         self,
-        level_filter: Literal['ALL', 'SEVERE', 'WARNING', 'INFO'] | None = None,
+        level_filter: ConsoleLogLevelFilter | None = None,
         pattern: str | None = None,
     ) -> ConsoleLogsResult:
         """Get browser console logs (console.log, console.error, etc.).
@@ -2212,7 +2280,6 @@ class BrowserService:
             Output file created with 0o600 permissions (owner read/write only).
             Contains sensitive auth tokens - treat as credentials.
         """
-
         logger.info("Exporting Chrome profile state from profile '%s' to %s", chrome_profile, output_file)
 
         # Convert Sequence to list for the export function
@@ -2660,6 +2727,111 @@ class BrowserService:
         )
 
     @tool_registry.register_tool
+    async def navigate_with_user_data_dir(
+        self,
+        url: str,
+        user_data_dir: str,
+        browser: Browser | None = None,
+        enable_har_capture: bool = False,
+        init_scripts: Sequence[str] | None = None,
+    ) -> NavigationResult:
+        """Launch fresh browser using a persistent --user-data-dir and navigate.
+
+        PERMISSION SCOPE: This tool reuses on-disk auth state (cookies,
+        localStorage, IndexedDB including non-extractable WebCrypto keys) from
+        a browser profile directory. Equivalent privilege to
+        navigate_with_profile_state — both import authenticated session state.
+        Requires separate approval from navigate().
+
+        Use this for long-lived persistent profiles where the directory IS the
+        portable artifact. The same browser binary always opens the same dir,
+        so on-disk state round-trips natively without crossing a serialization
+        boundary that would destroy non-extractable WebCrypto keys.
+
+        See get_browser for the macOS keychain caveat: the directory and the
+        chosen `browser` value form a binding pair, enforced by a sentinel
+        file in the dir. Mixing Chrome and Chromium against the same dir is
+        refused at launch.
+
+        Args:
+            url: URL to navigate to
+            user_data_dir: Persistent profile directory path. Created on first
+                use. Must not be in simultaneous use by another instance of
+                the same binary (exclusive SingletonLock in the directory).
+            browser: Which browser to use - "chrome" or "chromium". Defaults to
+                the currently running browser, or "chromium" if none is running.
+            enable_har_capture: Enable performance logging for HAR export.
+            init_scripts: JavaScript to inject before every page load.
+
+        Returns:
+            NavigationResult with current_url and title
+
+        Note:
+            This tool always starts a fresh browser process (implicit
+            fresh_browser=True) so the new user_data_dir takes effect.
+        """
+        timer = Timer()
+
+        if not url.startswith(VALID_URL_PREFIXES):
+            raise fastmcp.exceptions.ValidationError(
+                'URL must start with http://, https://, file://, about:, data:, or blob:',
+            )
+
+        # Resolve browser before close_browser() clears current_browser
+        if browser is None:
+            browser = self.state.current_browser or 'chromium'
+
+        logger.info(
+            'Navigating to %s with persistent user_data_dir=%s%s%s',
+            url,
+            user_data_dir,
+            ' (HAR capture enabled)' if enable_har_capture else '',
+            f' ({len(init_scripts)} init scripts)' if init_scripts else '',
+        )
+
+        # Always start fresh browser process so the new user_data_dir takes effect
+        await self.close_browser()
+
+        # Get browser with the persistent user-data-dir
+        driver = await self.get_browser(
+            enable_har_capture=enable_har_capture,
+            browser=browser,
+            user_data_dir=user_data_dir,
+        )
+
+        # Install user init scripts (after browser creation, before navigation)
+        if init_scripts:
+            for script in init_scripts:
+                await asyncio.to_thread(
+                    driver.execute_cdp_cmd,
+                    'Page.addScriptToEvaluateOnNewDocument',
+                    {'source': script},
+                )
+
+        # Install response body capture interceptor for HAR export
+        await _install_response_body_capture_if_needed(
+            driver,
+            self,
+            enable_har_capture,
+            'navigate_with_user_data_dir',
+        )
+
+        # Navigate (blocking operation)
+        await asyncio.to_thread(driver.get, url)
+
+        # Track the final origin after redirects
+        final_url = driver.current_url
+        self.state.origin_tracker.add_origin(final_url)
+
+        logger.info('Successfully navigated to %s (tracked origins: %s)', final_url, len(self.state.origin_tracker))
+
+        return NavigationResult(
+            current_url=driver.current_url,
+            title=driver.title,
+            elapsed_seconds=round(timer.elapsed(), 3),
+        )
+
+    @tool_registry.register_tool
     async def export_har(
         self,
         filename: str,
@@ -3093,18 +3265,21 @@ class BrowserService:
         Limitations:
             - Tokens may expire between save and restore - re-authenticate if needed
         """
-
         driver = self.state.driver
         if driver is None:
             raise fastmcp.exceptions.ToolError('Browser not initialized. Call navigate() first to establish a session.')
 
         logger.info('Exporting storage state to %s', filename)
 
-        # Get all cookies via CDP Network.getCookies
+        # Get all cookies browser-wide via CDP Storage.getCookies.
+        # NOT Network.getCookies — that filters to the current page URL and
+        # silently drops cookies scoped to other paths/domains (e.g. HttpOnly
+        # cookies at path=/api/auth/refresh, which Proton uses for session
+        # refresh and which are invisible from a mail.proton.me current page).
         cookies_result = await asyncio.to_thread(
             driver.execute_cdp_cmd,
-            'Network.getCookies',
-            {},  # Empty = get all cookies
+            'Storage.getCookies',
+            {},
         )
 
         cdp_cookies = cookies_result.get('cookies', [])
@@ -3143,7 +3318,13 @@ class BrowserService:
         # during navigate(). For the current origin, we query CDP directly.
         # =================================================================
 
-        tracked_origins = self.state.origin_tracker.get_origins()
+        # Always include the current origin even if it wasn't formally tracked
+        # (e.g., navigate() hit a load timeout on a slow SPA, or the page changed
+        # via a JS-initiated navigation). Without this, save silently drops the
+        # current origin's localStorage/IndexedDB.
+        tracked_origins = list(self.state.origin_tracker.get_origins())
+        if current_origin and current_origin not in tracked_origins:
+            tracked_origins.append(current_origin)
         await _cdp_enable_domstorage(driver)
 
         # Build origins as dict[str, ProfileStateOriginStorage]
@@ -3154,7 +3335,10 @@ class BrowserService:
         indexeddb_records_count = 0
 
         for origin in tracked_origins:
-            if origin.startswith(('chrome://', 'about:', 'data:', 'blob:', 'file://')):
+            # Opaque origins (about:blank, file pages, sandboxed iframes) report
+            # window.location.origin as the string "null"; CDP DOMStorage rejects
+            # it with SecurityError. Filter alongside the unsupported schemes.
+            if origin == 'null' or origin.startswith(('chrome://', 'about:', 'data:', 'blob:', 'file://')):
                 continue
 
             # Capture localStorage: cache for departed origins, CDP for current

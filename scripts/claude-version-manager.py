@@ -48,12 +48,13 @@ import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import httpx
 import pydantic
 import typer
 from cc_lib.claude_binary_patching import ORIGINALS_DIR, scan_binary
-from cc_lib.cli import add_install_command, create_app, run_app
+from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import ClosedModel, OpenModel
 from cc_lib.types import CCVersion
@@ -68,7 +69,7 @@ PLATFORM = 'darwin-arm64'
 class PlatformInfo(OpenModel):
     """Single platform entry from CDN manifest.json."""
 
-    binary: str
+    binary: Literal['claude', 'claude.exe'] | None = None  # absent in manifests before ~2.1.50
     checksum: str
     size: int
 
@@ -96,6 +97,7 @@ class LocalVersion(ClosedModel):
 
 
 app = create_app(help='Claude Code version manager.')
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
@@ -105,7 +107,7 @@ def cli_list(
     remote: bool = typer.Option(False, '--remote', '-r', help='Query npm for all available versions'),
     last: int = typer.Option(20, '--last', '-n', help='Show last N versions (--remote only)'),
 ) -> None:
-    """List installed versions. Use --remote to see all available.
+    r"""List installed versions. Use --remote to see all available.
 
     Local mode shows binaries in ~/.local/share/claude/versions/ with
     signature and patch status from Mach-O header + manifest detection.
@@ -251,7 +253,7 @@ def cli_info(
 
         if adhoc:
             data = path.read_bytes()
-            results = scan_binary(data)
+            results = scan_binary(data, current_version=version)
             applied = [n for n, r in results.items() if r.status == 'applied']
             unpatched = [n for n, r in results.items() if r.status == 'unpatched']
             changed = [n for n, r in results.items() if r.status == 'changed']
@@ -279,11 +281,10 @@ def cli_info(
         if platform:
             print(f'  Size: {platform.size / 1_000_000:.0f} MB')
             print(f'  Checksum: {platform.checksum[:32]}...')
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:  # noqa: PLR2004 — HTTP status code
-            print('\nNot available on CDN (retention ~9 months, 1.0.37+).')
-        else:
-            raise
+    except VersionNotPublished:
+        print('\nNot available on CDN: version was never published.')
+    except VersionExpiredFromCDN:
+        print('\nNot available on CDN: older than retention (~9 months, 1.0.37+).')
 
 
 @app.command('run')
@@ -295,7 +296,7 @@ def cli_run(
         None, help='Arguments to pass to claude'
     ),  # strict_typing_linter.py: mutable-type — typer requires list
 ) -> None:
-    """Run a specific Claude Code version (fetches if needed).
+    r"""Run a specific Claude Code version (fetches if needed).
 
     Replaces the current process via execvp — the launched Claude Code
     inherits the terminal directly for interactive use with the statusline.
@@ -419,7 +420,7 @@ class VersionStore:
                 adhoc = MachOSignature.is_adhoc(entry)
                 if adhoc:
                     data = entry.read_bytes()
-                    results = scan_binary(data)
+                    results = scan_binary(data, current_version=version)
                     patches = [patch_name for patch_name, r in results.items() if r.status == 'applied']
 
             versions.append(
@@ -486,8 +487,16 @@ class CDNClient:
         self._client = httpx.Client(timeout=httpx.Timeout(30.0, read=300.0))
 
     def fetch_manifest(self, version: str) -> Manifest:
-        """Fetch manifest.json for a version."""
+        """Fetch manifest.json for a version.
+
+        Raises VersionNotPublished if the version is absent from npm's publish history,
+        or VersionExpiredFromCDN if it was published but is past CDN retention.
+        """
         resp = self._client.get(f'{CDN_BASE}/{version}/manifest.json')
+        if resp.status_code == 404:  # noqa: PLR2004 — HTTP status code
+            if _is_published_on_npm(version):
+                raise VersionExpiredFromCDN(version)
+            raise VersionNotPublished(version)
         resp.raise_for_status()
         return Manifest.model_validate(resp.json())
 
@@ -505,7 +514,8 @@ class CDNClient:
             msg = f'Platform {PLATFORM} not in manifest for {version}'
             raise KeyError(msg)
 
-        binary_url = f'{CDN_BASE}/{version}/{PLATFORM}/{platform.binary}'
+        binary_filename = platform.binary or 'claude'  # PLATFORM hardcoded to darwin-arm64; old manifests omit field
+        binary_url = f'{CDN_BASE}/{version}/{PLATFORM}/{binary_filename}'
         dest = dest_dir / version
         tmp = dest_dir / f'.{version}.tmp'
 
@@ -571,12 +581,48 @@ class NpmRegistry:
         return timestamps
 
 
+def _is_published_on_npm(version: str) -> bool:
+    """Cross-check via npm. Returns True on npm errors — never assert "never published" without evidence."""
+    try:
+        return version in NpmRegistry().versions()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return True
+
+
+class VersionNotPublished(LookupError):
+    """A Claude Code version that was never published (skipped release number or typo).
+
+    Distinct from VersionExpiredFromCDN — npm cross-check confirmed the version
+    is absent from the registry's full publish history.
+    """
+
+    def __init__(self, version: str) -> None:
+        self.version = version
+        super().__init__(f'Version {version} was never published')
+
+
+class VersionExpiredFromCDN(LookupError):
+    """A published version that is no longer available on the CDN (~9 month retention)."""
+
+    def __init__(self, version: str) -> None:
+        self.version = version
+        super().__init__(f'Version {version} is no longer on CDN')
+
+
+@error_boundary.handler(VersionNotPublished)
+def _handle_not_published(exc: VersionNotPublished) -> None:
+    print(f'ERROR: Version {exc.version} was never published.', file=sys.stderr)
+    print('       Check published versions: claude-version-manager list --remote --last 30', file=sys.stderr)
+
+
+@error_boundary.handler(VersionExpiredFromCDN)
+def _handle_expired(exc: VersionExpiredFromCDN) -> None:
+    print(f'ERROR: Version {exc.version} is no longer on CDN (retention ~9 months, 1.0.37+).', file=sys.stderr)
+
+
 @error_boundary.handler(httpx.HTTPStatusError)
 def _handle_http_error(exc: httpx.HTTPStatusError) -> None:
-    if exc.response.status_code == 404:  # noqa: PLR2004 — HTTP status code
-        print('ERROR: Version not found on CDN. Retention is ~9 months (1.0.37+).', file=sys.stderr)
-    else:
-        print(f'ERROR: CDN request failed: {exc.response.status_code} {exc.request.url}', file=sys.stderr)
+    print(f'ERROR: CDN request failed: {exc.response.status_code} {exc.request.url}', file=sys.stderr)
 
 
 @error_boundary.handler(FileNotFoundError)

@@ -7,7 +7,7 @@ viewport scrollTo, and container scrollTo — with instant and smooth behavior.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from cc_lib.types import JsonObject
 from selenium import webdriver
@@ -16,6 +16,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from .models import ScrollBehavior, ScrollDirection, ScrollPosition
 from .scripts import SMOOTH_SCROLL_SCRIPT
 from .validators import validate_css_selector
 
@@ -30,11 +31,11 @@ PIXELS_PER_TICK = 100
 def execute_scroll(
     driver: webdriver.Chrome,
     *,
-    direction: Literal['up', 'down', 'left', 'right'] | None = None,
+    direction: ScrollDirection | None = None,
     scroll_amount: int = 3,
     css_selector: str | None = None,
-    behavior: Literal['instant', 'smooth'] = 'instant',
-    position: Literal['top', 'bottom', 'left', 'right'] | None = None,
+    behavior: ScrollBehavior = 'instant',
+    position: ScrollPosition | None = None,
     _find_timeout: int = 10,
 ) -> JsonObject:
     """Execute a scroll operation synchronously.
@@ -138,9 +139,9 @@ def _find_element(driver: webdriver.Chrome, css_selector: str, context: str, *, 
 def _scroll_to_position(
     driver: webdriver.Chrome,
     *,
-    position: str,
+    position: ScrollPosition,
     css_selector: str | None,
-    behavior: str,
+    behavior: ScrollBehavior,
     timeout: int = 10,
 ) -> JsonObject:
     """Mode 4/5: Absolute position scroll (scrollTo)."""
@@ -290,7 +291,9 @@ def _scroll_to_position(
     }
 
 
-def _scroll_into_view(driver: webdriver.Chrome, *, css_selector: str, behavior: str, timeout: int = 10) -> JsonObject:
+def _scroll_into_view(
+    driver: webdriver.Chrome, *, css_selector: str, behavior: ScrollBehavior, timeout: int = 10
+) -> JsonObject:
     """Mode 3: Scroll element into view."""
     element = _find_element(driver, css_selector, 'element', timeout=timeout)
 
@@ -367,11 +370,11 @@ def _scroll_into_view(driver: webdriver.Chrome, *, css_selector: str, behavior: 
 def _scroll_container(
     driver: webdriver.Chrome,
     *,
-    direction: str | None,
+    direction: ScrollDirection | None,
     css_selector: str,
     delta_x: int,
     delta_y: int,
-    behavior: str,
+    behavior: ScrollBehavior,
     timeout: int = 10,
 ) -> JsonObject:
     """Mode 2: Container scroll (direction + css_selector)."""
@@ -448,10 +451,10 @@ def _scroll_container(
 def _scroll_viewport(
     driver: webdriver.Chrome,
     *,
-    direction: str | None,
+    direction: ScrollDirection | None,
     delta_x: int,
     delta_y: int,
-    behavior: str,
+    behavior: ScrollBehavior,
 ) -> JsonObject:
     """Mode 1: Viewport scroll (direction only)."""
     if behavior == 'smooth':

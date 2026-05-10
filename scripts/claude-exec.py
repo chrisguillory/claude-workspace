@@ -20,6 +20,9 @@ Also fixes environment issues that the bare ``claude`` binary doesn't handle:
     - Activates ``$PWD/.venv/`` and cleans stale/IDE-injected PATH entries
     - Detects worktree state on resume (repairs trailing-NULL worktreeSession
       records so Claude Code re-chdirs into the worktree)
+    - Sets ``DEBUG=1`` so per-session debug logs land at
+      ``~/.claude/debug/<session>.txt`` from process start (restores
+      pre-v2.1.71 default-on behavior)
     - Injects ``--effort`` from settings.json env block
     - Injects ``--thinking-display summarized`` (Opus 4.7 default is
       ``omitted``; makes thinking-block content visible in JSONL)
@@ -56,9 +59,9 @@ import pydantic
 import rich.console
 import typer
 from cc_lib import claude_cli_introspection
-from cc_lib.cli import LauncherInstaller, create_app, run_app
+from cc_lib.cli import LauncherInstaller, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.schemas import CamelModel
+from cc_lib.schemas import CamelSubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.settings_env import get_cc_env_var
 from cc_lib.types import EffortLevel
@@ -66,6 +69,7 @@ from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 boundary = ErrorBoundary(exit_code=1)
 ext_app = create_app(help='Claude exec management commands.')
+add_help_command(ext_app)
 
 COMPLETION_DIR = Path.home() / '.config' / 'zsh' / 'completions'
 
@@ -77,6 +81,8 @@ def main() -> None:
         sys.argv = [sys.argv[0], *sys.argv[2:]]  # strip 'ext' so typer sees subcommands
         run_app(ext_app)
         return
+
+    _enable_debug_logging()
 
     raw_args = sys.argv[1:]
     if _is_subcommand_invocation(raw_args):
@@ -195,6 +201,39 @@ def _first_positional(args: Sequence[str]) -> str | None:
             continue
         i += 2 if takes_value.get(tok, False) else 1
     return None
+
+
+# -- Debug logging -------------------------------------------------------------
+
+
+def _enable_debug_logging() -> None:
+    """Set ``DEBUG=1`` so Claude Code writes per-session debug logs to disk.
+
+    Restores pre-v2.1.71 default-on behavior for ``~/.claude/debug/<session>.txt``.
+    v2.1.71 flipped the default off and didn't expose a settings.json key to
+    set it on persistently — Anthropic's only options are repeating ``--debug``
+    every launch, running ``/debug`` per-session (forward-only), or setting
+    ``DEBUG=1`` at startup. By the time you know you needed logs for an
+    unpredictable error, it's too late.
+
+    ``setdefault`` respects an explicit override (``DEBUG=0 claude-exec ...``
+    or ``env -u DEBUG claude-exec ...``).
+
+    Tradeoff: ``~/.claude/debug/`` grows unbounded — periodic cleanup
+    (``find ~/.claude/debug -mtime +30 -delete``) keeps it bounded. The
+    "right" upstream fix is the rolling in-memory buffer proposal in
+    https://github.com/anthropics/claude-code/issues/55217.
+
+    Removable: delete this function and the call in ``main()`` when
+    Anthropic restores default-on behavior or ships a settings.json key.
+
+    Related complaints (open):
+        https://github.com/anthropics/claude-code/issues/55217
+        https://github.com/anthropics/claude-code/issues/13865
+        https://github.com/anthropics/claude-code/issues/34394
+        https://github.com/anthropics/claude-code/issues/37035
+    """
+    os.environ.setdefault('DEBUG', '1')
 
 
 # -- Venv activation -----------------------------------------------------------
@@ -652,7 +691,22 @@ class SessionIndex:
     incremental updates based on file mtime + size.
     """
 
-    TITLE_NEEDLE = b'"custom-title"'
+    # Claude Code emits two title record types — `custom-title` (user-set
+    # via `/rename`, field `customTitle`) and `ai-title` (auto-generated,
+    # field `aiTitle`, Claude Code 2.1.122+). Custom titles always win over
+    # AI titles regardless of file position; this matches Claude Code's own
+    # resume picker, which resolves the two independently and prefers
+    # customTitle. The order matters because the `generateSessionTitle` SDK
+    # control request can append a fresh `ai-title` AFTER the user has run
+    # `/rename` — a plain latest-by-position approach would return the AI
+    # title in that case while Claude Code's UI continues to show the user's
+    # name. JSON-escaped quotes ensure the needles only match record-type
+    # markers, not user-message text content. Listed in precedence order:
+    # custom first (preferred), then ai (fallback).
+    TITLE_NEEDLES: Sequence[tuple[bytes, str]] = (
+        (b'"custom-title"', 'customTitle'),
+        (b'"ai-title"', 'aiTitle'),
+    )
     CACHE_FRESHNESS_SECONDS = 10.0
 
     def __init__(self, project_path: str) -> None:
@@ -732,20 +786,39 @@ class SessionIndex:
 
     @classmethod
     def _extract_title(cls, path: Path) -> str | None:
-        """Extract the last custom-title from a JSONL file using mmap rfind."""
+        """Extract the displayable session title from a JSONL file using mmap rfind.
+
+        Searches for ``custom-title`` (user-set via ``/rename``, field
+        ``customTitle``) and falls back to ``ai-title`` (auto-generated,
+        field ``aiTitle``, Claude Code 2.1.122+). Custom titles always
+        take precedence regardless of file position — matches Claude Code's
+        own resume picker, which resolves both record types independently
+        and prefers customTitle. Required because the
+        ``generateSessionTitle`` SDK control request can append a fresh
+        ``ai-title`` AFTER the user has run ``/rename``; a position-based
+        latest-wins would incorrectly return the AI title in that case.
+
+        For each needle the latest occurrence (rfind) gives the most recent
+        record of that type — so re-renames and re-runs of auto-titling
+        both resolve to their newest value.
+        """
         try:
             if path.stat().st_size == 0:
                 return None
             with open(path, 'rb') as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                pos = mm.rfind(cls.TITLE_NEEDLE)
-                if pos == -1:
-                    return None
-                line_start = mm.rfind(b'\n', 0, pos) + 1
-                line_end = mm.find(b'\n', pos)
-                if line_end == -1:
-                    line_end = len(mm)
-                rec: dict[str, str] = json.loads(mm[line_start:line_end])
-                return rec.get('customTitle') or None
+                for needle, field in cls.TITLE_NEEDLES:
+                    pos = mm.rfind(needle)
+                    if pos == -1:
+                        continue
+                    line_start = mm.rfind(b'\n', 0, pos) + 1
+                    line_end = mm.find(b'\n', pos)
+                    if line_end == -1:
+                        line_end = len(mm)
+                    rec: dict[str, str] = json.loads(mm[line_start:line_end])
+                    title = rec.get(field)
+                    if title:
+                        return title
+                return None
         except (OSError, json.JSONDecodeError, ValueError):
             return None
 
@@ -759,16 +832,14 @@ class SessionIndex:
 # -- Worktree resolution on resume --------------------------------------------
 
 
-class WorktreeSession(CamelModel):
-    """Claude Code's ``worktreeSession`` payload from session JSONL.
+class WorktreeSessionDataSubset(CamelSubsetModel):
+    """Subset of Claude Code's ``worktreeSession`` payload — reads only ``worktreePath``.
 
-    Claude Code protocol data — we declare only the field ``claude-exec``
-    reads. ``CamelModel``'s ``alias_generator=to_camel`` maps Python
-    ``worktree_path`` to JSON ``worktreePath``. The inherited ``extra='allow'``
-    default preserves the rest (``originalCwd``, ``worktreeName``,
-    ``worktreeBranch``, ``originalBranch``, ``originalHeadCommit``,
-    ``sessionId``, ``enteredExisting``, and anything Claude Code adds in
-    future versions) so the repair step round-trips byte-for-byte.
+    Full schema: claude_session.schemas.session.models.WorktreeSessionData.
+    Unread fields are round-tripped via ``WorktreeScan.raw_record``.
+
+    >>> # noinspection PyUnresolvedReferences
+    >>> from claude_session.schemas.session.models import WorktreeSessionData
     """
 
     worktree_path: str
@@ -779,10 +850,8 @@ class WorktreeScan:
     """Result of scanning a session JSONL for the current worktree state.
 
     ``worktree_session``
-        Typed view of the field claude-exec reads (``worktreePath``), or
-        ``None`` if no populated record was found. ``SubsetModel``/``OpenModel``
-        drops/preserves unknown fields on dump — for round-trip fidelity use
-        ``raw_record``.
+        Typed view of the parsed field (``worktreePath``), or ``None`` if
+        no populated record was found. Use ``raw_record`` for round-trip.
     ``raw_record``
         The full original ``worktreeSession`` dict from Claude Code's
         JSONL (with ``originalCwd``, ``originalBranch``, ``worktreeName``,
@@ -798,7 +867,7 @@ class WorktreeScan:
         the worktree — overrides ``saw_null_after``, do NOT repair.
     """
 
-    worktree_session: WorktreeSession | None
+    worktree_session: WorktreeSessionDataSubset | None
     raw_record: Mapping[str, object] | None
     saw_null_after: bool
     explicitly_exited: bool
@@ -918,11 +987,7 @@ class WorktreeResolver:
                     continue
                 session_dict = rec.get('worktreeSession')
                 if isinstance(session_dict, dict):
-                    try:
-                        parsed = WorktreeSession.model_validate(session_dict)
-                    except pydantic.ValidationError:
-                        end = line_start
-                        continue
+                    parsed = WorktreeSessionDataSubset.model_validate(session_dict)
                     if (Path(parsed.worktree_path) / '.git').is_file():
                         explicitly_exited = mm.find(cls.EXIT_WORKTREE_NEEDLE, line_end) != -1
                         return WorktreeScan(

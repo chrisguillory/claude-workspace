@@ -4,7 +4,7 @@ __all__ = [
     'register_tools',
 ]
 
-from typing import Any, Literal
+from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
@@ -12,6 +12,7 @@ from mcp.types import ToolAnnotations
 from ..models import (
     SleepResult,
     WaitForSelectorResult,
+    WaitForSelectorState,
 )
 from ..service import BrowserService
 
@@ -45,7 +46,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     async def wait_for_selector(
         css_selector: str,
         ctx: Context[Any, Any, Any],
-        state: Literal['visible', 'hidden', 'attached', 'detached'] = 'visible',
+        state: WaitForSelectorState = 'visible',
         timeout: int = 30000,
     ) -> WaitForSelectorResult:
         """Wait for an element matching the selector to reach a desired state.

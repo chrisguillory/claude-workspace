@@ -1,5 +1,4 @@
-"""
-Pydantic models for Claude Code session JSONL records.
+"""Pydantic models for Claude Code session JSONL records.
 
 This module defines strict types for all record types found in Claude Code session files.
 Uses discriminated unions for type-safe parsing of heterogeneous JSONL data.
@@ -130,6 +129,46 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   Extended CLAUDE_CODE_MAX_VERSION to 2.1.123.
 - Schema v0.2.30: Added AssistantRecord.attributionSkill (str | None) for assistant records
                   emitted while a skill is active; mirrors attributionAgent.
+- Schema v0.2.31: Added HookInfo.durationMs (int) — hook execution duration in milliseconds,
+                  always present in observed JSONL (100% prevalence) and confirmed in binary as
+                  `durationMs:0` initializer; introduced ≤ 2.1.120. Single-field fix collapses
+                  984 union-cascade errors on StopHookSummarySystemRecord (Pydantic left-to-right
+                  union evaluation against a 16-field record). Added AssistantRecord.attributionPlugin
+                  (str | None) paired with attributionSkill when a plugin-installed skill drives
+                  the turn (e.g. "codex"); introduced 2.1.121 alongside attributionAgent /
+                  attributionSkill. Added QueuedCommandAttachment.source_uuid (str | None) —
+                  UUID of the source message that triggered a queued command; rare (1/355
+                  globally), only on commandMode="prompt"; produced by the SDK replay path
+                  (`SDKUserMessageReplay` events, Claude Code 2.1.20+ `replayUserMessages`).
+                  Snake_case in wire schema, anomalous vs surrounding camelCase.
+- Schema v0.2.32: Added EditedTextFileAttachment.displayPath (str | None) — display-relative
+                  path alongside absolute filename, mirrors the displayPath field already modeled
+                  on FileAttachment / SelectedLinesInIdeAttachment / CompactFileReferenceAttachment.
+                  Modeled optional (~2% prevalence in observed JSONL, 2/107 records); confirmed in
+                  binary (14 occurrences in 2.1.123 through 2.1.131 — pre-existing schema gap).
+                  Added CacheMissReasonParamsChanged variant (type: 'params_changed', carries
+                  cache_missed_input_tokens: int) to the CacheMissReason discriminated union;
+                  server-emitted via the cache-diagnosis-2026-04-07 Anthropic API beta header,
+                  not present in client binary (consistent with the other CacheMissReason
+                  variants). Extended CLAUDE_CODE_MAX_VERSION to 2.1.131. Verified via parallel
+                  changelog + binary diff workers that no new record types, system subtypes,
+                  attachment types, message content types, or tool inputs were introduced
+                  between 2.1.124 and 2.1.131; binary-only candidates (claude-sonnet-4-6-20251114
+                  dated alias, service_tier='priority'/'batch' Zod widening, pause_turn
+                  stop_reason) deferred per empirical-only modeling rule until observed in JSONL.
+- Schema v0.2.33: Added AlreadyReadFileAttachment for the 'already_read_file' attachment type —
+                  reminder injected when Claude re-Reads an unchanged file in the same session.
+                  Shape mirrors FileAttachment exactly (filename, displayPath, FileAttachmentContent
+                  wrapping FileAttachmentFileContent), so the nested types are reused directly.
+                  Added CompactMetadata.preservedSegment (PreservedCompactSegment with
+                  headUuid/anchorUuid/tailUuid) — anchor pointers identifying the conversation
+                  segment preserved across an auto-compact; introduced 2.1.76. Single-field fix
+                  collapsed 14 union-cascade errors on CompactBoundarySystemRecord (Pydantic
+                  left-to-right union evaluation against a 16-field record). Corrected
+                  preCompactDiscoveredTools annotation 2.1.81 → 2.1.76 from per-version binary
+                  diff. Added DeferredToolsDeltaAttachment.readdedNames (tools removed then
+                  re-registered) and pendingMcpServers (MCP servers still connecting at emit
+                  time); both introduced in 2.1.128. Extended CLAUDE_CODE_MAX_VERSION to 2.1.138.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -206,6 +245,7 @@ __all__ = [
     'AgentTeammateSpawnedResult',
     'AgentsRetrievalResult',
     'AiTitleRecord',
+    'AlreadyReadFileAttachment',
     'ApiError',
     'ApiErrorDetail',
     'ApiErrorResponse',
@@ -231,6 +271,7 @@ __all__ = [
     'CacheCreation',
     'CacheMissReason',
     'CacheMissReasonMessagesChanged',
+    'CacheMissReasonParamsChanged',
     'CacheMissReasonPreviousMessageNotFound',
     'CacheMissReasonSystemChanged',
     'CacheMissReasonToolsChanged',
@@ -338,6 +379,7 @@ __all__ = [
     'PlanModeExitAttachment',
     'PlanModeReentryAttachment',
     'PrLinkRecord',
+    'PreservedCompactSegment',
     'ProgressData',
     'ProgressRecord',
     'PromptPermission',
@@ -441,9 +483,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.30'
+SCHEMA_VERSION = '0.2.33'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.123'
+CLAUDE_CODE_MAX_VERSION = '2.1.138'
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1178,8 +1220,8 @@ class ToolUseContent(StrictModel):
     @pydantic.field_validator('input', mode='after')
     @classmethod
     def validate_mcp_tool_fallback(cls, v: ToolInput, info: pydantic.ValidationInfo) -> ToolInput:
-        """
-        Enforce that only MCP tools (starting with 'mcp__') can use MCPToolInput fallback.
+        """Enforce that only MCP tools (starting with 'mcp__') can use MCPToolInput fallback.
+
         All Claude Code built-in tools must have typed models that successfully validate.
 
         This catches both:
@@ -1274,6 +1316,16 @@ class CacheMissReasonMessagesChanged(StrictModel):
     cache_missed_input_tokens: int
 
 
+class CacheMissReasonParamsChanged(StrictModel):
+    """Cache miss because request parameters changed.
+
+    Carries the count of input tokens that were not served from cache.
+    """
+
+    type: Literal['params_changed']
+    cache_missed_input_tokens: int
+
+
 class CacheMissReasonPreviousMessageNotFound(StrictModel):
     """Cache miss because the previous message couldn't be located in the cache."""
 
@@ -1310,6 +1362,7 @@ CacheMissReason = Annotated[
     CacheMissReasonPreviousMessageNotFound
     | CacheMissReasonSystemChanged
     | CacheMissReasonMessagesChanged
+    | CacheMissReasonParamsChanged
     | CacheMissReasonToolsChanged
     | CacheMissReasonUnavailable,
     pydantic.Field(discriminator='type'),
@@ -1476,9 +1529,21 @@ class CompactMetadata(StrictModel):
 
     trigger: Literal['auto', 'manual']  # auto=24, manual=18 across all sessions
     preTokens: int
-    preCompactDiscoveredTools: Sequence[str] | None = None  # Tools discovered before compaction (2.1.81+)
+    preCompactDiscoveredTools: Sequence[str] | None = None  # Tools discovered before compaction (2.1.76+)
     postTokens: int | None = None  # Token count after compaction (Claude Code 2.1.100+)
     durationMs: int | None = None  # Compaction runtime in milliseconds (Claude Code 2.1.100+)
+    preservedSegment: PreservedCompactSegment | None = None  # Anchor pointers preserved across compaction
+
+
+class PreservedCompactSegment(StrictModel):
+    """Anchor UUIDs identifying the conversation segment preserved across an auto-compact.
+
+    Pydantic resolves the forward reference from CompactMetadata.preservedSegment.
+    """
+
+    headUuid: str  # Earliest preserved record
+    anchorUuid: str  # Anchor record within the preserved segment
+    tailUuid: str  # Most recent preserved record (typically the new logicalParentUuid)
 
 
 class MicrocompactMetadata(StrictModel):
@@ -2509,6 +2574,11 @@ class AssistantRecord(BaseRecord):
         None,
         description='Active skill name (e.g., "recover-session"); mirrors attributionAgent.',
     )
+    attributionPlugin: str | None = pydantic.Field(
+        None,
+        description='Active plugin name (e.g., "codex"); paired with attributionSkill when '
+        'the assistant turn is emitted by a plugin-installed skill (Claude Code 2.1.121+).',
+    )
 
 
 # -- Summary Record (does NOT inherit from BaseRecord - different schema) ------
@@ -2681,6 +2751,7 @@ class HookInfo(StrictModel):
     """Information about a hook execution."""
 
     command: str
+    durationMs: int  # Hook execution duration in milliseconds (Claude Code 2.1.120+)
 
 
 class StopHookSummarySystemRecord(BaseRecord):
@@ -3120,6 +3191,8 @@ class DeferredToolsDeltaAttachment(StrictModel):
     addedNames: Sequence[str]
     addedLines: Sequence[str]
     removedNames: Sequence[str]
+    readdedNames: Sequence[str] | None = None  # Tools that were removed and then re-registered (2.1.128+)
+    pendingMcpServers: Sequence[str] | None = None  # MCP servers still connecting at emit time (2.1.128+)
 
 
 class TaskReminderItem(StrictModel):
@@ -3205,6 +3278,14 @@ class QueuedCommandAttachment(StrictModel):
     prompt: str | Sequence[TextContent | ImageContent]
     commandMode: str
     imagePasteIds: Sequence[int] | None = None  # Present when prompt contains pasted images
+    source_uuid: str | None = pydantic.Field(
+        None,
+        description='UUID of the source message that triggered this queued command. '
+        'Rare (1/355 globally observed); only seen with commandMode="prompt". '
+        'Set by the SDK replay path (Claude Code 2.1.20+ — `SDKUserMessageReplay` events '
+        'when `replayUserMessages` is enabled). Note: snake_case in the wire schema, '
+        'anomalous vs surrounding camelCase fields.',
+    )
 
 
 class DynamicSkillAttachment(StrictModel):
@@ -3291,12 +3372,31 @@ class FileAttachment(StrictModel):
     displayPath: str
 
 
+class AlreadyReadFileAttachment(StrictModel):
+    """Reminder injected when Claude re-Reads an unchanged file in the same session.
+
+    Carries the cached snapshot the model has already seen so it can skip re-issuing
+    the Read tool. Shape mirrors FileAttachment exactly (filename + displayPath +
+    wrapped FileAttachmentContent), so the nested types are reused directly.
+    """
+
+    type: Literal['already_read_file']
+    filename: PathField
+    content: FileAttachmentContent
+    displayPath: str
+
+
 class EditedTextFileAttachment(StrictModel):
-    """File edited externally — snippet with line numbers shown to Claude."""
+    """File edited externally — snippet with line numbers shown to Claude.
+
+    displayPath is rare (~2% of observed records, only on more recent
+    Claude Code versions when the file is outside cwd); modeled optional.
+    """
 
     type: Literal['edited_text_file']
     filename: PathField
     snippet: str
+    displayPath: str | None = None
 
 
 class OpenedFileInIdeAttachment(StrictModel):
@@ -3438,6 +3538,7 @@ AttachmentData = Annotated[
     | InvokedSkillsAttachment
     | NestedMemoryAttachment
     | FileAttachment
+    | AlreadyReadFileAttachment
     | EditedTextFileAttachment
     | OpenedFileInIdeAttachment
     | SelectedLinesInIdeAttachment

@@ -1,5 +1,4 @@
-"""
-Command-line interface for claude-session.
+"""Command-line interface for claude-session.
 
 Provides commands to archive and restore Claude Code sessions.
 """
@@ -16,13 +15,14 @@ import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Literal, TypeGuard
+from typing import Annotated, Literal
 
 import httpx
 import typer
-from cc_lib.cli import add_completion_command, create_app, run_app
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.session_tracker import load_sessions
+from cc_lib.types import OutputFormat
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.exceptions import ClaudeSessionError, SourceProjectConflictError
@@ -41,11 +41,13 @@ from claude_session.services.parser import SessionParserService
 from claude_session.services.restore import SessionRestoreService
 from claude_session.storage.gist import GistStorage
 from claude_session.storage.local import LocalFileSystemStorage
+from claude_session.types import ArchiveFormat, GistVisibility
 
 logger = logging.getLogger(__name__)
 
 app = create_app(help='Archive and restore Claude Code sessions.')
 add_completion_command(app)
+add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
 
@@ -72,23 +74,6 @@ def _configure_logging(
         os.environ['CLAUDE_CONFIG_DIR'] = str(claude_dir)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
-
-
-ArchiveFormat = Literal['json', 'zst']
-
-
-def _is_archive_format(value: str) -> TypeGuard[ArchiveFormat]:
-    """Type guard for valid archive formats."""
-    return value in ('json', 'zst')
-
-
-def _validate_archive_format(value: str | None) -> ArchiveFormat | None:
-    """Validate and narrow archive format for typer callback."""
-    if value is None:
-        return None
-    if _is_archive_format(value):
-        return value
-    raise typer.BadParameter("Must be 'json' or 'zst'")
 
 
 def _format_age(dt: datetime | None) -> str:
@@ -158,7 +143,6 @@ def archive(
             '--format',
             '-f',
             help='Archive format: json or zst',
-            callback=_validate_archive_format,
         ),
     ] = None,
     gist_token: Annotated[
@@ -169,7 +153,7 @@ def archive(
         ),
     ] = None,
     gist_visibility: Annotated[
-        Literal['public', 'secret'],
+        GistVisibility,
         typer.Option(
             '--gist-visibility',
             help='Gist visibility (public or secret)',
@@ -484,9 +468,7 @@ def info(
             autocompletion=_complete_session_id,
         ),
     ] = None,
-    format: Annotated[
-        Literal['text', 'json'], typer.Option('--format', '-f', help='Output format: text or json')
-    ] = 'text',
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format: text or json')] = 'text',
     source_project: Annotated[
         Path | None, typer.Option('--source-project', '--sp', help='Scope to sessions in this project directory')
     ] = None,
@@ -607,14 +589,13 @@ def _handle_user_error(exc: Exception) -> None:
 async def _archive_async(
     session_id: str,
     output: str,
-    format: Literal['json', 'zst'] | None,
+    format: ArchiveFormat | None,
     gist_token: str | None,
-    gist_visibility: Literal['public', 'secret'],
+    gist_visibility: GistVisibility,
     gist_description: str,
     source_project: Path | None,
 ) -> None:
     """Async implementation of archive command."""
-
     # Find the session
     discovery = SessionDiscoveryService()
     project_filter = _encode_project_filter(source_project)
@@ -730,7 +711,6 @@ async def _restore_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of restore command."""
-
     # Check if it's a Gist URL
     if archive.startswith('gist://'):
         gist_id = archive[7:]
@@ -874,7 +854,6 @@ async def _clone_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of clone command."""
-
     # Determine target project path
     if target_project:
         project_path = target_project.resolve()
@@ -944,7 +923,6 @@ async def _delete_async(
     delete_cross_session_artifacts: bool | None,
 ) -> None:
     """Async implementation of delete command."""
-
     # Resolve session ID prefix to full ID
     # When --source-project is provided, use it to disambiguate discovery
     info_service = SessionInfoService()
@@ -1047,7 +1025,6 @@ async def _move_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of move command."""
-
     # Resolve session ID prefix to full ID
     info_service = SessionInfoService()
     project_filter = _encode_project_filter(source_project)
@@ -1184,7 +1161,7 @@ async def _lineage_async(session_id: str, format: Literal['text', 'tree', 'json'
         typer.echo(tree.model_dump_json(indent=2))
 
 
-async def _info_async(session_id: str, format: Literal['text', 'json'], source_project: Path | None) -> None:
+async def _info_async(session_id: str, format: OutputFormat, source_project: Path | None) -> None:
     """Async implementation of info command."""
     info_service = SessionInfoService()
     project_filter = _encode_project_filter(source_project)

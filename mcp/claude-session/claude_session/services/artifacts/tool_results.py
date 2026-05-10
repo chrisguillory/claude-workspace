@@ -1,5 +1,4 @@
-"""
-Tool results handling for session operations.
+"""Tool results handling for session operations.
 
 Handles:
 - Tool result file/directory discovery with extension validation
@@ -134,8 +133,7 @@ class DiscoveryResult(NamedTuple):
 
 
 def get_tool_results_dir(project_folder: Path, session_id: str) -> Path:
-    """
-    Get the tool-results directory path for a session.
+    """Get the tool-results directory path for a session.
 
     Path structure: {project_folder}/{session_id}/tool-results/
 
@@ -217,8 +215,7 @@ def discover_tool_results(project_folder: Path, session_id: str) -> DiscoveryRes
 
 
 def collect_tool_results(project_folder: Path, session_id: str) -> ToolResultCollection:
-    """
-    Collect tool result files and directories for a session.
+    """Collect tool result files and directories for a session.
 
     Discovers all artifacts via discover_tool_results(), validates extensions
     (raises on unknowns), then reads file content into typed models.

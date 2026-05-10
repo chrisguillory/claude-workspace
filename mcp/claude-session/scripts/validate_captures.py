@@ -1,6 +1,5 @@
 #!/usr/bin/env -S uv run
-"""
-Validate capture schemas against all HTTP traffic capture files.
+"""Validate capture schemas against all HTTP traffic capture files.
 
 This script finds all .json capture files in the captures/ directory and validates
 them against the Pydantic models to ensure complete schema coverage.
@@ -138,8 +137,7 @@ class TotalStats(TypedDict):
 
 
 def normalize_path(loc: Sequence[str | int]) -> str:
-    """
-    Normalize a Pydantic error location path.
+    """Normalize a Pydantic error location path.
 
     Strips out Union[X, Y] and model name annotations that Pydantic adds
     for discriminated unions, producing a cleaner path for display.
@@ -174,8 +172,7 @@ def normalize_path(loc: Sequence[str | int]) -> str:
 
 
 def generalize_path(loc: Sequence[str | int]) -> str:
-    """
-    Generalize a path by replacing numeric indices with *.
+    """Generalize a path by replacing numeric indices with *.
 
     Used for grouping errors that occur at different array positions.
 
@@ -196,8 +193,7 @@ def generalize_path(loc: Sequence[str | int]) -> str:
 def extract_value_at_path(
     data: Mapping[str, Any], loc: Sequence[str | int]
 ) -> Any:  # strict_typing_linter.py: loose-typing — returns heterogeneous validation error values
-    """
-    Extract the value at a given path in a nested structure.
+    """Extract the value at a given path in a nested structure.
 
     Handles Pydantic's path annotations gracefully:
     - Skips Union[...] annotations
@@ -272,8 +268,7 @@ def extract_value_at_path(
 def format_value_shape(
     value: Any,
 ) -> str:  # strict_typing_linter.py: loose-typing — inspects heterogeneous validation error values
-    """
-    Describe the shape of a value for grouping and display.
+    """Describe the shape of a value for grouping and display.
 
     Returns strings like:
         "object with keys [a, b, c]"
@@ -310,8 +305,7 @@ def format_value_shape(
 def truncate_value(
     value: Any, full: bool = False
 ) -> str:  # strict_typing_linter.py: loose-typing — formats heterogeneous validation error values
-    """
-    Format a value for display, with optional truncation.
+    """Format a value for display, with optional truncation.
 
     Args:
         value: The value to format
@@ -378,8 +372,7 @@ def truncate_value(
 
 
 def compute_grouping_key(error: EnrichedFieldError) -> tuple[str, str, str]:
-    """
-    Compute the grouping key for an error.
+    """Compute the grouping key for an error.
 
     Groups by: (error_type, generalized_path, value_shape)
     """
@@ -391,8 +384,7 @@ def compute_grouping_key(error: EnrichedFieldError) -> tuple[str, str, str]:
 
 
 def group_errors(errors: Sequence[EnrichedFieldError]) -> Sequence[ErrorGroup]:
-    """
-    Group errors by their pattern.
+    """Group errors by their pattern.
 
     Returns groups sorted by count (most frequent first).
     """
@@ -427,8 +419,7 @@ def find_fallbacks(
     path: str = '',
     file: str = '',  # strict_typing_linter.py: loose-typing — walks arbitrary Pydantic model tree
 ) -> Sequence[FallbackUsage]:
-    """
-    Recursively find all PermissiveModel instances in a validated capture.
+    """Recursively find all PermissiveModel instances in a validated capture.
 
     This detects where typed unions fell back to permissive fallback types
     (e.g., UnknownConfigValue, UnknownSegmentTraits).
@@ -486,8 +477,7 @@ def validate_capture_with_values(
 ) -> tuple[
     str, Any, Sequence[EnrichedFieldError]
 ]:  # strict_typing_linter.py: loose-typing — second element is status-dependent (model | error | None)
-    """
-    Validate a capture file and extract values for any errors.
+    """Validate a capture file and extract values for any errors.
 
     Returns:
         ('success', capture_object, []) on success
@@ -543,7 +533,7 @@ def validate_capture_with_values(
 
 
 def find_capture_sessions(captures_dir: Path) -> Sequence[Path]:
-    """Find all session directories in captures/"""
+    """Find all session directories in captures/."""
     if not captures_dir.exists():
         return []
 
@@ -653,7 +643,6 @@ def format_error_group(group: ErrorGroup, full: bool = False) -> str:
 
 def print_errors_mode(all_results: Sequence[CaptureValidationResult], full: bool = False) -> None:
     """Print output in --errors mode: grouped errors first, summary at end."""
-
     # Collect all enriched errors
     all_errors: list[EnrichedFieldError] = []
     for result in all_results:
@@ -703,7 +692,6 @@ def print_summary_mode(
     total_stats: TotalStats,
 ) -> None:
     """Print output in summary mode (default): stats first, brief error list."""
-
     print('SUMMARY')
     print('-' * 80)
     print(f'Total sessions: {total_stats["sessions"]}')

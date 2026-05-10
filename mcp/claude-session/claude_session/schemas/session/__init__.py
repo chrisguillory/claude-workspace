@@ -1,5 +1,4 @@
-"""
-Session JSONL schema models.
+"""Session JSONL schema models.
 
 This package contains Pydantic models for Claude Code session JSONL records.
 All models are currently in models.py - see README.md for planned structure.
@@ -26,6 +25,7 @@ from claude_session.schemas.session.models import (
     # Tool results (alphabetical)
     AgentState,
     AgentTeammateSpawnedResult,
+    AiTitleRecord,
     # API errors
     ApiError,
     ApiErrorDetail,
@@ -346,6 +346,7 @@ __all__ = [
     'FileHistorySnapshotRecord',
     'QueueOperationRecord',
     'CustomTitleRecord',
+    'AiTitleRecord',
     'ProgressRecord',
     'PrLinkRecord',
     'SavedHookContextRecord',

@@ -1,5 +1,4 @@
-"""
-Capture type registry and discriminator function.
+"""Capture type registry and discriminator function.
 
 This module provides the type dispatch logic for the CapturedTraffic
 discriminated union. It maps HTTP context (host, path, direction) to
@@ -121,8 +120,7 @@ CAPTURE_REGISTRY: dict[
 
 
 def normalize_path(path: str) -> str:
-    """
-    Normalize path for registry lookup.
+    """Normalize path for registry lookup.
 
     Handles:
     - Query string removal: /path?query=value -> /path
@@ -169,8 +167,7 @@ def normalize_path(path: str) -> str:
 
 
 def extract_endpoint_from_filename(filename: str) -> tuple[str, str]:
-    """
-    Extract host and path hint from capture filename.
+    """Extract host and path hint from capture filename.
 
     Filenames are like: req_001_api_anthropic_com_v1_messages_beta_true.json
 
@@ -207,8 +204,7 @@ def extract_endpoint_from_filename(filename: str) -> tuple[str, str]:
 
 
 def get_capture_type(v: Any) -> str:  # strict_typing_linter.py: loose-typing — discriminator callback gets raw dict
-    """
-    Callable discriminator for CapturedTraffic union.
+    """Callable discriminator for CapturedTraffic union.
 
     Reads HTTP context (host, path, direction) from input data
     and returns discriminator tag for union dispatch.

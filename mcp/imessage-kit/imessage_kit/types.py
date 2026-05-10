@@ -32,6 +32,14 @@ type ReactionName = Literal['love', 'like', 'dislike', 'laugh', 'emphasize', 'qu
 type AttachmentMode = Literal['view', 'save']
 type ContactSourceKind = Literal['Google', 'iCloud']
 
+# Name-matching strictness for `lookup_contact`. Phone digit and email substring
+# matching are always active regardless. Each mode lists every layer it includes.
+type ContactMatchMode = Literal[
+    'exact_only',
+    'exact_or_substring',
+    'exact_or_substring_or_fuzzy',
+]
+
 # Terminal states of a send as observed in chat.db, after polling post-dispatch.
 # AppleScript `send` returning success is NOT a reliable delivery signal on its own —
 # Messages.app writes a row into chat.db whose `is_sent`, `is_delivered`, `error`,
@@ -103,6 +111,9 @@ class Contact(ClosedModel):
     # Provenance
     sources: Sequence[str]
     """Display names of sources this contact was merged from. e.g., ['Google', 'iCloud']."""
+
+    record_pk: int | None = None
+    """Per-source SQLite primary key (ZABCDRECORD.Z_PK). None on merged contacts."""
 
 
 class AttachmentMeta(ClosedModel):

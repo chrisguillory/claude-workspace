@@ -71,6 +71,19 @@ from pydantic import JsonValue
 # Use "chromium" to avoid AppleScript targeting conflicts when personal Chrome is running
 type Browser = Literal['chrome', 'chromium']
 
+# Scroll-related literals (used by service.py, tools/interaction.py, scroll.py, cli/main.py)
+type ScrollDirection = Literal['up', 'down', 'left', 'right']
+type ScrollPosition = Literal['top', 'bottom', 'left', 'right']
+type ScrollBehavior = Literal['instant', 'smooth']
+
+# Element-state target for wait_for_selector
+type WaitForSelectorState = Literal['visible', 'hidden', 'attached', 'detached']
+
+# Console-log severity. Filter parameters accept the synthetic 'ALL' sentinel
+# (meaning "no filtering"); ConsoleLogEntry.level itself never carries 'ALL'.
+type ConsoleLogLevel = Literal['SEVERE', 'WARNING', 'INFO']
+type ConsoleLogLevelFilter = Literal['ALL', 'SEVERE', 'WARNING', 'INFO']
+
 
 class ChromeProfileEssential(ClosedModel):
     """Essential profile metadata (default/concise view)."""
@@ -721,7 +734,7 @@ class SaveProfileStateResult(ClosedModel):
 class ConsoleLogEntry(ClosedModel):
     """Individual browser console log entry."""
 
-    level: Literal['SEVERE', 'WARNING', 'INFO']
+    level: ConsoleLogLevel
     message: str
     source: str  # javascript, network, security, etc.
     timestamp: int  # Epoch milliseconds
@@ -800,7 +813,7 @@ class WaitForSelectorResult(ClosedModel):
     """
 
     selector: str
-    state: Literal['visible', 'hidden', 'attached', 'detached']
+    state: WaitForSelectorState
     elapsed_ms: int
     element_count: int | None = None
     reason: str | None = None
