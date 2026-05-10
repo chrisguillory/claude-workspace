@@ -1,5 +1,4 @@
-"""
-Property types for tool.input_schema.properties in Claude Code API requests.
+"""Property types for tool.input_schema.properties in Claude Code API requests.
 
 NOT a general-purpose JSON Schema implementation. This module models ONLY the
 specific subset of JSON Schema that Claude Code uses when defining tool parameters

@@ -1,5 +1,4 @@
-"""
-Tests for edge case fixtures.
+"""Tests for edge case fixtures.
 
 These tests validate that all fixtures in the fixtures/ directory
 pass our Pydantic model validation. This serves multiple purposes:

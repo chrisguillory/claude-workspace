@@ -1,5 +1,4 @@
-"""
-Session discovery service - finds sessions across all Claude Code projects.
+"""Session discovery service - finds sessions across all Claude Code projects.
 
 Provides utilities to discover sessions by ID and list all available sessions.
 """
@@ -22,8 +21,7 @@ __all__ = [
 
 
 class SessionDiscoveryService:
-    """
-    Service for discovering Claude Code sessions across all projects.
+    """Service for discovering Claude Code sessions across all projects.
 
     Searches ~/.claude/projects/ for session files and provides utilities
     to find sessions by ID or list all available sessions.
@@ -36,8 +34,7 @@ class SessionDiscoveryService:
     async def find_session_by_id(
         self, session_id_or_prefix: str, *, project_filter: Path | None = None
     ) -> SessionInfo | None:
-        """
-        Find a session by ID or prefix across all projects using rg.
+        """Find a session by ID or prefix across all projects using rg.
 
         Supports both full session IDs and unique prefixes (e.g., 'fd0fe7fa').
 

@@ -1,5 +1,4 @@
-"""
-Fallback capture classes for unmapped endpoints.
+"""Fallback capture classes for unmapped endpoints.
 
 This module contains application-layer fallback captures for HTTP traffic
 we've observed but haven't created specific typed models for yet. These
@@ -36,8 +35,7 @@ __all__ = [
 
 
 class UnknownRequestCapture(RequestCapture):
-    """
-    Fallback capture for unmapped request endpoints.
+    """Fallback capture for unmapped request endpoints.
 
     Used when we observe traffic but haven't created typed models
     for that endpoint yet. The body accepts any JSON-serializable
@@ -59,8 +57,7 @@ class UnknownRequestCapture(RequestCapture):
 
 
 class UnknownResponseCapture(ResponseCapture):
-    """
-    Fallback capture for unmapped response endpoints.
+    """Fallback capture for unmapped response endpoints.
 
     Paired with UnknownRequestCapture for unmapped endpoints.
     """

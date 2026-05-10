@@ -1,3 +1,6 @@
+# ruff: noqa: W505 -- the module docstring is a research reference with version-history
+# tables whose long-form column headers (patch family names) are intentional; abbreviating
+# would obscure what's being tracked.
 """Claude Code binary patching definitions and scan logic.
 
 Patch definitions describe same-length byte replacements in the Claude Code
@@ -383,7 +386,8 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-29)::
     tengu_session_memory                                     2.0.64          2.0.62
     tengu_coral_fern                                         2.1.21          2.1.20
     tengu_scratch                                            2.1.45          2.1.44
-    ask rule/safety check requires full permission pipeline  2.1.109         2.1.92 (pre-diagnostic; scanned across 9 local originals)
+    ask rule/safety check requires full permission pipeline  2.1.109         2.1.92
+        (pre-diagnostic; scanned across 9 local originals)
 
 Site Count Evolution::
 

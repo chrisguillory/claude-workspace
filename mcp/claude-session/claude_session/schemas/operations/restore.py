@@ -1,5 +1,4 @@
-"""
-Restore operation schemas.
+"""Restore operation schemas.
 
 Models for session restoration results.
 """

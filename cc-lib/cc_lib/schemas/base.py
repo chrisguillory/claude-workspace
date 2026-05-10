@@ -100,6 +100,7 @@ class CamelModel(StrictModel):
         class Decision(CamelModel):
             permission_decision: str = 'allow'
 
+
         Decision().model_dump_json()
         # → {"permissionDecision": "allow"}
     """

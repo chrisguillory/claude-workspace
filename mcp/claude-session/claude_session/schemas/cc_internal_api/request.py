@@ -1,5 +1,4 @@
-"""
-Request schemas for Claude Code internal API.
+"""Request schemas for Claude Code internal API.
 
 These model the request payloads Claude Code sends to the API.
 Validated against mitmproxy captures of actual Claude Code traffic.
@@ -44,8 +43,7 @@ __all__ = [
 
 
 class SystemBlock(StrictModel):
-    """
-    Text block in the system parameter array.
+    """Text block in the system parameter array.
 
     VALIDATION STATUS: VALIDATED
     Observed: system is array of {type, text, cache_control} blocks.
@@ -61,8 +59,7 @@ class SystemBlock(StrictModel):
 
 
 class ToolInputSchema(StrictModel):
-    """
-    JSON Schema for tool input parameters.
+    """JSON Schema for tool input parameters.
 
     VALIDATION STATUS: VALIDATED
     Observed in tools[].input_schema.
@@ -82,8 +79,7 @@ class ToolInputSchema(StrictModel):
 
 
 class ToolDefinition(StrictModel):
-    """
-    Tool definition sent in API requests.
+    """Tool definition sent in API requests.
 
     VALIDATION STATUS: VALIDATED
     Observed: 18 built-in tools in vanilla capture.
@@ -103,8 +99,7 @@ class ToolDefinition(StrictModel):
 
 
 class TextContentBlock(StrictModel):
-    """
-    Text content block in messages.
+    """Text content block in messages.
 
     Observed in messages[].content[] for both user and assistant roles.
     May include cache_control for prompt caching.
@@ -116,8 +111,7 @@ class TextContentBlock(StrictModel):
 
 
 class RequestThinkingBlock(StrictModel):
-    """
-    Thinking content block in assistant messages (multi-turn conversations).
+    """Thinking content block in assistant messages (multi-turn conversations).
 
     VALIDATION STATUS: VALIDATED (2737 cases)
     - signature: ALWAYS present (2737/2737 = 100%)
@@ -132,8 +126,7 @@ class RequestThinkingBlock(StrictModel):
 
 
 class RequestToolUseBlock(StrictModel):
-    """
-    Tool use block in assistant messages (conversation history).
+    """Tool use block in assistant messages (conversation history).
 
     VALIDATION STATUS: VALIDATED (3462 cases)
     - cache_control: Optional (31/3462 = 0.9%)
@@ -150,8 +143,7 @@ class RequestToolUseBlock(StrictModel):
 
 
 class ToolResultTextItem(StrictModel):
-    """
-    Text item in tool_result list content.
+    """Text item in tool_result list content.
 
     VALIDATION STATUS: VALIDATED (204 list items)
     All list items observed are this shape. Source: MCP tools (perplexity_research,
@@ -163,8 +155,7 @@ class ToolResultTextItem(StrictModel):
 
 
 class RequestToolResultBlock(StrictModel):
-    """
-    Tool result block in user messages (conversation history).
+    """Tool result block in user messages (conversation history).
 
     VALIDATION STATUS: VALIDATED (3462 cases)
     - content: Always present. String (3260/3462 = 94.2%) or list (202/3462 = 5.8%)
@@ -190,8 +181,7 @@ RequestContentBlock = TextContentBlock | RequestThinkingBlock | RequestToolUseBl
 
 
 class RequestMessage(StrictModel):
-    """
-    Message in the messages array.
+    """Message in the messages array.
 
     User messages contain text blocks (with optional cache_control).
     Assistant messages contain text and/or thinking blocks (with signature).
@@ -227,8 +217,7 @@ ThinkingConfig = Annotated[
 
 
 class ContextManagementEdit(StrictModel):
-    """
-    Context management edit directive.
+    """Context management edit directive.
 
     VALIDATION STATUS: VALIDATED
     Observed: {"type": "clear_thinking_20251015", "keep": "all"}
@@ -239,8 +228,7 @@ class ContextManagementEdit(StrictModel):
 
 
 class RequestContextManagement(StrictModel):
-    """
-    Context management in requests.
+    """Context management in requests.
 
     VALIDATION STATUS: VALIDATED
     Observed in request.context_management.
@@ -253,8 +241,7 @@ class RequestContextManagement(StrictModel):
 
 
 class RequestMetadata(StrictModel):
-    """
-    Request metadata.
+    """Request metadata.
 
     VALIDATION STATUS: VALIDATED
     Observed: {"user_id": "..."}
@@ -267,8 +254,7 @@ class RequestMetadata(StrictModel):
 
 
 class MessagesRequest(StrictModel):
-    """
-    Complete request payload for /v1/messages.
+    """Complete request payload for /v1/messages.
 
     VALIDATION STATUS: VALIDATED
     Observed: 9 top-level keys.

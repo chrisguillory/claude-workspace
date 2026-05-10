@@ -1,5 +1,4 @@
-"""
-Gist operation result models.
+"""Gist operation result models.
 
 Models for GitHub Gist storage operations.
 """

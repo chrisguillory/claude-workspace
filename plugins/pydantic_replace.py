@@ -29,8 +29,8 @@ What this catches
 -----------------
 .. code-block:: python
 
-    result.__replace__(timming=None)   # error: No parameter named "timming"
-    result.__replace__(timing="oops")  # error: "str" not assignable to "float | None"
+    result.__replace__(timming=None)  # error: No parameter named "timming"
+    result.__replace__(timing='oops')  # error: "str" not assignable to "float | None"
 
 Without this plugin, ``model_copy(update={'timming': None})`` silently accepts
 both errors because ``update`` is ``dict[str, Any]``.
@@ -42,9 +42,9 @@ Mypy returns the first plugin's hook and ignores the rest, so having both
 causes this plugin to silently never fire::
 
     [tool.mypy]
-    plugins = ["plugins/pydantic_replace.py"]
+    plugins = ['plugins/pydantic_replace.py']
 
-    [tool.pydantic-mypy]
+    [tool.pydantic - mypy]
     init_forbid_extra = true
     init_typed = true
     # Do NOT set debug_dataclass_transform — this plugin replaces that workaround

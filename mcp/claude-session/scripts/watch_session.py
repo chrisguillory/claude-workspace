@@ -10,8 +10,7 @@
 # cc_lib = { path = "../../../cc-lib/", editable = true }
 # ///
 
-"""
-Watch a Claude Code session JSONL with live-updating HTML viewer.
+"""Watch a Claude Code session JSONL with live-updating HTML viewer.
 
 Does an initial full render via claude-code-log, then streams new records
 to the browser in real-time via Server-Sent Events. No page reloads needed.

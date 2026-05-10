@@ -10,7 +10,7 @@ Usage in tests::
     from tests.cc_lib import fake_lib
 
     proxy = boundary.wrap(fake_lib)
-    proxy.parse("hello")
+    proxy.parse('hello')
 """
 
 from __future__ import annotations

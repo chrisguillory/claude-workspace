@@ -187,6 +187,7 @@ def send(
 
     \b
     Default is preview — add --confirm to actually dispatch.
+
     Examples:
         imessage-kit send --handle +15555550100 -t hi
         imessage-kit send --handle +15555550100 -t hi --confirm

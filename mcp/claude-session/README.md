@@ -45,13 +45,7 @@ Create the file if it doesn't exist.
 ## Installation
 
 ```bash
-# Install globally (recommended)
-uv tool install git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session
-
-# Run without installing
-uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session claude-session --help
-
-# From local workspace clone (editable — changes take effect immediately)
+# Editable install from local workspace clone (source changes take effect immediately)
 uv tool install --editable ~/claude-workspace/mcp/claude-session
 ```
 
@@ -350,13 +344,10 @@ claude-session lineage 019b53ff --format json
 Install the MCP server to use archive/restore directly from Claude Code:
 
 ```bash
-# If installed globally (see Installation)
+# If installed via Installation section above
 claude mcp add --scope user claude-session -- claude-session-mcp
 
-# From GitHub (always-latest)
-claude mcp add --scope user claude-session -- uvx --refresh --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/claude-session claude-session-mcp
-
-# From local clone
+# From local clone (no install required)
 claude mcp add --scope user claude-session -- uv run --project ~/claude-workspace/mcp/claude-session claude-session-mcp
 ```
 

@@ -1,10 +1,6 @@
-"""
-Selenium Browser Automation MCP Server
+"""Selenium Browser Automation MCP Server.
 
 CDP stealth injection to bypass Cloudflare bot detection.
-
-Install:
-    uvx --from git+https://github.com/chrisguillory/claude-workspace.git#subdirectory=mcp/selenium-browser selenium-browser-mcp
 
 Architecture: Runs locally (not Docker) for visible browser monitoring.
 Uses Selenium with CDP stealth injection where Playwright fails.

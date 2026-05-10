@@ -1,5 +1,4 @@
-"""
-GCS (Google Cloud Storage) capture classes.
+"""GCS (Google Cloud Storage) capture classes.
 
 This module contains captures for storage.googleapis.com traffic,
 specifically the version check endpoint used by Claude Code.
@@ -24,8 +23,7 @@ __all__ = [
 
 
 class RawTextBody(StrictModel):
-    """
-    Body container for text responses that couldn't be parsed as JSON.
+    """Body container for text responses that couldn't be parsed as JSON.
 
     Created by preprocessing when body type is 'text' and JSON parsing fails.
     The raw_text field contains the original text content.

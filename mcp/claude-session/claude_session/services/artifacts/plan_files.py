@@ -1,5 +1,4 @@
-"""
-Plan file handling for clone/restore operations.
+"""Plan file handling for clone/restore operations.
 
 Handles:
 - Slug extraction from session records
@@ -53,8 +52,7 @@ SLUG_RECORD_TYPES = (
 
 
 def extract_base_slug(slug: str) -> str:
-    """
-    Extract the base slug, removing any -clone-XXXXXXXX suffix.
+    """Extract the base slug, removing any -clone-XXXXXXXX suffix.
 
     For native slugs, returns the slug unchanged.
     For cloned slugs, returns the portion before '-clone-'.
@@ -78,8 +76,7 @@ def extract_base_slug(slug: str) -> str:
 
 
 def extract_slugs_from_records(files_data: Mapping[str, Sequence[SessionRecord]]) -> Set[str]:
-    """
-    Extract all unique slugs from session records.
+    """Extract all unique slugs from session records.
 
     Uses structured extraction via Pydantic models, not regex.
 
@@ -98,8 +95,7 @@ def extract_slugs_from_records(files_data: Mapping[str, Sequence[SessionRecord]]
 
 
 def collect_plan_files(slugs: Set[str]) -> Mapping[str, str]:
-    """
-    Load plan file contents for slugs that have corresponding files.
+    """Load plan file contents for slugs that have corresponding files.
 
     Slugs without plan files are normal (session never used plan mode,
     or file was auto-deleted after 30-day retention). These are silently
@@ -121,8 +117,7 @@ def collect_plan_files(slugs: Set[str]) -> Mapping[str, str]:
 
 
 def generate_clone_slug(old_slug: str, new_session_id: str) -> str:
-    """
-    Generate new slug with provenance.
+    """Generate new slug with provenance.
 
     Format: {base_slug}-clone-{session_prefix}
     Example: curried-bubbling-wombat-clone-019b51bd
@@ -173,8 +168,7 @@ def write_plan_files(plans: Iterable[tuple[str, str]], *, exist_ok: bool = False
 
 
 def apply_slug_mapping(json_str: str, slug_mapping: Mapping[str, str]) -> str:
-    """
-    Replace all old slugs with new slugs in serialized JSON.
+    """Replace all old slugs with new slugs in serialized JSON.
 
     This catches both:
     - "slug":"old-slug" field values

@@ -1,5 +1,4 @@
-"""
-Common types for Claude Code internal API schemas.
+"""Common types for Claude Code internal API schemas.
 
 These types are shared between request and response schemas.
 Validated against mitmproxy captures of actual Claude Code traffic.
@@ -25,8 +24,7 @@ __all__ = [
 
 
 class CacheControl(StrictModel):
-    """
-    Cache control directive for API requests.
+    """Cache control directive for API requests.
 
     VALIDATION STATUS: VALIDATED
     Observed on system blocks and user message blocks.
@@ -41,8 +39,7 @@ class CacheControl(StrictModel):
 
 
 class ApiCacheCreation(StrictModel):
-    """
-    Detailed cache creation breakdown in API responses.
+    """Detailed cache creation breakdown in API responses.
 
     VALIDATION STATUS: VALIDATED
     Observed in response.usage.cache_creation.
@@ -65,8 +62,7 @@ class ApiCacheCreation(StrictModel):
 
 
 class ApiUsage(StrictModel):
-    """
-    Token usage in API responses.
+    """Token usage in API responses.
 
     VALIDATION STATUS: VALIDATED
     Observed in response.usage field.

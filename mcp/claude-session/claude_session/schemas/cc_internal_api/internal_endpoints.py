@@ -1,5 +1,4 @@
-"""
-Claude Code internal endpoint schemas.
+"""Claude Code internal endpoint schemas.
 
 These model Claude Code's internal API endpoints beyond the Messages API:
 - /v1/messages/count_tokens - Token counting
@@ -67,8 +66,7 @@ __all__ = [
 
 
 class CountTokensRequest(StrictModel):
-    """
-    Request to /v1/messages/count_tokens.
+    """Request to /v1/messages/count_tokens.
 
     VALIDATION STATUS: VALIDATED
     Observed in request body.
@@ -84,8 +82,7 @@ class CountTokensRequest(StrictModel):
 
 
 class CountTokensResponse(StrictModel):
-    """
-    Response from /v1/messages/count_tokens.
+    """Response from /v1/messages/count_tokens.
 
     VALIDATION STATUS: VALIDATED
     Observed: {"input_tokens": 14363}
@@ -98,8 +95,7 @@ class CountTokensResponse(StrictModel):
 
 
 class GroveResponse(StrictModel):
-    """
-    Response from /api/claude_code/grove or /api/claude_code_grove.
+    """Response from /api/claude_code/grove or /api/claude_code_grove.
 
     VALIDATION STATUS: VALIDATED
     Feature gating by region/subscription tier.
@@ -119,8 +115,7 @@ class GroveResponse(StrictModel):
 
 
 class ResourceAttributes(StrictModel):
-    """
-    Resource attributes in OpenTelemetry metrics.
+    """Resource attributes in OpenTelemetry metrics.
 
     VALIDATION STATUS: VALIDATED
     Service identification and environment metadata.
@@ -142,8 +137,7 @@ class ResourceAttributes(StrictModel):
 
 
 class MetricsAttributes(StrictModel):
-    """
-    Attributes on a metric data point.
+    """Attributes on a metric data point.
 
     VALIDATION STATUS: VALIDATED
     OpenTelemetry-style dimensions with dot-notation keys.
@@ -163,8 +157,7 @@ class MetricsAttributes(StrictModel):
 
 
 class MetricsDataPoint(StrictModel):
-    """
-    Single data point in a metrics report.
+    """Single data point in a metrics report.
 
     VALIDATION STATUS: VALIDATED
     OpenTelemetry-style data point.
@@ -176,8 +169,7 @@ class MetricsDataPoint(StrictModel):
 
 
 class MetricDefinition(StrictModel):
-    """
-    Single metric in a metrics report.
+    """Single metric in a metrics report.
 
     VALIDATION STATUS: VALIDATED
     """
@@ -189,8 +181,7 @@ class MetricDefinition(StrictModel):
 
 
 class MetricsRequest(StrictModel):
-    """
-    Request to /api/claude_code/metrics.
+    """Request to /api/claude_code/metrics.
 
     VALIDATION STATUS: VALIDATED
     OpenTelemetry-style metrics reporting.
@@ -201,8 +192,7 @@ class MetricsRequest(StrictModel):
 
 
 class MetricsResponse(StrictModel):
-    """
-    Response from /api/claude_code/metrics.
+    """Response from /api/claude_code/metrics.
 
     VALIDATION STATUS: VALIDATED
     Same structure as telemetry response.
@@ -213,8 +203,7 @@ class MetricsResponse(StrictModel):
 
 
 class MetricsEnabledResponse(StrictModel):
-    """
-    Response from /api/claude_code/organizations/metrics_enabled.
+    """Response from /api/claude_code/organizations/metrics_enabled.
 
     VALIDATION STATUS: VALIDATED
     Controls telemetry and VCS integration opt-in.
@@ -228,8 +217,7 @@ class MetricsEnabledResponse(StrictModel):
 
 
 class ClientDataResponse(StrictModel):
-    """
-    Response from /api/oauth/claude_cli/client_data.
+    """Response from /api/oauth/claude_cli/client_data.
 
     VALIDATION STATUS: VALIDATED
     Observed: {"client_data": {}}
@@ -247,8 +235,7 @@ PaprikaMode = Literal['basic', 'extended', 'disabled']
 
 
 class DismissedBanner(StrictModel):
-    """
-    Dismissed banner record.
+    """Dismissed banner record.
 
     VALIDATION STATUS: VALIDATED
     """
@@ -258,8 +245,7 @@ class DismissedBanner(StrictModel):
 
 
 class AccountSettingsResponse(StrictModel):
-    """
-    Response from /api/oauth/account/settings.
+    """Response from /api/oauth/account/settings.
 
     VALIDATION STATUS: VALIDATED
     User preferences and feature toggles.
@@ -348,8 +334,7 @@ class AccountSettingsResponse(StrictModel):
 
 
 class HelloResponse(StrictModel):
-    """
-    Response from /api/hello.
+    """Response from /api/hello.
 
     VALIDATION STATUS: VALIDATED
     Simple health check endpoint.
@@ -362,8 +347,7 @@ class HelloResponse(StrictModel):
 
 
 class ModelAccessResponse(StrictModel):
-    """
-    Response from /api/organization/{uuid}/claude_code_sonnet_1m_access.
+    """Response from /api/organization/{uuid}/claude_code_sonnet_1m_access.
 
     VALIDATION STATUS: VALIDATED
     Checks if organization has access to Sonnet 1M context model.
@@ -377,8 +361,7 @@ class ModelAccessResponse(StrictModel):
 
 
 class ReferralCodeDetails(StrictModel):
-    """
-    Referral code details.
+    """Referral code details.
 
     VALIDATION STATUS: VALIDATED
     """
@@ -389,8 +372,7 @@ class ReferralCodeDetails(StrictModel):
 
 
 class ReferralEligibilityResponse(StrictModel):
-    """
-    Response from /api/oauth/organizations/{uuid}/referral/eligibility.
+    """Response from /api/oauth/organizations/{uuid}/referral/eligibility.
 
     VALIDATION STATUS: VALIDATED
     Checks if user is eligible for referral program.
@@ -404,8 +386,7 @@ class ReferralEligibilityResponse(StrictModel):
 
 
 class ReferralRedemption(StrictModel):
-    """
-    Individual referral redemption record.
+    """Individual referral redemption record.
 
     VALIDATION STATUS: INFERRED (empty array only observed)
     Structure placeholder - no non-empty redemptions captured yet.
@@ -416,8 +397,7 @@ class ReferralRedemption(StrictModel):
 
 
 class ReferralRedemptionsResponse(StrictModel):
-    """
-    Response from /api/oauth/organizations/{uuid}/referral/redemptions.
+    """Response from /api/oauth/organizations/{uuid}/referral/redemptions.
 
     VALIDATION STATUS: VALIDATED (empty case)
     Returns referral redemption status and history.
@@ -435,8 +415,7 @@ class ReferralRedemptionsResponse(StrictModel):
 
 
 class ApiKeyCreator(StrictModel):
-    """
-    Reference to the user who created an API key.
+    """Reference to the user who created an API key.
 
     VALIDATION STATUS: VALIDATED
     """
@@ -446,8 +425,7 @@ class ApiKeyCreator(StrictModel):
 
 
 class CreateApiKeyResponse(StrictModel):
-    """
-    Response from /api/oauth/claude_cli/create_api_key.
+    """Response from /api/oauth/claude_cli/create_api_key.
 
     VALIDATION STATUS: VALIDATED
     Creates a new API key for Claude Code CLI access.
@@ -473,8 +451,7 @@ WorkspaceRole = Literal['workspace_developer']  # May expand
 
 
 class CliRolesResponse(StrictModel):
-    """
-    Response from /api/oauth/claude_cli/roles.
+    """Response from /api/oauth/claude_cli/roles.
 
     VALIDATION STATUS: VALIDATED
     Returns current user's organization and workspace roles.
@@ -499,8 +476,7 @@ BillingType = Literal['prepaid', 'stripe_subscription']
 
 
 class ProfileAccount(StrictModel):
-    """
-    User account information from profile endpoint.
+    """User account information from profile endpoint.
 
     VALIDATION STATUS: VALIDATED
     """
@@ -514,8 +490,7 @@ class ProfileAccount(StrictModel):
 
 
 class ProfileOrganization(StrictModel):
-    """
-    Organization information from profile endpoint.
+    """Organization information from profile endpoint.
 
     VALIDATION STATUS: VALIDATED
     """
@@ -529,8 +504,7 @@ class ProfileOrganization(StrictModel):
 
 
 class ProfileResponse(StrictModel):
-    """
-    Response from /api/oauth/profile.
+    """Response from /api/oauth/profile.
 
     VALIDATION STATUS: VALIDATED
     Returns current user's account and active organization info.

@@ -1,5 +1,4 @@
-"""
-Command-line interface for claude-session.
+"""Command-line interface for claude-session.
 
 Provides commands to archive and restore Claude Code sessions.
 """
@@ -597,7 +596,6 @@ async def _archive_async(
     source_project: Path | None,
 ) -> None:
     """Async implementation of archive command."""
-
     # Find the session
     discovery = SessionDiscoveryService()
     project_filter = _encode_project_filter(source_project)
@@ -713,7 +711,6 @@ async def _restore_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of restore command."""
-
     # Check if it's a Gist URL
     if archive.startswith('gist://'):
         gist_id = archive[7:]
@@ -857,7 +854,6 @@ async def _clone_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of clone command."""
-
     # Determine target project path
     if target_project:
         project_path = target_project.resolve()
@@ -927,7 +923,6 @@ async def _delete_async(
     delete_cross_session_artifacts: bool | None,
 ) -> None:
     """Async implementation of delete command."""
-
     # Resolve session ID prefix to full ID
     # When --source-project is provided, use it to disambiguate discovery
     info_service = SessionInfoService()
@@ -1030,7 +1025,6 @@ async def _move_async(
     extra_args: Sequence[str],
 ) -> None:
     """Async implementation of move command."""
-
     # Resolve session ID prefix to full ID
     info_service = SessionInfoService()
     project_filter = _encode_project_filter(source_project)

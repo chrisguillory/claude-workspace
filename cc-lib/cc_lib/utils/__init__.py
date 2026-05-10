@@ -76,13 +76,13 @@ def encode_project_path(path: Path | str) -> str:
         Encoded string for use as directory name in ~/.claude/projects/
 
     Examples:
-        >>> encode_project_path("/Users/chris/project")
+        >>> encode_project_path('/Users/chris/project')
         '-Users-chris-project'
 
-        >>> encode_project_path("/Users/chris/Mobile Documents/com~apple~CloudDocs")
+        >>> encode_project_path('/Users/chris/Mobile Documents/com~apple~CloudDocs')
         '-Users-chris-Mobile-Documents-com-apple-CloudDocs'
 
-        >>> encode_project_path("/Users/chris/my_project.app")
+        >>> encode_project_path('/Users/chris/my_project.app')
         '-Users-chris-my-project-app'
     """
     name = str(path) if isinstance(path, Path) else path
