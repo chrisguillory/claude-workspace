@@ -17,7 +17,6 @@ __all__ = [
     'AmbiguousSessionError',
     'CCLibError',
     'ClaudeContextError',
-    'ClaudeProcessError',
     'ClaudeProcessNotFoundError',
     'HookTreeMismatchError',
     'MissingEnvVarError',
@@ -51,10 +50,6 @@ class MissingEnvVarError(ClaudeContextError):
     def __init__(self, var_name: str) -> None:
         super().__init__(f'{var_name} is not set; this caller expects Bash-tool subprocess context')
         self.var_name = var_name
-
-
-class ClaudeProcessError(ClaudeContextError):
-    """Claude Code process not found or session not resolvable."""
 
 
 class HookTreeMismatchError(CCLibError):

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from collections.abc import Sequence, Set
 from datetime import UTC, datetime
@@ -12,7 +11,6 @@ from pathlib import Path
 import psutil
 from filelock import FileLock
 
-from cc_lib.exceptions import ClaudeProcessError
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import JsonDatetime, SessionSource, SessionState
 from cc_lib.utils import get_claude_workspace_config_home_dir
@@ -22,8 +20,6 @@ __all__ = [
     'SessionDatabase',
     'SessionManager',
     'SessionMetadata',
-    'find_claude_pid',
-    'resolve_session_id',
 ]
 
 # Path configuration
@@ -348,43 +344,6 @@ class SessionManager:
 
         self._db = SessionDatabase(sessions=kept)
         return removed
-
-
-# -- Process Discovery ---------------------------------------------------------
-
-
-def find_claude_pid() -> int:
-    """Find Claude Code PID by walking up the process tree.
-
-    Uses psutil.Process.exe() because psutil.name() on macOS returns the
-    version number (e.g., '2.1.44'), not 'claude'. The exe path is reliable.
-    """
-    current = os.getppid()
-    for _ in range(20):
-        try:
-            proc = psutil.Process(current)
-            exe = proc.exe()
-            if 'claude' in exe.lower():
-                return current
-            ppid = proc.ppid()
-            if ppid == 0:
-                break
-            current = ppid
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            break
-    raise ClaudeProcessError('Could not find Claude Code process in parent tree')
-
-
-def resolve_session_id(claude_pid: int, cwd: str) -> str:
-    """Look up the active session ID for a Claude PID from sessions.json."""
-    db = load_sessions(cwd)
-    matching = [s for s in db.sessions if s.state == 'active' and s.metadata.claude_pid == claude_pid]
-    if len(matching) == 1:
-        return matching[0].session_id
-    if len(matching) > 1:
-        ids = [s.session_id for s in matching]
-        raise RuntimeError(f'Multiple active sessions for PID {claude_pid}: {ids}')
-    raise ClaudeProcessError(f'No active session found for PID {claude_pid}')
 
 
 # Helper functions (not in __all__)
