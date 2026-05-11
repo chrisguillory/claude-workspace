@@ -61,9 +61,9 @@ from pathlib import Path
 from typing import Literal
 
 from _lib.config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
+from _lib.hashability_inspector import QualifiedName
 
 # Name resolution (import map usage)
-type QualifiedName = str  # Fully qualified dotted name (e.g., 'builtins.Exception', 'asyncio.CancelledError')
 type LocalName = str  # Local identifier as it appears in source (e.g., 'Exception', 'CancelledError')
 
 # Error code identifier
@@ -80,8 +80,8 @@ TEST_CASES_FILE = 'tests/linters/edge_cases/exception_safety_test_cases.py'
 # Broad exception types (fully qualified only - like strict_typing_linter.py pattern)
 # These are the canonical names after import resolution
 QUALIFIED_BROAD_EXCEPTIONS: Set[QualifiedName] = {
-    'builtins.Exception',
-    'builtins.BaseException',
+    QualifiedName('builtins.Exception'),
+    QualifiedName('builtins.BaseException'),
 }
 
 # Short names for builtins when not explicitly imported
@@ -92,7 +92,7 @@ BUILTIN_BROAD_EXCEPTIONS: Set[LocalName] = {
 
 # CancelledError types (fully qualified)
 QUALIFIED_CANCELLED_ERROR: Set[QualifiedName] = {
-    'asyncio.CancelledError',
+    QualifiedName('asyncio.CancelledError'),
 }
 
 # Short name for CancelledError
@@ -104,7 +104,7 @@ BUILTIN_CANCELLED_ERROR: Set[LocalName] = {
 # Note: CancelledError inherits from BaseException, NOT Exception.
 # So `except Exception:` does NOT catch CancelledError.
 QUALIFIED_CATCHES_CANCELLED: Set[QualifiedName] = {
-    'builtins.BaseException',
+    QualifiedName('builtins.BaseException'),
 }
 
 BUILTIN_CATCHES_CANCELLED: Set[LocalName] = {
@@ -113,7 +113,7 @@ BUILTIN_CATCHES_CANCELLED: Set[LocalName] = {
 
 # GeneratorExit types (fully qualified)
 QUALIFIED_GENERATOR_EXIT: Set[QualifiedName] = {
-    'builtins.GeneratorExit',
+    QualifiedName('builtins.GeneratorExit'),
 }
 
 # Short name for GeneratorExit
@@ -125,7 +125,7 @@ BUILTIN_GENERATOR_EXIT: Set[LocalName] = {
 # Like CancelledError, GeneratorExit inherits from BaseException, NOT Exception.
 # So `except Exception:` does NOT catch GeneratorExit.
 QUALIFIED_CATCHES_GENERATOR_EXIT: Set[QualifiedName] = {
-    'builtins.BaseException',
+    QualifiedName('builtins.BaseException'),
 }
 
 BUILTIN_CATCHES_GENERATOR_EXIT: Set[LocalName] = {
@@ -1011,13 +1011,13 @@ def build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local_name = alias.asname or alias.name
-                import_map[local_name] = alias.name
+                import_map[local_name] = QualifiedName(alias.name)
 
         elif isinstance(node, ast.ImportFrom):
             if node.module:
                 for alias in node.names:
                     local_name = alias.asname or alias.name
-                    import_map[local_name] = f'{node.module}.{alias.name}'
+                    import_map[local_name] = QualifiedName(f'{node.module}.{alias.name}')
 
     return import_map
 
@@ -1031,18 +1031,18 @@ def resolve_name(node: ast.expr, import_map: Mapping[LocalName, QualifiedName]) 
             return import_map[name]
         # Assume builtins for known exception names not explicitly imported
         if name in BUILTIN_BROAD_EXCEPTIONS | BUILTIN_CANCELLED_ERROR | BUILTIN_GENERATOR_EXIT:
-            return f'builtins.{name}'
-        return name  # Local definition or unknown
+            return QualifiedName(f'builtins.{name}')
+        return QualifiedName(name)  # Local definition or unknown
 
     elif isinstance(node, ast.Attribute):
         if isinstance(node.value, ast.Name):
             base = import_map.get(node.value.id, node.value.id)
-            return f'{base}.{node.attr}'
+            return QualifiedName(f'{base}.{node.attr}')
         # Nested attributes
         base = resolve_name(node.value, import_map)
-        return f'{base}.{node.attr}'
+        return QualifiedName(f'{base}.{node.attr}')
 
-    return ''
+    return QualifiedName('')
 
 
 def find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestReference]:

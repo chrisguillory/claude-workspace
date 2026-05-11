@@ -1,17 +1,22 @@
-"""Shared input validation for Selenium Browser Automation.
-
-Framework-free validators that raise ValueError. MCP tool wrappers
-convert to ToolError at the boundary.
-"""
+"""Input validation for Selenium Browser Automation."""
 
 from __future__ import annotations
 
 import re
+from typing import NewType
 
 __all__ = [
     'NON_CSS_SELECTOR_RE',
+    'CssSelector',
     'validate_css_selector',
 ]
+
+
+# Brand returned by ``validate_css_selector``. Functions that ultimately call
+# Selenium's ``find_element*`` accept this type so the type checker rejects
+# raw user input that hasn't been screened for Playwright-style selectors.
+CssSelector = NewType('CssSelector', str)
+
 
 NON_CSS_SELECTOR_RE = re.compile(
     r':(?:has-text|text|nth-match)\s*\('
@@ -21,8 +26,14 @@ NON_CSS_SELECTOR_RE = re.compile(
 )
 
 
-def validate_css_selector(selector: str) -> None:
-    """Detect non-CSS selector syntax and raise ValueError."""
+def validate_css_selector(selector: str) -> CssSelector:
+    """Validate CSS selector syntax and return the branded value.
+
+    Raises ``ValueError`` on Playwright-style selectors (e.g. ``:has-text(...)``)
+    or other non-standard CSS; the message includes guidance to use
+    ``get_interactive_elements`` or ``get_aria_snapshot`` instead. Tool wrappers
+    let the ``ValueError`` propagate; FastMCP surfaces it to the MCP client.
+    """
     match = NON_CSS_SELECTOR_RE.search(selector)
     if match:
         raise ValueError(
@@ -31,3 +42,4 @@ def validate_css_selector(selector: str) -> None:
             f"To find elements by text: get_interactive_elements(text_contains='...')\n"
             f"To discover selectors: get_aria_snapshot('body', include_urls=True)",
         )
+    return CssSelector(selector)

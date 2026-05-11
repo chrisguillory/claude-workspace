@@ -18,6 +18,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium_browser.hover import check_hover_actionability, validate_hover_duration
 from selenium_browser.scripts import HOVER_STABILITY_SCRIPT
+from selenium_browser.validators import CssSelector
 
 from tests.selenium_browser.helpers import load_yaml_test_specs
 
@@ -98,7 +99,7 @@ def test_hover_visibility(
     spec = test_case['spec']
     headless_driver.get(f'{examples_server}/{spec["fixture"]}')
 
-    result = check_hover_actionability(headless_driver, spec['selector'])
+    result = check_hover_actionability(headless_driver, CssSelector(spec['selector']))
     _assert_hover_result(result, spec['expect'])
 
 
@@ -115,10 +116,11 @@ def test_hover_occlusion(
     spec = test_case['spec']
     headless_driver.get(f'{examples_server}/{spec["fixture"]}')
 
+    setup = spec.get('setup_selector')
     result = check_hover_actionability(
         headless_driver,
-        spec['selector'],
-        setup_selector=spec.get('setup_selector'),
+        CssSelector(spec['selector']),
+        setup_selector=CssSelector(setup) if setup else None,
     )
     _assert_hover_result(result, spec['expect'])
 

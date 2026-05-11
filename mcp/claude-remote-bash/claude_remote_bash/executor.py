@@ -52,9 +52,18 @@ async def execute_command(
     effective_cwd = cwd or os.path.expanduser('~')
     marker = f'__CRBD_{uuid.uuid4().hex}__'
 
-    # EXIT trap guarantees the marker prints even if the command calls `exit`.
-    # The trap captures $? (the exit code) and $(pwd -P) (the working directory).
-    wrapped = f'trap \'echo "{marker}_$?_$(pwd -P)"\' EXIT; cd {_shell_quote(effective_cwd)} && {command}'
+    # The trap captures $? into __rc BEFORE running the leading bare
+    # ``echo`` — otherwise echo's own success clobbers $? to 0. The
+    # leading echo ensures the marker lands on its own line even when
+    # the command's stdout has no trailing newline (e.g. ``cat`` of a
+    # file with no final \n); the parser also tolerates an embedded
+    # marker as a defense-in-depth measure.
+    # EXIT trap fires even if the command calls ``exit``; $(pwd -P)
+    # captures the post-command working directory.
+    wrapped = (
+        f'trap \'__rc=$?; echo; echo "{marker}_${{__rc}}_$(pwd -P)"\' EXIT; '
+        f'cd {_shell_quote(effective_cwd)} && {command}'
+    )
 
     process = await asyncio.create_subprocess_exec(
         shell,
@@ -85,33 +94,34 @@ async def execute_command(
 def _parse_output(stdout_text: str, stderr_text: str, marker: str, fallback_cwd: str) -> CommandResult:
     """Extract stdout, stderr, exit code, and CWD from marker-delimited output.
 
-    The marker line is carved out of stdout; the command's own stdout is
-    everything before it. stderr is passed through untouched since the
-    marker never lands there.
+    Uses ``rfind`` to locate the marker — this tolerates a marker that's
+    embedded mid-line (which happens when the command's stdout has no
+    trailing newline before the trap's echo). Everything before the marker
+    position is the command's stdout; everything from the marker up to the
+    next ``\\n`` (or end-of-stream) is the marker line.
     """
     marker_prefix = f'{marker}_'
-    lines = stdout_text.split('\n')
+    idx = stdout_text.rfind(marker_prefix)
 
-    # Find the marker line (search from the end — it's the last line before exit)
-    for i in range(len(lines) - 1, -1, -1):
-        if lines[i].startswith(marker_prefix):
-            marker_line = lines[i]
-            stdout = '\n'.join(lines[:i]).rstrip('\n')
+    if idx == -1:
+        # No marker found — process likely crashed before the trap fired.
+        return CommandResult(stdout=stdout_text.rstrip('\n'), stderr=stderr_text, exit_code=-1, cwd=fallback_cwd)
 
-            # Parse: __CRBD_<hex>__<exit_code>_<cwd>
-            remainder = marker_line[len(marker_prefix) :]
-            parts = remainder.split('_', 1)
-            if len(parts) == 2:
-                exit_code = int(parts[0])
-                cwd = parts[1]
-            else:
-                exit_code = int(parts[0]) if parts[0] else -1
-                cwd = fallback_cwd
+    pre = stdout_text[:idx]
+    end = stdout_text.find('\n', idx)
+    marker_line = stdout_text[idx:] if end == -1 else stdout_text[idx:end]
 
-            return CommandResult(stdout=stdout, stderr=stderr_text, exit_code=exit_code, cwd=cwd)
+    # Parse: __CRBD_<hex>__<exit_code>_<cwd>
+    remainder = marker_line[len(marker_prefix) :]
+    parts = remainder.split('_', 1)
+    if len(parts) == 2:
+        exit_code = int(parts[0])
+        cwd = parts[1]
+    else:
+        exit_code = int(parts[0]) if parts[0] else -1
+        cwd = fallback_cwd
 
-    # No marker found — process likely crashed before reaching it
-    return CommandResult(stdout=stdout_text.rstrip('\n'), stderr=stderr_text, exit_code=-1, cwd=fallback_cwd)
+    return CommandResult(stdout=pre.rstrip('\n'), stderr=stderr_text, exit_code=exit_code, cwd=cwd)
 
 
 def _shell_quote(s: str) -> str:

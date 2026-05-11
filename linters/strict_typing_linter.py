@@ -95,33 +95,33 @@ FORBIDDEN_TYPES: Set[str] = MUTABLE_TYPES | LOOSE_TYPES
 
 # Fully qualified mutable types (typing module aliases for builtins + explicit mutable interfaces)
 QUALIFIED_MUTABLE: Set[QualifiedName] = {
-    'typing.List',
-    'typing.Dict',
-    'typing.Set',
-    'typing.MutableMapping',
-    'typing.MutableSequence',
-    'typing.MutableSet',
-    'collections.abc.MutableMapping',
-    'collections.abc.MutableSequence',
-    'collections.abc.MutableSet',
+    QualifiedName('typing.List'),
+    QualifiedName('typing.Dict'),
+    QualifiedName('typing.Set'),
+    QualifiedName('typing.MutableMapping'),
+    QualifiedName('typing.MutableSequence'),
+    QualifiedName('typing.MutableSet'),
+    QualifiedName('collections.abc.MutableMapping'),
+    QualifiedName('collections.abc.MutableSequence'),
+    QualifiedName('collections.abc.MutableSet'),
 }
 
 # Fully qualified allowed types (abstract interfaces)
 QUALIFIED_ALLOWED: Set[QualifiedName] = {
-    'collections.abc.Set',
-    'collections.abc.Mapping',
-    'collections.abc.Sequence',
-    'typing.AbstractSet',
-    'typing.Mapping',
-    'typing.Sequence',
+    QualifiedName('collections.abc.Set'),
+    QualifiedName('collections.abc.Mapping'),
+    QualifiedName('collections.abc.Sequence'),
+    QualifiedName('typing.AbstractSet'),
+    QualifiedName('typing.Mapping'),
+    QualifiedName('typing.Sequence'),
 }
 
 # Fully qualified transparent types (check nested contents)
 QUALIFIED_TRANSPARENT: Set[QualifiedName] = {
-    'collections.abc.Mapping',
-    'collections.abc.Sequence',
-    'typing.Mapping',
-    'typing.Sequence',
+    QualifiedName('collections.abc.Mapping'),
+    QualifiedName('collections.abc.Sequence'),
+    QualifiedName('typing.Mapping'),
+    QualifiedName('typing.Sequence'),
 }
 
 # Immutable containers that don't need content checking
@@ -138,16 +138,16 @@ ALLOWED_CONTAINERS: Set[str] = {
 # Names are resolved via import map, so only canonical names needed here
 ANY_ALLOWED_POSITIONS: Mapping[QualifiedName, Sequence[int] | None] = {
     # FastMCP Context[ServerSessionT, LifespanContextT, RequestT] - all positions
-    'mcp.server.fastmcp.Context': None,
+    QualifiedName('mcp.server.fastmcp.Context'): None,
     # Generator[YieldType, SendType, ReturnType] - SendType and ReturnType often unused
-    'typing.Generator': (1, 2),
-    'collections.abc.Generator': (1, 2),
+    QualifiedName('typing.Generator'): (1, 2),
+    QualifiedName('collections.abc.Generator'): (1, 2),
     # AsyncGenerator[YieldType, SendType] - SendType often unused
-    'typing.AsyncGenerator': (1,),
-    'collections.abc.AsyncGenerator': (1,),
+    QualifiedName('typing.AsyncGenerator'): (1,),
+    QualifiedName('collections.abc.AsyncGenerator'): (1,),
     # Coroutine[T_co, T_contra, V_co] - all positions commonly Any in fire-and-forget patterns
-    'typing.Coroutine': None,
-    'collections.abc.Coroutine': None,
+    QualifiedName('typing.Coroutine'): None,
+    QualifiedName('collections.abc.Coroutine'): None,
 }
 
 # Directive prefix uses the script filename for discoverability - readers immediately
@@ -833,7 +833,7 @@ class AnnotationChecker(ast.NodeVisitor):
         else:
             return f'ensure {unhashable} fields use hashable types (tuple instead of Sequence/list)'
 
-    def _classify_subscript(self, node: ast.Subscript) -> tuple[SubscriptKind, str]:
+    def _classify_subscript(self, node: ast.Subscript) -> tuple[SubscriptKind, QualifiedName]:
         """Classify a subscript node by its type form.
 
         Returns (kind, resolved_name). The resolved name is used by
@@ -952,7 +952,7 @@ class AnnotationChecker(ast.NodeVisitor):
             module_path = compute_module_path(self.filepath)
             if not module_path:
                 return None  # Standalone __init__.py with no package — can't resolve
-            qualified = f'{module_path}.{qualified}'
+            qualified = QualifiedName(f'{module_path}.{qualified}')
 
         result = self._inspector.check(qualified)
         if result is not None and not result.is_hashable:
@@ -1943,18 +1943,18 @@ def build_import_map(tree: ast.Module) -> Mapping[LocalName, QualifiedName]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local_name = alias.asname or alias.name
-                import_map[local_name] = alias.name
+                import_map[local_name] = QualifiedName(alias.name)
 
         elif isinstance(node, ast.ImportFrom):
             if node.module:
                 for alias in node.names:
                     local_name = alias.asname or alias.name
-                    import_map[local_name] = f'{node.module}.{alias.name}'
+                    import_map[local_name] = QualifiedName(f'{node.module}.{alias.name}')
 
     return import_map
 
 
-def compute_module_path(filepath: Path) -> str:
+def compute_module_path(filepath: Path) -> QualifiedName:
     """Compute importable module path by walking the package hierarchy.
 
     Resolves to absolute path first to prevent infinite loops when
@@ -1975,7 +1975,7 @@ def compute_module_path(filepath: Path) -> str:
     while (parent / '__init__.py').exists():
         parts.append(parent.name)
         parent = parent.parent
-    return '.'.join(reversed(parts))
+    return QualifiedName('.'.join(reversed(parts)))
 
 
 def find_source_root(path: Path) -> Path:
@@ -2002,7 +2002,7 @@ def resolve_qualified_name(node: ast.expr, import_map: Mapping[LocalName, Qualif
     """
     if isinstance(node, ast.Name):
         # Simple name - look up in import map
-        return import_map.get(node.id, node.id)
+        return import_map.get(node.id, QualifiedName(node.id))
 
     elif isinstance(node, ast.Attribute):
         # Qualified name like typing.Generator or t.Generator
@@ -2011,13 +2011,13 @@ def resolve_qualified_name(node: ast.expr, import_map: Mapping[LocalName, Qualif
         if isinstance(base_node, ast.Name):
             # Resolve the base module name
             resolved_base = import_map.get(base_node.id, base_node.id)
-            return f'{resolved_base}.{node.attr}'
+            return QualifiedName(f'{resolved_base}.{node.attr}')
         else:
             # Nested attributes - recursively resolve
             resolved_base = resolve_qualified_name(base_node, import_map)
-            return f'{resolved_base}.{node.attr}'
+            return QualifiedName(f'{resolved_base}.{node.attr}')
 
-    return ''
+    return QualifiedName('')
 
 
 # -- Output Formatting --------------------------------------------------------
