@@ -373,7 +373,7 @@ sequenceDiagram
 ```
 
 > [!IMPORTANT]
-> Each command is fully isolated — sub-agents execute in parallel without coordination. The daemon tracks **session context** (CWD) per `CLAUDE_CODE_SESSION_ID`, which the CLI reads from the environment (injected by the `inject-session-env.py` hook).
+> Each command is fully isolated — sub-agents execute in parallel without coordination. The daemon tracks **session context** (CWD) per `CLAUDE_CODE_SESSION_ID`, which the CLI reads from the Bash-tool subprocess environment (provided natively by Claude Code 2.1.132+).
 
 #### Session Context
 
@@ -575,7 +575,7 @@ Length-prefixed JSON over TCP with a flags byte for future extensibility.
 ```
 
 > [!NOTE]
-> The `session_id` comes from `CLAUDE_CODE_SESSION_ID` (injected by the `inject-session-env.py` hook). The daemon looks up the session context to get the tracked CWD, runs the command with that CWD, captures the new CWD via `pwd -P`, and updates the session context. No CWD field in the request — the daemon owns it.
+> The `session_id` comes from `CLAUDE_CODE_SESSION_ID` (provided natively by Claude Code 2.1.132+ in the Bash-tool subprocess environment). The daemon looks up the session context to get the tracked CWD, runs the command with that CWD, captures the new CWD via `pwd -P`, and updates the session context. No CWD field in the request — the daemon owns it.
 
 #### File & Config Operations
 
