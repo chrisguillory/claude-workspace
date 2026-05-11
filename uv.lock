@@ -2640,7 +2640,7 @@ wheels = [
 
 [[package]]
 name = "selenium-browser"
-version = "0.8.0"
+version = "0.8.1"
 source = { editable = "mcp/selenium-browser" }
 dependencies = [
     { name = "cc-lib" },
