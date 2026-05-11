@@ -52,10 +52,6 @@ class BaseSessionSettings(pydantic_settings.BaseSettings):
         extra='ignore',  # Only read defined fields, ignore other env vars
     )
 
-    # Application metadata
-    APP_NAME: str = 'claude-session-mcp'
-    VERSION: str = '0.3.0'
-
     # Compression settings (not overrideable at call-time)
     COMPRESSION_LEVEL: int = 3  # 0-9, zstd compression level (3 = balanced)
 
