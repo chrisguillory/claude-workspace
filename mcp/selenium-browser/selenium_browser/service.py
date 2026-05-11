@@ -107,17 +107,10 @@ from .scroll import execute_scroll
 from .state import BrowserState
 from .tool_registry import ToolRegistry
 from .tree_utils import compact_aria_tree, compact_visual_tree, serialize_aria_snapshot, serialize_visual_tree
-from .validators import validate_css_selector as _validate_css_selector_impl  # used by _validate_css_selector wrapper
+from .validators import CssSelector
+from .validators import validate_css_selector as _validate_css_selector_impl
 
 logger = logging.getLogger(__name__)
-
-
-def _validate_css_selector(selector: str) -> None:
-    """Validate CSS selector, converting ValueError to ToolError for MCP layer."""
-    try:
-        _validate_css_selector_impl(selector)
-    except ValueError as e:
-        raise fastmcp.exceptions.ToolError(str(e)) from None
 
 
 VALID_URL_PREFIXES = ('http://', 'https://', 'file://', 'about:', 'data:', 'blob:')
@@ -1026,7 +1019,7 @@ class BrowserService:
     @tool_registry.register_tool
     async def click(
         self,
-        css_selector: str,
+        css_selector: CssSelector,
         wait_for_network: bool = False,
         network_timeout: int = 10000,
     ) -> None:
@@ -1053,8 +1046,6 @@ class BrowserService:
         url_before = driver.current_url
 
         logger.info('Clicking element: %s%s', css_selector, ' (with delay)' if wait_for_network else '')
-
-        _validate_css_selector(css_selector)
 
         # Wait for element to be clickable (up to 10 seconds)
         try:
@@ -1241,7 +1232,7 @@ class BrowserService:
         logger.info('Text typing successful')
 
     @tool_registry.register_tool
-    async def hover(self, css_selector: str, duration_ms: int = 0) -> None:
+    async def hover(self, css_selector: CssSelector, duration_ms: int = 0) -> None:
         """Move mouse over an element to trigger hover states.
 
         Essential for dropdown menus, tooltips, and hover-triggered UI.
@@ -1270,8 +1261,6 @@ class BrowserService:
             raise ValueError('duration_ms exceeds maximum of 30000ms (30 seconds)')
 
         logger.info('Hovering over element: %s', css_selector)
-
-        _validate_css_selector(css_selector)
 
         # Wait for element to be present
         try:
@@ -1410,6 +1399,7 @@ class BrowserService:
             3. get_aria_snapshot('body') - see updated content
         """
         driver = await self.get_browser()
+        validated_selector = _validate_css_selector(css_selector) if css_selector else None
         logger.info(
             'Scroll: direction=%s, position=%s, selector=%s, amount=%s, behavior=%s',
             direction,
@@ -1424,7 +1414,7 @@ class BrowserService:
                 driver,
                 direction=direction,
                 scroll_amount=scroll_amount,
-                css_selector=css_selector,
+                css_selector=validated_selector,
                 behavior=behavior,
                 position=position,
             )
@@ -1485,7 +1475,7 @@ class BrowserService:
     @tool_registry.register_tool
     async def wait_for_selector(
         self,
-        css_selector: str,
+        css_selector: CssSelector,
         state: WaitForSelectorState = 'visible',
         timeout: int = 30000,
     ) -> WaitForSelectorResult:
@@ -1529,8 +1519,6 @@ class BrowserService:
             raise ValueError('timeout exceeds maximum of 300000ms (5 minutes)')
 
         logger.info("Waiting for selector '%s' to be %s", css_selector, state)
-
-        _validate_css_selector(css_selector)
 
         # Early validation: detect invalid CSS before entering polling loop.
         # Without this, an invalid selector silently wastes the full timeout.
@@ -3457,6 +3445,14 @@ class BrowserService:
         logger.info('%s for %s to %s (%s bytes)', ' + '.join(log_parts), current_origin, file_path, result.size_bytes)
 
         return result
+
+
+def _validate_css_selector(selector: str) -> CssSelector:
+    """Validate CSS selector and brand the result; ValueError is rewritten as ToolError for the MCP boundary."""
+    try:
+        return _validate_css_selector_impl(selector)
+    except ValueError as e:
+        raise fastmcp.exceptions.ToolError(str(e)) from None
 
 
 async def _lookup_intercepted_body(
