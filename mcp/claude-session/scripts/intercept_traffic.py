@@ -94,11 +94,11 @@ from typing import Any
 from urllib.parse import parse_qs
 
 import psutil
-from cc_lib.session_tracker import Session, SessionDatabase
+from cc_lib.claude_context import cached_sessions_by_pid
+from cc_lib.session_tracker import Session
 from cc_lib.utils import get_claude_workspace_config_home_dir
 from expiringdict import ExpiringDict
 from mitmproxy import addonmanager, connection, http
-from pydantic import TypeAdapter
 
 # -- Configuration -------------------------------------------------------------
 
@@ -118,9 +118,6 @@ _SESSIONS_SEEN_LOCK = threading.Lock()
 _CONNECTION_SESSIONS: dict[str, Session] = {}  # strict_typing_linter.py: mutable-type — runtime state guarded by lock
 _CONNECTION_SESSIONS_LOCK = threading.Lock()
 
-# TypeAdapter for parsing sessions.json with Pydantic validation
-_SESSION_DB_ADAPTER: TypeAdapter[SessionDatabase] = TypeAdapter(SessionDatabase)
-
 # Cache for codesign verification results: exe_path -> is_claude_code (expires after 1 hour)
 # We only need to verify each executable once per proxy lifetime
 _CODESIGN_CACHE: ExpiringDict[str, bool] = ExpiringDict(max_len=100, max_age_seconds=3600)
@@ -132,12 +129,6 @@ _RETRY_ATTEMPTED: ExpiringDict[tuple[int, float], bool] = ExpiringDict(max_len=1
 # Retry configuration for session lookup timing race
 _RETRY_MAX_ATTEMPTS = 10  # 10 attempts
 _RETRY_DELAY_SECONDS = 0.3  # 300ms between attempts = 3s max total
-
-# Session cache: maps PID → Session for active sessions
-# Invalidated when sessions.json mtime changes (handles /clear correctly)
-_SESSION_CACHE: dict[int, Session] = {}  # strict_typing_linter.py: mutable-type — runtime cache guarded by lock
-_SESSION_CACHE_MTIME: float = 0.0
-_SESSION_CACHE_LOCK = threading.Lock()
 
 
 # -- Claude Code Process Verification ------------------------------------------
@@ -324,40 +315,11 @@ def _get_pid_for_port(source_port: int) -> int | None:
 def _get_session_for_pid(pid: int) -> Session | None:
     """Find active Claude Code session for a given PID.
 
-    Uses mtime-based caching: only re-reads sessions.json when it changes.
-    This handles /clear correctly (file updated → cache invalidated).
-
-    Thread-safe via _SESSION_CACHE_LOCK.
-
-    Raises:
-        FileNotFoundError: If sessions.json doesn't exist (hooks not configured)
-        json.JSONDecodeError: If sessions.json is invalid JSON
-        pydantic.ValidationError: If sessions.json doesn't match schema
+    Delegates to cc_lib.cached_sessions_by_pid, which mtime-invalidates the
+    sessions.json read so /clear (which rewrites the file) is picked up.
+    Returns None when sessions.json is missing entirely (hooks unconfigured).
     """
-    global _SESSION_CACHE_MTIME, _SESSION_CACHE
-
-    with _SESSION_CACHE_LOCK:
-        # stat() inside lock to avoid TOCTOU race between threads
-        try:
-            current_mtime = SESSIONS_PATH.stat().st_mtime
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f'Sessions file not found: {SESSIONS_PATH}\n'
-                'Ensure claude-workspace hooks are configured in ~/.claude/settings.json'
-            ) from None
-        if current_mtime != _SESSION_CACHE_MTIME:
-            # File changed, rebuild cache
-            with open(SESSIONS_PATH) as f:
-                data = json.load(f)
-
-            # Validate with Pydantic - will raise ValidationError if schema doesn't match
-            session_db = _SESSION_DB_ADAPTER.validate_python(data)
-
-            # Build PID → Session mapping for active sessions only
-            _SESSION_CACHE = {s.metadata.claude_pid: s for s in session_db.sessions if s.state == 'active'}
-            _SESSION_CACHE_MTIME = current_mtime
-
-        return _SESSION_CACHE.get(pid)
+    return cached_sessions_by_pid().get(pid)
 
 
 def _get_session_dir(session_id: str | None) -> Path:

@@ -52,7 +52,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import pydantic
-from cc_lib.utils import get_claude_config_home_dir, get_claude_workspace_config_home_dir
+from cc_lib.claude_context import ClaudeContext
+from cc_lib.exceptions import ClaudeProcessNotFoundError
+from cc_lib.utils import get_claude_config_home_dir
 
 # -- Terminal Colors -----------------------------------------------------------
 
@@ -88,32 +90,6 @@ class StrictModel(pydantic.BaseModel):
         strict=True,
         frozen=True,
     )
-
-
-class SessionMetadata(StrictModel):
-    """Subset of claude-workspace SessionMetadata — only fields we need."""
-
-    claude_pid: int
-
-    model_config = pydantic.ConfigDict(extra='ignore', strict=True, frozen=True)
-
-
-class SessionEntry(StrictModel):
-    """Subset of claude-workspace Session — only fields we need."""
-
-    session_id: str
-    state: str
-    metadata: SessionMetadata
-
-    model_config = pydantic.ConfigDict(extra='ignore', strict=True, frozen=True)
-
-
-class SessionDatabase(StrictModel):
-    """Subset of claude-workspace SessionDatabase."""
-
-    sessions: Sequence[SessionEntry]
-
-    model_config = pydantic.ConfigDict(extra='ignore', strict=True, frozen=True)
 
 
 class DaemonContext(StrictModel):
@@ -168,87 +144,23 @@ def find_session(session_id_or_prefix: str) -> Path:
 
 # -- Session Auto-Detection ----------------------------------------------------
 
-_SESSIONS_FILE = get_claude_workspace_config_home_dir() / 'sessions.json'
-_SESSION_DB_ADAPTER = pydantic.TypeAdapter(SessionDatabase)
-
-
-def _find_ancestor_claude_pid() -> int | None:
-    """Walk process tree to find an ancestor Claude Code process.
-
-    Returns the PID if found, None if not running inside Claude Code.
-    Ported from src/services/claude_process.py:find_ancestor_claude_pid.
-    """
-    current = os.getppid()
-
-    for _ in range(20):
-        result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if not result.stdout.strip():
-            break
-
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-
-        if 'claude' in comm.lower():
-            return current
-
-        current = ppid
-
-    return None
-
-
-def _resolve_session_id_from_pid(claude_pid: int, *, max_attempts: int = 3) -> str | None:
-    """Look up session ID for a Claude PID in sessions.json.
-
-    Returns session ID if found, None if no matching active session.
-    Ported from src/services/claude_process.py:resolve_session_id_from_pid.
-    """
-    for attempt in range(max_attempts):
-        if not _SESSIONS_FILE.exists():
-            if attempt < max_attempts - 1:
-                time.sleep(0.5)
-            continue
-
-        with _SESSIONS_FILE.open() as f:
-            db = _SESSION_DB_ADAPTER.validate_python(json.load(f))
-
-        matching = [s for s in db.sessions if s.state == 'active' and s.metadata.claude_pid == claude_pid]
-
-        if len(matching) == 1:
-            return matching[0].session_id
-        if len(matching) > 1:
-            ids = [s.session_id for s in matching]
-            raise RuntimeError(f'Multiple active sessions for PID {claude_pid}: {ids}')
-
-        if attempt < max_attempts - 1:
-            time.sleep(0.5)
-
-    return None
-
 
 def _auto_detect_session() -> DaemonContext | None:
-    """Auto-detect current Claude Code session.
-
-    Walks the process tree to find a Claude ancestor, then resolves
-    the session ID via sessions.json and locates the JSONL file.
+    """Auto-detect current Claude Code session via cc_lib.
 
     Returns DaemonContext if successful, None if not running inside Claude Code.
+    Other state issues (e.g. session not in sessions.json, multiple matches)
+    propagate as exceptions per fail-fast.
     """
-    pid = _find_ancestor_claude_pid()
-    if pid is None:
+    try:
+        claude_context = ClaudeContext.from_pid_walk()
+    except ClaudeProcessNotFoundError:
         return None
-
-    session_id = _resolve_session_id_from_pid(pid)
-    if session_id is None:
-        return None
-
-    jsonl_path = find_session(session_id)
-    return DaemonContext(session_id=session_id, jsonl_path=jsonl_path, claude_pid=pid)
+    return DaemonContext(
+        session_id=claude_context.session_id,
+        jsonl_path=find_session(claude_context.session_id),
+        claude_pid=claude_context.claude_pid,
+    )
 
 
 def _is_process_alive(pid: int) -> bool:
