@@ -53,6 +53,7 @@ from document_search.schemas.indexing import (
 )
 from document_search.schemas.tracing import PipelineTimingReport, QueueDepthSample, StageTimingReport
 from document_search.schemas.vectors import ClearResult
+from document_search.search_path import ResolvedPaths
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbedCache, EmbeddingService
 from document_search.services.pdf_extraction import EncryptedPDFError
@@ -377,7 +378,7 @@ class IndexingService:
         self._chunking.shutdown()
         self._sparse_embedding.shutdown()
 
-    async def clear_documents(self, paths: Sequence[str], *, clear_cache: bool) -> ClearResult:
+    async def clear_documents(self, paths: ResolvedPaths, *, clear_cache: bool) -> ClearResult:
         """Clear documents from the index.
 
         Args:
