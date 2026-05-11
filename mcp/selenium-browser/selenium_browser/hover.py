@@ -13,6 +13,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 from .scripts import HOVER_OCCLUSION_SCRIPT
+from .validators import CssSelector
 
 __all__ = [
     'check_hover_actionability',
@@ -22,9 +23,9 @@ __all__ = [
 
 def check_hover_actionability(
     driver: webdriver.Chrome,
-    css_selector: str,
+    css_selector: CssSelector,
     *,
-    setup_selector: str | None = None,
+    setup_selector: CssSelector | None = None,
 ) -> JsonObject:
     """Check whether an element is actionable for hover.
 
