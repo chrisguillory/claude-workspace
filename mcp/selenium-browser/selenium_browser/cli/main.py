@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import pathlib
 import sys
 from collections.abc import Mapping, Sequence
@@ -570,18 +569,7 @@ def _configure_logging(
 
 
 def _get_socket_path() -> pathlib.Path:
-    """Find the Unix socket for the running MCP server's HTTP bridge.
-
-    Requires CLAUDECODE=1 env (set by Claude's Bash tool on all children).
-    """
-    if not os.environ.get('CLAUDECODE'):
-        typer.secho(
-            'Error: selenium-browser must be run inside Claude Code (CLAUDECODE env not set)',
-            fg=typer.colors.RED,
-            err=True,
-        )
-        raise SystemExit(1)
-
+    """Find the Unix socket for the running MCP server's HTTP bridge."""
     claude_pid = ClaudeContext.from_env().claude_pid
     sock = pathlib.Path(f'/tmp/selenium-browser-{claude_pid}.sock')
     if not sock.exists():

@@ -1,12 +1,13 @@
 """Exception hierarchy for cc_lib.
 
-CCLibError                              # base for all cc_lib exceptions
-├── ClaudeContextError                  # session-context failures
-│   ├── ClaudeProcessNotFoundError      # no Claude ancestor in process tree
-│   ├── SessionNotFoundError            # session not in sessions.json
-│   ├── AmbiguousSessionError           # multiple matches in sessions.json
-│   └── MissingEnvVarError              # expected env var not set
-└── HookTreeMismatchError               # hook tree != CLAUDE_EXEC_LAUNCH_DIR/hooks
+CCLibError                                # base for all cc_lib exceptions
+├── ClaudeContextError                    # session-context failures
+│   ├── ClaudeProcessNotFoundError        # no Claude ancestor in process tree
+│   ├── SessionNotFoundError              # session not in sessions.json
+│   ├── InactiveSessionError              # session in sessions.json but state != 'active'
+│   ├── MultipleActiveSessionsForPidError # multiple sessions claim the same claude_pid
+│   └── MissingEnvVarError                # expected env var not set
+└── HookTreeMismatchError                 # hook tree != CLAUDE_EXEC_LAUNCH_DIR/hooks
 """
 
 from __future__ import annotations
@@ -14,12 +15,13 @@ from __future__ import annotations
 from pathlib import Path
 
 __all__ = [
-    'AmbiguousSessionError',
     'CCLibError',
     'ClaudeContextError',
     'ClaudeProcessNotFoundError',
     'HookTreeMismatchError',
+    'InactiveSessionError',
     'MissingEnvVarError',
+    'MultipleActiveSessionsForPidError',
     'SessionNotFoundError',
 ]
 
@@ -40,8 +42,15 @@ class SessionNotFoundError(ClaudeContextError):
     """Active session not found in sessions.json."""
 
 
-class AmbiguousSessionError(ClaudeContextError):
-    """Multiple active sessions matched the same query."""
+class InactiveSessionError(ClaudeContextError):
+    """Session exists in sessions.json but is not in 'active' state."""
+
+
+class MultipleActiveSessionsForPidError(ClaudeContextError):
+    """Multiple sessions in sessions.json claim the same active claude_pid.
+
+    Workspace-state invariant violation — should not occur in normal operation.
+    """
 
 
 class MissingEnvVarError(ClaudeContextError):

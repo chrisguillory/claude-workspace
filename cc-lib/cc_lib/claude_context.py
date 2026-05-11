@@ -12,10 +12,11 @@ import pydantic
 from packaging.version import InvalidVersion, Version
 
 from cc_lib.exceptions import (
-    AmbiguousSessionError,
     ClaudeContextError,
     ClaudeProcessNotFoundError,
+    InactiveSessionError,
     MissingEnvVarError,
+    MultipleActiveSessionsForPidError,
     SessionNotFoundError,
 )
 from cc_lib.session_tracker import SESSIONS_PATH, Session, SessionDatabase
@@ -59,7 +60,7 @@ class ClaudeContext:
 
     def __init__(self, session: Session) -> None:
         if session.state != 'active':
-            raise ClaudeContextError(f"Session {session.session_id} is in state {session.state!r}, expected 'active'")
+            raise InactiveSessionError(f"Session {session.session_id} is in state {session.state!r}, expected 'active'")
         if session.metadata.claude_version is None:
             raise ClaudeContextError(f'Session {session.session_id} has no claude_version in sessions.json')
         try:
@@ -135,7 +136,7 @@ def lookup_session_by_id(session_id: str) -> Session:
         raise SessionNotFoundError(f'Session {session_id} not in {SESSIONS_PATH}')
     session = matching[0]
     if session.state != 'active':
-        raise SessionNotFoundError(
+        raise InactiveSessionError(
             f"Session {session_id} in sessions.json but state={session.state!r}, expected 'active'"
         )
     return session
@@ -144,13 +145,17 @@ def lookup_session_by_id(session_id: str) -> Session:
 def lookup_active_session_by_pid(claude_pid: int) -> Session:
     """Look up the active Session record matching this claude PID."""
     db = _load_sessions()
-    matching = [s for s in db.sessions if s.state == 'active' and s.metadata.claude_pid == claude_pid]
-    if not matching:
-        raise SessionNotFoundError(f'No active session for PID {claude_pid} in {SESSIONS_PATH}')
-    if len(matching) > 1:
-        ids = [s.session_id for s in matching]
-        raise AmbiguousSessionError(f'Multiple active sessions for PID {claude_pid}: {ids}')
-    return matching[0]
+    for_pid = [s for s in db.sessions if s.metadata.claude_pid == claude_pid]
+    if not for_pid:
+        raise SessionNotFoundError(f'No session for PID {claude_pid} in {SESSIONS_PATH}')
+    active = [s for s in for_pid if s.state == 'active']
+    if not active:
+        states = [(s.session_id, s.state) for s in for_pid]
+        raise InactiveSessionError(f'Sessions for PID {claude_pid} exist but none are active: {states}')
+    if len(active) > 1:
+        ids = [s.session_id for s in active]
+        raise MultipleActiveSessionsForPidError(f'Multiple active sessions for PID {claude_pid}: {ids}')
+    return active[0]
 
 
 def cached_sessions_by_pid() -> Mapping[int, Session]:
@@ -189,7 +194,7 @@ def _is_claude_binary(pid: int) -> bool:
         text=True,
     )
     # codesign writes the Identifier= line to stderr.
-    return 'Identifier=com.anthropic.claude-code' in result.stderr
+    return 'Identifier=com.anthropic.claude-code' in result.stderr.splitlines()
 
 
 def _load_sessions() -> SessionDatabase:
