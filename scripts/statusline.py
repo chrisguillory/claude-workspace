@@ -112,10 +112,10 @@ from typing import Literal
 import psutil
 import pydantic
 import pydantic.alias_generators
+from cc_lib.claude_context import lookup_session_by_id
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
-from cc_lib.session_tracker import find_claude_pid
 from cc_lib.types import EffortLevel
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
@@ -1563,7 +1563,7 @@ def main() -> None:
     except pydantic.ValidationError as e:
         raise StatusLineValidationError(e, raw) from e
 
-    claude_pid = find_claude_pid()
+    claude_pid = lookup_session_by_id(data.session_id).metadata.claude_pid
 
     # Collect process health early — before slow operations (keychain, git) —
     # so the CPU delta captures Claude's behavior, not our own overhead.
