@@ -46,12 +46,16 @@ import typing
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NewType
 
 logger = logging.getLogger(__name__)
 
-# Fully qualified dotted type name (e.g., 'document_search.schemas.vectors.VectorPoint')
-type QualifiedName = str
+# Fully qualified dotted type name (e.g., 'document_search.schemas.vectors.VectorPoint').
+# Returned by the resolver functions in the linters; membership checks against
+# the QUALIFIED_* constant sets require this brand, so future contributors cannot
+# silently miss when checking a raw local name (``node.id``) against a set of
+# canonical names.
+QualifiedName = NewType('QualifiedName', str)
 
 # Runtime type annotation object (from typing.get_type_hints, get_origin, get_args).
 # No standard type exists yet — see Python discuss.python.org/t/typeform-spelling/51435.
@@ -98,30 +102,30 @@ UNHASHABLE_ORIGINS: frozenset[type] = frozenset(
 # External types we can classify without importing
 KNOWN_HASHABLE: frozenset[QualifiedName] = frozenset(
     {
-        'uuid.UUID',
-        'datetime.datetime',
-        'datetime.date',
-        'datetime.time',
-        'datetime.timedelta',
-        'datetime.timezone',
-        'decimal.Decimal',
-        'fractions.Fraction',
-        'pathlib.Path',
-        'pathlib.PurePath',
-        'pathlib.PosixPath',
-        'pathlib.WindowsPath',
-        'ipaddress.IPv4Address',
-        'ipaddress.IPv6Address',
-        're.Pattern',
+        QualifiedName('uuid.UUID'),
+        QualifiedName('datetime.datetime'),
+        QualifiedName('datetime.date'),
+        QualifiedName('datetime.time'),
+        QualifiedName('datetime.timedelta'),
+        QualifiedName('datetime.timezone'),
+        QualifiedName('decimal.Decimal'),
+        QualifiedName('fractions.Fraction'),
+        QualifiedName('pathlib.Path'),
+        QualifiedName('pathlib.PurePath'),
+        QualifiedName('pathlib.PosixPath'),
+        QualifiedName('pathlib.WindowsPath'),
+        QualifiedName('ipaddress.IPv4Address'),
+        QualifiedName('ipaddress.IPv6Address'),
+        QualifiedName('re.Pattern'),
     },
 )
 
 KNOWN_UNHASHABLE: frozenset[QualifiedName] = frozenset(
     {
-        'numpy.ndarray',
-        'numpy.matrix',
-        'pandas.DataFrame',
-        'pandas.Series',
+        QualifiedName('numpy.ndarray'),
+        QualifiedName('numpy.matrix'),
+        QualifiedName('pandas.DataFrame'),
+        QualifiedName('pandas.Series'),
     },
 )
 
@@ -467,7 +471,7 @@ class HashabilityInspector:
             return True
 
         # Recurse into the inspector for framework-supported types
-        qualified = f'{cls.__module__}.{cls.__qualname__}'
+        qualified = QualifiedName(f'{cls.__module__}.{cls.__qualname__}')
         result = self.check(qualified)
         if result is not None:
             return result.is_hashable
@@ -555,7 +559,7 @@ if __name__ == '__main__':
     exit_code = 0
 
     for name in sys.argv[1:]:
-        result = inspector.check(name)
+        result = inspector.check(QualifiedName(name))
         if result is None:
             print(f'{name}: could not verify (not importable or no framework metadata)')
         elif result.is_hashable:
