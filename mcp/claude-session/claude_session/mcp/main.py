@@ -15,7 +15,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import pathlib
 import subprocess
 import sys
 import tempfile
@@ -24,7 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
+from cc_lib.claude_context import ClaudeContext
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 from mcp.server.fastmcp import Context, FastMCP
 
 from claude_session.exceptions import RunningSessionDeletionError, RunningSessionMoveError
@@ -37,7 +37,6 @@ from claude_session.schemas.operations.lineage import LineageTree
 from claude_session.schemas.operations.move import MoveResult
 from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.services.archive import SessionArchiveService
-from claude_session.services.claude_process import find_ancestor_claude_pid, resolve_session_id_from_pid
 from claude_session.services.clone import SessionCloneService
 from claude_session.services.delete import SessionDeleteService
 from claude_session.services.info import CurrentSessionContext, SessionInfoService
@@ -50,7 +49,6 @@ from claude_session.storage.local import LocalFileSystemStorage
 from claude_session.types import ArchiveFormat, GistVisibility
 
 __all__ = [
-    'ClaudeContext',
     'ServerState',
     'lifespan',
     'logger',
@@ -99,14 +97,6 @@ class ServerState:
     archive_service: SessionArchiveService
 
 
-@dataclass(frozen=True)
-class ClaudeContext:
-    """Context information about the Claude Code session."""
-
-    claude_pid: int
-    project_dir: pathlib.Path
-
-
 # -- Lifespan Management -------------------------------------------------------
 
 
@@ -116,32 +106,24 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
 
     Creates ServerState with all services at startup and cleans up on shutdown.
     """
-    # Discover Claude context (PID and project directory)
-    claude_context = _find_claude_context()
-    project_path = claude_context.project_dir
+    claude_context = ClaudeContext.from_pid_walk()
 
-    # Discover session ID from claude-workspace sessions.json
-    session_id = _discover_session_id(claude_context.claude_pid)
-
-    # Create temp directory (cleaned up on exit)
     temp_dir = tempfile.TemporaryDirectory(prefix='claude-session-')
     temp_path = Path(temp_dir.name)
 
     try:
-        # Initialize services
         parser_service = SessionParserService()
         archive_service = SessionArchiveService(
-            session_id=session_id,
+            session_id=claude_context.session_id,
             temp_dir=temp_path,
             parser_service=parser_service,
-            project_path=project_path,  # Real project path from lsof
-            claude_pid=claude_context.claude_pid,  # For process-based version detection
+            project_path=claude_context.project_dir,
+            claude_pid=claude_context.claude_pid,
         )
 
-        # Create immutable state
         state = ServerState(
-            session_id=session_id,
-            project_path=project_path,
+            session_id=claude_context.session_id,
+            project_path=claude_context.project_dir,
             claude_pid=claude_context.claude_pid,
             temp_dir=temp_dir,
             parser_service=parser_service,
@@ -157,8 +139,8 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
             stream=sys.stderr,
         )
 
-        logger.info('Session ID: %s', session_id)
-        logger.info('Project: %s', project_path)
+        logger.info('Session ID: %s', claude_context.session_id)
+        logger.info('Project: %s', claude_context.project_dir)
         logger.info('Temp dir: %s', temp_path)
 
         yield  # Setup successful; application active
@@ -857,65 +839,6 @@ def main() -> None:
 
 
 # -- Private Helpers -----------------------------------------------------------
-
-
-def _find_claude_context() -> ClaudeContext:
-    """Find Claude process and extract its context (PID, project directory).
-
-    Returns:
-        ClaudeContext with PID and project directory
-
-    Raises:
-        RuntimeError: If Claude process cannot be found or CWD cannot be determined
-    """
-    pid = find_ancestor_claude_pid()
-    if pid is None:
-        raise RuntimeError('Could not find Claude process in parent tree')
-
-    result = subprocess.run(
-        ['lsof', '-p', str(pid), '-a', '-d', 'cwd'],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    cwd = None
-    for line in result.stdout.split('\n'):
-        if 'cwd' in line:
-            parts = line.split()
-            if len(parts) >= 9:
-                cwd = pathlib.Path(' '.join(parts[8:]))
-                break
-
-    if not cwd:
-        raise RuntimeError(f'Found Claude process (PID {pid}) but could not determine CWD')
-
-    return ClaudeContext(claude_pid=pid, project_dir=cwd)
-
-
-def _discover_session_id(claude_pid: int) -> str:
-    """Discover Claude Code session ID from claude-workspace sessions.json.
-
-    Delegates to shared session resolution with MCP-specific retry count
-    (10 attempts) to handle the startup race with SessionStart hook.
-
-    Args:
-        claude_pid: PID of the Claude process (from _find_claude_context)
-
-    Returns:
-        Session ID (UUID string)
-
-    Raises:
-        RuntimeError: If no matching session found or multiple active sessions match
-    """
-    session_id = resolve_session_id_from_pid(claude_pid, max_attempts=10)
-    if session_id is None:
-        sessions_file = get_claude_workspace_config_home_dir() / 'sessions.json'
-        raise RuntimeError(
-            f'Could not find active session for Claude PID {claude_pid} in {sessions_file} '
-            f'after 10 attempts. Ensure claude-workspace SessionStart hook is configured.'
-        )
-    return session_id
 
 
 def _get_github_token() -> str | None:

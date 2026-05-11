@@ -19,6 +19,7 @@ from typing import Annotated, Literal
 
 import httpx
 import typer
+from cc_lib.claude_context import ClaudeContext
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.session_tracker import load_sessions
@@ -30,7 +31,6 @@ from claude_session.launcher import launch_claude_with_session
 from claude_session.schemas.operations.lineage import LineageTree
 from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts.custom_title import extract_custom_title_from_file
-from claude_session.services.claude_process import auto_detect_session_id
 from claude_session.services.clone import SessionCloneService
 from claude_session.services.delete import SessionDeleteService
 from claude_session.services.discovery import SessionDiscoveryService
@@ -261,7 +261,7 @@ def clone(
     if session_id is None and source_project is not None:
         raise SourceProjectConflictError
 
-    detected = auto_detect_session_id()
+    detected = _auto_detect_session_id()
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
         typer.echo('Use claude --resume <session-id> after cloning instead.', err=True)
@@ -402,7 +402,7 @@ def move(
     if session_id is None and source_project is not None:
         raise SourceProjectConflictError
 
-    detected = auto_detect_session_id()
+    detected = _auto_detect_session_id()
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
         typer.echo('Use claude --resume <session-id> after moving instead.', err=True)
@@ -499,6 +499,13 @@ def main() -> None:
 # -- Private helpers --
 
 
+def _auto_detect_session_id() -> str | None:
+    """Return current session_id if invoked from Claude Code's Bash tool, else None."""
+    if 'CLAUDE_CODE_SESSION_ID' not in os.environ:
+        return None
+    return ClaudeContext.from_env().session_id
+
+
 def _render_lineage_tree(tree: LineageTree) -> None:
     """Render a LineageTree with proper box-drawing characters."""
 
@@ -529,7 +536,7 @@ def _resolve_session_id(session_id: str | None) -> str:
     """Resolve session_id, auto-detecting from Claude Code if not provided."""
     if session_id is not None:
         return session_id
-    detected = auto_detect_session_id()
+    detected = _auto_detect_session_id()
     if detected is None:
         typer.secho('Error: Not running inside Claude Code.', fg=typer.colors.RED, err=True)
         typer.echo('Provide a session ID: claude-session <command> <session-id>', err=True)
