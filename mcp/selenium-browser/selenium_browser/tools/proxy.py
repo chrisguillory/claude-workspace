@@ -5,9 +5,8 @@ __all__ = [
 ]
 
 from collections.abc import Sequence
-from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
@@ -33,7 +32,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         port: int,
         username: str,
         password: str,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> ConfigureProxyResult:
         """Configure authenticated HTTP proxy for bypassing IP-based rate limiting.
 
@@ -85,7 +83,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=True,
         ),
     )
-    async def clear_proxy(ctx: Context[Any, Any, Any] | None = None) -> ClearProxyResult:
+    async def clear_proxy() -> ClearProxyResult:
         """Clear proxy configuration and return to direct connection.
 
         Stops the mitmproxy subprocess and clears proxy settings.
@@ -102,7 +100,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=True,
         ),
     )
-    async def set_blocked_urls(urls: Sequence[str], ctx: Context[Any, Any, Any] | None = None) -> SetBlockedURLsResult:
+    async def set_blocked_urls(urls: Sequence[str]) -> SetBlockedURLsResult:
         """Block network requests matching URL patterns via CDP.
 
         Uses Chrome DevTools Protocol Network.setBlockedURLs to block requests

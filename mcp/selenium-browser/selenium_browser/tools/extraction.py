@@ -5,9 +5,8 @@ __all__ = [
 ]
 
 from collections.abc import Sequence
-from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
@@ -29,7 +28,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         ),
     )
     async def get_page_text(
-        ctx: Context[Any, Any, Any],
         selector: str = 'auto',
         include_images: bool = False,
     ) -> PageTextResult:
@@ -100,7 +98,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             openWorldHint=True,
         ),
     )
-    async def get_page_html(ctx: Context[Any, Any, Any], selector: str | None = None, limit: int | None = None) -> str:
+    async def get_page_html(selector: str | None = None, limit: int | None = None) -> str:
         """Get raw HTML source or specific elements.
 
         Use this when you need actual HTML markup for inspection or parsing.
@@ -237,7 +235,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         text_contains: str | None,
         tag_filter: Sequence[str] | None,
         limit: int | None,
-        ctx: Context[Any, Any, Any],
     ) -> Sequence[InteractiveElement]:
         """Find clickable elements by text or other filters. Returns CSS selectors for click().
 
@@ -249,7 +246,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             text_contains: Filter by text content (case-insensitive, None = no filter)
             tag_filter: Only specific tags (e.g., ["button", "a"], None = all tags)
             limit: Max results to return (None = unlimited)
-            ctx: MCP context
 
         Returns:
             list[InteractiveElement]: Filtered interactive elements with selectors for clicking
@@ -259,13 +255,12 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         )
 
     @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
-    async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> Sequence[FocusableElement]:
+    async def get_focusable_elements(only_tabbable: bool) -> Sequence[FocusableElement]:
         """Get keyboard-navigable elements sorted by tab order.
 
         Args:
             only_tabbable: True = Tab key only (tabindex >= 0)
                           False = includes programmatic focus (tabindex >= -1)
-            ctx: MCP context
 
         Returns:
             list[FocusableElement]: Sorted by tab order, each with tag, text, selector, tab_index
