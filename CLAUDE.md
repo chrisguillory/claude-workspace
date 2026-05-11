@@ -197,6 +197,28 @@ class Session(BaseModel):
 - Pydantic validation: Runtime enforcement of literal values
 - DRY: Type encapsulation prevents Field() repetition
 
+### NewType validation barriers
+
+`NewType('X', T)` brands a primitive (`str`, `int`, `Sequence[T]`) so the type checker treats `X` and `T` as distinct. Use it at validator/translator boundaries where mixing raw input with validated output would reintroduce the bug the validator exists to prevent.
+
+| Tool                             | Enforcement                                                            |
+|----------------------------------|------------------------------------------------------------------------|
+| `type X = T` (PEP 695 alias)     | None — checker treats `X` and `T` as interchangeable                   |
+| `NewType('X', T)`                | mypy rejects raw `T` where `X` is required; zero runtime cost          |
+| Pydantic `BaseModel`/`RootModel` | Runtime validation + structured data; use when validation must run     |
+
+**Conventions:**
+
+- Declare each `NewType` adjacent to its **producer function** — the validator that returns the branded type is the single legal point of construction. Wrap returns explicitly (`return X([...])`).
+- Workspace-shared types live in `cc-lib/cc_lib/types.py`. Module-scoped types live next to the producer.
+
+**When NOT to use:**
+
+- Don't wrap `NewType` in a factory function. It's already the minimum primitive; further indirection adds noise without enforcement.
+- Don't add runtime validation inside the `NewType` callable — `X(value)` is identity at runtime; validation belongs in the producer function.
+- Don't `NewType` against a hypothetical bug class. The bar is "a real caller could currently bypass the validator and trigger a known failure mode." `type X = T` aliases remain right for `Literal` unions and other transparent reusable annotations.
+- Don't expect `isinstance(value, X)` to work. If runtime type checks matter, `NewType` is the wrong tool — use Pydantic or a real class.
+
 ### Data Model Design
 
 **Separate orthogonal concerns** - State (current status) and source (origin/history) are independent dimensions:
