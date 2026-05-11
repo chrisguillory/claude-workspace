@@ -396,6 +396,13 @@ def index(
             help='Per-file chunking timeout in seconds. Raise for table-heavy PDFs.',
         ),
     ] = None,
+    embed_workers: Annotated[
+        int | None,
+        typer.Option(
+            '--embed-workers',
+            help='Number of concurrent embed workers. Lower if Redis/Qdrant timeouts occur.',
+        ),
+    ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Index documents for search.
@@ -407,7 +414,9 @@ def index(
         document-search index ./docs ./api -c other-collection
     """
     asyncio.run(
-        _index_async(paths, _resolve_collection(collection), gitignore, stop_after, chunk_timeout, format),
+        _index_async(
+            paths, _resolve_collection(collection), gitignore, stop_after, chunk_timeout, embed_workers, format
+        ),
     )
 
 
@@ -725,6 +734,7 @@ async def _search_async(
 
 class _IndexOverrides(TypedDict, total=False):
     chunk_timeout_seconds: int
+    embed_workers: int
 
 
 async def _index_async(
@@ -733,6 +743,7 @@ async def _index_async(
     gitignore: bool | None,
     stop_after: StopAfterStage | None,
     chunk_timeout: int | None,
+    embed_workers: int | None,
     format: OutputFormat,
 ) -> None:
     resolved_paths = resolve_index_paths([str(p) for p in paths])
@@ -798,6 +809,8 @@ async def _index_async(
             index_overrides: _IndexOverrides = {}
             if chunk_timeout is not None:
                 index_overrides['chunk_timeout_seconds'] = chunk_timeout
+            if embed_workers is not None:
+                index_overrides['embed_workers'] = embed_workers
 
             result = await indexing_service.index(
                 resolved_paths,
