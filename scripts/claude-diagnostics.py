@@ -61,7 +61,8 @@ from typing import Any, Literal, TypedDict
 
 import pydantic
 from cc_lib.schemas.base import ClosedModel
-from cc_lib.types import JsonDatetime, JsonObject, StrictJsonObject
+from cc_lib.session_tracker import SessionDatabase
+from cc_lib.types import JsonObject, StrictJsonObject
 from cc_lib.utils import get_claude_config_home_dir, get_claude_workspace_config_home_dir
 
 # Diagnostic sections produce heterogeneous data (TypedDict, Pydantic model, dict, None).
@@ -409,32 +410,7 @@ class StatsigSession(ClosedModel):
 
 # -- Hook-tracked Sessions (from ~/.claude-workspace/sessions.json) ------------
 
-type SessionState = Literal['active', 'exited', 'completed', 'crashed']
-type SessionSource = Literal['startup', 'resume', 'compact', 'clear']
-
-
-class SessionMetadata(ClosedModel):
-    claude_pid: int
-    process_created_at: JsonDatetime | None = None
-    session_ended_at: JsonDatetime | None = None
-    session_end_reason: str | None = None
-    parent_id: str | None = None
-    crash_detected_at: JsonDatetime | None = None
-    startup_model: str | None = None
-    claude_version: str | None = None
-
-
-class TrackedSession(ClosedModel):
-    session_id: str
-    state: SessionState
-    project_dir: str
-    transcript_path: str
-    source: SessionSource
-    metadata: SessionMetadata
-
-
-class SessionDatabase(ClosedModel):
-    sessions: Sequence[TrackedSession] = ()
+# SessionDatabase / Session models live in cc_lib.session_tracker.
 
 
 # -- Diagnostic Result Types ---------------------------------------------------
