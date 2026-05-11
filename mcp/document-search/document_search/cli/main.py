@@ -43,6 +43,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
+from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,14 @@ def info(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[str | None, typer.Option('--path', '-p', help='Scope to path ("**" for global).')] = None,
+    paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str],
+        typer.Option(
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
+        ),
+    ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Show collection info.
@@ -230,7 +238,7 @@ def info(
         document-search info my-collection --path "**"
         document-search info -f json
     """
-    asyncio.run(_info_async(_resolve_collection(collection), path, format))
+    asyncio.run(_info_async(_resolve_collection(collection), paths, format))
 
 
 @app.command('list')
@@ -243,7 +251,14 @@ def list_docs(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[str | None, typer.Option('--path', '-p', help='Scope to path ("**" for global).')] = None,
+    paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str],
+        typer.Option(
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
+        ),
+    ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     file_type: Annotated[FileType | None, typer.Option('--type', '-t', help='Filter by file type.')] = None,
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max files to return.')] = 50,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -256,16 +271,18 @@ def list_docs(
         document-search list --type markdown --limit 10
         document-search list my-collection --path "**"
     """
-    asyncio.run(_list_async(_resolve_collection(collection), path, file_type, limit, format))
+    asyncio.run(_list_async(_resolve_collection(collection), paths, file_type, limit, format))
 
 
 @app.command()
 @error_boundary
 def clear(
-    paths: Annotated[
-        list[str] | None,
-        typer.Argument(help='Paths to clear ("**" for entire collection). Defaults to CWD if omitted.'),
-    ] = None,  # strict_typing_linter.py: mutable-type — typer requires list
+    paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str],
+        typer.Argument(
+            help='Paths to clear. Default: current directory. Must exist on disk. Use "**" alone for entire collection; globs are not supported.',
+        ),
+    ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     collection: Annotated[
         str | None,
         typer.Option(
@@ -287,10 +304,9 @@ def clear(
         document-search clear /old/docs /more/docs -c my-collection
     """
     resolved = _resolve_collection(collection)
-    scopes = paths if paths else [str(Path.cwd())]
-    scope_str = ', '.join(scopes)
-    typer.confirm(f'Clear documents from {resolved} (paths: {scope_str})?', abort=True)
-    asyncio.run(_clear_async(resolved, scopes, clear_cache, format))
+    resolved_paths = resolve_search_paths(paths, scope_hint='entire collection')
+    typer.confirm(f'Clear documents from {resolved} (paths: {", ".join(resolved_paths)})?', abort=True)
+    asyncio.run(_clear_async(resolved, resolved_paths, clear_cache, format))
 
 
 # -- Commands: full-stack tier --
@@ -309,12 +325,19 @@ def search(
             autocompletion=_complete_collection_name,
         ),
     ] = None,
-    path: Annotated[str | None, typer.Option('--path', '-p', help='Scope to path ("**" for global).')] = None,
+    paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str],
+        typer.Option(
+            '--path',
+            '-p',
+            help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
+        ),
+    ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
     search_type: Annotated[SearchType, typer.Option('--type', '-t', help='Search strategy.')] = 'hybrid',
-    exclude_path: Annotated[
-        list[str] | None, typer.Option('--exclude', '-x', help='Exclude files under these paths.')
-    ] = None,  # strict_typing_linter.py: mutable-type — typer requires list
+    exclude_paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[str], typer.Option('--exclude', '-x', help='Exclude files under these paths.')
+    ] = [],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     min_score: Annotated[
         float | None, typer.Option('--min-score', help='Minimum relevance score (0.0 = relevant).')
     ] = None,
@@ -331,7 +354,9 @@ def search(
         document-search search "retry logic" --min-score 0.0
     """
     asyncio.run(
-        _search_async(query, _resolve_collection(collection), path, limit, search_type, exclude_path, min_score, format)
+        _search_async(
+            query, _resolve_collection(collection), paths, limit, search_type, exclude_paths, min_score, format
+        )
     )
 
 
@@ -379,7 +404,7 @@ def index(
     Examples:
         document-search index .
         document-search index /docs /api /guides
-        document-search index ./docs/**/*.md -c other-collection
+        document-search index ./docs ./api -c other-collection
     """
     asyncio.run(
         _index_async(paths, _resolve_collection(collection), gitignore, stop_after, chunk_timeout, format),
@@ -395,15 +420,6 @@ def main() -> None:
 
 
 # -- Private helpers (used by async implementations below) --
-
-
-def _resolve_path(path: str | None) -> str:
-    """Resolve path argument: '**' for global, None for CWD, else expand."""
-    if path == '**':
-        return '**'
-    if path is None:
-        return str(Path.cwd())
-    return str(Path(path).expanduser().resolve())
 
 
 @dataclass
@@ -429,7 +445,7 @@ async def infrastructure() -> AsyncIterator[InfraContext]:
 # -- Private async implementations --
 
 
-async def _info_async(collection_name: str, path: str | None, format: OutputFormat) -> None:
+async def _info_async(collection_name: str, paths: Sequence[str], format: OutputFormat) -> None:
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -445,8 +461,8 @@ async def _info_async(collection_name: str, path: str | None, format: OutputForm
             typer.secho('Collection not initialized in Qdrant — run index first.', fg=typer.colors.YELLOW, err=True)
             raise typer.Exit(1)
 
-        resolved_path = _resolve_path(path)
-        content = await repository.get_content_stats(resolved_path)
+        resolved_paths = resolve_search_paths(paths, scope_hint='global scope')
+        content = await repository.get_content_stats(to_repo_filter(resolved_paths))
 
         dashboard_port = DashboardStateManager().get_dashboard_port()
         dashboard_url = f'http://127.0.0.1:{dashboard_port}' if dashboard_port else None
@@ -461,7 +477,7 @@ async def _info_async(collection_name: str, path: str | None, format: OutputForm
             embedding=embedding_info,
             storage=storage,
             content=content,
-            path=resolved_path,
+            paths=resolved_paths,
             dashboard_url=dashboard_url,
         )
 
@@ -499,7 +515,7 @@ async def _info_async(collection_name: str, path: str | None, format: OutputForm
 
 async def _list_async(
     collection_name: str,
-    path: str | None,
+    paths: Sequence[str],
     file_type: FileType | None,
     limit: int,
     format: OutputFormat,
@@ -513,12 +529,10 @@ async def _list_async(
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        resolved_path = _resolve_path(path)
-        # list_indexed_files uses None for "no filter", not "**"
-        filter_path = None if resolved_path == '**' else resolved_path
+        filter_paths = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
 
         files = await repository.list_indexed_files(
-            path_prefix=filter_path,
+            path_prefixes=filter_paths,
             file_type=file_type,
             limit=limit,
         )
@@ -549,9 +563,8 @@ async def _clear_async(
 
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
-        resolved_paths = [_resolve_path(p) for p in paths]
 
-        if any(p == '**' for p in resolved_paths):
+        if any(p == '**' for p in paths):
             if clear_cache:
                 total_invalidated = 0
                 async for index_key in ctx.redis.scan_iter(match='embed-idx:file:*'):
@@ -568,7 +581,7 @@ async def _clear_async(
         else:
             total_files = 0
             total_chunks = 0
-            for resolved_path in resolved_paths:
+            for resolved_path in paths:
                 if clear_cache:
                     prefix = resolved_path
                     if prefix and not prefix.endswith('/'):
@@ -596,7 +609,7 @@ async def _clear_async(
                     total_files += len(files_under)
                     total_chunks += len(all_chunk_ids)
 
-            result = ClearResult(files_removed=total_files, chunks_removed=total_chunks, paths=resolved_paths)
+            result = ClearResult(files_removed=total_files, chunks_removed=total_chunks, paths=paths)
 
         if format == 'json':
             typer.echo(result.model_dump_json(indent=2))
@@ -610,13 +623,16 @@ async def _clear_async(
 async def _search_async(
     query: str,
     collection_name: str,
-    path: str | None,
+    paths: Sequence[str],
     limit: int,
     search_type: SearchType,
-    exclude_paths: Sequence[str] | None,
+    exclude_paths: Sequence[str],
     min_score: float | None,
     format: OutputFormat,
 ) -> None:
+    source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
+    resolved_excludes = resolve_filter_paths(exclude_paths)
+
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
@@ -665,10 +681,6 @@ async def _search_async(
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
 
-            resolved_path = _resolve_path(path)
-            filter_path = None if resolved_path == '**' else resolved_path
-            resolved_excludes = [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else None
-
             effective_limit = min(max(limit, 1), 100)
             rerank_candidates = min(effective_limit * 3, 200)
 
@@ -678,7 +690,7 @@ async def _search_async(
                 sparse_indices=sparse_indices,
                 sparse_values=sparse_values,
                 limit=rerank_candidates,
-                source_path_prefixes=[filter_path] if filter_path else None,
+                source_path_prefixes=source_prefixes,
                 exclude_path_prefixes=resolved_excludes,
             )
 
@@ -711,6 +723,10 @@ async def _search_async(
             await embedding_client.close()
 
 
+class _IndexOverrides(TypedDict, total=False):
+    chunk_timeout_seconds: int
+
+
 async def _index_async(
     paths: Sequence[Path],
     collection_name: str,
@@ -719,8 +735,7 @@ async def _index_async(
     chunk_timeout: int | None,
     format: OutputFormat,
 ) -> None:
-    class _IndexOverrides(TypedDict, total=False):
-        chunk_timeout_seconds: int
+    resolved_paths = resolve_index_paths([str(p) for p in paths])
 
     async with infrastructure() as ctx:
         collection = ctx.registry.get(collection_name)
@@ -780,19 +795,6 @@ async def _index_async(
         )
 
         try:
-            # Validate all paths upfront
-            resolved_paths: list[Path] = []
-            for p in paths:
-                resolved = p.expanduser().resolve()
-                if not resolved.is_file() and not resolved.is_dir():
-                    typer.secho(f'Path not found: {resolved}', fg=typer.colors.RED, err=True)
-                    continue
-                resolved_paths.append(resolved)
-
-            if not resolved_paths:
-                typer.secho('No valid paths to index.', fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
-
             index_overrides: _IndexOverrides = {}
             if chunk_timeout is not None:
                 index_overrides['chunk_timeout_seconds'] = chunk_timeout
