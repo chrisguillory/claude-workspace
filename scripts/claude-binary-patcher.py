@@ -52,10 +52,11 @@ from cc_lib.claude_binary_patching import (
     PatchScanResult,
     scan_binary,
 )
+from cc_lib.claude_context import ClaudeContext
 from cc_lib.claude_process import kill_and_copy_resume
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
-from cc_lib.exceptions import ClaudeProcessError
+from cc_lib.exceptions import ClaudeContextError
 from cc_lib.utils.atomic_write import atomic_write
 
 
@@ -163,11 +164,11 @@ def apply(
 
     if restart:
         try:
-            resume_cmd = kill_and_copy_resume()
+            resume_cmd = kill_and_copy_resume(ClaudeContext.from_env())
             print()
             print(f'Resume command copied: {resume_cmd}')
             print('Paste Cmd+V + Enter after Claude exits.')
-        except ClaudeProcessError as e:
+        except ClaudeContextError as e:
             print(f'\nNote: {e}', file=sys.stderr)
             print('Restart Claude Code manually to pick up the changes.')
 
@@ -283,11 +284,11 @@ def restore(
 
     if restart:
         try:
-            resume_cmd = kill_and_copy_resume()
+            resume_cmd = kill_and_copy_resume(ClaudeContext.from_env())
             print()
             print(f'Resume command copied: {resume_cmd}')
             print('Paste Cmd+V + Enter after Claude exits.')
-        except ClaudeProcessError as e:
+        except ClaudeContextError as e:
             print(f'\nNote: {e}', file=sys.stderr)
             print('Restart Claude Code manually to pick up the changes.')
 

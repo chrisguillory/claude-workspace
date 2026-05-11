@@ -42,12 +42,11 @@ __all__ = [
 ]
 
 import argparse
-import os
-import pathlib
-import subprocess
 import sys
+from pathlib import Path
 
 import httpx
+from cc_lib.claude_context import ClaudeContext
 
 
 def main() -> None:
@@ -61,8 +60,7 @@ def main() -> None:
         print('Error: No code provided on stdin', file=sys.stderr)
         sys.exit(1)
 
-    # Get socket path
-    socket_path = get_socket_path()
+    socket_path = Path(f'/tmp/python-interpreter-{ClaudeContext.from_env().claude_pid}.sock')
 
     # Build request payload
     payload = {'code': code, 'interpreter': args.interpreter}
@@ -89,37 +87,6 @@ def main() -> None:
         # Print result
         result = response.json()['result']
         print(result)
-
-
-def get_socket_path() -> pathlib.Path:
-    """Get Unix socket path by finding Claude PID in process tree."""
-    current = os.getppid()
-
-    for _ in range(20):  # Depth limit
-        result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-
-        if not result.stdout.strip():
-            break
-
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-
-        # Check if this is Claude
-        if 'claude' in comm.lower():
-            return pathlib.Path(f'/tmp/python-interpreter-{current}.sock')
-
-        if ppid == 0:
-            break
-
-        current = ppid
-
-    raise RuntimeError('Could not find Claude process in process tree')
 
 
 if __name__ == '__main__':

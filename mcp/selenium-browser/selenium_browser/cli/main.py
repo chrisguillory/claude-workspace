@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import pathlib
-import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from typing import Annotated
 
 import httpx
 import typer
+from cc_lib.claude_context import ClaudeContext
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import OutputFormat
@@ -570,45 +569,14 @@ def _configure_logging(
 
 
 def _get_socket_path() -> pathlib.Path:
-    """Find the Unix socket for the running MCP server's HTTP bridge.
-
-    Requires CLAUDECODE=1 env (set by Claude's Bash tool on all children).
-    Walks the process tree to find the Claude Code ancestor PID.
-    """
-    if not os.environ.get('CLAUDECODE'):
-        typer.secho(
-            'Error: selenium-browser must be run inside Claude Code (CLAUDECODE env not set)',
-            fg=typer.colors.RED,
-            err=True,
-        )
+    """Find the Unix socket for the running MCP server's HTTP bridge."""
+    claude_pid = ClaudeContext.from_env().claude_pid
+    sock = pathlib.Path(f'/tmp/selenium-browser-{claude_pid}.sock')
+    if not sock.exists():
+        typer.secho(f'Error: Socket not found at {sock}', fg=typer.colors.RED, err=True)
+        typer.echo('Is the selenium-browser MCP server running?', err=True)
         raise SystemExit(1)
-
-    current = os.getppid()
-    for _ in range(20):
-        result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if not result.stdout.strip():
-            break
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-        if 'claude' in comm.lower():
-            sock = pathlib.Path(f'/tmp/selenium-browser-{current}.sock')
-            if not sock.exists():
-                typer.secho(f'Error: Socket not found at {sock}', fg=typer.colors.RED, err=True)
-                typer.echo('Is the selenium-browser MCP server running?', err=True)
-                raise SystemExit(1)
-            return sock
-        if ppid == 0:
-            break
-        current = ppid
-
-    typer.secho('Error: Claude Code not found in process tree', fg=typer.colors.RED, err=True)
-    raise SystemExit(1)
+    return sock
 
 
 def _call_tool(tool: str, **params: object) -> object:
