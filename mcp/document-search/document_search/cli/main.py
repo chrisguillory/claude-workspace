@@ -410,6 +410,13 @@ def index(
             help='Number of concurrent embed workers. Lower if Redis/Qdrant timeouts occur.',
         ),
     ] = None,
+    redis_url_params: Annotated[
+        str | None,
+        typer.Option(
+            '--redis-url-params',
+            help='Redis URL query params (passthrough to redis-py). e.g. "socket_timeout=120&socket_connect_timeout=120". Raise on slow hosts where indexing hits Redis timeouts.',
+        ),
+    ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Index documents for search.
@@ -422,7 +429,14 @@ def index(
     """
     asyncio.run(
         _index_async(
-            paths, _resolve_collection(collection), gitignore, stop_after, chunk_timeout, embed_workers, format
+            paths,
+            _resolve_collection(collection),
+            gitignore,
+            stop_after,
+            chunk_timeout,
+            embed_workers,
+            redis_url_params,
+            format,
         ),
     )
 
@@ -446,9 +460,9 @@ class InfraContext:
 
 
 @asynccontextmanager
-async def infrastructure() -> AsyncIterator[InfraContext]:
+async def infrastructure(*, redis_url_params: str | None = None) -> AsyncIterator[InfraContext]:
     redis_port = discover_redis_port(PROJECT_ROOT)
-    redis = RedisClient(host='127.0.0.1', port=redis_port)
+    redis = RedisClient(host='127.0.0.1', port=redis_port, url_params=redis_url_params)
     try:
         await redis.ping()
         qdrant = QdrantClient(url='http://localhost:6333')
@@ -747,11 +761,12 @@ async def _index_async(
     stop_after: StopAfterStage | None,
     chunk_timeout: int | None,
     embed_workers: int | None,
+    redis_url_params: str | None,
     format: OutputFormat,
 ) -> None:
     resolved_paths = resolve_index_paths([str(p) for p in paths])
 
-    async with infrastructure() as ctx:
+    async with infrastructure(redis_url_params=redis_url_params) as ctx:
         collection = ctx.registry.get(collection_name)
         if collection is None:
             typer.secho(f"Collection '{collection_name}' not found.", fg=typer.colors.RED, err=True)

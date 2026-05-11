@@ -51,21 +51,24 @@ class RedisClient:
         host: str = '127.0.0.1',
         port: int = 6379,
         *,
+        url_params: str | None = None,
         max_connections: int = 5000,  # Lazy ceiling. Semaphores (500+500) provide backpressure. Server maxclients: 65,536.
         max_concurrent: int = 500,
         max_concurrent_pipelines: int = 500,
         socket_timeout: float = 30.0,
-        socket_connect_timeout: float = 5.0,
+        socket_connect_timeout: float = 30.0,
     ) -> None:
-        pool = aioredis.ConnectionPool(
-            host=host,
-            port=port,
+        # URL routing lets `url_params` pass through any redis-py connection knob without code changes.
+        url = f'redis://{host}:{port}/0'
+        if url_params:
+            url = f'{url}?{url_params}'
+        self._client: aioredis.Redis = aioredis.Redis.from_url(
+            url,
+            decode_responses=False,
             max_connections=max_connections,
             socket_timeout=socket_timeout,
             socket_connect_timeout=socket_connect_timeout,
-            decode_responses=False,
         )
-        self._client = aioredis.Redis(connection_pool=pool)
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._pipe_semaphore = asyncio.Semaphore(max_concurrent_pipelines)
 
