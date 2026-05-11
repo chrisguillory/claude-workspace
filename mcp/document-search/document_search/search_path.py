@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import NewType
 
 __all__ = [
+    'ResolvedIndexPaths',
     'ResolvedPaths',
     'resolve_filter_paths',
     'resolve_index_paths',
@@ -13,10 +14,16 @@ __all__ = [
 ]
 
 
-# Brand returned by the path validators. ``to_repo_filter`` requires this
-# type so the type checker rejects raw user input being fed through the
-# translator into the repository layer.
+# Brand returned by the search-path validators. ``to_repo_filter`` requires
+# this type so the type checker rejects raw user input being fed through
+# the translator into the repository layer.
 ResolvedPaths = NewType('ResolvedPaths', Sequence[str])
+
+# Brand returned by ``resolve_index_paths``: ``Path`` objects that have
+# passed the file-or-directory check. ``IndexingService.index`` requires
+# this type so the file-or-directory invariant is type-checked instead of
+# re-asserted at every consumer.
+ResolvedIndexPaths = NewType('ResolvedIndexPaths', Sequence[Path])
 
 
 def resolve_search_paths(paths: Sequence[str], *, scope_hint: str = 'global scope') -> ResolvedPaths:
@@ -66,7 +73,7 @@ def resolve_filter_paths(paths: Sequence[str]) -> ResolvedPaths:
     return ResolvedPaths([_resolve_search_path(p) for p in paths])
 
 
-def resolve_index_paths(paths: Sequence[str]) -> Sequence[Path]:
+def resolve_index_paths(paths: Sequence[str]) -> ResolvedIndexPaths:
     """Validate paths for indexing: concrete files or directories only.
 
     Empty input is rejected. ``"**"`` is rejected. Non-regular filesystem
@@ -86,7 +93,7 @@ def resolve_index_paths(paths: Sequence[str]) -> Sequence[Path]:
     for rp in resolved:
         if not rp.is_file() and not rp.is_dir():
             raise ValueError(f'Path is not a file or directory: {rp}')
-    return resolved
+    return ResolvedIndexPaths(resolved)
 
 
 def to_repo_filter(value: ResolvedPaths) -> Sequence[str]:

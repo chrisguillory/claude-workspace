@@ -40,7 +40,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-# Brand returned by ``CacheLoader.cache_key``: the Redis key for a single
+# Brand returned by ``EmbedCache.key_for_text``: the Redis key for a single
 # cached embedding. Required by Redis ops that read/write the embedding cache.
 EmbedCacheKey = NewType('EmbedCacheKey', str)
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from document_search.search_path import (
+    ResolvedIndexPaths,
     ResolvedPaths,
     resolve_filter_paths,
     resolve_index_paths,
@@ -120,12 +121,12 @@ class TestResolveFilterPaths:
 
 class TestResolveIndexPaths:
     def test_directory_accepted(self, tmp_path: Path) -> None:
-        assert resolve_index_paths([str(tmp_path)]) == [tmp_path.resolve()]
+        assert resolve_index_paths([str(tmp_path)]) == ResolvedIndexPaths([tmp_path.resolve()])
 
     def test_file_accepted(self, tmp_path: Path) -> None:
         f = tmp_path / 'doc.md'
         f.write_text('hi')
-        assert resolve_index_paths([str(f)]) == [f.resolve()]
+        assert resolve_index_paths([str(f)]) == ResolvedIndexPaths([f.resolve()])
 
     def test_returns_path_objects(self, tmp_path: Path) -> None:
         result = resolve_index_paths([str(tmp_path)])
