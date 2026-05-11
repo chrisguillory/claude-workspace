@@ -19,7 +19,13 @@ __all__ = [
 
 
 def find_ancestor_claude_pid() -> int | None:
-    """Walk process tree to find an ancestor Claude Code process.
+    """Walk process tree to find an ancestor running the Claude Code binary.
+
+    Verifies each candidate via ``codesign``: Anthropic embeds
+    ``Identifier=com.anthropic.claude-code`` in the binary's code signature,
+    bound to the code-directory hash. The identifier is preserved across
+    adhoc re-signing, so this works for both vanilla and binary-patched
+    installs.
 
     Returns the PID if found, None if not running inside Claude Code.
     """
@@ -27,7 +33,7 @@ def find_ancestor_claude_pid() -> int | None:
 
     for _ in range(20):
         result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
+            ['ps', '-p', str(current), '-o', 'ppid='],
             check=False,
             capture_output=True,
             text=True,
@@ -35,14 +41,10 @@ def find_ancestor_claude_pid() -> int | None:
         if not result.stdout.strip():
             break
 
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-
-        if 'claude' in comm.lower():
+        if _is_claude_binary(current):
             return current
 
-        current = ppid
+        current = int(result.stdout.strip())
 
     return None
 
@@ -90,3 +92,15 @@ def auto_detect_session_id() -> str | None:
     if pid is None:
         return None
     return resolve_session_id_from_pid(pid, max_attempts=1)
+
+
+def _is_claude_binary(pid: int) -> bool:
+    """True if ``pid`` is running the Claude Code binary, verified via codesign."""
+    result = subprocess.run(
+        ['codesign', '-dvv', f'+{pid}'],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    # codesign writes the Identifier= line to stderr.
+    return 'Identifier=com.anthropic.claude-code' in result.stderr

@@ -862,8 +862,6 @@ def main() -> None:
 def _find_claude_context() -> ClaudeContext:
     """Find Claude process and extract its context (PID, project directory).
 
-    Uses shared process tree walk to find Claude, then lsof to determine CWD.
-
     Returns:
         ClaudeContext with PID and project directory
 
@@ -874,7 +872,6 @@ def _find_claude_context() -> ClaudeContext:
     if pid is None:
         raise RuntimeError('Could not find Claude process in parent tree')
 
-    # Get Claude's CWD using lsof
     result = subprocess.run(
         ['lsof', '-p', str(pid), '-a', '-d', 'cwd'],
         check=False,
@@ -892,24 +889,6 @@ def _find_claude_context() -> ClaudeContext:
 
     if not cwd:
         raise RuntimeError(f'Found Claude process (PID {pid}) but could not determine CWD')
-
-    # Verify by checking if Claude has config dir files open
-    result = subprocess.run(['lsof', '-p', str(pid)], check=False, capture_output=True, text=True)
-
-    config_dir = str(get_claude_config_home_dir())
-    claude_files = []
-    for line in result.stdout.split('\n'):
-        if config_dir in line:
-            parts = line.split()
-            if len(parts) >= 9:
-                file_path = ' '.join(parts[8:])
-                claude_files.append(file_path)
-
-    if not claude_files:
-        raise RuntimeError(
-            f'Found Claude process (PID {pid}) with CWD {cwd}, '
-            f'but no {config_dir}/ files are open - may not be a Claude project'
-        )
 
     return ClaudeContext(claude_pid=pid, project_dir=cwd)
 
