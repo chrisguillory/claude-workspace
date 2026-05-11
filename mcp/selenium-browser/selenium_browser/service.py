@@ -108,7 +108,6 @@ from .state import BrowserState
 from .tool_registry import ToolRegistry
 from .tree_utils import compact_aria_tree, compact_visual_tree, serialize_aria_snapshot, serialize_visual_tree
 from .validators import CssSelector
-from .validators import validate_css_selector as _validate_css_selector_impl
 
 logger = logging.getLogger(__name__)
 
@@ -436,7 +435,7 @@ class BrowserService:
         )
 
     @tool_registry.register_tool
-    async def get_page_html(self, selector: str | None = None, limit: int | None = None) -> str:
+    async def get_page_html(self, selector: CssSelector | None = None, limit: int | None = None) -> str:
         """Get raw HTML source or specific elements.
 
         Use this when you need actual HTML markup for inspection or parsing.
@@ -3444,14 +3443,6 @@ class BrowserService:
         logger.info('%s for %s to %s (%s bytes)', ' + '.join(log_parts), current_origin, file_path, result.size_bytes)
 
         return result
-
-
-def _validate_css_selector(selector: str) -> CssSelector:
-    """Validate CSS selector and brand the result; ValueError is rewritten as ToolError for the MCP boundary."""
-    try:
-        return _validate_css_selector_impl(selector)
-    except ValueError as e:
-        raise fastmcp.exceptions.ToolError(str(e)) from None
 
 
 async def _lookup_intercepted_body(

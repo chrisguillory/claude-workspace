@@ -12,7 +12,8 @@ from ..models import (
     WaitForSelectorResult,
     WaitForSelectorState,
 )
-from ..service import BrowserService, _validate_css_selector
+from ..service import BrowserService
+from ..validators import validate_css_selector
 
 
 def register_tools(service: BrowserService, mcp: FastMCP) -> None:
@@ -75,7 +76,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             TimeoutError: If element doesn't reach desired state within timeout
         """
         return await service.wait_for_selector(
-            css_selector=_validate_css_selector(css_selector), state=state, timeout=timeout
+            css_selector=validate_css_selector(css_selector), state=state, timeout=timeout
         )
 
     @mcp.tool(

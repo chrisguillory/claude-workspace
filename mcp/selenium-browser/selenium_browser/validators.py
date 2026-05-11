@@ -1,8 +1,4 @@
-"""Shared input validation for Selenium Browser Automation.
-
-Framework-free validators that raise ValueError. MCP tool wrappers
-convert to ToolError at the boundary.
-"""
+"""Input validation for Selenium Browser Automation."""
 
 from __future__ import annotations
 
@@ -31,7 +27,13 @@ NON_CSS_SELECTOR_RE = re.compile(
 
 
 def validate_css_selector(selector: str) -> CssSelector:
-    """Validate CSS selector syntax and return the branded value."""
+    """Validate CSS selector syntax and return the branded value.
+
+    Raises ``ValueError`` on Playwright-style selectors (e.g. ``:has-text(...)``)
+    or other non-standard CSS; the message includes guidance to use
+    ``get_interactive_elements`` or ``get_aria_snapshot`` instead. Tool wrappers
+    let the ``ValueError`` propagate; FastMCP surfaces it to the MCP client.
+    """
     match = NON_CSS_SELECTOR_RE.search(selector)
     if match:
         raise ValueError(

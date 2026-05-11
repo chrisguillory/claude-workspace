@@ -9,7 +9,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import ScrollBehavior, ScrollDirection, ScrollPosition
-from ..service import BrowserService, _validate_css_selector
+from ..service import BrowserService
+from ..validators import validate_css_selector
 
 
 def register_tools(service: BrowserService, mcp: FastMCP) -> None:
@@ -38,7 +39,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             4. get_aria_snapshot() - understand new page state
         """
         return await service.click(
-            css_selector=_validate_css_selector(css_selector),
+            css_selector=validate_css_selector(css_selector),
             wait_for_network=wait_for_network,
             network_timeout=network_timeout,
         )
@@ -70,7 +71,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             3. get_aria_snapshot() - see dropdown content
             4. click(dropdown_item_selector) - select item
         """
-        return await service.hover(css_selector=_validate_css_selector(css_selector), duration_ms=duration_ms)
+        return await service.hover(css_selector=validate_css_selector(css_selector), duration_ms=duration_ms)
 
     @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
     async def press_key(key: str) -> None:
@@ -184,7 +185,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.scroll(
             direction=direction,
             scroll_amount=scroll_amount,
-            css_selector=_validate_css_selector(css_selector) if css_selector else None,
+            css_selector=validate_css_selector(css_selector) if css_selector else None,
             behavior=behavior,
             position=position,
         )
