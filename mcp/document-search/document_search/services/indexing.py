@@ -53,8 +53,9 @@ from document_search.schemas.indexing import (
 )
 from document_search.schemas.tracing import PipelineTimingReport, QueueDepthSample, StageTimingReport
 from document_search.schemas.vectors import ClearResult
+from document_search.search_path import ResolvedIndexPaths, ResolvedPaths
 from document_search.services.chunking import ChunkingService
-from document_search.services.embedding import EmbeddingService
+from document_search.services.embedding import EmbedCache, EmbeddingService
 from document_search.services.pdf_extraction import EncryptedPDFError
 from document_search.services.sparse_embedding import SparseEmbeddingService, SparseVector
 from document_search.services.tracing import PipelineTracer
@@ -128,7 +129,7 @@ class IndexingService:
 
     async def index(
         self,
-        paths: Sequence[Path],
+        paths: ResolvedIndexPaths,
         *,
         collection_name: str,
         owner_pid: int,
@@ -157,10 +158,6 @@ class IndexingService:
             embedding_client: For transient error delta tracking (optional).
             redis_client: For connection HWM tracking (optional).
         """
-        for p in paths:
-            if not p.is_file() and not p.is_dir():
-                raise ValueError(f'Path not found: {p}')
-
         # Capture baseline transient error counts for delta calculation
         transient_errors_start: Mapping[str, int] = (
             {str(k): v for k, v in embedding_client.transient_errors.items()} if embedding_client else {}
@@ -377,7 +374,7 @@ class IndexingService:
         self._chunking.shutdown()
         self._sparse_embedding.shutdown()
 
-    async def clear_documents(self, paths: Sequence[str], *, clear_cache: bool) -> ClearResult:
+    async def clear_documents(self, paths: ResolvedPaths, *, clear_cache: bool) -> ClearResult:
         """Clear documents from the index.
 
         Args:
@@ -1049,10 +1046,7 @@ class IndexingService:
 
                     # Pre-compute cache keys from ALL chunk texts (avoids
                     # carrying full text strings through the pipeline).
-                    all_cache_keys = [
-                        (self._cache_key_prefix + hashlib.sha256(c.text.encode()).hexdigest()[:16]).encode()
-                        for c in chunks
-                    ]
+                    all_cache_keys = [EmbedCache.key_for_text(self._cache_key_prefix, c.text).encode() for c in chunks]
 
                     tracer.record(file_key, 'chunk', 'completed')
                     tracer.record(file_key, 'embed', 'queued')

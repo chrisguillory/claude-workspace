@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence, Set
 from pathlib import Path
+from typing import NewType
 
 __all__ = [
+    'ResolvedIndexPaths',
+    'ResolvedPaths',
     'resolve_filter_paths',
     'resolve_index_paths',
     'resolve_search_paths',
@@ -11,7 +14,19 @@ __all__ = [
 ]
 
 
-def resolve_search_paths(paths: Sequence[str], *, scope_hint: str = 'global scope') -> Sequence[str]:
+# Brand returned by the search-path validators. ``to_repo_filter`` requires
+# this type so the type checker rejects raw user input being fed through
+# the translator into the repository layer.
+ResolvedPaths = NewType('ResolvedPaths', Sequence[str])
+
+# Brand returned by ``resolve_index_paths``: ``Path`` objects that have
+# passed the file-or-directory check. ``IndexingService.index`` requires
+# this type so the file-or-directory invariant is type-checked instead of
+# re-asserted at every consumer.
+ResolvedIndexPaths = NewType('ResolvedIndexPaths', Sequence[Path])
+
+
+def resolve_search_paths(paths: Sequence[str], *, scope_hint: str = 'global scope') -> ResolvedPaths:
     """Validate paths that define a search scope.
 
     The caller must pick a scope: one or more concrete paths, or ``"**"``
@@ -37,10 +52,10 @@ def resolve_search_paths(paths: Sequence[str], *, scope_hint: str = 'global scop
         raise ValueError(f'path cannot be empty. Provide at least one path or "**" for {scope_hint}.')
     if '**' in paths and len(paths) > 1:
         raise ValueError(f'"**" cannot be mixed with other paths. Pass "**" alone for {scope_hint}.')
-    return [_resolve_search_path(p) for p in paths]
+    return ResolvedPaths([_resolve_search_path(p) for p in paths])
 
 
-def resolve_filter_paths(paths: Sequence[str]) -> Sequence[str]:
+def resolve_filter_paths(paths: Sequence[str]) -> ResolvedPaths:
     """Validate paths that refine a result set.
 
     Empty input returns ``[]`` (no filter). ``"**"`` is rejected — excluding
@@ -52,13 +67,13 @@ def resolve_filter_paths(paths: Sequence[str]) -> Sequence[str]:
             exist on disk.
     """
     if not paths:
-        return []
+        return ResolvedPaths([])
     if any(p == '**' for p in paths):
         raise ValueError('"**" is not supported here. Specify concrete paths.')
-    return [_resolve_search_path(p) for p in paths]
+    return ResolvedPaths([_resolve_search_path(p) for p in paths])
 
 
-def resolve_index_paths(paths: Sequence[str]) -> Sequence[Path]:
+def resolve_index_paths(paths: Sequence[str]) -> ResolvedIndexPaths:
     """Validate paths for indexing: concrete files or directories only.
 
     Empty input is rejected. ``"**"`` is rejected. Non-regular filesystem
@@ -78,10 +93,10 @@ def resolve_index_paths(paths: Sequence[str]) -> Sequence[Path]:
     for rp in resolved:
         if not rp.is_file() and not rp.is_dir():
             raise ValueError(f'Path is not a file or directory: {rp}')
-    return resolved
+    return ResolvedIndexPaths(resolved)
 
 
-def to_repo_filter(value: Sequence[str]) -> Sequence[str]:
+def to_repo_filter(value: ResolvedPaths) -> Sequence[str]:
     """Translate the user-facing ``"**"`` sentinel to the repository's empty-list form.
 
     Pure translator — does not validate. Performs the boundary swap so the

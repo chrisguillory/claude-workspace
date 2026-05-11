@@ -43,7 +43,14 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
-from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
+from document_search.search_path import (
+    ResolvedPaths,
+    resolve_filter_paths,
+    resolve_index_paths,
+    resolve_search_paths,
+    to_repo_filter,
+)
+from document_search.services.embedding import FileCacheIndex
 
 logger = logging.getLogger(__name__)
 
@@ -551,7 +558,7 @@ async def _list_async(
 
 async def _clear_async(
     collection_name: str,
-    paths: Sequence[str],
+    paths: ResolvedPaths,
     clear_cache: bool,
     format: OutputFormat,
 ) -> None:
@@ -567,7 +574,7 @@ async def _clear_async(
         if any(p == '**' for p in paths):
             if clear_cache:
                 total_invalidated = 0
-                async for index_key in ctx.redis.scan_iter(match='embed-idx:file:*'):
+                async for index_key in ctx.redis.scan_iter(match=FileCacheIndex.glob()):
                     cache_keys = await ctx.redis.smembers(index_key)
                     if cache_keys:
                         await ctx.redis.unlink(*cache_keys, index_key)
@@ -583,11 +590,7 @@ async def _clear_async(
             total_chunks = 0
             for resolved_path in paths:
                 if clear_cache:
-                    prefix = resolved_path
-                    if prefix and not prefix.endswith('/'):
-                        prefix += '/'
-                    pattern = f'embed-idx:file:{prefix}*'
-                    async for index_key in ctx.redis.scan_iter(match=pattern):
+                    async for index_key in ctx.redis.scan_iter(match=FileCacheIndex.glob(resolved_path)):
                         cache_keys = await ctx.redis.smembers(index_key)
                         if cache_keys:
                             await ctx.redis.unlink(*cache_keys, index_key)

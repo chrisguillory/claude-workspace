@@ -15,6 +15,7 @@ from ..models import (
     PageTextResult,
 )
 from ..service import BrowserService
+from ..validators import validate_css_selector
 
 
 def register_tools(service: BrowserService, mcp: FastMCP) -> None:
@@ -126,7 +127,10 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             # Specific form by ID
             html = get_page_html(selector="form#login")
         """
-        return await service.get_page_html(selector=selector, limit=limit)
+        return await service.get_page_html(
+            selector=validate_css_selector(selector) if selector else None,
+            limit=limit,
+        )
 
     @mcp.tool(annotations=ToolAnnotations(title='Get ARIA Snapshot', readOnlyHint=True))
     async def get_aria_snapshot(

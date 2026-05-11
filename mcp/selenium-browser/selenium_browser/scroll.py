@@ -18,7 +18,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from .models import ScrollBehavior, ScrollDirection, ScrollPosition
 from .scripts import SMOOTH_SCROLL_SCRIPT
-from .validators import validate_css_selector
+from .validators import CssSelector
 
 __all__ = [
     'PIXELS_PER_TICK',
@@ -33,7 +33,7 @@ def execute_scroll(
     *,
     direction: ScrollDirection | None = None,
     scroll_amount: int = 3,
-    css_selector: str | None = None,
+    css_selector: CssSelector | None = None,
     behavior: ScrollBehavior = 'instant',
     position: ScrollPosition | None = None,
     _find_timeout: int = 10,
@@ -123,9 +123,8 @@ def execute_scroll(
 # ── Private helpers ──
 
 
-def _find_element(driver: webdriver.Chrome, css_selector: str, context: str, *, timeout: int = 10) -> Any:
+def _find_element(driver: webdriver.Chrome, css_selector: CssSelector, context: str, *, timeout: int = 10) -> Any:
     """Find element by CSS selector with wait. Raises ValueError if not found."""
-    validate_css_selector(css_selector)
     try:
         return WebDriverWait(driver, timeout).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, css_selector)),
@@ -140,7 +139,7 @@ def _scroll_to_position(
     driver: webdriver.Chrome,
     *,
     position: ScrollPosition,
-    css_selector: str | None,
+    css_selector: CssSelector | None,
     behavior: ScrollBehavior,
     timeout: int = 10,
 ) -> JsonObject:
@@ -292,7 +291,7 @@ def _scroll_to_position(
 
 
 def _scroll_into_view(
-    driver: webdriver.Chrome, *, css_selector: str, behavior: ScrollBehavior, timeout: int = 10
+    driver: webdriver.Chrome, *, css_selector: CssSelector, behavior: ScrollBehavior, timeout: int = 10
 ) -> JsonObject:
     """Mode 3: Scroll element into view."""
     element = _find_element(driver, css_selector, 'element', timeout=timeout)
@@ -371,7 +370,7 @@ def _scroll_container(
     driver: webdriver.Chrome,
     *,
     direction: ScrollDirection | None,
-    css_selector: str,
+    css_selector: CssSelector,
     delta_x: int,
     delta_y: int,
     behavior: ScrollBehavior,
