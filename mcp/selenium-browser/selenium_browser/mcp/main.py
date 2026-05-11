@@ -23,6 +23,8 @@ from pathlib import Path
 
 # Third-Party Libraries
 import uvicorn
+from cc_lib.claude_context import ClaudeContext
+from cc_lib.exceptions import ClaudeContextError
 from mcp.server.fastmcp import FastMCP
 
 # Local
@@ -123,30 +125,17 @@ def _register_tools(service: BrowserService) -> None:
 
 
 def _find_socket_path() -> Path | None:
-    """Find Claude Code PID via process tree walk, return socket path.
+    """Return the Unix socket path for this MCP, or None when standalone.
 
-    Returns None if not running under Claude Code (e.g., standalone testing).
+    Returns None when not running under Claude Code (standalone testing) so
+    callers can disable the HTTP bridge instead of crashing.
     """
-    current = os.getppid()
-    for _ in range(20):
-        result = subprocess.run(
-            ['ps', '-p', str(current), '-o', 'ppid=,comm='],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if not result.stdout.strip():
-            break
-        parts = result.stdout.strip().split(None, 1)
-        ppid = int(parts[0])
-        comm = parts[1] if len(parts) > 1 else ''
-        if 'claude' in comm.lower():
-            return Path(f'/tmp/selenium-browser-{current}.sock')
-        if ppid == 0:
-            break
-        current = ppid
-    logger.info('Claude Code not found in process tree — HTTP bridge disabled')
-    return None
+    try:
+        claude_pid = ClaudeContext.from_pid_walk().claude_pid
+    except ClaudeContextError:
+        logger.info('Claude Code not found in process tree — HTTP bridge disabled')
+        return None
+    return Path(f'/tmp/selenium-browser-{claude_pid}.sock')
 
 
 def _sync_cleanup(state: BrowserState, timeout: int = 5) -> None:

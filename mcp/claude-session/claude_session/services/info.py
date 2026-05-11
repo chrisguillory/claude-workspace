@@ -25,7 +25,6 @@ from claude_session.services.artifacts import extract_custom_title_from_file
 from claude_session.services.delete import is_native_session
 from claude_session.services.discovery import SessionDiscoveryService
 from claude_session.services.lineage import LineageService, get_machine_id
-from claude_session.services.version import get_version_from_process
 
 __all__ = [
     'CLAUDE_WORKSPACE_SESSIONS',
@@ -143,7 +142,6 @@ class SessionInfoService:
             machine_id = get_machine_id() if workspace_session else None
 
         claude_version = await self._get_claude_version(
-            claude_pid=claude_pid,
             session_file=session_file,
             workspace_version=workspace_session.metadata.claude_version if workspace_session else None,
         )
@@ -280,32 +278,17 @@ class SessionInfoService:
 
     async def _get_claude_version(
         self,
-        claude_pid: int | None,
         session_file: Path,
         workspace_version: str | None,
     ) -> str | None:
-        """Get Claude Code version with proper fallback chain.
+        """Get Claude Code version, preferring workspace sessions.json.
 
-        Priority:
-        1. Process-based (if PID available and process exists)
-        2. JSONL records (from session file)
-        3. Workspace sessions.json (lowest priority fallback)
-
-        Args:
-            claude_pid: PID of Claude process (if available)
-            session_file: Path to session JSONL file
-            workspace_version: Version from workspace sessions.json (if available)
-
-        Returns:
-            Version string, or None if not determinable
+        Falls back to scanning JSONL records when sessions.json doesn't carry a
+        version (e.g., orphaned sessions, or pre-hook-version-capture entries).
         """
-        # Try process-based first (most accurate for current operations)
-        if claude_pid is not None:
-            version = get_version_from_process(claude_pid)
-            if version:
-                return version
+        if workspace_version:
+            return workspace_version
 
-        # Try JSONL records (read just enough to find version)
         if session_file.exists():
             with session_file.open() as f:
                 for line in f:
@@ -314,8 +297,7 @@ class SessionInfoService:
                     if isinstance(version, str):
                         return version
 
-        # Lowest fallback: workspace sessions.json
-        return workspace_version
+        return None
 
     def _get_first_message_timestamp(self, session_file: Path) -> datetime | None:
         """Extract the first timestamp from a session JSONL file.

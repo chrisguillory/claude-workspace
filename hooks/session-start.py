@@ -23,11 +23,12 @@ from pathlib import Path
 
 import packaging.version
 import psutil
+from cc_lib.claude_context import find_claude_pid
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.phantom import PhantomHandler
 from cc_lib.schemas.base import SubsetModel
 from cc_lib.schemas.hooks import SessionStartHookInput
-from cc_lib.session_tracker import SessionManager, find_claude_pid
+from cc_lib.session_tracker import SessionManager
 from cc_lib.utils import Timer
 
 boundary = ErrorBoundary(exit_code=2)

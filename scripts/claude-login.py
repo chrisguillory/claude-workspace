@@ -125,9 +125,10 @@ import pydantic
 import rich.console
 import rich.panel
 import typer
+from cc_lib.claude_context import ClaudeContext
 from cc_lib.claude_process import kill_and_copy_resume
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
-from cc_lib.exceptions import ClaudeProcessError
+from cc_lib.exceptions import ClaudeContextError
 from cc_lib.schemas import CamelModel, StrictModel
 from cc_lib.types import JsonObject
 from cc_lib.utils import get_claude_workspace_config_home_dir
@@ -859,10 +860,10 @@ def cmd_switch_login(name: str, use_keychain: bool, restart: bool, model: str | 
     if restart:
         extra_args = ['--model', model] if model else []
         try:
-            resume_cmd = kill_and_copy_resume(extra_args=extra_args)
+            resume_cmd = kill_and_copy_resume(ClaudeContext.from_env(), extra_args=extra_args)
             print(f'Resume command copied to clipboard: {resume_cmd}')
             print('Paste (Cmd+V) + Enter after Claude exits.')
-        except ClaudeProcessError as e:
+        except ClaudeContextError as e:
             print(f'WARNING: Cannot restart: {e}', file=sys.stderr)
             print('Restart Claude Code manually to activate.')
     else:
