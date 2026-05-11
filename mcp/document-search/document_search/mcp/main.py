@@ -22,7 +22,6 @@ import time
 import typing
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 import mcp.server.fastmcp
 import mcp.types
@@ -56,6 +55,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
+from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
 from document_search.services.indexing import FILE_CHUNK_TIMEOUT_SECONDS, IndexingService
@@ -216,7 +216,9 @@ since the last indexing run. Supports markdown, text, JSON, and PDF files.
 Args:
     collection_name: Name of the collection to index into.
     path: Path to file or directory to index. Defaults to current working
-        directory if not specified. Note: "**" is not supported.
+        directory if not specified. Supports absolute, relative, or ~ expansion.
+        Accepts a single path string or a list of paths.
+        Note: "**" is not supported - indexing requires concrete paths.
     respect_gitignore: Control .gitignore filtering behavior:
         - None (default): Auto-detect git repos, respect gitignore if found.
         - True: Strictly respect gitignore, fail if not a git repo.
@@ -246,13 +248,12 @@ Returns:
     )
     async def index_documents(
         collection_name: str,
-        path: str | Sequence[str] | None = None,
+        path: str | Sequence[str] = '.',
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
         embed_workers: int = 64,
         chunk_timeout_seconds: int = FILE_CHUNK_TIMEOUT_SECONDS,
         include_timing: bool = False,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> IndexingResult:
         """Index documents for semantic search (file or directory auto-detected).
 
@@ -281,20 +282,8 @@ Returns:
         Returns:
             IndexingResult with counts and stopped_after indicator.
         """
-        if not ctx:
-            raise ValueError('MCP context required')
-
-        # Normalize path → list[str]
-        path_inputs: Sequence[str]
-        if path is None:
-            path_inputs = [str(Path.cwd())]
-        elif isinstance(path, str):
-            path_inputs = [path]
-        else:
-            path_inputs = path
-
-        if any(p == '**' for p in path_inputs):
-            raise ValueError("index_documents does not support '**'. Specify a file or directory path.")
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        resolved_paths = resolve_index_paths(path_inputs)
 
         # Get collection and indexing service
         collection = state.get_collection(collection_name)
@@ -302,15 +291,9 @@ Returns:
 
         logger.info('Using collection: %s (%s)', collection_name, collection.provider)
 
-        resolved_paths = [Path(p).expanduser().resolve() for p in path_inputs]
-
         # Ensure Qdrant collection exists with correct dimensions
         repository = state.get_repository(collection_name)
         await repository.ensure_collection(collection.dimensions)
-
-        for rp in resolved_paths:
-            if not rp.is_file() and not rp.is_dir():
-                raise ValueError(f'Path not found: {rp}')
 
         embedding_client = state.get_embedding_client(collection)
         result = await indexing_service.index(
@@ -336,6 +319,7 @@ Args:
     path: Filter to files under this path. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
         Accepts a single path string or a list of paths (matches files under ANY).
+        "**" must be standalone — cannot be mixed with concrete paths.
     limit: Maximum number of results to return (1-100).
     search_type: Search strategy:
         - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
@@ -368,17 +352,17 @@ Returns:
     async def search_documents(
         query: str,
         collection_name: str,
-        path: str | Sequence[str] | None = None,
+        path: str | Sequence[str] = '.',
         limit: int = 10,
         search_type: SearchType = 'hybrid',
         file_types: Sequence[FileType] | None = None,
-        exclude_paths: Sequence[str] | None = None,
+        exclude_paths: Sequence[str] = (),
         min_score: float | None = None,
         search_timeout: int | None = None,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> SearchResult:
-        if not ctx:
-            raise ValueError('MCP context required')
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        source_prefixes = to_repo_filter(resolve_search_paths(path_inputs, scope_hint='global scope'))
+        resolved_excludes = resolve_filter_paths(exclude_paths)
 
         # Get collection and services
         collection = state.get_collection(collection_name)
@@ -436,18 +420,6 @@ Returns:
         effective_limit = min(max(limit, 1), 100)
         rerank_candidates = min(effective_limit * 3, 200)
 
-        # Resolve paths (defaults to CWD, "**" means no filter)
-        if path == '**' or (not isinstance(path, str) and path is not None and '**' in path):
-            resolved_paths: Sequence[str] | None = None
-        elif path is None:
-            resolved_paths = [str(Path.cwd())]
-        elif isinstance(path, str):
-            resolved_paths = [str(Path(path).expanduser().resolve())]
-        else:
-            resolved_paths = [str(Path(p).expanduser().resolve()) for p in path]
-
-        resolved_excludes = [str(Path(p).expanduser().resolve()) for p in exclude_paths] if exclude_paths else None
-
         # Build search query
         search_query = SearchQuery(
             search_type=search_type,
@@ -456,7 +428,7 @@ Returns:
             sparse_values=sparse_values,
             limit=rerank_candidates,
             file_types=file_types,
-            source_path_prefixes=resolved_paths,
+            source_path_prefixes=source_prefixes,
             exclude_path_prefixes=resolved_excludes,
         )
 
@@ -488,6 +460,7 @@ Args:
     path: Path to clear. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
         Accepts a single path string or a list of paths (clears all of them).
+        "**" must be standalone — cannot be mixed with concrete paths.
     clear_cache: Also delete cached embeddings for the cleared files.
         Uses a Redis reverse index (decoupled from Qdrant). Next re-index
         will call the embedding API instead of serving from cache.
@@ -507,29 +480,18 @@ Returns:
     )
     async def clear_documents(
         collection_name: str,
-        path: str | Sequence[str] | None = None,
+        path: str | Sequence[str] = '.',
         clear_cache: bool = False,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> ClearResult:
-        if not ctx:
-            raise ValueError('MCP context required')
-
         # Verify collection exists
         collection = state.get_collection(collection_name)
         indexing_service = await state.get_indexing_service(collection_name)
 
         logger.info('Clearing from collection: %s (%s)', collection_name, collection.provider)
 
-        # Normalize path → list[str]
-        path_inputs: Sequence[str]
-        if path is None:
-            path_inputs = [str(Path.cwd())]
-        elif isinstance(path, str):
-            path_inputs = [path]
-        else:
-            path_inputs = path
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        resolved_paths = resolve_search_paths(path_inputs, scope_hint='entire collection')
 
-        resolved_paths = [p if p == '**' else str(Path(p).expanduser().resolve()) for p in path_inputs]
         logger.info('Clearing documents: %s', resolved_paths)
 
         if clear_cache:
@@ -550,6 +512,8 @@ Args:
     collection_name: Name of the collection to list documents from.
     path: Filter to files under this path. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
+        Accepts a single path string or a list of paths (matches files under ANY).
+        "**" must be standalone — cannot be mixed with concrete paths.
     file_type: Filter to this file type (e.g., 'markdown', 'pdf').
     limit: Maximum number of files to return (default 50).
 
@@ -568,30 +532,21 @@ Returns:
     )
     async def list_documents(
         collection_name: str,
-        path: str | None = None,
+        path: str | Sequence[str] = '.',
         file_type: FileType | None = None,
         limit: int = 50,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> Sequence[IndexedFile]:
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         # Verify collection exists and get repository
         state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
 
         logger.debug('Listing documents in collection: %s', collection_name)
 
-        # Resolve path (defaults to CWD, "**" for global)
-        if path == '**':
-            resolved_path = None
-        elif path is None:
-            resolved_path = str(Path.cwd())
-        else:
-            resolved_path = str(Path(path).expanduser().resolve())
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        filter_paths = to_repo_filter(resolve_search_paths(path_inputs, scope_hint='global scope'))
 
         files = await repository.list_indexed_files(
-            path_prefix=resolved_path,
+            path_prefixes=filter_paths,
             file_type=file_type,
             limit=limit,
         )
@@ -608,6 +563,9 @@ Args:
     collection_name: Name of the collection to get info for.
     path: Scope content stats to files under this path. Defaults to current working directory.
         Use "**" for entire collection (no path filter).
+        Accepts a single path string or a list of paths (each file counted once
+        if matched by any prefix).
+        "**" must be standalone — cannot be mixed with concrete paths.
 
 Returns:
     IndexInfo with collection metadata, embedding config, storage stats, and content breakdown."""
@@ -624,28 +582,21 @@ Returns:
     )
     async def get_info(
         collection_name: str,
-        path: str | None = None,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
+        path: str | Sequence[str] = '.',
     ) -> IndexInfo:
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         # Get collection metadata from registry
         collection = state.get_collection(collection_name)
         repository = state.get_repository(collection_name)
 
         logger.debug('Getting info for collection: %s', collection_name)
 
-        # Resolve path (defaults to CWD, "**" for global)
-        if path == '**':
-            resolved_path: str | None = '**'
-            logger.debug('Getting global collection info')
-        elif path is None:
-            resolved_path = str(Path.cwd())
-            logger.debug('Getting info for: %s', resolved_path)
+        path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
+        resolved_paths = resolve_search_paths(path_inputs, scope_hint='global scope')
+        filter_paths = to_repo_filter(resolved_paths)
+        if filter_paths:
+            logger.debug('Getting info for: %s', filter_paths)
         else:
-            resolved_path = str(Path(path).expanduser().resolve())
-            logger.debug('Getting info for: %s', resolved_path)
+            logger.debug('Getting global collection info')
 
         # Build embedding info from collection
         embedding_info = EmbeddingInfo.from_collection(collection)
@@ -655,8 +606,8 @@ Returns:
         if storage is None:
             raise ValueError('Collection not initialized in Qdrant - run index_documents first')
 
-        # Get content stats (scoped by path)
-        content = await repository.get_content_stats(resolved_path)
+        # Get content stats (scoped by paths; empty Sequence = global)
+        content = await repository.get_content_stats(filter_paths)
 
         # Dashboard URL (live check — dashboard can restart on different port)
         dashboard_port = DashboardStateManager().get_dashboard_port()
@@ -673,7 +624,7 @@ Returns:
             embedding=embedding_info,
             storage=storage,
             content=content,
-            path=resolved_path,
+            paths=resolved_paths,
             dashboard_url=dashboard_url,
         )
 
@@ -700,7 +651,6 @@ Returns:
         provider: EmbeddingProvider,
         model: str | None = None,
         dimensions: int | None = None,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> Collection:
         """Create a new document collection.
 
@@ -717,9 +667,6 @@ Returns:
         Returns:
             The created Collection with name, provider, model, and dimensions.
         """
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         # Validate name
         if name == '**':
             raise ValueError("Collection name '**' is reserved")
@@ -745,17 +692,12 @@ Returns:
             openWorldHint=False,
         ),
     )
-    async def list_collections(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
-    ) -> Sequence[Collection]:
+    async def list_collections() -> Sequence[Collection]:
         """List all document collections.
 
         Returns:
             List of all collections with their names, providers, and descriptions.
         """
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         collections = state.collection_registry.list_collections()
 
         return collections
@@ -771,7 +713,6 @@ Returns:
     )
     async def delete_collection(
         name: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any] | None = None,
     ) -> bool:
         """Delete a document collection.
 
@@ -783,9 +724,6 @@ Returns:
         Returns:
             True if deleted successfully.
         """
-        if ctx is None:
-            raise ValueError('MCP context required')
-
         # Verify collection exists and delete from Qdrant
         state.get_collection(name)
         await state.qdrant_client.delete_collection(name)

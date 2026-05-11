@@ -69,7 +69,6 @@ def register_tools(service: PythonInterpreterService) -> None:
     )
     async def execute(
         code: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         interpreter: str = 'builtin',
     ) -> str:
         """Execute Python code in persistent scope.
@@ -128,7 +127,6 @@ def register_tools(service: PythonInterpreterService) -> None:
     async def register_interpreter(
         name: str,
         python_path: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
         startup_script: str | None = None,
@@ -159,7 +157,6 @@ def register_tools(service: PythonInterpreterService) -> None:
     )
     async def stop_interpreter(
         name: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         remove: bool = False,
     ) -> str:
         """Stop an interpreter subprocess.
@@ -193,9 +190,7 @@ def register_tools(service: PythonInterpreterService) -> None:
             openWorldHint=False,
         ),
     )
-    async def list_interpreters(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
-    ) -> Sequence[InterpreterInfo]:
+    async def list_interpreters() -> Sequence[InterpreterInfo]:
         return await service.list_interpreters()
 
 

@@ -126,8 +126,8 @@ class SearchQuery(StrictModel):
     score_threshold: float | None = None
     # Optional filters
     file_types: Sequence[FileType] | None = None
-    source_path_prefixes: Sequence[str] | None = None
-    exclude_path_prefixes: Sequence[str] | None = None
+    source_path_prefixes: Sequence[str] = ()
+    exclude_path_prefixes: Sequence[str] = ()
 
 
 class SearchHit(StrictModel):
@@ -249,7 +249,7 @@ class IndexInfo(StrictModel):
     embedding: EmbeddingInfo
     storage: StorageStats
     content: ContentStats
-    path: str | None = None  # Scope used for content stats (None = CWD)
+    paths: Sequence[str]
     dashboard_url: str | None = None
 
 

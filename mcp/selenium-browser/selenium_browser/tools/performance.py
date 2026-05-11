@@ -4,9 +4,7 @@ __all__ = [
     'register_tools',
 ]
 
-from typing import Any
-
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
@@ -29,14 +27,13 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=True,
         ),
     )
-    async def capture_web_vitals(ctx: Context[Any, Any, Any], timeout_ms: int = 5000) -> CoreWebVitals:
+    async def capture_web_vitals(timeout_ms: int = 5000) -> CoreWebVitals:
         """Capture Core Web Vitals (LCP, CLS, INP, FCP, TTFB) for current page.
 
         Uses JavaScript Performance APIs to collect metrics post-navigation.
         Must be called after navigate().
 
         Args:
-            ctx: MCP context
             timeout_ms: Max wait time for metrics in milliseconds (default 5000)
 
         Returns:
@@ -64,7 +61,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         ),
     )
     async def get_resource_timings(
-        ctx: Context[Any, Any, Any],
         clear_resource_timing_buffer: bool = False,
         min_duration_ms: int = 0,
     ) -> NetworkCapture:
@@ -100,7 +96,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         ),
     )
     async def export_har(
-        ctx: Context[Any, Any, Any],
         filename: str,
         include_response_bodies: bool = False,
         max_body_size_mb: int = 10,
@@ -139,7 +134,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         ),
     )
     async def get_console_logs(
-        ctx: Context[Any, Any, Any],
         level_filter: ConsoleLogLevelFilter | None = None,
         pattern: str | None = None,
     ) -> ConsoleLogsResult:
