@@ -214,7 +214,7 @@ def register_tools(state: ServerState) -> None:
                 output_path='/path/to/archive.json.zst',
                 format='zst'
             )
-        """  # Create storage backend
+        """
         if storage_backend == 'local':
             if output_path:
                 # User-specified path - use parent directory
