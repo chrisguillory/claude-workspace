@@ -25,7 +25,7 @@ import playwright.async_api
 import playwright_stealth.stealth
 import yaml
 from cc_lib.schemas.base import ClosedModel
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 """
@@ -347,7 +347,6 @@ async def navigate(
 @mcp.tool(annotations=ToolAnnotations(title='Get Page Content', readOnlyHint=True, openWorldHint=True))
 async def get_page_content(
     format: Literal['text', 'html', 'markdown'],
-    ctx: Context[Any, Any, Any],
     selector: str | None = None,
     limit: int | None = None,
 ) -> str:
@@ -358,7 +357,6 @@ async def get_page_content(
             - "text": Plain text (recommended)
             - "html": Raw HTML (large, use sparingly)
             - "markdown": Not yet implemented
-        ctx: MCP context
         selector: CSS selector to limit extraction (e.g., 'img', 'main', '.content')
             When provided, returns matching elements instead of full page
         limit: Max number of elements to return when using selector (None = all matches)
@@ -400,12 +398,11 @@ async def get_page_content(
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Take Screenshot', readOnlyHint=True))
-async def screenshot(filename: str, ctx: Context[Any, Any, Any]) -> str:
+async def screenshot(filename: str) -> str:
     """Take full-page screenshot. Saves to temp directory with auto-cleanup on exit.
 
     Args:
         filename: Name for screenshot file (e.g., "homepage.png")
-        ctx: MCP context
 
     Returns:
         Absolute path to temp file (use Read tool to view image)
@@ -513,7 +510,6 @@ async def get_interactive_elements(
     text_contains: str | None,
     tag_filter: Sequence[str] | None,
     limit: int | None,
-    ctx: Context[Any, Any, Any],
 ) -> Sequence[InteractiveElement]:
     """Get clickable elements with optional filters for targeted extraction.
 
@@ -525,7 +521,6 @@ async def get_interactive_elements(
         text_contains: Filter by text content (case-insensitive, None = no filter)
         tag_filter: Only specific tags (e.g., ["button", "a"], None = all tags)
         limit: Max results to return (None = unlimited)
-        ctx: MCP context
 
     Returns:
         list[InteractiveElement]: Filtered interactive elements with selectors for clicking
@@ -602,13 +597,12 @@ async def get_interactive_elements(
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Get Focusable Elements', readOnlyHint=True))
-async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any]) -> Sequence[FocusableElement]:
+async def get_focusable_elements(only_tabbable: bool) -> Sequence[FocusableElement]:
     """Get keyboard-navigable elements sorted by tab order.
 
     Args:
         only_tabbable: True = Tab key only (tabindex >= 0)
                       False = includes programmatic focus (tabindex >= -1)
-        ctx: MCP context
 
     Returns:
         list[FocusableElement]: Sorted by tab order, each with tag, text, selector, tab_index
@@ -667,7 +661,6 @@ async def get_focusable_elements(only_tabbable: bool, ctx: Context[Any, Any, Any
 @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))
 async def click(
     selector: str,
-    ctx: Context[Any, Any, Any],
     wait_for_network: bool = False,
     network_timeout: int = 10000,
 ) -> None:
@@ -675,7 +668,6 @@ async def click(
 
     Args:
         selector: CSS selector from get_interactive_elements() or get_focusable_elements()
-        ctx: MCP context
         wait_for_network: If True, wait for network idle after clicking (default False)
         network_timeout: Timeout in ms for network idle wait (default 10000ms)
 
@@ -697,13 +689,12 @@ async def click(
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Wait for Network Idle', readOnlyHint=True, idempotentHint=True))
-async def wait_for_network_idle(ctx: Context[Any, Any, Any], timeout: int = 10000) -> None:
+async def wait_for_network_idle(timeout: int = 10000) -> None:
     """Wait for network activity to settle after clicks or dynamic content loads.
 
     Use after click() if page triggers AJAX/fetch requests. Default: 10000ms (10 sec).
 
     Args:
-        ctx: MCP context
         timeout: Timeout in milliseconds (default 10000ms)
     """
     _, _, page = await get_browser()
@@ -716,7 +707,7 @@ async def wait_for_network_idle(ctx: Context[Any, Any, Any], timeout: int = 1000
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
-async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
+async def press_key(key: str) -> None:
     """Press a keyboard key or key combination.
 
     Args:
@@ -729,7 +720,6 @@ async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
                 'Control+A' (Ctrl+A), 'Meta+V' (Cmd+V on Mac),
                 'Control+Shift+T', 'Alt+F4'
             - Modifiers: 'Control', 'Shift', 'Alt', 'Meta'
-        ctx: MCP context
 
     Examples:
         - press_key('Escape') - Close modals
@@ -750,12 +740,11 @@ async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
 
 
 @mcp.tool(annotations=ToolAnnotations(title='Type Text', destructiveHint=False, idempotentHint=False))
-async def type_text(text: str, ctx: Context[Any, Any, Any], delay_ms: int = 0) -> None:
+async def type_text(text: str, delay_ms: int = 0) -> None:
     """Type text character by character with optional delay between keystrokes.
 
     Args:
         text: Text to type
-        ctx: MCP context
         delay_ms: Optional delay between keystrokes in milliseconds (default 0)
 
     Note: For simple form filling, prefer using page.fill() via other tools as it's faster.
