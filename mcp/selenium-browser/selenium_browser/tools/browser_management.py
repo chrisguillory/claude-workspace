@@ -4,9 +4,7 @@ __all__ = [
     'register_tools',
 ]
 
-from typing import Any
-
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
@@ -27,7 +25,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=True,
         ),
     )
-    async def resize_window(width: int, height: int, ctx: Context[Any, Any, Any]) -> ResizeWindowResult:
+    async def resize_window(width: int, height: int) -> ResizeWindowResult:
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
@@ -85,7 +83,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=False,
         ),
     )
-    async def execute_javascript(code: str, ctx: Context[Any, Any, Any], timeout_ms: int = 30000) -> JavaScriptResult:
+    async def execute_javascript(code: str, timeout_ms: int = 30000) -> JavaScriptResult:
         """Execute JavaScript in the browser and return the result.
 
         Evaluates a JavaScript expression in the current page context.
@@ -149,7 +147,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.execute_javascript(code=code, timeout_ms=timeout_ms)
 
     @mcp.tool(annotations=ToolAnnotations(title='Take Screenshot', readOnlyHint=True))
-    async def screenshot(filename: str, ctx: Context[Any, Any, Any], full_page: bool = False) -> str:
+    async def screenshot(filename: str, full_page: bool = False) -> str:
         """Capture visual screenshot for verification and debugging.
 
         Use cases:
@@ -160,7 +158,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
 
         Args:
             filename: Output filename (e.g., "checkout-page.png")
-            ctx: MCP context
             full_page: True for entire scrollable page, False for viewport only
 
         Returns:

@@ -4,9 +4,7 @@ __all__ = [
     'register_tools',
 ]
 
-from typing import Any
-
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
@@ -21,14 +19,13 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     """Register waiting tools."""
 
     @mcp.tool(annotations=ToolAnnotations(title='Wait for Network Idle', readOnlyHint=True, idempotentHint=True))
-    async def wait_for_network_idle(ctx: Context[Any, Any, Any], timeout: int = 10000) -> None:
+    async def wait_for_network_idle(timeout: int = 10000) -> None:
         """Wait for network activity to settle after clicks or dynamic content loads.
 
         Uses JavaScript instrumentation to monitor Fetch and XMLHttpRequest activity.
         Waits for no active requests and 500ms of idle time.
 
         Args:
-            ctx: MCP context
             timeout: Timeout in milliseconds (default 10000ms)
 
         Note: Uses JavaScript instrumentation of Fetch/XHR APIs to track network activity.
@@ -45,7 +42,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     )
     async def wait_for_selector(
         css_selector: str,
-        ctx: Context[Any, Any, Any],
         state: WaitForSelectorState = 'visible',
         timeout: int = 30000,
     ) -> WaitForSelectorResult:
@@ -87,7 +83,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=True,
         ),
     )
-    async def sleep(duration_ms: int, ctx: Context[Any, Any, Any], reason: str | None = None) -> SleepResult:
+    async def sleep(duration_ms: int, reason: str | None = None) -> SleepResult:
         """Pause execution for a fixed duration. Use sparingly.
 
         This is a simple time-based delay. For most automation scenarios,

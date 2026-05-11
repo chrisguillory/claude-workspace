@@ -5,9 +5,8 @@ __all__ = [
 ]
 
 from collections.abc import Sequence
-from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
@@ -31,7 +30,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     async def save_profile_state(
         filename: str,
         include_indexeddb: bool = False,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> SaveProfileStateResult:
         """Export browser storage state to Playwright-compatible JSON for session persistence.
 
@@ -98,7 +96,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         include_indexeddb: bool = False,
         origins_filter: Sequence[str] | None = None,
         live_session_storage_via_applescript: bool = False,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> ChromeProfileStateExportResult:
         """Export profile state from Chrome's profile files for use in automation.
 
@@ -160,14 +157,12 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     @mcp.tool(annotations=ToolAnnotations(title='List Chrome Profiles', readOnlyHint=True, idempotentHint=True))
     async def list_chrome_profiles(
         verbose: bool = False,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> ChromeProfilesResult:
         """List all Chrome profiles with metadata.
 
         Args:
             verbose: If True, include all metadata fields.
                      If False (default), show only essential fields.
-            ctx: MCP context (optional, for logging)
 
         Returns:
             ChromeProfilesResult with profiles list, count, and default profile

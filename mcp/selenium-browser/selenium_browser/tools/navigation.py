@@ -5,9 +5,8 @@ __all__ = [
 ]
 
 from collections.abc import Sequence
-from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import (
@@ -34,7 +33,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
         browser: Browser | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
 
@@ -121,7 +119,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> NavigationResult:
         """Launch fresh browser with imported profile state and navigate.
 
@@ -198,7 +195,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> NavigationResult:
         """Launch fresh browser using a persistent --user-data-dir and navigate.
 
