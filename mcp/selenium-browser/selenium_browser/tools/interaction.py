@@ -4,10 +4,8 @@ __all__ = [
     'register_tools',
 ]
 
-from typing import Any
-
 from cc_lib.types import JsonObject
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..models import ScrollBehavior, ScrollDirection, ScrollPosition
@@ -20,7 +18,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
     @mcp.tool(annotations=ToolAnnotations(title='Click Element', destructiveHint=False, idempotentHint=False))
     async def click(
         css_selector: str,
-        ctx: Context[Any, Any, Any],
         wait_for_network: bool = False,
         network_timeout: int = 10000,
     ) -> None:
@@ -51,7 +48,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=True,
         ),
     )
-    async def hover(css_selector: str, ctx: Context[Any, Any, Any], duration_ms: int = 0) -> None:
+    async def hover(css_selector: str, duration_ms: int = 0) -> None:
         """Move mouse over an element to trigger hover states.
 
         Essential for dropdown menus, tooltips, and hover-triggered UI.
@@ -74,7 +71,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.hover(css_selector=css_selector, duration_ms=duration_ms)
 
     @mcp.tool(annotations=ToolAnnotations(title='Press Keyboard Key', destructiveHint=False, idempotentHint=False))
-    async def press_key(key: str, ctx: Context[Any, Any, Any]) -> None:
+    async def press_key(key: str) -> None:
         """Press a keyboard key or key combination.
 
         Args:
@@ -84,7 +81,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
                     'ARROW_UP', 'ARROW_DOWN', 'ARROW_LEFT', 'ARROW_RIGHT'
                 - Special keys: 'F1' through 'F12', 'HOME', 'END', 'PAGE_UP', 'PAGE_DOWN'
                 - Modifiers: Use + for combinations like 'CONTROL+A', 'META+V'
-            ctx: MCP context
 
         Examples:
             - press_key('ESCAPE') - Close modals
@@ -99,12 +95,11 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.press_key(key=key)
 
     @mcp.tool(annotations=ToolAnnotations(title='Type Text', destructiveHint=False, idempotentHint=False))
-    async def type_text(text: str, ctx: Context[Any, Any, Any], delay_ms: int = 0) -> None:
+    async def type_text(text: str, delay_ms: int = 0) -> None:
         """Type text character by character with optional delay between keystrokes.
 
         Args:
             text: Text to type
-            ctx: MCP context
             delay_ms: Optional delay between keystrokes in milliseconds (default 0)
 
         Note: For simple form filling, prefer using element.send_keys() directly as it's faster.
@@ -124,7 +119,6 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         ),
     )
     async def scroll(
-        ctx: Context[Any, Any, Any],
         direction: ScrollDirection | None = None,
         scroll_amount: int = 3,
         css_selector: str | None = None,

@@ -56,7 +56,6 @@ def register_tools(service: IMessageService) -> None:
         ),
     )
     async def list_chats(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         limit: int = 20,
         offset: int = 0,
         is_group: bool | None = None,
@@ -90,7 +89,6 @@ def register_tools(service: IMessageService) -> None:
         ),
     )
     async def get_messages(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         handle: str | None = None,
         chat_id: int | None = None,
         limit: int = 50,
@@ -143,7 +141,6 @@ def register_tools(service: IMessageService) -> None:
     )
     async def search_messages(
         query: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         limit: int = 25,
         offset: int = 0,
         handle: str | None = None,
@@ -188,7 +185,6 @@ def register_tools(service: IMessageService) -> None:
         ),
     )
     async def list_attachments(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         handle: str | None = None,
         chat_id: int | None = None,
         limit: int = 20,
@@ -236,7 +232,6 @@ def register_tools(service: IMessageService) -> None:
     async def get_attachment(
         attachment_id: int,
         mode: AttachmentMode,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
     ) -> AttachmentView | AttachmentSave:
         """Retrieve an attachment by ID.
 
@@ -260,7 +255,6 @@ def register_tools(service: IMessageService) -> None:
     )
     async def send_message(
         confirm: bool,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         text: str = '',
         handle: str | None = None,
         chat_guid: str | None = None,
@@ -315,7 +309,6 @@ def register_tools(service: IMessageService) -> None:
     )
     async def lookup_contact(
         query: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         limit: int = 10,
         source: str | None = None,
         match_mode: ContactMatchMode = 'exact_or_substring',
@@ -331,9 +324,7 @@ def register_tools(service: IMessageService) -> None:
             openWorldHint=False,
         ),
     )
-    async def get_unread(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
-    ) -> Sequence[Message]:
+    async def get_unread() -> Sequence[Message]:
         """Get unread incoming messages across all chats.
 
         Returns all unread messages (is_read=0, is_from_me=0), excluding
@@ -350,9 +341,7 @@ def register_tools(service: IMessageService) -> None:
             openWorldHint=False,
         ),
     )
-    async def diagnose(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
-    ) -> DiagnosticResult:
+    async def diagnose() -> DiagnosticResult:
         """Check Full Disk Access, DB connectivity, contacts, macOS version.
 
         Run this first to verify imessage-kit is properly configured.
@@ -371,7 +360,6 @@ def register_tools(service: IMessageService) -> None:
     )
     async def get_chat_thread(
         thread_originator_guid: str,
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         limit: int = 50,
     ) -> Sequence[Message]:
         """Get inline reply thread within a chat.
@@ -395,7 +383,6 @@ def register_tools(service: IMessageService) -> None:
         ),
     )
     async def get_chat_info(
-        ctx: mcp.server.fastmcp.Context[typing.Any, typing.Any, typing.Any],
         handle: str | None = None,
         chat_id: int | None = None,
     ) -> Chat:

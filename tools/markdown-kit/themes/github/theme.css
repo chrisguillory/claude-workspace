@@ -549,11 +549,52 @@ p > img:only-child {
     margin: 0.3em 0;
 }
 
-/* Footnote back-reference arrow */
-.footnotes a[data-footnote-backref] {
+/* === ABBREVIATIONS === */
+
+abbr[title] {
+    position: relative;
+    border-bottom: 1px dotted #d1242f;
     text-decoration: none;
+    cursor: help;
+}
+abbr[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1f2328;
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 6px;
     font-size: 0.85em;
-    margin-left: 0.25em;
+    font-weight: normal;
+    font-style: normal;
+    white-space: nowrap;
+    z-index: 100;
+    box-shadow: 0 3px 6px rgba(31, 35, 40, 0.15);
+    pointer-events: none;
+}
+abbr:not([title]) {
+    border-bottom: 1px dotted #1f2328;
+    cursor: help;
+}
+
+/* Footnote back-reference arrow — pill-styled for visibility */
+.footnotes a[data-footnote-backref] {
+    display: inline-block;
+    text-decoration: none;
+    font-size: 1em;
+    margin-left: 0.5em;
+    padding: 0.05em 0.5em;
+    background: #f6f8fa;
+    color: #0969da;
+    border-radius: 6px;
+    transition: background-color 0.15s ease;
+}
+.footnotes a[data-footnote-backref]:hover {
+    background: #d0d7de;
+    text-decoration: none;
 }
 
 /* Footnote reference superscript in body text */

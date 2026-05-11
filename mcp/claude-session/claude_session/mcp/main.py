@@ -22,10 +22,10 @@ import tempfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 
 from claude_session.exceptions import RunningSessionDeletionError, RunningSessionMoveError
 from claude_session.schemas.operations.archive import ArchiveMetadata
@@ -189,7 +189,6 @@ def register_tools(state: ServerState) -> None:
         output_path: str | None = None,
         format: ArchiveFormat | None = None,
         storage_backend: Literal['local'] = 'local',
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> ArchiveMetadata:
         """Save current Claude Code session to archive.
 
@@ -216,10 +215,6 @@ def register_tools(state: ServerState) -> None:
                 format='zst'
             )
         """
-        if ctx is None:
-            raise RuntimeError('Context is required - must be called via FastMCP')
-
-        # Create storage backend
         if storage_backend == 'local':
             if output_path:
                 # User-specified path - use parent directory
@@ -241,7 +236,6 @@ def register_tools(state: ServerState) -> None:
     async def restore_session(
         archive_path: str,
         translate_paths: bool = True,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> RestoreResult:
         """Restore a saved session archive with a new session ID.
 
@@ -271,9 +265,6 @@ def register_tools(state: ServerState) -> None:
             After restoration, use `claude --resume {new_session_id}` in CLI
             to continue the conversation with the restored history.
         """
-        if ctx is None:
-            raise RuntimeError('Context is required - must be called via FastMCP')
-
         # Create restore service for current project
         restore_service = SessionRestoreService(state.project_path)
 
@@ -293,7 +284,6 @@ def register_tools(state: ServerState) -> None:
         source_session_id: str | None = None,
         translate_paths: bool = True,
         source_project: str | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> RestoreResult:
         """Clone a session directly without creating an archive file.
 
@@ -331,9 +321,6 @@ def register_tools(state: ServerState) -> None:
             After cloning, use `claude --resume {new_session_id}` in CLI
             to continue the conversation with the cloned history.
         """
-        if ctx is None:
-            raise RuntimeError('Context is required - must be called via FastMCP')
-
         # Default to current session if not specified
         target_id = source_session_id or state.session_id
 
@@ -362,7 +349,6 @@ def register_tools(state: ServerState) -> None:
         dry_run: bool = False,
         source_project: str | None = None,
         delete_cross_session_artifacts: bool | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> DeleteResult:
         """Delete session artifacts with auto-backup.
 
@@ -427,9 +413,6 @@ def register_tools(state: ServerState) -> None:
             To undo a delete, run:
             claude-session restore --in-place <backup_path>
         """
-        if ctx is None:
-            raise RuntimeError('Context is required - must be called via FastMCP')
-
         # Resolve prefix to full session ID
         info_service = SessionInfoService()
         project_filter = _encode_project_filter(source_project)
@@ -506,7 +489,6 @@ def register_tools(state: ServerState) -> None:
         terminate_running: bool = False,
         no_backup: bool = False,
         dry_run: bool = False,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> MoveResult:
         """Move a session from one project to another.
 
@@ -554,9 +536,6 @@ def register_tools(state: ServerState) -> None:
             # Move a running session
             result = await move_session('019b5232-...', terminate_running=True)
         """
-        if ctx is None:
-            raise RuntimeError('Context is required - must be called via FastMCP')
-
         # Default target to current project
         target_path = Path(target_project) if target_project else state.project_path
 
@@ -619,7 +598,6 @@ def register_tools(state: ServerState) -> None:
     async def session_lineage(
         session_id: str | None = None,
         source_project: str | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> LineageTree | None:
         """Get lineage tree for a session.
 
@@ -643,9 +621,6 @@ def register_tools(state: ServerState) -> None:
             # Get lineage tree for specific session
             result = await session_lineage('019b5232')
         """
-        if ctx is None:
-            raise RuntimeError('Context is required - must be called via FastMCP')
-
         target_id_or_prefix = session_id or state.session_id
 
         # Resolve prefix to full session ID and validate session exists
@@ -670,7 +645,6 @@ def register_tools(state: ServerState) -> None:
     async def get_session_info(
         session_id: str | None = None,
         source_project: str | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> SessionContext:
         """Get comprehensive information about a session.
 
@@ -702,9 +676,6 @@ def register_tools(state: ServerState) -> None:
             # Get info for another session
             info = await get_session_info('019b5232')
         """
-        if ctx is None:
-            raise RuntimeError('Context is required - must be called via FastMCP')
-
         # Build current session context for enrichment
         current_context = CurrentSessionContext(
             session_id=state.session_id,
@@ -728,7 +699,6 @@ def register_tools(state: ServerState) -> None:
         visibility: GistVisibility = 'secret',
         description: str = 'Claude Code Session Archive',
         source_project: str | None = None,
-        ctx: Context[Any, Any, Any] | None = None,
     ) -> GistArchiveResult:
         """Save a session to GitHub Gist.
 
@@ -765,9 +735,6 @@ def register_tools(state: ServerState) -> None:
             # Update an existing gist
             result = await save_session_to_gist(gist_id='abc123xyz')
         """
-        if ctx is None:
-            raise RuntimeError('Context is required - must be called via FastMCP')
-
         # Get GitHub token
         token = _get_github_token()
         if not token:
