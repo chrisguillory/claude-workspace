@@ -184,7 +184,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.scroll(
             direction=direction,
             scroll_amount=scroll_amount,
-            css_selector=css_selector,
+            css_selector=_validate_css_selector(css_selector) if css_selector else None,
             behavior=behavior,
             position=position,
         )

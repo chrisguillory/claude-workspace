@@ -1340,7 +1340,7 @@ class BrowserService:
         self,
         direction: ScrollDirection | None = None,
         scroll_amount: int = 3,
-        css_selector: str | None = None,
+        css_selector: CssSelector | None = None,
         behavior: ScrollBehavior = 'instant',
         position: ScrollPosition | None = None,
     ) -> JsonObject:
@@ -1399,7 +1399,6 @@ class BrowserService:
             3. get_aria_snapshot('body') - see updated content
         """
         driver = await self.get_browser()
-        validated_selector = _validate_css_selector(css_selector) if css_selector else None
         logger.info(
             'Scroll: direction=%s, position=%s, selector=%s, amount=%s, behavior=%s',
             direction,
@@ -1414,7 +1413,7 @@ class BrowserService:
                 driver,
                 direction=direction,
                 scroll_amount=scroll_amount,
-                css_selector=validated_selector,
+                css_selector=css_selector,
                 behavior=behavior,
                 position=position,
             )

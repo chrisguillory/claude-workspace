@@ -43,7 +43,13 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
-from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
+from document_search.search_path import (
+    ResolvedPaths,
+    resolve_filter_paths,
+    resolve_index_paths,
+    resolve_search_paths,
+    to_repo_filter,
+)
 from document_search.services.embedding import FileCacheIndex
 
 logger = logging.getLogger(__name__)
@@ -552,7 +558,7 @@ async def _list_async(
 
 async def _clear_async(
     collection_name: str,
-    paths: Sequence[str],
+    paths: ResolvedPaths,
     clear_cache: bool,
     format: OutputFormat,
 ) -> None:
