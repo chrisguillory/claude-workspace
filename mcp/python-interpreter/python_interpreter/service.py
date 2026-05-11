@@ -17,9 +17,9 @@ import tempfile
 import typing
 from collections.abc import Mapping, Sequence
 
+from cc_lib.claude_context import ClaudeContext
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir, humanize_seconds
 
-from python_interpreter.discovery import discover_session_id, find_claude_context
 from python_interpreter.jetbrains import discover_run_configs, discover_sdk_entries
 from python_interpreter.manager import ExternalInterpreterManager, InterpreterConfig
 from python_interpreter.models import (
@@ -71,18 +71,14 @@ class ServerState:
         """Factory method to create and initialize server state - fails fast if anything goes wrong."""
         started_at = datetime.datetime.now(datetime.UTC)
 
-        # Find Claude context (PID, project directory) by walking process tree
-        claude_context = find_claude_context()
+        claude_context = ClaudeContext.from_pid_walk()
         print(f'Claude context: PID={claude_context.claude_pid}, Project={claude_context.project_dir}', file=sys.stderr)
-
-        # Discover session ID from claude-workspace sessions.json
-        session_id = discover_session_id(claude_context.claude_pid)
-        print(f'Discovered session ID: {session_id}', file=sys.stderr, flush=True)
+        print(f'Discovered session ID: {claude_context.session_id}', file=sys.stderr, flush=True)
 
         # Compute transcript path using Claude Code's path encoding convention
         encoded_project_path = encode_project_path(claude_context.project_dir)
         transcript_path = (
-            get_claude_config_home_dir() / 'projects' / encoded_project_path / f'{session_id}.jsonl'
+            get_claude_config_home_dir() / 'projects' / encoded_project_path / f'{claude_context.session_id}.jsonl'
         ).resolve(strict=False)
 
         # Initialize temp directory for large outputs
@@ -90,11 +86,12 @@ class ServerState:
         output_dir = pathlib.Path(temp_dir.name)
         print(f'Temp directory for large outputs: {output_dir}', file=sys.stderr)
 
+        socket_path = pathlib.Path(f'/tmp/python-interpreter-{claude_context.claude_pid}.sock')
         # Remove stale socket if it exists
-        if claude_context.socket_path.exists():
-            claude_context.socket_path.unlink()
+        if socket_path.exists():
+            socket_path.unlink()
 
-        print(f'Unix socket path: {claude_context.socket_path}', file=sys.stderr)
+        print(f'Unix socket path: {socket_path}', file=sys.stderr)
 
         # Initialize external interpreter manager
         interpreter_manager = ExternalInterpreterManager(claude_context.project_dir)
@@ -127,10 +124,10 @@ class ServerState:
                 )
 
         return cls(
-            session_id=session_id,
+            session_id=claude_context.session_id,
             started_at=started_at,
             project_dir=claude_context.project_dir,
-            socket_path=claude_context.socket_path,
+            socket_path=socket_path,
             transcript_path=transcript_path,
             output_dir=output_dir,
             temp_dir=temp_dir,
