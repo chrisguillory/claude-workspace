@@ -8,6 +8,7 @@ argv.
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import logging
 import os
 import shutil
@@ -51,7 +52,7 @@ from claude_remote_bash.protocol import read_message, write_message
 
 logger = logging.getLogger(__name__)
 
-VERSION = '0.1.0'
+VERSION = importlib.metadata.version('claude-remote-bash')
 LAUNCHD_LABEL = 'com.claude-remote-bash.daemon'
 
 error_boundary = ErrorBoundary(exit_code=1)

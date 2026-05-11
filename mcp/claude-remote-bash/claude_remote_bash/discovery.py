@@ -47,7 +47,7 @@ async def register_service(
     port: int,
     *,
     alias: str,
-    version: str = '0.1.0',
+    version: str,
 ) -> tuple[AsyncZeroconf, AsyncServiceInfo]:
     """Register this daemon as a mDNS service.
 
