@@ -54,7 +54,7 @@ from document_search.schemas.indexing import (
 from document_search.schemas.tracing import PipelineTimingReport, QueueDepthSample, StageTimingReport
 from document_search.schemas.vectors import ClearResult
 from document_search.services.chunking import ChunkingService
-from document_search.services.embedding import EmbeddingService
+from document_search.services.embedding import EmbedCache, EmbeddingService
 from document_search.services.pdf_extraction import EncryptedPDFError
 from document_search.services.sparse_embedding import SparseEmbeddingService, SparseVector
 from document_search.services.tracing import PipelineTracer
@@ -1049,10 +1049,7 @@ class IndexingService:
 
                     # Pre-compute cache keys from ALL chunk texts (avoids
                     # carrying full text strings through the pipeline).
-                    all_cache_keys = [
-                        (self._cache_key_prefix + hashlib.sha256(c.text.encode()).hexdigest()[:16]).encode()
-                        for c in chunks
-                    ]
+                    all_cache_keys = [EmbedCache.key_for_text(self._cache_key_prefix, c.text).encode() for c in chunks]
 
                     tracer.record(file_key, 'chunk', 'completed')
                     tracer.record(file_key, 'embed', 'queued')

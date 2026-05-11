@@ -18,6 +18,7 @@ import hashlib
 import logging
 import time
 from collections.abc import Sequence
+from typing import Final, NewType
 
 import numpy as np
 from cc_lib.batch_loader import GenericBatchLoader
@@ -37,6 +38,15 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+# Brand returned by ``CacheLoader.cache_key``: the Redis key for a single
+# cached embedding. Required by Redis ops that read/write the embedding cache.
+EmbedCacheKey = NewType('EmbedCacheKey', str)
+
+# Brand returned by ``FileCacheIndex.key``: the Redis key for the reverse
+# index that tracks which cache entries belong to a given file path.
+FileCacheIndexKey = NewType('FileCacheIndexKey', str)
 
 
 class EmbeddingService:
@@ -245,6 +255,55 @@ CACHE_DEFAULTS = CacheConfig()
 ADAPTIVE_BATCH_DEFAULTS = AdaptiveBatchConfig()
 
 
+class FileCacheIndex:
+    """Redis key format for the per-file embedding cache index.
+
+    The reverse index maps a source file path to the set of ``EmbedCacheKey``
+    values for the embeddings of its chunks, so a cache invalidation can
+    locate every entry tied to a file (or directory of files) by SCAN glob.
+    """
+
+    PREFIX: Final = 'embed-idx:file:'
+
+    @staticmethod
+    def key(file_path: str) -> FileCacheIndexKey:
+        """Index key for a single file."""
+        return FileCacheIndexKey(f'{FileCacheIndex.PREFIX}{file_path}')
+
+    @staticmethod
+    def glob(path_prefix: str = '') -> str:
+        """SCAN glob for index keys under a directory prefix.
+
+        Empty ``path_prefix`` returns a match-all glob. Non-empty prefixes
+        get a trailing ``'/'`` so ``/dir1*`` does not match ``/dir10/...``.
+        """
+        if path_prefix and not path_prefix.endswith('/'):
+            path_prefix += '/'
+        return f'{FileCacheIndex.PREFIX}{path_prefix}*'
+
+
+class EmbedCache:
+    """Redis key format for individual embedding cache entries.
+
+    Keys are content-addressed by sha256 of the chunk text, scoped by
+    model + dimensions so different embedding models can coexist in the
+    same Redis instance.
+    """
+
+    TEXT_HASH_LENGTH: Final = 16
+
+    @staticmethod
+    def key_for_text(prefix: str, text: str) -> EmbedCacheKey:
+        """Cache key for a chunk of text under the given prefix.
+
+        ``prefix`` is the ``embed:{model}:{dims}:document:`` portion produced
+        by ``CacheLoader.cache_key_prefix``; the suffix is the truncated
+        sha256 of ``text``.
+        """
+        text_hash = hashlib.sha256(text.encode()).hexdigest()[: EmbedCache.TEXT_HASH_LENGTH]
+        return EmbedCacheKey(f'{prefix}{text_hash}')
+
+
 class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
     """Batch cache lookups with miss forwarding.
 
@@ -299,20 +358,19 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
         """
         return f'embed:{self._model}:{self._dimensions}:document:'
 
-    def cache_key(self, text: str) -> str:
-        """Generate cache key for a text.
+    def cache_key(self, text: str) -> EmbedCacheKey:
+        """Cache key for a text, content-addressed under the loader's prefix.
 
-        Key format: embed:{model}:{dims}:document:{sha256[:16]}
-        Content-addressed for cross-file deduplication.
+        Cross-file deduplication: two chunks with identical text map to the
+        same key regardless of source file.
         """
-        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
-        return f'embed:{self._model}:{self._dimensions}:document:{text_hash}'
+        return EmbedCache.key_for_text(self.cache_key_prefix, text)
 
     # ── Reverse index: file path → cache keys ───────────────────
 
     async def submit_file_index(self, file_path: str, texts: Sequence[str]) -> None:
         """Fire-and-forget reverse index update via batcher."""
-        index_key = self._index_key(file_path)
+        index_key = FileCacheIndex.key(file_path)
         cache_keys = tuple(self.cache_key(t).encode() for t in texts) if texts else ()
         await self._index_write_batcher.submit((index_key, cache_keys))
 
@@ -321,12 +379,12 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
 
         Avoids re-hashing texts when the caller already computed keys.
         """
-        index_key = self._index_key(file_path)
+        index_key = FileCacheIndex.key(file_path)
         await self._index_write_batcher.submit((index_key, tuple(cache_keys)))
 
     async def refresh_file_index_ttl(self, file_path: str) -> None:
         """Refresh TTL on an existing reverse index entry (no content change)."""
-        index_key = self._index_key(file_path)
+        index_key = FileCacheIndex.key(file_path)
         await self._redis.expire(index_key, CACHE_DEFAULTS.ttl_seconds)
 
     async def update_file_index(self, file_path: str, texts: Sequence[str]) -> None:
@@ -334,7 +392,7 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
 
         Uses MULTI/EXEC transaction: UNLINK old set → SADD new keys → EXPIRE.
         """
-        index_key = self._index_key(file_path)
+        index_key = FileCacheIndex.key(file_path)
         if not texts:
             # No embeddings to track — remove stale reverse index
             await self._redis.unlink(index_key)
@@ -348,7 +406,7 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
 
     async def invalidate_file_cache(self, file_path: str) -> int:
         """Delete all cached embeddings for a file via reverse index."""
-        index_key = self._index_key(file_path)
+        index_key = FileCacheIndex.key(file_path)
         cache_keys = await self._redis.smembers(index_key)
         if cache_keys:
             await self._redis.unlink(*cache_keys, index_key)
@@ -356,12 +414,8 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
 
     async def invalidate_path_prefix(self, path_prefix: str) -> int:
         """Delete all cached embeddings for files under a directory."""
-        # Ensure directory boundary to avoid /dir1* matching /dir10/
-        if path_prefix and not path_prefix.endswith('/'):
-            path_prefix += '/'
-        pattern = f'embed-idx:file:{path_prefix}*'
         total = 0
-        async for index_key in self._redis.scan_iter(match=pattern):
+        async for index_key in self._redis.scan_iter(match=FileCacheIndex.glob(path_prefix)):
             cache_keys = await self._redis.smembers(index_key)
             if cache_keys:
                 await self._redis.unlink(*cache_keys, index_key)
@@ -393,11 +447,6 @@ class CacheLoader(GenericBatchLoader[str, NDArray[np.float32]]):
         self._index_write_batcher.cancel_all()
 
     # ── Private: batch loading, cache writes, helpers ──────────────
-
-    @staticmethod
-    def _index_key(file_path: str) -> str:
-        """Reverse index key for a file path."""
-        return f'embed-idx:file:{file_path}'
 
     async def _bulk_lookup(self, texts: Sequence[str]) -> Sequence[NDArray[np.float32]]:
         """Look up cached embeddings, forward misses to embed loader.
