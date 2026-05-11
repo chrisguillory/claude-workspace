@@ -199,7 +199,7 @@ class Session(BaseModel):
 
 ### NewType validation barriers
 
-`NewType('X', T)` brands a primitive (`str`, `int`, `Sequence[T]`) so the type checker treats `X` and `T` as distinct. Use it at validator/translator boundaries where mixing raw input with validated output would reintroduce the bug the validator exists to prevent.
+`NewType('X', T)` brands a primitive (`str`, `int`, `Sequence[T]`) so the type checker treats `X` and `T` as distinct. Use it at validator/translator boundaries to make "this value came from the validator" a type-system requirement rather than a convention.
 
 | Tool                             | Enforcement                                                            |
 |----------------------------------|------------------------------------------------------------------------|
