@@ -49,7 +49,7 @@ from claude_session.services.artifacts import (
 )
 from claude_session.services.lineage import get_machine_id
 from claude_session.services.parser import SessionParserService
-from claude_session.services.version import get_version
+from claude_session.services.version import get_version_from_records
 from claude_session.storage.protocol import StorageBackend
 from claude_session.types import ArchiveFormat
 
@@ -160,7 +160,7 @@ class SessionArchiveService:
         *,
         project_path: Path | None = None,
         session_folder: Path | None = None,
-        claude_pid: int | None = None,
+        claude_version: str | None = None,
     ) -> None:
         """Initialize archive service.
 
@@ -170,11 +170,12 @@ class SessionArchiveService:
             parser_service: Session parser service for loading JSONL files
             project_path: Current project directory (used to find session folder via encoding)
             session_folder: Session folder directly (bypasses encoding, use when discovered)
-            claude_pid: Optional PID of running Claude process (for accurate version detection)
+            claude_version: Claude Code version for archive metadata (from sessions.json
+                via ClaudeContext.claude_version). Falls back to JSONL record scan when absent.
 
         Note: Provide either project_path OR session_folder.
-        - MCP handlers have the real project_path from lsof - use that
-        - CLI archive command has session_folder from discovery - use that
+        - MCP handlers have project_path from ClaudeContext.from_pid_walk
+        - CLI archive command has session_folder from discovery
         """
         if not project_path and not session_folder:
             raise ValueError('Either project_path or session_folder must be provided')
@@ -183,7 +184,7 @@ class SessionArchiveService:
         self.project_path = project_path
         self.temp_dir = temp_dir
         self.parser_service = parser_service
-        self.claude_pid = claude_pid
+        self.claude_version = claude_version
 
         # Claude stores sessions here
         self.claude_sessions_dir = get_claude_config_home_dir() / 'projects'
@@ -542,29 +543,20 @@ class SessionArchiveService:
         return files_data, total_records
 
     async def _extract_claude_code_version(self, files_data: Mapping[str, Sequence[SessionRecord]]) -> str | None:
-        """Extract Claude Code version using best available method.
+        """Extract Claude Code version for archive metadata.
 
-        Fallback chain:
-        1. Process-based detection (if claude_pid was provided and process exists)
-        2. Session records (find first record with version field)
-        3. None (if version cannot be determined)
-
-        Args:
-            files_data: Parsed session records
-
-        Returns:
-            Claude Code version string (e.g., '2.0.37'), or None if not found
+        Prefers the caller-provided `claude_version` (from sessions.json via
+        ClaudeContext); falls back to scanning JSONL records when absent.
         """
-        # Flatten all records from all files
+        if self.claude_version:
+            return self.claude_version
+
         all_records = [record for records in files_data.values() for record in records]
-
-        version = get_version(claude_pid=self.claude_pid, records=all_records)
-
+        version = get_version_from_records(all_records)
         if version:
-            logger.info('Extracted Claude version: %s', version)
+            logger.info('Extracted Claude version from records: %s', version)
         else:
             logger.warning('No version found')
-
         return version
 
     async def _serialize_json(self, archive: SessionArchive) -> bytes:

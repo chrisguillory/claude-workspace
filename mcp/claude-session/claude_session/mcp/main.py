@@ -92,6 +92,7 @@ class ServerState:
     session_id: str
     project_path: Path
     claude_pid: int
+    claude_version: str
     temp_dir: tempfile.TemporaryDirectory[str]
     parser_service: SessionParserService
     archive_service: SessionArchiveService
@@ -113,18 +114,20 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
 
     try:
         parser_service = SessionParserService()
+        claude_version = str(claude_context.claude_version)
         archive_service = SessionArchiveService(
             session_id=claude_context.session_id,
             temp_dir=temp_path,
             parser_service=parser_service,
             project_path=claude_context.project_dir,
-            claude_pid=claude_context.claude_pid,
+            claude_version=claude_version,
         )
 
         state = ServerState(
             session_id=claude_context.session_id,
             project_path=claude_context.project_dir,
             claude_pid=claude_context.claude_pid,
+            claude_version=claude_version,
             temp_dir=temp_dir,
             parser_service=parser_service,
             archive_service=archive_service,
@@ -776,18 +779,15 @@ def register_tools(state: ServerState) -> None:
 
         logger.info('Saving session to Gist: %s...', target_id[:12])
 
-        # Determine correct PID for version detection:
-        # - If archiving current session: use live PID from state
-        # - If archiving other session: get historical PID from sessions.json (if available)
-        is_current_session = _is_same_running_session(session_info, state)
-        if is_current_session:
-            archive_claude_pid: int | None = state.claude_pid
+        # Resolve claude_version for the target session:
+        # - current session: from state (set at lifespan)
+        # - other session: from workspace sessions.json (if tracked)
+        if _is_same_running_session(session_info, state):
+            archive_claude_version: str | None = state.claude_version
         else:
-            # Get target session's PID from workspace sessions.json
             workspace_session = info_service._load_workspace_session(target_id, session_info.session_folder)
-            archive_claude_pid = workspace_session.metadata.claude_pid if workspace_session else None
+            archive_claude_version = workspace_session.metadata.claude_version if workspace_session else None
 
-        # Create Gist storage backend
         storage = GistStorage(
             token=token,
             gist_id=gist_id,
@@ -800,7 +800,7 @@ def register_tools(state: ServerState) -> None:
             temp_dir=Path(state.temp_dir.name),
             parser_service=state.parser_service,
             session_folder=session_info.session_folder,
-            claude_pid=archive_claude_pid,  # Target session's PID (not current session's PID)
+            claude_version=archive_claude_version,
         )
 
         # Create archive (zst for better compression - auto base64-encoded for Gist)
