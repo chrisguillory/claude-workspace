@@ -23,6 +23,7 @@ from cc_lib.claude_context import ClaudeContext
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.session_tracker import load_sessions
+from cc_lib.settings_env import claude_binary_name
 from cc_lib.types import OutputFormat
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
@@ -264,7 +265,7 @@ def clone(
     detected = _auto_detect_session_id()
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
-        typer.echo('Use claude --resume <session-id> after cloning instead.', err=True)
+        typer.echo(f'Use {claude_binary_name()} --resume <session-id> after cloning instead.', err=True)
         raise SystemExit(1)
 
     # Use cached detection result to avoid a second process tree walk
@@ -405,7 +406,7 @@ def move(
     detected = _auto_detect_session_id()
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
-        typer.echo('Use claude --resume <session-id> after moving instead.', err=True)
+        typer.echo(f'Use {claude_binary_name()} --resume <session-id> after moving instead.', err=True)
         raise SystemExit(1)
 
     if session_id is None:
@@ -849,7 +850,7 @@ async def _restore_async(
     else:
         typer.echo()
         typer.echo('To continue this session, run:')
-        typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
+        typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _clone_async(
@@ -917,7 +918,7 @@ async def _clone_async(
     else:
         typer.echo()
         typer.echo('To continue this session, run:')
-        typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
+        typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _delete_async(
@@ -1112,7 +1113,7 @@ async def _move_async(
         else:
             typer.echo()
             typer.echo('To continue this session, run:')
-            typer.secho(f'  claude --resume {result.session_id}', fg=typer.colors.CYAN)
+            typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _lineage_async(session_id: str, format: Literal['text', 'tree', 'json'], source_project: Path | None) -> None:

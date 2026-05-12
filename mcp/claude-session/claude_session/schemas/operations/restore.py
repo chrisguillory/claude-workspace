@@ -48,6 +48,9 @@ class RestoreResult(StrictModel):
     session_memory_restored: bool
     debug_log_restored: bool
 
+    # Continuation command
+    resume_command: str
+
     # Transformation info
     paths_translated: bool
     slug_mappings_applied: int

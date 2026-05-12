@@ -9,6 +9,8 @@ import os
 import shutil
 from collections.abc import Sequence
 
+from cc_lib.settings_env import claude_binary_name
+
 __all__ = [
     'launch_claude_with_session',
 ]
@@ -25,16 +27,14 @@ def launch_claude_with_session(session_id: str, extra_args: Sequence[str]) -> No
         extra_args: Additional arguments to pass to claude CLI (e.g., --chrome)
 
     Raises:
-        RuntimeError: If Claude Code CLI is not found in PATH
+        RuntimeError: If the resolved claude binary is not found in PATH
     """
-    claude_path = shutil.which('claude')
-    if not claude_path:
-        raise RuntimeError('Claude Code CLI not found in PATH.\nInstall from: https://claude.ai/code')
+    binary = claude_binary_name()
+    if not shutil.which(binary):
+        raise RuntimeError(f'{binary!r} not found in PATH.\nInstall from: https://claude.ai/code')
 
-    # Build command with optional extra args
-    cmd = ['claude', '--resume', session_id]
+    cmd = [binary, '--resume', session_id]
     if extra_args:
         cmd.extend(extra_args)
 
-    # Replace current process with Claude
-    os.execvp('claude', cmd)
+    os.execvp(binary, cmd)

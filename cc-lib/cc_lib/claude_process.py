@@ -6,6 +6,7 @@ import sys
 from collections.abc import Sequence
 
 from cc_lib.claude_context import ClaudeContext
+from cc_lib.settings_env import claude_binary_name
 
 __all__ = [
     'kill_and_copy_resume',
@@ -17,13 +18,13 @@ def kill_and_copy_resume(
     *,
     extra_args: Sequence[str] = (),
 ) -> str:
-    """Kill Claude Code and copy `claude --resume <session-id>` to clipboard.
+    """Kill Claude Code and copy `{claude_binary_name} --resume {session-id}` to clipboard.
 
     SIGTERM fires 0.5s after this returns (detached subprocess), giving the
     caller time to print success messages before Claude exits.
     """
     parts = [
-        'claude',
+        claude_binary_name(),
         '--resume',
         shlex.quote(claude_context.session_id),
         *(shlex.quote(a) for a in extra_args),
