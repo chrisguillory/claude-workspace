@@ -9,12 +9,12 @@ import os
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Annotated
 
 import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 from claude_remote_bash.auth import load_config
 from claude_remote_bash.discovery import DiscoveredHost, browse_hosts, resolve_host
@@ -45,7 +45,7 @@ add_completion_command(app)
 add_help_command(app)
 error_boundary = ErrorBoundary(exit_code=1)
 
-CACHE_DIR = Path.home() / '.claude-workspace' / 'claude-remote-bash'
+CACHE_DIR = get_claude_workspace_config_home_dir() / 'mcp' / 'claude-remote-bash'
 CACHE_FILE = CACHE_DIR / 'hosts-cache.json'
 CACHE_TTL_SECONDS = 30.0
 

@@ -9,6 +9,7 @@ import stat
 from collections.abc import Mapping
 from pathlib import Path
 
+from cc_lib.utils import get_claude_workspace_config_home_dir
 from filelock import FileLock
 
 __all__ = [
@@ -20,9 +21,12 @@ __all__ = [
     'verify_key',
 ]
 
-CONFIG_DIR = Path.home() / '.claude-workspace' / 'claude-remote-bash'
-CONFIG_FILE = CONFIG_DIR / 'config.json'
-LOCK_FILE = CONFIG_DIR / 'config.lock'
+# User-data directory mirrors the source layout at mcp/claude-remote-bash/.
+# Filenames are role-tagged (daemon_config.json vs client_config.json) so the
+# directory is unambiguous when it holds both daemon and client state.
+CONFIG_DIR = get_claude_workspace_config_home_dir() / 'mcp' / 'claude-remote-bash'
+CONFIG_FILE = CONFIG_DIR / 'daemon_config.json'
+LOCK_FILE = CONFIG_DIR / 'daemon_config.lock'
 KEY_LENGTH = 32  # 256-bit key
 
 
