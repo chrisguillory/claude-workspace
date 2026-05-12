@@ -531,8 +531,15 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 │       └── utils.py
 ├── commands/                   # Custom slash commands
 ├── skills/                     # Auto-activating skills
-└── configs/                    # Configuration templates
+├── configs/                    # Configuration templates
+└── claude-docs/                # Reference docs for Claude (not auto-loaded)
 ```
+
+Reference docs in `claude-docs/` are not auto-loaded into context. Read them when the task lands in their domain.
+
+| Topic           | Doc                               |
+|-----------------|-----------------------------------|
+| Installing apps | `claude-docs/app-installation.md` |
 
 ## Architecture
 
