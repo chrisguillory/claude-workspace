@@ -72,4 +72,8 @@ class TestExecuteCommand:
 
 
 def _run(coro: Coroutine[Any, Any, CommandResult]) -> CommandResult:
-    return asyncio.new_event_loop().run_until_complete(coro)
+    # ``asyncio.run`` creates *and closes* a fresh event loop per call —
+    # ``new_event_loop().run_until_complete(coro)`` leaks the loop, and the
+    # resource warning at GC bleeds into the next test as a pytest
+    # ``PytestUnraisableExceptionWarning`` failure.
+    return asyncio.run(coro)
