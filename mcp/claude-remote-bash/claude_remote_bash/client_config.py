@@ -1,83 +1,55 @@
-"""Client-side preferences for claude-remote-bash (groups, future settings).
-
-The file at ``~/.claude-workspace/mcp/claude-remote-bash/client_config.json``
-holds personal, machine-local preferences for the CLI client. Today it
-carries just the user's named host groups; the top-level wrapper leaves
-room for future keys (default timeout, output format, etc.) without
-breaking the loader.
-"""
+"""Client-side configuration loaded from ``client_config.json``."""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from typing import Any
 
-from cc_lib.utils import get_claude_workspace_config_home_dir
+from cc_lib.schemas import ClosedModel
+from pydantic import ValidationError, field_validator, model_validator
+
+from claude_remote_bash.exceptions import ConfigError
+from claude_remote_bash.paths import CLIENT_CONFIG
 
 __all__ = [
-    'CLIENT_CONFIG_FILE',
-    'GroupOfGroupsError',
-    'MalformedClientConfigError',
-    'load_groups',
+    'ClientConfig',
 ]
 
 
-CLIENT_CONFIG_FILE: Path = get_claude_workspace_config_home_dir() / 'mcp' / 'claude-remote-bash' / 'client_config.json'
+class ClientConfig(ClosedModel):
+    """User's named host groups."""
 
+    groups: Mapping[str, Sequence[str]] = {}
+    """Group name → ordered list of host aliases. Keys lowercased on load."""
 
-class MalformedClientConfigError(ValueError):
-    """``groups`` key in client_config.json is not a JSON object."""
+    @classmethod
+    def load(cls) -> ClientConfig:
+        """Load the client config from disk, or return an empty default if the file is missing."""
+        if not CLIENT_CONFIG.exists():
+            return cls()
+        try:
+            return cls.model_validate_json(CLIENT_CONFIG.read_text())
+        except ValidationError as exc:
+            msg = exc.errors()[0]['msg'].removeprefix('Value error, ')
+            raise ConfigError(f'{CLIENT_CONFIG}: {msg}') from exc
 
+    @field_validator('groups', mode='before')
+    @classmethod
+    def _lowercase_keys(cls, v: Any) -> Any:
+        """Lowercase group names so the selector grammar can match them case-insensitively."""
+        if isinstance(v, dict):
+            return {str(name).lower(): list(members) for name, members in v.items()}
+        return v
 
-class GroupOfGroupsError(ValueError):
-    """A group's value list contains a name that is also a group (Phase 1 disallows this)."""
-
-
-def load_groups() -> Mapping[str, Sequence[str]]:
-    """Return the user-defined groups map, or an empty dict if there's nothing to load.
-
-    Behavior across degenerate inputs (matched to the plan's locked spec):
-
-    * file absent             → empty map
-    * file present, 0 bytes   → empty map (json.loads raises; caught)
-    * ``{}`` or missing key   → empty map
-    * ``{"groups": {}}``      → empty map
-    * ``{"groups": null}``    → empty map
-    * ``{"groups": <not-a-dict>}`` → MalformedClientConfigError
-    * group value list contains a name that's also a group → GroupOfGroupsError
-
-    Group keys are lowercased on load so they compare consistently with
-    the selector atom (which is also lowercased).
-    """
-    if not CLIENT_CONFIG_FILE.exists():
-        return {}
-
-    raw = CLIENT_CONFIG_FILE.read_text()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        if raw.strip() == '':
-            return {}
-        raise
-
-    groups_raw = data.get('groups') if isinstance(data, dict) else None
-    if groups_raw is None:
-        return {}
-    if not isinstance(groups_raw, dict):
-        raise MalformedClientConfigError(
-            f"client_config.json: 'groups' must be a JSON object, got {type(groups_raw).__name__}"
-        )
-
-    groups: dict[str, Sequence[str]] = {name.lower(): list(members) for name, members in groups_raw.items()}
-
-    group_names = set(groups.keys())
-    for name, members in groups.items():
-        for member in members:
-            if member.lower() in group_names:
-                raise GroupOfGroupsError(
-                    f'group {name!r} references group {member!r} — '
-                    'Phase 1 does not support group-of-groups (or self-reference)'
-                )
-
-    return groups
+    @model_validator(mode='after')
+    def _reject_group_of_groups(self) -> ClientConfig:
+        """Reject any group whose value list names another group."""
+        names = set(self.groups.keys())
+        for owner, members in self.groups.items():
+            for member in members:
+                if member.lower() in names:
+                    raise ValueError(
+                        f'group {owner!r} references group {member!r} — '
+                        'group-of-groups and self-reference are not supported'
+                    )
+        return self

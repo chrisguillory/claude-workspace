@@ -83,7 +83,7 @@ class DaemonError(RemoteBashError):
 
 
 class ConfigError(RemoteBashError):
-    """Daemon config is missing or incomplete (no PSK, no alias, etc.)."""
+    """Config file is missing or invalid — daemon_config.json or client_config.json."""
 
 
 class FirewallApprovalError(RemoteBashError):

@@ -76,8 +76,8 @@ def parse(
         if prior is not None:
             raise SelectorError(
                 f'Duplicate atom {atom!r} at positions {prior} and {position}. '
-                'Remove the duplicate (post-expansion overlaps from groups are dedup'
-                'd silently; pre-expansion duplicates signal user confusion).'
+                'Remove the duplicate (post-expansion overlaps from groups are deduped '
+                'silently; pre-expansion duplicates signal user confusion).'
             )
         seen_lower[key] = position
 
