@@ -39,7 +39,8 @@ from claude_remote_bash.exceptions import (
     RemoteBashError,
 )
 from claude_remote_bash.executor import execute_command
-from claude_remote_bash.models import (
+from claude_remote_bash.protocol import read_message, write_message
+from claude_remote_bash.schemas.protocol import (
     AuthFail,
     AuthOk,
     AuthRequest,
@@ -48,7 +49,6 @@ from claude_remote_bash.models import (
     ExecuteResult,
     Message,
 )
-from claude_remote_bash.protocol import read_message, write_message
 
 logger = logging.getLogger(__name__)
 

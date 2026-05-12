@@ -1,4 +1,4 @@
-"""Pydantic models for the claude-remote-bash protocol."""
+"""Wire-protocol messages exchanged between client and daemon over TCP."""
 
 from __future__ import annotations
 

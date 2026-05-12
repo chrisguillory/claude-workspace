@@ -15,6 +15,7 @@ from typing import Annotated
 import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.types import OutputFormat
 
 from claude_remote_bash.auth import load_config
 from claude_remote_bash.discovery import DiscoveredHost, browse_hosts, resolve_host
@@ -25,14 +26,18 @@ from claude_remote_bash.exceptions import (
     HostUnreachableError,
     RemoteBashError,
 )
-from claude_remote_bash.models import (
+from claude_remote_bash.protocol import read_message, write_message
+from claude_remote_bash.schemas.discovery import (
+    DiscoveredHostInfo,
+    DiscoverResult,
+)
+from claude_remote_bash.schemas.protocol import (
     AuthFail,
     AuthRequest,
     ErrorResponse,
     ExecuteRequest,
     ExecuteResult,
 )
-from claude_remote_bash.protocol import read_message, write_message
 
 __all__ = [
     'main',
@@ -70,8 +75,17 @@ def execute(
         str | None, typer.Option('--agent-id', envvar='CLAUDE_CODE_AGENT_ID', help='Agent ID for sub-agent isolation')
     ] = None,
     timeout: Annotated[float, typer.Option('--timeout', '-t', help='Command timeout in seconds')] = 120.0,
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    """Execute a command on a remote host."""
+    """Execute a command on a remote host.
+
+    With ``--format json``, stdout, stderr, exit_code, and cwd are emitted as
+    a single ``ExecuteResult`` JSON object on stdout — the remote stderr is
+    captured in the result rather than echoed locally, so downstream parsers
+    aren't corrupted. The exit code still propagates to this process; only
+    the success path emits JSON, while call-layer errors (host unreachable,
+    auth failure) still go to stderr.
+    """
     if not host:
         raise RemoteBashError('--host is required')
 
@@ -89,20 +103,48 @@ def execute(
         )
     )
 
-    if result.stdout:
-        typer.echo(result.stdout)
-    if result.stderr:
-        typer.echo(result.stderr, err=True)
+    if format == 'json':
+        # JSON encapsulates stdout, stderr, exit_code, cwd — emit as one object
+        # on stdout. Do not split to local stderr; that would corrupt parsers.
+        typer.echo(result.model_dump_json())
+    else:
+        if result.stdout:
+            typer.echo(result.stdout)
+        if result.stderr:
+            typer.echo(result.stderr, err=True)
 
     raise SystemExit(result.exit_code)
 
 
 @app.command()
 @error_boundary
-def discover() -> None:
-    """Browse the LAN for claude-remote-bash daemons."""
+def discover(
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Browse the LAN for claude-remote-bash daemons.
+
+    With ``--format json``, emits ``{"daemons": [...]}`` — wrapped in an
+    object so future fields (errors, scan duration) can be added without
+    breaking consumers. Empty result is ``{"daemons": []}``.
+    """
     hosts = asyncio.run(browse_hosts(timeout=3.0))
     _write_cache(hosts)
+
+    if format == 'json':
+        result = DiscoverResult(
+            daemons=[
+                DiscoveredHostInfo(
+                    alias=h.alias,
+                    hostname=h.hostname,
+                    ips=list(h.ips),
+                    port=h.port,
+                    version=h.version,
+                )
+                for h in hosts
+            ]
+        )
+        typer.echo(result.model_dump_json())
+        return
 
     if not hosts:
         typer.echo('No daemons found on the network.')
