@@ -48,7 +48,7 @@ class RestoreResult(StrictModel):
     session_memory_restored: bool
     debug_log_restored: bool
 
-    # Continuation command (formatted with the resolved claude binary name)
+    # Continuation command
     resume_command: str
 
     # Transformation info
