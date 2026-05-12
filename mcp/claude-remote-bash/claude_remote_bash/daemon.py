@@ -70,6 +70,10 @@ app = typer.Typer(
     ),
     add_completion=False,
     no_args_is_help=False,
+    # Bind -h to --help. The daemon CLI doesn't go through cc_lib.create_app,
+    # so it doesn't inherit the cascade — set explicitly here for consistency
+    # with every other claude-workspace CLI.
+    context_settings={'help_option_names': ['-h', '--help']},
 )
 typer.completion.completion_init()
 add_completion_command(app)

@@ -17,7 +17,6 @@ __all__ = [
     'browse_hosts',
     'publishable_ipv4s',
     'register_service',
-    'resolve_host',
     'unregister_service',
 ]
 
@@ -145,27 +144,6 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> Sequence[Disc
     await azc.async_close()
 
     return hosts
-
-
-def resolve_host(hosts: Sequence[DiscoveredHost], query: str) -> DiscoveredHost | None:
-    """Resolve a host query against discovered hosts.
-
-    Resolution chain:
-        1. Exact alias match (case-insensitive)
-        2. Substring match on hostname (case-insensitive)
-        3. None if no match
-    """
-    query_lower = query.lower()
-
-    for host in hosts:
-        if host.alias.lower() == query_lower:
-            return host
-
-    for host in hosts:
-        if query_lower in host.hostname.lower():
-            return host
-
-    return None
 
 
 def publishable_ipv4s() -> Sequence[str]:
