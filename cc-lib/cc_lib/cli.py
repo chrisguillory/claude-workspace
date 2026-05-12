@@ -44,9 +44,16 @@ def create_app(*, help: str) -> typer.Typer:  # noqa: A002 — standard CLI para
     - Calls ``typer.completion.completion_init()`` for runtime tab completion
     - Registers a callback that prints help on bare invocation
     - Installs the PEP 695 alias patch (idempotent, lazy)
+    - Binds ``-h`` to ``--help`` via ``context_settings``; typer does not
+      auto-rebind ``-h`` to help when it's freed, and the setting cascades
+      from the Typer instance to every subcommand registered against it.
     """
     Pep695AliasPatcher().install()
-    app = typer.Typer(help=help, add_completion=False)
+    app = typer.Typer(
+        help=help,
+        add_completion=False,
+        context_settings={'help_option_names': ['-h', '--help']},
+    )
     typer.completion.completion_init()
 
     @app.callback(invoke_without_command=True)
