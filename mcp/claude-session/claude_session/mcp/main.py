@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Literal
 
 from cc_lib.claude_context import ClaudeContext
-from cc_lib.settings_env import claude_binary_name
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 from mcp.server.fastmcp import FastMCP
 
@@ -248,8 +247,8 @@ def register_tools(state: ServerState) -> None:
             )
 
         Note:
-            After restoration, use the resume command printed in the result
-            to continue the conversation with the restored history.
+            After restoration, run ``result.resume_command`` to continue the
+            conversation with the restored history.
         """
         # Create restore service for current project
         restore_service = SessionRestoreService(state.project_path)
@@ -261,7 +260,7 @@ def register_tools(state: ServerState) -> None:
         )
 
         logger.info('Session restored with new ID: %s', result.new_session_id)
-        logger.info('Use: %s --resume %s', claude_binary_name(), result.new_session_id)
+        logger.info('Run: %s', result.resume_command)
 
         return result
 
@@ -304,8 +303,8 @@ def register_tools(state: ServerState) -> None:
             )
 
         Note:
-            After cloning, use the resume command printed in the result
-            to continue the conversation with the cloned history.
+            After cloning, run ``result.resume_command`` to continue the
+            conversation with the cloned history.
         """
         # Default to current session if not specified
         target_id = source_session_id or state.session_id
@@ -322,7 +321,7 @@ def register_tools(state: ServerState) -> None:
         )
 
         logger.info('Session cloned with new ID: %s', result.new_session_id)
-        logger.info('Use: %s --resume %s', claude_binary_name(), result.new_session_id)
+        logger.info('Run: %s', result.resume_command)
 
         return result
 

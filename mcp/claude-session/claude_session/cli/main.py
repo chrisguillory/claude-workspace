@@ -850,7 +850,7 @@ async def _restore_async(
     else:
         typer.echo()
         typer.echo('To continue this session, run:')
-        typer.secho(f'  {claude_binary_name()} --resume {result.new_session_id}', fg=typer.colors.CYAN)
+        typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _clone_async(
@@ -918,7 +918,7 @@ async def _clone_async(
     else:
         typer.echo()
         typer.echo('To continue this session, run:')
-        typer.secho(f'  {claude_binary_name()} --resume {result.new_session_id}', fg=typer.colors.CYAN)
+        typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _delete_async(
@@ -1113,7 +1113,7 @@ async def _move_async(
         else:
             typer.echo()
             typer.echo('To continue this session, run:')
-            typer.secho(f'  {claude_binary_name()} --resume {result.session_id}', fg=typer.colors.CYAN)
+            typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _lineage_async(session_id: str, format: Literal['text', 'tree', 'json'], source_project: Path | None) -> None:
