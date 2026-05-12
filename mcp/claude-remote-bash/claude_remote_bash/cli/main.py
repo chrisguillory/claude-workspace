@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from typing import Annotated
 
 import typer
@@ -18,6 +19,7 @@ from cc_lib.utils import get_claude_workspace_config_home_dir
 from cc_lib.utils.atomic_write import atomic_write
 
 from claude_remote_bash.auth import load_config
+from claude_remote_bash.client_config import load_groups
 from claude_remote_bash.discovery import DiscoveredHost, browse_hosts
 from claude_remote_bash.exceptions import (
     AuthError,
@@ -34,6 +36,8 @@ from claude_remote_bash.models import (
     ExecuteResult,
 )
 from claude_remote_bash.protocol import read_message, write_message
+from claude_remote_bash.selector import SelectorError
+from claude_remote_bash.selector import parse as parse_selector
 
 __all__ = [
     'main',
@@ -63,39 +67,36 @@ def main() -> None:
 @error_boundary
 def execute(
     command: Annotated[str | None, typer.Argument(help='Command to execute (reads stdin if omitted)')] = None,
-    host: Annotated[str, typer.Option('--host', '-h', help='Host alias, hostname, or ip:port')] = '',
+    target: Annotated[
+        str,
+        typer.Option('--target', '-t', help='Target selector — host alias, comma-list, or group name'),
+    ] = '',
     session_id: Annotated[
         str, typer.Option('--session-id', envvar='CLAUDE_CODE_SESSION_ID', help='Session ID for CWD tracking')
     ] = 'default',
     agent_id: Annotated[
         str | None, typer.Option('--agent-id', envvar='CLAUDE_CODE_AGENT_ID', help='Agent ID for sub-agent isolation')
     ] = None,
-    timeout: Annotated[float, typer.Option('--timeout', '-t', help='Command timeout in seconds')] = 120.0,
+    timeout: Annotated[float, typer.Option('--timeout', help='Command timeout in seconds')] = 120.0,
 ) -> None:
-    """Execute a command on a remote host."""
-    if not host:
-        raise RemoteBashError('--host is required')
+    """Execute a command on one or more remote hosts.
+
+    \b
+    The target selector accepts:
+      - a host alias (e.g. M2)
+      - a comma-separated list (M2,M3,M4)
+      - a named group from client_config.json (e.g. fleet)
+      - a literal ip:port (192.168.4.22:51648)
+      - any mix of the above; whitespace per-atom is stripped, duplicates rejected.
+    """
+    if not target:
+        raise RemoteBashError('--target is required')
 
     cmd = command or _read_stdin()
     if not cmd:
         raise RemoteBashError('No command provided (pass as argument or pipe via stdin)')
 
-    result = asyncio.run(
-        _execute_remote(
-            host=host,
-            command=cmd,
-            session_id=session_id,
-            agent_id=agent_id,
-            timeout=timeout,
-        )
-    )
-
-    if result.stdout:
-        typer.echo(result.stdout)
-    if result.stderr:
-        typer.echo(result.stderr, err=True)
-
-    raise SystemExit(result.exit_code)
+    asyncio.run(_run_target(target, cmd, session_id, agent_id, timeout))
 
 
 @app.command()
@@ -124,17 +125,21 @@ def discover() -> None:
 # -- Async internals -----------------------------------------------------------
 
 
-async def _execute_remote(
+async def _execute_remote_at(
     *,
-    host: str,
+    ips: Sequence[str],
+    port: int,
     command: str,
     session_id: str,
     agent_id: str | None,
     timeout: float,
 ) -> ExecuteResult:
-    """Connect to a daemon, authenticate, and execute a command."""
-    ips, port = await _resolve_host(host)
+    """Connect to a daemon at a pre-resolved ``(ips, port)``, authenticate, execute.
 
+    Does no discovery I/O — that's the caller's job, so multi-host dispatch
+    can call this concurrently from ``asyncio.gather`` without per-host
+    cache races.
+    """
     reader, writer = await _open_connection_any(ips, port)
     try:
         await _authenticate(reader, writer)
@@ -159,6 +164,145 @@ async def _execute_remote(
     finally:
         writer.close()
         await writer.wait_closed()
+
+
+async def _run_target(
+    target: str,
+    command: str,
+    session_id: str,
+    agent_id: str | None,
+    timeout: float,
+) -> None:
+    """Resolve the selector, dispatch to one or more hosts, print results, exit.
+
+    Single-host case: stream raw stdout/stderr; exit with the host's exit code.
+    Multi-host case: parallel via ``asyncio.gather``; each host's stdout/stderr
+    lines prefixed with ``[hostname] ``; summary table at end; exit 0 iff every
+    host succeeded.
+    """
+    groups = load_groups()
+    discovered = await _browse_and_cache()
+    discovered_aliases: Set[str] = frozenset(str(e.get('alias', '')).lower() for e in discovered)
+
+    try:
+        atoms = parse_selector(target, groups=groups, discovered_aliases=discovered_aliases)
+    except SelectorError as exc:
+        raise RemoteBashError(str(exc)) from exc
+
+    resolved: list[tuple[str, tuple[Sequence[str], int]]] = []
+    missing: list[str] = []
+    for atom in atoms:
+        addr = _lookup_alias(discovered, atom)
+        if addr is None:
+            missing.append(atom)
+        else:
+            resolved.append((atom, addr))
+
+    if missing:
+        # Cache may be fresh-by-TTL but stale-by-content — a daemon may have
+        # just come up. Force one fresh browse and retry the missing atoms.
+        discovered = await _browse_fresh_and_cache()
+        for atom in missing:
+            addr = _lookup_alias(discovered, atom)
+            if addr is None:
+                _raise_host_not_found(atom)
+                raise AssertionError  # unreachable
+            resolved.append((atom, addr))
+
+    if len(resolved) == 1:
+        atom, (ips, port) = resolved[0]
+        result = await _execute_remote_at(
+            ips=ips,
+            port=port,
+            command=command,
+            session_id=session_id,
+            agent_id=agent_id,
+            timeout=timeout,
+        )
+        if result.stdout:
+            typer.echo(result.stdout)
+        if result.stderr:
+            typer.echo(result.stderr, err=True)
+        raise SystemExit(result.exit_code)
+
+    results = await _multi_dispatch(resolved, command, session_id, agent_id, timeout)
+    _print_summary(results)
+    overall = 0 if all(r.exit_code == 0 and r.error is None for r in results) else 1
+    raise SystemExit(overall)
+
+
+@dataclasses.dataclass
+class _HostRunResult:
+    atom: str
+    exit_code: int
+    duration_s: float
+    stdout: str
+    stderr: str
+    error: str | None  # None on success; non-None on connection/auth/protocol failure
+
+
+async def _multi_dispatch(
+    resolved: Sequence[tuple[str, tuple[Sequence[str], int]]],
+    command: str,
+    session_id: str,
+    agent_id: str | None,
+    timeout: float,
+) -> Sequence[_HostRunResult]:
+    """Run the command on every (atom, (ips, port)) in parallel via asyncio.gather.
+
+    Each task is wrapped in a per-host timing + exception capture so a single
+    bad daemon doesn't bring down the whole batch.
+    """
+
+    async def _one(atom: str, ips: Sequence[str], port: int) -> _HostRunResult:
+        started = time.monotonic()
+        try:
+            result = await _execute_remote_at(
+                ips=ips,
+                port=port,
+                command=command,
+                session_id=session_id,
+                agent_id=agent_id,
+                timeout=timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 # exception_safety_linter.py: swallowed-exception — multi-host UX: one bad daemon (connection/auth/protocol/timeout) must not abort the batch; per-host failure is captured into the summary table
+            return _HostRunResult(
+                atom=atom,
+                exit_code=-1,
+                duration_s=time.monotonic() - started,
+                stdout='',
+                stderr='',
+                error=f'{type(exc).__name__}: {exc}',
+            )
+        return _HostRunResult(
+            atom=atom,
+            exit_code=result.exit_code,
+            duration_s=time.monotonic() - started,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            error=None,
+        )
+
+    results = await asyncio.gather(*(_one(atom, ips, port) for atom, (ips, port) in resolved))
+
+    for r in results:
+        for line in r.stdout.splitlines():
+            typer.echo(f'[{r.atom}] {line}')
+        for line in r.stderr.splitlines():
+            typer.echo(f'[{r.atom}] {line}', err=True)
+
+    return results
+
+
+def _print_summary(results: Sequence[_HostRunResult]) -> None:
+    """Print a per-host summary table after multi-host dispatch."""
+    width = max(len('host'), *(len(r.atom) for r in results))
+    typer.echo('')
+    typer.echo(f'{"host":<{width}}  status  exit  duration')
+    for r in results:
+        status = 'ok' if r.error is None and r.exit_code == 0 else 'failed'
+        suffix = f'  ({r.error})' if r.error else ''
+        typer.echo(f'{r.atom:<{width}}  {status:<6}  {r.exit_code:<4}  {r.duration_s:.2f}s{suffix}')
 
 
 CONNECT_TIMEOUT_SECONDS = 2.0
