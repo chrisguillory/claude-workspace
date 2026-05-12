@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import zstandard as zstd
+from cc_lib.types import CCVersion
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.config.mcp import settings
@@ -160,7 +161,7 @@ class SessionArchiveService:
         *,
         project_path: Path | None = None,
         session_folder: Path | None = None,
-        claude_version: str | None = None,
+        claude_version: CCVersion | None = None,
     ) -> None:
         """Initialize archive service.
 
@@ -376,10 +377,12 @@ class SessionArchiveService:
         # Calculate statistics
         total_agent_records = sum(agent.record_count for agent in agent_entries)
 
-        # Handle None version (v2 requires string)
+        # Serialize to the v2 on-disk format (string with "unknown" sentinel for missing).
         if claude_code_version is None:
-            claude_code_version = 'unknown'
+            archive_version_str = 'unknown'
             logger.warning('Claude Code version not found, using "unknown"')
+        else:
+            archive_version_str = str(claude_code_version)
 
         # Create v2 archive structure
         archive = SessionArchive(
@@ -387,7 +390,7 @@ class SessionArchiveService:
             session_id=self.session_id,
             archived_at=datetime.now(UTC),
             original_project_path=str(source_project_path),
-            claude_code_version=claude_code_version,
+            claude_code_version=archive_version_str,
             machine_id=get_machine_id(),
             custom_title=custom_title,
             main_session=main_session,
@@ -542,7 +545,7 @@ class SessionArchiveService:
 
         return files_data, total_records
 
-    async def _extract_claude_code_version(self, files_data: Mapping[str, Sequence[SessionRecord]]) -> str | None:
+    async def _extract_claude_code_version(self, files_data: Mapping[str, Sequence[SessionRecord]]) -> CCVersion | None:
         """Extract Claude Code version for archive metadata.
 
         Prefers the caller-provided `claude_version` (from sessions.json via
