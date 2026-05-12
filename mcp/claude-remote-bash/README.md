@@ -5,7 +5,7 @@
 Each machine in the mesh runs a lightweight daemon that registers itself via mDNS and accepts authenticated shell commands over TCP. A client CLI discovers daemons by alias (e.g. `--target M2`) and executes commands on them. Use this when you want Claude Code on one MacBook to install software on another, read a remote config, or orchestrate work across your personal machines — without SSH key juggling or static `hosts` entries.
 
 > [!NOTE]
-> **Status:** Phase 1 (daemon) and Phase 2 (client CLI) ship. Phase 3 (MCP server) is deferred pending an empirical need — the CLI's `Bash()` permission integration covers the current use cases cleanly. See [`docs/claude-remote-bash-plan.md`](../../docs/claude-remote-bash-plan.md) for the full rationale.
+> **Status:** Phase 1 (daemon) and Phase 2 (client CLI) ship. Phase 3 (MCP server) is deferred pending an empirical need — the CLI's `Bash()` permission integration covers the current use cases cleanly.
 
 ---
 
@@ -485,6 +485,5 @@ When you bump behavior that affects installed users, update `version` in `pyproj
 
 | Document | Purpose |
 |---|---|
-| [`docs/claude-remote-bash-plan.md`](../../docs/claude-remote-bash-plan.md) | Canonical design doc — architecture, decision log, phased plan. |
 | [`CLAUDE.md`](../../CLAUDE.md) | Workspace-wide conventions (naming, entry points, MCP server patterns). |
 | [`cc-lib/`](../../cc-lib/) | Shared library used for error boundary, CLI scaffolding, base Pydantic models. |
