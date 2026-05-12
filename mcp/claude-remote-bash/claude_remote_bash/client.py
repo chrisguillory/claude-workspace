@@ -7,8 +7,8 @@ from collections.abc import Sequence
 
 from claude_remote_bash.auth import load_config
 from claude_remote_bash.exceptions import AuthError, DaemonError, HostUnreachableError
-from claude_remote_bash.models import AuthFail, AuthRequest, ErrorResponse, ExecuteRequest, ExecuteResult
 from claude_remote_bash.protocol import read_message, write_message
+from claude_remote_bash.schemas.protocol import AuthFail, AuthRequest, ErrorResponse, ExecuteRequest, ExecuteResult
 
 __all__ = [
     'authenticate',

@@ -9,7 +9,7 @@ import struct
 import pydantic
 
 from claude_remote_bash.exceptions import ProtocolError
-from claude_remote_bash.models import Message
+from claude_remote_bash.schemas.protocol import Message
 
 __all__ = [
     'read_message',

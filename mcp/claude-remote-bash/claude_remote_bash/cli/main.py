@@ -11,11 +11,13 @@ from typing import Annotated
 import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.types import OutputFormat
 
 from claude_remote_bash.cache import HostsCache
 from claude_remote_bash.discovery import browse_hosts
 from claude_remote_bash.dispatch import DispatchResult, DispatchService, HostRunResult
 from claude_remote_bash.exceptions import RemoteBashError
+from claude_remote_bash.schemas.discovery import DiscoveredHostInfo, DiscoverResult
 
 __all__ = [
     'main',
@@ -52,6 +54,7 @@ def execute(
         str | None, typer.Option('--agent-id', envvar='CLAUDE_CODE_AGENT_ID', help='Agent ID for sub-agent isolation')
     ] = None,
     timeout: Annotated[float, typer.Option('--timeout', help='Command timeout in seconds')] = 120.0,
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Execute a command on one or more remote hosts.
 
@@ -62,6 +65,11 @@ def execute(
       - a named group from client_config.json (e.g. fleet)
       - a literal ip:port (192.168.4.22:51648)
       - any mix of the above; whitespace per-atom is stripped, duplicates rejected.
+
+    With ``--format json``, emits a single ``DispatchResult`` JSON object on
+    stdout — per-host stdout/stderr/exit_code/duration are captured in the
+    result rather than streamed, so downstream parsers aren't corrupted by
+    multi-host fan-out. The overall exit code still propagates.
     """
     if not target:
         raise RemoteBashError('--target is required')
@@ -70,15 +78,38 @@ def execute(
     if not cmd:
         raise RemoteBashError('No command provided (pass as argument or pipe via stdin)')
 
-    asyncio.run(_drive_dispatch(target, cmd, session_id, agent_id, timeout))
+    asyncio.run(_drive_dispatch(target, cmd, session_id, agent_id, timeout, format))
 
 
 @app.command()
 @error_boundary
-def discover() -> None:
-    """Browse the LAN for claude-remote-bash daemons."""
+def discover(
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """Browse the LAN for claude-remote-bash daemons.
+
+    With ``--format json``, emits ``{"daemons": [...]}`` — wrapped in an
+    object so future fields (errors, scan duration) can be added without
+    breaking consumers. Empty result is ``{"daemons": []}``.
+    """
     hosts = asyncio.run(browse_hosts(timeout=3.0))
     HostsCache.from_browse(hosts).write()
+
+    if format == 'json':
+        result = DiscoverResult(
+            daemons=[
+                DiscoveredHostInfo(
+                    alias=h.alias,
+                    hostname=h.hostname,
+                    ips=list(h.ips),
+                    port=h.port,
+                    version=h.version,
+                )
+                for h in hosts
+            ]
+        )
+        typer.echo(result.model_dump_json())
+        return
 
     if not hosts:
         typer.echo('No daemons found on the network.')
@@ -105,14 +136,16 @@ async def _drive_dispatch(
     session_id: str,
     agent_id: str | None,
     timeout: float,
+    output_format: OutputFormat,
 ) -> None:
     """Invoke ``DispatchService.run_target`` and format the result for the terminal.
 
-    Single-host: stream raw stdout/stderr; exit with the host's exit code;
-    surface connection/auth/protocol failures via the error boundary.
+    Text mode: single-host streams raw stdout/stderr; multi-host prefixes every
+    line with ``[host]`` and prints a summary table.
 
-    Multi-host: prefix every output line with ``[host]``, print a summary
-    table, exit 0 iff every host succeeded.
+    JSON mode: emits a single ``DispatchResult`` JSON object on stdout regardless
+    of host count; per-host output is captured inside the result. Overall exit
+    code propagates either way.
     """
     result = await DispatchService().run_target(
         target,
@@ -121,6 +154,9 @@ async def _drive_dispatch(
         agent_id=agent_id,
         timeout=timeout,
     )
+    if output_format == 'json':
+        typer.echo(result.model_dump_json())
+        raise SystemExit(result.overall_exit_code)
     if len(result.results) == 1:
         _emit_single(result.results[0])
     else:
