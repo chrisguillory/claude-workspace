@@ -15,9 +15,10 @@ import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.utils import get_claude_workspace_config_home_dir
+from cc_lib.utils.atomic_write import atomic_write
 
 from claude_remote_bash.auth import load_config
-from claude_remote_bash.discovery import DiscoveredHost, browse_hosts, resolve_host
+from claude_remote_bash.discovery import DiscoveredHost, browse_hosts
 from claude_remote_bash.exceptions import (
     AuthError,
     DaemonError,
@@ -258,46 +259,86 @@ async def _authenticate(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         raise AuthError(f'Authentication failed: {response.reason}')
 
 
-async def _resolve_host(host: str) -> tuple[Sequence[str], int]:
-    """Resolve a host specifier to (ips, port).
-
-    A single host may advertise multiple IPv4 addresses (LAN + VPN + ethernet);
-    the caller tries each in turn. For a literal ip:port the list has one entry.
-
-    Resolution chain:
-        1. Direct ip:port (e.g., "192.168.4.24:63276")
-        2. Cached mDNS discovery (< 30s old)
-        3. Fresh mDNS browse
-    """
-    if ':' in host:
-        parts = host.rsplit(':', 1)
-        return [parts[0]], int(parts[1])
-
-    cached = _read_cache()
-    if cached is not None:
-        for entry in cached:
-            if (
-                str(entry.get('alias', '')).lower() == host.lower()
-                or host.lower() in str(entry.get('hostname', '')).lower()
-            ):
-                return _cache_ips(entry), int(str(entry['port']))
-
+async def _browse_fresh_and_cache() -> Sequence[Mapping[str, object]]:
+    """Always browse mDNS; write the result to the cache atomically."""
     hosts = await browse_hosts(timeout=3.0)
     _write_cache(hosts)
+    return [{'alias': h.alias, 'hostname': h.hostname, 'ips': list(h.ips), 'port': h.port} for h in hosts]
 
-    found = resolve_host(hosts, host)
-    if found is None:
-        raise HostNotFoundError(
-            f'Host not found: {host}\n'
-            'Run `claude-remote-bash discover` to see available hosts.\n'
-            '\n'
-            'Common causes:\n'
-            "  - The daemon isn't running on the target.\n"
-            '  - Alias typo — check the output of `discover`.\n'
-            "  - Target is on a different LAN segment (mDNS doesn't cross subnets)."
-        )
 
-    return found.ips, found.port
+async def _browse_and_cache() -> Sequence[Mapping[str, object]]:
+    """Return the discovered-hosts map — cached if fresh, else fresh browse.
+
+    Splits the I/O (cache read + optional browse + cache write) away from
+    per-atom lookup (``_lookup_alias``) so the multi-host dispatch path
+    can call this once upfront and run a pure-function lookup per atom
+    concurrently inside ``asyncio.gather``.
+    """
+    cached = _read_cache()
+    if cached is not None:
+        return cached
+    return await _browse_fresh_and_cache()
+
+
+def _lookup_alias(
+    discovered: Sequence[Mapping[str, object]],
+    atom: str,
+) -> tuple[Sequence[str], int] | None:
+    """Resolve one atom to (ips, port), or ``None`` on miss. Pure — no I/O.
+
+    The atom is either a literal ``ip:port`` (direct address; bypasses
+    discovery) or a host alias to look up in the already-discovered map.
+    Hostname-substring matching is intentionally dropped from the old
+    ``_resolve_host``: single-user environment with operator-assigned
+    aliases, exact match is enough.
+
+    Returns ``None`` on miss so the caller can decide whether to retry
+    with a fresh browse before raising — the cache may be fresh-by-TTL
+    but stale-by-content (e.g. a new daemon appeared since the last
+    browse).
+    """
+    if ':' in atom:
+        parts = atom.rsplit(':', 1)
+        return [parts[0]], int(parts[1])
+
+    atom_lower = atom.lower()
+    for entry in discovered:
+        if str(entry.get('alias', '')).lower() == atom_lower:
+            return _cache_ips(entry), int(str(entry['port']))
+
+    return None
+
+
+def _raise_host_not_found(atom: str) -> None:
+    raise HostNotFoundError(
+        f'Host not found: {atom}\n'
+        'Run `claude-remote-bash discover` to see available hosts.\n'
+        '\n'
+        'Common causes:\n'
+        "  - The daemon isn't running on the target.\n"
+        '  - Alias typo — check the output of `discover`.\n'
+        "  - Target is on a different LAN segment (mDNS doesn't cross subnets)."
+    )
+
+
+async def _resolve_host(host: str) -> tuple[Sequence[str], int]:
+    """Resolve a single host: cache → fresh-browse → raise.
+
+    Used by today's single-host ``execute`` path. The multi-host dispatch
+    (later commit) uses ``_browse_and_cache`` + ``_lookup_alias`` directly
+    so it can fan out across atoms inside ``asyncio.gather``.
+    """
+    discovered = await _browse_and_cache()
+    result = _lookup_alias(discovered, host)
+    if result is None:
+        # Cache may be fresh-by-TTL but stale-by-content; force a fresh
+        # browse before declaring the host missing.
+        discovered = await _browse_fresh_and_cache()
+        result = _lookup_alias(discovered, host)
+    if result is None:
+        _raise_host_not_found(host)
+        raise AssertionError  # unreachable — _raise_host_not_found always raises
+    return result
 
 
 def _cache_ips(entry: Mapping[str, object]) -> Sequence[str]:
@@ -335,12 +376,18 @@ def _read_cache() -> Sequence[Mapping[str, object]] | None:
 
 
 def _write_cache(hosts: Sequence[DiscoveredHost]) -> None:
-    """Write host discovery results to cache."""
+    """Write host discovery results to cache atomically.
+
+    The explicit ``chmod 0o700`` on the directory matters: ``atomic_write``
+    creates ``target.parent`` via ``mkdir(parents=True, exist_ok=True)`` which
+    respects umask (typically 0o755). We tighten the directory after.
+    The cache file itself is set to 0o600 by ``atomic_write``'s ``mode=`` kwarg.
+    """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(CACHE_DIR, 0o700)
     entries = [{'alias': h.alias, 'hostname': h.hostname, 'ips': list(h.ips), 'port': h.port} for h in hosts]
-    CACHE_FILE.write_text(json.dumps({'timestamp': time.time(), 'hosts': entries}))
-    os.chmod(CACHE_FILE, 0o600)
+    payload = json.dumps({'timestamp': time.time(), 'hosts': entries}).encode()
+    atomic_write(CACHE_FILE, payload, mode=0o600)
 
 
 # -- Error boundary handlers --------------------------------------------------
