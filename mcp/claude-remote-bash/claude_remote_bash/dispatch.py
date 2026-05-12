@@ -16,9 +16,8 @@ from claude_remote_bash.resolve import (
     browse_and_cache,
     browse_fresh_and_cache,
     lookup_alias,
-    raise_host_not_found,
 )
-from claude_remote_bash.selector import SelectorError
+from claude_remote_bash.selector import SelectorError, UnknownAtomError
 from claude_remote_bash.selector import parse as parse_selector
 
 __all__ = [
@@ -79,18 +78,33 @@ class DispatchService:
     ) -> DispatchResult:
         """Parse the selector, fan out across hosts in parallel, return aggregated results."""
         cache = await self._hosts_resolver()
-        discovered_aliases = frozenset(entry.alias.lower() for entry in cache.hosts)
-
         try:
             atoms = parse_selector(
                 target,
                 groups=self._client_config.groups,
-                discovered_aliases=discovered_aliases,
+                discovered_aliases=frozenset(entry.alias.lower() for entry in cache.hosts),
             )
+        except UnknownAtomError:
+            # Cache may be fresh-by-TTL but stale-by-content — a daemon may have
+            # come up since the last browse. Retry once with a fresh browse.
+            cache = await browse_fresh_and_cache()
+            try:
+                atoms = parse_selector(
+                    target,
+                    groups=self._client_config.groups,
+                    discovered_aliases=frozenset(entry.alias.lower() for entry in cache.hosts),
+                )
+            except SelectorError as exc:
+                raise RemoteBashError(str(exc)) from exc
         except SelectorError as exc:
             raise RemoteBashError(str(exc)) from exc
 
-        resolved = await _resolve_atoms(cache, atoms)
+        resolved: list[tuple[str, tuple[Sequence[str], int]]] = []
+        for atom in atoms:
+            addr = lookup_alias(cache, atom)
+            if addr is None:
+                raise AssertionError(f'parser validated {atom!r} but cache lookup missed it')
+            resolved.append((atom, addr))
 
         started = time.monotonic()
         host_results = await asyncio.gather(
@@ -116,37 +130,6 @@ class DispatchService:
         )
 
 
-async def _resolve_atoms(
-    cache: HostsCache,
-    atoms: Sequence[str],
-) -> Sequence[tuple[str, tuple[Sequence[str], int]]]:
-    """Resolve each atom to ``(host, (ips, port))``; force a fresh browse for atoms the cache misses.
-
-    The cache may be fresh-by-TTL but stale-by-content — a daemon may have
-    come up since the last browse. Retrying the misses once with a fresh
-    browse closes that gap before declaring a host missing.
-    """
-    resolved: list[tuple[str, tuple[Sequence[str], int]]] = []
-    missing: list[str] = []
-    for atom in atoms:
-        addr = lookup_alias(cache, atom)
-        if addr is None:
-            missing.append(atom)
-        else:
-            resolved.append((atom, addr))
-
-    if missing:
-        cache = await browse_fresh_and_cache()
-        for atom in missing:
-            addr = lookup_alias(cache, atom)
-            if addr is None:
-                raise_host_not_found(atom)
-                raise AssertionError  # unreachable
-            resolved.append((atom, addr))
-
-    return resolved
-
-
 async def _run_one(
     host: str,
     ips: Sequence[str],
@@ -169,13 +152,14 @@ async def _run_one(
             timeout=timeout,
         )
     except Exception as exc:  # noqa: BLE001  # exception_safety_linter.py: swallowed-exception — one bad daemon must not abort the batch; per-host failure is captured into the summary table
+        error_text = str(exc) if isinstance(exc, RemoteBashError) else f'{type(exc).__name__}: {exc}'
         return HostRunResult(
             host=host,
             exit_code=-1,
             duration_s=time.monotonic() - started,
             stdout='',
             stderr='',
-            error=f'{type(exc).__name__}: {exc}',
+            error=error_text,
         )
     return HostRunResult(
         host=host,

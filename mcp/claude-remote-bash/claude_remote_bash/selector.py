@@ -27,12 +27,17 @@ from collections.abc import Mapping, Sequence, Set
 
 __all__ = [
     'SelectorError',
+    'UnknownAtomError',
     'parse',
 ]
 
 
 class SelectorError(ValueError):
     """The selector string violates one of the locked grammar rules."""
+
+
+class UnknownAtomError(SelectorError):
+    """An atom is not in the given ``discovered_aliases`` snapshot — the snapshot may be stale."""
 
 
 def parse(
@@ -106,7 +111,7 @@ def parse(
             for member in groups[atom_lower]:
                 member_stripped = member.strip()
                 if ':' not in member_stripped and member_stripped.lower() not in discovered_aliases:
-                    raise SelectorError(
+                    raise UnknownAtomError(
                         f'Group {atom!r} references unknown host {member!r}. '
                         'Check the alias matches a daemon advertised on the LAN '
                         '(run `claude-remote-bash discover`).'
@@ -116,7 +121,7 @@ def parse(
         if atom_lower in discovered_aliases:
             _append(atom)
             continue
-        raise SelectorError(
+        raise UnknownAtomError(
             f'Unknown atom {atom!r}. Not a discovered host alias and not a group. '
             'Run `claude-remote-bash discover` to see available hosts; '
             'check ~/.claude-workspace/mcp/claude-remote-bash/client_config.json for groups.'

@@ -9,8 +9,9 @@ import stat
 from collections.abc import Mapping
 from pathlib import Path
 
-from cc_lib.utils import get_claude_workspace_config_home_dir
 from filelock import FileLock
+
+from claude_remote_bash.paths import DAEMON_CONFIG, DAEMON_CONFIG_LOCK, DATA_DIR
 
 __all__ = [
     'DaemonConfig',
@@ -21,12 +22,6 @@ __all__ = [
     'verify_key',
 ]
 
-# User-data directory mirrors the source layout at mcp/claude-remote-bash/.
-# Filenames are role-tagged (daemon_config.json vs client_config.json) so the
-# directory is unambiguous when it holds both daemon and client state.
-CONFIG_DIR = get_claude_workspace_config_home_dir() / 'mcp' / 'claude-remote-bash'
-CONFIG_FILE = CONFIG_DIR / 'daemon_config.json'
-LOCK_FILE = CONFIG_DIR / 'daemon_config.lock'
 KEY_LENGTH = 32  # 256-bit key
 
 
@@ -70,7 +65,7 @@ class DaemonConfig:
 
 def config_path() -> Path:
     """Return the config file path."""
-    return CONFIG_FILE
+    return DAEMON_CONFIG
 
 
 def generate_key() -> str:
@@ -80,21 +75,21 @@ def generate_key() -> str:
 
 def load_config() -> DaemonConfig | None:
     """Load config from disk. Returns None if no config file exists."""
-    with FileLock(LOCK_FILE):
-        if not CONFIG_FILE.exists():
+    with FileLock(DAEMON_CONFIG_LOCK):
+        if not DAEMON_CONFIG.exists():
             return None
-        data = json.loads(CONFIG_FILE.read_text())
+        data = json.loads(DAEMON_CONFIG.read_text())
         return DaemonConfig.from_dict(data)
 
 
 def save_config(config: DaemonConfig) -> Path:
     """Save config to disk with 0600 permissions. Returns the config file path."""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    os.chmod(CONFIG_DIR, stat.S_IRWXU)  # 0o700 — umask doesn't narrow mkdir mode
-    with FileLock(LOCK_FILE):
-        CONFIG_FILE.write_text(json.dumps(config.to_dict(), indent=2) + '\n')
-        os.chmod(CONFIG_FILE, stat.S_IRUSR | stat.S_IWUSR)
-    return CONFIG_FILE
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(DATA_DIR, stat.S_IRWXU)  # 0o700 — umask doesn't narrow mkdir mode
+    with FileLock(DAEMON_CONFIG_LOCK):
+        DAEMON_CONFIG.write_text(json.dumps(config.to_dict(), indent=2) + '\n')
+        os.chmod(DAEMON_CONFIG, stat.S_IRUSR | stat.S_IWUSR)
+    return DAEMON_CONFIG
 
 
 def verify_key(provided: str, config: DaemonConfig) -> bool:
