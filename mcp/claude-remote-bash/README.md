@@ -2,7 +2,7 @@
 
 > Cross-machine shell execution for Claude Code via mDNS-discovered daemons on a home LAN.
 
-Each machine in the mesh runs a lightweight daemon that registers itself via mDNS and accepts authenticated shell commands over TCP. A client CLI discovers daemons by alias (e.g. `--host M2`) and executes commands on them. Use this when you want Claude Code on one MacBook to install software on another, read a remote config, or orchestrate work across your personal machines — without SSH key juggling or static `hosts` entries.
+Each machine in the mesh runs a lightweight daemon that registers itself via mDNS and accepts authenticated shell commands over TCP. A client CLI discovers daemons by alias (e.g. `--target M2`) and executes commands on them. Use this when you want Claude Code on one MacBook to install software on another, read a remote config, or orchestrate work across your personal machines — without SSH key juggling or static `hosts` entries.
 
 > [!NOTE]
 > **Status:** Phase 1 (daemon) and Phase 2 (client CLI) ship. Phase 3 (MCP server) is deferred pending an empirical need — the CLI's `Bash()` permission integration covers the current use cases cleanly. See [`docs/claude-remote-bash-plan.md`](../../docs/claude-remote-bash-plan.md) for the full rationale.
@@ -123,7 +123,7 @@ claude-remote-bash-daemon                       # start
 
 ```bash
 claude-remote-bash discover                      # should list M1 and M2
-claude-remote-bash execute --host M1 'hostname'  # smoke test
+claude-remote-bash execute --target M1 'hostname'  # smoke test
 ```
 
 > [!IMPORTANT]
@@ -144,7 +144,7 @@ claude-remote-bash execute --host M1 'hostname'  # smoke test
 | `uninstall-service` | Remove the `LaunchAgent` plist and unload it from launchd. |
 | `--help`, `-h` | Print usage. |
 
-Config file: `~/.claude-workspace/claude-remote-bash/config.json` (mode `0600`).
+Config file: `~/.claude-workspace/mcp/claude-remote-bash/daemon_config.json` (mode `0600`). Optional groups for the CLI client live alongside it at `client_config.json`.
 
 ---
 
@@ -152,21 +152,42 @@ Config file: `~/.claude-workspace/claude-remote-bash/config.json` (mode `0600`).
 
 | Subcommand | Purpose |
 |---|---|
-| `execute --host <alias> <cmd>` | Run a command on a remote host. Supports heredoc on stdin when `<cmd>` is omitted. |
+| `execute --target <selector> <cmd>` | Run a command on one or more remote hosts. `<selector>` is a host alias (`M2`), a comma-list (`M2,M3,M4`), a group name from `client_config.json` (e.g. `fleet`), a literal `ip:port`, or any mix. Supports heredoc on stdin when `<cmd>` is omitted. |
 | `discover` | Browse mDNS for 3s and print every daemon found. Refreshes the cache. |
 | `install-completions` | Install shell tab completion (zsh/bash) — inherited from `cc_lib.cli`. |
 | `uninstall-completions` | Remove shell tab completion. |
 
-`execute` accepts the host as either an alias (`M2`), a substring of the hostname, or a literal `ip:port`.
+`execute --target` (`-t`) accepts:
+
+- a single host alias (`M2`) — single-host mode: stream raw stdout/stderr; exit with the host's exit code
+- a comma-separated list (`M2,M3,M4`) — multi-host mode: parallel via `asyncio.gather`, per-line `[<atom>] ` prefix, summary table at end, aggregated exit code
+- a group name from `client_config.json` (see below) — replaced inline with its member list
+- a literal `ip:port` (`192.168.4.22:51648`) — direct address; bypasses mDNS discovery
+- any mix of the above
+
+Grammar: whitespace per-atom stripped; empty atoms, trailing commas, and pre-expansion duplicates rejected before any RPC. Matching is case-insensitive.
+
+**Groups** are local-only personal shortcuts at `~/.claude-workspace/mcp/claude-remote-bash/client_config.json`:
+
+```json
+{
+  "groups": {
+    "fleet": ["M2", "M3", "M4"],
+    "workers": ["M3", "M4"]
+  }
+}
+```
+
+Then: `claude-remote-bash execute -t fleet 'uptime'` runs on M2, M3, M4 in parallel.
 
 ### Example invocations
 
 ```bash
 # Single command
-claude-remote-bash execute --host M2 'ls -la ~/.claude'
+claude-remote-bash execute --target M2 'ls -la ~/.claude'
 
 # Heredoc (the shape Claude Code's Bash tool uses)
-claude-remote-bash execute --host M2 <<'BASH'
+claude-remote-bash execute --target M2 <<'BASH'
 cd ~/projects
 cat .env
 echo "CWD: $(pwd)"
@@ -184,7 +205,7 @@ The CLI participates in Claude Code's existing `Bash(...)` permission system via
 {
   "permissions": {
     "allow": [
-      "Bash(claude-remote-bash execute --host M2:*)",
+      "Bash(claude-remote-bash execute --target M2:*)",
       "Bash(claude-remote-bash discover:*)"
     ]
   }
@@ -194,7 +215,7 @@ The CLI participates in Claude Code's existing `Bash(...)` permission system via
 | Pattern | Effect |
 |---|---|
 | `Bash(claude-remote-bash:*)` | Allow every subcommand on every host. |
-| `Bash(claude-remote-bash execute --host M2:*)` | Allow `execute` on M2 only. |
+| `Bash(claude-remote-bash execute --target M2:*)` | Allow `execute` on M2 only. |
 | `Bash(claude-remote-bash discover:*)` | Allow `discover` only. |
 
 No custom permission code. No new config surface. The CLI's shape gives per-host and per-command granularity on Claude Code's existing infrastructure.
@@ -263,7 +284,7 @@ claude-remote-bash-daemon allow-firewall
 ### Empirical signature of a pending approval
 
 ```
-$ claude-remote-bash execute --host M2 'ls'
+$ claude-remote-bash execute --target M2 'ls'
 TCP connected but the daemon did not respond to auth within 5s.
 
 This is the signature of a pending macOS Application Firewall prompt
@@ -364,14 +385,14 @@ Re-running `install-service` calls `launchctl unload` before rewriting — confi
 | Property | Value |
 |---|---|
 | Authentication | Pre-shared key (PSK), 256-bit, generated via `secrets.token_hex(32)` |
-| Key storage | `~/.claude-workspace/claude-remote-bash/config.json`, mode `0600` |
+| Key storage | `~/.claude-workspace/mcp/claude-remote-bash/daemon_config.json`, mode `0600` |
 | Key distribution | Out-of-band (user copies PSK from `init` output to `join` on each target) |
 | Key comparison | `secrets.compare_digest` (constant-time) |
 | Transport | Plaintext TCP. No TLS. |
 | Network scope | LAN trust model — any device on the same mDNS subnet can attempt to connect; only the PSK gates execution. |
 
 > [!CAUTION]
-> **This is a LAN-trust model, not zero-trust.** The PSK is stored in plaintext on every machine in the mesh. Anyone who reads `config.json` (or sniffs the TCP bytes on an unencrypted LAN) and guesses a target hostname can execute arbitrary shell as your user on your machines. Appropriate for a home network with trusted devices. **Not** appropriate for shared Wi-Fi, coworking spaces, or any environment where you don't physically control every machine on the subnet.
+> **This is a LAN-trust model, not zero-trust.** The PSK is stored in plaintext on every machine in the mesh. Anyone who reads `daemon_config.json` (or sniffs the TCP bytes on an unencrypted LAN) and guesses a target hostname can execute arbitrary shell as your user on your machines. Appropriate for a home network with trusted devices. **Not** appropriate for shared Wi-Fi, coworking spaces, or any environment where you don't physically control every machine on the subnet.
 
 > [!WARNING]
 > If the PSK leaks, rotate it immediately: run `init` on one machine and `join <new-key>` on every other. There is no "revoke" — the old key will keep working until it's overwritten everywhere.

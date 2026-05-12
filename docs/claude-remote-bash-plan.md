@@ -2,6 +2,23 @@
 
 > Cross-machine shell execution for Claude Code via mDNS-discovered daemons
 
+> [!IMPORTANT]
+> **Historical design doc.** This was the original architecture plan from the
+> initial build. Some details have evolved since:
+>
+> - The client flag is now `-t, --target` (was `-h, --host`); see
+>   [`mcp/claude-remote-bash/README.md`](../mcp/claude-remote-bash/README.md).
+> - The target selector accepts comma-separated host aliases, named groups
+>   (from `client_config.json`), and literal `ip:port` atoms; multi-host
+>   dispatch runs in parallel with a per-host summary table.
+> - User-data lives at `~/.claude-workspace/mcp/claude-remote-bash/`
+>   (not `~/.claude-workspace/claude-remote-bash/`), with
+>   `daemon_config.json` (daemon PSK + alias) and `client_config.json`
+>   (user groups) as separate role-tagged files.
+>
+> The README is the live source of truth. Sections below describe the design
+> rationale; the user-facing CLI surface they describe is out of date.
+
 ---
 
 ## Overview
