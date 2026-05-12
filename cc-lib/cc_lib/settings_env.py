@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = [
+    'claude_binary_name',
     'get_cc_env_var',
     'get_cc_setting',
     'is_env_truthy',
@@ -22,6 +23,14 @@ def is_env_truthy(value: str | None) -> bool:
     Anything else (``'0'``, ``'false'``, empty string, ``None``) is falsy.
     """
     return value is not None and value.lower() in ('1', 'true', 'yes')
+
+
+def claude_binary_name() -> str:
+    """Return the binary name the user invokes to launch Claude Code.
+
+    Reads ``CLAUDE_BINARY_NAME``. Defaults to ``'claude'``.
+    """
+    return get_cc_env_var('CLAUDE_BINARY_NAME') or 'claude'
 
 
 def get_cc_env_var(key: str) -> str | None:

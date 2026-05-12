@@ -29,6 +29,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cc_lib.settings_env import claude_binary_name
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.config.base import DATA_DIR
@@ -220,7 +221,7 @@ class SessionMoveService:
                 was_terminated=False,
                 backup_path=None,
                 custom_title=custom_title,
-                resume_command=f'cd {self.target_project_path} && claude --resume {sid}',
+                resume_command=f'cd {self.target_project_path} && {claude_binary_name()} --resume {sid}',
                 was_dry_run=True,
                 duration_ms=duration_ms,
                 moved_at=datetime.now(UTC),
@@ -372,7 +373,7 @@ class SessionMoveService:
             was_terminated=was_terminated,
             backup_path=str(backup_path) if backup_path else None,
             custom_title=custom_title,
-            resume_command=f'cd {self.target_project_path} && claude --resume {sid}',
+            resume_command=f'cd {self.target_project_path} && {claude_binary_name()} --resume {sid}',
             was_dry_run=False,
             duration_ms=duration_ms,
             moved_at=datetime.now(UTC),
