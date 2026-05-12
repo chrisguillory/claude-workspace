@@ -46,6 +46,7 @@ import stat
 import struct
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
@@ -148,7 +149,7 @@ def cli_list(
 
     npm = NpmRegistry()
     all_versions = npm.versions()
-    recent = list(reversed(all_versions[-last:]))
+    recent = [CCVersion(v) for v in reversed(all_versions[-last:])]
 
     installed = {v.version for v in local if not v.is_bak}
     active = store.active_version()
@@ -233,13 +234,15 @@ def cli_info(
     store = VersionStore()
 
     if version is None:
-        version = store.active_version()
-        if version is None:
+        target = store.active_version()
+        if target is None:
             print('No active version detected. Pass a version number.', file=sys.stderr)
             raise SystemExit(1)
-        print(f'Active version: {version}\n')
+        print(f'Active version: {target}\n')
+    else:
+        target = CCVersion(version)
 
-    path = store.path_for(version)
+    path = store.path_for(str(target))
     if path.exists():
         st = path.stat()
         adhoc = MachOSignature.is_adhoc(path)
@@ -249,12 +252,11 @@ def cli_info(
         print(f'  Path: {path}')
         print(f'  Size: {st.st_size / 1_000_000:.0f} MB')
         print(f'  Signature: {sig_label}')
-        print(f'  Active: {store.active_version() == version}')
+        print(f'  Active: {store.active_version() == target}')
 
         if adhoc:
             data = path.read_bytes()
-            current = version if isinstance(version, CCVersion) else CCVersion(version)
-            results = scan_binary(data, current_version=current)
+            results = scan_binary(data, current_version=target)
             applied = [n for n, r in results.items() if r.status == 'applied']
             unpatched = [n for n, r in results.items() if r.status == 'unpatched']
             changed = [n for n, r in results.items() if r.status == 'changed']
@@ -267,7 +269,7 @@ def cli_info(
             if not applied and not unpatched and not changed:
                 print('  Modified (ad-hoc signed, no recognized patches)')
 
-        original = ORIGINALS_DIR / version
+        original = ORIGINALS_DIR / str(target)
         if original.exists():
             print(f'  Original: {original} ({original.stat().st_size / 1_000_000:.0f} MB)')
     else:
@@ -275,7 +277,7 @@ def cli_info(
 
     cdn = CDNClient()
     try:
-        cdn_manifest = cdn.fetch_manifest(version)
+        cdn_manifest = cdn.fetch_manifest(str(target))
         platform = cdn_manifest.platforms.get(PLATFORM)
         print('\nCDN:')
         print(f'  Build date: {cdn_manifest.build_date}')
@@ -518,25 +520,32 @@ class CDNClient:
         binary_filename = platform.binary or 'claude'  # PLATFORM hardcoded to darwin-arm64; old manifests omit field
         binary_url = f'{CDN_BASE}/{version}/{PLATFORM}/{binary_filename}'
         dest = dest_dir / version
-        tmp = dest_dir / f'.{version}.tmp'
 
         print(f'  Downloading {version} ({platform.size / 1_000_000:.0f} MB)...')
 
-        hasher = hashlib.sha256()
-        with self._client.stream('GET', binary_url) as resp:
-            resp.raise_for_status()
-            with tmp.open('wb') as f:
+        with tempfile.NamedTemporaryFile(
+            mode='wb',
+            dir=dest_dir,
+            prefix=f'.{version}.',
+            suffix='.tmp',
+            delete=True,
+            delete_on_close=False,
+        ) as tmp:
+            hasher = hashlib.sha256()
+            with self._client.stream('GET', binary_url) as resp:
+                resp.raise_for_status()
                 for chunk in resp.iter_bytes(chunk_size=65536):
-                    f.write(chunk)
+                    tmp.write(chunk)
                     hasher.update(chunk)
+            tmp.close()
 
-        actual = hasher.hexdigest()
-        if actual != platform.checksum:
-            tmp.unlink(missing_ok=True)
-            msg = f'Checksum mismatch for {version}: expected {platform.checksum[:16]}..., got {actual[:16]}...'
-            raise ValueError(msg)
+            actual = hasher.hexdigest()
+            if actual != platform.checksum:
+                msg = f'Checksum mismatch for {version}: expected {platform.checksum[:16]}..., got {actual[:16]}...'
+                raise ValueError(msg)
 
-        os.replace(tmp, dest)
+            os.replace(tmp.name, dest)
+
         dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
         print(f'  Verified: SHA-256 {actual[:16]}...')

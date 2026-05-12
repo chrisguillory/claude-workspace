@@ -13,10 +13,15 @@ from cc_lib.types import CCVersion
 from claude_session.schemas.session import (
     ApiErrorSystemRecord,
     AssistantRecord,
+    AwaySummarySystemRecord,
+    BridgeStatusSystemRecord,
     CompactBoundarySystemRecord,
     InformationalSystemRecord,
     LocalCommandSystemRecord,
+    MicrocompactBoundarySystemRecord,
+    ScheduledTaskFireSystemRecord,
     SessionRecord,
+    StopHookSummarySystemRecord,
     TurnDurationSystemRecord,
     UserRecord,
 )
@@ -33,9 +38,14 @@ VERSION_RECORD_TYPES = (
     AssistantRecord,
     LocalCommandSystemRecord,
     CompactBoundarySystemRecord,
+    MicrocompactBoundarySystemRecord,
     ApiErrorSystemRecord,
     InformationalSystemRecord,
     TurnDurationSystemRecord,
+    StopHookSummarySystemRecord,
+    BridgeStatusSystemRecord,
+    ScheduledTaskFireSystemRecord,
+    AwaySummarySystemRecord,
 )
 
 

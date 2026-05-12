@@ -36,6 +36,7 @@ from claude_session.schemas.session.models import (
     # Records
     AssistantRecord,
     AsyncTaskLaunchResult,
+    AwaySummarySystemRecord,
     BackgroundTask,
     BaseRecord,
     BashOutputToolInput,
@@ -277,6 +278,7 @@ __all__ = [
     'AgentTeammateSpawnedResult',
     'AskUserQuestionToolResult',
     'AsyncTaskLaunchResult',
+    'AwaySummarySystemRecord',
     'BackgroundTask',
     'BashToolResult',
     'BashOutputToolResult',

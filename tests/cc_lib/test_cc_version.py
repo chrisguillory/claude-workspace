@@ -80,9 +80,15 @@ class TestPydanticRoundTrip:
         m = _Model.model_validate({'version': None})
         assert m.version is None
 
-    def test_serializes_as_string(self) -> None:
+    def test_python_mode_preserves_instance(self) -> None:
         m = _Model(version=CCVersion('2.1.131'))
-        assert m.model_dump() == {'version': '2.1.131'}
+        dumped = m.model_dump()
+        assert isinstance(dumped['version'], CCVersion)
+        assert dumped['version'] == CCVersion('2.1.131')
+
+    def test_json_mode_serializes_as_string(self) -> None:
+        m = _Model(version=CCVersion('2.1.131'))
+        assert m.model_dump(mode='json') == {'version': '2.1.131'}
         assert m.model_dump_json() == '{"version":"2.1.131"}'
 
     def test_json_round_trip(self) -> None:

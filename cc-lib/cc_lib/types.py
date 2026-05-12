@@ -98,7 +98,7 @@ class CCVersion(Version):
     ) -> CoreSchema:
         return core_schema.no_info_plain_validator_function(
             cls._pydantic_validate,
-            serialization=core_schema.plain_serializer_function_ser_schema(str, when_used='always'),
+            serialization=core_schema.plain_serializer_function_ser_schema(str, when_used='json'),
         )
 
     @classmethod
