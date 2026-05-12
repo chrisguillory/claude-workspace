@@ -753,7 +753,11 @@ def register_tools(state: ServerState) -> None:
             archive_claude_version: str | None = state.claude_version
         else:
             workspace_session = info_service._load_workspace_session(target_id, session_info.session_folder)
-            archive_claude_version = workspace_session.metadata.claude_version if workspace_session else None
+            archive_claude_version = (
+                str(workspace_session.metadata.claude_version)
+                if workspace_session and workspace_session.metadata.claude_version is not None
+                else None
+            )
 
         storage = GistStorage(
             token=token,

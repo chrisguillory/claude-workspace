@@ -890,6 +890,7 @@ class TestMainIntegration:
         self,
         hook_module: ModuleType,
         monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """extra='allow' (default): unknown fields preserved, hook processes normally.
@@ -898,10 +899,16 @@ class TestMainIntegration:
         (Claude Code adding new fields) doesn't break consumers.
         Set CC_STRICT_MODEL_EXTRA_FORBID=1 for strict mode (see sibling test).
         """
+        home = tmp_path / 'home'
+        (home / '.claude').mkdir(parents=True)
+        (home / '.claude' / 'settings.json').write_text(
+            json.dumps({'permissions': {'allow': ['Bash(echo:*)']}}),
+        )
+        monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         payload = json.dumps(
             {
                 'session_id': 'test',
-                'cwd': '/tmp',
+                'cwd': str(home),
                 'transcript_path': '/tmp/transcript.jsonl',
                 'hook_event_name': 'PreToolUse',
                 'tool_name': 'Bash',
@@ -912,7 +919,7 @@ class TestMainIntegration:
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
-        hook_module.handle_hook()
+        hook_module.handle_hook.__wrapped__()
 
         captured = capsys.readouterr()
         output = json.loads(captured.out)

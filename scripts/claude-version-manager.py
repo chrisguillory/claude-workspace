@@ -253,7 +253,8 @@ def cli_info(
 
         if adhoc:
             data = path.read_bytes()
-            results = scan_binary(data, current_version=version)
+            current = version if isinstance(version, CCVersion) else CCVersion(version)
+            results = scan_binary(data, current_version=current)
             applied = [n for n, r in results.items() if r.status == 'applied']
             unpatched = [n for n, r in results.items() if r.status == 'unpatched']
             changed = [n for n, r in results.items() if r.status == 'changed']
@@ -409,7 +410,7 @@ class VersionStore:
             if not entry.is_file():
                 continue
             name = entry.name
-            version = name.removesuffix('.bak')
+            version = CCVersion(name.removesuffix('.bak'))
             is_bak = name.endswith('.bak')
             st = entry.stat()
             is_ghost = st.st_size == 0
@@ -438,15 +439,15 @@ class VersionStore:
 
         return sorted(versions, key=lambda v: v.version, reverse=True)
 
-    def active_version(self) -> str | None:
-        """Read the claude symlink target, extract version string."""
+    def active_version(self) -> CCVersion | None:
+        """Read the claude symlink target, extract the active version."""
         try:
             target = SYMLINK_PATH.resolve()
-            if target.parent == self._dir.resolve():
-                return target.name
         except OSError:
-            pass
-        return None
+            return None
+        if target.parent != self._dir.resolve():
+            return None
+        return CCVersion(target.name)
 
     def path_for(self, version: str) -> Path:
         """Return expected path for a version binary."""
@@ -644,9 +645,9 @@ def _complete_local_version(incomplete: str) -> Sequence[tuple[str, str]]:
     """Complete version strings from locally installed versions."""
     store = VersionStore()
     return [
-        (v.version, f'{v.size / 1_000_000:.0f} MB')
+        (str(v.version), f'{v.size / 1_000_000:.0f} MB')
         for v in store.scan()
-        if not v.is_bak and not v.is_ghost and v.version.startswith(incomplete)
+        if not v.is_bak and not v.is_ghost and str(v.version).startswith(incomplete)
     ]
 
 

@@ -25,6 +25,9 @@ def pytest_configure() -> None:
     repo_root = str(Path(__file__).resolve().parent)
     os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, [repo_root, os.environ.get('PYTHONPATH', '')]))
 
-    # Ensure StrictModel/OpenModel default to extra='allow' regardless of parent env
-    os.environ.pop('CC_STRICT_MODEL_EXTRA_FORBID', None)
-    os.environ.pop('CC_OPEN_MODEL_EXTRA_FORBID', None)
+    # Ensure StrictModel/OpenModel default to extra='allow' regardless of parent
+    # env OR ~/.claude/settings.json. ``get_cc_env_var`` falls back to settings
+    # when the env var is unset, so popping alone isn't enough — set to an empty
+    # string so the function returns '' (not '1') without consulting settings.
+    os.environ['CC_STRICT_MODEL_EXTRA_FORBID'] = ''
+    os.environ['CC_OPEN_MODEL_EXTRA_FORBID'] = ''

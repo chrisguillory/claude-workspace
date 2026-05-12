@@ -12,7 +12,7 @@ import psutil
 from filelock import FileLock
 
 from cc_lib.schemas.base import ClosedModel
-from cc_lib.types import JsonDatetime, SessionSource, SessionState
+from cc_lib.types import CCVersion, JsonDatetime, SessionSource, SessionState
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
 __all__ = [
@@ -63,7 +63,7 @@ class SessionMetadata(ClosedModel):
     parent_id: str | None = None  # Extracted from transcript file
     crash_detected_at: JsonDatetime | None = None  # When crash detected
     startup_model: str | None = None  # Initial AI model (only set on startup, not resume)
-    claude_version: str | None = None  # Claude Code CLI version (from executable symlink path)
+    claude_version: CCVersion | None = None  # Claude Code CLI version (from executable symlink path)
 
 
 class SessionManager:
@@ -115,7 +115,7 @@ class SessionManager:
         claude_pid: int,
         parent_id: str | None,
         startup_model: str | None = None,
-        claude_version: str | None = None,
+        claude_version: CCVersion | None = None,
         process_created_at: datetime | None = None,
     ) -> None:
         """Start a new session or restart an exited/completed/crashed session.

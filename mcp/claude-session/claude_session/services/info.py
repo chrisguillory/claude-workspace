@@ -17,6 +17,7 @@ from pathlib import Path
 import psutil
 import pydantic
 from cc_lib.session_tracker import Session, SessionDatabase
+from cc_lib.types import CCVersion
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
 
 from claude_session.schemas.operations.context import SessionContext
@@ -279,8 +280,8 @@ class SessionInfoService:
     async def _get_claude_version(
         self,
         session_file: Path,
-        workspace_version: str | None,
-    ) -> str | None:
+        workspace_version: CCVersion | None,
+    ) -> CCVersion | None:
         """Get Claude Code version, preferring workspace sessions.json.
 
         Falls back to scanning JSONL records when sessions.json doesn't carry a
@@ -295,7 +296,7 @@ class SessionInfoService:
                     record = json.loads(line)
                     version = record.get('version')
                     if isinstance(version, str):
-                        return version
+                        return CCVersion(version)
 
         return None
 

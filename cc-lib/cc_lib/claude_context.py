@@ -9,7 +9,6 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pydantic
-from packaging.version import InvalidVersion, Version
 
 from cc_lib.exceptions import (
     ClaudeContextError,
@@ -20,6 +19,7 @@ from cc_lib.exceptions import (
     SessionNotFoundError,
 )
 from cc_lib.session_tracker import SESSIONS_PATH, Session, SessionDatabase
+from cc_lib.types import CCVersion
 
 __all__ = [
     'ClaudeContext',
@@ -63,14 +63,8 @@ class ClaudeContext:
             raise InactiveSessionError(f"Session {session.session_id} is in state {session.state!r}, expected 'active'")
         if session.metadata.claude_version is None:
             raise ClaudeContextError(f'Session {session.session_id} has no claude_version in sessions.json')
-        try:
-            claude_version = Version(session.metadata.claude_version)
-        except InvalidVersion as e:
-            raise ClaudeContextError(
-                f'Session {session.session_id} has invalid claude_version {session.metadata.claude_version!r}: {e}'
-            ) from e
         self._session = session
-        self._claude_version = claude_version
+        self._claude_version = session.metadata.claude_version
 
     @property
     def session(self) -> Session:
@@ -89,7 +83,7 @@ class ClaudeContext:
         return Path(self._session.project_dir)
 
     @property
-    def claude_version(self) -> Version:
+    def claude_version(self) -> CCVersion:
         return self._claude_version
 
     def __eq__(self, other: object) -> bool:

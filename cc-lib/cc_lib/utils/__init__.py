@@ -28,8 +28,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 
-from packaging.version import Version
-
 from cc_lib.exceptions import HookTreeMismatchError
 from cc_lib.types import CCVersion
 
@@ -108,12 +106,12 @@ def encode_project_path(path: Path | str) -> str:
 
 
 def get_active_cc_version() -> CCVersion | None:
-    """Return the active Claude Code version, e.g. ``'2.1.131'``.
+    """Return the active Claude Code version, e.g. ``CCVersion('2.1.131')``.
 
-    Runs ``claude --version`` and parses the first whitespace-separated token
-    from stdout (full output is ``'2.1.131 (Claude Code)'``). Returns
-    ``None`` when the CLI is missing, fails, or outputs an unparseable line —
-    callers can fall back to scanning all patches.
+    Runs ``claude --version`` and parses ``CCVersion`` from the stdout line
+    (which has the form ``'2.1.131 (Claude Code)'``). Returns ``None`` when
+    the CLI is missing, fails, or outputs an unparseable line — callers can
+    fall back to scanning all patches.
     """
     try:
         result = subprocess.run(
@@ -127,8 +125,10 @@ def get_active_cc_version() -> CCVersion | None:
         return None
     if result.returncode != 0:
         return None
-    parts = result.stdout.strip().split(maxsplit=1)
-    return parts[0] if parts else None
+    stdout = result.stdout.strip()
+    if not stdout:
+        return None
+    return CCVersion.parse(stdout)
 
 
 def get_claude_config_home_dir() -> Path:
@@ -227,14 +227,11 @@ def version_in_range(
 ) -> bool:
     """True if ``version`` falls within the (inclusive) ``[min, max]`` range.
 
-    ``None`` bounds are unbounded on that side. Comparison uses
-    ``packaging.version.Version`` so dotted-numeric strings sort correctly
-    (``2.1.10 > 2.1.9``, unlike string comparison).
+    ``None`` bounds are unbounded on that side.
     """
-    v = Version(version)
-    if min_version is not None and v < Version(min_version):
+    if min_version is not None and version < min_version:
         return False
-    if max_version is not None and v > Version(max_version):
+    if max_version is not None and version > max_version:
         return False
     return True
 

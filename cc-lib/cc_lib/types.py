@@ -48,7 +48,9 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import pydantic
-from pydantic import JsonValue
+from packaging.version import Version
+from pydantic import GetCoreSchemaHandler, JsonValue
+from pydantic_core import CoreSchema, core_schema
 
 # -- Session lifecycle --------------------------------------------------------
 
@@ -65,7 +67,49 @@ type OutputFormat = Literal['text', 'json']
 
 # -- Claude Code versioning ---------------------------------------------------
 
-type CCVersion = str
+
+class CCVersion(Version):
+    """Claude Code version — a PEP 440 ``Version`` with a relaxed parser.
+
+    Direct construction (``CCVersion('2.1.131')``) requires strict PEP 440
+    input. Use ``CCVersion.parse(raw)`` to handle ``claude --version`` output
+    (``'2.1.131 (Claude Code)'``) — it strips the ``' (Claude Code)'`` suffix
+    before parsing.
+
+    Comparison and hashing follow PEP 440 version order
+    (``CCVersion('2.1.10') > CCVersion('2.1.9')``); ``.major`` / ``.minor`` /
+    ``.micro`` are inherited from ``packaging.version.Version``.
+
+    Pydantic models serialize as a string and deserialize via ``parse``.
+    """
+
+    @classmethod
+    def parse(cls, raw: str) -> CCVersion:
+        """Parse raw ``claude --version`` output, stripping the ``(Claude Code)`` suffix."""
+        stripped = raw.strip()
+        cleaned = stripped.split()[0] if stripped else stripped
+        return cls(cleaned)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,  # noqa: ARG003 — required by Pydantic protocol
+        handler: GetCoreSchemaHandler,  # noqa: ARG003 — required by Pydantic protocol
+    ) -> CoreSchema:
+        return core_schema.no_info_plain_validator_function(
+            cls._pydantic_validate,
+            serialization=core_schema.plain_serializer_function_ser_schema(str, when_used='always'),
+        )
+
+    @classmethod
+    def _pydantic_validate(cls, value: object) -> CCVersion:
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            return cls.parse(value)
+        # Pydantic wraps ValueError into ValidationError; TypeError would leak through.
+        raise ValueError(f'Cannot construct CCVersion from {type(value).__name__}')
+
 
 # -- JSON serialization helpers -----------------------------------------------
 

@@ -959,8 +959,8 @@ PATCHES: Sequence[SessionPatchDef] = (
         kind=PatchKind.FIX,
         detector=_detect_duplicate_uuid,
         deps=(),
-        min_version='2.1.27',
-        max_version='2.1.27',
+        min_version=CCVersion('2.1.27'),
+        max_version=CCVersion('2.1.27'),
     ),
     SessionPatchDef(
         name='orphan-sidechain',
@@ -969,7 +969,7 @@ PATCHES: Sequence[SessionPatchDef] = (
         detector=_detect_orphan_sidechain,
         # Both upstream patches mutate parent chains; orphan-sidechain must see the post-fix file.
         deps=('duplicate-uuid', 'oversized-image'),
-        min_version='2.1.24',
+        min_version=CCVersion('2.1.24'),
     ),
     SessionPatchDef(
         name='oversized-image',
@@ -988,7 +988,7 @@ PATCHES: Sequence[SessionPatchDef] = (
         detector=_detect_stale_parent,
         # Walks the chain; needs post-fix file from chain-mutating patches.
         deps=('duplicate-uuid', 'oversized-image'),
-        min_version='2.1.85',
+        min_version=CCVersion('2.1.85'),
     ),
 )
 
