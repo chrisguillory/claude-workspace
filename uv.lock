@@ -261,7 +261,7 @@ wheels = [
 
 [[package]]
 name = "claude-remote-bash"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "mcp/claude-remote-bash" }
 dependencies = [
     { name = "cc-lib" },
@@ -512,7 +512,7 @@ wheels = [
 
 [[package]]
 name = "document-search"
-version = "0.7.2"
+version = "0.7.4"
 source = { editable = "mcp/document-search" }
 dependencies = [
     { name = "bm25-rs" },
@@ -2640,7 +2640,7 @@ wheels = [
 
 [[package]]
 name = "selenium-browser"
-version = "0.8.1"
+version = "0.8.2"
 source = { editable = "mcp/selenium-browser" }
 dependencies = [
     { name = "cc-lib" },
