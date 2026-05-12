@@ -247,8 +247,8 @@ def register_tools(state: ServerState) -> None:
             )
 
         Note:
-            After restoration, use `claude --resume {new_session_id}` in CLI
-            to continue the conversation with the restored history.
+            After restoration, run ``result.resume_command`` to continue the
+            conversation with the restored history.
         """
         # Create restore service for current project
         restore_service = SessionRestoreService(state.project_path)
@@ -260,7 +260,7 @@ def register_tools(state: ServerState) -> None:
         )
 
         logger.info('Session restored with new ID: %s', result.new_session_id)
-        logger.info('Use: claude --resume %s', result.new_session_id)
+        logger.info('Run: %s', result.resume_command)
 
         return result
 
@@ -303,8 +303,8 @@ def register_tools(state: ServerState) -> None:
             )
 
         Note:
-            After cloning, use `claude --resume {new_session_id}` in CLI
-            to continue the conversation with the cloned history.
+            After cloning, run ``result.resume_command`` to continue the
+            conversation with the cloned history.
         """
         # Default to current session if not specified
         target_id = source_session_id or state.session_id
@@ -321,7 +321,7 @@ def register_tools(state: ServerState) -> None:
         )
 
         logger.info('Session cloned with new ID: %s', result.new_session_id)
-        logger.info('Use: claude --resume %s', result.new_session_id)
+        logger.info('Run: %s', result.resume_command)
 
         return result
 

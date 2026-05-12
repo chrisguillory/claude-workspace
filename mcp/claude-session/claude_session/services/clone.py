@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import uuid6
+from cc_lib.settings_env import claude_binary_name
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.schemas.operations.discovery import SessionInfo
@@ -423,6 +424,7 @@ class SessionCloneService:
             session_env_restored=session_env_cloned,
             session_memory_restored=session_memory_cloned,
             debug_log_restored=debug_log_cloned,
+            resume_command=f'{claude_binary_name()} --resume {new_session_id}',
             paths_translated=translator is not None,
             slug_mappings_applied=len(slug_mapping),
             agent_id_mappings_applied=len(agent_id_mapping),
