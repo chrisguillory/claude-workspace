@@ -8,8 +8,13 @@ mDNS, or auth — just a zsh binary on PATH.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import subprocess
+import time
+import uuid
 from pathlib import Path
 
+import pytest
 from claude_remote_bash.executor import execute_command
 
 
@@ -67,3 +72,53 @@ class TestExecuteCommand:
         result = asyncio.run(execute_command('echo before; exit 7'))
         assert result.stdout == 'before'
         assert result.exit_code == 7
+
+    def test_cancellation_kills_subprocess_group(self) -> None:
+        """A cancelled ``execute_command`` SIGKILLs the whole subprocess group.
+
+        Without the group kill, daemon shutdown would unblock but the user's
+        command and its children would survive as orphans reparented to launchd.
+        """
+        sentinel = f'crbtest-{uuid.uuid4().hex[:8]}'
+
+        async def _run() -> str:
+            task = asyncio.create_task(
+                execute_command(f'sleep 47 # {sentinel}', timeout=60),
+            )
+            pgid = ''
+            for _ in range(30):
+                await asyncio.sleep(0.1)
+                found = subprocess.run(
+                    ['pgrep', '-f', sentinel],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if found.stdout.strip():
+                    pid = found.stdout.strip().split('\n')[0]
+                    pgid_out = subprocess.run(
+                        ['ps', '-p', pid, '-o', 'pgid='],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    pgid = pgid_out.stdout.strip()
+                    if pgid:
+                        break
+            if not pgid:
+                pytest.fail("subprocess didn't appear within 3s")
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            return pgid
+
+        pgid = asyncio.run(_run())
+        time.sleep(0.5)
+        remaining = subprocess.run(
+            ['pgrep', '-g', pgid],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert remaining.returncode == 1, f'pgrep -g {pgid} returned matches after cancellation: {remaining.stdout!r}'
+        assert not remaining.stdout.strip(), f'processes in pgid {pgid} survived cancellation: {remaining.stdout!r}'
