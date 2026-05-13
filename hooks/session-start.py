@@ -130,6 +130,11 @@ def _extract_parent_id(transcript_file: Path) -> str | None:
 @boundary.handler(RivalSessionError)
 def _handle_rival_session(exc: RivalSessionError) -> None:
     print(f'session-start: {exc}', file=sys.stderr)
+    print(f'session-start: terminating rival claude pid {exc.claude_pid}', file=sys.stderr)
+    try:
+        psutil.Process(exc.claude_pid).terminate()
+    except psutil.NoSuchProcess:
+        pass
 
 
 if __name__ == '__main__':

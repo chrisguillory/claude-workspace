@@ -243,13 +243,14 @@ class SessionManager:
     def find_rival_session(self, session_id: str, claude_pid: int) -> Session | None:
         """Return an active session owned by a different live pid for the same session_id.
 
-        Caller intent: detect at SessionStart that another claude process is already
-        running this session_id, so the rival start can be refused before clobbering
-        the existing entry.
+        A rival is a recorded entry whose claude_pid differs from the caller's,
+        is still alive, and whose pid has not been recycled (verified via
+        process_created_at match). Hooks call this to refuse touching an entry
+        they don't own — at SessionStart to avoid clobbering on rival start,
+        at SessionEnd to avoid flipping state to exited on rival exit.
 
         Returns None when no conflict: no entry, entry not active, same pid as caller,
-        rival pid is dead, or rival pid was recycled by an unrelated process (verified
-        via process_created_at match).
+        rival pid is dead, or rival pid was recycled by an unrelated process.
         """
         if self._db is None:
             raise RuntimeError("SessionManager must be used within 'with' context")

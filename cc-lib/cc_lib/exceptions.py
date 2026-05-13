@@ -76,13 +76,13 @@ class HookTreeMismatchError(CCLibError):
 
 
 class RivalSessionError(CCLibError):
-    """Another active claude process already owns this session_id."""
+    """Another live claude process owns this session_id."""
 
     def __init__(self, *, session_id: str, rival_pid: int, claude_pid: int) -> None:
         self.session_id = session_id
         self.rival_pid = rival_pid
         self.claude_pid = claude_pid
         super().__init__(
-            f'session_id {session_id} is already active for pid {rival_pid} '
-            f'(this process is pid {claude_pid}). Refusing to start a second instance.'
+            f'session_id {session_id} is owned by live pid {rival_pid} '
+            f'(this process is pid {claude_pid}). Refusing to modify the entry.'
         )
