@@ -175,7 +175,7 @@ class AgentMetadataEntry(StrictModel):
     """Per-subagent invocation manifest sidecar (Claude Code 2.1.70+).
 
     Claude Code writes a small JSON file when spawning each sidechain agent.
-    Pairs 1:1 (when present) with an AgentFileEntry via agent_id.
+    The agent_id matches the paired AgentFileEntry when both writes landed.
 
     Derived fields (computed on restore):
     - filename: f"agent-{agent_id}.meta.json"
