@@ -27,6 +27,15 @@ This repository contains Claude Code customizations for Chris Guillory, includin
 | **Self-documenting**          | Clear naming and structure explain intent    |
 | **Documentation locality**    | Keep docs near what they describe            |
 | **Public APIs**               | Classes, functions, tools get docstrings     |
+| **Module docstrings**         | Reserved for specs, grammars, taxonomies     |
+
+### Module Docstrings
+
+When the file IS a canonical spec — a grammar, a protocol, a taxonomy — the module docstring carries that spec. Examples in this repo: `cc-lib/cc_lib/schemas/base.py` (the four base-model taxonomy) and `mcp/claude-remote-bash/claude_remote_bash/selector.py` (selector grammar). Most files don't qualify; their function and class docstrings carry the weight.
+
+A one-line topical label is acceptable only when the module name alone is genuinely ambiguous — e.g., `protocol.py` → `"""Length-prefixed JSON framing over TCP."""` disambiguates from "message protocol" or "auth protocol." Decorative restatement of the filename ("Command-line interface for X", "Models for Y") is journey residue; omit.
+
+A docstring that needs to enumerate multiple concerns is a signal to split the file, not to expand the docstring.
 
 ### Application
 
