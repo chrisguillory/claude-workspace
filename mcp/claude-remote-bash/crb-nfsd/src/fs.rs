@@ -28,6 +28,11 @@ use tracing::debug;
 
 use crate::pollution::{is_pollution_pattern, validate_component, validate_symlink_target};
 
+/// Matches the `rtmax` advertised in nfsserve's `fsinfo` response. READ
+/// requests beyond this cap are refused with `NFS3ERR_INVAL` — the server
+/// won't allocate a multi-GB response buffer just because a peer asked.
+const MAX_READ_SIZE: usize = 1024 * 1024;
+
 #[derive(Debug, Clone)]
 struct FSEntry {
     name: Vec<Symbol>,
@@ -449,6 +454,14 @@ impl NFSFileSystem for MirrorFS {
     }
 
     async fn read(&self, id: fileid3, offset: u64, count: u32) -> Result<(Vec<u8>, bool), nfsstat3> {
+        // Enforce the rtmax we advertise in fsinfo (1 MB). Without this, a
+        // peer-controlled `count` up to u32::MAX would drive a multi-GB
+        // `vec![0; count]` allocation per RPC — recoverable DoS via the
+        // server's own response buffer. RFC 1813 §3.3.6 permits servers to
+        // return short reads, so capping is RFC-compliant.
+        if count as usize > MAX_READ_SIZE {
+            return Err(nfsstat3::NFS3ERR_INVAL);
+        }
         let fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(id)?;
         // RFC 1813 §3.3.6: READ is defined for regular files only. Type-gate
