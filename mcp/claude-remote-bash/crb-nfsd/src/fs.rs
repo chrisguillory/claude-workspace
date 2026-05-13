@@ -424,7 +424,7 @@ impl NFSFileSystem for MirrorFS {
         // component, so without this check a peer-created symlink in the
         // served tree (target = anywhere outside --root, e.g. /etc/passwd or
         // a path under --block-prefix) would be readable via this handler.
-        // The C1 fix to refresh_dir_list caches symlinks as NF3LNK; this
+        // refresh_dir_list caches symlinks as NF3LNK in their fattr3; this
         // gate enforces the type at the protocol layer.
         if !matches!(ent.fsmeta.ftype, ftype3::NF3REG) {
             return Err(nfsstat3::NFS3ERR_INVAL);
