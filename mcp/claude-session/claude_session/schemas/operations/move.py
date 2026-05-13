@@ -22,8 +22,17 @@ class MoveResult(StrictModel):
     source_project: str
     target_project: str
 
+    # Aggregate counts
     files_moved: int
     files_deleted: int
+
+    # Per-artifact-type breakdown (target-side moves)
+    main_session_moved: int
+    agent_files_moved: int
+    agent_metadata_moved: int
+    tool_results_moved: int
+    session_memory_moved: bool
+
     paths_translated: bool
 
     was_running: bool
