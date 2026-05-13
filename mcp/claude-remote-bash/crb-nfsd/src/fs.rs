@@ -22,7 +22,7 @@ use nfsserve::fs_util::{
 };
 use nfsserve::nfs::{fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, sattr3};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
-use tokio::fs::{File, OpenOptions};
+use tokio::fs::OpenOptions;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tracing::debug;
 
@@ -463,15 +463,29 @@ impl NFSFileSystem for MirrorFS {
         }
         let path = fsmap.sym_to_path(&ent.name);
         drop(fsmap);
-        let mut f = File::open(&path).await.map_err(|e| {
-            debug!("read: File::open({:?}) failed: {}", path, e);
-            match e.kind() {
-                std::io::ErrorKind::NotFound => nfsstat3::NFS3ERR_NOENT,
-                std::io::ErrorKind::PermissionDenied => nfsstat3::NFS3ERR_ACCES,
-                std::io::ErrorKind::IsADirectory => nfsstat3::NFS3ERR_ISDIR,
-                _ => nfsstat3::NFS3ERR_IO,
-            }
-        })?;
+        // O_NOFOLLOW closes a TOCTOU between the type-gate above and this
+        // open: peer A drops the lock here, peer B runs remove(name) then
+        // symlink(name, "<relative-target>"), peer A's open follows the
+        // freshly-planted symlink and bypasses the gate. The type-gate's
+        // cache check was valid at lock time but the leaf inode can change
+        // after lock release. ELOOP -> INVAL surfaces the refusal explicitly.
+        let mut f = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)
+            .await
+            .map_err(|e| {
+                debug!("read: open({:?}) failed: {}", path, e);
+                match e.raw_os_error() {
+                    Some(err) if err == libc::ELOOP => nfsstat3::NFS3ERR_INVAL,
+                    _ => match e.kind() {
+                        std::io::ErrorKind::NotFound => nfsstat3::NFS3ERR_NOENT,
+                        std::io::ErrorKind::PermissionDenied => nfsstat3::NFS3ERR_ACCES,
+                        std::io::ErrorKind::IsADirectory => nfsstat3::NFS3ERR_ISDIR,
+                        _ => nfsstat3::NFS3ERR_IO,
+                    },
+                }
+            })?;
         let len = f.metadata().await.map_err(|e| {
             debug!("read: metadata({:?}) failed: {}", path, e);
             nfsstat3::NFS3ERR_IO
@@ -602,15 +616,24 @@ impl NFSFileSystem for MirrorFS {
         let path = fsmap.sym_to_path(&ent.name);
         drop(fsmap);
         debug!("write to init {:?}", path);
+        // O_NOFOLLOW: same TOCTOU defense as read() — close the race where a
+        // peer can substitute the leaf with a symlink between our cache
+        // type-check and this open. Without O_NOFOLLOW, create(true) on a
+        // dangling symlink would also synthesize a file at the resolved
+        // target.
         let mut f = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(false)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&path)
             .await
             .map_err(|e| {
-                debug!("Unable to open {:?}", e);
-                nfsstat3::NFS3ERR_IO
+                debug!("write: open({:?}) failed: {}", path, e);
+                match e.raw_os_error() {
+                    Some(err) if err == libc::ELOOP => nfsstat3::NFS3ERR_INVAL,
+                    _ => nfsstat3::NFS3ERR_IO,
+                }
             })?;
         f.seek(SeekFrom::Start(offset)).await.map_err(|e| {
             debug!("Unable to seek {:?}", e);
