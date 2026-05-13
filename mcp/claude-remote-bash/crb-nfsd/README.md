@@ -40,13 +40,15 @@ The server refuses operations beyond what `--block-prefix` and `--readonly` cove
 
 ## Install
 
-Packaged via maturin `bindings = "bin"`. The wheel contains `crb_nfsd-<ver>.data/scripts/crb-nfsd` (the binary), `LICENSE-UPSTREAM`, and a CycloneDX SBOM. When `claude-remote-bash`'s pyproject lists `crb-nfsd` as a workspace path dep, `uv tool install --editable mcp/claude-remote-bash` builds and installs the binary on PATH; the daemon does `shutil.which('crb-nfsd')` at startup.
+Packaged via maturin `bindings = "bin"`. The wheel contains `crb_nfsd-<ver>.data/scripts/crb-nfsd` (the binary), `LICENSE-UPSTREAM`, and a CycloneDX SBOM.
+
+A future commit on this branch will add `crb-nfsd` as a workspace path dep in `mcp/claude-remote-bash/pyproject.toml`. Once that lands, `uv tool install --editable mcp/claude-remote-bash` will build and install the binary on PATH, and the daemon will do `shutil.which('crb-nfsd')` at startup.
 
 ## Scope (out of scope for this binary)
 
 - Tunnel orchestration, mDNS announce, auth, mount-point management → live in `claude-remote-bash` daemon and CLI
 - NFSv4 / Kerberos → not needed; nfsserve is v3-only
-- Symlink CREATE → empirically works (contradicts the depth-dive's claim); no special handling required
+- Symlink CREATE → handled by upstream's standard `symlink` VFS hook; no special-casing required
 
 ## License
 
