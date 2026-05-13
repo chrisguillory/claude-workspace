@@ -20,6 +20,7 @@ from claude_session.config.mcp import settings
 from claude_session.schemas.operations.archive import (
     ARCHIVE_FORMAT_VERSION,
     AgentFileEntry,
+    AgentMetadataEntry,
     ArchiveMetadata,
     FileMetadata,
     MainSessionFileEntry,
@@ -34,6 +35,8 @@ from claude_session.schemas.operations.archive import (
 )
 from claude_session.schemas.session import SessionRecord, Task
 from claude_session.services.artifacts import (
+    AGENT_METADATA_FILENAME_PATTERN,
+    collect_agent_metadata,
     collect_debug_log,
     collect_plan_files,
     collect_session_env,
@@ -343,6 +346,17 @@ class SessionArchiveService:
                 )
             )
 
+        # Agent metadata sidecars (paired with agent_files when present)
+        agent_metadata_files = collect_agent_metadata(project_folder, self.session_id)
+        agent_metadata_entries: list[AgentMetadataEntry] = []
+        for filename, content in agent_metadata_files.items():
+            match = AGENT_METADATA_FILENAME_PATTERN.match(filename)
+            if not match:
+                continue
+            agent_metadata_entries.append(AgentMetadataEntry(agent_id=match.group(1), content=content))
+        if agent_metadata_entries:
+            logger.info('Collected %d agent metadata sidecars', len(agent_metadata_entries))
+
         # Convert artifacts to v2 entry models
         plan_entries = [PlanFileEntry(slug=slug, content=content) for slug, content in plan_files.items()]
 
@@ -392,6 +406,7 @@ class SessionArchiveService:
             custom_title=custom_title,
             main_session=main_session,
             agent_files=agent_entries,
+            agent_metadata=agent_metadata_entries,
             plan_files=plan_entries,
             tool_results=tool_result_entries,
             tool_result_dirs=tool_result_dir_entries,

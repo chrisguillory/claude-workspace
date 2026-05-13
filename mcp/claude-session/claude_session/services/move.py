@@ -41,11 +41,13 @@ from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts import (
     AgentFileInfo,
     collect_agent_file_info,
+    collect_agent_metadata,
     collect_session_memory,
     collect_tool_results,
     detect_agent_structure,
     extract_custom_title_from_records,
     extract_source_project_path,
+    write_agent_metadata,
     write_jsonl,
     write_session_memory,
     write_tool_results,
@@ -149,6 +151,7 @@ class SessionMoveService:
 
         # Collect agent file info
         agent_infos = collect_agent_file_info(files_data, agent_structure)
+        agent_metadata_files = collect_agent_metadata(source_session_dir, session_info.session_id)
 
         # Collect tool results
         tool_results = collect_tool_results(source_session_dir, session_info.session_id)
@@ -181,6 +184,11 @@ class SessionMoveService:
                 all_output_paths.append(target_dir / sid / 'subagents' / filename)
             else:
                 all_output_paths.append(target_dir / filename)
+
+        # Agent metadata sidecars (always nested; same agent_id preserved on move)
+        all_output_paths.extend(
+            target_dir / sid / 'subagents' / meta_filename for meta_filename in agent_metadata_files
+        )
 
         # Tool results (flat files + directory files)
         if tool_results:
@@ -260,6 +268,11 @@ class SessionMoveService:
 
             logger.info('Wrote agent %s: %d records', filename, len(translated))
 
+        # Write agent metadata sidecars (raw copy, no translation)
+        if agent_metadata_files:
+            write_agent_metadata(target_dir, sid, agent_metadata_files)
+            logger.info('Wrote %d agent metadata sidecars', len(agent_metadata_files))
+
         # Write tool results (raw copy, no translation)
         if tool_results:
             write_tool_results(tool_results, target_dir, sid)
@@ -309,6 +322,11 @@ class SessionMoveService:
                 else:
                     agent_path = source_session_dir / f'agent-{info.agent_id}.jsonl'
                 agent_path.unlink()
+                files_deleted += 1
+
+            # Delete agent metadata sidecars
+            for meta_filename in agent_metadata_files:
+                (source_session_dir / sid / 'subagents' / meta_filename).unlink()
                 files_deleted += 1
 
             # Delete tool results (flat files)
