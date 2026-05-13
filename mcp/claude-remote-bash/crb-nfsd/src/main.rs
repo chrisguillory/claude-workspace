@@ -26,13 +26,35 @@ use async_trait::async_trait;
 use clap::Parser;
 use intaglio::osstr::SymbolTable;
 use intaglio::Symbol;
-use nfsserve::fs_util::*;
-use nfsserve::nfs::*;
+use nfsserve::fs_util::{
+    exists_no_traverse, fattr3_differ, file_setattr, metadata_to_fattr3, path_setattr,
+};
+use nfsserve::nfs::{fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, sattr3};
 use nfsserve::tcp::{NFSTcp, NFSTcpListener};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tracing::debug;
+
+/// Refuses any NFS `filename3` that is not a single, sane path component.
+///
+/// RFC 1813 §3.3.2 says `filename3` is one path component, but the upstream
+/// `nfsserve` crate does not enforce that before delegating to the VFS impl.
+/// Without this check, a peer crafting `filename = b"../../etc/whatever"`
+/// would, on `PathBuf::push`, append that bytes literally; the OS resolves
+/// `..` and `/` at syscall time, escaping `--root`. Enforce the contract at
+/// the protocol layer so every mutation entry point fails loud and early.
+fn validate_component(name: &[u8]) -> Result<(), nfsstat3> {
+    if name.is_empty()
+        || name == b"."
+        || name == b".."
+        || name.contains(&b'/')
+        || name.contains(&b'\0')
+    {
+        return Err(nfsstat3::NFS3ERR_INVAL);
+    }
+    Ok(())
+}
 
 /// macOS metadata filenames that Finder, Spotlight, and Quick Look auto-create
 /// on any browsed folder. Filtering these out of every namespace operation
@@ -100,7 +122,7 @@ impl FSMap {
             path_to_id: HashMap::from([(Vec::new(), 0)]),
         }
     }
-    async fn sym_to_path(&self, symlist: &[Symbol]) -> PathBuf {
+    fn sym_to_path(&self, symlist: &[Symbol]) -> PathBuf {
         let mut ret = self.root.clone();
         for i in symlist.iter() {
             ret.push(self.intern.get(*i).unwrap());
@@ -108,7 +130,7 @@ impl FSMap {
         ret
     }
 
-    async fn sym_to_fname(&self, symlist: &[Symbol]) -> OsString {
+    fn sym_to_fname(&self, symlist: &[Symbol]) -> OsString {
         if let Some(x) = symlist.last() {
             self.intern.get(*x).unwrap().into()
         } else {
@@ -143,7 +165,7 @@ impl FSMap {
     fn find_entry_mut(&mut self, id: fileid3) -> Result<&mut FSEntry, nfsstat3> {
         self.id_to_path.get_mut(&id).ok_or(nfsstat3::NFS3ERR_NOENT)
     }
-    async fn find_child(&self, id: fileid3, filename: &[u8]) -> Result<fileid3, nfsstat3> {
+    fn find_child(&self, id: fileid3, filename: &[u8]) -> Result<fileid3, nfsstat3> {
         let mut name = self.id_to_path.get(&id).ok_or(nfsstat3::NFS3ERR_NOENT)?.name.clone();
         name.push(
             self.intern
@@ -154,7 +176,7 @@ impl FSMap {
     }
     async fn refresh_entry(&mut self, id: fileid3) -> Result<RefreshResult, nfsstat3> {
         let entry = self.id_to_path.get(&id).ok_or(nfsstat3::NFS3ERR_NOENT)?.clone();
-        let path = self.sym_to_path(&entry.name).await;
+        let path = self.sym_to_path(&entry.name);
         if !exists_no_traverse(&path) {
             self.delete_entry(id);
             debug!("Deleting entry A {:?}: {:?}. Ent: {:?}", id, path, entry);
@@ -193,15 +215,25 @@ impl FSMap {
             return Ok(());
         }
         let mut cur_path = entry.name.clone();
-        let path = self.sym_to_path(&entry.name).await;
+        let path = self.sym_to_path(&entry.name);
         let mut new_children: Vec<u64> = Vec::new();
         debug!("Relisting entry {:?}: {:?}. Ent: {:?}", id, path, entry);
         if let Ok(mut listing) = tokio::fs::read_dir(&path).await {
             while let Some(entry) = listing.next_entry().await.map_err(|_| nfsstat3::NFS3ERR_IO)? {
-                let sym = self.intern.intern(entry.file_name()).unwrap();
+                let sym = self
+                    .intern
+                    .intern(entry.file_name())
+                    .map_err(|_| nfsstat3::NFS3ERR_IO)?;
                 cur_path.push(sym);
-                let meta = entry.metadata().await.unwrap();
-                let next_id = self.create_entry(&cur_path, meta).await;
+                // symlink_metadata (not entry.metadata()) so a symlinked child is
+                // cached as NF3LNK with the link's own attrs — never as the
+                // target's attrs. Without this, a symlink-to-blocked-target would
+                // be served as a regular file by the cache, and read() would
+                // follow it server-side, bypassing --block-prefix.
+                let meta = tokio::fs::symlink_metadata(entry.path())
+                    .await
+                    .map_err(|_| nfsstat3::NFS3ERR_IO)?;
+                let next_id = self.create_entry(&cur_path, meta);
                 new_children.push(next_id);
                 cur_path.pop();
             }
@@ -212,7 +244,7 @@ impl FSMap {
         Ok(())
     }
 
-    async fn create_entry(&mut self, fullpath: &[Symbol], meta: Metadata) -> fileid3 {
+    fn create_entry(&mut self, fullpath: &[Symbol], meta: Metadata) -> fileid3 {
         let next_id = if let Some(chid) = self.path_to_id.get(fullpath) {
             if let Some(chent) = self.id_to_path.get_mut(chid) {
                 chent.fsmeta = metadata_to_fattr3(*chid, &meta);
@@ -237,11 +269,11 @@ impl FSMap {
     }
 }
 #[derive(Debug)]
-pub struct MirrorFS {
+struct MirrorFS {
     fsmap: tokio::sync::Mutex<FSMap>,
     readonly: bool,
     /// Canonical absolute path prefixes that must not be exposed. Hit in `lookup`.
-    block_prefixes: Vec<PathBuf>,
+    block_prefixes: Box<[PathBuf]>,
 }
 
 /// Enumeration for the create_fs_object method
@@ -256,7 +288,7 @@ enum CreateFSObject {
     Symlink((sattr3, nfspath3)),
 }
 impl MirrorFS {
-    pub fn new(root: PathBuf, readonly: bool, block_prefixes: Vec<PathBuf>) -> MirrorFS {
+    fn new(root: PathBuf, readonly: bool, block_prefixes: Box<[PathBuf]>) -> MirrorFS {
         MirrorFS {
             fsmap: tokio::sync::Mutex::new(FSMap::new(root)),
             readonly,
@@ -279,6 +311,7 @@ impl MirrorFS {
         objectname: &filename3,
         object: &CreateFSObject,
     ) -> Result<(fileid3, fattr3), nfsstat3> {
+        validate_component(objectname)?;
         // Refuse Apple metadata sidecar names so Finder/Spotlight/Quick Look
         // can't pollute the peer's filesystem with `.DS_Store`, `._*`, etc.
         // EACCES (not EPERM) — per RFC 1813 EACCES is the policy-refused status
@@ -288,7 +321,7 @@ impl MirrorFS {
         }
         let mut fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(dirid)?;
-        let mut path = fsmap.sym_to_path(&ent.name).await;
+        let mut path = fsmap.sym_to_path(&ent.name);
         let objectname_osstr = OsStr::from_bytes(objectname).to_os_string();
         path.push(&objectname_osstr);
 
@@ -331,7 +364,7 @@ impl MirrorFS {
         let mut name = ent.name.clone();
         name.push(sym);
         let meta = path.symlink_metadata().map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        let fileid = fsmap.create_entry(&name, meta.clone()).await;
+        let fileid = fsmap.create_entry(&name, meta.clone());
 
         // update the children list
         if let Some(ref mut children) = fsmap.id_to_path.get_mut(&dirid).ok_or(nfsstat3::NFS3ERR_NOENT)?.children {
@@ -355,6 +388,7 @@ impl NFSFileSystem for MirrorFS {
     }
 
     async fn lookup(&self, dirid: fileid3, filename: &filename3) -> Result<fileid3, nfsstat3> {
+        validate_component(filename)?;
         // Apple pollution sidecars are namespace-invisible — refuse before
         // touching the FS or the cache. NOENT (not ACCES) so client sees the
         // names as nonexistent, consistent with readdir filtering.
@@ -368,7 +402,7 @@ impl NFSFileSystem for MirrorFS {
         // prefixes before exposing anything and (b) reuse it for the
         // negative-lookup fast path below.
         let dirent = fsmap.find_entry(dirid)?;
-        let mut path = fsmap.sym_to_path(&dirent.name).await;
+        let mut path = fsmap.sym_to_path(&dirent.name);
         let objectname_osstr = OsStr::from_bytes(filename).to_os_string();
         path.push(&objectname_osstr);
 
@@ -398,7 +432,7 @@ impl NFSFileSystem for MirrorFS {
             return Err(nfsstat3::NFS3ERR_NOENT);
         }
 
-        if let Ok(id) = fsmap.find_child(dirid, filename).await {
+        if let Ok(id) = fsmap.find_child(dirid, filename) {
             if fsmap.id_to_path.contains_key(&id) {
                 return Ok(id);
             }
@@ -416,7 +450,7 @@ impl NFSFileSystem for MirrorFS {
         }
         let _ = fsmap.refresh_dir_list(dirid).await;
 
-        fsmap.find_child(dirid, filename).await
+        fsmap.find_child(dirid, filename)
     }
 
     async fn getattr(&self, id: fileid3) -> Result<fattr3, nfsstat3> {
@@ -425,7 +459,7 @@ impl NFSFileSystem for MirrorFS {
             return Err(nfsstat3::NFS3ERR_NOENT);
         }
         let ent = fsmap.find_entry(id)?;
-        let path = fsmap.sym_to_path(&ent.name).await;
+        let path = fsmap.sym_to_path(&ent.name);
         debug!("Stat {:?}: {:?}", path, ent);
         Ok(ent.fsmeta)
     }
@@ -433,10 +467,21 @@ impl NFSFileSystem for MirrorFS {
     async fn read(&self, id: fileid3, offset: u64, count: u32) -> Result<(Vec<u8>, bool), nfsstat3> {
         let fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(id)?;
-        let path = fsmap.sym_to_path(&ent.name).await;
+        let path = fsmap.sym_to_path(&ent.name);
         drop(fsmap);
-        let mut f = File::open(&path).await.or(Err(nfsstat3::NFS3ERR_NOENT))?;
-        let len = f.metadata().await.or(Err(nfsstat3::NFS3ERR_NOENT))?.len();
+        let mut f = File::open(&path).await.map_err(|e| {
+            debug!("read: File::open({:?}) failed: {}", path, e);
+            match e.kind() {
+                std::io::ErrorKind::NotFound => nfsstat3::NFS3ERR_NOENT,
+                std::io::ErrorKind::PermissionDenied => nfsstat3::NFS3ERR_ACCES,
+                std::io::ErrorKind::IsADirectory => nfsstat3::NFS3ERR_ISDIR,
+                _ => nfsstat3::NFS3ERR_IO,
+            }
+        })?;
+        let len = f.metadata().await.map_err(|e| {
+            debug!("read: metadata({:?}) failed: {}", path, e);
+            nfsstat3::NFS3ERR_IO
+        })?.len();
         let mut start = offset;
         // checked_add: real NFSv3 clients cap `count` at ~64KB so overflow is
         // theoretical, but a malformed tunnel-claim could craft `offset + count`
@@ -487,7 +532,7 @@ impl NFSFileSystem for MirrorFS {
         };
 
         let remaining_length = children.range((range_start, Bound::Unbounded)).count();
-        let path = fsmap.sym_to_path(&entry.name).await;
+        let path = fsmap.sym_to_path(&entry.name);
         debug!("path: {:?}", path);
         debug!("children len: {:?}", children.len());
         debug!("remaining_len : {:?}", remaining_length);
@@ -497,12 +542,12 @@ impl NFSFileSystem for MirrorFS {
         for i in children.range((range_start, Bound::Unbounded)) {
             let fileid = *i;
             let fileent = fsmap.find_entry(fileid)?;
-            let name = fsmap.sym_to_fname(&fileent.name).await;
+            let name = fsmap.sym_to_fname(&fileent.name);
             if is_pollution_pattern(name.as_bytes()) {
                 skipped += 1;
                 continue;
             }
-            let child_path = fsmap.sym_to_path(&fileent.name).await;
+            let child_path = fsmap.sym_to_path(&fileent.name);
             if self.is_blocked(&child_path) {
                 skipped += 1;
                 continue;
@@ -528,7 +573,7 @@ impl NFSFileSystem for MirrorFS {
     async fn setattr(&self, id: fileid3, setattr: sattr3) -> Result<fattr3, nfsstat3> {
         let mut fsmap = self.fsmap.lock().await;
         let entry = fsmap.find_entry(id)?;
-        let path = fsmap.sym_to_path(&entry.name).await;
+        let path = fsmap.sym_to_path(&entry.name);
         path_setattr(&path, &setattr).await?;
 
         // I have to lookup a second time to update
@@ -541,7 +586,7 @@ impl NFSFileSystem for MirrorFS {
     async fn write(&self, id: fileid3, offset: u64, data: &[u8]) -> Result<fattr3, nfsstat3> {
         let fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(id)?;
-        let path = fsmap.sym_to_path(&ent.name).await;
+        let path = fsmap.sym_to_path(&ent.name);
         drop(fsmap);
         debug!("write to init {:?}", path);
         let mut f = OpenOptions::new()
@@ -583,6 +628,7 @@ impl NFSFileSystem for MirrorFS {
     }
 
     async fn remove(&self, dirid: fileid3, filename: &filename3) -> Result<(), nfsstat3> {
+        validate_component(filename)?;
         // Apple pollution sidecars are namespace-invisible — report NOENT,
         // consistent with lookup() and readdir() filtering.
         if is_pollution_pattern(filename) {
@@ -590,7 +636,7 @@ impl NFSFileSystem for MirrorFS {
         }
         let mut fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(dirid)?;
-        let mut path = fsmap.sym_to_path(&ent.name).await;
+        let mut path = fsmap.sym_to_path(&ent.name);
         path.push(OsStr::from_bytes(filename));
         if let Ok(meta) = path.symlink_metadata() {
             if meta.is_dir() {
@@ -630,6 +676,8 @@ impl NFSFileSystem for MirrorFS {
         to_dirid: fileid3,
         to_filename: &filename3,
     ) -> Result<(), nfsstat3> {
+        validate_component(from_filename)?;
+        validate_component(to_filename)?;
         // Refuse rename if either endpoint touches the pollution namespace.
         // Source: NOENT (the name doesn't exist to us); destination: ACCES
         // (we won't let you create one of these via rename either).
@@ -642,11 +690,11 @@ impl NFSFileSystem for MirrorFS {
         let mut fsmap = self.fsmap.lock().await;
 
         let from_dirent = fsmap.find_entry(from_dirid)?;
-        let mut from_path = fsmap.sym_to_path(&from_dirent.name).await;
+        let mut from_path = fsmap.sym_to_path(&from_dirent.name);
         from_path.push(OsStr::from_bytes(from_filename));
 
         let to_dirent = fsmap.find_entry(to_dirid)?;
-        let mut to_path = fsmap.sym_to_path(&to_dirent.name).await;
+        let mut to_path = fsmap.sym_to_path(&to_dirent.name);
         // to folder must exist
         if !exists_no_traverse(&to_path) {
             return Err(nfsstat3::NFS3ERR_NOENT);
@@ -658,9 +706,22 @@ impl NFSFileSystem for MirrorFS {
             return Err(nfsstat3::NFS3ERR_NOENT);
         }
         debug!("Rename {:?} to {:?}", from_path, to_path);
-        tokio::fs::rename(&from_path, &to_path)
-            .await
-            .map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        tokio::fs::rename(&from_path, &to_path).await.map_err(|e| {
+            debug!("rename({:?} -> {:?}) failed: {}", from_path, to_path, e);
+            // Preserve RFC 1813 RENAME3resfail semantics so the Edit-tool's
+            // atomic write-temp-then-rename flow can distinguish "target was a
+            // non-empty dir" from "permission denied" from "cross-filesystem".
+            match e.kind() {
+                std::io::ErrorKind::NotFound => nfsstat3::NFS3ERR_NOENT,
+                std::io::ErrorKind::PermissionDenied => nfsstat3::NFS3ERR_ACCES,
+                std::io::ErrorKind::AlreadyExists => nfsstat3::NFS3ERR_EXIST,
+                std::io::ErrorKind::IsADirectory => nfsstat3::NFS3ERR_ISDIR,
+                std::io::ErrorKind::NotADirectory => nfsstat3::NFS3ERR_NOTDIR,
+                std::io::ErrorKind::DirectoryNotEmpty => nfsstat3::NFS3ERR_NOTEMPTY,
+                std::io::ErrorKind::CrossesDevices => nfsstat3::NFS3ERR_XDEV,
+                _ => nfsstat3::NFS3ERR_IO,
+            }
+        })?;
 
         let oldsym = fsmap.intern.intern(OsStr::from_bytes(from_filename).to_os_string()).unwrap();
         let newsym = fsmap.intern.intern(OsStr::from_bytes(to_filename).to_os_string()).unwrap();
@@ -714,7 +775,7 @@ impl NFSFileSystem for MirrorFS {
     async fn readlink(&self, id: fileid3) -> Result<nfspath3, nfsstat3> {
         let fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(id)?;
-        let path = fsmap.sym_to_path(&ent.name).await;
+        let path = fsmap.sym_to_path(&ent.name);
         drop(fsmap);
         if path.is_symlink() {
             if let Ok(target) = path.read_link() {
@@ -775,11 +836,12 @@ async fn main() -> anyhow::Result<()> {
     std::fs::metadata(&root).with_context(|| format!("--root {} metadata unreadable", root.display()))?;
     // Hard-fail if any --block-prefix can't be canonicalized — better to refuse
     // to start than to silently serve a path that should have been hidden.
-    let block_prefixes: Vec<PathBuf> = args
+    let block_prefixes: Box<[PathBuf]> = args
         .block_prefix
         .iter()
-        .map(|p| p.canonicalize().with_context(|| format!("--block-prefix {p:?} could not be canonicalized")))
-        .collect::<anyhow::Result<_>>()?;
+        .map(|p| p.canonicalize().with_context(|| format!("--block-prefix {} could not be canonicalized", p.display())))
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .into_boxed_slice();
 
     let fs = MirrorFS::new(root, args.readonly, block_prefixes);
     let listener = NFSTcpListener::bind(&args.listen, fs).await?;
@@ -858,5 +920,38 @@ mod tests {
         // "._" matches as a prefix, not as a substring elsewhere in the name.
         assert!(!is_pollution_pattern(b"foo._bar"));
         assert!(!is_pollution_pattern(b" ._"));
+    }
+
+    #[test]
+    fn validate_component_rejects_path_traversal() {
+        assert!(validate_component(b"..").is_err());
+        assert!(validate_component(b"../etc/passwd").is_err());
+        assert!(validate_component(b"foo/bar").is_err());
+        assert!(validate_component(b"/absolute").is_err());
+        assert!(validate_component(b"../../tmp/pwned").is_err());
+    }
+
+    #[test]
+    fn validate_component_rejects_special_names() {
+        assert!(validate_component(b"").is_err());
+        assert!(validate_component(b".").is_err());
+    }
+
+    #[test]
+    fn validate_component_rejects_null_byte() {
+        assert!(validate_component(b"foo\0bar").is_err());
+        assert!(validate_component(b"\0").is_err());
+    }
+
+    #[test]
+    fn validate_component_accepts_normal_filenames() {
+        assert!(validate_component(b"main.rs").is_ok());
+        assert!(validate_component(b".gitignore").is_ok());
+        assert!(validate_component(b".hidden").is_ok());
+        assert!(validate_component(b"a").is_ok());
+        // Dot-prefixed name that is NOT just "." or ".." is fine.
+        assert!(validate_component(b"...").is_ok());
+        // Spaces and unicode in single component are fine.
+        assert!(validate_component(b"file with spaces.txt").is_ok());
     }
 }
