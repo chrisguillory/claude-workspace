@@ -1,0 +1,26 @@
+[package]
+name = "crb-nfsd"
+version = "0.1.0"
+edition = "2021"
+description = "Userspace NFSv3 server for the claude-remote-bash filesystem-mount feature"
+license = "BSD-3-Clause"
+
+[dependencies]
+# Exact-pin nfsserve per docs/claude-remote-bash-fs-plan.md "Fallback escape hatch":
+# small upstream user base; pin so we can fork cleanly if upstream stagnates.
+nfsserve = "=0.11.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+intaglio = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1"
+
+# Auto-discovered binary: `src/main.rs` + package name `crb-nfsd` is sufficient.
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+strip = true
