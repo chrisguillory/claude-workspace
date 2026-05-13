@@ -240,6 +240,42 @@ class SessionManager:
                 )
                 return
 
+    def find_rival_session(self, session_id: str, claude_pid: int) -> Session | None:
+        """Return an active session owned by a different live pid for the same session_id.
+
+        Caller intent: detect at SessionStart that another claude process is already
+        running this session_id, so the rival start can be refused before clobbering
+        the existing entry.
+
+        Returns None when no conflict: no entry, entry not active, same pid as caller,
+        rival pid is dead, or rival pid was recycled by an unrelated process (verified
+        via process_created_at match).
+        """
+        if self._db is None:
+            raise RuntimeError("SessionManager must be used within 'with' context")
+
+        for session in self._db.sessions:
+            if session.session_id != session_id:
+                continue
+            if session.state != 'active':
+                continue
+            rival_pid = session.metadata.claude_pid
+            if rival_pid == claude_pid:
+                continue
+            if not psutil.pid_exists(rival_pid):
+                continue
+            recorded_create_at = session.metadata.process_created_at
+            if recorded_create_at is None:
+                return session
+            try:
+                actual_create_time = psutil.Process(rival_pid).create_time()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            if abs(actual_create_time - recorded_create_at.timestamp()) > 1.0:
+                continue  # PID recycled — different process now owns it
+            return session
+        return None
+
     def detect_crashed_sessions(self) -> Sequence[str]:
         """Check all active sessions and mark crashed if PID is dead.
 
