@@ -147,6 +147,7 @@ dependencies = [
  "async-trait",
  "clap",
  "intaglio",
+ "libc",
  "nfsserve",
  "tokio",
  "tracing",

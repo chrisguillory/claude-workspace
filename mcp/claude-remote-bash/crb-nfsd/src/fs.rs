@@ -10,6 +10,7 @@ use std::fs::Metadata;
 use std::io::SeekFrom;
 use std::ops::Bound;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -25,7 +26,7 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tracing::debug;
 
-use crate::pollution::{is_pollution_pattern, validate_component};
+use crate::pollution::{is_pollution_pattern, validate_component, validate_symlink_target};
 
 #[derive(Debug, Clone)]
 struct FSEntry {
@@ -273,6 +274,14 @@ impl MirrorFS {
         }
         let mut fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(dirid)?;
+        // dirid must resolve to a directory. Without this, a peer holding a
+        // fileid for a peer-created symlink could pass it as dirid; the
+        // sym_to_path + push below produces a path the OS walks through the
+        // symlink at create-time, escaping --root. Same shape applies to
+        // mkdir, symlink, exclusive-create — all funnel through here.
+        if !matches!(ent.fsmeta.ftype, ftype3::NF3DIR) {
+            return Err(nfsstat3::NFS3ERR_NOTDIR);
+        }
         let mut path = fsmap.sym_to_path(&ent.name);
         let objectname_osstr = OsStr::from_bytes(objectname).to_os_string();
         path.push(&objectname_osstr);
@@ -287,7 +296,21 @@ impl MirrorFS {
             },
             CreateFSObject::File(setattr) => {
                 debug!("create {:?}", path);
-                let file = std::fs::File::create(&path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+                // O_NOFOLLOW: refuse to create through a peer-planted symlink
+                // at the leaf. Plain File::create is O_WRONLY|O_CREAT|O_TRUNC
+                // without O_NOFOLLOW, which the kernel resolves through a
+                // leaf symlink — truncating whatever the daemon's uid can
+                // write at the target (e.g., ~/.ssh/authorized_keys).
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(&path)
+                    .map_err(|e| match e.raw_os_error() {
+                        Some(libc::ELOOP) => nfsstat3::NFS3ERR_INVAL,
+                        _ => nfsstat3::NFS3ERR_IO,
+                    })?;
                 let _ = file_setattr(&file, setattr).await;
             },
             CreateFSObject::Exclusive => {
@@ -299,6 +322,7 @@ impl MirrorFS {
                     .map_err(|_| nfsstat3::NFS3ERR_EXIST)?;
             },
             CreateFSObject::Symlink((_, target)) => {
+                validate_symlink_target(target)?;
                 debug!("symlink {:?} {:?}", path, target);
                 if exists_no_traverse(&path) {
                     return Err(nfsstat3::NFS3ERR_EXIST);
@@ -354,6 +378,14 @@ impl NFSFileSystem for MirrorFS {
         // prefixes before exposing anything and (b) reuse it for the
         // negative-lookup fast path below.
         let dirent = fsmap.find_entry(dirid)?;
+        // dirid must be a directory. Defense in depth — refresh_dir_list's
+        // early-return on non-NF3DIR (line 164) already prevents lookup from
+        // populating non-dir children, but a peer-held symlink fileid could
+        // still flow through the path-build path below; fail loud at the
+        // protocol layer to be consistent with create/remove/rename.
+        if !matches!(dirent.fsmeta.ftype, ftype3::NF3DIR) {
+            return Err(nfsstat3::NFS3ERR_NOTDIR);
+        }
         let mut path = fsmap.sym_to_path(&dirent.name);
         let objectname_osstr = OsStr::from_bytes(filename).to_os_string();
         path.push(&objectname_osstr);
@@ -617,6 +649,11 @@ impl NFSFileSystem for MirrorFS {
         }
         let mut fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(dirid)?;
+        // dirid must be a directory. Without this, remove on a peer-created
+        // symlink-as-parent would unlink files outside --root.
+        if !matches!(ent.fsmeta.ftype, ftype3::NF3DIR) {
+            return Err(nfsstat3::NFS3ERR_NOTDIR);
+        }
         let mut path = fsmap.sym_to_path(&ent.name);
         path.push(OsStr::from_bytes(filename));
         if let Ok(meta) = path.symlink_metadata() {
@@ -671,10 +708,18 @@ impl NFSFileSystem for MirrorFS {
         let mut fsmap = self.fsmap.lock().await;
 
         let from_dirent = fsmap.find_entry(from_dirid)?;
+        // Both dirids must be directories. Same threat as create/remove —
+        // a symlinked-dir endpoint would let rename move files out of --root.
+        if !matches!(from_dirent.fsmeta.ftype, ftype3::NF3DIR) {
+            return Err(nfsstat3::NFS3ERR_NOTDIR);
+        }
         let mut from_path = fsmap.sym_to_path(&from_dirent.name);
         from_path.push(OsStr::from_bytes(from_filename));
 
         let to_dirent = fsmap.find_entry(to_dirid)?;
+        if !matches!(to_dirent.fsmeta.ftype, ftype3::NF3DIR) {
+            return Err(nfsstat3::NFS3ERR_NOTDIR);
+        }
         let mut to_path = fsmap.sym_to_path(&to_dirent.name);
         // to folder must exist
         if !exists_no_traverse(&to_path) {
@@ -712,6 +757,24 @@ impl NFSFileSystem for MirrorFS {
         let mut to_sympath = to_dirent.name.clone();
         to_sympath.push(newsym);
         if let Some(fileid) = fsmap.path_to_id.get(&from_sympath).copied() {
+            // Evict any pre-existing destination entry first. Without this,
+            // an overwrite leaves the displaced fileid's id_to_path entry
+            // intact with its old (now-stale) ftype/name; a peer holding the
+            // stale handle can then READ/WRITE through it, defeating the
+            // ftype gate at read()/write() since the cached entry still
+            // says NF3REG while the on-disk leaf is the renamed symlink.
+            if let Some(stale_id) = fsmap.path_to_id.get(&to_sympath).copied() {
+                if stale_id != fileid {
+                    if to_dirid != from_dirid {
+                        if let Ok(to_dirent_mut) = fsmap.find_entry_mut(to_dirid) {
+                            if let Some(ref mut toch) = to_dirent_mut.children {
+                                toch.remove(&stale_id);
+                            }
+                        }
+                    }
+                    fsmap.delete_entry(stale_id);
+                }
+            }
             // update the fileid -> path
             // and the path -> fileid mappings for the new file
             fsmap.id_to_path.get_mut(&fileid).unwrap().name = to_sympath.clone();

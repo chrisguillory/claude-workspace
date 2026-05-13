@@ -10,6 +10,7 @@ anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 intaglio = "1"
+libc = "0.2"
 # Exact-pin nfsserve: small upstream user base, so pin a known-good version
 # and fork cleanly if upstream stagnates.
 nfsserve = "=0.11.0"

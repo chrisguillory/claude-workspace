@@ -33,6 +33,27 @@ pub(crate) fn validate_component(name: &[u8]) -> Result<(), nfsstat3> {
     Ok(())
 }
 
+/// Refuses NFS symlink targets that escape the served tree at use-time.
+///
+/// `nfspath3` is opaque per RFC 1813 §3.3.17, but the kernel resolves the
+/// stored string verbatim whenever something walks through the symlink.
+/// Three classes of target turn an otherwise-benign symlink into a
+/// confused-deputy primitive: absolute paths, `..` segments, and embedded
+/// NULs. With the `read`/`write`/`setattr` type-gates already refusing
+/// server-side opens through a NF3LNK fileid, this is defense-in-depth —
+/// it also closes the self-mount case where a stock client's client-side
+/// readlink resolves against the same filesystem the server sits on.
+pub(crate) fn validate_symlink_target(target: &[u8]) -> Result<(), nfsstat3> {
+    if target.is_empty()
+        || target.first() == Some(&b'/')
+        || target.contains(&b'\0')
+        || target.split(|&b| b == b'/').any(|seg| seg == b"..")
+    {
+        return Err(nfsstat3::NFS3ERR_INVAL);
+    }
+    Ok(())
+}
+
 /// macOS metadata filenames that Finder, Spotlight, and Quick Look auto-create
 /// on any browsed folder. Filtering these out of every namespace operation
 /// (lookup, readdir, create, remove, rename) keeps Finder/Spotlight from
@@ -136,6 +157,38 @@ mod tests {
     fn validate_component_rejects_null_byte() {
         assert!(validate_component(b"foo\0bar").is_err());
         assert!(validate_component(b"\0").is_err());
+    }
+
+    #[test]
+    fn validate_symlink_target_rejects_absolute() {
+        assert!(validate_symlink_target(b"/etc/passwd").is_err());
+        assert!(validate_symlink_target(b"/").is_err());
+        assert!(validate_symlink_target(b"/Users/chris/.ssh/authorized_keys").is_err());
+    }
+
+    #[test]
+    fn validate_symlink_target_rejects_parent_segment() {
+        assert!(validate_symlink_target(b"..").is_err());
+        assert!(validate_symlink_target(b"../etc").is_err());
+        assert!(validate_symlink_target(b"foo/../../etc").is_err());
+        assert!(validate_symlink_target(b"a/b/c/../../..").is_err());
+    }
+
+    #[test]
+    fn validate_symlink_target_rejects_null_and_empty() {
+        assert!(validate_symlink_target(b"").is_err());
+        assert!(validate_symlink_target(b"foo\0bar").is_err());
+    }
+
+    #[test]
+    fn validate_symlink_target_accepts_relative_paths() {
+        assert!(validate_symlink_target(b"sibling.txt").is_ok());
+        assert!(validate_symlink_target(b"subdir/child").is_ok());
+        assert!(validate_symlink_target(b"a/b/c/d").is_ok());
+        // Names containing ".." as a substring are fine; only `..` as a full
+        // path segment is dangerous.
+        assert!(validate_symlink_target(b"file..txt").is_ok());
+        assert!(validate_symlink_target(b"...").is_ok());
     }
 
     #[test]
