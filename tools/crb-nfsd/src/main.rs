@@ -380,6 +380,13 @@ impl NFSFileSystem for MirrorFS {
         // exist (negative lookup under a symlinked ancestor). Async because the
         // rest of the file uses tokio::fs::* for I/O — keep the runtime worker
         // unblocked.
+        //
+        // Scope of defense: catches symlinks IN the ancestor chain. Does NOT
+        // catch a leaf that is itself a symlink whose target lives under a
+        // blocked prefix — macOS NFS clients resolve readlinks client-side, so
+        // the follow-up lookups against the resolved target go through their
+        // own parent-canonicalize on each segment. For stronger isolation use a
+        // narrowly-scoped `--root` rather than relying on `--block-prefix`.
         let candidate = match path.parent() {
             Some(parent) => match tokio::fs::canonicalize(parent).await {
                 Ok(canon_parent) => canon_parent.join(&objectname_osstr),
