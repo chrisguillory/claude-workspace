@@ -419,6 +419,16 @@ impl NFSFileSystem for MirrorFS {
     async fn read(&self, id: fileid3, offset: u64, count: u32) -> Result<(Vec<u8>, bool), nfsstat3> {
         let fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(id)?;
+        // RFC 1813 §3.3.6: READ is defined for regular files only. Type-gate
+        // before the open call — File::open follows symlinks at the final
+        // component, so without this check a peer-created symlink in the
+        // served tree (target = anywhere outside --root, e.g. /etc/passwd or
+        // a path under --block-prefix) would be readable via this handler.
+        // The C1 fix to refresh_dir_list caches symlinks as NF3LNK; this
+        // gate enforces the type at the protocol layer.
+        if !matches!(ent.fsmeta.ftype, ftype3::NF3REG) {
+            return Err(nfsstat3::NFS3ERR_INVAL);
+        }
         let path = fsmap.sym_to_path(&ent.name);
         drop(fsmap);
         let mut f = File::open(&path).await.map_err(|e| {
@@ -525,6 +535,16 @@ impl NFSFileSystem for MirrorFS {
     async fn setattr(&self, id: fileid3, setattr: sattr3) -> Result<fattr3, nfsstat3> {
         let mut fsmap = self.fsmap.lock().await;
         let entry = fsmap.find_entry(id)?;
+        // Refuse SETATTR on symlinks. path_setattr uses filetime::set_file_*
+        // and std::fs::set_permissions, both of which follow symlinks at the
+        // final component on macOS. A peer-created symlink whose target lives
+        // outside --root could otherwise be used to truncate (size=0), chmod,
+        // or touch any file the daemon's user can write. lchmod/lutimes
+        // semantics aren't worth surfacing for symlinks themselves; refuse.
+        // Dirs remain allowed (legit atime/mtime/mode use).
+        if matches!(entry.fsmeta.ftype, ftype3::NF3LNK) {
+            return Err(nfsstat3::NFS3ERR_INVAL);
+        }
         let path = fsmap.sym_to_path(&entry.name);
         path_setattr(&path, &setattr).await?;
 
@@ -538,6 +558,15 @@ impl NFSFileSystem for MirrorFS {
     async fn write(&self, id: fileid3, offset: u64, data: &[u8]) -> Result<fattr3, nfsstat3> {
         let fsmap = self.fsmap.lock().await;
         let ent = fsmap.find_entry(id)?;
+        // RFC 1813 §3.3.7: WRITE is for regular files only. Same threat as
+        // read() — OpenOptions::open follows symlinks at the final component,
+        // and with create(true) a peer-crafted symlink to a non-existent
+        // target could even synthesize a new file at an arbitrary path
+        // (e.g. ~/.ssh/authorized_keys, /etc/cron.d/payload). Refuse non-REG
+        // at the protocol layer.
+        if !matches!(ent.fsmeta.ftype, ftype3::NF3REG) {
+            return Err(nfsstat3::NFS3ERR_INVAL);
+        }
         let path = fsmap.sym_to_path(&ent.name);
         drop(fsmap);
         debug!("write to init {:?}", path);
