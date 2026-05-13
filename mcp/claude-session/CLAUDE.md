@@ -525,6 +525,34 @@ MCPSearch is an undocumented built-in tool for dynamic MCP tool discovery, intro
 
 **For user-facing information**, including how to disable, known issues, and accuracy concerns, see `docs/mcpsearch-guide.md`.
 
+## Verifying Artifact Operations
+
+`claude-session` is a shadow of Claude Code: it classifies, transforms, persists, restores, and deletes the artifacts another system writes to disk. We do not drive what gets emitted — we react to it. Our correctness is a function of how faithfully we mirror whatever the host is producing today, which is a moving target we cannot read from any spec.
+
+### Computational irreducibility
+
+Claude Code is computationally irreducible with respect to our concerns. The filename patterns, directory layouts, content schemas, and lifecycle behaviors it emits cannot be derived from any spec we have access to. Each new version may silently add a category we have never seen, change a sidecar's optional fields, or relocate a directory. The `agent-*.meta.json` sidecars (introduced in 2.1.70 with no announcement, discovered ten months later only when a deletion failed) are not an anomaly to patch — they are the prototype of every future surprise. We will be surprised again. We do not know by what.
+
+### Why static integration tests would lie
+
+A test suite that fixtures the current shape of a session directory and asserts our code handles those fixtures will, by construction, continue passing after Claude Code introduces a category the fixtures don't know about. CI stays green; data loss is silent. The properties that normally make a regression suite valuable — determinism, repeatability, independence from external state — actively mislead here. Confidence becomes a function of staleness, which is worse than no tests: the absence of tests prompts the question *how do we verify?*; green tests close that question off.
+
+This rejection applies to *integration*-level tests that fixture the directory shape Claude Code produces. Record-level fixtures that validate stable Pydantic models against captured JSONL — like the existing `tests/claude_session/test_fixtures.py` and the workflow described in [Schema Validation Fix Workflow](#schema-validation-fix-workflow) — remain useful. Those fix a schema we control. The trap is fixturing the host's output.
+
+### The verification loop
+
+The only check that does not lie compares against current ground truth: a recent session directory produced by the Claude Code version in use, inspected for what it actually contains, before and after the operation under suspicion. The comparison is not deterministic. Some differences are expected (IDs remapped, paths translated, slugs cycled); some are losses; some are categories we have never classified. The judgment is recursive — the comparator must reason about equivalence for artifacts it may have never seen.
+
+An LLM serves as the judge. It enumerates artifacts on both sides, infers categories, surfaces what it cannot classify, and reports deltas with their probable interpretations: ID remap, path translation, expected omission, unexpected loss, orphan. A human reviews the verdict. The human is the residual ground truth, especially for novel categories where the LLM's reasoning may be wrong. The loop is exploratory, not confirmatory: we do not verify a hypothesis about what the host produced; we discover it.
+
+### Implications
+
+We do not build a regression harness or freeze synthetic session directories. The set of "expected artifact families" is the wrong category — what we need is the set of artifacts the host produced *this run*, which we discover, not declare. Production code handles what we currently know about and surfaces what it doesn't (an `unclassified` tripwire); the ad-hoc loop closes the gaps it finds. Verdicts from the loop — counts, ratios, version-specific field distributions — are ephemeral. They live in the loop's report, not in code comments or docstrings, which document invariants, not survey snapshots that rot. Durable external facts (version cutoffs, behavioral invariants, binary symbols) belong in code; a one-time count or ratio does not. The production code (closing gaps) and this section (keeping the loop replayable) are what persist. Discipline lives in the code's clarity and the loop's rigor, not in green CI that lies about coverage.
+
+### Bootstrap
+
+This section exists to make the loop legible to a future session that has no context. Given only this manual and the codebase, such a session should be able to take a recent session directory, run the operation under suspicion, inspect the result, judge it as the LLM in the loop, surface findings to a human, and apply fixes. It is the bridge across discontinuities — compactions, model changes, new `claude-session` versions, new Claude Code versions. It is the closest thing to a test that survives irreducibility.
+
 ## Schema Validation Fix Workflow
 
 When Claude Code updates or new session data introduces schema drift:
