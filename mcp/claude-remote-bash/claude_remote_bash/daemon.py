@@ -267,8 +267,19 @@ def uninstall_service() -> None:
 async def run_daemon(config: DaemonConfig) -> None:
     """Start the daemon: TCP server + mDNS registration."""
     daemon = _Daemon(config)
+    handler_tasks: set[asyncio.Task[None]] = set()
 
-    server = await asyncio.start_server(daemon.handle_client, '0.0.0.0', 0)
+    async def _tracked_handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            handler_tasks.add(task)
+        try:
+            await daemon.handle_client(reader, writer)
+        finally:
+            if task is not None:
+                handler_tasks.discard(task)
+
+    server = await asyncio.start_server(_tracked_handle, '0.0.0.0', 0)
     port = server.sockets[0].getsockname()[1]
     logger.info('Listening on port %d', port)
 
@@ -293,6 +304,13 @@ async def run_daemon(config: DaemonConfig) -> None:
 
     async with server:
         await stop.wait()
+        # Cancel client handlers before the context exits — Server.wait_closed()
+        # (awaited by async-with's __aexit__) blocks until every active handler
+        # finishes naturally, so a slow handler would otherwise pin shutdown.
+        for t in handler_tasks:
+            t.cancel()
+        if handler_tasks:
+            await asyncio.gather(*handler_tasks, return_exceptions=True)
 
     await unregister_service(azc, info)
     logger.info('Shutdown complete')
