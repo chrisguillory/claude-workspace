@@ -796,3 +796,67 @@ async fn main() -> anyhow::Result<()> {
     listener.handle_forever().await.context("server exited")?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pollution_pattern_matches_exact_macos_names() {
+        assert!(is_pollution_pattern(b".DS_Store"));
+        assert!(is_pollution_pattern(b".Spotlight-V100"));
+        assert!(is_pollution_pattern(b".Trashes"));
+        assert!(is_pollution_pattern(b".fseventsd"));
+        assert!(is_pollution_pattern(b".TemporaryItems"));
+        assert!(is_pollution_pattern(b".DocumentRevisions-V100"));
+    }
+
+    #[test]
+    fn pollution_pattern_matches_icon_with_literal_cr() {
+        // Finder's "Custom Folder Icon" file is literally [0x49, 0x63, 0x6f, 0x6e, 0x0D].
+        // Both spellings must match the same 5-byte sequence.
+        assert!(is_pollution_pattern(b"Icon\r"));
+        assert!(is_pollution_pattern(&[0x49, 0x63, 0x6f, 0x6e, 0x0D]));
+    }
+
+    #[test]
+    fn pollution_pattern_matches_appledouble_prefix() {
+        assert!(is_pollution_pattern(b"._foo"));
+        assert!(is_pollution_pattern(b"._.DS_Store"));
+        assert!(is_pollution_pattern(b"._main.rs"));
+        // The two-byte minimum prefix matches on its own.
+        assert!(is_pollution_pattern(b"._"));
+    }
+
+    #[test]
+    fn pollution_pattern_rejects_regular_names() {
+        assert!(!is_pollution_pattern(b"regular.txt"));
+        assert!(!is_pollution_pattern(b"main.rs"));
+        assert!(!is_pollution_pattern(b".gitignore"));
+        assert!(!is_pollution_pattern(b".env"));
+        assert!(!is_pollution_pattern(b""));
+    }
+
+    #[test]
+    fn pollution_pattern_is_case_sensitive() {
+        // NFS LOOKUP is byte-exact; macOS writers use these exact capitalizations.
+        assert!(!is_pollution_pattern(b".ds_store"));
+        assert!(!is_pollution_pattern(b".DS_STORE"));
+        assert!(!is_pollution_pattern(b"icon\r"));
+    }
+
+    #[test]
+    fn pollution_pattern_rejects_icon_without_cr() {
+        // Plain "Icon" is a valid user filename; only the CR-suffixed Finder pattern is refused.
+        assert!(!is_pollution_pattern(b"Icon"));
+        assert!(!is_pollution_pattern(b"Icon\n"));
+        assert!(!is_pollution_pattern(b"Icon\r\n"));
+    }
+
+    #[test]
+    fn pollution_pattern_dot_underscore_is_prefix_only() {
+        // "._" matches as a prefix, not as a substring elsewhere in the name.
+        assert!(!is_pollution_pattern(b"foo._bar"));
+        assert!(!is_pollution_pattern(b" ._"));
+    }
+}
