@@ -271,13 +271,13 @@ async def run_daemon(config: DaemonConfig) -> None:
 
     async def _tracked_handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
-        if task is not None:
-            handler_tasks.add(task)
+        if task is None:
+            raise RuntimeError('asyncio.current_task() returned None inside server callback')
+        handler_tasks.add(task)
         try:
             await daemon.handle_client(reader, writer)
         finally:
-            if task is not None:
-                handler_tasks.discard(task)
+            handler_tasks.discard(task)
 
     server = await asyncio.start_server(_tracked_handle, '0.0.0.0', 0)
     port = server.sockets[0].getsockname()[1]
