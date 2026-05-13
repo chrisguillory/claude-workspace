@@ -87,14 +87,14 @@ async def execute_command(
             timeout=timeout,
         )
     except TimeoutError:
-        _kill_process_group(process)
+        _killpg_session_leader(process)
         await process.wait()
         return CommandResult(stdout='[TIMEOUT]', stderr='', exit_code=-1, cwd=effective_cwd)
     except asyncio.CancelledError:
         # Daemon shutdown cancels the handler task awaiting us; kill the whole
         # process group so the user's command (and any descendants) don't
         # survive as orphans reparented to launchd.
-        _kill_process_group(process)
+        _killpg_session_leader(process)
         await process.wait()
         raise
 
@@ -141,8 +141,14 @@ def _shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
-def _kill_process_group(process: asyncio.subprocess.Process) -> None:
-    """SIGKILL the subprocess's process group. Requires ``start_new_session=True`` at spawn."""
+def _killpg_session_leader(process: asyncio.subprocess.Process) -> None:
+    """SIGKILL the entire process group whose leader is ``process``.
+
+    The function name encodes the contract: this only works when ``process``
+    was spawned as a session leader (``start_new_session=True``), so its PID
+    equals its PGID. Passing a non-leader process here would send SIGKILL
+    to whatever group its PID happens to alias, which is silently wrong.
+    """
     if process.pid is None:
         return
     try:
