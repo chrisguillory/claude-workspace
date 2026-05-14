@@ -320,7 +320,18 @@ async def _bridge_kernel_conn_to_peer(
                 kernel_writer.write(payload)
                 await kernel_writer.drain()
 
-        await asyncio.gather(kernel_to_peer(), peer_to_kernel(), return_exceptions=True)
+        # FIRST_COMPLETED: as soon as one direction terminates (kernel EOF on
+        # unmount, or peer-side zero-frame on nfsd shutdown), tear down the
+        # other side. With ``gather`` we'd hang forever when the daemon
+        # cancels its pump in response to our zero-frame and consequently
+        # never sends one back — leaving our ``peer_to_kernel`` blocked.
+        k2p = asyncio.create_task(kernel_to_peer())
+        p2k = asyncio.create_task(peer_to_kernel())
+        await asyncio.wait({k2p, p2k}, return_when=asyncio.FIRST_COMPLETED)
+        for task in (k2p, p2k):
+            if not task.done():
+                task.cancel()
+        await asyncio.wait({k2p, p2k})
     finally:
         peer_writer.close()
 
