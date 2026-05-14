@@ -15,11 +15,14 @@ from claude_remote_bash.discovery import DiscoveredHost, browse_hosts
 from claude_remote_bash.dispatch import HostRunResult
 from claude_remote_bash.selector import parse as parse_selector
 
+from claude_remote_audio.cache import DeviceCache, write_devices
+
 __all__ = [
     'ApplyError',
     'ApplyResult',
     'HostApplyOutcome',
     'apply',
+    'enumerate_devices',
 ]
 
 
@@ -27,6 +30,7 @@ _BASE_PORT = 11001
 _MIC_RECEIVE_PORT = 10001
 _DISPATCH_SESSION = 'claude-remote-audio'
 _DISPATCH_TIMEOUT_S = 60.0
+_DEVICE_SECTION_SEPARATOR = '---claude-remote-audio-section---'
 
 
 # -- Public schemas -----------------------------------------------------------
@@ -59,11 +63,17 @@ class ApplyResult(ClosedModel):
 async def apply(
     *,
     target: str,
-    hub: str,
+    hub: str | None = None,
     input_device: str | None = None,
     output_device: str | None = None,
 ) -> ApplyResult:
-    """Resolve ``target`` into hosts and converge each toward the declared audio topology."""
+    """Resolve ``target`` into hosts and converge each toward the declared audio topology.
+
+    ``hub=None`` defaults to the local machine — the discovered daemon whose advertised
+    IPs overlap with this host's interface IPs (``DiscoveredHost.is_self``). Locality
+    model: the command acts on the machine you ran it from. Pass ``hub`` explicitly to
+    override.
+    """
     service = DispatchService()
     plan = await _build_plan(
         service=service,
@@ -85,6 +95,37 @@ async def apply(
     )
 
 
+async def enumerate_devices(
+    service: DispatchService,
+    hub_alias: str,
+) -> DeviceCache:
+    """Enumerate ``hub_alias``'s Core Audio outputs + inputs in one dispatch; write + return the snapshot.
+
+    The cache write is unconditional on success — every dispatch refreshes the
+    on-disk cache backing ``--input`` / ``--output`` tab completion.
+    """
+    raw = (
+        await _run(
+            service,
+            hub_alias,
+            'SwitchAudioSource -a -t output; '
+            f"printf '%s\\n' {shlex.quote(_DEVICE_SECTION_SEPARATOR)}; "
+            'SwitchAudioSource -a -t input',
+        )
+    ).stdout
+    outputs: list[str] = []
+    inputs: list[str] = []
+    section = outputs
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
+        if line == _DEVICE_SECTION_SEPARATOR:
+            section = inputs
+            continue
+        if line:
+            section.append(line)
+    return write_devices(hub_alias, outputs=outputs, inputs=inputs)
+
+
 # -- Plan internals -----------------------------------------------------------
 
 
@@ -104,6 +145,8 @@ class _Plan(ClosedModel):
     hub_in_target: bool
     hub_ip: str
     hub_loopback_port: int | None
+    hub_outputs: Sequence[str]
+    hub_inputs: Sequence[str]
     topology_peer_aliases: Sequence[str]
     topology_peer_to_ip: Mapping[str, str]
     topology_peer_to_port: Mapping[str, int]
@@ -116,15 +159,25 @@ async def _build_plan(
     *,
     service: DispatchService,
     target: str,
-    hub: str,
+    hub: str | None,
     input_device: str | None,
     output_device: str | None,
 ) -> _Plan:
-    """Parse ``--target`` against mDNS discovery + client groups, validate against ``--hub``."""
+    """Parse ``--target`` against mDNS discovery + client groups, resolve hub default if absent."""
     hosts = await browse_hosts(timeout=3.0)
     aliases: dict[str, DiscoveredHost] = {h.alias.lower(): h for h in hosts}
     if not aliases:
         raise ApplyError('no daemons discovered on the LAN — ensure claude-remote-bash-daemon is running on each Mac')
+
+    if hub is None:
+        self_host = next((h for h in hosts if h.is_self), None)
+        if self_host is None:
+            raise ApplyError(
+                'no --hub provided and the local machine is not a discovered daemon. '
+                f'Discovered: {sorted(aliases.keys())}. '
+                'Start claude-remote-bash-daemon locally or pass --hub explicitly.'
+            )
+        hub = self_host.alias
 
     config = ClientConfig.load()
     atoms = parse_selector(
@@ -162,6 +215,7 @@ async def _build_plan(
         has_input=input_device is not None,
     )
 
+    hub_devices = await enumerate_devices(service, hub)
     hub_loopback_port = await _read_hub_loopback_port(service, hub)
     topology_peer_aliases = sorted(a for a in aliases if a != hub_lower)
     topology_peer_to_ip = {p: _best_ip(aliases[p]) for p in topology_peer_aliases}
@@ -172,6 +226,8 @@ async def _build_plan(
         hub_in_target=hub_in_target,
         hub_ip=hub_ip,
         hub_loopback_port=hub_loopback_port,
+        hub_outputs=hub_devices.outputs,
+        hub_inputs=hub_devices.inputs,
         topology_peer_aliases=topology_peer_aliases,
         topology_peer_to_ip=topology_peer_to_ip,
         topology_peer_to_port=topology_peer_to_port,
@@ -249,9 +305,9 @@ async def _guard_feedback_loop(service: DispatchService, plan: _Plan) -> None:
 
 
 async def _set_hub_output(service: DispatchService, plan: _Plan) -> Sequence[str]:
-    """Resolve user-typed device name to canonical, then set the hub's default output."""
+    """Resolve user-typed device name to canonical (against pre-fetched list), then set hub default output."""
     assert plan.output_device is not None  # guaranteed by caller
-    canonical = await _resolve_output_device(service, plan.hub_alias, plan.output_device)
+    canonical = _resolve_output_device(plan.hub_outputs, plan.hub_alias, plan.output_device)
     await _run(
         service,
         plan.hub_alias,
@@ -260,12 +316,12 @@ async def _set_hub_output(service: DispatchService, plan: _Plan) -> Sequence[str
     return [f'set default output → {canonical}']
 
 
-async def _resolve_output_device(service: DispatchService, hub_alias: str, requested: str) -> str:
-    """Match ``requested`` against canonical output device names on the hub.
+def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: str) -> str:
+    """Match ``requested`` against the pre-fetched canonical output list.
 
     Strategy (enumerate-then-resolve, not normalize-then-compare):
 
-    1. Exact match against ``SwitchAudioSource -a -t output`` output.
+    1. Exact match.
     2. NFKC case-folded match (handles legitimate Unicode equivalences like full-width).
     3. Miss → raise ``ApplyError`` with a ``difflib.get_close_matches`` "did you mean" hint.
 
@@ -273,9 +329,6 @@ async def _resolve_output_device(service: DispatchService, hub_alias: str, reque
     ``SwitchAudioSource -s NAME`` is destructive, so we ask the user to pick the canonical
     name rather than guess. The error message surfaces the canonical name for copy-paste.
     """
-    raw = (await _run(service, hub_alias, 'SwitchAudioSource -a -t output')).stdout
-    canonical = [line.strip() for line in raw.splitlines() if line.strip()]
-
     if requested in canonical:
         return requested
 
@@ -286,9 +339,9 @@ async def _resolve_output_device(service: DispatchService, hub_alias: str, reque
     if matches:
         raise ApplyError(f'{hub_alias}: --output {requested!r} ambiguous: {matches}')
 
-    suggestion = difflib.get_close_matches(requested, canonical, n=1, cutoff=0.6)
+    suggestion = difflib.get_close_matches(requested, list(canonical), n=1, cutoff=0.6)
     hint = f' Did you mean {suggestion[0]!r}?' if suggestion else ''
-    raise ApplyError(f'{hub_alias}: --output {requested!r} not found. Available: {canonical}.{hint}')
+    raise ApplyError(f'{hub_alias}: --output {requested!r} not found. Available: {list(canonical)}.{hint}')
 
 
 def _nfkc_casefold(s: str) -> str:
@@ -507,9 +560,9 @@ async def _check_prereqs(
     has_input: bool,
 ) -> None:
     """Verify hub and target peers have required binaries before any mutation."""
-    hub_binaries = ['roc-vad']
+    hub_binaries = ['roc-vad', 'SwitchAudioSource']
     if has_output:
-        hub_binaries += ['SwitchAudioSource', 'roc-recv']
+        hub_binaries += ['roc-recv']
     if has_input:
         hub_binaries += ['roc-send']
     await _verify_binaries(service, hub_alias, hub_binaries)

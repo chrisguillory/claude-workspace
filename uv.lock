@@ -262,7 +262,7 @@ wheels = [
 
 [[package]]
 name = "claude-remote-audio"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "mcp/claude-remote-audio" }
 dependencies = [
     { name = "cc-lib" },
@@ -281,7 +281,7 @@ requires-dist = [
 
 [[package]]
 name = "claude-remote-bash"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "mcp/claude-remote-bash" }
 dependencies = [
     { name = "cc-lib" },
