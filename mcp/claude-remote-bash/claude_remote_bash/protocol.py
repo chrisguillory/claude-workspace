@@ -13,6 +13,7 @@ from claude_remote_bash.schemas.protocol import Message
 
 __all__ = [
     'CONTROL_CHANNEL',
+    'parse_message',
     'read_frame',
     'read_message',
     'write_frame',
@@ -72,22 +73,13 @@ async def write_frame(writer: asyncio.StreamWriter, channel_id: int, payload: by
     await writer.drain()
 
 
-async def read_message(reader: asyncio.StreamReader) -> Message:
-    """Read and validate a control-channel JSON message.
-
-    Convenience for control-channel callers. Reads one frame, asserts
-    ``channel_id == CONTROL_CHANNEL``, deserializes the JSON payload into
-    the appropriate pydantic ``Message`` variant via discriminated union.
+def parse_message(payload: bytes) -> Message:
+    """Deserialize a control-channel JSON payload into the discriminated ``Message`` union.
 
     Raises:
-        ProtocolError: On framing errors, off-channel frames, or malformed JSON.
+        ProtocolError: On malformed JSON or non-object payload.
         pydantic.ValidationError: On schema validation failure.
-        asyncio.IncompleteReadError: On unexpected connection close.
     """
-    channel_id, payload = await read_frame(reader)
-    if channel_id != CONTROL_CHANNEL:
-        raise ProtocolError(f'expected control-channel frame, got channel_id={channel_id}')
-
     try:
         data = json.loads(payload)
     except json.JSONDecodeError as e:
@@ -97,6 +89,24 @@ async def read_message(reader: asyncio.StreamReader) -> Message:
         raise ProtocolError(f'expected JSON object, got {type(data).__name__}')
 
     return _MESSAGE_ADAPTER.validate_python(data)
+
+
+async def read_message(reader: asyncio.StreamReader) -> Message:
+    """Read and validate a control-channel JSON message.
+
+    Convenience for callers that only deal with the control channel. Reads
+    one frame, asserts ``channel_id == CONTROL_CHANNEL``, and dispatches the
+    JSON payload through ``parse_message``.
+
+    Raises:
+        ProtocolError: On framing errors or off-channel frames.
+        pydantic.ValidationError: On schema validation failure.
+        asyncio.IncompleteReadError: On unexpected connection close.
+    """
+    channel_id, payload = await read_frame(reader)
+    if channel_id != CONTROL_CHANNEL:
+        raise ProtocolError(f'expected control-channel frame, got channel_id={channel_id}')
+    return parse_message(payload)
 
 
 async def write_message(writer: asyncio.StreamWriter, msg: Message) -> None:

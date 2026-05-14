@@ -105,12 +105,13 @@ class MountRequest(ClosedModel):
 
 
 class MountResponse(ClosedModel):
-    """Daemon → Client: nfsd is ready, here's how to claim a tunnel to it.
+    """Daemon → Client: nfsd is ready; use ``mount_id`` to open tunnel channels.
 
     The named ``(root, readonly)`` crb-nfsd is running and accepting NFS RPCs
-    on the daemon's loopback. The client opens new TCP connections to the
-    daemon, sends `TunnelOpen(mount_id=...)` on each, and those connections
-    become byte-pipes to the nfsd's port.
+    on the daemon's loopback. The client claims tunnel channels on its
+    PSK-authed connection by sending ``TunnelOpen(mount_id=...)``; the daemon
+    allocates a ``channel_id`` and returns it in ``TunnelOk``. Subsequent
+    frames on that channel carry raw NFS RPC bytes in both directions.
     """
 
     type: Literal['mount_response'] = 'mount_response'
@@ -120,12 +121,13 @@ class MountResponse(ClosedModel):
 
 
 class TunnelOpen(ClosedModel):
-    """Client → Daemon: claim this PSK-authed TCP connection as a tunnel.
+    """Client → Daemon: allocate a tunnel channel for ``mount_id``.
 
-    The daemon connects to the crb-nfsd loopback port registered under
-    ``mount_id`` and bidirectionally pipes bytes. Once `TunnelOk` is written
-    by the daemon, both sides treat the connection as raw bytes — not framed
-    messages.
+    Sent on the control channel of an already-PSK-authed connection. The
+    daemon connects to the crb-nfsd loopback port registered under
+    ``mount_id``, allocates a non-zero ``channel_id``, and returns it via
+    ``TunnelOk``. Subsequent frames on the allocated channel carry raw NFS
+    RPC bytes; control-channel frames continue to flow alongside.
     """
 
     type: Literal['tunnel_open'] = 'tunnel_open'
@@ -133,13 +135,17 @@ class TunnelOpen(ClosedModel):
 
 
 class TunnelOk(ClosedModel):
-    """Daemon → Client: tunnel established.
+    """Daemon → Client: tunnel established on the assigned channel.
 
-    Bytes after this message frame are raw NFS RPC traffic in both directions.
+    The daemon allocates a non-zero ``channel_id`` for the tunnel and routes
+    subsequent frames on that channel to the underlying ``crb-nfsd`` loopback
+    socket. The client sends tunneled NFS RPCs by writing frames on the
+    same channel; control messages continue to flow on channel 0.
     """
 
     type: Literal['tunnel_ok'] = 'tunnel_ok'
     mount_id: str
+    channel_id: int
 
 
 class UnmountRequest(ClosedModel):
