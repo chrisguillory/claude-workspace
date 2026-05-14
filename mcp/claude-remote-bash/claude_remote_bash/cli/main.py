@@ -102,6 +102,14 @@ def mount(
         typer.Argument(help='Local mountpoint. Defaults to ~/.crb/host/<peer>/<basename>/.'),
     ] = None,
     readonly: Annotated[bool, typer.Option('--readonly', help='Mount read-only.')] = False,
+    browse: Annotated[
+        bool,
+        typer.Option(
+            '--browse',
+            help='Show the mount in Finder\'s "Computer" view and sidebar. Off by default — '
+            'enables Finder drag-and-drop at the cost of an eject button that bypasses `crb umount`.',
+        ),
+    ] = False,
     foreground: Annotated[
         bool,
         typer.Option(
@@ -114,6 +122,8 @@ def mount(
 
     Detaches a supervisor process by default — ``crb umount <mountpoint>``
     cleans up. With ``--foreground``, blocks until ^C and then unmounts.
+    The mount is hidden from Finder's volume listing by default; pass
+    ``--browse`` if you want drag-and-drop visibility.
 
     \b
     Example:
@@ -137,6 +147,7 @@ def mount(
                 remote_path=remote_path,
                 mountpoint=resolved_mountpoint,
                 readonly=readonly,
+                browse=browse,
             )
         )
         return
@@ -146,6 +157,7 @@ def mount(
         remote_path=remote_path,
         mountpoint=resolved_mountpoint,
         readonly=readonly,
+        browse=browse,
     )
     typer.echo(f'mounted {peer}:{remote_path} at {resolved_mountpoint}')
     typer.echo(f'supervisor pid={pid} mount_id={mount_id[:8]}')

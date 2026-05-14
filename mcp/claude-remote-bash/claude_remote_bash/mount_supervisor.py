@@ -75,6 +75,7 @@ async def _supervise(args: argparse.Namespace) -> None:
             remote_path=args.remote_path,
             mountpoint=mountpoint,
             readonly=args.readonly,
+            browse=args.browse,
             on_mounted=on_mounted,
         )
     finally:
@@ -90,6 +91,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument('remote_path')
     parser.add_argument('mountpoint')
     parser.add_argument('--readonly', action='store_true')
+    parser.add_argument('--browse', action='store_true')
     return parser.parse_args()
 
 

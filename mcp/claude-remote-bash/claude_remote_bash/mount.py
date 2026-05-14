@@ -63,9 +63,10 @@ logger = logging.getLogger(__name__)
 MOUNT_NFS_FLAGS = (
     'vers=3,tcp,nolocks,actimeo=0,rdirplus,rsize=65536,wsize=65536,soft,timeo=50,retrans=2,deadtimeout=30,intr'
 )
-"""Empirically-validated `mount_nfs(8)` flags. `actimeo=0,noac` keeps Edit-tool
+"""Always-applied `mount_nfs(8)` flags. `actimeo=0,noac` keeps Edit-tool
 read-after-write coherent; `soft+timeo+retrans+deadtimeout` bound recovery to
-~30s on tunnel failure rather than indefinite kernel hangs."""
+~30s on tunnel failure rather than indefinite kernel hangs. The ``nobrowse``
+flag is appended per-mount unless ``browse=True`` is set — see ``_run_mount_nfs``."""
 
 
 class MountError(RemoteBashError):
@@ -86,6 +87,7 @@ def spawn_detached_supervisor(
     remote_path: str,
     mountpoint: Path,
     readonly: bool,
+    browse: bool = False,
 ) -> tuple[int, str]:
     """Fork a detached supervisor and wait for it to signal ``READY``.
 
@@ -104,6 +106,8 @@ def spawn_detached_supervisor(
     ]
     if readonly:
         args.append('--readonly')
+    if browse:
+        args.append('--browse')
 
     proc = subprocess.Popen(
         args,
@@ -184,6 +188,7 @@ async def crb_mount_blocking(
     remote_path: str,
     mountpoint: Path,
     readonly: bool,
+    browse: bool = False,
     ips: Sequence[str] | None = None,
     port: int | None = None,
     on_mounted: Callable[[str], None] | None = None,
@@ -195,6 +200,10 @@ async def crb_mount_blocking(
 
     ``ips``/``port`` override mDNS discovery (used by tests). When omitted,
     discovers via the existing browse-cache flow.
+
+    ``browse=True`` makes the mount appear in Finder's "Computer" view and
+    sidebar. Default is hidden (``nobrowse`` mount flag) — see
+    ``MOUNT_NFS_FLAGS``.
 
     ``on_mounted`` fires once with the peer-assigned ``mount_id`` right
     after ``mount_nfs`` succeeds — supervisors use it to write a registry
@@ -217,7 +226,7 @@ async def crb_mount_blocking(
         local_port = local_listener.sockets[0].getsockname()[1]
         logger.info('Local NFS bridge listening on 127.0.0.1:%d', local_port)
 
-        await _run_mount_nfs(local_port, mountpoint)
+        await _run_mount_nfs(local_port, mountpoint, browse=browse)
         _post_mount_macos_tweaks(mountpoint)
         logger.info('Mounted %s:%s at %s', peer_alias, remote_path, mountpoint)
 
@@ -348,9 +357,12 @@ async def _bridge_kernel_conn_to_peer(
         peer_writer.close()
 
 
-async def _run_mount_nfs(local_port: int, mountpoint: Path) -> None:
+async def _run_mount_nfs(local_port: int, mountpoint: Path, *, browse: bool) -> None:
     """Invoke ``mount_nfs`` and verify the kernel actually mounted."""
-    flags = f'{MOUNT_NFS_FLAGS},port={local_port},mountport={local_port}'
+    flags = MOUNT_NFS_FLAGS
+    if not browse:
+        flags = f'{flags},nobrowse'
+    flags = f'{flags},port={local_port},mountport={local_port}'
     args = ['/sbin/mount_nfs', '-o', flags, '127.0.0.1:/', str(mountpoint)]
     proc = await asyncio.create_subprocess_exec(
         *args,
