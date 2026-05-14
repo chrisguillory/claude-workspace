@@ -45,6 +45,7 @@ Records with `type='attachment'` (discriminated by `attachment.type` field). Att
 | `companion_intro` | Companion creature introduction (`/buddy` feature) (v0.2.20) | `name`, `species` |
 | `mcp_instructions_delta` | MCP server instruction changes (added/removed tool descriptions) (v0.2.20) | `addedNames`, `addedBlocks`, `removedNames` |
 | `deferred_tools_delta` | Deferred-tool registration changes for the tool-search system (v0.2.27, Claude Code 2.1.120+; `readdedNames`/`pendingMcpServers` added 2.1.128) | `addedNames`, `addedLines`, `removedNames`, `readdedNames`, `pendingMcpServers` |
+| `agent_listing_delta` | Agent registry delta — added/removed agent types for the Agent tool (v0.2.34, Claude Code 2.1.90+) | `addedTypes`, `addedLines`, `removedTypes`, `isInitial`, `showConcurrencyNote` |
 | `task_reminder` | Task-list reminder injected into conversation (v0.2.22) | `content` (Sequence[TaskReminderItem]), `itemCount` |
 | `hook_success` | Hook executed successfully — stdout/exit injected (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `content`, `stdout`, `stderr`, `exitCode`, `command`, `durationMs` |
 | `hook_blocking_error` | Hook returned a blocking error; tool execution halted (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `blockingError` |
