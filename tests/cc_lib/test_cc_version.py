@@ -106,5 +106,20 @@ class TestPydanticRoundTrip:
             _Model.model_validate({'version': 'not a version'})
 
 
+class TestJsonSchemaGeneration:
+    def test_optional_field_produces_string_schema(self) -> None:
+        schema = _Model.model_json_schema()
+        field = schema['properties']['version']
+        # CCVersion | None → anyOf [string, null]
+        assert any(branch.get('type') == 'string' for branch in field['anyOf'])
+
+    def test_required_field_produces_string_schema(self) -> None:
+        class Required(pydantic.BaseModel):
+            version: CCVersion
+
+        field = Required.model_json_schema()['properties']['version']
+        assert field['type'] == 'string'
+
+
 class _Model(pydantic.BaseModel):
     version: CCVersion | None = None

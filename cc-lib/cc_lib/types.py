@@ -102,6 +102,14 @@ class CCVersion(Version):
         )
 
     @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        schema: CoreSchema,  # noqa: ARG003 — required by Pydantic protocol
+        handler: pydantic.GetJsonSchemaHandler,  # noqa: ARG003 — required by Pydantic protocol
+    ) -> Mapping[str, Any]:
+        return {'type': 'string', 'description': 'PEP 440 version string (e.g., "2.1.131")'}
+
+    @classmethod
     def _pydantic_validate(cls, value: object) -> CCVersion:
         if isinstance(value, cls):
             return value

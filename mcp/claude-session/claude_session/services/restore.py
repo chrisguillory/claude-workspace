@@ -89,24 +89,15 @@ class PathTranslator:
         if not self.needs_translation:
             return record
 
-        # Get model class and find path fields
-        model_class = type(record)
-        path_fields = get_path_fields(model_class)
-
-        # Create dict for updating
         record_dict = record.model_dump(exclude_unset=True, mode='json')
 
-        # Translate each path field
-        for field_name in path_fields:
-            if field_name in record_dict:
-                value = record_dict[field_name]
-                if isinstance(value, str):
-                    record_dict[field_name] = self._translate_path(value)
-                elif isinstance(value, list):
-                    record_dict[field_name] = [self._translate_path(p) if isinstance(p, str) else p for p in value]
+        for field_name, value in get_path_fields(record).items():
+            if isinstance(value, str):
+                record_dict[field_name] = self._translate_path(value)
+            elif isinstance(value, list):
+                record_dict[field_name] = [self._translate_path(p) if isinstance(p, str) else p for p in value]
 
-        # Reconstruct record with translated paths
-        return model_class(**record_dict)
+        return type(record)(**record_dict)
 
     def _translate_path(self, path: str) -> str:
         """Translate a single path string."""

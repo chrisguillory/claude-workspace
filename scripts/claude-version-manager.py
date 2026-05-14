@@ -240,7 +240,7 @@ def cli_info(
             raise SystemExit(1)
         print(f'Active version: {target}\n')
     else:
-        target = CCVersion(version)
+        target = CCVersion.parse(version)
 
     path = store.path_for(str(target))
     if path.exists():
