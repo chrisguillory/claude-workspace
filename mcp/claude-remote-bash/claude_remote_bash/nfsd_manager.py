@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,9 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 NFSD_BINARY = 'crb-nfsd'
-"""Expected on PATH after `uv sync --all-groups --all-packages`."""
+"""Maturin (``bindings = "bin"``) installs this into the same venv as the
+daemon, so ``Path(sys.executable).parent / NFSD_BINARY`` is the canonical
+location. ``PATH`` lookup is the fallback for unusual invocations."""
 
 READY_TIMEOUT_SECONDS = 10.0
 """How long to wait for the spawned binary to print `LISTEN_PORT=N` + `READY`."""
@@ -146,12 +149,7 @@ class NfsdManager:
             logger.info('Shut down %d nfsd child(ren)', len(procs))
 
     async def _spawn(self, root: Path, readonly: bool) -> NfsdProcess:
-        binary = shutil.which(NFSD_BINARY)
-        if binary is None:
-            raise DaemonError(
-                f"Couldn't find `{NFSD_BINARY}` on PATH. "
-                'Run `uv sync --all-groups --all-packages` from the workspace root.'
-            )
+        binary = _locate_nfsd_binary()
 
         crb_dir = Path.home() / '.crb'
         crb_dir.mkdir(parents=True, exist_ok=True)
@@ -202,6 +200,29 @@ class NfsdManager:
         except TimeoutError:
             nfsd.process.kill()
             await nfsd.process.wait()
+
+
+def _locate_nfsd_binary() -> str:
+    """Return the path to ``crb-nfsd``, preferring the daemon's own venv.
+
+    Maturin's ``bindings = "bin"`` mode installs ``crb-nfsd`` into the
+    venv's ``bin/`` directory alongside ``claude-remote-bash-daemon``.
+    Looking adjacent to ``sys.executable`` is robust against PATH not
+    including the venv (e.g., the daemon launched without venv activation).
+    """
+    adjacent = Path(sys.executable).parent / NFSD_BINARY
+    if adjacent.is_file():
+        return str(adjacent)
+
+    on_path = shutil.which(NFSD_BINARY)
+    if on_path is not None:
+        return on_path
+
+    raise DaemonError(
+        f"Couldn't find `{NFSD_BINARY}` next to {sys.executable} or on PATH. "
+        'Run `uv tool install --reinstall claude-remote-bash` (for installed daemons) '
+        'or `uv sync --all-groups --all-packages` (workspace dev).'
+    )
 
 
 async def _read_listen_port(process: asyncio.subprocess.Process) -> int:
