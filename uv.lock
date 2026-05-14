@@ -261,10 +261,11 @@ wheels = [
 
 [[package]]
 name = "claude-remote-bash"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "mcp/claude-remote-bash" }
 dependencies = [
     { name = "cc-lib" },
+    { name = "crb-nfsd" },
     { name = "filelock" },
     { name = "pydantic" },
     { name = "typer" },
@@ -274,6 +275,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cc-lib", editable = "cc-lib" },
+    { name = "crb-nfsd", editable = "mcp/claude-remote-bash/crb-nfsd" },
     { name = "filelock", specifier = ">=3.20.0" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "typer", specifier = ">=0.20.0" },
@@ -386,6 +388,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
 ]
+
+[[package]]
+name = "crb-nfsd"
+version = "0.1.0"
+source = { editable = "mcp/claude-remote-bash/crb-nfsd" }
 
 [[package]]
 name = "cryptography"
@@ -565,7 +572,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pymupdf", specifier = ">=1.26.7" },
     { name = "pyrate-limiter", specifier = ">=4.0.2" },
-    { name = "qdrant-client", specifier = ">=1.16.2" },
+    { name = "qdrant-client", specifier = ">=1.16.2,<1.17" },
     { name = "redis", extras = ["hiredis"], specifier = ">=5.0.0" },
     { name = "tenacity", specifier = ">=9.1.2" },
     { name = "uuid6", specifier = ">=2025.0.1" },
@@ -2392,7 +2399,7 @@ wheels = [
 
 [[package]]
 name = "qdrant-client"
-version = "1.17.1"
+version = "1.16.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "grpcio" },
@@ -2403,9 +2410,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/dd/f8a8261b83946af3cd65943c93c4f83e044f01184e8525404989d22a81a5/qdrant_client-1.17.1.tar.gz", hash = "sha256:22f990bbd63485ed97ba551a4c498181fcb723f71dcab5d6e4e43fe1050a2bc0", size = 344979, upload-time = "2026-03-13T17:13:44.678Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/7d/3cd10e26ae97b35cf856ca1dc67576e42414ae39502c51165bb36bb1dff8/qdrant_client-1.16.2.tar.gz", hash = "sha256:ca4ef5f9be7b5eadeec89a085d96d5c723585a391eb8b2be8192919ab63185f0", size = 331112, upload-time = "2025-12-12T10:58:30.866Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/69/77d1a971c4b933e8c79403e99bcbb790463da5e48333cc4fd5d412c63c98/qdrant_client-1.17.1-py3-none-any.whl", hash = "sha256:6cda4064adfeaf211c751f3fbc00edbbdb499850918c7aff4855a9a759d56cbd", size = 389947, upload-time = "2026-03-13T17:13:43.156Z" },
+    { url = "https://files.pythonhosted.org/packages/08/13/8ce16f808297e16968269de44a14f4fef19b64d9766be1d6ba5ba78b579d/qdrant_client-1.16.2-py3-none-any.whl", hash = "sha256:442c7ef32ae0f005e88b5d3c0783c63d4912b97ae756eb5e052523be682f17d3", size = 377186, upload-time = "2025-12-12T10:58:29.282Z" },
 ]
 
 [[package]]

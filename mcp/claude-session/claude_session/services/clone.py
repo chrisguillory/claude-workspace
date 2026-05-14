@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import uuid6
+from cc_lib.settings_env import claude_binary_name
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.schemas.operations.discovery import SessionInfo
@@ -21,6 +22,7 @@ from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.artifacts import (
     collect_agent_file_info,
+    collect_agent_metadata,
     collect_debug_log,
     collect_plan_files,
     collect_session_env,
@@ -40,7 +42,9 @@ from claude_session.services.artifacts import (
     get_tasks_dir,
     get_todos_dir,
     iter_tasks,
+    transform_agent_metadata_filename,
     transform_todo_filename,
+    write_agent_metadata,
     write_debug_log,
     write_jsonl,
     write_plan_files,
@@ -141,6 +145,11 @@ class SessionCloneService:
         if nested_count:
             logger.info('  %d nested agents (in subagents/)', nested_count)
 
+        # Collect agent metadata sidecars (paired with agent files when present)
+        agent_metadata_files = collect_agent_metadata(source_session_dir, session_info.session_id)
+        if agent_metadata_files:
+            logger.info('Found %d agent metadata sidecars', len(agent_metadata_files))
+
         # Collect tool results from source session
         tool_results = collect_tool_results(source_session_dir, session_info.session_id)
         logger.info('Found %d tool result files', tool_results.total_file_count)
@@ -235,6 +244,11 @@ class SessionCloneService:
             else:
                 # Flat: <target>/agent-*.jsonl
                 all_output_paths.append(target_dir / new_filename)
+
+        # 2b. Agent metadata sidecars (always nested; agent_id remapped)
+        for old_filename in agent_metadata_files:
+            new_filename = transform_agent_metadata_filename(old_filename, agent_id_mapping)
+            all_output_paths.append(target_dir / new_session_id / 'subagents' / new_filename)
 
         # 3. Tool results (flat files + directory files)
         if tool_results:
@@ -391,6 +405,16 @@ class SessionCloneService:
 
             logger.info('Cloned %s: %d records', new_filename, len(updated_records))
 
+        # Clone agent metadata sidecars (raw passthrough — content preserved verbatim)
+        agent_metadata_cloned = 0
+        if agent_metadata_files:
+            remapped_metadata = {
+                transform_agent_metadata_filename(filename, agent_id_mapping): content
+                for filename, content in agent_metadata_files.items()
+            }
+            agent_metadata_cloned = write_agent_metadata(target_dir, new_session_id, remapped_metadata)
+            logger.info('Cloned %d agent metadata sidecars', agent_metadata_cloned)
+
         # Record lineage (source_path already extracted above)
         lineage_service = LineageService()
         lineage_service.record_clone(
@@ -416,6 +440,7 @@ class SessionCloneService:
             agent_files=agent_file_paths,
             main_records_restored=main_records_cloned,
             agent_records_restored=agent_records_cloned,
+            agent_metadata_restored=agent_metadata_cloned,
             plan_files_restored=plan_files_cloned,
             tool_results_restored=tool_results.total_file_count,
             todos_restored=todos_cloned,
@@ -423,6 +448,7 @@ class SessionCloneService:
             session_env_restored=session_env_cloned,
             session_memory_restored=session_memory_cloned,
             debug_log_restored=debug_log_cloned,
+            resume_command=f'{claude_binary_name()} --resume {new_session_id}',
             paths_translated=translator is not None,
             slug_mappings_applied=len(slug_mapping),
             agent_id_mappings_applied=len(agent_id_mapping),

@@ -18,6 +18,7 @@ from typing import Any
 
 import uuid6
 import zstandard
+from cc_lib.settings_env import claude_binary_name
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.introspection import get_path_fields
@@ -37,6 +38,7 @@ from claude_session.services.artifacts import (
     get_session_env_dir,
     get_tasks_dir,
     get_todos_dir,
+    write_agent_metadata,
     write_debug_log,
     write_jsonl,
     write_plan_files,
@@ -232,6 +234,11 @@ class SessionRestoreService:
             else:
                 # Flat: <target>/agent-*.jsonl
                 all_output_paths.append(target_dir / new_filename)
+
+        # 2b. Agent metadata sidecars (always nested; agent_id remapped on fork)
+        for meta in archive.agent_metadata:
+            new_agent_id = meta.agent_id if in_place else agent_id_mapping[meta.agent_id]
+            all_output_paths.append(target_dir / new_session_id / 'subagents' / f'agent-{new_agent_id}.meta.json')
 
         # 3. Tool results (flat files + directory files)
         has_tool_results = archive.tool_results or archive.tool_result_dirs
@@ -435,6 +442,16 @@ class SessionRestoreService:
 
             logger.info('Restored %s: %d records', new_filename, len(updated_records))
 
+        # Restore agent metadata sidecars (raw passthrough — content preserved verbatim)
+        agent_metadata_restored = 0
+        if archive.agent_metadata:
+            remapped_metadata = {
+                f'agent-{meta.agent_id if in_place else agent_id_mapping[meta.agent_id]}.meta.json': meta.content
+                for meta in archive.agent_metadata
+            }
+            agent_metadata_restored = write_agent_metadata(target_dir, new_session_id, remapped_metadata)
+            logger.info('Restored %d agent metadata sidecars', agent_metadata_restored)
+
         # Record lineage (only for non-in-place restores)
         if not in_place:
             lineage_service = LineageService()
@@ -463,6 +480,7 @@ class SessionRestoreService:
             agent_files=agent_file_paths,
             main_records_restored=len(main_records),
             agent_records_restored=total_agent_records,
+            agent_metadata_restored=agent_metadata_restored,
             plan_files_restored=plan_files_restored,
             tool_results_restored=tool_results_restored,
             todos_restored=todos_restored,
@@ -470,6 +488,7 @@ class SessionRestoreService:
             session_env_restored=session_env_restored,
             session_memory_restored=session_memory_restored,
             debug_log_restored=debug_log_restored,
+            resume_command=f'{claude_binary_name()} --resume {new_session_id}',
             paths_translated=translator is not None,
             slug_mappings_applied=len(slug_mapping),
             agent_id_mappings_applied=len(agent_id_mapping),

@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import ast
 import re
-import subprocess
-import sys
 from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
+
+from tests.linters.helpers import run_linter
 
 # -- Data Types ---------------------------------------------------------------
 
@@ -140,79 +140,6 @@ EDGE_CASE_SUPPRESSED: Set[str] = {
 }
 
 
-# -- AST Parsing --------------------------------------------------------------
-
-
-def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
-    """Parse AST to get line ranges for each function.
-
-    Returns dict mapping function name to (start_line, end_line).
-    Fixture files must use unique function names — duplicates overwrite silently.
-    """
-    source = filepath.read_text(encoding='utf-8')
-    tree = ast.parse(source)
-
-    ranges: dict[str, LineRange] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            # end_lineno is always set for nodes parsed from source (not constructed)
-            assert node.end_lineno is not None
-            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
-
-    return ranges
-
-
-# -- Linter Output Parsing ----------------------------------------------------
-
-
-def run_linter(test_file: Path, linter: Path) -> str:
-    """Run the linter and return combined stdout+stderr."""
-    result = subprocess.run(
-        [sys.executable, str(linter), '--no-skip-file', '--no-config', str(test_file)],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    return result.stdout + result.stderr
-
-
-def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
-    """Parse linter output to extract (line_number, rule_code) tuples."""
-    violations: list[tuple[int, str]] = []
-
-    # Pattern: "filename:line:col: error: EXCNNN message"
-    pattern = re.compile(r'.+:(\d+):\d+: error: (EXC\d+)')
-
-    for line in output.splitlines():
-        match = pattern.match(line)
-        if match:
-            line_num = int(match.group(1))
-            rule_code = match.group(2)
-            violations.append((line_num, rule_code))
-
-    return violations
-
-
-def map_violations_to_functions(
-    violations: Sequence[tuple[int, str]],
-    ranges: Mapping[str, LineRange],
-) -> ViolationMap:
-    """Map violations to the functions they occur in.
-
-    Returns dict mapping function name to set of rule codes.
-    """
-    result: ViolationMap = {}
-
-    for line_num, rule_code in violations:
-        for func_name, (start, end) in ranges.items():
-            if start <= line_num <= end:
-                result.setdefault(func_name, set()).add(rule_code)
-                break
-
-    return result
-
-
 # -- Module-Scoped Fixtures ---------------------------------------------------
 
 
@@ -302,6 +229,67 @@ def test_edge_case_no_unexpected(edge_case_results: tuple[ViolationMap, Set[str]
         f'{func}: unexpected violations {sorted(rules)}' for func, rules in actual_map.items() if func not in known
     }
     assert not unexpected, '\n'.join(sorted(unexpected))
+
+
+# -- AST Parsing --------------------------------------------------------------
+
+
+def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
+    """Parse AST to get line ranges for each function.
+
+    Returns dict mapping function name to (start_line, end_line).
+    Fixture files must use unique function names — duplicates overwrite silently.
+    """
+    source = filepath.read_text(encoding='utf-8')
+    tree = ast.parse(source)
+
+    ranges: dict[str, LineRange] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            # end_lineno is always set for nodes parsed from source (not constructed)
+            assert node.end_lineno is not None
+            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
+
+    return ranges
+
+
+# -- Linter Output Parsing ----------------------------------------------------
+
+
+def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
+    """Parse linter output to extract (line_number, rule_code) tuples."""
+    violations: list[tuple[int, str]] = []
+
+    # Pattern: "filename:line:col: error: EXCNNN message"
+    pattern = re.compile(r'.+:(\d+):\d+: error: (EXC\d+)')
+
+    for line in output.splitlines():
+        match = pattern.match(line)
+        if match:
+            line_num = int(match.group(1))
+            rule_code = match.group(2)
+            violations.append((line_num, rule_code))
+
+    return violations
+
+
+def map_violations_to_functions(
+    violations: Sequence[tuple[int, str]],
+    ranges: Mapping[str, LineRange],
+) -> ViolationMap:
+    """Map violations to the functions they occur in.
+
+    Returns dict mapping function name to set of rule codes.
+    """
+    result: ViolationMap = {}
+
+    for line_num, rule_code in violations:
+        for func_name, (start, end) in ranges.items():
+            if start <= line_num <= end:
+                result.setdefault(func_name, set()).add(rule_code)
+                break
+
+    return result
 
 
 # -- Private Helpers ----------------------------------------------------------

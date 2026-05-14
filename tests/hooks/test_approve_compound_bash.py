@@ -901,9 +901,7 @@ class TestMainIntegration:
         """
         home = tmp_path / 'home'
         (home / '.claude').mkdir(parents=True)
-        (home / '.claude' / 'settings.json').write_text(
-            json.dumps({'permissions': {'allow': ['Bash(echo:*)']}}),
-        )
+        (home / '.claude' / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Bash(echo:*)']}}))
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
         payload = json.dumps(
             {

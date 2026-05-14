@@ -27,6 +27,7 @@ class ArtifactFile(StrictModel):
     artifact_type: Literal[
         'session_main',  # ~/.claude/projects/<enc>/{session_id}.jsonl
         'session_agent',  # Flat: .../agent-{id}.jsonl | Nested (2.1.2+): .../{sid}/subagents/agent-{id}.jsonl
+        'agent_metadata',  # Nested only (2.1.70+): .../{sid}/subagents/agent-{id}.meta.json
         'plan_file',  # ~/.claude/plans/{slug}.md
         'tool_result',  # ~/.claude/projects/<enc>/{sid}/tool-results/{tool_use_id}.txt
         'todo_file',  # ~/.claude/todos/{session_id}-agent-{agent_id}.json
@@ -57,6 +58,7 @@ class DeleteManifest(StrictModel):
     # Per-type file paths
     session_main_file: PathStr
     agent_files: Sequence[PathStr]
+    agent_metadata_files: Sequence[PathStr]
     plan_files: Sequence[PathStr]
     tool_result_files: Sequence[PathStr]
     todo_files: Sequence[PathStr]
@@ -86,7 +88,9 @@ class DeleteResult(StrictModel):
     deleted_files: Sequence[PathStr]
 
     # Per-artifact-type breakdown
-    session_files_deleted: int  # main + agents
+    main_session_deleted: int
+    agent_files_deleted: int
+    agent_metadata_deleted: int
     plan_files_deleted: int
     tool_results_deleted: int
     todos_deleted: int

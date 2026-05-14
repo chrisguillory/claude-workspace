@@ -21,6 +21,7 @@ from claude_session.types import ArchiveFormat
 __all__ = [
     'ARCHIVE_FORMAT_VERSION',
     'AgentFileEntry',
+    'AgentMetadataEntry',
     'ArchiveMetadata',
     'FileMetadata',
     'MainSessionFileEntry',
@@ -37,10 +38,11 @@ __all__ = [
 
 # -- Archive Format Version ----------------------------------------------------
 
-ARCHIVE_FORMAT_VERSION = '2.2'
+ARCHIVE_FORMAT_VERSION = '2.3'
 """Current archive format version. Used when creating new archives.
 
 Version history:
+- 2.3: Added agent_metadata for agent-*.meta.json sidecars (Claude Code 2.1.70+)
 - 2.2: Added session_env, session_memory, and debug_log
 - 2.1: Added tool_result_dirs for pdf-<uuid>/page-NN.jpg directory structures
 - 2.0: Explicit artifact models, tasks support, agent structure preservation
@@ -88,6 +90,7 @@ class SessionArchive(StrictModel):
     """Archive format v2.x - explicit artifact models.
 
     Version history:
+    - 2.3: Added agent_metadata for agent-*.meta.json sidecars (Claude Code 2.1.70+)
     - 2.2: Added session_env, session_memory, and debug_log
     - 2.1: Added tool_result_dirs for directory-based tool results (pdf page renders)
     - 2.0: Explicit artifact models, tasks support, agent structure preservation
@@ -95,6 +98,7 @@ class SessionArchive(StrictModel):
     Derived fields (not stored, computed on restore):
     - Main session filename: f"{session_id}.jsonl"
     - Agent filename: f"agent-{agent_id}.jsonl"
+    - Agent metadata filename: f"agent-{agent_id}.meta.json"
     - Agent relative path: "subagents/..." if nested else just filename
     """
 
@@ -110,6 +114,7 @@ class SessionArchive(StrictModel):
     # Explicit artifact collections
     main_session: MainSessionFileEntry
     agent_files: Sequence[AgentFileEntry] = ()
+    agent_metadata: Sequence[AgentMetadataEntry] = ()
     plan_files: Sequence[PlanFileEntry] = ()
     tool_results: Sequence[ToolResultEntry] = ()
     tool_result_dirs: Sequence[ToolResultDirectoryEntry] = ()
@@ -164,6 +169,25 @@ class AgentFileEntry(StrictModel):
     nested: bool  # True if in subagents/ directory
     record_count: int  # Metadata first
     records: Sequence[SessionRecord]
+
+
+class AgentMetadataEntry(StrictModel):
+    """Per-subagent invocation manifest sidecar (Claude Code 2.1.70+).
+
+    Claude Code writes a small JSON file when spawning each sidechain agent.
+    The agent_id matches the paired AgentFileEntry when both writes landed.
+
+    Derived fields (computed on restore):
+    - filename: f"agent-{agent_id}.meta.json"
+    - location: f"<project>/{sid}/subagents/{filename}" (always nested)
+
+    Sparse by design: pre-2.1.70 sidechains have no sidecar, and write
+    failures are silently swallowed. Content stored raw for forward
+    compatibility with new fields.
+    """
+
+    agent_id: str  # Matches paired AgentFileEntry.agent_id
+    content: str  # Raw JSON of agent-{id}.meta.json
 
 
 class PlanFileEntry(StrictModel):

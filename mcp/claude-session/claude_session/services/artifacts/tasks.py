@@ -77,6 +77,7 @@ def classify_task_directory(session_id: str) -> TaskDirectoryContents | None:
     unexpected_files: list[Path] = []
     for path in tasks_dir.iterdir():
         if not path.is_file():
+            unexpected_files.append(path)
             continue
         if path.name in TASK_METADATA_FILES:
             metadata_files.append(path)

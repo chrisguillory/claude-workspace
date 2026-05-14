@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import ast
 import re
-import subprocess
-import sys
 from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
+
+from tests.linters.helpers import run_linter
 
 # -- Data Types ---------------------------------------------------------------
 
@@ -183,98 +183,6 @@ EDGE_CASE_SUPPRESSED: Set[str] = {
     'EdgeMultipleSuppressionCodes',
 }
 
-# -- AST Parsing --------------------------------------------------------------
-
-
-def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
-    """Parse AST to get line ranges for each class.
-
-    Returns dict mapping class name to (start_line, end_line).
-    Uses ast.walk to find classes inside any compound statement (try, if, with, etc.).
-
-    Note: Duplicate class names (same name at different scopes) will overwrite each other.
-    Test files should use unique class names to avoid this limitation.
-    """
-    source = filepath.read_text(encoding='utf-8')
-    tree = ast.parse(source)
-
-    ranges: dict[str, LineRange] = {}
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.end_lineno is not None:
-            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
-
-    return ranges
-
-
-# -- Linter Output Parsing ----------------------------------------------------
-
-
-def run_linter(test_file: Path, linter: Path) -> str:
-    """Run the linter and return combined stdout+stderr."""
-    result = subprocess.run(
-        [sys.executable, str(linter), '--no-skip-file', '--no-config', str(test_file)],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    return result.stdout + result.stderr
-
-
-def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
-    """Parse linter output to extract (line_number, violation_kind) tuples.
-
-    Pattern: "filepath:line:col: error: {Type} '{bad_type}' in {context} annotation"
-    """
-    violations: list[tuple[int, str]] = []
-
-    # Match violation types from error output
-    patterns = [
-        (r'.+:(\d+):\d+: error: Variable-length tuple', 'tuple-field'),
-        (r'.+:(\d+):\d+: error: Unhashable type', 'hashable-field'),
-        (r'.+:(\d+):\d+: error: Mutable type', 'mutable'),
-        (r'.+:(\d+):\d+: error: Loose type', 'loose'),
-    ]
-
-    for line in output.splitlines():
-        for pattern, kind in patterns:
-            match = re.match(pattern, line)
-            if match:
-                line_num = int(match.group(1))
-                violations.append((line_num, kind))
-                break
-
-    return violations
-
-
-def map_violations_to_classes(
-    violations: Sequence[tuple[int, str]],
-    ranges: Mapping[str, LineRange],
-) -> ViolationMap:
-    """Map violations to the classes they occur in.
-
-    For nested classes with overlapping ranges, attributes violations to the
-    innermost (most specific) class.
-
-    Returns dict mapping class name to set of violation kinds.
-    """
-    result: ViolationMap = {}
-
-    for line_num, kind in violations:
-        # Find all classes that contain this line
-        matching_classes = [
-            (class_name, start, end) for class_name, (start, end) in ranges.items() if start <= line_num <= end
-        ]
-
-        if matching_classes:
-            # Pick the innermost (smallest range)
-            best = min(matching_classes, key=lambda x: x[2] - x[1])
-            result.setdefault(best[0], set()).add(kind)
-
-    return result
-
-
 # -- Module-Scoped Fixtures ---------------------------------------------------
 
 
@@ -367,6 +275,86 @@ def test_edge_case_no_unexpected(edge_case_results: tuple[ViolationMap, Set[str]
 
 
 # -- Private Helpers ----------------------------------------------------------
+
+
+# -- AST Parsing --------------------------------------------------------------
+
+
+def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
+    """Parse AST to get line ranges for each class.
+
+    Returns dict mapping class name to (start_line, end_line).
+    Uses ast.walk to find classes inside any compound statement (try, if, with, etc.).
+
+    Note: Duplicate class names (same name at different scopes) will overwrite each other.
+    Test files should use unique class names to avoid this limitation.
+    """
+    source = filepath.read_text(encoding='utf-8')
+    tree = ast.parse(source)
+
+    ranges: dict[str, LineRange] = {}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.end_lineno is not None:
+            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
+
+    return ranges
+
+
+# -- Linter Output Parsing ----------------------------------------------------
+
+
+def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
+    """Parse linter output to extract (line_number, violation_kind) tuples.
+
+    Pattern: "filepath:line:col: error: {Type} '{bad_type}' in {context} annotation"
+    """
+    violations: list[tuple[int, str]] = []
+
+    # Match violation types from error output
+    patterns = [
+        (r'.+:(\d+):\d+: error: Variable-length tuple', 'tuple-field'),
+        (r'.+:(\d+):\d+: error: Unhashable type', 'hashable-field'),
+        (r'.+:(\d+):\d+: error: Mutable type', 'mutable'),
+        (r'.+:(\d+):\d+: error: Loose type', 'loose'),
+    ]
+
+    for line in output.splitlines():
+        for pattern, kind in patterns:
+            match = re.match(pattern, line)
+            if match:
+                line_num = int(match.group(1))
+                violations.append((line_num, kind))
+                break
+
+    return violations
+
+
+def map_violations_to_classes(
+    violations: Sequence[tuple[int, str]],
+    ranges: Mapping[str, LineRange],
+) -> ViolationMap:
+    """Map violations to the classes they occur in.
+
+    For nested classes with overlapping ranges, attributes violations to the
+    innermost (most specific) class.
+
+    Returns dict mapping class name to set of violation kinds.
+    """
+    result: ViolationMap = {}
+
+    for line_num, kind in violations:
+        # Find all classes that contain this line
+        matching_classes = [
+            (class_name, start, end) for class_name, (start, end) in ranges.items() if start <= line_num <= end
+        ]
+
+        if matching_classes:
+            # Pick the innermost (smallest range)
+            best = min(matching_classes, key=lambda x: x[2] - x[1])
+            result.setdefault(best[0], set()).add(kind)
+
+    return result
 
 
 def _build_actual_map(test_file: Path) -> tuple[ViolationMap, Set[str]]:

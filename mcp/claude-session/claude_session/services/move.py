@@ -29,6 +29,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cc_lib.settings_env import claude_binary_name
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.config.base import DATA_DIR
@@ -40,11 +41,13 @@ from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts import (
     AgentFileInfo,
     collect_agent_file_info,
+    collect_agent_metadata,
     collect_session_memory,
     collect_tool_results,
     detect_agent_structure,
     extract_custom_title_from_records,
     extract_source_project_path,
+    write_agent_metadata,
     write_jsonl,
     write_session_memory,
     write_tool_results,
@@ -148,6 +151,7 @@ class SessionMoveService:
 
         # Collect agent file info
         agent_infos = collect_agent_file_info(files_data, agent_structure)
+        agent_metadata_files = collect_agent_metadata(source_session_dir, session_info.session_id)
 
         # Collect tool results
         tool_results = collect_tool_results(source_session_dir, session_info.session_id)
@@ -180,6 +184,11 @@ class SessionMoveService:
                 all_output_paths.append(target_dir / sid / 'subagents' / filename)
             else:
                 all_output_paths.append(target_dir / filename)
+
+        # Agent metadata sidecars (always nested; same agent_id preserved on move)
+        all_output_paths.extend(
+            target_dir / sid / 'subagents' / meta_filename for meta_filename in agent_metadata_files
+        )
 
         # Tool results (flat files + directory files)
         if tool_results:
@@ -215,12 +224,17 @@ class SessionMoveService:
                 target_project=str(self.target_project_path),
                 files_moved=len(all_output_paths),
                 files_deleted=0,
+                main_session_moved=1,
+                agent_files_moved=len(agent_infos),
+                agent_metadata_moved=len(agent_metadata_files),
+                tool_results_moved=tool_results.total_file_count,
+                session_memory_moved=session_memory is not None,
                 paths_translated=source_project_path.resolve() != self.target_project_path,
                 was_running=terminate_pid is not None,
                 was_terminated=False,
                 backup_path=None,
                 custom_title=custom_title,
-                resume_command=f'cd {self.target_project_path} && claude --resume {sid}',
+                resume_command=f'cd {self.target_project_path} && {claude_binary_name()} --resume {sid}',
                 was_dry_run=True,
                 duration_ms=duration_ms,
                 moved_at=datetime.now(UTC),
@@ -258,6 +272,11 @@ class SessionMoveService:
             write_jsonl(output_path, translated, {}, {})
 
             logger.info('Wrote agent %s: %d records', filename, len(translated))
+
+        # Write agent metadata sidecars (raw copy, no translation)
+        if agent_metadata_files:
+            write_agent_metadata(target_dir, sid, agent_metadata_files)
+            logger.info('Wrote %d agent metadata sidecars', len(agent_metadata_files))
 
         # Write tool results (raw copy, no translation)
         if tool_results:
@@ -308,6 +327,11 @@ class SessionMoveService:
                 else:
                     agent_path = source_session_dir / f'agent-{info.agent_id}.jsonl'
                 agent_path.unlink()
+                files_deleted += 1
+
+            # Delete agent metadata sidecars
+            for meta_filename in agent_metadata_files:
+                (source_session_dir / sid / 'subagents' / meta_filename).unlink()
                 files_deleted += 1
 
             # Delete tool results (flat files)
@@ -367,12 +391,17 @@ class SessionMoveService:
             target_project=str(self.target_project_path),
             files_moved=files_written,
             files_deleted=files_deleted,
+            main_session_moved=1,
+            agent_files_moved=len(agent_infos),
+            agent_metadata_moved=len(agent_metadata_files),
+            tool_results_moved=tool_results.total_file_count,
+            session_memory_moved=session_memory is not None,
             paths_translated=translator.needs_translation,
             was_running=terminate_pid is not None,
             was_terminated=was_terminated,
             backup_path=str(backup_path) if backup_path else None,
             custom_title=custom_title,
-            resume_command=f'cd {self.target_project_path} && claude --resume {sid}',
+            resume_command=f'cd {self.target_project_path} && {claude_binary_name()} --resume {sid}',
             was_dry_run=False,
             duration_ms=duration_ms,
             moved_at=datetime.now(UTC),

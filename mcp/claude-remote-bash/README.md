@@ -2,10 +2,10 @@
 
 > Cross-machine shell execution for Claude Code via mDNS-discovered daemons on a home LAN.
 
-Each machine in the mesh runs a lightweight daemon that registers itself via mDNS and accepts authenticated shell commands over TCP. A client CLI discovers daemons by alias (e.g. `--host M2`) and executes commands on them. Use this when you want Claude Code on one MacBook to install software on another, read a remote config, or orchestrate work across your personal machines — without SSH key juggling or static `hosts` entries.
+Each machine in the mesh runs a lightweight daemon that registers itself via mDNS and accepts authenticated shell commands over TCP. A client CLI discovers daemons by alias (e.g. `--target M2`) and executes commands on them. Use this when you want Claude Code on one MacBook to install software on another, read a remote config, or orchestrate work across your personal machines — without SSH key juggling or static `hosts` entries.
 
 > [!NOTE]
-> **Status:** Phase 1 (daemon) and Phase 2 (client CLI) ship. Phase 3 (MCP server) is deferred pending an empirical need — the CLI's `Bash()` permission integration covers the current use cases cleanly. See [`docs/claude-remote-bash-plan.md`](../../docs/claude-remote-bash-plan.md) for the full rationale.
+> **Status:** Phase 1 (daemon), Phase 2 (client CLI), and Phase 4 (filesystem mount) ship. Phase 3 (MCP server) is deferred pending an empirical need — the CLI's `Bash()` permission integration covers the current use cases cleanly.
 
 ---
 
@@ -123,7 +123,7 @@ claude-remote-bash-daemon                       # start
 
 ```bash
 claude-remote-bash discover                      # should list M1 and M2
-claude-remote-bash execute --host M1 'hostname'  # smoke test
+claude-remote-bash execute --target M1 'hostname'  # smoke test
 ```
 
 > [!IMPORTANT]
@@ -144,7 +144,7 @@ claude-remote-bash execute --host M1 'hostname'  # smoke test
 | `uninstall-service` | Remove the `LaunchAgent` plist and unload it from launchd. |
 | `--help`, `-h` | Print usage. |
 
-Config file: `~/.claude-workspace/claude-remote-bash/config.json` (mode `0600`).
+Config file: `~/.claude-workspace/mcp/claude-remote-bash/daemon_config.json` (mode `0600`). Optional groups for the CLI client live alongside it at `client_config.json`.
 
 ---
 
@@ -152,21 +152,45 @@ Config file: `~/.claude-workspace/claude-remote-bash/config.json` (mode `0600`).
 
 | Subcommand | Purpose |
 |---|---|
-| `execute --host <alias> <cmd>` | Run a command on a remote host. Supports heredoc on stdin when `<cmd>` is omitted. |
+| `execute --target <selector> <cmd>` | Run a command on one or more remote hosts. `<selector>` is a host alias (`M2`), a comma-list (`M2,M3,M4`), a group name from `client_config.json` (e.g. `fleet`), a literal `ip:port`, or any mix. Supports heredoc on stdin when `<cmd>` is omitted. |
 | `discover` | Browse mDNS for 3s and print every daemon found. Refreshes the cache. |
+| `mount <peer>:<path> [mountpoint]` | Mount a remote directory over NFSv3. Detaches a supervisor by default; `--foreground` blocks until ^C. See [Filesystem mount](#filesystem-mount). |
+| `umount <mountpoint>` | Tear down a mount established via `mount`. SIGTERMs the supervisor; supervisor unmounts and removes its registry entry. |
+| `mounts` | List active mounts with live/orphan status. `--format json` for machine-readable output. |
 | `install-completions` | Install shell tab completion (zsh/bash) — inherited from `cc_lib.cli`. |
 | `uninstall-completions` | Remove shell tab completion. |
 
-`execute` accepts the host as either an alias (`M2`), a substring of the hostname, or a literal `ip:port`.
+`execute --target` (`-t`) accepts:
+
+- a single host alias (`M2`) — single-host mode: stream raw stdout/stderr; exit with the host's exit code
+- a comma-separated list (`M2,M3,M4`) — multi-host mode: parallel via `asyncio.gather`, per-line `[<atom>] ` prefix, summary table at end, aggregated exit code
+- a group name from `client_config.json` (see below) — replaced inline with its member list
+- a literal `ip:port` (`192.168.4.22:51648`) — direct address; bypasses mDNS discovery
+- any mix of the above
+
+Grammar: whitespace per-atom stripped; empty atoms, trailing commas, and pre-expansion duplicates rejected before any RPC. Matching is case-insensitive.
+
+**Groups** are local-only personal shortcuts at `~/.claude-workspace/mcp/claude-remote-bash/client_config.json`:
+
+```json
+{
+  "groups": {
+    "fleet": ["M2", "M3", "M4"],
+    "workers": ["M3", "M4"]
+  }
+}
+```
+
+Then: `claude-remote-bash execute -t fleet 'uptime'` runs on M2, M3, M4 in parallel.
 
 ### Example invocations
 
 ```bash
 # Single command
-claude-remote-bash execute --host M2 'ls -la ~/.claude'
+claude-remote-bash execute --target M2 'ls -la ~/.claude'
 
 # Heredoc (the shape Claude Code's Bash tool uses)
-claude-remote-bash execute --host M2 <<'BASH'
+claude-remote-bash execute --target M2 <<'BASH'
 cd ~/projects
 cat .env
 echo "CWD: $(pwd)"
@@ -184,7 +208,7 @@ The CLI participates in Claude Code's existing `Bash(...)` permission system via
 {
   "permissions": {
     "allow": [
-      "Bash(claude-remote-bash execute --host M2:*)",
+      "Bash(claude-remote-bash execute --target M2:*)",
       "Bash(claude-remote-bash discover:*)"
     ]
   }
@@ -194,12 +218,163 @@ The CLI participates in Claude Code's existing `Bash(...)` permission system via
 | Pattern | Effect |
 |---|---|
 | `Bash(claude-remote-bash:*)` | Allow every subcommand on every host. |
-| `Bash(claude-remote-bash execute --host M2:*)` | Allow `execute` on M2 only. |
+| `Bash(claude-remote-bash execute --target M2:*)` | Allow `execute` on M2 only. |
 | `Bash(claude-remote-bash discover:*)` | Allow `discover` only. |
 
 No custom permission code. No new config surface. The CLI's shape gives per-host and per-command granularity on Claude Code's existing infrastructure.
 
 </details>
+
+---
+
+## Filesystem mount
+
+`crb mount m2:~/projects/foo` makes the M2 host's `~/projects/foo` directory readable and writable on M3 as a regular filesystem path at `~/.crb/host/m2/foo/`. Edit-tool semantics work: Claude can `read_file`, `edit`, and `cat` across machines without an SSH/rsync round-trip per operation.
+
+The transport reuses the existing PSK-authed daemon connection. There is no second protocol, no NFS-over-the-LAN, and no second port that needs firewall approval.
+
+### Quick example
+
+```bash
+crb mount m2:~/projects/foo
+# → mounted m2:~/projects/foo at /Users/chris/.crb/host/m2/foo
+# → supervisor pid=70614 mount_id=bf3da046
+
+cat ~/.crb/host/m2/foo/README.md      # reads through the mount
+echo "from M3" > ~/.crb/host/m2/foo/note.md  # write-through to M2
+
+crb mounts                            # list active mounts
+crb umount ~/.crb/host/m2/foo         # tear it down (~0.5s)
+```
+
+### Architecture
+
+```mermaid
+graph LR
+    subgraph "M3 — client machine"
+        Kernel[macOS NFS client]
+        Supervisor["mount_supervisor process<br/>(detached, owns lifecycle)"]
+        Bridge["TCP listener<br/>127.0.0.1:dynamic"]
+        Registry["mounts.json<br/>(filelock-guarded)"]
+        Supervisor --> Bridge
+        Supervisor --> Registry
+        Kernel --"NFSv3 RPC"--> Bridge
+    end
+
+    subgraph "M2 — peer machine"
+        Daemon["claude-remote-bash-daemon<br/>(channel-mux dispatch loop)"]
+        NfsdMgr["NfsdManager<br/>(refcount sharing)"]
+        Nfsd["crb-nfsd subprocess<br/>(userspace NFSv3 server)"]
+        Files[("~/projects/foo")]
+        Daemon --> NfsdMgr
+        NfsdMgr --> Nfsd
+        Nfsd --> Files
+    end
+
+    Bridge --"tunnel channel N<br/>over PSK-authed TCP"--> Daemon
+```
+
+### Components
+
+| Piece | Where it lives | What it does |
+|---|---|---|
+| `crb mount` CLI | M3 client | Spawns the supervisor, waits for its `READY` line, returns. |
+| `mount_supervisor.py` | M3 (detached subprocess) | Owns the mount lifecycle. SIGTERM unwinds → `UnmountRequest` → `umount` → registry cleanup. |
+| `mount.py:crb_mount_blocking` | M3 supervisor | Discover peer → auth → `MountRequest` → start local TCP listener → invoke `mount_nfs` → block on signal. |
+| `mounts_registry.py` | M3 (filelock JSON) | One entry per live mount: `peer_alias`, `remote_path`, `mountpoint`, `supervisor_pid`, `mount_id`. |
+| `NfsdManager` | Peer daemon | Spawns/refcount-shares `crb-nfsd` subprocesses by `(canonical(root), readonly)` key. |
+| `crb-nfsd` | Peer daemon child | Maturin-built Rust binary serving NFSv3 on `127.0.0.1:dynamic`. Built on [nfsserve](https://github.com/xetdata/nfsserve). |
+| Channel mux | Daemon ↔ supervisor | Channel 0 = control JSON (`MountRequest` etc.); channel N>0 = opaque NFS bytes routed by `channel_id`. One peer TCP conn per kernel NFS conn. |
+
+### Mountpoint convention
+
+`crb mount m2:~/projects/foo` mounts at `~/.crb/host/m2/foo/`:
+
+- Root: `~/.crb/host/` (constant — `MOUNTS_ROOT`)
+- Per-peer directory: `<peer_alias>/`
+- Per-mount basename: `<basename of remote path>`
+
+Override with the second CLI argument: `crb mount m2:~/projects/foo /tmp/mnt`. The CLI resolves the path (`.resolve()`) before writing to the registry, so symlink chains like macOS's `/tmp → /private/tmp` don't break the umount lookup.
+
+### Read-after-write coherence
+
+The mount runs `mount_nfs` with `actimeo=0,noac` — the NFS client revalidates attributes on every operation rather than caching. This is what makes Claude's Edit tool work correctly:
+
+```
+write a.txt (round trip to peer)
+read a.txt (revalidates → sees just-written bytes, not stale cache)
+```
+
+Without `actimeo=0` the NFS client caches attributes for ~30s by default and read-after-write reads stale data. The trade-off is one extra GETATTR per operation; for Edit-tool workloads that's invisible.
+
+### Lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant CLI as crb mount<br/>(parent process)
+    participant Sup as mount_supervisor<br/>(detached child)
+    participant D as Peer daemon
+    participant K as macOS NFS client
+
+    U->>CLI: crb mount m2:~/projects/foo
+    CLI->>Sup: spawn (subprocess.Popen, start_new_session=True)
+    CLI->>Sup: wait for stdout "READY <mount_id>"
+    Sup->>D: connect + auth (channel 0)
+    Sup->>D: MountRequest{root, readonly}
+    D-->>Sup: MountResponse{mount_id}
+    Sup->>K: mount_nfs 127.0.0.1:0 → /Users/chris/.crb/host/m2/foo
+    Sup-->>CLI: "READY <mount_id>" via stdout
+    CLI->>U: "mounted at ...; pid=N"
+    CLI-->>U: returns (supervisor stays detached)
+
+    Note over K,D: NFS RPCs flow through tunnel channels<br/>(one per kernel-NFS connection)
+
+    U->>Sup: crb umount → SIGTERM (via registry pid)
+    Sup->>K: umount -f
+    Sup->>D: UnmountRequest{mount_id}
+    D-->>Sup: UnmountResponse{child_terminated}
+    Sup->>Sup: registry remove_entry
+    Sup-->>U: process exits
+```
+
+### Multi-tab share (refcount)
+
+Two Claude tabs on the same machine mounting the same `(root, readonly)` key share one `crb-nfsd` subprocess. The `NfsdManager` returns a fresh `mount_id` for each acquire and increments the share's `refcount`. `UnmountRequest` decrements; the subprocess is SIGTERMed only when the last holder releases. This makes the multi-tab workflow free of "tab A's umount kills tab B's mount" surprises.
+
+### Cleanup on abnormal exit
+
+The supervisor's `try/finally` removes its registry entry and runs `umount -f` on every exit path, including signal-driven teardown. If the supervisor itself is SIGKILLed (skipping `finally`), the daemon's dispatch loop tracks per-connection mount holds and releases them when the control TCP connection closes — the peer-side `crb-nfsd` doesn't leak even if M3 crashes or partitions away.
+
+If the supervisor is killed but the kernel mount remains, running `crb umount <mountpoint>` against the stale registry entry reaps it: the supervisor PID is no longer alive, `terminate_supervisor` removes the entry and surfaces a clear "stale registry entry" message.
+
+### Mountpoint registry
+
+| Path | Purpose |
+|---|---|
+| `~/.claude-workspace/mcp/claude-remote-bash/mounts.json` | List of `MountEntry` records, one per live mount. |
+| `~/.claude-workspace/mcp/claude-remote-bash/mounts.lock` | `FileLock` guard for concurrent `mount`/`umount`. |
+
+Each entry: `mount_id`, `peer_alias`, `remote_path`, `mountpoint`, `supervisor_pid`, `readonly`, `established_at`.
+
+### Logs
+
+| Path | What's there |
+|---|---|
+| `~/.crb/log/supervisor-<pid>.log` | Supervisor's INFO-level lifecycle log. |
+| `~/.crb/log/crb-nfsd-<uuid8>.log` | The peer-side `crb-nfsd` subprocess's stderr (whatever `tracing`/panic output it emits). |
+| `/tmp/crb-daemon.log` | Daemon log if running headless. |
+
+### `crb-nfsd` discovery
+
+The daemon finds `crb-nfsd` via `Path(sys.executable).parent / 'crb-nfsd'` first — maturin's `bindings = "bin"` mode installs the Rust binary into the same venv `bin/` directory as `claude-remote-bash-daemon`. `PATH` lookup is the fallback. This means a clean `uv tool install --reinstall claude-remote-bash` populates everything the daemon needs without any `~/.local/bin` symlinking.
+
+> [!NOTE]
+> **No peer-side mount allowlist yet.** Any client with a valid PSK can request a mount of any path the peer's user can read. Appropriate for the same LAN-trust model as `execute`; not appropriate for environments where the PSK is shared with parties who shouldn't see all of `$HOME`. Tracked as a follow-up.
+
+> [!TIP]
+> **Spotlight and Time Machine are excluded automatically.** On mount, the supervisor runs `mdutil -i off <mountpoint>` and `tmutil addexclusion <mountpoint>` so the indexer doesn't walk the tree and Time Machine doesn't try to back up the peer's filesystem. Without these the mount feels unresponsive on first Finder open.
 
 ---
 
@@ -263,7 +438,7 @@ claude-remote-bash-daemon allow-firewall
 ### Empirical signature of a pending approval
 
 ```
-$ claude-remote-bash execute --host M2 'ls'
+$ claude-remote-bash execute --target M2 'ls'
 TCP connected but the daemon did not respond to auth within 5s.
 
 This is the signature of a pending macOS Application Firewall prompt
@@ -364,14 +539,14 @@ Re-running `install-service` calls `launchctl unload` before rewriting — confi
 | Property | Value |
 |---|---|
 | Authentication | Pre-shared key (PSK), 256-bit, generated via `secrets.token_hex(32)` |
-| Key storage | `~/.claude-workspace/claude-remote-bash/config.json`, mode `0600` |
+| Key storage | `~/.claude-workspace/mcp/claude-remote-bash/daemon_config.json`, mode `0600` |
 | Key distribution | Out-of-band (user copies PSK from `init` output to `join` on each target) |
 | Key comparison | `secrets.compare_digest` (constant-time) |
 | Transport | Plaintext TCP. No TLS. |
 | Network scope | LAN trust model — any device on the same mDNS subnet can attempt to connect; only the PSK gates execution. |
 
 > [!CAUTION]
-> **This is a LAN-trust model, not zero-trust.** The PSK is stored in plaintext on every machine in the mesh. Anyone who reads `config.json` (or sniffs the TCP bytes on an unencrypted LAN) and guesses a target hostname can execute arbitrary shell as your user on your machines. Appropriate for a home network with trusted devices. **Not** appropriate for shared Wi-Fi, coworking spaces, or any environment where you don't physically control every machine on the subnet.
+> **This is a LAN-trust model, not zero-trust.** The PSK is stored in plaintext on every machine in the mesh. Anyone who reads `daemon_config.json` (or sniffs the TCP bytes on an unencrypted LAN) and guesses a target hostname can execute arbitrary shell as your user on your machines. Appropriate for a home network with trusted devices. **Not** appropriate for shared Wi-Fi, coworking spaces, or any environment where you don't physically control every machine on the subnet.
 
 > [!WARNING]
 > If the PSK leaks, rotate it immediately: run `init` on one machine and `join <new-key>` on every other. There is no "revoke" — the old key will keep working until it's overwritten everywhere.
@@ -385,11 +560,12 @@ Every error raised by this package descends from `RemoteBashError`. The CLI's er
 ```
 Exception
 └── RemoteBashError              # library root
-    ├── ProtocolError            # wire-format errors (framing, size limits, malformed JSON)
+    ├── ProtocolError            # wire-format errors (framing, size limits, malformed JSON, schema validation)
     ├── AuthError                # no PSK, or authentication rejected
     ├── HostNotFoundError        # mDNS found no matching alias
     ├── HostUnreachableError     # every advertised IP failed to connect
     ├── DaemonError              # daemon returned an ErrorResponse
+    ├── MountError               # mount/umount flow failed (mount_nfs, supervisor handshake, stale registry)
     ├── ConfigError              # daemon config missing or incomplete
     ├── FirewallApprovalError    # allow-firewall subcommand could not complete
     └── LaunchdError             # install-service / uninstall-service failed
@@ -405,21 +581,22 @@ Some subclasses set a `prefix` class attribute to prepend a label in `__str__` (
 
 <details><summary>Framing and message types (click to expand)</summary>
 
-The protocol is length-prefixed JSON over TCP with one reserved flags byte.
+The protocol is channel-multiplexed length-prefixed framing over TCP.
 
 ```
-┌──────────────┬──────────────┬──────────────────────────────┐
-│ 4 bytes      │ 1 byte       │ N bytes                      │
-│ uint32 BE    │ flags (0x00) │ JSON UTF-8 payload           │
-│ (length = N) │              │                              │
-└──────────────┴──────────────┴──────────────────────────────┘
+┌──────────────┬──────────────┬──────────────┬──────────────────────────────┐
+│ 4 bytes      │ 1 byte       │ 4 bytes      │ N bytes                      │
+│ uint32 BE    │ flags (0x00) │ uint32 BE    │ payload                      │
+│ (length = N) │              │ channel_id   │                              │
+└──────────────┴──────────────┴──────────────┴──────────────────────────────┘
 ```
 
 - `MAX_PAYLOAD_SIZE = 10 MB` — enforced on read; oversize payloads raise `ProtocolError`.
 - `flags` is reserved for compression. `0x00` is the only currently-valid value.
-- Payloads are validated as Pydantic `ClosedModel` subclasses via a discriminated union on `type`.
+- `channel_id = 0` (the `CONTROL_CHANNEL`) carries framed JSON `Message` payloads validated as Pydantic `ClosedModel` subclasses via a discriminated union on `type`.
+- `channel_id > 0` carries opaque tunnel bytes (NFS RPCs for the filesystem mount feature), routed by `channel_id` without JSON interpretation.
 
-### Message types
+### Message types (channel 0)
 
 | Direction | `type` | Purpose |
 |---|---|---|
@@ -430,6 +607,12 @@ The protocol is length-prefixed JSON over TCP with one reserved flags byte.
 | D → C | `result` | Command finished; includes `stdout`, `stderr`, `exit_code`, `cwd`. |
 | C → D | `read_config` | Request remote Claude Code config files. |
 | D → C | `config` | `~/.claude.json` + `~/.claude/settings.json` as parsed JSON. |
+| C → D | `mount_request` | Spawn (or share) a `crb-nfsd` serving `root`; returns a `mount_id`. |
+| D → C | `mount_response` | Result of `mount_request`. Includes `mount_id`. |
+| C → D | `tunnel_open` | Allocate a new tunnel channel against a `mount_id`. |
+| D → C | `tunnel_ok` | Tunnel allocated; includes `channel_id` to use for subsequent tunnel frames. |
+| C → D | `unmount_request` | Drop one hold on `mount_id`; SIGTERMs the `crb-nfsd` if refcount hits zero. |
+| D → C | `unmount_response` | Result of `unmount_request`. Includes `child_terminated`. |
 | D → C | `error` | Any error the daemon wants to surface to the client. |
 
 ### Wrapping shell commands
@@ -464,6 +647,5 @@ When you bump behavior that affects installed users, update `version` in `pyproj
 
 | Document | Purpose |
 |---|---|
-| [`docs/claude-remote-bash-plan.md`](../../docs/claude-remote-bash-plan.md) | Canonical design doc — architecture, decision log, phased plan. |
 | [`CLAUDE.md`](../../CLAUDE.md) | Workspace-wide conventions (naming, entry points, MCP server patterns). |
 | [`cc-lib/`](../../cc-lib/) | Shared library used for error boundary, CLI scaffolding, base Pydantic models. |

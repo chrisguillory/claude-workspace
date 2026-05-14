@@ -1,10 +1,11 @@
 [project]
 name = "claude-remote-bash"
-version = "0.1.1"
+version = "0.2.0"
 description = "Cross-machine shell execution for Claude Code via mDNS-discovered daemons"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "cc-lib",
+    "crb-nfsd",
     "filelock>=3.20.0",
     "pydantic>=2.12.0",
     "typer>=0.20.0",
@@ -17,6 +18,7 @@ claude-remote-bash-daemon = "claude_remote_bash.daemon:main"
 
 [tool.uv.sources]
 cc-lib = { workspace = true }
+crb-nfsd = { path = "./crb-nfsd/", editable = true }
 
 [build-system]
 requires = ["hatchling"]

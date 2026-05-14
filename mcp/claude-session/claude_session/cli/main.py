@@ -23,6 +23,7 @@ from cc_lib.claude_context import ClaudeContext
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.session_tracker import load_sessions
+from cc_lib.settings_env import claude_binary_name
 from cc_lib.types import OutputFormat
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
@@ -264,7 +265,7 @@ def clone(
     detected = _auto_detect_session_id()
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
-        typer.echo('Use claude --resume <session-id> after cloning instead.', err=True)
+        typer.echo(f'Use {claude_binary_name()} --resume <session-id> after cloning instead.', err=True)
         raise SystemExit(1)
 
     # Use cached detection result to avoid a second process tree walk
@@ -405,7 +406,7 @@ def move(
     detected = _auto_detect_session_id()
     if launch and detected is not None:
         typer.secho('Error: --launch cannot be used inside Claude Code.', fg=typer.colors.RED, err=True)
-        typer.echo('Use claude --resume <session-id> after moving instead.', err=True)
+        typer.echo(f'Use {claude_binary_name()} --resume <session-id> after moving instead.', err=True)
         raise SystemExit(1)
 
     if session_id is None:
@@ -822,7 +823,11 @@ async def _restore_async(
     typer.echo(f'  Mode: {"in-place" if result.was_in_place else "fork"}')
     typer.echo()
     typer.echo('  Files restored:')
-    typer.echo(f'    - Session: 1 main + {len(result.agent_files)} agents')
+    typer.echo('    - Main session: 1')
+    if result.agent_files:
+        typer.echo(f'    - Agent transcripts: {len(result.agent_files)}')
+    if result.agent_metadata_restored:
+        typer.echo(f'    - Agent metadata: {result.agent_metadata_restored}')
     if result.plan_files_restored:
         typer.echo(f'    - Plans: {result.plan_files_restored}')
     if result.tool_results_restored:
@@ -849,7 +854,7 @@ async def _restore_async(
     else:
         typer.echo()
         typer.echo('To continue this session, run:')
-        typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
+        typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _clone_async(
@@ -890,7 +895,11 @@ async def _clone_async(
     typer.echo(f'  Project: {result.project_path}')
     typer.echo()
     typer.echo('  Files cloned:')
-    typer.echo(f'    - Session: 1 main + {len(result.agent_files)} agents')
+    typer.echo('    - Main session: 1')
+    if result.agent_files:
+        typer.echo(f'    - Agent transcripts: {len(result.agent_files)}')
+    if result.agent_metadata_restored:
+        typer.echo(f'    - Agent metadata: {result.agent_metadata_restored}')
     if result.plan_files_restored:
         typer.echo(f'    - Plans: {result.plan_files_restored}')
     if result.tool_results_restored:
@@ -917,7 +926,7 @@ async def _clone_async(
     else:
         typer.echo()
         typer.echo('To continue this session, run:')
-        typer.secho(f'  claude --resume {result.new_session_id}', fg=typer.colors.CYAN)
+        typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _delete_async(
@@ -994,7 +1003,11 @@ async def _delete_async(
         typer.echo(f'  Session ID: {result.session_id}')
         typer.echo()
         typer.echo('  Files deleted:')
-        typer.echo(f'    - Session: {result.session_files_deleted}')
+        typer.echo(f'    - Main session: {result.main_session_deleted}')
+        if result.agent_files_deleted:
+            typer.echo(f'    - Agent transcripts: {result.agent_files_deleted}')
+        if result.agent_metadata_deleted:
+            typer.echo(f'    - Agent metadata: {result.agent_metadata_deleted}')
         if result.plan_files_deleted:
             typer.echo(f'    - Plans: {result.plan_files_deleted}')
         if result.tool_results_deleted:
@@ -1083,7 +1096,17 @@ async def _move_async(
         typer.echo(f'  Session ID: {result.session_id}')
         typer.echo(f'  From: {result.source_project}')
         typer.echo(f'  To: {result.target_project}')
-        typer.echo(f'  Files: {result.files_moved}')
+        typer.echo()
+        typer.echo('  Files to move:')
+        typer.echo(f'    - Main session: {result.main_session_moved}')
+        if result.agent_files_moved:
+            typer.echo(f'    - Agent transcripts: {result.agent_files_moved}')
+        if result.agent_metadata_moved:
+            typer.echo(f'    - Agent metadata: {result.agent_metadata_moved}')
+        if result.tool_results_moved:
+            typer.echo(f'    - Tool results: {result.tool_results_moved}')
+        if result.session_memory_moved:
+            typer.echo('    - Session memory: yes')
         typer.echo(f'  Paths translated: {result.paths_translated}')
     else:
         typer.secho('✓ Session moved successfully!', fg=typer.colors.GREEN)
@@ -1091,8 +1114,17 @@ async def _move_async(
         typer.echo(f'  From: {result.source_project}')
         typer.echo(f'  To: {result.target_project}')
         typer.echo()
-        typer.echo(f'  Files written: {result.files_moved}')
-        typer.echo(f'  Files deleted: {result.files_deleted}')
+        typer.echo('  Files moved:')
+        typer.echo(f'    - Main session: {result.main_session_moved}')
+        if result.agent_files_moved:
+            typer.echo(f'    - Agent transcripts: {result.agent_files_moved}')
+        if result.agent_metadata_moved:
+            typer.echo(f'    - Agent metadata: {result.agent_metadata_moved}')
+        if result.tool_results_moved:
+            typer.echo(f'    - Tool results: {result.tool_results_moved}')
+        if result.session_memory_moved:
+            typer.echo('    - Session memory: yes')
+        typer.echo(f'  Source files deleted: {result.files_deleted}')
         typer.echo(f'  Paths translated: {result.paths_translated}')
         typer.echo(f'  Duration: {result.duration_ms:.0f}ms')
         if result.backup_path:
@@ -1112,7 +1144,7 @@ async def _move_async(
         else:
             typer.echo()
             typer.echo('To continue this session, run:')
-            typer.secho(f'  claude --resume {result.session_id}', fg=typer.colors.CYAN)
+            typer.secho(f'  {result.resume_command}', fg=typer.colors.CYAN)
 
 
 async def _lineage_async(session_id: str, format: Literal['text', 'tree', 'json'], source_project: Path | None) -> None:

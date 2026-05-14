@@ -93,6 +93,16 @@ LOOSE_TYPES: Set[str] = {
 # Combined forbidden types (short names only)
 FORBIDDEN_TYPES: Set[str] = MUTABLE_TYPES | LOOSE_TYPES
 
+# Fully qualified fixture-factory decorators allowed to precede classes (pytest idiom).
+# Functions decorated with one of these sort with classes for class-ordering purposes,
+# so a fixture can be defined above the test class that consumes it. Explicit allow-list:
+# unrelated decorators with a ``.fixture`` attribute (other libraries, future additions)
+# don't slip through silently.
+FIXTURE_DECORATORS: Set[QualifiedName] = {
+    QualifiedName('pytest.fixture'),
+    QualifiedName('pytest_asyncio.fixture'),
+}
+
 # Fully qualified mutable types (typing module aliases for builtins + explicit mutable interfaces)
 QUALIFIED_MUTABLE: Set[QualifiedName] = {
     QualifiedName('typing.List'),
@@ -492,10 +502,10 @@ def check_file(
     raw_ordering: list[tuple[int, str]] = []
     if not _is_entry_point(filepath, source_lines):
         # Skip __init__.py only if it has no definitions (just boilerplate)
-        if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree)):
+        if filepath.name != '__init__.py' or extract_definitions(tree, extract_all_names(tree), import_map):
             violations.extend(check_all_defined(filepath, tree, source_lines, raw_ordering))
             violations.extend(check_all_trailing_comma(filepath, tree, source_lines, raw_ordering))
-            violations.extend(check_module_ordering(filepath, tree, source_lines, raw_ordering))
+            violations.extend(check_module_ordering(filepath, tree, source_lines, import_map, raw_ordering))
             violations.extend(check_class_method_ordering(filepath, tree, source_lines, raw_ordering))
 
     # Merge ordering raw violations into all_raw for unused-directive detection
@@ -1545,7 +1555,11 @@ def _collect_private_base_refs(tree: ast.Module) -> Set[str]:
     return refs
 
 
-def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequence[Definition]:
+def extract_definitions(
+    tree: ast.Module,
+    all_names: Set[str] | None,
+    import_map: Mapping[LocalName, QualifiedName],
+) -> Sequence[Definition]:
     """Extract top-level class and function definitions."""
     definitions = []
     all_names = all_names or set()
@@ -1574,13 +1588,35 @@ def extract_definitions(tree: ast.Module, all_names: Set[str] | None) -> Sequenc
                 Definition(
                     name=node.name,
                     line=node.lineno,
-                    is_class=False,
+                    # Functions decorated with a known fixture factory sort with classes —
+                    # pytest resolves fixtures by name at collection time, so position is
+                    # stylistic, and the convention places them above consuming test classes.
+                    is_class=_has_fixture_decorator(node, import_map),
                     is_private=node.name.startswith('_'),
                     in_all=node.name in all_names,
                 ),
             )
 
     return definitions
+
+
+def _has_fixture_decorator(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    import_map: Mapping[LocalName, QualifiedName],
+) -> bool:
+    """Return True if any decorator on ``node`` resolves to a name in ``FIXTURE_DECORATORS``.
+
+    Resolution goes through ``resolve_qualified_name`` so aliased imports
+    (``import pytest as pt; @pt.fixture``) are correctly recognized, and unrelated
+    decorators that happen to be named ``.fixture`` are not.
+    """
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if not isinstance(target, ast.expr):
+            continue
+        if resolve_qualified_name(target, import_map) in FIXTURE_DECORATORS:
+            return True
+    return False
 
 
 def has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
@@ -1599,6 +1635,7 @@ def check_module_ordering(
     filepath: Path,
     tree: ast.Module,
     source_lines: Sequence[str],
+    import_map: Mapping[LocalName, QualifiedName],
     raw_ordering: list[tuple[int, str]]
     | None = None,  # strict_typing_linter.py: mutable-type — caller appends to this list
 ) -> Sequence[OrderingViolation]:
@@ -1606,7 +1643,7 @@ def check_module_ordering(
     violations: list[OrderingViolation] = []
 
     all_names = extract_all_names(tree)
-    definitions = extract_definitions(tree, all_names)
+    definitions = extract_definitions(tree, all_names, import_map)
 
     if not definitions:
         return violations

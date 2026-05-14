@@ -53,6 +53,7 @@ from claude_session.services.artifacts import (
     ToolResultDirectory,
     ToolResultDirectoryFile,
     ToolResultFile,
+    classify_subagents_directory,
     classify_task_directory,
     create_session_env_dir,
     discover_tool_results,
@@ -173,6 +174,7 @@ class SessionDeleteService:
         # Initialize collections
         artifacts: list[ArtifactFile] = []
         agent_file_paths: list[str] = []
+        agent_metadata_paths: list[str] = []
         plan_file_paths: list[str] = []
         tool_result_paths: list[str] = []
         todo_file_paths: list[str] = []
@@ -219,17 +221,18 @@ class SessionDeleteService:
                     )
                     agent_file_paths.append(str(agent_path))
 
-        # Track subagents directory if it exists (2.1.2+ nested structure)
-        subagents_dir = session_dir / session_id / 'subagents'
-        if subagents_dir.exists():
-            # Check for unexpected files in subagents/ (non-agent files)
-            for path in subagents_dir.iterdir():
-                if path.is_file() and not path.name.startswith('agent-'):
-                    unexpected_files.append(str(path))
-                elif path.is_dir():
-                    # Unexpected subdirectory in subagents/
-                    directories_to_cleanup.append(str(path))
-            directories_to_cleanup.append(str(subagents_dir))
+        # Subagents/ directory contents (jsonl handled above via rg; meta sidecars
+        # captured here; subdirectories and unmatched filenames surfaced for
+        # fail-fast or cleanup).
+        subagents_contents = classify_subagents_directory(session_dir, session_id)
+        if subagents_contents is not None:
+            for meta_path in subagents_contents.metadata_files:
+                size = meta_path.stat().st_size
+                artifacts.append(ArtifactFile(path=str(meta_path), size_bytes=size, artifact_type='agent_metadata'))
+                agent_metadata_paths.append(str(meta_path))
+            directories_to_cleanup.extend(str(d) for d in subagents_contents.subdirectories)
+            unexpected_files.extend(str(p) for p in subagents_contents.unexpected_files)
+            directories_to_cleanup.append(str(session_dir / session_id / 'subagents'))
 
         # Also track parent session directory if it exists
         session_parent_dir = session_dir / session_id
@@ -396,6 +399,7 @@ class SessionDeleteService:
             total_size_bytes=total_size,
             session_main_file=str(main_file),
             agent_files=agent_file_paths,
+            agent_metadata_files=agent_metadata_paths,
             plan_files=plan_file_paths,
             tool_result_files=tool_result_paths,
             todo_files=todo_file_paths,
@@ -469,7 +473,9 @@ class SessionDeleteService:
                 files_deleted=0,
                 size_freed_bytes=0,
                 deleted_files=[],
-                session_files_deleted=0,
+                main_session_deleted=0,
+                agent_files_deleted=0,
+                agent_metadata_deleted=0,
                 plan_files_deleted=0,
                 tool_results_deleted=0,
                 todos_deleted=0,
@@ -508,7 +514,9 @@ class SessionDeleteService:
                 files_deleted=len(manifest.files),
                 size_freed_bytes=manifest.total_size_bytes,
                 deleted_files=[a.path for a in manifest.files],
-                session_files_deleted=counts['session_files'],
+                main_session_deleted=counts['main_session'],
+                agent_files_deleted=counts['agent_files'],
+                agent_metadata_deleted=counts['agent_metadata'],
                 plan_files_deleted=counts['plan_files'],
                 tool_results_deleted=counts['tool_results'],
                 todos_deleted=counts['todos'],
@@ -537,7 +545,9 @@ class SessionDeleteService:
                 files_deleted=0,
                 size_freed_bytes=0,
                 deleted_files=[],
-                session_files_deleted=0,
+                main_session_deleted=0,
+                agent_files_deleted=0,
+                agent_metadata_deleted=0,
                 plan_files_deleted=0,
                 tool_results_deleted=0,
                 todos_deleted=0,
@@ -595,7 +605,9 @@ class SessionDeleteService:
                 files_deleted=0,
                 size_freed_bytes=0,
                 deleted_files=[],
-                session_files_deleted=0,
+                main_session_deleted=0,
+                agent_files_deleted=0,
+                agent_metadata_deleted=0,
                 plan_files_deleted=0,
                 tool_results_deleted=0,
                 todos_deleted=0,
@@ -642,7 +654,9 @@ class SessionDeleteService:
             files_deleted=len(deleted_files),
             size_freed_bytes=size_freed,
             deleted_files=deleted_files,
-            session_files_deleted=counts['session_files'],
+            main_session_deleted=counts['main_session'],
+            agent_files_deleted=counts['agent_files'],
+            agent_metadata_deleted=counts['agent_metadata'],
             plan_files_deleted=counts['plan_files'],
             tool_results_deleted=counts['tool_results'],
             todos_deleted=counts['todos'],
@@ -913,7 +927,9 @@ class SessionDeleteService:
             Dict with per-artifact-type counts.
         """
         return {
-            'session_files': 1 + len(manifest.agent_files),  # main + agents
+            'main_session': 1,
+            'agent_files': len(manifest.agent_files),
+            'agent_metadata': len(manifest.agent_metadata_files),
             'plan_files': len(manifest.plan_files),
             'tool_results': len(manifest.tool_result_files),
             'todos': len(manifest.todo_files),
@@ -927,7 +943,9 @@ class SessionDeleteService:
 class ArtifactCounts(TypedDict):
     """Per-artifact-type deletion counts."""
 
-    session_files: int  # main + agents
+    main_session: int
+    agent_files: int
+    agent_metadata: int
     plan_files: int
     tool_results: int
     todos: int

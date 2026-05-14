@@ -40,6 +40,7 @@ class RestoreResult(StrictModel):
     agent_records_restored: int
 
     # Auxiliary artifact counts
+    agent_metadata_restored: int
     plan_files_restored: int
     tool_results_restored: int
     todos_restored: int
@@ -47,6 +48,9 @@ class RestoreResult(StrictModel):
     tasks_restored: int
     session_memory_restored: bool
     debug_log_restored: bool
+
+    # Continuation command
+    resume_command: str
 
     # Transformation info
     paths_translated: bool
