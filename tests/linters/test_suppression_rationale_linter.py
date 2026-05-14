@@ -19,12 +19,12 @@ Uses line-level tags:
 from __future__ import annotations
 
 import re
-import subprocess
-import sys
 from collections.abc import Mapping, Set
 from pathlib import Path
 
 import pytest
+
+from tests.linters.helpers import run_linter
 
 # -- Configuration ------------------------------------------------------------
 
@@ -36,47 +36,13 @@ EDGE_CASES_DIR = TEST_DIR / 'edge_cases'
 TEST_FILE = EDGE_CASES_DIR / 'suppression_rationale_linter_test_cases.py'
 EDGE_CASE_FILE = EDGE_CASES_DIR / 'suppression_rationale_linter_edge_cases.py'
 
-# -- Linter Output Parsing ----------------------------------------------------
-
-
-def run_linter(test_file: Path, linter: Path) -> str:
-    """Run the linter and return combined stdout+stderr."""
-    result = subprocess.run(
-        [sys.executable, str(linter), '--no-skip-file', '--no-config', str(test_file)],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    return result.stdout + result.stderr
-
-
-def parse_linter_output(output: str) -> Mapping[int, str]:
-    """Parse linter output to extract {line_number: rule_code} mapping.
-
-    If multiple violations on the same line, keeps the first.
-    """
-    violations: dict[int, str] = {}
-    pattern = re.compile(r'.+:(\d+):\d+: error: (SUP\d+)')
-
-    for line in output.splitlines():
-        match = pattern.match(line)
-        if match:
-            line_num = int(match.group(1))
-            rule_code = match.group(2)
-            if line_num not in violations:
-                violations[line_num] = rule_code
-
-    return violations
-
-
 # -- Test File Parsing ---------------------------------------------------------
 
 EXPECT_RE = re.compile(r'#\s*EXPECT:\s*(SUP\d+)')
 OK_RE = re.compile(r'#\s*OK\b')
 
 
-def parse_expectations(filepath: Path) -> tuple[Mapping[int, str], Set[int]]:
+def _parse_expectations(filepath: Path) -> tuple[Mapping[int, str], Set[int]]:
     """Parse test file for EXPECT and OK tags.
 
     Tags apply to the NEXT non-blank line after the tag. This avoids tags
@@ -128,8 +94,8 @@ def parse_expectations(filepath: Path) -> tuple[Mapping[int, str], Set[int]]:
 
 
 # Pre-parse expectations at module level (used by parametrize decorators AND fixtures)
-_INSTRUCTIVE_EXPECTED, _INSTRUCTIVE_OK = parse_expectations(TEST_FILE)
-_EDGE_CASE_EXPECTED, _EDGE_CASE_OK = parse_expectations(EDGE_CASE_FILE)
+_INSTRUCTIVE_EXPECTED, _INSTRUCTIVE_OK = _parse_expectations(TEST_FILE)
+_EDGE_CASE_EXPECTED, _EDGE_CASE_OK = _parse_expectations(EDGE_CASE_FILE)
 
 
 @pytest.fixture(scope='module')
@@ -245,6 +211,28 @@ def test_edge_case_no_unexpected(
             source_line = _get_source_line(EDGE_CASE_FILE, lineno)
             unexpected.append(f'line {lineno}: unexpected {actual_code} (untagged: {source_line[:60]})')
     assert not unexpected, '\n'.join(unexpected)
+
+
+# -- Linter Output Parsing ----------------------------------------------------
+
+
+def parse_linter_output(output: str) -> Mapping[int, str]:
+    """Parse linter output to extract {line_number: rule_code} mapping.
+
+    If multiple violations on the same line, keeps the first.
+    """
+    violations: dict[int, str] = {}
+    pattern = re.compile(r'.+:(\d+):\d+: error: (SUP\d+)')
+
+    for line in output.splitlines():
+        match = pattern.match(line)
+        if match:
+            line_num = int(match.group(1))
+            rule_code = match.group(2)
+            if line_num not in violations:
+                violations[line_num] = rule_code
+
+    return violations
 
 
 def _get_source_line(filepath: Path, lineno: int) -> str:
