@@ -28,6 +28,13 @@ READY_TIMEOUT_SECONDS = 10.0
 TERMINATE_TIMEOUT_SECONDS = 3.0
 """Grace window between SIGTERM and SIGKILL during shutdown."""
 
+LOG_DIR = Path.home() / '.crb' / 'log'
+"""Per-spawn stderr log files for ``crb-nfsd`` children. Redirecting stderr to
+a file (rather than ``PIPE``) prevents the kernel pipe buffer filling and
+deadlocking the binary on any future use of ``tracing``/``eprintln!``/panic
+backtraces — none of which the current binary emits, but the pipe is a foot
+gun the moment that changes."""
+
 
 @dataclass
 class NfsdProcess:
@@ -45,6 +52,10 @@ class NfsdProcess:
 
     refcount: int
     """Number of live ``mount_id`` claims on this child. Zero => terminate."""
+
+    log_path: Path
+    """Path to the per-spawn stderr log file. Useful for debugging crb-nfsd
+    failures after the fact."""
 
 
 class NfsdManager:
@@ -166,11 +177,17 @@ class NfsdManager:
         if readonly:
             args.append('--readonly')
 
-        process = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = LOG_DIR / f'crb-nfsd-{uuid.uuid4().hex[:8]}.log'
+        log_file = log_path.open('ab')
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=log_file,
+            )
+        finally:
+            log_file.close()
 
         try:
             port = await asyncio.wait_for(_read_listen_port(process), timeout=READY_TIMEOUT_SECONDS)
@@ -185,6 +202,7 @@ class NfsdManager:
             port=port,
             process=process,
             refcount=1,
+            log_path=log_path,
         )
 
     async def _terminate(self, nfsd: NfsdProcess) -> None:

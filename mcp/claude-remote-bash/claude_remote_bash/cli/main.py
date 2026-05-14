@@ -125,7 +125,10 @@ def mount(
     if not sep or not peer or not remote_path:
         raise RemoteBashError('mount target must be `<peer>:<remote_path>`')
 
-    resolved_mountpoint = mountpoint or default_mountpoint(peer, remote_path)
+    # ``resolve()`` absolutizes and follows parent symlinks (e.g. /tmp →
+    # /private/tmp on macOS) so the registry's mountpoint matches what
+    # ``terminate_supervisor`` later resolves the user's argument to.
+    resolved_mountpoint = (mountpoint or default_mountpoint(peer, remote_path)).resolve()
 
     if foreground:
         asyncio.run(

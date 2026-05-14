@@ -192,6 +192,38 @@ async def test_unmount_request_releases_the_nfsd_and_reports_termination(
 
 
 @pytest.mark.asyncio
+async def test_connection_close_without_unmount_releases_held_mount_ids(
+    running_daemon: tuple[int, _EchoNfsdManager],
+) -> None:
+    """Supervisor SIGKILL / crash / partition: M3 disappears before UnmountRequest.
+
+    The daemon must release the mount_id on connection close, or the
+    crb-nfsd subprocess (in production) leaks indefinitely.
+    """
+    port, stub = running_daemon
+    reader, writer = await _authed_conn(port)
+    await write_message(writer, MountRequest(id='leak-test', root='/tmp', readonly=False))
+    resp = await asyncio.wait_for(read_message(reader), timeout=3.0)
+    assert isinstance(resp, MountResponse)
+    mount_id = resp.mount_id
+    assert stub.get(mount_id) is not None  # daemon sees the hold
+
+    # Abruptly close — no UnmountRequest sent.
+    writer.close()
+    await writer.wait_closed()
+
+    # Daemon's dispatch_loop should release the hold in its finally block.
+    # Poll briefly because the release happens asynchronously after the
+    # IncompleteReadError lands on the daemon side.
+    deadline = asyncio.get_event_loop().time() + 2.0
+    while asyncio.get_event_loop().time() < deadline:
+        if stub.get(mount_id) is None:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f'mount_id {mount_id} not released after connection close')
+
+
+@pytest.mark.asyncio
 async def test_tunnel_open_on_unknown_mount_id_errors(
     running_daemon: tuple[int, _EchoNfsdManager],
 ) -> None:

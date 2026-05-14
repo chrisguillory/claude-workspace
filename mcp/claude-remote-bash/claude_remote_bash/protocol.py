@@ -77,8 +77,10 @@ def parse_message(payload: bytes) -> Message:
     """Deserialize a control-channel JSON payload into the discriminated ``Message`` union.
 
     Raises:
-        ProtocolError: On malformed JSON or non-object payload.
-        pydantic.ValidationError: On schema validation failure.
+        ProtocolError: On malformed JSON, non-object payload, or schema
+            validation failure. Pydantic's ``ValidationError`` is wrapped so
+            every caller has a single exception class to handle for any
+            protocol-level violation.
     """
     try:
         data = json.loads(payload)
@@ -88,7 +90,10 @@ def parse_message(payload: bytes) -> Message:
     if not isinstance(data, dict):
         raise ProtocolError(f'expected JSON object, got {type(data).__name__}')
 
-    return _MESSAGE_ADAPTER.validate_python(data)
+    try:
+        return _MESSAGE_ADAPTER.validate_python(data)
+    except pydantic.ValidationError as e:
+        raise ProtocolError(f'schema validation failed: {e}') from e
 
 
 async def read_message(reader: asyncio.StreamReader) -> Message:
@@ -99,8 +104,8 @@ async def read_message(reader: asyncio.StreamReader) -> Message:
     JSON payload through ``parse_message``.
 
     Raises:
-        ProtocolError: On framing errors or off-channel frames.
-        pydantic.ValidationError: On schema validation failure.
+        ProtocolError: On framing errors, off-channel frames, malformed
+            JSON, or schema validation failures.
         asyncio.IncompleteReadError: On unexpected connection close.
     """
     channel_id, payload = await read_frame(reader)

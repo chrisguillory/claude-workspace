@@ -410,6 +410,11 @@ class _Daemon:
         write_lock = asyncio.Lock()
         channels: dict[int, tuple[asyncio.StreamWriter, asyncio.Task[None]]] = {}
         next_channel_id = 1
+        # mount_ids acquired on this connection but not yet released via
+        # UnmountRequest. Released on connection close to handle the
+        # supervisor-SIGKILL / crash / partition paths where M3 disappears
+        # before sending UnmountRequest.
+        held_mount_ids: set[str] = set()
 
         try:
             while True:
@@ -425,6 +430,10 @@ class _Daemon:
                             channels[new_id] = entry
                     else:
                         response = await self._handle_message(msg)
+                        if isinstance(msg, MountRequest) and isinstance(response, MountResponse):
+                            held_mount_ids.add(response.mount_id)
+                        elif isinstance(msg, UnmountRequest):
+                            held_mount_ids.discard(msg.mount_id)
                         async with write_lock:
                             await write_message(writer, response)
                     continue
@@ -439,6 +448,17 @@ class _Daemon:
                     nfsd_writer.close()
                     _nfsd_writer, pump_task = channels.pop(channel_id)
                     pump_task.cancel()
+                    await asyncio.wait({pump_task})
+                    if not pump_task.cancelled():
+                        exc = pump_task.exception()
+                        if exc is not None:
+                            logger.warning(
+                                'pump ch%d exited with %s: %s',
+                                channel_id,
+                                type(exc).__name__,
+                                exc,
+                                exc_info=exc,
+                            )
                 else:
                     nfsd_writer.write(payload)
                     await nfsd_writer.drain()
@@ -449,6 +469,24 @@ class _Daemon:
             pumps = [t for _, t in channels.values()]
             if pumps:
                 await asyncio.wait(pumps)
+                for task in pumps:
+                    if not task.cancelled():
+                        exc = task.exception()
+                        if exc is not None:
+                            logger.warning(
+                                'pump %s exited with %s: %s',
+                                task.get_name(),
+                                type(exc).__name__,
+                                exc,
+                                exc_info=exc,
+                            )
+            # Release any mount_ids this connection still holds — supervisor
+            # crash / SIGKILL / network partition paths skip UnmountRequest
+            # entirely, and the nfsd would otherwise stay alive indefinitely.
+            for mid in held_mount_ids:
+                terminated = await self._nfsd_manager.release(mid)
+                if terminated:
+                    logger.info('Released orphaned mount_id=%s on connection close', mid)
 
     async def _handle_message(self, msg: Message) -> Message:
         """Dispatch a message to the appropriate handler."""

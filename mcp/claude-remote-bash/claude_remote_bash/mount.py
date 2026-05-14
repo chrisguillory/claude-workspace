@@ -325,13 +325,25 @@ async def _bridge_kernel_conn_to_peer(
         # other side. With ``gather`` we'd hang forever when the daemon
         # cancels its pump in response to our zero-frame and consequently
         # never sends one back — leaving our ``peer_to_kernel`` blocked.
-        k2p = asyncio.create_task(kernel_to_peer())
-        p2k = asyncio.create_task(peer_to_kernel())
+        k2p = asyncio.create_task(kernel_to_peer(), name=f'k2p-ch{channel_id}')
+        p2k = asyncio.create_task(peer_to_kernel(), name=f'p2k-ch{channel_id}')
         await asyncio.wait({k2p, p2k}, return_when=asyncio.FIRST_COMPLETED)
         for task in (k2p, p2k):
             if not task.done():
                 task.cancel()
         await asyncio.wait({k2p, p2k})
+        for task in (k2p, p2k):
+            if task.cancelled():
+                continue
+            exc = task.exception()
+            if exc is not None:
+                logger.warning(
+                    'bridge %s exited with %s: %s',
+                    task.get_name(),
+                    type(exc).__name__,
+                    exc,
+                    exc_info=exc,
+                )
     finally:
         peer_writer.close()
 
