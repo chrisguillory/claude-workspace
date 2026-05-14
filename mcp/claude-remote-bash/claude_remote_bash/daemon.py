@@ -39,6 +39,7 @@ from claude_remote_bash.exceptions import (
     RemoteBashError,
 )
 from claude_remote_bash.executor import execute_command
+from claude_remote_bash.nfsd_manager import NfsdManager
 from claude_remote_bash.protocol import read_message, write_message
 from claude_remote_bash.schemas.protocol import (
     AuthFail,
@@ -48,6 +49,12 @@ from claude_remote_bash.schemas.protocol import (
     ExecuteRequest,
     ExecuteResult,
     Message,
+    MountRequest,
+    MountResponse,
+    TunnelOk,
+    TunnelOpen,
+    UnmountRequest,
+    UnmountResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -312,6 +319,7 @@ async def run_daemon(config: DaemonConfig) -> None:
         if handler_tasks:
             await asyncio.gather(*handler_tasks, return_exceptions=True)
 
+    await daemon.shutdown_nfsd()
     await unregister_service(azc, info)
     logger.info('Shutdown complete')
 
@@ -324,6 +332,7 @@ class _Daemon:
     def __init__(self, config: DaemonConfig) -> None:
         self._config = config
         self._contexts = SessionContextStore(default_cwd=os.path.expanduser('~'))
+        self._nfsd_manager = NfsdManager()
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Handle a single client TCP connection."""
@@ -341,6 +350,10 @@ class _Daemon:
         finally:
             writer.close()
             await writer.wait_closed()
+
+    async def shutdown_nfsd(self) -> None:
+        """SIGTERM any crb-nfsd children spawned for filesystem mounts."""
+        await self._nfsd_manager.shutdown()
 
     async def _authenticate(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> bool:
         """Perform PSK authentication handshake. Returns True on success."""
@@ -374,9 +387,18 @@ class _Daemon:
         return True
 
     async def _dispatch_loop(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        """Read and dispatch messages until the client disconnects."""
+        """Read and dispatch messages until the client disconnects.
+
+        ``TunnelOpen`` is handled inline rather than via ``_handle_message`` because
+        its response (``TunnelOk``) transforms the connection from framed messages
+        to raw bytes — once the tunnel pipe runs to completion, the connection is
+        spent and the dispatch loop exits.
+        """
         while True:
             msg = await read_message(reader)
+            if isinstance(msg, TunnelOpen):
+                await self._handle_tunnel_open(msg, reader, writer)
+                return
             response = await self._handle_message(msg)
             await write_message(writer, response)
 
@@ -384,6 +406,10 @@ class _Daemon:
         """Dispatch a message to the appropriate handler."""
         if isinstance(msg, ExecuteRequest):
             return await self._handle_execute(msg)
+        if isinstance(msg, MountRequest):
+            return await self._handle_mount(msg)
+        if isinstance(msg, UnmountRequest):
+            return await self._handle_unmount(msg)
         return ErrorResponse(message=f'unexpected message type: {msg.type}')
 
     async def _handle_execute(self, msg: ExecuteRequest) -> ExecuteResult | ErrorResponse:
@@ -406,6 +432,64 @@ class _Daemon:
             exit_code=result.exit_code,
             cwd=result.cwd,
         )
+
+    async def _handle_mount(self, msg: MountRequest) -> MountResponse | ErrorResponse:
+        """Spawn (or reuse) a crb-nfsd serving the requested root."""
+        try:
+            nfsd = await self._nfsd_manager.acquire(msg.root, msg.readonly)
+        except RemoteBashError as exc:
+            return ErrorResponse(id=msg.id, message=str(exc))
+        return MountResponse(id=msg.id, mount_id=nfsd.mount_id)
+
+    async def _handle_unmount(self, msg: UnmountRequest) -> UnmountResponse:
+        """Drop one hold on the mount; SIGTERM the child when refcount hits zero."""
+        terminated = await self._nfsd_manager.release(msg.mount_id)
+        return UnmountResponse(id=msg.id, mount_id=msg.mount_id, child_terminated=terminated)
+
+    async def _handle_tunnel_open(
+        self,
+        msg: TunnelOpen,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        """Claim the connection as a tunnel and bridge raw bytes to the nfsd loopback.
+
+        After writing ``TunnelOk``, neither side treats the connection as framed
+        messages — bytes flow straight through to the child's NFS socket and back.
+        Returns when either direction closes; the caller then closes the writer.
+        """
+        nfsd = self._nfsd_manager.get(msg.mount_id)
+        if nfsd is None:
+            await write_message(writer, ErrorResponse(message=f'unknown mount_id: {msg.mount_id}'))
+            return
+
+        try:
+            target_reader, target_writer = await asyncio.open_connection('127.0.0.1', nfsd.port)
+        except OSError as exc:
+            await write_message(writer, ErrorResponse(message=f'tunnel connect failed: {exc}'))
+            return
+
+        await write_message(writer, TunnelOk(mount_id=msg.mount_id))
+
+        async def _pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
+            try:
+                while True:
+                    chunk = await src.read(65536)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+                    await dst.drain()
+            finally:
+                dst.close()
+
+        try:
+            await asyncio.gather(
+                _pipe(reader, target_writer),
+                _pipe(target_reader, writer),
+                return_exceptions=True,
+            )
+        finally:
+            target_writer.close()
 
 
 @app.callback(invoke_without_command=True)
