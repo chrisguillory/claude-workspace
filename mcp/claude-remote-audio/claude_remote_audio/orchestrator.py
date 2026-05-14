@@ -15,6 +15,7 @@ from claude_remote_bash.discovery import DiscoveredHost, browse_hosts
 from claude_remote_bash.dispatch import HostRunResult
 from claude_remote_bash.selector import parse as parse_selector
 
+from claude_remote_audio import bluetooth
 from claude_remote_audio.cache import DeviceCache, write_devices
 
 __all__ = [
@@ -215,6 +216,9 @@ async def _build_plan(
         has_input=input_device is not None,
     )
 
+    if output_device is not None:
+        await _ensure_bluetooth_output(service, hub, output_device)
+
     hub_devices = await enumerate_devices(service, hub)
     hub_loopback_port = await _read_hub_loopback_port(service, hub)
     topology_peer_aliases = sorted(a for a in aliases if a != hub_lower)
@@ -270,6 +274,39 @@ async def _assign_peer_ports(
         next_port += 1
 
     return port_map
+
+
+async def _ensure_bluetooth_output(service: DispatchService, hub_alias: str, output_device: str) -> None:
+    """If ``output_device`` is a paired Bluetooth audio device on the hub, bring up the link.
+
+    Called from ``_build_plan`` *before* ``enumerate_devices`` so the freshly-connected
+    device appears in Core Audio's output list when we enumerate. No-op when the device
+    is wired, AirPlay, virtual, or simply not paired on this hub — the subsequent
+    ``_resolve_output_device`` step will surface a clear "not found" error if it doesn't
+    appear in Core Audio after this step.
+
+    Cold-state caveat: when the device has *never* been engaged on this hub, ``blueutil
+    --connect`` brings up the BT control link but A2DP doesn't auto-engage; Core Audio
+    still won't list the device. The remedy in that case is a one-time click in the
+    Sound menu on the hub Mac. Subsequent applies work without the click (warm state).
+    """
+    try:
+        bt_device = await bluetooth.find_device(service, hub_alias, output_device)
+    except bluetooth.BluetoothError as exc:
+        raise ApplyError(f'{hub_alias}: bluetooth probe failed: {exc}') from exc
+
+    if bt_device is None or bt_device.connected:
+        return
+
+    try:
+        await bluetooth.ensure_connected(service, hub_alias, bt_device.address)
+    except bluetooth.BluetoothError as exc:
+        raise ApplyError(f'{hub_alias}: failed to connect Bluetooth device {bt_device.name!r}: {exc}') from exc
+
+    # A2DP engagement / Core Audio registration lags the BT control link by ~1-3s
+    # depending on whether Core Audio remembers the device. Wait so the subsequent
+    # ``enumerate_devices`` call sees the device in its output list.
+    await asyncio.sleep(2)
 
 
 # -- Hub phase ----------------------------------------------------------------

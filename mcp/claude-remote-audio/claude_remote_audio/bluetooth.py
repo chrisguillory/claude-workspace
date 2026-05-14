@@ -216,11 +216,11 @@ async def _run(
 def _parse_system_profiler(raw_json: str) -> Sequence[BluetoothDevice]:
     """Parse ``system_profiler SPBluetoothDataType -json`` into a ``BluetoothDevice`` list.
 
-    The JSON shape is ``{SPBluetoothDataType: [controller]}``, where each
-    controller has ``device_connected`` and ``device_not_connected`` arrays.
-    Each array entry is a single-key dict whose key is the device name and
-    whose value is a dict of device fields. Non-audio devices (no A2DP or HFP
-    in their service list) are filtered out.
+    Returns every paired device the controller reports, including non-audio ones
+    (keyboards, trackpads, etc.). Callers narrow by name — and since the names
+    that reach this module come from Core Audio output enumeration, the
+    narrowing inherently selects audio devices. Filtering on parse would just
+    couple us to Apple's evolving minor-type strings for no gain.
     """
     data = json.loads(raw_json)
     items = data.get('SPBluetoothDataType', [])
@@ -231,15 +231,12 @@ def _parse_system_profiler(raw_json: str) -> Sequence[BluetoothDevice]:
     for section_key, is_connected_section in (('device_connected', True), ('device_not_connected', False)):
         for entry in controller.get(section_key, []):
             for name, info in entry.items():
-                services = info.get('device_services', '')
-                if 'A2DP' not in services and 'HFP' not in services:
-                    continue
                 out.append(
                     BluetoothDevice(
                         name=name,
                         address=_normalize_address(info.get('device_address', '')),
                         minor_type=info.get('device_minorType', ''),
-                        services=services,
+                        services=info.get('device_services', ''),
                         connected=is_connected_section,
                     )
                 )
