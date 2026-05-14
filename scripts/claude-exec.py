@@ -65,7 +65,7 @@ from cc_lib.schemas import CamelSubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.settings_env import get_cc_env_var
 from cc_lib.types import EffortLevel
-from cc_lib.utils import encode_project_path, get_claude_config_home_dir
+from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
 
 boundary = ErrorBoundary(exit_code=1)
 ext_app = create_app(help='Claude exec management commands.')
@@ -712,7 +712,7 @@ class SessionIndex:
     def __init__(self, project_path: str) -> None:
         encoded = encode_project_path(project_path)
         self._project_dir = get_claude_config_home_dir() / 'projects' / encoded
-        self._cache_path = Path.home() / '.claude-workspace' / 'claude-exec' / f'{encoded}.json'
+        self._cache_path = get_claude_workspace_config_home_dir() / 'claude-exec' / f'{encoded}.json'
 
     def completions(self) -> Sequence[SessionEntry]:
         """Return resumable sessions sorted by recency, using cache when fresh."""

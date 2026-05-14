@@ -7,7 +7,8 @@ CCLibError                                # base for all cc_lib exceptions
 │   ├── InactiveSessionError              # session in sessions.json but state != 'active'
 │   ├── MultipleActiveSessionsForPidError # multiple sessions claim the same claude_pid
 │   └── MissingEnvVarError                # expected env var not set
-└── HookTreeMismatchError                 # hook tree != CLAUDE_EXEC_LAUNCH_DIR/hooks
+├── HookTreeMismatchError                 # hook tree != CLAUDE_EXEC_LAUNCH_DIR/hooks
+└── RivalSessionError                     # another live claude process owns this session_id
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ __all__ = [
     'InactiveSessionError',
     'MissingEnvVarError',
     'MultipleActiveSessionsForPidError',
+    'RivalSessionError',
     'SessionNotFoundError',
 ]
 
@@ -70,4 +72,17 @@ class HookTreeMismatchError(CCLibError):
         super().__init__(
             f'hook at {actual} does not match CLAUDE_EXEC_LAUNCH_DIR/hooks ({expected}). '
             f'Hooks are wired to a different tree than CLAUDE_EXEC_LAUNCH_DIR points to.'
+        )
+
+
+class RivalSessionError(CCLibError):
+    """Another live claude process owns this session_id."""
+
+    def __init__(self, *, session_id: str, rival_pid: int, claude_pid: int) -> None:
+        self.session_id = session_id
+        self.rival_pid = rival_pid
+        self.claude_pid = claude_pid
+        super().__init__(
+            f'session_id {session_id} is owned by live pid {rival_pid} '
+            f'(this process is pid {claude_pid}). Refusing to modify the entry.'
         )

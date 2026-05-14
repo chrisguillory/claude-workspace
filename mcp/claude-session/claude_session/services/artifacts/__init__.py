@@ -21,6 +21,14 @@ from .agent_ids import (
     generate_clone_agent_id,
     transform_agent_filename,
 )
+from .agent_metadata import (
+    AGENT_METADATA_FILENAME_PATTERN,
+    SubagentsDirectoryContents,
+    classify_subagents_directory,
+    collect_agent_metadata,
+    transform_agent_metadata_filename,
+    write_agent_metadata,
+)
 from .custom_title import (
     CLONE_SUFFIX_PATTERN,
     extract_base_custom_title,
@@ -110,6 +118,13 @@ __all__ = [
     'generate_agent_id_mapping',
     'generate_clone_agent_id',
     'transform_agent_filename',
+    # agent_metadata
+    'AGENT_METADATA_FILENAME_PATTERN',
+    'SubagentsDirectoryContents',
+    'classify_subagents_directory',
+    'collect_agent_metadata',
+    'transform_agent_metadata_filename',
+    'write_agent_metadata',
     # plan_files
     'SLUG_RECORD_TYPES',
     'extract_base_slug',

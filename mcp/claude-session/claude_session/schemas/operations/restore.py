@@ -40,6 +40,7 @@ class RestoreResult(StrictModel):
     agent_records_restored: int
 
     # Auxiliary artifact counts
+    agent_metadata_restored: int
     plan_files_restored: int
     tool_results_restored: int
     todos_restored: int

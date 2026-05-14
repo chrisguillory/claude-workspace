@@ -1,0 +1,25 @@
+[package]
+name = "crb-nfsd"
+version = "0.1.0"
+edition = "2021"
+description = "Userspace NFSv3 server for the claude-remote-bash filesystem-mount feature"
+license = "BSD-3-Clause"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+intaglio = "1"
+libc = "0.2"
+# Exact-pin nfsserve: small upstream user base, so pin a known-good version
+# and fork cleanly if upstream stagnates.
+nfsserve = "=0.11.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+strip = true

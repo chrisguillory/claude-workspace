@@ -823,7 +823,11 @@ async def _restore_async(
     typer.echo(f'  Mode: {"in-place" if result.was_in_place else "fork"}')
     typer.echo()
     typer.echo('  Files restored:')
-    typer.echo(f'    - Session: 1 main + {len(result.agent_files)} agents')
+    typer.echo('    - Main session: 1')
+    if result.agent_files:
+        typer.echo(f'    - Agent transcripts: {len(result.agent_files)}')
+    if result.agent_metadata_restored:
+        typer.echo(f'    - Agent metadata: {result.agent_metadata_restored}')
     if result.plan_files_restored:
         typer.echo(f'    - Plans: {result.plan_files_restored}')
     if result.tool_results_restored:
@@ -891,7 +895,11 @@ async def _clone_async(
     typer.echo(f'  Project: {result.project_path}')
     typer.echo()
     typer.echo('  Files cloned:')
-    typer.echo(f'    - Session: 1 main + {len(result.agent_files)} agents')
+    typer.echo('    - Main session: 1')
+    if result.agent_files:
+        typer.echo(f'    - Agent transcripts: {len(result.agent_files)}')
+    if result.agent_metadata_restored:
+        typer.echo(f'    - Agent metadata: {result.agent_metadata_restored}')
     if result.plan_files_restored:
         typer.echo(f'    - Plans: {result.plan_files_restored}')
     if result.tool_results_restored:
@@ -995,7 +1003,11 @@ async def _delete_async(
         typer.echo(f'  Session ID: {result.session_id}')
         typer.echo()
         typer.echo('  Files deleted:')
-        typer.echo(f'    - Session: {result.session_files_deleted}')
+        typer.echo(f'    - Main session: {result.main_session_deleted}')
+        if result.agent_files_deleted:
+            typer.echo(f'    - Agent transcripts: {result.agent_files_deleted}')
+        if result.agent_metadata_deleted:
+            typer.echo(f'    - Agent metadata: {result.agent_metadata_deleted}')
         if result.plan_files_deleted:
             typer.echo(f'    - Plans: {result.plan_files_deleted}')
         if result.tool_results_deleted:
@@ -1084,7 +1096,17 @@ async def _move_async(
         typer.echo(f'  Session ID: {result.session_id}')
         typer.echo(f'  From: {result.source_project}')
         typer.echo(f'  To: {result.target_project}')
-        typer.echo(f'  Files: {result.files_moved}')
+        typer.echo()
+        typer.echo('  Files to move:')
+        typer.echo(f'    - Main session: {result.main_session_moved}')
+        if result.agent_files_moved:
+            typer.echo(f'    - Agent transcripts: {result.agent_files_moved}')
+        if result.agent_metadata_moved:
+            typer.echo(f'    - Agent metadata: {result.agent_metadata_moved}')
+        if result.tool_results_moved:
+            typer.echo(f'    - Tool results: {result.tool_results_moved}')
+        if result.session_memory_moved:
+            typer.echo('    - Session memory: yes')
         typer.echo(f'  Paths translated: {result.paths_translated}')
     else:
         typer.secho('✓ Session moved successfully!', fg=typer.colors.GREEN)
@@ -1092,8 +1114,17 @@ async def _move_async(
         typer.echo(f'  From: {result.source_project}')
         typer.echo(f'  To: {result.target_project}')
         typer.echo()
-        typer.echo(f'  Files written: {result.files_moved}')
-        typer.echo(f'  Files deleted: {result.files_deleted}')
+        typer.echo('  Files moved:')
+        typer.echo(f'    - Main session: {result.main_session_moved}')
+        if result.agent_files_moved:
+            typer.echo(f'    - Agent transcripts: {result.agent_files_moved}')
+        if result.agent_metadata_moved:
+            typer.echo(f'    - Agent metadata: {result.agent_metadata_moved}')
+        if result.tool_results_moved:
+            typer.echo(f'    - Tool results: {result.tool_results_moved}')
+        if result.session_memory_moved:
+            typer.echo('    - Session memory: yes')
+        typer.echo(f'  Source files deleted: {result.files_deleted}')
         typer.echo(f'  Paths translated: {result.paths_translated}')
         typer.echo(f'  Duration: {result.duration_ms:.0f}ms')
         if result.backup_path:

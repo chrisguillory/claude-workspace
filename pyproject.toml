@@ -193,7 +193,7 @@ filterwarnings = [
 
 [tool.strict-typing-linter.per-file-ignores]
 # Test infrastructure
-"**/tests/**" = ["mutable-type", "loose-typing", "missing-all", "class-ordering"]
+"**/tests/**" = ["mutable-type", "loose-typing", "missing-all"]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
 

@@ -169,6 +169,27 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   diff. Added DeferredToolsDeltaAttachment.readdedNames (tools removed then
                   re-registered) and pendingMcpServers (MCP servers still connecting at emit
                   time); both introduced in 2.1.128. Extended CLAUDE_CODE_MAX_VERSION to 2.1.138.
+- Schema v0.2.34: Closed a cluster of long-standing schema gaps surfaced when a session
+                  with team-mode records was cloned. (1) AgentListingDeltaAttachment for the
+                  'agent_listing_delta' attachment type — agent registry delta carrying
+                  addedTypes/removedTypes for identifiers, addedLines for formatted descriptions,
+                  isInitial + showConcurrencyNote; shape mirrors DeferredToolsDeltaAttachment;
+                  present in binary from at least 2.1.90. (2) teamName/agentName added to
+                  AttachmentRecord — v0.2.15 added these to all record types but
+                  AttachmentRecord (added in v0.2.20) was missed. (3) TaskReminderItem.owner
+                  (str) and TaskReminderItem.metadata (Mapping[str, Any]) — binary schema:
+                  `v.record(v.string(), v.unknown()).optional()`. Same metadata field added to
+                  TaskCreateToolInput. (4) UserQuestion.multiSelect default False — binary
+                  declares `v.boolean().default(!1)`, so the field is optional with default,
+                  not required. (5) SendMessageToolInput rewritten to the post-backfill wire
+                  shape (to, message, type, recipient, content, summary?) — Claude Code's
+                  `backfillObservableInput` derives type/recipient/content from to/message
+                  before JSONL serialization, so the recorded shape always carries all six
+                  fields when type=='message'. Removed SendMessagePromptToolInput (v0.2.24)
+                  per empirical-only modeling — zero observed records of {to, prompt} across
+                  the 1108-session corpus, and no `prompt` field in the binary's SendMessage
+                  zod schema. (6) TeamCreateToolInput.agent_type (str | None) — assigned to
+                  team lead at creation (e.g., 'team-lead').
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -238,6 +259,7 @@ __all__ = [
     'CLAUDE_CODE_MAX_VERSION',
     'CLAUDE_CODE_MIN_VERSION',
     'SCHEMA_VERSION',
+    'AgentListingDeltaAttachment',
     'AgentNameRecord',
     'AgentOutputToolInput',
     'AgentProgressData',
@@ -403,7 +425,6 @@ __all__ = [
     'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
     'SelectedLinesInIdeAttachment',
-    'SendMessagePromptToolInput',
     'SendMessageRouting',
     'SendMessageSimpleToolInput',
     'SendMessageToolInput',
@@ -483,7 +504,7 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.33'
+SCHEMA_VERSION = '0.2.34'
 CLAUDE_CODE_MIN_VERSION = '2.0.35'
 CLAUDE_CODE_MAX_VERSION = '2.1.138'
 
@@ -782,18 +803,26 @@ class TeamCreateToolInput(StrictModel):
 
     team_name: str
     description: str
+    agent_type: str | None = None  # Agent type assigned to team lead (e.g., 'team-lead')
 
 
 # -- SendMessage Tool Input (Claude Code 2.1.63+) ------------------------------
 
 
 class SendMessageToolInput(StrictModel):
-    """Input for SendMessage tool - sends a message to a teammate."""
+    """Input for SendMessage tool — post-backfill wire shape.
 
-    type: Literal['message']
-    recipient: str
-    content: str
-    summary: str
+    Claude Code's `backfillObservableInput` derives `type`/`recipient`/`content` from
+    `to`/`message` before serialization, so the recorded shape carries all six fields
+    when `type=='message'`. The raw two-field form is captured by SendMessageSimpleToolInput.
+    """
+
+    to: str
+    message: str
+    type: Literal['message']  # Backfilled from message.type
+    recipient: str  # Backfilled from to
+    content: str  # Backfilled from message
+    summary: str | None = None  # Binary: v.string().optional()
 
 
 class SendMessageSimpleToolInput(StrictModel):
@@ -801,13 +830,6 @@ class SendMessageSimpleToolInput(StrictModel):
 
     to: str
     message: str
-
-
-class SendMessagePromptToolInput(StrictModel):
-    """SendMessage input using 'prompt' field (Claude Code 2.1.112+)."""
-
-    to: str
-    prompt: str
 
 
 # -- TaskCreate Tool Input (Claude Code 2.1.17+) -------------------------------
@@ -820,11 +842,15 @@ class TaskCreateToolInput(StrictModel):
         subject: Brief title for the task (imperative form, e.g., "Run tests")
         description: Detailed description of what needs to be done
         activeForm: Present continuous form shown in spinner (e.g., "Running tests")
+        metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()
     """
 
     subject: str
     description: str
     activeForm: str | None = None
+    metadata: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — binary schema is v.record(v.string(), v.unknown()).optional()
+    )
 
 
 # -- TaskUpdate Tool Input (Claude Code 2.1.17+) -------------------------------
@@ -1129,9 +1155,8 @@ ToolInput = Annotated[
     | NotebookEditToolInput  # notebook_path, new_source required
     | ReadToolInput  # file_path required
     # Multi-field tools
-    | SendMessageToolInput  # type, recipient, content, summary required (2.1.63+)
+    | SendMessageToolInput  # to, message, type, recipient, content required (backfilled wire shape)
     | SendMessageSimpleToolInput  # to, message required (2.1.81+)
-    | SendMessagePromptToolInput  # to, prompt required (2.1.112+)
     | TaskToolInput  # prompt, description, subagent_type required
     | TaskCreateToolInput  # subject, description required (2.1.17+)
     | TeamCreateToolInput  # team_name, description required (2.1.63+)
@@ -2005,7 +2030,7 @@ class UserQuestion(StrictModel):
     question: str
     header: str
     options: Sequence[QuestionOption]
-    multiSelect: bool
+    multiSelect: bool = False  # Binary: v.boolean().default(!1) — optional with default
 
 
 class QuestionAnnotation(StrictModel):
@@ -3195,6 +3220,17 @@ class DeferredToolsDeltaAttachment(StrictModel):
     pendingMcpServers: Sequence[str] | None = None  # MCP servers still connecting at emit time (2.1.128+)
 
 
+class AgentListingDeltaAttachment(StrictModel):
+    """Agent registry changes — added/removed agent types for the Agent tool (Claude Code 2.1.90+)."""
+
+    type: Literal['agent_listing_delta']
+    addedTypes: Sequence[str]
+    addedLines: Sequence[str]
+    removedTypes: Sequence[str]
+    isInitial: bool
+    showConcurrencyNote: bool
+
+
 class TaskReminderItem(StrictModel):
     """Task entry within a task_reminder attachment."""
 
@@ -3205,6 +3241,10 @@ class TaskReminderItem(StrictModel):
     blocks: Sequence[str]
     blockedBy: Sequence[str]
     activeForm: str | None = None  # Only set for tasks that were given an active-form label
+    owner: str | None = None  # Task owner (e.g. 'frontend', 'backend') when set via TaskCreate
+    metadata: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — binary schema is v.record(v.string(), v.unknown()).optional()
+    )
 
 
 class TaskReminderAttachment(StrictModel):
@@ -3527,6 +3567,7 @@ AttachmentData = Annotated[
     CompanionIntroAttachment
     | McpInstructionsDeltaAttachment
     | DeferredToolsDeltaAttachment
+    | AgentListingDeltaAttachment
     | TaskReminderAttachment
     | HookSuccessAttachment
     | HookBlockingErrorAttachment
@@ -3573,6 +3614,8 @@ class AttachmentRecord(BaseRecord):
     slug: str | None = None
     entrypoint: str | None = None
     agentId: str | None = None
+    teamName: str | None = None
+    agentName: str | None = None
     attachment: AttachmentData
 
 

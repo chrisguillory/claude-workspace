@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import uuid
 
 __all__ = [
@@ -74,6 +75,10 @@ async def execute_command(
         stderr=asyncio.subprocess.PIPE,
         env={**os.environ, 'PS1': '', 'TERM': 'dumb'},
         limit=1024 * 1024,  # 1 MB per-stream buffer
+        # Run the shell + its descendants in a dedicated process group so a
+        # single killpg cleans up the whole tree (the user's command and any
+        # children) rather than just the shell wrapper.
+        start_new_session=True,
     )
 
     try:
@@ -82,9 +87,16 @@ async def execute_command(
             timeout=timeout,
         )
     except TimeoutError:
-        process.kill()
+        _killpg_session_leader(process)
         await process.wait()
         return CommandResult(stdout='[TIMEOUT]', stderr='', exit_code=-1, cwd=effective_cwd)
+    except asyncio.CancelledError:
+        # Daemon shutdown cancels the handler task awaiting us; kill the whole
+        # process group so the user's command (and any descendants) don't
+        # survive as orphans reparented to launchd.
+        _killpg_session_leader(process)
+        await process.wait()
+        raise
 
     stdout_text = raw_stdout.decode(errors='replace')
     stderr_text = raw_stderr.decode(errors='replace').rstrip('\n')
@@ -127,3 +139,19 @@ def _parse_output(stdout_text: str, stderr_text: str, marker: str, fallback_cwd:
 def _shell_quote(s: str) -> str:
     """Single-quote a string for shell use, handling embedded single quotes."""
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+def _killpg_session_leader(process: asyncio.subprocess.Process) -> None:
+    """SIGKILL the entire process group whose leader is ``process``.
+
+    The function name encodes the contract: this only works when ``process``
+    was spawned as a session leader (``start_new_session=True``), so its PID
+    equals its PGID. Passing a non-leader process here would send SIGKILL
+    to whatever group its PID happens to alias, which is silently wrong.
+    """
+    if process.pid is None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass

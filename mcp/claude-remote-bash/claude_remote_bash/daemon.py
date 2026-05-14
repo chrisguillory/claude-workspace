@@ -39,7 +39,15 @@ from claude_remote_bash.exceptions import (
     RemoteBashError,
 )
 from claude_remote_bash.executor import execute_command
-from claude_remote_bash.protocol import read_message, write_message
+from claude_remote_bash.nfsd_manager import NfsdManager
+from claude_remote_bash.protocol import (
+    CONTROL_CHANNEL,
+    parse_message,
+    read_frame,
+    read_message,
+    write_frame,
+    write_message,
+)
 from claude_remote_bash.schemas.protocol import (
     AuthFail,
     AuthOk,
@@ -48,6 +56,12 @@ from claude_remote_bash.schemas.protocol import (
     ExecuteRequest,
     ExecuteResult,
     Message,
+    MountRequest,
+    MountResponse,
+    TunnelOk,
+    TunnelOpen,
+    UnmountRequest,
+    UnmountResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -267,8 +281,19 @@ def uninstall_service() -> None:
 async def run_daemon(config: DaemonConfig) -> None:
     """Start the daemon: TCP server + mDNS registration."""
     daemon = _Daemon(config)
+    handler_tasks: set[asyncio.Task[None]] = set()
 
-    server = await asyncio.start_server(daemon.handle_client, '0.0.0.0', 0)
+    async def _tracked_handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is None:
+            raise RuntimeError('asyncio.current_task() returned None inside server callback')
+        handler_tasks.add(task)
+        try:
+            await daemon.handle_client(reader, writer)
+        finally:
+            handler_tasks.discard(task)
+
+    server = await asyncio.start_server(_tracked_handle, '0.0.0.0', 0)
     port = server.sockets[0].getsockname()[1]
     logger.info('Listening on port %d', port)
 
@@ -293,7 +318,15 @@ async def run_daemon(config: DaemonConfig) -> None:
 
     async with server:
         await stop.wait()
+        # Cancel client handlers before the context exits — Server.wait_closed()
+        # (awaited by async-with's __aexit__) blocks until every active handler
+        # finishes naturally, so a slow handler would otherwise pin shutdown.
+        for t in handler_tasks:
+            t.cancel()
+        if handler_tasks:
+            await asyncio.gather(*handler_tasks, return_exceptions=True)
 
+    await daemon.shutdown_nfsd()
     await unregister_service(azc, info)
     logger.info('Shutdown complete')
 
@@ -306,6 +339,7 @@ class _Daemon:
     def __init__(self, config: DaemonConfig) -> None:
         self._config = config
         self._contexts = SessionContextStore(default_cwd=os.path.expanduser('~'))
+        self._nfsd_manager = NfsdManager()
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Handle a single client TCP connection."""
@@ -323,6 +357,10 @@ class _Daemon:
         finally:
             writer.close()
             await writer.wait_closed()
+
+    async def shutdown_nfsd(self) -> None:
+        """SIGTERM any crb-nfsd children spawned for filesystem mounts."""
+        await self._nfsd_manager.shutdown()
 
     async def _authenticate(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> bool:
         """Perform PSK authentication handshake. Returns True on success."""
@@ -356,16 +394,108 @@ class _Daemon:
         return True
 
     async def _dispatch_loop(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        """Read and dispatch messages until the client disconnects."""
-        while True:
-            msg = await read_message(reader)
-            response = await self._handle_message(msg)
-            await write_message(writer, response)
+        """Per-connection frame router.
+
+        Channel 0 carries control-channel JSON messages; non-zero channels
+        carry opaque tunnel payload routed to a per-channel ``crb-nfsd``
+        loopback socket. Tunnel channels are allocated on demand by
+        ``TunnelOpen`` and torn down when the connection closes or the peer
+        sends a zero-length frame on the channel.
+
+        A single ``write_lock`` serializes the multiple producers writing
+        back on this connection (control responses + per-channel reverse
+        pumps). A queue would give better fairness; the lock is correct
+        and ~half the LOC for v0.1.
+        """
+        write_lock = asyncio.Lock()
+        channels: dict[int, tuple[asyncio.StreamWriter, asyncio.Task[None]]] = {}
+        next_channel_id = 1
+        # mount_ids acquired on this connection but not yet released via
+        # UnmountRequest. Released on connection close to handle the
+        # supervisor-SIGKILL / crash / partition paths where M3 disappears
+        # before sending UnmountRequest.
+        held_mount_ids: set[str] = set()
+
+        try:
+            while True:
+                channel_id, payload = await read_frame(reader)
+
+                if channel_id == CONTROL_CHANNEL:
+                    msg = parse_message(payload)
+                    if isinstance(msg, TunnelOpen):
+                        new_id = next_channel_id
+                        next_channel_id += 1
+                        entry = await self._open_tunnel(msg, new_id, writer, write_lock)
+                        if entry is not None:
+                            channels[new_id] = entry
+                    else:
+                        response = await self._handle_message(msg)
+                        if isinstance(msg, MountRequest) and isinstance(response, MountResponse):
+                            held_mount_ids.add(response.mount_id)
+                        elif isinstance(msg, UnmountRequest):
+                            held_mount_ids.discard(msg.mount_id)
+                        async with write_lock:
+                            await write_message(writer, response)
+                    continue
+
+                entry = channels.get(channel_id)
+                if entry is None:
+                    logger.warning('frame for unknown channel_id=%d (dropped)', channel_id)
+                    continue
+                nfsd_writer, _pump = entry
+                if not payload:
+                    # Zero-length frame = client closed this channel.
+                    nfsd_writer.close()
+                    _nfsd_writer, pump_task = channels.pop(channel_id)
+                    pump_task.cancel()
+                    await asyncio.wait({pump_task})
+                    if not pump_task.cancelled():
+                        exc = pump_task.exception()
+                        if exc is not None:
+                            logger.warning(
+                                'pump ch%d exited with %s: %s',
+                                channel_id,
+                                type(exc).__name__,
+                                exc,
+                                exc_info=exc,
+                            )
+                else:
+                    nfsd_writer.write(payload)
+                    await nfsd_writer.drain()
+        finally:
+            for nfsd_writer, pump_task in channels.values():
+                pump_task.cancel()
+                nfsd_writer.close()
+            pumps = [t for _, t in channels.values()]
+            if pumps:
+                await asyncio.wait(pumps)
+                for task in pumps:
+                    if not task.cancelled():
+                        exc = task.exception()
+                        if exc is not None:
+                            logger.warning(
+                                'pump %s exited with %s: %s',
+                                task.get_name(),
+                                type(exc).__name__,
+                                exc,
+                                exc_info=exc,
+                            )
+            # Release any mount_ids this connection still holds — supervisor
+            # crash / SIGKILL / network partition paths skip UnmountRequest
+            # entirely, and the nfsd would otherwise stay alive indefinitely.
+            for mid in held_mount_ids:
+                terminated = await self._nfsd_manager.release(mid)
+                if terminated:
+                    logger.info('Released orphaned mount_id=%s on connection close', mid)
 
     async def _handle_message(self, msg: Message) -> Message:
         """Dispatch a message to the appropriate handler."""
         if isinstance(msg, ExecuteRequest):
             return await self._handle_execute(msg)
+        if isinstance(msg, MountRequest):
+            return await self._handle_mount(msg)
+        if isinstance(msg, UnmountRequest):
+            return await self._handle_unmount(msg)
         return ErrorResponse(message=f'unexpected message type: {msg.type}')
 
     async def _handle_execute(self, msg: ExecuteRequest) -> ExecuteResult | ErrorResponse:
@@ -388,6 +518,78 @@ class _Daemon:
             exit_code=result.exit_code,
             cwd=result.cwd,
         )
+
+    async def _handle_mount(self, msg: MountRequest) -> MountResponse | ErrorResponse:
+        """Spawn (or reuse) a crb-nfsd serving the requested root."""
+        try:
+            mount_id = await self._nfsd_manager.acquire(msg.root, msg.readonly)
+        except RemoteBashError as exc:
+            return ErrorResponse(id=msg.id, message=str(exc))
+        return MountResponse(id=msg.id, mount_id=mount_id)
+
+    async def _handle_unmount(self, msg: UnmountRequest) -> UnmountResponse:
+        """Drop one hold on the mount; SIGTERM the child when refcount hits zero."""
+        terminated = await self._nfsd_manager.release(msg.mount_id)
+        return UnmountResponse(id=msg.id, mount_id=msg.mount_id, child_terminated=terminated)
+
+    async def _open_tunnel(
+        self,
+        msg: TunnelOpen,
+        channel_id: int,
+        client_writer: asyncio.StreamWriter,
+        write_lock: asyncio.Lock,
+    ) -> tuple[asyncio.StreamWriter, asyncio.Task[None]] | None:
+        """Allocate routing for a new tunnel channel against ``msg.mount_id``.
+
+        Returns ``(nfsd_writer, pump_task)`` on success; the dispatch loop
+        stores the pair in its per-channel registry. Inbound client frames
+        on this channel are written to ``nfsd_writer``; the spawned pump
+        task copies bytes the other way (nfsd reads → client frames).
+
+        On failure, writes an ``ErrorResponse`` on the control channel and
+        returns ``None``.
+        """
+        nfsd = self._nfsd_manager.get(msg.mount_id)
+        if nfsd is None:
+            async with write_lock:
+                await write_message(client_writer, ErrorResponse(message=f'unknown mount_id: {msg.mount_id}'))
+            return None
+
+        try:
+            nfsd_reader, nfsd_writer = await asyncio.open_connection('127.0.0.1', nfsd.port)
+        except OSError as exc:
+            async with write_lock:
+                await write_message(client_writer, ErrorResponse(message=f'tunnel connect failed: {exc}'))
+            return None
+
+        async with write_lock:
+            await write_message(client_writer, TunnelOk(mount_id=msg.mount_id, channel_id=channel_id))
+
+        pump_task = asyncio.create_task(
+            self._pump_nfsd_to_client(channel_id, nfsd_reader, client_writer, write_lock),
+            name=f'tunnel-pump-ch{channel_id}',
+        )
+        return (nfsd_writer, pump_task)
+
+    async def _pump_nfsd_to_client(
+        self,
+        channel_id: int,
+        nfsd_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+        write_lock: asyncio.Lock,
+    ) -> None:
+        """Copy bytes from the nfsd loopback socket back to the client as channel-N frames.
+
+        Terminates on either nfsd-side EOF (sends a zero-length frame as
+        close signal) or external cancellation (when the dispatch loop tears
+        down the channel).
+        """
+        while True:
+            chunk = await nfsd_reader.read(65536)
+            async with write_lock:
+                await write_frame(client_writer, channel_id, chunk)
+            if not chunk:
+                return
 
 
 @app.callback(invoke_without_command=True)
