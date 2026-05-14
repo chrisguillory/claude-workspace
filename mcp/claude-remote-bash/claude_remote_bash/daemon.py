@@ -484,10 +484,10 @@ class _Daemon:
     async def _handle_mount(self, msg: MountRequest) -> MountResponse | ErrorResponse:
         """Spawn (or reuse) a crb-nfsd serving the requested root."""
         try:
-            nfsd = await self._nfsd_manager.acquire(msg.root, msg.readonly)
+            mount_id = await self._nfsd_manager.acquire(msg.root, msg.readonly)
         except RemoteBashError as exc:
             return ErrorResponse(id=msg.id, message=str(exc))
-        return MountResponse(id=msg.id, mount_id=nfsd.mount_id)
+        return MountResponse(id=msg.id, mount_id=mount_id)
 
     async def _handle_unmount(self, msg: UnmountRequest) -> UnmountResponse:
         """Drop one hold on the mount; SIGTERM the child when refcount hits zero."""
