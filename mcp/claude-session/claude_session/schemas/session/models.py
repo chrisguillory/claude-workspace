@@ -230,6 +230,7 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
 
 import pydantic
+from cc_lib.types import CCVersion
 
 from claude_session.schemas.session.markers import PathField, PathListField
 from claude_session.schemas.types import BaseStrictModel, EmptySequence, ModelId, PermissiveModel
@@ -484,8 +485,8 @@ __all__ = [
 # -- Schema Version ------------------------------------------------------------
 
 SCHEMA_VERSION = '0.2.33'
-CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.138'
+CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.138')
 
 
 # -- Base Configuration --------------------------------------------------------
