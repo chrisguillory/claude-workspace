@@ -35,7 +35,6 @@ See: https://code.claude.com/docs/en/hooks#pretooluse
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.hooks import (
@@ -43,6 +42,7 @@ from cc_lib.schemas.hooks import (
     PreToolUseHookOutput,
     PreToolUseSpecificOutput,
 )
+from cc_lib.utils import get_claude_workspace_config_home_dir
 
 GATED_TOOLS = {
     # Editing
@@ -127,7 +127,7 @@ GATED_TOOLS = {
     'mcp__google-workspace__run_script_function',
 }
 
-GATE_DIR = Path.home() / '.claude-workspace' / 'ask-before-auto-approval'
+GATE_DIR = get_claude_workspace_config_home_dir() / 'ask-before-auto-approval'
 
 boundary = ErrorBoundary(exit_code=2)
 
