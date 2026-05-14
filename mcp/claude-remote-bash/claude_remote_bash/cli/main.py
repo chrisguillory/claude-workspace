@@ -218,6 +218,7 @@ def discover(
                     ips=list(h.ips),
                     port=h.port,
                     version=h.version,
+                    is_self=h.is_self,
                 )
                 for h in hosts
             ]
@@ -238,7 +239,8 @@ def discover(
     typer.echo(f'Found {len(hosts)} daemon(s):\n')
     for h in hosts:
         ips_str = ','.join(h.ips) if h.ips else '?'
-        typer.echo(f'  {h.alias:<12} {ips_str}:{h.port}  ({h.hostname})  v{h.version}')
+        self_marker = '  (self)' if h.is_self else ''
+        typer.echo(f'  {h.alias:<12} {ips_str}:{h.port}  ({h.hostname})  v{h.version}{self_marker}')
 
 
 # -- Output formatting ---------------------------------------------------------
