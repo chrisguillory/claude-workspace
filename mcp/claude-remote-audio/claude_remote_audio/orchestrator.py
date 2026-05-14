@@ -217,7 +217,8 @@ async def _build_plan(
     )
 
     if output_device is not None:
-        await _ensure_bluetooth_output(service, hub, output_device)
+        mesh_aliases = sorted(v.alias for v in aliases.values())
+        await _ensure_bluetooth_output(service, aliases[hub_lower].alias, mesh_aliases, output_device)
 
     hub_devices = await enumerate_devices(service, hub)
     hub_loopback_port = await _read_hub_loopback_port(service, hub)
@@ -276,19 +277,32 @@ async def _assign_peer_ports(
     return port_map
 
 
-async def _ensure_bluetooth_output(service: DispatchService, hub_alias: str, output_device: str) -> None:
-    """If ``output_device`` is a paired Bluetooth audio device on the hub, bring up the link.
+async def _ensure_bluetooth_output(
+    service: DispatchService,
+    hub_alias: str,
+    mesh_aliases: Sequence[str],
+    output_device: str,
+) -> None:
+    """If ``output_device`` is a paired Bluetooth audio device, claim it for the hub.
 
-    Called from ``_build_plan`` *before* ``enumerate_devices`` so the freshly-connected
-    device appears in Core Audio's output list when we enumerate. No-op when the device
-    is wired, AirPlay, virtual, or simply not paired on this hub — the subsequent
-    ``_resolve_output_device`` step will surface a clear "not found" error if it doesn't
-    appear in Core Audio after this step.
+    Called from ``_build_plan`` *before* ``enumerate_devices`` so the freshly-claimed
+    device appears in Core Audio's output list when we enumerate. No-op when the
+    device is wired / AirPlay / virtual / not paired on the hub — the subsequent
+    ``_resolve_output_device`` step will surface a clear "not found" error if the
+    device doesn't show up after this step.
 
-    Cold-state caveat: when the device has *never* been engaged on this hub, ``blueutil
-    --connect`` brings up the BT control link but A2DP doesn't auto-engage; Core Audio
-    still won't list the device. The remedy in that case is a one-time click in the
-    Sound menu on the hub Mac. Subsequent applies work without the click (warm state).
+    Auto-steal: when the device is paired on the hub but not currently connected,
+    we use ``bluetooth.steal`` which also disconnects on any *other* mesh host
+    that has it. This is necessary because macOS Continuity allows multi-link
+    sharing (paired BT audio appears "connected" on multiple iCloud-linked Macs)
+    — without the disconnect-on-source step, audio mixes from every Mac that has
+    it instead of routing exclusively to the hub.
+
+    Cold-state caveat: when the device has *never* been engaged on this hub,
+    ``blueutil --connect`` brings up the BT control link but A2DP doesn't
+    auto-engage; Core Audio still won't list the device. The remedy in that
+    case is a one-time click in the Sound menu on the hub Mac. Subsequent
+    applies work without the click (warm state).
     """
     try:
         bt_device = await bluetooth.find_device(service, hub_alias, output_device)
@@ -299,9 +313,9 @@ async def _ensure_bluetooth_output(service: DispatchService, hub_alias: str, out
         return
 
     try:
-        await bluetooth.ensure_connected(service, hub_alias, bt_device.address)
+        await bluetooth.steal(service, hub_alias, bt_device.address, mesh_aliases)
     except bluetooth.BluetoothError as exc:
-        raise ApplyError(f'{hub_alias}: failed to connect Bluetooth device {bt_device.name!r}: {exc}') from exc
+        raise ApplyError(f'{hub_alias}: failed to claim Bluetooth device {bt_device.name!r}: {exc}') from exc
 
     # A2DP engagement / Core Audio registration lags the BT control link by ~1-3s
     # depending on whether Core Audio remembers the device. Wait so the subsequent
@@ -425,12 +439,30 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
 
 
 async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostApplyOutcome:
-    """Ensure peer has Claude Remote Mic + Claude Remote Speaker devices wired to the hub."""
+    """Ensure peer has Claude Remote Mic + Claude Remote Speaker devices wired to the hub.
+
+    When the hub is managing output (``--output`` was passed), the peer's default
+    output is also flipped to ``Claude Remote Speaker`` — otherwise the peer's audio
+    plays out locally and never reaches the hub via Flow 2.
+    """
     list_text = (await _run(service, peer, 'roc-vad device list')).stdout
     actions: list[str] = []
     actions.extend(await _ensure_peer_mic(service, peer, list_text))
     actions.extend(await _ensure_peer_speaker(service, plan, peer, list_text))
+    if plan.output_device is not None:
+        actions.extend(await _route_peer_output_to_hub(service, peer))
     return HostApplyOutcome(host=peer, role='peer', actions=actions, success=True)
+
+
+async def _route_peer_output_to_hub(service: DispatchService, peer: str) -> Sequence[str]:
+    """Set ``peer``'s Core Audio default output to ``Claude Remote Speaker``.
+
+    Without this, peer-application audio plays out the peer's local speakers and
+    never enters the RTP path to the hub. Idempotent — SwitchAudioSource on the
+    already-current device is a no-op.
+    """
+    await _run(service, peer, 'SwitchAudioSource -t output -s "Claude Remote Speaker"')
+    return ['set default output → Claude Remote Speaker']
 
 
 async def _ensure_peer_mic(service: DispatchService, peer: str, list_text: str) -> Sequence[str]:
@@ -622,7 +654,12 @@ async def _check_prereqs(
         hub_binaries += ['roc-send']
     await _verify_binaries(service, hub_alias, hub_binaries)
 
-    await asyncio.gather(*(_verify_binaries(service, peer, ['roc-vad']) for peer in target_peer_aliases))
+    peer_binaries = ['roc-vad']
+    if has_output:
+        # Peers' default output flips to Claude Remote Speaker via SwitchAudioSource
+        # so their audio enters the RTP path back to the hub.
+        peer_binaries += ['SwitchAudioSource']
+    await asyncio.gather(*(_verify_binaries(service, peer, peer_binaries) for peer in target_peer_aliases))
 
 
 async def _verify_binaries(service: DispatchService, host: str, binaries: Sequence[str]) -> None:
