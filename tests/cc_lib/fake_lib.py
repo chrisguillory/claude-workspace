@@ -1,4 +1,6 @@
 # ruff: noqa: B904 — deliberately simulates buggy library that loses exception chains
+# strict_typing_linter.py: skip-file — fake library deliberately mimics real third-party module structure
+# exception_safety_linter.py: skip-file — same rationale as B904; fake library simulates implicit chaining
 """A fake third-party library for testing LibraryBoundary.
 
 Designed to look like a real library: module-level functions, module-level
@@ -76,7 +78,7 @@ def throw_converter() -> Iterator[str]:
         except RuntimeError:
             raise ValueError(
                 'converted from RuntimeError',
-            )  # exception_safety_linter.py: raise-without-from — simulates real library implicit chaining
+            )
 
 
 def fail_during_creation() -> Iterator[None]:
@@ -176,7 +178,7 @@ async def async_throw_converter() -> AsyncIterator[str]:
         except RuntimeError:
             raise ValueError(
                 'async converted from RuntimeError',
-            )  # exception_safety_linter.py: raise-without-from — simulates real library implicit chaining
+            )
 
 
 # -- Factory functions returning async generators (NOT async generator functions) --

@@ -16,12 +16,12 @@ Validates three fixture categories:
 from __future__ import annotations
 
 import re
-import subprocess
-import sys
 from collections.abc import Mapping, Set
 from pathlib import Path
 
 import pytest
+
+from tests.linters.helpers import run_linter
 
 # -- Configuration ------------------------------------------------------------
 
@@ -69,38 +69,6 @@ STRUCTURAL_CASES: list[tuple[str, int]] = [
     ('annotated_all.py', 2),
     ('tuple_all.py', 2),
 ]
-
-# -- Linter Output Parsing ---------------------------------------------------
-
-
-def run_linter(test_file: Path, linter: Path) -> str:
-    """Run the linter and return combined stdout+stderr."""
-    result = subprocess.run(
-        [sys.executable, str(linter), '--no-skip-file', '--no-config', str(test_file)],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    return result.stdout + result.stderr
-
-
-def parse_flagged_names(output: str) -> Set[str]:
-    """Parse linter output to extract names flagged with REX001.
-
-    Extracts the symbol name from the error line itself:
-        path/file.py:42:0: error: REX001 'join' re-exported via __all__
-    """
-    flagged: set[str] = set()
-
-    for line in output.splitlines():
-        if 'REX001' in line:
-            match = re.search(r"REX001 '([^']+)'", line)
-            if match:
-                flagged.add(match.group(1))
-
-    return flagged
-
 
 # -- Module-Scoped Fixtures ---------------------------------------------------
 
@@ -181,3 +149,23 @@ def test_structural_case(filename: str, expected_count: int) -> None:
     output = run_linter(fixture, LINTER)
     actual = output.count('REX001')
     assert actual == expected_count, f'{filename}: expected {expected_count} violations, got {actual}'
+
+
+# -- Linter Output Parsing ---------------------------------------------------
+
+
+def parse_flagged_names(output: str) -> Set[str]:
+    """Parse linter output to extract names flagged with REX001.
+
+    Extracts the symbol name from the error line itself:
+        path/file.py:42:0: error: REX001 'join' re-exported via __all__
+    """
+    flagged: set[str] = set()
+
+    for line in output.splitlines():
+        if 'REX001' in line:
+            match = re.search(r"REX001 '([^']+)'", line)
+            if match:
+                flagged.add(match.group(1))
+
+    return flagged
