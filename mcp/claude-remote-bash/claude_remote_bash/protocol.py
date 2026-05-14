@@ -1,4 +1,4 @@
-"""Length-prefixed JSON framing over TCP."""
+"""Channel-multiplexed length-prefixed framing over TCP."""
 
 from __future__ import annotations
 
@@ -12,32 +12,46 @@ from claude_remote_bash.exceptions import ProtocolError
 from claude_remote_bash.schemas.protocol import Message
 
 __all__ = [
+    'CONTROL_CHANNEL',
+    'read_frame',
     'read_message',
+    'write_frame',
     'write_message',
 ]
 
-# Wire format: [4 bytes uint32 BE length] [1 byte flags] [N bytes JSON]
-# Flags byte reserved for future compression (bit 0: compressed, bits 1-2: algorithm).
-HEADER_FORMAT = '!IB'
+HEADER_FORMAT = '!IBI'
+"""Wire header: ``[uint32 BE length] [uint8 flags] [uint32 BE channel_id]``.
+
+The flags byte is reserved for future per-frame compression.
+"""
+
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-MAX_PAYLOAD_SIZE = 10 * 1024 * 1024  # 10 MB guard
+
+MAX_PAYLOAD_SIZE = 10 * 1024 * 1024
+"""Largest single frame payload accepted. NFS RPCs cap well below 1 MB per frame."""
+
+CONTROL_CHANNEL = 0
+"""Reserved channel for JSON control messages.
+
+Channel 0 carries the framed-JSON ``Message`` protocol from
+``schemas/protocol.py``; channels with id > 0 carry opaque tunnel payload
+(raw NFS RPC bytes), established via control-channel ``TunnelOpen`` /
+``TunnelOk`` exchanges. Recipients route frames purely by ``channel_id``
+without interpreting the payload as JSON unless the id is zero.
+"""
 
 _MESSAGE_ADAPTER: pydantic.TypeAdapter[Message] = pydantic.TypeAdapter(Message)
 
 
-async def read_message(reader: asyncio.StreamReader) -> Message:
-    """Read and validate a length-prefixed JSON message from the stream.
-
-    The raw JSON is deserialized into the appropriate Pydantic model via
-    discriminated union on the ``type`` field.
+async def read_frame(reader: asyncio.StreamReader) -> tuple[int, bytes]:
+    """Read one wire frame; return ``(channel_id, payload_bytes)``.
 
     Raises:
-        ProtocolError: On framing errors, oversized payloads, or malformed JSON.
-        pydantic.ValidationError: On schema validation failure.
+        ProtocolError: On framing errors or oversized payloads.
         asyncio.IncompleteReadError: On unexpected connection close.
     """
     header = await reader.readexactly(HEADER_SIZE)
-    length, flags = struct.unpack(HEADER_FORMAT, header)
+    length, flags, channel_id = struct.unpack(HEADER_FORMAT, header)
 
     if flags != 0:
         raise ProtocolError(f'unsupported flags byte: 0x{flags:02x}')
@@ -46,6 +60,33 @@ async def read_message(reader: asyncio.StreamReader) -> Message:
         raise ProtocolError(f'payload too large: {length} bytes (max {MAX_PAYLOAD_SIZE})')
 
     payload = await reader.readexactly(length)
+    return channel_id, payload
+
+
+async def write_frame(writer: asyncio.StreamWriter, channel_id: int, payload: bytes) -> None:
+    """Serialize and write one wire frame to the stream."""
+    if len(payload) > MAX_PAYLOAD_SIZE:
+        raise ProtocolError(f'payload too large: {len(payload)} bytes (max {MAX_PAYLOAD_SIZE})')
+    header = struct.pack(HEADER_FORMAT, len(payload), 0x00, channel_id)
+    writer.write(header + payload)
+    await writer.drain()
+
+
+async def read_message(reader: asyncio.StreamReader) -> Message:
+    """Read and validate a control-channel JSON message.
+
+    Convenience for control-channel callers. Reads one frame, asserts
+    ``channel_id == CONTROL_CHANNEL``, deserializes the JSON payload into
+    the appropriate pydantic ``Message`` variant via discriminated union.
+
+    Raises:
+        ProtocolError: On framing errors, off-channel frames, or malformed JSON.
+        pydantic.ValidationError: On schema validation failure.
+        asyncio.IncompleteReadError: On unexpected connection close.
+    """
+    channel_id, payload = await read_frame(reader)
+    if channel_id != CONTROL_CHANNEL:
+        raise ProtocolError(f'expected control-channel frame, got channel_id={channel_id}')
 
     try:
         data = json.loads(payload)
@@ -59,8 +100,6 @@ async def read_message(reader: asyncio.StreamReader) -> Message:
 
 
 async def write_message(writer: asyncio.StreamWriter, msg: Message) -> None:
-    """Serialize and write a length-prefixed JSON message to the stream."""
+    """Serialize and write a control-channel JSON message."""
     payload = _MESSAGE_ADAPTER.dump_json(msg, by_alias=True)
-    header = struct.pack(HEADER_FORMAT, len(payload), 0x00)
-    writer.write(header + payload)
-    await writer.drain()
+    await write_frame(writer, CONTROL_CHANNEL, payload)
