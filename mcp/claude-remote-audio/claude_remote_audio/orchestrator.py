@@ -319,15 +319,14 @@ async def _set_hub_output(service: DispatchService, plan: _Plan) -> Sequence[str
 def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: str) -> str:
     """Match ``requested`` against the pre-fetched canonical output list.
 
-    Strategy (enumerate-then-resolve, not normalize-then-compare):
+    Strategy:
 
     1. Exact match.
-    2. NFKC case-folded match (handles legitimate Unicode equivalences like full-width).
+    2. NFKC case-folded match with smart-quote / NBSP folding (U+2019 → U+0027,
+       U+201C/D → U+0022, U+00A0 → ASCII space). Safe because the matched
+       canonical name is what gets passed to ``SwitchAudioSource -s``; lenient
+       matching only widens resolution, never execution.
     3. Miss → raise ``ApplyError`` with a ``difflib.get_close_matches`` "did you mean" hint.
-
-    Smart-quote variants (U+2019 vs U+0027) are intentionally NOT silently folded —
-    ``SwitchAudioSource -s NAME`` is destructive, so we ask the user to pick the canonical
-    name rather than guess. The error message surfaces the canonical name for copy-paste.
     """
     if requested in canonical:
         return requested
@@ -344,9 +343,28 @@ def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: 
     raise ApplyError(f'{hub_alias}: --output {requested!r} not found. Available: {list(canonical)}.{hint}')
 
 
+_QUOTE_FOLD_TABLE = str.maketrans(
+    {
+        '\u2018': "'",  # left single quote → ASCII apostrophe
+        '\u2019': "'",  # right single quote / apostrophe — what Core Audio uses for Chris's AirPods Max
+        '\u201c': '"',  # left double quote → ASCII double quote
+        '\u201d': '"',  # right double quote → ASCII double quote
+        '\u00a0': ' ',  # NBSP → ASCII space
+    }
+)
+
+
 def _nfkc_casefold(s: str) -> str:
-    """NFKC-normalize and case-fold a string for matching legitimate Unicode equivalences."""
-    return unicodedata.normalize('NFKC', s).casefold()
+    """NFKC-normalize, fold smart quotes and NBSP to ASCII, then case-fold.
+
+    The smart-quote fold is the load-bearing piece: Core Audio uses U+2019
+    (curly apostrophe) in user-renamed devices like ``Chris's AirPods Max``,
+    but keyboards type U+0027 (straight). NFKC alone does not bridge those —
+    they are different semantic characters, not Unicode-equivalence variants.
+    Folding is safe because callers always pass the *canonical* matched name
+    to destructive commands; the fold only widens matching, not side effects.
+    """
+    return unicodedata.normalize('NFKC', s).translate(_QUOTE_FOLD_TABLE).casefold()
 
 
 async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[str]:
