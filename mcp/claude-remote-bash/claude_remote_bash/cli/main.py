@@ -18,7 +18,14 @@ from claude_remote_bash.cache import HostsCache
 from claude_remote_bash.discovery import browse_hosts
 from claude_remote_bash.dispatch import DispatchResult, DispatchService, HostRunResult
 from claude_remote_bash.exceptions import RemoteBashError
-from claude_remote_bash.mount import crb_mount_blocking, default_mountpoint
+from claude_remote_bash.mount import (
+    crb_mount_blocking,
+    default_mountpoint,
+    spawn_detached_supervisor,
+    supervisor_alive,
+    terminate_supervisor,
+)
+from claude_remote_bash.mounts_registry import read_registry
 from claude_remote_bash.schemas.discovery import DiscoveredHostInfo, DiscoverResult
 
 __all__ = [
@@ -88,40 +95,101 @@ def execute(
 def mount(
     target: Annotated[
         str,
-        typer.Argument(
-            help='Mount target as `<peer>:<remote_path>` (e.g. `m2:~/projects/foo`)',
-        ),
+        typer.Argument(help='Mount target as `<peer>:<remote_path>` (e.g. `m2:~/projects/foo`)'),
     ],
     mountpoint: Annotated[
         Path | None,
         typer.Argument(help='Local mountpoint. Defaults to ~/.crb/host/<peer>/<basename>/.'),
     ] = None,
     readonly: Annotated[bool, typer.Option('--readonly', help='Mount read-only.')] = False,
+    foreground: Annotated[
+        bool,
+        typer.Option(
+            '--foreground',
+            help='Block in the foreground instead of detaching. ^C unmounts. Useful for debugging.',
+        ),
+    ] = False,
 ) -> None:
     """Mount a remote directory over NFSv3.
 
-    Foreground-blocking — the mount lives only as long as this process. Press
-    Ctrl-C to unmount. ``crb umount``/``crb mounts`` (detached supervisor with
-    a registry) ships in a follow-up.
+    Detaches a supervisor process by default — ``crb umount <mountpoint>``
+    cleans up. With ``--foreground``, blocks until ^C and then unmounts.
 
     \b
     Example:
       crb mount m2:~/projects/foo
-      # opens ~/.crb/host/m2/foo/, blocks until ^C
+      crb mounts                              # see live mounts
+      crb umount ~/.crb/host/m2/foo           # tear it down
     """
     peer, sep, remote_path = target.partition(':')
     if not sep or not peer or not remote_path:
         raise RemoteBashError('mount target must be `<peer>:<remote_path>`')
 
     resolved_mountpoint = mountpoint or default_mountpoint(peer, remote_path)
-    asyncio.run(
-        crb_mount_blocking(
-            peer_alias=peer,
-            remote_path=remote_path,
-            mountpoint=resolved_mountpoint,
-            readonly=readonly,
+
+    if foreground:
+        asyncio.run(
+            crb_mount_blocking(
+                peer_alias=peer,
+                remote_path=remote_path,
+                mountpoint=resolved_mountpoint,
+                readonly=readonly,
+            )
         )
+        return
+
+    pid, mount_id = spawn_detached_supervisor(
+        peer_alias=peer,
+        remote_path=remote_path,
+        mountpoint=resolved_mountpoint,
+        readonly=readonly,
     )
+    typer.echo(f'mounted {peer}:{remote_path} at {resolved_mountpoint}')
+    typer.echo(f'supervisor pid={pid} mount_id={mount_id[:8]}')
+    typer.echo(f'tear down with: crb umount {resolved_mountpoint}')
+
+
+@app.command()
+@error_boundary
+def umount(
+    mountpoint: Annotated[Path, typer.Argument(help='Mountpoint to tear down')],
+) -> None:
+    """Tear down a mount established via ``crb mount``.
+
+    SIGTERMs the supervisor for the mount; the supervisor unmounts and
+    removes its registry entry. Reports an error if no such mount exists
+    or if the supervisor doesn't unwind cleanly.
+    """
+    terminate_supervisor(mountpoint)
+    typer.echo(f'unmounted {mountpoint}')
+
+
+@app.command()
+@error_boundary
+def mounts(
+    format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
+) -> None:
+    """List active mounts established via ``crb mount``.
+
+    Each entry's ``status`` is ``live`` if the supervisor PID still
+    responds to ``kill -0``, otherwise ``orphan`` (registry left a stale
+    entry — running ``crb umount`` against the mountpoint reaps it).
+    """
+    registry = read_registry()
+
+    if format == 'json':
+        typer.echo(registry.model_dump_json(by_alias=True))
+        return
+
+    if not registry.mounts:
+        typer.echo('No active mounts.')
+        return
+
+    width = max(len('mountpoint'), *(len(m.mountpoint) for m in registry.mounts))
+    typer.echo(f'{"mountpoint":<{width}}  status  pid       peer:remote')
+    for m in registry.mounts:
+        status = 'live' if supervisor_alive(m.supervisor_pid) else 'orphan'
+        typer.echo(f'{m.mountpoint:<{width}}  {status:<6}  {m.supervisor_pid:<8}  {m.peer_alias}:{m.remote_path}')
 
 
 @app.command()

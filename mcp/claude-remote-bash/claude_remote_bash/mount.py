@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import queue
 import signal
 import subprocess
-from collections.abc import Sequence
+import sys
+import threading
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from claude_remote_bash.client import authenticate, open_connection_any
@@ -15,6 +20,7 @@ from claude_remote_bash.exceptions import (
     HostNotFoundError,
     RemoteBashError,
 )
+from claude_remote_bash.mounts_registry import find_by_mountpoint, remove_entry
 from claude_remote_bash.paths import MOUNTS_ROOT
 from claude_remote_bash.protocol import (
     read_frame,
@@ -41,7 +47,16 @@ __all__ = [
     'MountError',
     'crb_mount_blocking',
     'default_mountpoint',
+    'spawn_detached_supervisor',
+    'supervisor_alive',
+    'terminate_supervisor',
 ]
+
+SUPERVISOR_READY_TIMEOUT_SECONDS = 30.0
+"""Bound on how long ``crb mount`` waits for the spawned supervisor to print ``READY``."""
+
+SUPERVISOR_SHUTDOWN_TIMEOUT_SECONDS = 30.0
+"""Bound on how long ``crb umount`` waits for the supervisor to remove its registry entry after SIGTERM."""
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +80,104 @@ def default_mountpoint(peer_alias: str, remote_path: str) -> Path:
     return MOUNTS_ROOT / peer_alias / basename
 
 
+def spawn_detached_supervisor(
+    *,
+    peer_alias: str,
+    remote_path: str,
+    mountpoint: Path,
+    readonly: bool,
+) -> tuple[int, str]:
+    """Fork a detached supervisor and wait for it to signal ``READY``.
+
+    Returns ``(supervisor_pid, mount_id)``. Raises ``MountError`` if the
+    supervisor exits before READY or fails to signal within
+    ``SUPERVISOR_READY_TIMEOUT_SECONDS``. On failure, stderr from the
+    supervisor (formatted via its ErrorBoundary) is included verbatim.
+    """
+    args = [
+        sys.executable,
+        '-m',
+        'claude_remote_bash.mount_supervisor',
+        peer_alias,
+        remote_path,
+        str(mountpoint),
+    ]
+    if readonly:
+        args.append('--readonly')
+
+    proc = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        text=True,
+    )
+
+    try:
+        line = _read_first_line_with_timeout(proc.stdout, SUPERVISOR_READY_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        proc.terminate()
+        proc.wait(timeout=5.0)
+        raise MountError(f'Supervisor did not signal READY within {SUPERVISOR_READY_TIMEOUT_SECONDS:.0f}s') from exc
+
+    if line is None:
+        # Supervisor exited before signaling — its ErrorBoundary handler wrote the reason to stderr.
+        proc.wait(timeout=5.0)
+        stderr = proc.stderr.read() if proc.stderr else ''
+        raise MountError(f'Supervisor exited (rc={proc.returncode}): {stderr.strip()}')
+
+    line = line.rstrip('\n')
+    if not line.startswith('READY '):
+        proc.terminate()
+        proc.wait(timeout=5.0)
+        raise MountError(f'Unexpected supervisor handshake: {line!r}')
+
+    mount_id = line.removeprefix('READY ').strip()
+    return proc.pid, mount_id
+
+
+def supervisor_alive(pid: int) -> bool:
+    """Return True iff the supervisor process is still running."""
+    try:
+        os.kill(pid, 0)
+    except (OSError, ProcessLookupError):
+        return False
+    return True
+
+
+def terminate_supervisor(mountpoint: Path) -> None:
+    """SIGTERM the supervisor for ``mountpoint`` and wait for it to clean up.
+
+    "Clean up" = supervisor removes its own registry entry, which it does
+    in the ``finally`` block of ``mount_supervisor._supervise``. Polling
+    the registry rather than ``waitpid`` is necessary because the caller
+    is not the supervisor's parent.
+    """
+    abs_mp = mountpoint.resolve()
+    entry = find_by_mountpoint(abs_mp)
+    if entry is None:
+        raise MountError(f'No active mount at {abs_mp}')
+
+    try:
+        os.kill(entry.supervisor_pid, signal.SIGTERM)
+    except ProcessLookupError as exc:
+        # Stale registry entry — supervisor died without cleaning up.
+        remove_entry(abs_mp)
+        raise MountError(
+            f'Supervisor pid={entry.supervisor_pid} was already gone — removed stale registry entry.'
+        ) from exc
+
+    deadline = time.monotonic() + SUPERVISOR_SHUTDOWN_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if find_by_mountpoint(abs_mp) is None:
+            return
+        time.sleep(0.2)
+
+    raise MountError(
+        f'Supervisor pid={entry.supervisor_pid} did not unwind within {SUPERVISOR_SHUTDOWN_TIMEOUT_SECONDS:.0f}s.'
+    )
+
+
 async def crb_mount_blocking(
     *,
     peer_alias: str,
@@ -73,6 +186,7 @@ async def crb_mount_blocking(
     readonly: bool,
     ips: Sequence[str] | None = None,
     port: int | None = None,
+    on_mounted: Callable[[str], None] | None = None,
 ) -> None:
     """Mount ``peer_alias:remote_path`` at ``mountpoint``. Blocks until SIGINT/SIGTERM.
 
@@ -81,6 +195,10 @@ async def crb_mount_blocking(
 
     ``ips``/``port`` override mDNS discovery (used by tests). When omitted,
     discovers via the existing browse-cache flow.
+
+    ``on_mounted`` fires once with the peer-assigned ``mount_id`` right
+    after ``mount_nfs`` succeeds — supervisors use it to write a registry
+    entry and signal ``READY`` to the spawning parent.
     """
     if ips is None or port is None:
         ips, port = await _resolve(peer_alias)
@@ -102,8 +220,9 @@ async def crb_mount_blocking(
         await _run_mount_nfs(local_port, mountpoint)
         _post_mount_macos_tweaks(mountpoint)
         logger.info('Mounted %s:%s at %s', peer_alias, remote_path, mountpoint)
-        print(f'mounted {peer_alias}:{remote_path} at {mountpoint}')
-        print('Press Ctrl-C to unmount.')
+
+        if on_mounted is not None:
+            on_mounted(mount_id)
 
         await _wait_for_signal()
 
@@ -279,3 +398,23 @@ async def _teardown(
 
     local_listener.close()
     await local_listener.wait_closed()
+
+
+def _read_first_line_with_timeout(stream: object, timeout: float) -> str | None:
+    """Read one line from ``stream`` with timeout. Returns None on EOF.
+
+    Uses a daemon thread because Popen pipe streams are blocking and the
+    selectors module only signals readiness, not full-line availability.
+    """
+    result: queue.Queue[str | None] = queue.Queue(maxsize=1)
+
+    def reader() -> None:
+        line = stream.readline() if stream is not None else ''  # type: ignore[attr-defined]  # Popen stdout is IO[str] in text mode
+        result.put(line if line else None)
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+    try:
+        return result.get(timeout=timeout)
+    except queue.Empty as exc:
+        raise TimeoutError from exc
