@@ -30,6 +30,7 @@ The CLI is stateless and runs only when invoked. Cross-Mac orchestration uses a 
 
 ```bash
 uv tool install --editable ~/claude-workspace/mcp/claude-remote-audio
+claude-remote-audio install-completions   # zsh/bash TAB on --hub, --target, --input, --output
 ```
 
 Prerequisites on each Mac in the mesh:
@@ -46,7 +47,7 @@ Prerequisites on each Mac in the mesh:
 
 ## Quickstart
 
-`--target` accepts a host alias, a comma-separated list, a configured group name (e.g. `mac-mesh`), or a literal `ip:port`. Groups are the most ergonomic form for steady-state operations.
+`--target` accepts a host alias, a comma-separated list, a configured group name (e.g. `mac-mesh`), or a literal `ip:port`. Groups are the most ergonomic form for steady-state operations. `--hub` defaults to the local machine — pass it explicitly only when invoking from a Mac that isn't the intended hub.
 
 Bring the whole topology up — hub broadcast + peer aggregation, end to end:
 
@@ -75,9 +76,3 @@ claude-remote-audio apply --target mac-mesh --hub M5
 ```
 
 See `claude-remote-audio apply --help` for full flag semantics. `--format json` emits machine-readable output for scripting.
-
----
-
-## Reference
-
-The canonical architecture + failure-modes doc is memorialized separately — link TBD (will be added once published as a gist).
