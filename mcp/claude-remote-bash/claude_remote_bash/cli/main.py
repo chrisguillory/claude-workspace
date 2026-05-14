@@ -6,6 +6,7 @@ import asyncio
 import logging
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -17,6 +18,7 @@ from claude_remote_bash.cache import HostsCache
 from claude_remote_bash.discovery import browse_hosts
 from claude_remote_bash.dispatch import DispatchResult, DispatchService, HostRunResult
 from claude_remote_bash.exceptions import RemoteBashError
+from claude_remote_bash.mount import crb_mount_blocking, default_mountpoint
 from claude_remote_bash.schemas.discovery import DiscoveredHostInfo, DiscoverResult
 
 __all__ = [
@@ -79,6 +81,47 @@ def execute(
         raise RemoteBashError('No command provided (pass as argument or pipe via stdin)')
 
     asyncio.run(_drive_dispatch(target, cmd, session_id, agent_id, timeout, format))
+
+
+@app.command()
+@error_boundary
+def mount(
+    target: Annotated[
+        str,
+        typer.Argument(
+            help='Mount target as `<peer>:<remote_path>` (e.g. `m2:~/projects/foo`)',
+        ),
+    ],
+    mountpoint: Annotated[
+        Path | None,
+        typer.Argument(help='Local mountpoint. Defaults to ~/.crb/host/<peer>/<basename>/.'),
+    ] = None,
+    readonly: Annotated[bool, typer.Option('--readonly', help='Mount read-only.')] = False,
+) -> None:
+    """Mount a remote directory over NFSv3.
+
+    Foreground-blocking — the mount lives only as long as this process. Press
+    Ctrl-C to unmount. ``crb umount``/``crb mounts`` (detached supervisor with
+    a registry) ships in a follow-up.
+
+    \b
+    Example:
+      crb mount m2:~/projects/foo
+      # opens ~/.crb/host/m2/foo/, blocks until ^C
+    """
+    peer, sep, remote_path = target.partition(':')
+    if not sep or not peer or not remote_path:
+        raise RemoteBashError('mount target must be `<peer>:<remote_path>`')
+
+    resolved_mountpoint = mountpoint or default_mountpoint(peer, remote_path)
+    asyncio.run(
+        crb_mount_blocking(
+            peer_alias=peer,
+            remote_path=remote_path,
+            mountpoint=resolved_mountpoint,
+            readonly=readonly,
+        )
+    )
 
 
 @app.command()
