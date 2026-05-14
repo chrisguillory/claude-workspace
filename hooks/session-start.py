@@ -8,6 +8,7 @@ See: https://code.claude.com/docs/en/hooks#sessionstart
 # requires-python = ">=3.13"
 # dependencies = [
 #   "cc_lib",
+#   "click",
 #   "packaging",
 #   "pydantic>=2.0.0",
 # ]
@@ -17,14 +18,17 @@ See: https://code.claude.com/docs/en/hooks#sessionstart
 # ///
 from __future__ import annotations
 
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import click
 import packaging.version
 import psutil
 from cc_lib.claude_context import find_claude_pid
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.exceptions import RivalSessionError
 from cc_lib.phantom import PhantomHandler
 from cc_lib.schemas.base import SubsetModel
 from cc_lib.schemas.hooks import SessionStartHookInput
@@ -65,6 +69,13 @@ def main() -> None:
         else:
             phantom.cleanup(hook_data.session_id)
             manager.prune_orphaned_sessions()
+            rival = manager.find_rival_session(hook_data.session_id, claude_pid)
+            if rival is not None:
+                raise RivalSessionError(
+                    session_id=hook_data.session_id,
+                    rival_pid=rival.metadata.claude_pid,
+                    claude_pid=claude_pid,
+                )
             manager.start_session(
                 session_id=hook_data.session_id,
                 transcript_path=hook_data.transcript_path,
@@ -117,6 +128,33 @@ def _extract_parent_id(transcript_file: Path) -> str | None:
         if not first_line:
             return None
         return _TranscriptFirstLine.model_validate_json(first_line).leafUuid
+
+
+def _emit_to_tty(*lines: str) -> None:
+    """Write to /dev/tty in red bold (bypasses Claude Code's hook stderr capture)."""
+    with open('/dev/tty', 'w') as tty:
+        for line in lines:
+            click.secho(line, fg='red', bold=True, file=tty)
+
+
+def _notify_macos(exc: RivalSessionError) -> None:
+    """Show a desktop notification for cross-tab visibility (macOS only)."""
+    body = (
+        f'Refused duplicate resume — session {exc.session_id[:8]} owned by pid {exc.rival_pid}. '
+        f'Terminated rival pid {exc.claude_pid}.'
+    )
+    subprocess.run(['osascript', '-e', f'display notification "{body}" with title "Claude Code"'], check=False)
+
+
+@boundary.handler(RivalSessionError)
+def _handle_rival_session(exc: RivalSessionError) -> None:
+    msg_owner = f'session-start: {exc}'
+    msg_kill = f'session-start: terminating rival claude pid {exc.claude_pid}'
+    print(msg_owner, file=sys.stderr)
+    print(msg_kill, file=sys.stderr)
+    _emit_to_tty(msg_owner, msg_kill)
+    _notify_macos(exc)
+    psutil.Process(exc.claude_pid).terminate()
 
 
 if __name__ == '__main__':
