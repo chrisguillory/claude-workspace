@@ -102,6 +102,14 @@ def mount(
         typer.Argument(help='Local mountpoint. Defaults to ~/.crb/host/<peer>/<basename>/.'),
     ] = None,
     readonly: Annotated[bool, typer.Option('--readonly', help='Mount read-only.')] = False,
+    browse: Annotated[
+        bool,
+        typer.Option(
+            '--browse',
+            help='Show the mount in Finder\'s "Computer" view and sidebar. Off by default — '
+            'enables Finder drag-and-drop at the cost of an eject button that bypasses `crb umount`.',
+        ),
+    ] = False,
     foreground: Annotated[
         bool,
         typer.Option(
@@ -114,6 +122,8 @@ def mount(
 
     Detaches a supervisor process by default — ``crb umount <mountpoint>``
     cleans up. With ``--foreground``, blocks until ^C and then unmounts.
+    The mount is hidden from Finder's volume listing by default; pass
+    ``--browse`` if you want drag-and-drop visibility.
 
     \b
     Example:
@@ -137,6 +147,7 @@ def mount(
                 remote_path=remote_path,
                 mountpoint=resolved_mountpoint,
                 readonly=readonly,
+                browse=browse,
             )
         )
         return
@@ -146,6 +157,7 @@ def mount(
         remote_path=remote_path,
         mountpoint=resolved_mountpoint,
         readonly=readonly,
+        browse=browse,
     )
     typer.echo(f'mounted {peer}:{remote_path} at {resolved_mountpoint}')
     typer.echo(f'supervisor pid={pid} mount_id={mount_id[:8]}')
@@ -218,6 +230,7 @@ def discover(
                     ips=list(h.ips),
                     port=h.port,
                     version=h.version,
+                    is_self=h.is_self,
                 )
                 for h in hosts
             ]
@@ -238,7 +251,8 @@ def discover(
     typer.echo(f'Found {len(hosts)} daemon(s):\n')
     for h in hosts:
         ips_str = ','.join(h.ips) if h.ips else '?'
-        typer.echo(f'  {h.alias:<12} {ips_str}:{h.port}  ({h.hostname})  v{h.version}')
+        self_marker = '  (self)' if h.is_self else ''
+        typer.echo(f'  {h.alias:<12} {ips_str}:{h.port}  ({h.hostname})  v{h.version}{self_marker}')
 
 
 # -- Output formatting ---------------------------------------------------------

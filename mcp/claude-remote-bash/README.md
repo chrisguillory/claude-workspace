@@ -154,7 +154,7 @@ Config file: `~/.claude-workspace/mcp/claude-remote-bash/daemon_config.json` (mo
 |---|---|
 | `execute --target <selector> <cmd>` | Run a command on one or more remote hosts. `<selector>` is a host alias (`M2`), a comma-list (`M2,M3,M4`), a group name from `client_config.json` (e.g. `fleet`), a literal `ip:port`, or any mix. Supports heredoc on stdin when `<cmd>` is omitted. |
 | `discover` | Browse mDNS for 3s and print every daemon found. Refreshes the cache. |
-| `mount <peer>:<path> [mountpoint]` | Mount a remote directory over NFSv3. Detaches a supervisor by default; `--foreground` blocks until ^C. See [Filesystem mount](#filesystem-mount). |
+| `mount <peer>:<path> [mountpoint]` | Mount a remote directory over NFSv3. Detaches a supervisor by default; `--foreground` blocks until ^C. Hidden from Finder by default; `--browse` opts in to volume-list visibility. See [Filesystem mount](#filesystem-mount). |
 | `umount <mountpoint>` | Tear down a mount established via `mount`. SIGTERMs the supervisor; supervisor unmounts and removes its registry entry. |
 | `mounts` | List active mounts with live/orphan status. `--format json` for machine-readable output. |
 | `install-completions` | Install shell tab completion (zsh/bash) — inherited from `cc_lib.cli`. |
@@ -374,7 +374,22 @@ The daemon finds `crb-nfsd` via `Path(sys.executable).parent / 'crb-nfsd'` first
 > **No peer-side mount allowlist yet.** Any client with a valid PSK can request a mount of any path the peer's user can read. Appropriate for the same LAN-trust model as `execute`; not appropriate for environments where the PSK is shared with parties who shouldn't see all of `$HOME`. Tracked as a follow-up.
 
 > [!TIP]
-> **Spotlight and Time Machine are excluded automatically.** On mount, the supervisor runs `mdutil -i off <mountpoint>` and `tmutil addexclusion <mountpoint>` so the indexer doesn't walk the tree and Time Machine doesn't try to back up the peer's filesystem. Without these the mount feels unresponsive on first Finder open.
+> **Spotlight and Time Machine are excluded automatically.** On mount, the supervisor runs `mdutil -i off <mountpoint>` and `tmutil addexclusion <mountpoint>` so the indexer doesn't walk the tree and Time Machine doesn't try to back up the peer's filesystem. Empirically, macOS's Spotlight ignores NFS by default anyway — these calls are belt-and-suspenders.
+
+### Finder visibility (`nobrowse` default)
+
+Default mounts include the `nobrowse` flag — they appear at their filesystem path but are hidden from Finder's "Computer" view and sidebar. Two reasons:
+
+1. **Eject-button foot-gun**: a visible "Remote Volume" entry has an eject affordance that bypasses `crb umount`, leaving stale registry entries and an in-memory supervisor with no way for the CLI to find it.
+2. **Misleading server label**: every mount appears under a single `127.0.0.1` sidebar group (the local NFS bridge), so the entry tells you nothing about which peer owns the data.
+
+Pass `--browse` to opt in when you specifically want Finder drag-and-drop:
+
+```bash
+crb mount --browse m2:~/Downloads /tmp/m2-downloads
+```
+
+After `--browse`, the mount shows up in the Computer view as "Remote Volume" and under Locations as `127.0.0.1`. Just don't click the eject button — use `crb umount` instead.
 
 ---
 

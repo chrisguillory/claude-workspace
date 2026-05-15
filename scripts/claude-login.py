@@ -159,10 +159,20 @@ class OAuthAccount(CamelModel):
     cc_onboarding_flags: Mapping[str, object] = pydantic.Field(default_factory=dict)
     claude_code_trial_ends_at: str | None = None
     claude_code_trial_duration_days: int | None = None
+
+    # Tier strings populated by Anthropic's /api/oauth/account/settings on profile
+    # refresh — not constants in the Claude Code binary. Anthropic adds new tier
+    # values server-side without notice; widen the Literals here when validation
+    # fails on a real account.
+    #
+    # `default_raven`: server codename for the Team-plan org-pool rate limit
+    # (user-facing label "Team 5x"). Bird codenames appear to be Anthropic's
+    # convention for new org-pooling tiers — expect `default_owl`/etc. later.
+    # Not present anywhere in the 2.1.138 binary strings; purely a backend label.
     seat_tier: Literal['team_tier_1'] | None = None
-    organization_type: Literal['claude_max'] | None = None
-    organization_rate_limit_tier: Literal['default_claude_max_20x'] | None = None
-    user_rate_limit_tier: None = None
+    organization_type: Literal['claude_max', 'claude_team'] | None = None
+    organization_rate_limit_tier: Literal['default_claude_max_20x', 'default_raven'] | None = None
+    user_rate_limit_tier: Literal['default_claude_max_5x'] | None = None
 
 
 class ClaudeAiOAuth(StrictModel):

@@ -23,6 +23,7 @@ class DiscoveredHostInfo(ClosedModel):
     ips: Sequence[str]
     port: int
     version: str
+    is_self: bool
 
 
 class DiscoverResult(ClosedModel):

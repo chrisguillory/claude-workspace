@@ -29,17 +29,31 @@ class DiscoveredHost:
 
     A single host may advertise multiple IP addresses (LAN + VPN + ethernet);
     callers should try each in order until one accepts a TCP connection.
+
+    ``is_self`` flags the discovered host as the local machine — set by ``browse_hosts``
+    when any advertised IP overlaps with a local interface IP. Removes the need for
+    callers to reconstruct "which machine am I?" from hostname conventions.
     """
 
-    def __init__(self, *, alias: str, hostname: str, ips: Sequence[str], port: int, version: str) -> None:
+    def __init__(
+        self,
+        *,
+        alias: str,
+        hostname: str,
+        ips: Sequence[str],
+        port: int,
+        version: str,
+        is_self: bool,
+    ) -> None:
         self.alias = alias
         self.hostname = hostname
         self.ips = list(ips)
         self.port = port
         self.version = version
+        self.is_self = is_self
 
     def __repr__(self) -> str:
-        return f'DiscoveredHost(alias={self.alias!r}, ips={self.ips}, port={self.port})'
+        return f'DiscoveredHost(alias={self.alias!r}, ips={self.ips}, port={self.port}, is_self={self.is_self})'
 
 
 async def register_service(
@@ -89,6 +103,7 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> Sequence[Disc
     """
     _install_zeroconf_log_filter()
     azc = AsyncZeroconf(ip_version=IPVersion.V4Only)
+    local_ips = set(publishable_ipv4s())
     hosts: list[DiscoveredHost] = []
     resolved_names: set[str] = set()
     pending: list[asyncio.Task[None]] = []
@@ -118,6 +133,7 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> Sequence[Disc
                 ips=addresses,
                 port=info.port,
                 version=_decode_prop(props, b'version'),
+                is_self=bool(local_ips.intersection(addresses)),
             )
         )
 
