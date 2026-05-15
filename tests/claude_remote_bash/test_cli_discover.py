@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import textwrap
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -65,26 +66,40 @@ class TestText:
     ) -> None:
         fake_hosts.extend([_host('M2', is_self=True), _host('M3')])
         result = runner.invoke(cli_main.app, ['discover'])
+        expected = textwrap.dedent(f"""\
+            Found 2 daemon(s):
+
+              M2           192.168.4.50:60050  (M2.local.)  v0.3.1  (self)
+              M3           192.168.4.51:60051  (M3.local.)  v0.3.1
+
+            No groups configured.
+            Define groups in {discover_env} to target multiple hosts at once.
+        """)
         assert result.exit_code == 0
-        assert 'Found 2 daemon(s)' in result.stdout
-        assert 'M2' in result.stdout
-        assert '(self)' in result.stdout
-        assert 'No groups configured.' in result.stdout
-        assert str(discover_env) in result.stdout
+        assert result.stdout == expected
 
     def test_daemons_and_groups(self, runner: CliRunner, discover_env: Path, fake_hosts: list[DiscoveredHost]) -> None:
         fake_hosts.extend([_host('M2', is_self=True), _host('M3'), _host('M4')])
         discover_env.write_text(json.dumps({'groups': {'fleet': ['M2', 'M3', 'M4'], 'workers': ['M3', 'M4']}}))
         result = runner.invoke(cli_main.app, ['discover'])
+        # Members are comma-joined without spaces — the rendered list matches the
+        # selector grammar's canonical form and is copy-paste ready for `--target`.
+        expected = textwrap.dedent("""\
+            Found 3 daemon(s):
+
+              M2           192.168.4.50:60050  (M2.local.)  v0.3.1  (self)
+              M3           192.168.4.51:60051  (M3.local.)  v0.3.1
+              M4           192.168.4.52:60052  (M4.local.)  v0.3.1
+
+            Groups (2):
+
+              fleet    M2,M3,M4
+              workers  M3,M4
+
+            Use with `execute --target <group>`.
+        """)
         assert result.exit_code == 0
-        assert 'Groups (2):' in result.stdout
-        # Fleet line has self-marker on M2.
-        fleet_line = next(line for line in result.stdout.splitlines() if line.lstrip().startswith('fleet'))
-        assert 'M2 (self)' in fleet_line
-        assert 'M3' in fleet_line
-        assert 'M4' in fleet_line
-        assert '(no daemon)' not in fleet_line
-        assert 'Use with `execute --target <group>`.' in result.stdout
+        assert result.stdout == expected
 
     def test_group_member_missing_daemon_marked(
         self, runner: CliRunner, discover_env: Path, fake_hosts: list[DiscoveredHost]
@@ -92,11 +107,9 @@ class TestText:
         fake_hosts.extend([_host('M2', is_self=True), _host('M3')])
         discover_env.write_text(json.dumps({'groups': {'fleet': ['M2', 'M3', 'M99']}}))
         result = runner.invoke(cli_main.app, ['discover'])
+        fleet_line = next(line for line in result.stdout.splitlines() if line.lstrip().startswith('fleet'))
         assert result.exit_code == 0
-        assert 'M99 (no daemon)' in result.stdout
-        # Present members are not falsely marked.
-        assert 'M2 (no daemon)' not in result.stdout
-        assert 'M3 (no daemon)' not in result.stdout
+        assert fleet_line == '  fleet  M2,M3,M99 (no daemon)'
 
     def test_malformed_config_warns_and_continues(
         self, runner: CliRunner, discover_env: Path, fake_hosts: list[DiscoveredHost]
@@ -104,10 +117,18 @@ class TestText:
         fake_hosts.append(_host('M2', is_self=True))
         discover_env.write_text('{"groups": "not-a-mapping"}')
         result = runner.invoke(cli_main.app, ['discover'])
+        expected_stdout = textwrap.dedent(f"""\
+            Found 1 daemon(s):
+
+              M2           192.168.4.50:60050  (M2.local.)  v0.3.1  (self)
+
+            No groups configured.
+            Define groups in {discover_env} to target multiple hosts at once.
+        """)
+        expected_stderr = f'Warning: {discover_env}: Input should be an object\n'
         assert result.exit_code == 0
-        assert 'Found 1 daemon(s)' in result.stdout
-        assert 'Warning:' in result.stderr
-        assert 'Groups (' not in result.stdout
+        assert result.stdout == expected_stdout
+        assert result.stderr == expected_stderr
 
     def test_no_daemons_still_renders_groups(
         self, runner: CliRunner, discover_env: Path, fake_hosts: list[DiscoveredHost]
@@ -115,12 +136,23 @@ class TestText:
         # fake_hosts intentionally empty.
         discover_env.write_text(json.dumps({'groups': {'fleet': ['M2', 'M3']}}))
         result = runner.invoke(cli_main.app, ['discover'])
+        expected = textwrap.dedent("""\
+            No daemons found on the network.
+
+            If a daemon should be visible:
+              - Verify the daemon is running on the target:
+                  `pgrep -f claude-remote-bash-daemon`
+              - Verify network reachability: `ping <target>.local`
+              - Ensure client and target are on the same LAN segment (mDNS doesn't cross subnets).
+
+            Groups (1):
+
+              fleet  M2 (no daemon),M3 (no daemon)
+
+            Use with `execute --target <group>`.
+        """)
         assert result.exit_code == 0
-        assert 'No daemons found on the network.' in result.stdout
-        assert 'Groups (1):' in result.stdout
-        # Every member should be marked unreachable since no daemons were found.
-        assert 'M2 (no daemon)' in result.stdout
-        assert 'M3 (no daemon)' in result.stdout
+        assert result.stdout == expected
 
 
 class TestJson:
@@ -130,8 +162,8 @@ class TestJson:
         fake_hosts.extend([_host('M2', is_self=True), _host('M3')])
         discover_env.write_text(json.dumps({'groups': {'fleet': ['M2', 'M3']}}))
         result = runner.invoke(cli_main.app, ['discover', '--format', 'json'])
-        assert result.exit_code == 0
         payload = json.loads(result.stdout)
+        assert result.exit_code == 0
         assert [d['alias'] for d in payload['daemons']] == ['M2', 'M3']
         assert payload['groups'] == [{'name': 'fleet', 'members': ['M2', 'M3']}]
 
@@ -140,6 +172,6 @@ class TestJson:
     ) -> None:
         fake_hosts.append(_host('M2', is_self=True))
         result = runner.invoke(cli_main.app, ['discover', '--format', 'json'])
-        assert result.exit_code == 0
         payload = json.loads(result.stdout)
+        assert result.exit_code == 0
         assert payload['groups'] == []

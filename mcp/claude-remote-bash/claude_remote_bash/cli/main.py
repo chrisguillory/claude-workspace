@@ -287,9 +287,8 @@ def _render_daemons_block(hosts: Sequence[DiscoveredHost]) -> None:
 def _render_groups_block(groups: Mapping[str, Sequence[str]], hosts: Sequence[DiscoveredHost]) -> None:
     """Render the configured-groups block after the daemons block.
 
-    Member aliases are decorated with ``(self)`` when they match the current
-    host and ``(no daemon)`` when they are not in the discovered host set —
-    the latter surfaces stale config without failing the command.
+    Member aliases not in the discovered host set are decorated with
+    ``(no daemon)`` to surface stale config without failing the command.
     """
     typer.echo('')
     if not groups:
@@ -298,23 +297,22 @@ def _render_groups_block(groups: Mapping[str, Sequence[str]], hosts: Sequence[Di
         return
 
     discovered_aliases = {h.alias.lower() for h in hosts}
-    self_alias = next((h.alias.lower() for h in hosts if h.is_self), None)
     name_width = max(len(name) for name in groups)
 
     typer.echo(f'Groups ({len(groups)}):\n')
     for name, members in groups.items():
-        rendered = ', '.join(_decorate_member(m, discovered_aliases, self_alias) for m in members)
+        # No spaces between members: the rendered form matches the selector
+        # grammar's canonical comma-separated format, so it's copy-paste ready
+        # for `--target`.
+        rendered = ','.join(_decorate_member(m, discovered_aliases) for m in members)
         typer.echo(f'  {name:<{name_width}}  {rendered}')
     typer.echo('')
     typer.echo('Use with `execute --target <group>`.')
 
 
-def _decorate_member(alias: str, discovered: Set[str], self_alias: str | None) -> str:
-    """Return ``alias`` with a ``(self)`` or ``(no daemon)`` marker as appropriate."""
-    key = alias.lower()
-    if self_alias is not None and key == self_alias:
-        return f'{alias} (self)'
-    if key not in discovered:
+def _decorate_member(alias: str, discovered: Set[str]) -> str:
+    """Return ``alias`` with a ``(no daemon)`` marker if not in ``discovered``."""
+    if alias.lower() not in discovered:
         return f'{alias} (no daemon)'
     return alias
 
