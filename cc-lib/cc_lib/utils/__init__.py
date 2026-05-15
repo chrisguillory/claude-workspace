@@ -110,19 +110,15 @@ def get_active_cc_version() -> CCVersion | None:
 
     Runs ``claude --version`` and parses ``CCVersion`` from the stdout line
     (which has the form ``'2.1.131 (Claude Code)'``). Returns ``None`` when
-    the CLI is missing, fails, or outputs an unparseable line — callers can
-    fall back to scanning all patches.
+    the CLI exits nonzero or emits empty stdout.
     """
-    try:
-        result = subprocess.run(
-            ['claude', '--version'],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
+    result = subprocess.run(
+        ['claude', '--version'],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     if result.returncode != 0:
         return None
     stdout = result.stdout.strip()

@@ -47,8 +47,9 @@ def get_path_fields(target: BaseModel | type[BaseModel]) -> Sequence[str] | Mapp
     """Find all fields marked with PathMarker.
 
     Passing the model class returns the field names; passing a model instance
-    returns a mapping of name → value for every marked field. Handles Python
-    3.12+ type aliases and Union types (e.g., ``PathField | None``).
+    returns a mapping of name → value for every marked field that is set
+    (None values are filtered). Handles Python 3.12+ type aliases and Union
+    types (e.g., ``PathField | None``).
 
     Example:
         >>> from claude_session.schemas.session import UserRecord
@@ -61,7 +62,7 @@ def get_path_fields(target: BaseModel | type[BaseModel]) -> Sequence[str] | Mapp
     ]
     if isinstance(target, type):
         return names
-    return {name: getattr(target, name) for name in names}
+    return {name: value for name, value in target if name in names and value is not None}
 
 
 @overload
@@ -72,8 +73,9 @@ def get_cc_version_fields(target: BaseModel | type[BaseModel]) -> Sequence[str] 
     """Find all fields marked with CCVersionMarker.
 
     Passing the model class returns the field names; passing a model instance
-    returns a mapping of name → value for every marked field. Handles Python
-    3.12+ type aliases and Union types (e.g., ``CCVersionStrField | None``).
+    returns a mapping of name → value for every marked field that is set
+    (None values are filtered). Handles Python 3.12+ type aliases and Union
+    types (e.g., ``CCVersionStrField | None``).
 
     Example:
         >>> from claude_session.schemas.session import UserRecord
@@ -86,7 +88,7 @@ def get_cc_version_fields(target: BaseModel | type[BaseModel]) -> Sequence[str] 
     ]
     if isinstance(target, type):
         return names
-    return {name: getattr(target, name) for name in names}
+    return {name: value for name, value in target if name in names and value is not None}
 
 
 def get_reserved_fields(model: type[BaseModel]) -> Mapping[str, Mapping[str, object]]:
