@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
 from typing import Annotated
 
@@ -15,9 +15,10 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import OutputFormat
 
 from claude_remote_bash.cache import HostsCache
-from claude_remote_bash.discovery import browse_hosts
+from claude_remote_bash.client_config import ClientConfig
+from claude_remote_bash.discovery import DiscoveredHost, browse_hosts
 from claude_remote_bash.dispatch import DispatchResult, DispatchService, HostRunResult
-from claude_remote_bash.exceptions import RemoteBashError
+from claude_remote_bash.exceptions import ConfigError, RemoteBashError
 from claude_remote_bash.mount import (
     crb_mount_blocking,
     default_mountpoint,
@@ -26,7 +27,8 @@ from claude_remote_bash.mount import (
     terminate_supervisor,
 )
 from claude_remote_bash.mounts_registry import read_registry
-from claude_remote_bash.schemas.discovery import DiscoveredHostInfo, DiscoverResult
+from claude_remote_bash.paths import CLIENT_CONFIG
+from claude_remote_bash.schemas.discovery import DiscoveredHostInfo, DiscoverResult, GroupInfo
 
 __all__ = [
     'main',
@@ -212,14 +214,20 @@ def mounts(
 def discover(
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    """Browse the LAN for claude-remote-bash daemons.
+    """Browse the LAN for claude-remote-bash daemons and list configured groups.
 
-    With ``--format json``, emits ``{"daemons": [...]}`` — wrapped in an
-    object so future fields (errors, scan duration) can be added without
-    breaking consumers. Empty result is ``{"daemons": []}``.
+    The text output renders two blocks: the discovered daemons followed by
+    any named host groups from ``client_config.json``. With ``--format json``,
+    emits ``{"daemons": [...], "groups": [...]}`` — wrapped in an object so
+    future fields (errors, scan duration) can be added without breaking
+    consumers. Empty result is ``{"daemons": [], "groups": []}``.
+
+    A malformed ``client_config.json`` does not fail the command; the error
+    is logged to stderr and the daemons block still prints.
     """
     hosts = asyncio.run(browse_hosts(timeout=3.0))
     HostsCache.from_browse(hosts).write()
+    groups = _load_groups_for_discover()
 
     if format == 'json':
         result = DiscoverResult(
@@ -233,11 +241,32 @@ def discover(
                     is_self=h.is_self,
                 )
                 for h in hosts
-            ]
+            ],
+            groups=[GroupInfo(name=name, members=list(members)) for name, members in groups.items()],
         )
         typer.echo(result.model_dump_json())
         return
 
+    _render_daemons_block(hosts)
+    _render_groups_block(groups, hosts)
+
+
+def _load_groups_for_discover() -> Mapping[str, Sequence[str]]:
+    """Load ``client_config.json`` groups for the discover command.
+
+    A malformed config emits a warning to stderr and returns no groups —
+    discover's primary job is to show daemons, so a bad config shouldn't
+    fail the command.
+    """
+    try:
+        return dict(ClientConfig.load().groups)
+    except ConfigError as exc:
+        typer.echo(f'Warning: {exc}', err=True)
+        return {}
+
+
+def _render_daemons_block(hosts: Sequence[DiscoveredHost]) -> None:
+    """Render the discovered-daemons block, or the empty-state hint."""
     if not hosts:
         typer.echo('No daemons found on the network.')
         typer.echo('')
@@ -253,6 +282,41 @@ def discover(
         ips_str = ','.join(h.ips) if h.ips else '?'
         self_marker = '  (self)' if h.is_self else ''
         typer.echo(f'  {h.alias:<12} {ips_str}:{h.port}  ({h.hostname})  v{h.version}{self_marker}')
+
+
+def _render_groups_block(groups: Mapping[str, Sequence[str]], hosts: Sequence[DiscoveredHost]) -> None:
+    """Render the configured-groups block after the daemons block.
+
+    Member aliases are decorated with ``(self)`` when they match the current
+    host and ``(no daemon)`` when they are not in the discovered host set —
+    the latter surfaces stale config without failing the command.
+    """
+    typer.echo('')
+    if not groups:
+        typer.echo('No groups configured.')
+        typer.echo(f'Define groups in {CLIENT_CONFIG} to target multiple hosts at once.')
+        return
+
+    discovered_aliases = {h.alias.lower() for h in hosts}
+    self_alias = next((h.alias.lower() for h in hosts if h.is_self), None)
+    name_width = max(len(name) for name in groups)
+
+    typer.echo(f'Groups ({len(groups)}):\n')
+    for name, members in groups.items():
+        rendered = ', '.join(_decorate_member(m, discovered_aliases, self_alias) for m in members)
+        typer.echo(f'  {name:<{name_width}}  {rendered}')
+    typer.echo('')
+    typer.echo('Use with `execute --target <group>`.')
+
+
+def _decorate_member(alias: str, discovered: Set[str], self_alias: str | None) -> str:
+    """Return ``alias`` with a ``(self)`` or ``(no daemon)`` marker as appropriate."""
+    key = alias.lower()
+    if self_alias is not None and key == self_alias:
+        return f'{alias} (self)'
+    if key not in discovered:
+        return f'{alias} (no daemon)'
+    return alias
 
 
 # -- Output formatting ---------------------------------------------------------
