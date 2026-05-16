@@ -222,6 +222,7 @@ class ChromeLocalState(OpenModel):
     profile_network_context_service: JsonObject | None = None
     profiles: JsonObject | None = None  # Note: different from 'profile' section
     restart: JsonObject | None = None  # Session restart state
+    safebrowsing: JsonObject | None = None  # Safe Browsing state (trigger_event_timestamps, etc.)
     segmentation_platform: JsonObject | None = None
     session_id_generator_last_value: str | None = None
     signin: JsonObject | None = None
