@@ -82,8 +82,6 @@ class TestText:
         fake_hosts.extend([_host('M2', is_self=True), _host('M3'), _host('M4')])
         discover_env.write_text(json.dumps({'groups': {'fleet': ['M2', 'M3', 'M4'], 'workers': ['M3', 'M4']}}))
         result = runner.invoke(cli_main.app, ['discover'])
-        # Members are comma-joined without spaces — the rendered list matches the
-        # selector grammar's canonical form and is copy-paste ready for `--target`.
         expected = textwrap.dedent("""\
             Found 3 daemon(s):
 

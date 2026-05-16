@@ -301,9 +301,8 @@ def _render_groups_block(groups: Mapping[str, Sequence[str]], hosts: Sequence[Di
 
     typer.echo(f'Groups ({len(groups)}):\n')
     for name, members in groups.items():
-        # No spaces between members: the rendered form matches the selector
-        # grammar's canonical comma-separated format, so it's copy-paste ready
-        # for `--target`.
+        # Bare commas, no spaces — spaces would shell-split the list, so the
+        # no-space form pastes straight after `--target` as a single argument.
         rendered = ','.join(_decorate_member(m, discovered_aliases) for m in members)
         typer.echo(f'  {name:<{name_width}}  {rendered}')
     typer.echo('')
