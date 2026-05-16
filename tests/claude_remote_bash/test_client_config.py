@@ -60,6 +60,11 @@ class TestLoad:
         with pytest.raises(ConfigError, match=r"group 'all' references group 'FLEET'"):
             ClientConfig.load()
 
+    def test_empty_group_rejected(self, tmp_config_file: Path) -> None:
+        tmp_config_file.write_text('{"groups": {"fleet": []}}')
+        with pytest.raises(ConfigError, match=r"group 'fleet' has no members"):
+            ClientConfig.load()
+
     def test_unknown_top_level_key_rejected(self, tmp_config_file: Path) -> None:
         tmp_config_file.write_text('{"groups": {}, "future_setting": 42}')
         with pytest.raises(ConfigError):
