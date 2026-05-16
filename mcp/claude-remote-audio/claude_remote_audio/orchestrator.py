@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import difflib
+import logging
 import re
 import shlex
+import subprocess
 import unicodedata
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Literal
 
 from cc_lib.schemas import ClosedModel
@@ -32,6 +36,8 @@ _MIC_RECEIVE_PORT = 10001
 _DISPATCH_SESSION = 'claude-remote-audio'
 _DISPATCH_TIMEOUT_S = 60.0
 _DEVICE_SECTION_SEPARATOR = '---claude-remote-audio-section---'
+
+logger = logging.getLogger(__name__)
 
 
 # -- Public schemas -----------------------------------------------------------
@@ -67,6 +73,7 @@ async def apply(
     hub: str | None = None,
     input_device: str | None = None,
     output_device: str | None = None,
+    install_prereqs: bool = False,
 ) -> ApplyResult:
     """Resolve ``target`` into hosts and converge each toward the declared audio topology.
 
@@ -75,6 +82,14 @@ async def apply(
     model: the command acts on the machine you ran it from. Pass ``hub`` explicitly to
     override.
     """
+    logger.info(
+        'apply: target=%s hub=%s input=%r output=%r install_prereqs=%s',
+        target,
+        hub or '<local>',
+        input_device,
+        output_device,
+        install_prereqs,
+    )
     service = DispatchService()
     plan = await _build_plan(
         service=service,
@@ -82,6 +97,7 @@ async def apply(
         hub=hub,
         input_device=input_device,
         output_device=output_device,
+        install_prereqs=install_prereqs,
     )
 
     outcomes: list[HostApplyOutcome] = []
@@ -163,6 +179,7 @@ async def _build_plan(
     hub: str | None,
     input_device: str | None,
     output_device: str | None,
+    install_prereqs: bool,
 ) -> _Plan:
     """Parse ``--target`` against mDNS discovery + client groups, resolve hub default if absent."""
     hosts = await browse_hosts(timeout=3.0)
@@ -208,12 +225,13 @@ async def _build_plan(
         if p not in aliases:
             raise ApplyError(f'peer {p!r} resolved from target but not discoverable')
 
-    await _check_prereqs(
+    await _ensure_prereqs(
         service=service,
         hub_alias=hub,
         target_peer_aliases=target_peer_aliases,
         has_output=output_device is not None,
         has_input=input_device is not None,
+        install_prereqs=install_prereqs,
     )
 
     if output_device is not None:
@@ -298,29 +316,61 @@ async def _ensure_bluetooth_output(
     — without the disconnect-on-source step, audio mixes from every Mac that has
     it instead of routing exclusively to the hub.
 
-    Cold-state caveat: when the device has *never* been engaged on this hub,
-    ``blueutil --connect`` brings up the BT control link but A2DP doesn't
-    auto-engage; Core Audio still won't list the device. The remedy in that
-    case is a one-time click in the Sound menu on the hub Mac. Subsequent
-    applies work without the click (warm state).
+    Cold-state rescue: a BT device whose A2DP profile has never engaged on this
+    hub stays in the Sound submenu's "available routes" list without being
+    promoted into Core Audio's device enumeration; plain ``blueutil --connect``
+    doesn't promote it either. When we detect that state (BT link up, but
+    ``SwitchAudioSource`` doesn't list the device), we call
+    ``bluetooth.engage_via_sound_menu`` to click the device's row in the
+    Control Center Sound popover. After one successful rescue, Core Audio
+    remembers the device and subsequent applies hit the warm path without
+    re-rescuing.
     """
+    logger.info('%s: ensuring Bluetooth output %r', hub_alias, output_device)
     try:
         bt_device = await bluetooth.find_device(service, hub_alias, output_device)
     except bluetooth.BluetoothError as exc:
         raise ApplyError(f'{hub_alias}: bluetooth probe failed: {exc}') from exc
 
-    if bt_device is None or bt_device.connected:
+    if bt_device is None:
+        logger.info('%s: %r is not a paired BT device — deferring to Core Audio resolution', hub_alias, output_device)
         return
 
-    try:
-        await bluetooth.steal(service, hub_alias, bt_device.address, mesh_aliases)
-    except bluetooth.BluetoothError as exc:
-        raise ApplyError(f'{hub_alias}: failed to claim Bluetooth device {bt_device.name!r}: {exc}') from exc
+    if not bt_device.connected:
+        try:
+            await bluetooth.steal(service, hub_alias, bt_device.address, mesh_aliases)
+        except bluetooth.BluetoothError as exc:
+            raise ApplyError(f'{hub_alias}: failed to claim Bluetooth device {bt_device.name!r}: {exc}') from exc
+        # A2DP engagement / Core Audio registration lags the BT control link by
+        # ~1-3s. Wait so the verification below sees the warm path before we
+        # decide to invoke the GUI rescue.
+        await asyncio.sleep(2)
 
-    # A2DP engagement / Core Audio registration lags the BT control link by ~1-3s
-    # depending on whether Core Audio remembers the device. Wait so the subsequent
-    # ``enumerate_devices`` call sees the device in its output list.
-    await asyncio.sleep(2)
+    if await _device_in_hub_outputs(service, hub_alias, bt_device.name):
+        logger.info('%s: %r is engaged in Core Audio (warm path)', hub_alias, bt_device.name)
+        return
+
+    logger.info('%s: %r BT link-up but absent from Core Audio — Sound-menu rescue', hub_alias, bt_device.name)
+    try:
+        engaged = await bluetooth.engage_via_sound_menu(service, hub_alias, bt_device.name)
+    except bluetooth.BluetoothError as exc:
+        raise ApplyError(f'{hub_alias}: Sound-menu rescue failed for {bt_device.name!r}: {exc}') from exc
+
+    if not engaged:
+        raise ApplyError(
+            f'{hub_alias}: Bluetooth link is up to {bt_device.name!r} but Core Audio '
+            f'will not enumerate it, and the Sound-menu rescue did not find it among '
+            f'the popover rows. Check that the device is powered on and visible in '
+            f'System Settings → Sound on {hub_alias!r}.'
+        )
+    logger.info('%s: rescue engaged %r in Core Audio', hub_alias, bt_device.name)
+
+
+async def _device_in_hub_outputs(service: DispatchService, hub_alias: str, name: str) -> bool:
+    """True if ``name`` (smart-quote-folded) appears in ``SwitchAudioSource -a -t output``."""
+    raw = (await _run(service, hub_alias, 'SwitchAudioSource -a -t output')).stdout
+    folded = _nfkc_casefold(name)
+    return any(_nfkc_casefold(line.strip()) == folded for line in raw.splitlines() if line.strip())
 
 
 # -- Hub phase ----------------------------------------------------------------
@@ -617,7 +667,10 @@ async def _run(service: DispatchService, host: str, command: str) -> HostRunResu
     Wraps both dispatch-layer errors (host unreachable, auth, protocol — surfaced in
     ``HostRunResult.error``) and non-zero remote exit codes into a single user-facing
     ``ApplyError``. The orchestrator never sees raw ``RemoteBashError`` exceptions.
+    Every dispatched command + its result is traced at DEBUG so the per-run log file
+    has a complete cross-machine record.
     """
+    logger.debug('%s: dispatch: %s', host, command)
     result = await service.run_target(
         host,
         command,
@@ -628,6 +681,13 @@ async def _run(service: DispatchService, host: str, command: str) -> HostRunResu
     if not result.results:
         raise ApplyError(f'{host}: no host results returned from dispatch')
     host_result = result.results[0]
+    logger.debug(
+        '%s: result: exit=%s stdout=%r stderr=%r',
+        host,
+        host_result.exit_code,
+        host_result.stdout[-500:],
+        host_result.stderr[-500:],
+    )
     if host_result.error is not None:
         raise ApplyError(f'{host}: dispatch failed: {host_result.error}')
     if host_result.exit_code != 0:
@@ -638,38 +698,276 @@ async def _run(service: DispatchService, host: str, command: str) -> HostRunResu
     return host_result
 
 
-async def _check_prereqs(
+async def _ensure_prereqs(
     *,
     service: DispatchService,
     hub_alias: str,
     target_peer_aliases: Sequence[str],
     has_output: bool,
     has_input: bool,
+    install_prereqs: bool,
 ) -> None:
-    """Verify hub and target peers have required binaries before any mutation."""
+    """Make sure hub and target peers have required binaries before any mutation.
+
+    With ``install_prereqs``, hosts that fail the probe get ``scripts/bootstrap.sh``
+    dispatched to them (idempotent — brew installs short-circuit when already
+    present; roc-toolkit compiles from source on first run, ~5 min). Every host
+    that would be installed-into shows a native macOS dialog first: a password
+    prompt where sudo is required (the prompt doubles as install consent), or a
+    yes/no confirm dialog where ``/usr/local`` is already user-writable. The
+    same password entered for one host is silently tried on subsequent hosts
+    via ``sudo -K; sudo -S -v`` — when it validates, the user gets a yes/no
+    confirm instead of re-typing.
+    """
     hub_binaries = ['roc-vad', 'SwitchAudioSource']
     if has_output:
         hub_binaries += ['roc-recv']
     if has_input:
         hub_binaries += ['roc-send']
-    await _verify_binaries(service, hub_alias, hub_binaries)
 
     peer_binaries = ['roc-vad']
     if has_output:
         # Peers' default output flips to Claude Remote Speaker via SwitchAudioSource
         # so their audio enters the RTP path back to the hub.
         peer_binaries += ['SwitchAudioSource']
-    await asyncio.gather(*(_verify_binaries(service, peer, peer_binaries) for peer in target_peer_aliases))
 
+    host_reqs: dict[str, Sequence[str]] = {hub_alias: hub_binaries}
+    for peer in target_peer_aliases:
+        host_reqs[peer] = peer_binaries
 
-async def _verify_binaries(service: DispatchService, host: str, binaries: Sequence[str]) -> None:
-    """``command -v`` each binary on ``host``; raise ``ApplyError`` listing any missing."""
-    quoted = [shlex.quote(b) for b in binaries]
-    cmd = '; '.join(f'command -v {q} >/dev/null 2>&1 || echo MISSING:{q}' for q in quoted)
-    result = await _run(service, host, cmd)
-    missing = re.findall(r'MISSING:(\S+)', result.stdout)
-    if missing:
-        raise ApplyError(
-            f'{host}: missing prerequisite(s): {", ".join(missing)}. '
-            'See the claude-remote-audio README for install instructions.'
+    logger.info('prereqs: probing %d host(s)', len(host_reqs))
+    missing_by_host = await _probe_missing_binaries(service, host_reqs)
+
+    if any(missing_by_host.values()):
+        summary = ', '.join(f'{h}=[{", ".join(m)}]' for h, m in missing_by_host.items() if m)
+        logger.info('prereqs missing: %s', summary)
+    else:
+        logger.info('prereqs satisfied on all hosts')
+
+    if install_prereqs and any(missing_by_host.values()):
+        hosts_to_bootstrap = [h for h, m in missing_by_host.items() if m]
+        logger.info('prereqs: authorizing installs on %s', hosts_to_bootstrap)
+        passwords = await _authorize_installs(service, hosts_to_bootstrap)
+        logger.info('prereqs: dispatching bootstrap to %s (parallel)', hosts_to_bootstrap)
+        await asyncio.gather(*(_install_prereqs_on_host(service, h, passwords[h]) for h in hosts_to_bootstrap))
+        logger.info('prereqs: re-probing %s', hosts_to_bootstrap)
+        missing_by_host = await _probe_missing_binaries(service, {h: host_reqs[h] for h in hosts_to_bootstrap})
+        if not any(missing_by_host.values()):
+            logger.info('prereqs: all hosts satisfied after bootstrap')
+
+    if any(missing_by_host.values()):
+        issues = [f'{h}: {", ".join(m)}' for h, m in missing_by_host.items() if m]
+        hint = (
+            '\n\nBootstrap was attempted but binaries are still missing — review the bootstrap output above.'
+            if install_prereqs
+            else '\n\nRe-run with --install-prereqs to bootstrap these hosts (or see the claude-remote-audio README).'
         )
+        body = '\n  '.join(issues)
+        raise ApplyError(f'missing prerequisite(s):\n  {body}{hint}')
+
+
+async def _probe_missing_binaries(
+    service: DispatchService,
+    host_reqs: Mapping[str, Sequence[str]],
+) -> Mapping[str, Sequence[str]]:
+    """Return ``host -> missing-binaries`` for each entry in ``host_reqs``.
+
+    Runs ``command -v`` per binary in a single dispatch per host (in parallel
+    across hosts), and parses ``MISSING:<name>`` lines back into a list.
+    """
+
+    async def _one(host: str, binaries: Sequence[str]) -> tuple[str, Sequence[str]]:
+        quoted = [shlex.quote(b) for b in binaries]
+        cmd = '; '.join(f'command -v {q} >/dev/null 2>&1 || echo MISSING:{q}' for q in quoted)
+        result = await _run(service, host, cmd)
+        return host, re.findall(r'MISSING:(\S+)', result.stdout)
+
+    pairs = await asyncio.gather(*(_one(h, bs) for h, bs in host_reqs.items()))
+    return dict(pairs)
+
+
+_KNOWN_PASSWORD_TRY_LIMIT = 2  # most-recent passwords to silently retry per host
+_PASSWORD_RETRY_LIMIT = 3  # max prompts per host when the user mistypes
+
+
+async def _authorize_installs(
+    service: DispatchService,
+    hosts: Sequence[str],
+) -> Mapping[str, str | None]:
+    """Walk through ``hosts`` collecting per-host install consent and sudo credentials.
+
+    For each host:
+
+    1. Probe whether ``/usr/local`` is user-writable. If yes, pop a yes/no
+       confirm dialog (``Install prereqs on M3 (~5 min)?``); on accept, the
+       password is ``None``.
+    2. Otherwise, try the most-recently-entered passwords silently (up to
+       ``_KNOWN_PASSWORD_TRY_LIMIT``) via ``sudo -K; echo $pw | sudo -S -p "" -v``.
+       On a match, pop a yes/no confirm dialog ("using saved password") and
+       reuse the validated password.
+    3. Otherwise, pop the password dialog. Validate each entry, re-prompt
+       on mismatch up to ``_PASSWORD_RETRY_LIMIT`` times.
+
+    Cancel on any dialog raises ``ApplyError`` — no silent skipping.
+    """
+    known_passwords: list[str] = []
+    out: dict[str, str | None] = {}
+    for host in hosts:
+        password = await _authorize_install_for_host(service, host, known_passwords)
+        if password is not None and password not in known_passwords:
+            known_passwords.append(password)
+        out[host] = password
+    return out
+
+
+async def _authorize_install_for_host(
+    service: DispatchService,
+    host: str,
+    known_passwords: Sequence[str],
+) -> str | None:
+    """Resolve one host's install consent + sudo password (see ``_authorize_installs``)."""
+    if not await _probe_needs_sudo(service, host):
+        logger.info('%s: no sudo needed — awaiting install consent', host)
+        if not await asyncio.to_thread(_confirm_install_dialog, host, with_saved_password=False):
+            raise ApplyError(f'install on {host!r} cancelled by user')
+        logger.info('%s: install authorized (no sudo)', host)
+        return None
+
+    for pw in reversed(known_passwords[-_KNOWN_PASSWORD_TRY_LIMIT:]):
+        if await _validate_sudo_password(service, host, pw):
+            logger.info('%s: saved password validated — awaiting install consent', host)
+            if not await asyncio.to_thread(_confirm_install_dialog, host, with_saved_password=True):
+                raise ApplyError(f'install on {host!r} cancelled by user')
+            logger.info('%s: install authorized (saved password)', host)
+            return pw
+
+    logger.info('%s: prompting for sudo password', host)
+    for attempt in range(_PASSWORD_RETRY_LIMIT):
+        password = await asyncio.to_thread(_prompt_sudo_password_dialog, host, attempt > 0)
+        if await _validate_sudo_password(service, host, password):
+            logger.info('%s: install authorized (fresh password)', host)
+            return password
+        logger.info('%s: password validation failed (attempt %d/%d)', host, attempt + 1, _PASSWORD_RETRY_LIMIT)
+    raise ApplyError(f'sudo password for {host!r} failed validation {_PASSWORD_RETRY_LIMIT} times — aborting install.')
+
+
+async def _probe_needs_sudo(service: DispatchService, host: str) -> bool:
+    """True if scons install on ``host`` would need sudo (any /usr/local subdir not writable)."""
+    cmd = '[[ -w /usr/local/bin && -w /usr/local/lib && -w /usr/local/include ]] && echo OK || echo NEED_SUDO'
+    result = await _run(service, host, cmd)
+    return 'NEED_SUDO' in result.stdout
+
+
+async def _validate_sudo_password(service: DispatchService, host: str, password: str) -> bool:
+    """Silently validate ``password`` against ``host``'s sudo via ``sudo -K`` + ``sudo -S -v``.
+
+    ``sudo -K`` clears any cached credential first so a stale timestamp can't
+    masquerade as a successful validation. ``sudo -S -v`` reads from stdin
+    and only refreshes the timestamp — no command is executed under privilege.
+    """
+    quoted = shlex.quote(password)
+    cmd = f'sudo -K; echo {quoted} | sudo -S -p "" -v 2>/dev/null'
+    result = await service.run_target(
+        host,
+        cmd,
+        session_id=_DISPATCH_SESSION,
+        agent_id=None,
+        timeout=15.0,
+    )
+    if not result.results:
+        return False
+    return result.results[0].exit_code == 0
+
+
+def _confirm_install_dialog(host: str, *, with_saved_password: bool) -> bool:
+    """Pop a yes/no install-consent dialog for ``host``. Returns ``True`` on accept."""
+    suffix = ' (using saved password)' if with_saved_password else ''
+    script = (
+        'tell application "System Events" to activate\n'
+        'tell application "System Events" to '
+        f'display dialog "Install prereqs on {host}{suffix} (~5 min)?" '
+        'with title "claude-remote-audio install-prereqs" '
+        'buttons {"Cancel", "Install"} default button "Install"'
+    )
+    return subprocess.run(['osascript', '-e', script], capture_output=True, text=True, check=False).returncode == 0
+
+
+def _prompt_sudo_password_dialog(host: str, retry: bool) -> str:
+    """Pop a macOS native password dialog asking for ``host``'s sudo password.
+
+    Uses ``osascript display dialog`` with ``hidden answer`` for a real
+    Mac-native input field. Returns the entered text. Raises ``ApplyError``
+    when the user cancels. ``retry`` swaps the message to a "wrong password"
+    variant for subsequent attempts.
+    """
+    prompt = f'Wrong password — sudo password for {host}:' if retry else f'sudo password for {host}:'
+    script = (
+        'tell application "System Events" to activate\n'
+        'tell application "System Events" to '
+        f'display dialog "{prompt}" '
+        'with title "claude-remote-audio install-prereqs" '
+        'default answer "" with hidden answer '
+        'buttons {"Cancel", "OK"} default button "OK"'
+    )
+    try:
+        result = subprocess.run(
+            ['osascript', '-e', script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise ApplyError(f'sudo password prompt for {host!r} cancelled — aborting install.') from exc
+    match = re.search(r'text returned:(.*)$', result.stdout.rstrip('\n'))
+    if match is None:
+        raise ApplyError(f'unexpected osascript output: {result.stdout!r}')
+    return match.group(1)
+
+
+async def _install_prereqs_on_host(
+    service: DispatchService,
+    host: str,
+    sudo_password: str | None,
+) -> None:
+    """Dispatch ``scripts/bootstrap.sh`` to ``host`` and run it.
+
+    The script is base64-encoded so it ships through dispatch as a single
+    command (no heredoc quoting, no temp files, no mount). When
+    ``sudo_password`` is set, an ``export SUDO_PASSWORD=...`` line is prepended
+    to the payload — the script's install step pipes that into ``sudo -S``.
+    Timeout is generous (15 min) because cold first runs include a scons
+    compile of roc-toolkit (~5 min on Apple Silicon).
+    """
+    script_text = _bootstrap_script_path().read_text(encoding='utf-8')
+    payload = (
+        f'export SUDO_PASSWORD={shlex.quote(sudo_password)}\n{script_text}'
+        if sudo_password is not None
+        else script_text
+    )
+    encoded = base64.b64encode(payload.encode('utf-8')).decode('ascii')
+    cmd = f'echo {shlex.quote(encoded)} | base64 -d | bash'
+
+    logger.info('%s: bootstrap dispatching (timeout 15min; cold compile ~5min)', host)
+    started = asyncio.get_event_loop().time()
+    result = await service.run_target(
+        host,
+        cmd,
+        session_id=_DISPATCH_SESSION,
+        agent_id=None,
+        timeout=900.0,
+    )
+    elapsed = asyncio.get_event_loop().time() - started
+    if not result.results:
+        raise ApplyError(f'{host}: bootstrap dispatch returned no host result')
+    hr = result.results[0]
+    logger.debug('%s: bootstrap stdout:\n%s', host, hr.stdout)
+    logger.debug('%s: bootstrap stderr:\n%s', host, hr.stderr)
+    if hr.error is not None or hr.exit_code != 0:
+        tail = (hr.stderr or hr.stdout or '').strip()[-2000:]
+        raise ApplyError(f'{host}: bootstrap failed (exit {hr.exit_code}):\n{tail}')
+    logger.info('%s: bootstrap complete in %.1fs', host, elapsed)
+
+
+def _bootstrap_script_path() -> Path:
+    """Locate ``scripts/bootstrap.sh`` next to the ``claude_remote_audio`` package."""
+    return Path(__file__).resolve().parent.parent / 'scripts' / 'bootstrap.sh'

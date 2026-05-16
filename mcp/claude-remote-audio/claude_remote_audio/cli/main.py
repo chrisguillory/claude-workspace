@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -10,6 +13,7 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import OutputFormat
 from claude_remote_bash.exceptions import RemoteBashError
 
+from claude_remote_audio import paths
 from claude_remote_audio.cli import completion
 from claude_remote_audio.orchestrator import ApplyError, ApplyResult, apply
 
@@ -72,6 +76,13 @@ def apply_cmd(
             autocompletion=completion.complete_output_devices,
         ),
     ] = None,
+    install_prereqs: Annotated[
+        bool,
+        typer.Option(
+            '--install-prereqs',
+            help='Dispatch scripts/bootstrap.sh to hosts missing audio prereqs before applying.',
+        ),
+    ] = False,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Resolve the target topology and converge each host toward the declared audio state.
@@ -88,12 +99,16 @@ def apply_cmd(
     automatic — first TAB per cold host pays a short dispatch, subsequent TABs
     within the cache window are instant.
     """
+    log_path = _configure_apply_logging()
+    typer.echo(f'apply log: {log_path}', err=True)
+
     result = asyncio.run(
         apply(
             target=target,
             hub=hub,
             input_device=input_device,
             output_device=output_device,
+            install_prereqs=install_prereqs,
         )
     )
 
@@ -103,6 +118,37 @@ def apply_cmd(
         _print_text(result)
 
     raise SystemExit(0 if result.overall_success else 1)
+
+
+def _configure_apply_logging() -> Path:
+    """Wire root logger to console (INFO, bare) + per-run file (DEBUG, full canonical).
+
+    Console handler is bare-format on stderr so progress lines look like CLI output,
+    not framework noise. File handler captures every DEBUG-level event for post-hoc
+    traceability when Claude Code's terminal scrollback truncates the early output.
+    Each apply run gets its own timestamped file; no rotation, no retention — purge
+    ``~/.claude-workspace/mcp/claude-remote-audio/logs/`` when you want.
+    """
+    paths.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime('%Y%m%d-%H%M%S')
+    log_path = paths.LOGS_DIR / f'apply-{timestamp}.log'
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    for existing in list(root.handlers):
+        root.removeHandler(existing)
+
+    console = logging.StreamHandler(sys.stderr)
+    console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter('%(message)s'))
+    root.addHandler(console)
+
+    file = logging.FileHandler(log_path)
+    file.setLevel(logging.DEBUG)
+    file.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+    root.addHandler(file)
+
+    return log_path
 
 
 @error_boundary.handler(ApplyError)
