@@ -53,3 +53,11 @@ class ClientConfig(ClosedModel):
                         'group-of-groups and self-reference are not supported'
                     )
         return self
+
+    @model_validator(mode='after')
+    def _reject_empty_groups(self) -> ClientConfig:
+        """Reject any group with no members — an empty group cannot be targeted."""
+        for name, members in self.groups.items():
+            if not members:
+                raise ValueError(f'group {name!r} has no members — list at least one host or remove the group')
+        return self
