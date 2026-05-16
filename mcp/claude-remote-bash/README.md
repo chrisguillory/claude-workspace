@@ -153,7 +153,7 @@ Config file: `~/.claude-workspace/mcp/claude-remote-bash/daemon_config.json` (mo
 | Subcommand | Purpose |
 |---|---|
 | `execute --target <selector> <cmd>` | Run a command on one or more remote hosts. `<selector>` is a host alias (`M2`), a comma-list (`M2,M3,M4`), a group name from `client_config.json` (e.g. `fleet`), a literal `ip:port`, or any mix. Supports heredoc on stdin when `<cmd>` is omitted. |
-| `discover` | Browse mDNS for 3s and print every daemon found. Refreshes the cache. |
+| `discover` | Browse mDNS for 3s and print every daemon found, then list named groups from `client_config.json`. Refreshes the cache. `--format json` for machine-readable output. |
 | `mount <peer>:<path> [mountpoint]` | Mount a remote directory over NFSv3. Detaches a supervisor by default; `--foreground` blocks until ^C. Hidden from Finder by default; `--browse` opts in to volume-list visibility. See [Filesystem mount](#filesystem-mount). |
 | `umount <mountpoint>` | Tear down a mount established via `mount`. SIGTERMs the supervisor; supervisor unmounts and removes its registry entry. |
 | `mounts` | List active mounts with live/orphan status. `--format json` for machine-readable output. |

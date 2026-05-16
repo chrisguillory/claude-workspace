@@ -9,6 +9,7 @@ from cc_lib.schemas.base import ClosedModel
 __all__ = [
     'DiscoverResult',
     'DiscoveredHostInfo',
+    'GroupInfo',
 ]
 
 
@@ -26,6 +27,18 @@ class DiscoveredHostInfo(ClosedModel):
     is_self: bool
 
 
+class GroupInfo(ClosedModel):
+    """A named host group from ``client_config.json`` — JSON serialization schema.
+
+    Members are alias strings in the order declared by the config. The
+    discover command does not enrich them with daemon details; readers
+    cross-reference ``DiscoverResult.daemons`` for that.
+    """
+
+    name: str
+    members: Sequence[str]
+
+
 class DiscoverResult(ClosedModel):
     """Top-level JSON output of ``claude-remote-bash discover --format json``.
 
@@ -35,3 +48,4 @@ class DiscoverResult(ClosedModel):
     """
 
     daemons: Sequence[DiscoveredHostInfo]
+    groups: Sequence[GroupInfo] = ()
