@@ -12,6 +12,7 @@ from cc_lib.cli import add_completion_command, add_help_command, create_app, run
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import OutputFormat
 from claude_remote_bash.exceptions import RemoteBashError
+from claude_remote_bash.selector import SelectorError
 
 from claude_remote_audio import paths
 from claude_remote_audio.cli import completion
@@ -161,6 +162,12 @@ def _handle_apply_error(exc: ApplyError) -> None:
 def _handle_dispatch_error(exc: RemoteBashError) -> None:
     """Fallback: dispatch-layer failure that escaped the orchestrator's wrapping — print cleanly."""
     typer.echo(f'dispatch: {exc}', err=True)
+
+
+@error_boundary.handler(SelectorError)
+def _handle_selector_error(exc: SelectorError) -> None:
+    """``--target`` selector grammar / discovery-mismatch errors — clean message, no traceback."""
+    typer.echo(f'target: {exc}', err=True)
 
 
 def _print_text(result: ApplyResult) -> None:
