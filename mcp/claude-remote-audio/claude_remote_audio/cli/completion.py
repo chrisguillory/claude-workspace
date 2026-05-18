@@ -136,10 +136,9 @@ def _resolve_hub_for_completion(ctx: typer.Context) -> str | None:
     if hub:
         return hub
     cache = HostsCache.load(max_age_s=None)
-    if cache is None:
+    if cache is None or cache.local_daemon is None:
         return None
-    self_entry = next((h for h in cache.hosts if h.is_self), None)
-    return self_entry.alias if self_entry else None
+    return cache.local_daemon.alias
 
 
 def _complete_from_cache(
@@ -166,7 +165,7 @@ def _alias_atoms() -> Sequence[str]:
     """Return all daemon aliases — bash hosts cache when warm, fresh mDNS browse on miss."""
     cache = HostsCache.load(max_age_s=None)
     if cache is not None:
-        return [h.alias for h in cache.hosts]
-    hosts = asyncio.run(browse_hosts(timeout=3.0))
-    HostsCache.from_browse(hosts).write()
-    return [h.alias for h in hosts]
+        return [h.alias for h in cache.all_hosts()]
+    browse = asyncio.run(browse_hosts(timeout=3.0))
+    HostsCache.from_browse(browse).write()
+    return [h.alias for h in [*browse.remote_daemons, *([browse.local_daemon] if browse.local_daemon else [])]]

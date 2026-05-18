@@ -1,5 +1,3 @@
-"""Command-line interface for claude-remote-bash."""
-
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +13,7 @@ from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.types import OutputFormat
 
 from claude_remote_bash.cache import HostsCache
+from claude_remote_bash.cli.output import DiscoverResult, GroupInfo
 from claude_remote_bash.client_config import ClientConfig
 from claude_remote_bash.discovery import DiscoveredHost, browse_hosts
 from claude_remote_bash.dispatch import DispatchResult, DispatchService, HostRunResult
@@ -28,7 +27,6 @@ from claude_remote_bash.mount import (
 )
 from claude_remote_bash.mounts_registry import read_registry
 from claude_remote_bash.paths import CLIENT_CONFIG
-from claude_remote_bash.schemas.discovery import DiscoveredHostInfo, DiscoverResult, GroupInfo
 
 __all__ = [
     'main',
@@ -216,39 +214,29 @@ def discover(
 ) -> None:
     """Browse the LAN for claude-remote-bash daemons and list configured groups.
 
-    The text output renders two blocks: the discovered daemons followed by
-    any named host groups from ``client_config.json``. With ``--format json``,
-    emits ``{"daemons": [...], "groups": [...]}`` — wrapped in an object so
-    future fields (errors, scan duration) can be added without breaking
-    consumers. Empty result is ``{"daemons": [], "groups": []}``.
+    The text output renders three blocks: the local daemon (if its mDNS
+    advertisement is on the wire), remote daemons, and named host groups
+    from ``client_config.json``. With ``--format json``, emits a
+    ``DiscoverResult`` envelope: ``{remote_daemons, local_daemon, groups}``.
 
     A malformed ``client_config.json`` does not fail the command; the error
     is logged to stderr and the daemons block still prints.
     """
-    hosts = asyncio.run(browse_hosts(timeout=3.0))
-    HostsCache.from_browse(hosts).write()
+    result = asyncio.run(browse_hosts(timeout=3.0))
+    HostsCache.from_browse(result).write()
     groups = _load_groups_for_discover()
 
     if format == 'json':
-        result = DiscoverResult(
-            daemons=[
-                DiscoveredHostInfo(
-                    alias=h.alias,
-                    hostname=h.hostname,
-                    ips=list(h.ips),
-                    port=h.port,
-                    version=h.version,
-                    is_self=h.is_self,
-                )
-                for h in hosts
-            ],
+        envelope = DiscoverResult(
+            remote_daemons=result.remote_daemons,
+            local_daemon=result.local_daemon,
             groups=[GroupInfo(name=name, members=list(members)) for name, members in groups.items()],
         )
-        typer.echo(result.model_dump_json())
+        typer.echo(envelope.model_dump_json())
         return
 
-    _render_daemons_block(hosts)
-    _render_groups_block(groups, hosts)
+    _render_daemons_block(result.remote_daemons, result.local_daemon)
+    _render_groups_block(groups, result.remote_daemons, result.local_daemon)
 
 
 def _load_groups_for_discover() -> Mapping[str, Sequence[str]]:
@@ -265,9 +253,12 @@ def _load_groups_for_discover() -> Mapping[str, Sequence[str]]:
         return {}
 
 
-def _render_daemons_block(hosts: Sequence[DiscoveredHost]) -> None:
-    """Render the discovered-daemons block, or the empty-state hint."""
-    if not hosts:
+def _render_daemons_block(
+    remote_daemons: Sequence[DiscoveredHost],
+    local_daemon: DiscoveredHost | None,
+) -> None:
+    """Render the local daemon (if any) followed by the remote daemons."""
+    if not remote_daemons and local_daemon is None:
         typer.echo('No daemons found on the network.')
         typer.echo('')
         typer.echo('If a daemon should be visible:')
@@ -277,14 +268,26 @@ def _render_daemons_block(hosts: Sequence[DiscoveredHost]) -> None:
         typer.echo("  - Ensure client and target are on the same LAN segment (mDNS doesn't cross subnets).")
         return
 
-    typer.echo(f'Found {len(hosts)} daemon(s):\n')
-    for h in hosts:
-        ips_str = ','.join(h.ips) if h.ips else '?'
-        self_marker = '  (self)' if h.is_self else ''
-        typer.echo(f'  {h.alias:<12} {ips_str}:{h.port}  ({h.hostname})  v{h.version}{self_marker}')
+    total = len(remote_daemons) + (1 if local_daemon else 0)
+    typer.echo(f'Found {total} daemon(s):\n')
+    if local_daemon is not None:
+        typer.echo(_format_host_line(local_daemon, is_local=True))
+    for h in remote_daemons:
+        typer.echo(_format_host_line(h, is_local=False))
 
 
-def _render_groups_block(groups: Mapping[str, Sequence[str]], hosts: Sequence[DiscoveredHost]) -> None:
+def _format_host_line(host: DiscoveredHost, *, is_local: bool) -> str:
+    """Render one host row as ``alias  ip(kind),ip(kind):port  (hostname)  vX.Y.Z  (self)?``."""
+    addrs = ','.join(f'{a.ip}({a.kind})' for a in host.addresses) if host.addresses else '?'
+    self_marker = '  (self)' if is_local else ''
+    return f'  {host.alias:<12} {addrs}:{host.port}  ({host.hostname})  v{host.version}{self_marker}'
+
+
+def _render_groups_block(
+    groups: Mapping[str, Sequence[str]],
+    remote_daemons: Sequence[DiscoveredHost],
+    local_daemon: DiscoveredHost | None,
+) -> None:
     """Render the configured-groups block after the daemons block.
 
     Member aliases not in the discovered host set are decorated with
@@ -296,7 +299,9 @@ def _render_groups_block(groups: Mapping[str, Sequence[str]], hosts: Sequence[Di
         typer.echo(f'Define groups in {CLIENT_CONFIG} to target multiple hosts at once.')
         return
 
-    discovered_aliases = {h.alias.lower() for h in hosts}
+    discovered_aliases = {h.alias.lower() for h in remote_daemons}
+    if local_daemon is not None:
+        discovered_aliases.add(local_daemon.alias.lower())
     name_width = max(len(name) for name in groups)
 
     typer.echo(f'Groups ({len(groups)}):\n')

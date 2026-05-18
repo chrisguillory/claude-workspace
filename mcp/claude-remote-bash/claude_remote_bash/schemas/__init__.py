@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from claude_remote_bash.schemas.discovery import (
-    DiscoveredHostInfo,
-    DiscoverResult,
-)
 from claude_remote_bash.schemas.protocol import (
     AuthFail,
     AuthOk,
@@ -16,16 +12,12 @@ from claude_remote_bash.schemas.protocol import (
     Message,
 )
 
-__all__ = [  # noqa: RUF022 — grouped by schema module, not alphabetical
-    # Protocol — wire messages
-    'AuthRequest',
-    'AuthOk',
+__all__ = [
     'AuthFail',
+    'AuthOk',
+    'AuthRequest',
+    'ErrorResponse',
     'ExecuteRequest',
     'ExecuteResult',
-    'ErrorResponse',
     'Message',
-    # Discovery — CLI JSON output
-    'DiscoveredHostInfo',
-    'DiscoverResult',
 ]

@@ -182,20 +182,20 @@ async def _build_plan(
     install_prereqs: bool,
 ) -> _Plan:
     """Parse ``--target`` against mDNS discovery + client groups, resolve hub default if absent."""
-    hosts = await browse_hosts(timeout=3.0)
-    aliases: dict[str, DiscoveredHost] = {h.alias.lower(): h for h in hosts}
+    browse = await browse_hosts(timeout=3.0)
+    all_hosts = [*browse.remote_daemons, *([browse.local_daemon] if browse.local_daemon else [])]
+    aliases: dict[str, DiscoveredHost] = {h.alias.lower(): h for h in all_hosts}
     if not aliases:
         raise ApplyError('no daemons discovered on the LAN — ensure claude-remote-bash-daemon is running on each Mac')
 
     if hub is None:
-        self_host = next((h for h in hosts if h.is_self), None)
-        if self_host is None:
+        if browse.local_daemon is None:
             raise ApplyError(
                 'no --hub provided and the local machine is not a discovered daemon. '
                 f'Discovered: {sorted(aliases.keys())}. '
                 'Start claude-remote-bash-daemon locally or pass --hub explicitly.'
             )
-        hub = self_host.alias
+        hub = browse.local_daemon.alias
 
     config = ClientConfig.load()
     atoms = parse_selector(
@@ -261,10 +261,14 @@ async def _build_plan(
 
 
 def _best_ip(host: DiscoveredHost) -> str:
-    """Pick a single IPv4 address from a host's mDNS-advertised set (first wins for v0)."""
-    if not host.ips:
-        raise ApplyError(f'host {host.alias!r} has no advertised IPs')
-    return host.ips[0]
+    """Pick a single IPv4 address from a host's mDNS-advertised set.
+
+    Addresses arrive pre-sorted by ``_address_rank`` (Ethernet first, then
+    Wi-Fi, etc.), so the first element is the preferred path.
+    """
+    if not host.addresses:
+        raise ApplyError(f'host {host.alias!r} has no advertised addresses')
+    return host.addresses[0].ip
 
 
 async def _assign_peer_ports(
