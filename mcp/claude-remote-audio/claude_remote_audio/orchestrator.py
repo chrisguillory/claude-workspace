@@ -561,18 +561,11 @@ async def _ensure_peer_speaker(
 
     target_uri = f'rtp://{plan.hub_ip}:{plan.topology_peer_to_port[peer]}'
     speaker_show = (await _run(service, peer, f'roc-vad device show {speaker_idx}')).stdout
-
-    slot_uris = _parse_slot_uris(speaker_show)
-    stale_slots = [slot for slot, uri in slot_uris.items() if uri != target_uri]
-    for slot in stale_slots:
-        await _run(service, peer, f'roc-vad device disconnect {speaker_idx} --slot {slot}')
-        actions.append(f'disconnected stale Claude Remote Speaker slot {slot} ({slot_uris[slot]})')
-
-    if target_uri in slot_uris.values():
+    if target_uri in speaker_show:
         return actions
 
-    live_slots = [slot for slot, uri in slot_uris.items() if uri == target_uri]
-    next_slot = (max(slot_uris) + 1) if slot_uris and not live_slots else 0
+    existing_slots = sorted({int(m.group(1)) for m in re.finditer(r'slot\s+(\d+):', speaker_show)})
+    next_slot = (max(existing_slots) + 1) if existing_slots else 0
     await _run(
         service,
         peer,
@@ -580,22 +573,6 @@ async def _ensure_peer_speaker(
     )
     actions.append(f'connected Claude Remote Speaker slot {next_slot} → {target_uri}')
     return actions
-
-
-def _parse_slot_uris(speaker_show: str) -> Mapping[int, str]:
-    """Parse ``roc-vad device show`` output into ``{slot_index: audiosrc_uri}``."""
-    out: dict[int, str] = {}
-    current_slot: int | None = None
-    for line in speaker_show.splitlines():
-        slot_match = re.match(r'\s*slot\s+(\d+):', line)
-        if slot_match:
-            current_slot = int(slot_match.group(1))
-            continue
-        uri_match = re.match(r'\s*audiosrc:\s*(rtp://\S+)', line)
-        if uri_match and current_slot is not None:
-            out[current_slot] = uri_match.group(1)
-            current_slot = None
-    return out
 
 
 # -- roc-vad state readers ----------------------------------------------------

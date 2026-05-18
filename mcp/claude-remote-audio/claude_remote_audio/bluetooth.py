@@ -5,7 +5,7 @@ import json
 import logging
 import shlex
 import unicodedata
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 
 from cc_lib.schemas import ClosedModel
 from claude_remote_bash import DispatchService
@@ -201,26 +201,24 @@ async def engage_via_sound_menu(
     The only known way to promote it is to "select" it in the Sound submenu, which
     Apple gates behind a real GUI click.
 
-    Algorithm: open the Sound popover, step a click point down each candidate output
-    row, and after every click re-enumerate Core Audio outputs. Stop on first match.
-    On miss, restore the prior default (the click-walk leaves the last-clicked row
-    selected) and return False. The caller is then free to ``SwitchAudioSource -s``
-    the target name as the new default.
+    Algorithm: open the Sound popover, iterate the AXCheckBox children of its
+    scroll area (each is one device row), click each in turn, and after every
+    click re-enumerate Core Audio outputs. Stop on first match. On miss,
+    restore the prior default (clicking sets the row as default) and return
+    False. The caller is then free to ``SwitchAudioSource -s`` the target name.
 
-    Requires Accessibility TCC granted to the daemon that runs dispatched commands
-    on ``host_alias``. macOS releases sometimes shift the Sound popover's layout;
-    if the rescue starts missing rows it has previously hit, the geometry constants
-    in ``_row_click_points`` are the first place to look.
+    Requires Accessibility TCC granted to the daemon that runs dispatched
+    commands on ``host_alias``.
     """
     prev_default = await _current_default_output(service, host_alias)
-    bounds = await _open_sound_popover(service, host_alias)
-    logger.info('%s: Sound popover open at %s — clicking rows looking for %r', host_alias, bounds, name)
+    row_count = await _open_sound_popover_and_count_rows(service, host_alias)
+    logger.info('%s: Sound popover open, %d candidate rows — looking for %r', host_alias, row_count, name)
     folded_target = _nfkc_casefold(name)
     hit = False
     try:
-        for idx, (click_x, click_y) in enumerate(_row_click_points(bounds)):
-            logger.debug('%s: click row %d at (%d, %d)', host_alias, idx, click_x, click_y)
-            await _click_at(service, host_alias, click_x, click_y)
+        for idx in range(1, row_count + 1):
+            logger.debug('%s: click checkbox %d/%d', host_alias, idx, row_count)
+            await _click_sound_row(service, host_alias, idx)
             await asyncio.sleep(0.4)
             outputs = await _list_core_audio_outputs(service, host_alias)
             if any(_nfkc_casefold(o) == folded_target for o in outputs):
@@ -350,11 +348,11 @@ async def _list_core_audio_outputs(service: DispatchService, host_alias: str) ->
     return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
-_OPEN_POPOVER_APPLESCRIPT = """
+_OPEN_AND_COUNT_APPLESCRIPT = """
 tell application "System Events"
     tell process "ControlCenter"
         try
-            click menu bar item "Sound" of menu bar 1
+            click (first menu bar item of menu bar 1 whose description is "Sound")
         on error errMsg
             return "ERROR_OPEN: " & errMsg
         end try
@@ -362,42 +360,35 @@ tell application "System Events"
         if (count of windows) = 0 then
             return "ERROR_NOWINDOW"
         end if
-        set pos to position of window 1
-        set sz to size of window 1
-        return ((item 1 of pos as integer) as string) & "," & ¬
-               ((item 2 of pos as integer) as string) & "," & ¬
-               ((item 1 of sz as integer) as string) & "," & ¬
-               ((item 2 of sz as integer) as string)
+        try
+            return (count of checkboxes of scroll area 1 of group 1 of window 1) as text
+        on error errMsg
+            return "ERROR_COUNT: " & errMsg
+        end try
     end tell
 end tell
 """
 
 
-async def _open_sound_popover(service: DispatchService, host_alias: str) -> tuple[int, int, int, int]:
-    """Open the Control Center Sound popover and return its (x, y, width, height) on ``host_alias``.
+async def _open_sound_popover_and_count_rows(service: DispatchService, host_alias: str) -> int:
+    """Open the Control Center Sound popover and return the number of device rows.
 
-    Raises ``BluetoothError`` if Accessibility TCC isn't granted (caught from
-    AppleScript's ``-1719``/``-1743`` error envelope) or the popover doesn't appear.
+    Each row is an ``AXCheckBox`` child of the popover's ``AXScrollArea``. Raises
+    ``BluetoothError`` with the verbatim AppleScript error when the popover
+    can't open (Accessibility TCC denied, ControlCenter not running, Sound icon
+    hidden from menu bar, etc.) — the message names what the OS actually said
+    rather than guessing at the cause.
     """
-    cmd = f'osascript -e {shlex.quote(_OPEN_POPOVER_APPLESCRIPT)}'
+    cmd = f'osascript -e {shlex.quote(_OPEN_AND_COUNT_APPLESCRIPT)}'
     result = await _run(service, host_alias, cmd)
     out = result.stdout.strip()
     if out.startswith('ERROR_OPEN'):
-        raise BluetoothError(
-            f'{host_alias}: cannot open Sound popover — likely Accessibility TCC '
-            f'not granted to the claude-remote-bash daemon. Grant via System Settings '
-            f'→ Privacy & Security → Accessibility. AppleScript said: {out}'
-        )
+        raise BluetoothError(f'{host_alias}: Sound popover did not open. AppleScript said: {out}')
     if out == 'ERROR_NOWINDOW':
-        raise BluetoothError(
-            f'{host_alias}: Sound popover did not appear after menu bar click. '
-            f'Control Center may be in an unexpected state.'
-        )
-    parts = out.split(',')
-    if len(parts) != 4:
-        raise BluetoothError(f'{host_alias}: malformed popover geometry: {out!r}')
-    x, y, w, h = (int(p) for p in parts)
-    return x, y, w, h
+        raise BluetoothError(f'{host_alias}: Sound popover did not appear after menu bar click')
+    if out.startswith('ERROR_COUNT'):
+        raise BluetoothError(f'{host_alias}: Sound popover opened but row introspection failed: {out}')
+    return int(out)
 
 
 _CLOSE_POPOVER_APPLESCRIPT = 'tell application "System Events" to key code 53'
@@ -411,29 +402,15 @@ async def _close_popover(service: DispatchService, host_alias: str) -> None:
         pass
 
 
-async def _click_at(service: DispatchService, host_alias: str, x: int, y: int) -> None:
-    """Synthesize a click at screen coordinates ``(x, y)`` on ``host_alias`` via AppleScript."""
-    script = f'tell application "System Events" to click at {{{x}, {y}}}'
-    await _run(service, host_alias, f'osascript -e {shlex.quote(script)}')
+async def _click_sound_row(service: DispatchService, host_alias: str, index: int) -> None:
+    """Click the Nth ``AXCheckBox`` row in the open Sound popover.
 
-
-_POPOVER_TOP_SKIP = 110  # px to skip past Sound title + volume slider + "Output" header
-_POPOVER_BOTTOM_SKIP = 50  # px to skip "Sound Settings..." footer
-_POPOVER_ROW_HEIGHT = 36  # typical Sound submenu row height on macOS Sequoia
-
-
-def _row_click_points(bounds: tuple[int, int, int, int]) -> Iterator[tuple[int, int]]:
-    """Yield candidate ``(x, y)`` click points for each output row in the Sound popover.
-
-    Geometric heuristic for macOS Sequoia's Control Center Sound submenu — skip the
-    header band (Sound title, volume slider, "Output" subheader) and the footer
-    button ("Sound Settings..."), step ``_POPOVER_ROW_HEIGHT`` px between candidates,
-    and click at horizontal center to avoid the radio-button gutter on the left.
+    Uses AppleScript object reference rather than screen coordinates — robust
+    to popover position and size changes across macOS versions and screen
+    configurations. The popover must already be open.
     """
-    x, y, width, height = bounds
-    click_x = x + width // 2
-    cy = y + _POPOVER_TOP_SKIP
-    bottom = y + height - _POPOVER_BOTTOM_SKIP
-    while cy < bottom:
-        yield click_x, cy
-        cy += _POPOVER_ROW_HEIGHT
+    script = (
+        'tell application "System Events" to tell process "ControlCenter" '
+        f'to click checkbox {index} of scroll area 1 of group 1 of window 1'
+    )
+    await _run(service, host_alias, f'osascript -e {shlex.quote(script)}')
