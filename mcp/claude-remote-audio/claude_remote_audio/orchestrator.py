@@ -544,35 +544,66 @@ async def _ensure_peer_speaker(
     peer: str,
     list_text: str,
 ) -> Sequence[str]:
-    """Ensure peer has a Claude Remote Speaker sender connected to the hub at its assigned port."""
+    """Ensure peer's Claude Remote Speaker has exactly one slot pointing at the hub.
+
+    ``roc-vad device connect --slot N`` errors against an occupied slot, and there
+    is no ``disconnect`` verb — the only way to retire stale slot URIs is to
+    ``del`` and re-``add`` the device. Recreate when the live slots diverge from
+    ``[target_uri]``; preserve the UID so Core Audio identifies the recreated
+    device as the same one reappearing (default-output bindings survive).
+    """
     actions: list[str] = []
+    target_uri = f'rtp://{plan.hub_ip}:{plan.topology_peer_to_port[peer]}'
+
     speaker_idx = _parse_device_index(list_text, name='Claude Remote Speaker')
     if speaker_idx is None:
-        add_out = await _run(
-            service,
-            peer,
-            'roc-vad device add sender -n "Claude Remote Speaker" -r 48000 --fec-encoding disable',
-        )
-        speaker_idx = _parse_added_idx(add_out.stdout)
+        speaker_idx = await _add_peer_speaker(service, peer, uid=None)
         actions.append(f'added Claude Remote Speaker (idx={speaker_idx})')
-
-    if speaker_idx is None:
+        await _connect_speaker_slot_zero(service, peer, speaker_idx, target_uri)
+        actions.append(f'connected Claude Remote Speaker slot 0 → {target_uri}')
         return actions
 
-    target_uri = f'rtp://{plan.hub_ip}:{plan.topology_peer_to_port[peer]}'
-    speaker_show = (await _run(service, peer, f'roc-vad device show {speaker_idx}')).stdout
-    if target_uri in speaker_show:
+    show_text = (await _run(service, peer, f'roc-vad device show {speaker_idx}')).stdout
+    existing_uris = re.findall(r'audiosrc:\s+(rtp://\S+)', show_text)
+    if existing_uris == [target_uri]:
         return actions
 
-    existing_slots = sorted({int(m.group(1)) for m in re.finditer(r'slot\s+(\d+):', speaker_show)})
-    next_slot = (max(existing_slots) + 1) if existing_slots else 0
-    await _run(
-        service,
-        peer,
-        f'roc-vad device connect {speaker_idx} --slot {next_slot} --source {target_uri}',
-    )
-    actions.append(f'connected Claude Remote Speaker slot {next_slot} → {target_uri}')
+    uid = _parse_device_uid(show_text)
+    await _run(service, peer, f'roc-vad device del {speaker_idx}')
+    actions.append(f'deleted Claude Remote Speaker to retire {len(existing_uris)} slot(s): {existing_uris}')
+    speaker_idx = await _add_peer_speaker(service, peer, uid=uid)
+    await _connect_speaker_slot_zero(service, peer, speaker_idx, target_uri)
+    actions.append(f'recreated Claude Remote Speaker (idx={speaker_idx}), slot 0 → {target_uri}')
     return actions
+
+
+async def _add_peer_speaker(service: DispatchService, host: str, *, uid: str | None) -> int:
+    """Create the Claude Remote Speaker sender on ``host``; preserve UID across recreates.
+
+    Pinning the UID lets Core Audio treat the recreated device as the same one
+    reappearing — default-output assignments and per-app preferences that
+    referenced the old UID stay bound through a del+add cycle.
+    """
+    uid_arg = f' --uid {uid}' if uid else ''
+    cmd = f'roc-vad device add sender -n "Claude Remote Speaker" -r 48000 --fec-encoding disable{uid_arg}'
+    add_out = await _run(service, host, cmd)
+    idx = _parse_added_idx(add_out.stdout)
+    if idx is None:
+        raise ApplyError(
+            f'{host}: failed to parse Claude Remote Speaker index from `roc-vad device add` output: {add_out.stdout!r}'
+        )
+    return idx
+
+
+async def _connect_speaker_slot_zero(service: DispatchService, host: str, speaker_idx: int, target_uri: str) -> None:
+    """Wire slot 0 of the Claude Remote Speaker at ``speaker_idx`` to ``target_uri``."""
+    await _run(service, host, f'roc-vad device connect {speaker_idx} --slot 0 --source {target_uri}')
+
+
+def _parse_device_uid(show_text: str) -> str | None:
+    """Extract the ``uid:`` field from ``roc-vad device show`` output."""
+    match = re.search(r'^\s*uid:\s+(\S+)', show_text, re.MULTILINE)
+    return match.group(1) if match else None
 
 
 # -- roc-vad state readers ----------------------------------------------------
