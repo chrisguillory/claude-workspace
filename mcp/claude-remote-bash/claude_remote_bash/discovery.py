@@ -17,6 +17,8 @@ from cc_lib.schemas import ClosedModel, StrictModel
 from zeroconf import IPVersion, ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
+from claude_remote_bash.exceptions import ProtocolError
+
 __all__ = [
     'BrowseResult',
     'DiscoveredAddress',
@@ -277,8 +279,7 @@ _KIND_RANK: Mapping[InterfaceKind, int] = {
 }
 
 _NETWORKSETUP_BLOCK = re.compile(
-    r'Hardware Port:\s*(?P<port>.+?)\s*\n.*?Device:\s*(?P<device>\S+)',
-    re.DOTALL,
+    r'Hardware Port:\s*(?P<port>[^\n]+?)\s*\nDevice:\s*(?P<device>\S+)',
 )
 
 _zeroconf_log_filter_installed = False
@@ -287,72 +288,106 @@ _zeroconf_log_filter_installed = False
 def _partition(hosts: Sequence[DiscoveredHost]) -> BrowseResult:
     """Split discovered hosts into the local daemon (if any) and remote daemons.
 
-    Match is by IP-string intersection against ``local_addresses()``; any
-    single overlap identifies the host as the local daemon.
+    Match is by IP-string intersection against ``local_addresses()``. The first
+    overlapping host becomes ``local_daemon``; any subsequent overlapping
+    hosts (zombie mDNS records during daemon restart, etc.) fall through to
+    ``remote_daemons`` rather than overwriting and silently disappearing.
     """
     local_ips = {a.ip for a in local_addresses()}
     local_daemon: DiscoveredHost | None = None
     remote: list[DiscoveredHost] = []
     for h in hosts:
-        if local_ips.intersection(a.ip for a in h.addresses):
+        if local_daemon is None and local_ips.intersection(a.ip for a in h.addresses):
             local_daemon = h
         else:
             remote.append(h)
     return BrowseResult(remote_daemons=remote, local_daemon=local_daemon)
 
 
+_TXT_VALUE_MAX_BYTES = 252
+"""DNS TXT character-string limit (255) minus ``len('if=')`` — the budget for the encoded address list."""
+
+
 def _encode_addresses_txt(addresses: Sequence[DiscoveredAddress]) -> str:
-    """Serialize addresses into the TXT ``if=`` value: ``ip|kind,ip|kind,...``."""
-    return ','.join(f'{a.ip}|{a.kind}' for a in addresses)
+    """Serialize addresses into the TXT ``if=`` value: ``ip|kind,ip|kind,...``.
+
+    Raises ``RuntimeError`` if the encoded value would exceed
+    ``_TXT_VALUE_MAX_BYTES``. Without this guard, ``zeroconf`` raises a generic
+    ``ValueError`` from inside its TXT packing routine that names the wrong
+    layer; the daemon then fails to start with no actionable diagnostic.
+    """
+    value = ','.join(f'{a.ip}|{a.kind}' for a in addresses)
+    if len(value.encode('utf-8')) > _TXT_VALUE_MAX_BYTES:
+        raise ProtocolError(
+            f'TXT `if=` value would be {len(value)} bytes for {len(addresses)} addresses; '
+            f'DNS TXT character-strings cap at 255. Drop the lowest-rank addresses '
+            f'(typically inactive VPN tunnels or stale Thunderbolt bridges) or stop '
+            f'advertising over interfaces that this daemon does not need.'
+        )
+    return value
 
 
 def _decode_addresses_txt(raw: str) -> Mapping[str, InterfaceKind]:
     """Parse a TXT ``if=`` value into ``{ip: kind}``.
 
-    Unknown kinds are logged at WARNING and coerced to ``other`` so the host's
-    other addresses remain usable. Silent fold without the warning would hide
-    real cluster-wide drift.
+    Wire format is daemon-to-daemon under our control. Malformed pairs and
+    unknown kinds raise — they signal a bug in the advertising daemon's
+    encoder or version drift that the operator needs to see, not absorb.
     """
     out: dict[str, InterfaceKind] = {}
     for pair_raw in raw.split(','):
         pair = pair_raw.strip()
         ip, sep, raw_kind = pair.partition('|')
         if not sep:
-            continue
-        if raw_kind in _VALID_KINDS:
-            out[ip.strip()] = cast('InterfaceKind', raw_kind)
-        else:
-            logger.warning('unknown InterfaceKind %r in TXT if=; classifying as other', raw_kind)
-            out[ip.strip()] = 'other'
+            raise ProtocolError(f'malformed TXT `if=` entry {pair!r}: missing `|` separator')
+        if raw_kind not in _VALID_KINDS:
+            raise ProtocolError(f'unknown InterfaceKind {raw_kind!r} in TXT `if=`; valid: {sorted(_VALID_KINDS)}')
+        out[ip.strip()] = cast('InterfaceKind', raw_kind)
     return out
 
 
 def _classify_adapters() -> Mapping[str, InterfaceKind]:
     """Build a ``{adapter_name: kind}`` map for every interface on this host.
 
-    macOS: parses ``networksetup -listallhardwareports`` to map each BSD device
-    name to its user-facing port name, then normalizes via ``_kind_from_port_name``.
-    Substring-matched because macOS releases occasionally rename port strings
-    and vendor adapters carry vendor names.
+    macOS: parses ``networksetup -listallhardwareports`` for hardware ports
+    (Ethernet, Wi-Fi, Thunderbolt Bridge) and falls back to BSD-name-prefix
+    matching for virtual tunnels (``utun*``, ``ipsec*``, ``wg*``, ``tailscale*``)
+    that ``networksetup`` doesn't list.
 
     Non-macOS: returns an empty map; all interfaces classify as ``other`` until
-    a platform-specific classifier lands.
+    a platform-specific classifier lands. Errors from ``networksetup`` (missing
+    binary, non-zero exit, timeout) propagate — a host that can't classify its
+    own interfaces should not silently advertise them all as ``other``.
     """
     if sys.platform != 'darwin':
         return {}
 
-    try:
-        result = subprocess.run(
-            ['networksetup', '-listallhardwareports'],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5.0,
-        )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-        return {}
+    result = subprocess.run(
+        ['networksetup', '-listallhardwareports'],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=5.0,
+    )
 
-    return _parse_networksetup(result.stdout)
+    out: dict[str, InterfaceKind] = dict(_parse_networksetup(result.stdout))
+    for adapter in ifaddr.get_adapters():
+        if adapter.name in out:
+            continue
+        out[adapter.name] = _kind_from_adapter_name(adapter.name)
+    return out
+
+
+def _kind_from_adapter_name(name: str) -> InterfaceKind:
+    """Classify by BSD device name when no Hardware Port entry was found.
+
+    macOS hides virtual tunnels (Tailscale, WireGuard, IPSec, corporate VPN)
+    from ``networksetup``; their device names follow established conventions
+    (``utun0``, ``wg0``, ``ipsec0``, ``tailscale0``) that we can match directly.
+    """
+    if name.startswith(('utun', 'ipsec', 'wg', 'tailscale')):
+        return 'vpn'
+    return 'other'
 
 
 def _parse_networksetup(text: str) -> Mapping[str, InterfaceKind]:
