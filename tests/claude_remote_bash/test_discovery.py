@@ -88,4 +88,5 @@ def _host(alias: str, ips: list[str]) -> DiscoveredHost:
         addresses=[DiscoveredAddress(ip=ip, kind='ethernet') for ip in ips],
         port=12345,
         version='0.4.0',
+        legacy=False,
     )

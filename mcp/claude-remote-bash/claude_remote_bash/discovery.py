@@ -83,6 +83,12 @@ class DiscoveredHost(ClosedModel):
     version: str
     """``claude-remote-bash`` package version of the advertising daemon."""
 
+    legacy: bool
+    """``True`` if the daemon advertised no ``if=`` TXT key. Interface kinds are
+    not available; every address is assigned ``kind='other'``. Dispatch still
+    works (it only needs IPs); audio orchestration refuses legacy hosts at the
+    apply boundary since Ethernet preference requires real kind metadata."""
+
 
 class BrowseResult(ClosedModel):
     """What ``browse_hosts`` learned about the LAN."""
@@ -124,25 +130,30 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> BrowseResult:
 
         props = info.properties or {}
         if_raw = _decode_prop(props, b'if')
-        if not if_raw:
+
+        addresses: list[DiscoveredAddress]
+        legacy: bool
+        if if_raw:
+            kind_by_ip = _decode_addresses_txt(if_raw)
+            addresses = []
+            for ip in ips:
+                kind = kind_by_ip.get(ip)
+                if kind is None:
+                    logger.warning(
+                        '%s: A record %s has no matching `if=` entry — daemon TXT is inconsistent, skipping',
+                        name,
+                        ip,
+                    )
+                    return
+                addresses.append(DiscoveredAddress(ip=ip, kind=kind))
+            legacy = False
+        else:
             logger.warning(
-                '%s: advertised no `if=` TXT key — upgrade this daemon to advertise interface kinds',
+                '%s: advertised no `if=` TXT key — legacy daemon, upgrade to advertise interface kinds',
                 name,
             )
-            return
-
-        kind_by_ip = _decode_addresses_txt(if_raw)
-        addresses = []
-        for ip in ips:
-            kind = kind_by_ip.get(ip)
-            if kind is None:
-                logger.warning(
-                    '%s: A record %s has no matching `if=` entry — daemon TXT is inconsistent, skipping',
-                    name,
-                    ip,
-                )
-                return
-            addresses.append(DiscoveredAddress(ip=ip, kind=kind))
+            addresses = [DiscoveredAddress(ip=ip, kind='other') for ip in ips]
+            legacy = True
 
         addresses.sort(key=DiscoveredAddress.rank)
 
@@ -153,6 +164,7 @@ async def browse_hosts(timeout: float = BROWSE_TIMEOUT_SECONDS) -> BrowseResult:
                 addresses=addresses,
                 port=info.port,
                 version=_decode_prop(props, b'version'),
+                legacy=legacy,
             )
         )
 

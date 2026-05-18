@@ -155,4 +155,5 @@ def _host(alias: str, kind: InterfaceKind = 'ethernet') -> DiscoveredHost:
         addresses=[DiscoveredAddress(ip=f'192.168.4.{ord(alias[-1])}', kind=kind)],
         port=60000 + ord(alias[-1]),
         version='0.4.0',
+        legacy=False,
     )

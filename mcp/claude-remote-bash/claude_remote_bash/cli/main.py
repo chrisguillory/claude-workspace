@@ -277,10 +277,14 @@ def _render_daemons_block(
 
 
 def _format_host_line(host: DiscoveredHost, *, is_local: bool) -> str:
-    """Render one host row as ``alias  ip(kind),ip(kind):port  (hostname)  vX.Y.Z  (self)?``."""
+    """Render one host row: ``alias  ip(kind),ip(kind):port  (hostname)  vX.Y.Z  (self)?  (legacy)?``."""
     addrs = ','.join(f'{a.ip}({a.kind})' for a in host.addresses) if host.addresses else '?'
-    self_marker = '  (self)' if is_local else ''
-    return f'  {host.alias:<12} {addrs}:{host.port}  ({host.hostname})  v{host.version}{self_marker}'
+    markers = ''
+    if is_local:
+        markers += '  (self)'
+    if host.legacy:
+        markers += '  (legacy)'
+    return f'  {host.alias:<12} {addrs}:{host.port}  ({host.hostname})  v{host.version}{markers}'
 
 
 def _render_groups_block(
