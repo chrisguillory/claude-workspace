@@ -82,7 +82,7 @@ class DispatchService:
             atoms = parse_selector(
                 target,
                 groups=self._client_config.groups,
-                discovered_aliases=frozenset(entry.alias.lower() for entry in cache.hosts),
+                discovered_aliases=frozenset(entry.alias.lower() for entry in cache.all_hosts()),
             )
         except UnknownAtomError:
             # Cache may be fresh-by-TTL but stale-by-content — a daemon may have
@@ -92,7 +92,7 @@ class DispatchService:
                 atoms = parse_selector(
                     target,
                     groups=self._client_config.groups,
-                    discovered_aliases=frozenset(entry.alias.lower() for entry in cache.hosts),
+                    discovered_aliases=frozenset(entry.alias.lower() for entry in cache.all_hosts()),
                 )
             except SelectorError as exc:
                 raise RemoteBashError(str(exc)) from exc
