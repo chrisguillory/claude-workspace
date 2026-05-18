@@ -44,9 +44,9 @@ def lookup_alias(cache: HostsCache, atom: str) -> tuple[Sequence[str], int] | No
         return [parts[0]], int(parts[1])
 
     atom_lower = atom.lower()
-    for entry in cache.hosts:
+    for entry in cache.all_hosts():
         if entry.alias.lower() == atom_lower:
-            return list(entry.ips), entry.port
+            return [addr.ip for addr in entry.addresses], entry.port
 
     return None
 

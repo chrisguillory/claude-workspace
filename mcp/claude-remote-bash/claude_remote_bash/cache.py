@@ -9,12 +9,11 @@ from collections.abc import Sequence
 from cc_lib.schemas import ClosedModel
 from cc_lib.utils.atomic_write import atomic_write
 
-from claude_remote_bash.discovery import DiscoveredHost
+from claude_remote_bash.discovery import BrowseResult, DiscoveredHost
 from claude_remote_bash.paths import DATA_DIR, HOSTS_CACHE
 
 __all__ = [
     'CACHE_TTL_SECONDS',
-    'HostEntry',
     'HostsCache',
 ]
 
@@ -22,23 +21,17 @@ CACHE_TTL_SECONDS = 30.0
 """How long a browse result is reused before another mDNS sweep is required."""
 
 
-class HostEntry(ClosedModel):
-    """One daemon, as stored in the browse cache."""
-
-    alias: str
-    hostname: str
-    ips: Sequence[str]
-    port: int
-    is_self: bool
-
-
 class HostsCache(ClosedModel):
-    """An mDNS browse result with the timestamp it was captured."""
+    """A persisted ``BrowseResult`` plus the time it was captured."""
 
     timestamp: float
     """Unix epoch seconds when the browse completed."""
 
-    hosts: Sequence[HostEntry]
+    remote_daemons: Sequence[DiscoveredHost]
+    """Daemons advertised by other machines on the LAN at capture time."""
+
+    local_daemon: DiscoveredHost | None = None
+    """The local machine's daemon at capture time, if it was on the wire."""
 
     @classmethod
     def load(cls, *, max_age_s: float | None = CACHE_TTL_SECONDS) -> HostsCache | None:
@@ -58,13 +51,13 @@ class HostsCache(ClosedModel):
         return cache
 
     @classmethod
-    def from_browse(cls, hosts: Sequence[DiscoveredHost]) -> HostsCache:
-        """Snapshot a fresh mDNS browse result, stamping it with the current time."""
-        entries = [
-            HostEntry(alias=h.alias, hostname=h.hostname, ips=list(h.ips), port=h.port, is_self=h.is_self)
-            for h in hosts
-        ]
-        return cls(timestamp=time.time(), hosts=entries)
+    def from_browse(cls, result: BrowseResult) -> HostsCache:
+        """Snapshot a fresh browse result, stamping it with the current time."""
+        return cls(
+            timestamp=time.time(),
+            remote_daemons=list(result.remote_daemons),
+            local_daemon=result.local_daemon,
+        )
 
     def write(self) -> None:
         """Persist this snapshot atomically.
@@ -76,3 +69,7 @@ class HostsCache(ClosedModel):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         os.chmod(DATA_DIR, 0o700)
         atomic_write(HOSTS_CACHE, self.model_dump_json().encode(), mode=0o600)
+
+    def all_hosts(self) -> Sequence[DiscoveredHost]:
+        """Flat list including the local daemon, for consumers that don't care about the partition."""
+        return [*self.remote_daemons, *([self.local_daemon] if self.local_daemon else [])]
