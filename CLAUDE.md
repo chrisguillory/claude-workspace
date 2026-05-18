@@ -65,6 +65,7 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 | **Trust event authority**                     | Don't second-guess events with defensive validation                                                            |
 | **Async-first libraries**                     | Use async versions (aioboto3, asyncpg) when available                                                          |
 | **Assertions only in tests/**                 | Application code raises exceptions explicitly                                                                  |
+| **Tests earn their place**                    | Automated tests cover what empirical use can't — regressions and hard-to-stage edge cases. Happy-path coverage is redundant with manual end-to-end. |
 | **Ideal state over backwards compat**         | Dev-only repo — fix sources over workarounds; rename cleanly, no migration shims or doc-as-bandaid              |
 | **DI via closures**                           | FastMCP pattern for dependency injection                                                                       |
 
@@ -148,6 +149,22 @@ def main() -> int:
 def _handle_subprocess(exc: subprocess.CalledProcessError) -> None:
     sys.stderr.buffer.write(exc.stdout)
 ```
+
+### Test discipline
+
+Empirical testing — running the system against real conditions — is the primary verification modality in this repo. Automated tests earn their place only when they cover failure modes that are hard to trigger empirically.
+
+**Tests that earn their place:**
+- **Regression tests for fixed bugs.** Lock in the fix; surface re-introduction during refactor.
+- **Hard-to-stage failure modes.** Examples: zombie mDNS records during daemon restart, format anomalies in third-party tool output, size-limit edge cases requiring 10+ instances to trigger. Each requires deliberate environment construction that won't happen during a manual run.
+- **Wire-format integrity.** Round-trip encode/decode, parsers rejecting bad input. End-to-end manual tests exercise the happy path; refactors silently break round-trip without coverage.
+
+**Tests that don't:**
+- **Happy-path coverage** that the manual run-the-system loop exercises every time.
+- **Absence-of-bug** assertions for cases that weren't actually bugs. Often redundant with what the type system already proves.
+- **Third-party library validation.** Testing the library's behavior, not ours.
+
+The asymmetry: a regression test specifically prevents re-introduction of a real failure mode (high value); a happy-path test re-proves what every empirical run already proves (low value, maintenance cost).
 
 ## Python Specifics
 
@@ -822,17 +839,17 @@ When modifying MCP servers:
 
 Add to `cc-lib/cc_lib/` directory. All MCP servers can import them. Follow public-first organization with explicit `__all__` exports.
 
-## Testing
+## Build smoke tests
 
-Test inline dependencies work:
+Verify the install + entry-point path works (separate concern from automated test coverage — see *Test discipline* above):
+
 ```bash
+# Inline dependencies resolve and the server starts
 uv run --directory mcp/python-interpreter --script python_interpreter/mcp/main.py
 ```
 
-Should successfully import `cc_lib` and start the server.
-
-Test entry points work:
 ```bash
+# Entry point installed via pyproject.toml is invokable
 uv run --project mcp/python-interpreter python-interpreter-mcp
 ```
 
