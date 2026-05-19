@@ -6,7 +6,6 @@ __all__ = [
 ]
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
 import uvicorn
@@ -47,9 +46,4 @@ async def start_uds_bridge(app: ASGIApp, mcp_name: str) -> UdsBridge:
 class ASGIApp(Protocol):
     """An ASGI3 application — the callable shape uvicorn serves."""
 
-    async def __call__(
-        self,
-        scope: Mapping[str, Any],
-        receive: Callable[[], Awaitable[Mapping[str, Any]]],
-        send: Callable[[Mapping[str, Any]], Awaitable[None]],
-    ) -> None: ...
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None: ...

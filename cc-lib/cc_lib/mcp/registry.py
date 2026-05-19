@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = [
     'McpServerInfo',
     'clear_session',
+    'find_live_sock_path',
     'find_one',
     'read_all',
     'register',
@@ -116,6 +117,20 @@ def find_one(session_id: str, name: str) -> McpServerInfo | None:
         if psutil.pid_exists(info.mcp_pid):
             return info
     return None
+
+
+def find_live_sock_path(name: str) -> Path | None:
+    """Return UDS path for live MCP ``name`` in the current session, or None.
+
+    Read-side counterpart to ``register_self(..., sock_path=...)``: resolves
+    the current session via ``ClaudeContext.from_env()`` and reads the
+    registry entry. Returns None when no live entry has a ``sock_path``.
+    """
+    session_id = ClaudeContext.from_env().session_id
+    entry = find_one(session_id, name)
+    if entry is None or entry.sock_path is None:
+        return None
+    return Path(entry.sock_path)
 
 
 def read_all(session_id: str) -> Sequence[McpServerInfo]:
