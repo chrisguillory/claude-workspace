@@ -5,7 +5,7 @@ import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, TextIO
 
 import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
@@ -123,33 +123,87 @@ def apply_cmd(
     raise SystemExit(0 if result.overall_success else 1)
 
 
-def _configure_apply_logging() -> Path:
-    """Wire root logger to console (INFO, bare) + per-run file (DEBUG, full canonical).
+class _StderrTee:
+    """Tee ``sys.stderr`` writes to multiple streams (terminal + log file).
 
-    Console handler is bare-format on stderr so progress lines look like CLI output,
-    not framework noise. File handler captures every DEBUG-level event for post-hoc
-    traceability when Claude Code's terminal scrollback truncates the early output.
-    Each apply run gets its own timestamped file; no rotation, no retention — purge
-    ``~/.claude-workspace/mcp/claude-remote-audio/logs/`` when you want.
+    Replacing ``sys.stderr`` here means any ``typer.echo(err=True)`` /
+    ``render_recovery`` / direct ``print(file=sys.stderr)`` write naturally
+    lands in BOTH the real terminal and the per-run log file — no per-handler
+    bookkeeping in user-facing error paths. ``isatty`` / ``fileno`` delegate
+    to the first stream so context-aware renderers (e.g. ``render_recovery``'s
+    TTY-vs-piped branch) keep detecting the terminal correctly.
+
+    The composition-tee idiom (vs. ``os.dup2`` FD redirect, ``StreamToLogger``
+    coercion, or ``contextlib.redirect_stderr``) is the right shape for a
+    pure-Python CLI that wants raw-text capture with the terminal untouched.
+    """
+
+    def __init__(self, *streams: TextIO) -> None:
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        for stream in self._streams:
+            stream.write(data)
+            stream.flush()
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            stream.flush()
+
+    def isatty(self) -> bool:
+        return bool(self._streams) and self._streams[0].isatty()
+
+    def fileno(self) -> int:
+        return self._streams[0].fileno()
+
+
+def _configure_apply_logging() -> Path:
+    """Wire stderr-tee + root logger to per-run log file.
+
+    Two write paths, both landing in the same log file:
+
+    - **Stderr tee**: ``sys.stderr`` is replaced with ``_StderrTee(real_stderr,
+      log_fp)``. Raw user-facing output (``typer.echo(err=True)``,
+      ``render_recovery``, anything else writing to ``sys.stderr``) flows to
+      terminal AND log file at write time.
+    - **File logger**: a ``StreamHandler`` bound to the same ``log_fp``
+      captures ``logger.*`` calls with timestamp + level prefix.
+
+    The console handler is bound to ``sys.__stderr__`` (real terminal),
+    deliberately NOT to the tee — otherwise every ``logger.*`` event would
+    flow through the tee and appear twice in the log file. The console
+    therefore receives logger lines once; the log file receives logger lines
+    formatted via the file handler AND any raw stderr writes via the tee.
     """
     paths.LOGS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime('%Y%m%d-%H%M%S')
     log_path = paths.LOGS_DIR / f'apply-{timestamp}.log'
+    log_fp = log_path.open('a', buffering=1, encoding='utf-8')
+
+    real_stderr = sys.__stderr__
+    if real_stderr is None:
+        raise RuntimeError('sys.__stderr__ is None — cannot configure apply logging')
+
+    # Wrap sys.stderr BEFORE constructing the console StreamHandler — the
+    # handler binds its stream eagerly at __init__, so we bind it to
+    # sys.__stderr__ explicitly to bypass the tee.
+    sys.stderr = _StderrTee(real_stderr, log_fp)
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     for existing in list(root.handlers):
         root.removeHandler(existing)
 
-    console = logging.StreamHandler(sys.stderr)
+    console = logging.StreamHandler(real_stderr)
     console.setLevel(logging.INFO)
     console.setFormatter(logging.Formatter('%(message)s'))
     root.addHandler(console)
 
-    file = logging.FileHandler(log_path)
-    file.setLevel(logging.DEBUG)
-    file.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
-    root.addHandler(file)
+    file_log = logging.StreamHandler(log_fp)
+    file_log.setLevel(logging.DEBUG)
+    file_log.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+    root.addHandler(file_log)
 
     return log_path
 
