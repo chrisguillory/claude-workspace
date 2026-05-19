@@ -354,6 +354,22 @@ async def _ensure_bluetooth_output(
     try:
         engaged = await bluetooth.engage_via_sound_menu(service, hub_alias, bt_device.name)
     except bluetooth.BluetoothError as exc:
+        if _looks_like_applescript_tcc_denial(str(exc)):
+            raise ResolvableApplyError(
+                f'{hub_alias}: Sound-menu rescue blocked by AppleScript automation permission.',
+                code='applescript-system-events-denied',
+                title='AppleScript automation permission required',
+                suggestions=(
+                    f'On {hub_alias}: click Allow on the macOS dialog that appeared '
+                    f'(the dispatching app — typically iTerm, Terminal, or your IDE — '
+                    f'needs to control "System Events").',
+                    f'If no dialog is visible on {hub_alias}: System Settings → Privacy '
+                    "& Security → Automation → enable the dispatching app's entry for "
+                    '"System Events".',
+                    'Re-run apply after granting permission. The grant persists.',
+                ),
+                context={'host': hub_alias, 'device': bt_device.name},
+            ) from exc
         raise ApplyError(f'{hub_alias}: Sound-menu rescue failed for {bt_device.name!r}: {exc}') from exc
 
     if not engaged:
@@ -371,6 +387,24 @@ async def _device_in_hub_outputs(service: DispatchService, hub_alias: str, name:
     raw = (await _run(service, hub_alias, 'SwitchAudioSource -a -t output')).stdout
     folded = _nfkc_casefold(name)
     return any(_nfkc_casefold(line.strip()) == folded for line in raw.splitlines() if line.strip())
+
+
+def _looks_like_applescript_tcc_denial(error_msg: str) -> bool:
+    """True when a BluetoothError looks like an AppleScript Automation TCC denial.
+
+    Signal: a non-zero osascript exit on a command that tells ``"System Events"``
+    while the user hasn't (yet) granted Automation permission. macOS often
+    suppresses osascript's stderr in this state (the process is held while the
+    permission dialog awaits user action; the daemon-side dispatch timeout fires
+    and reports exit -1 with empty stderr). We match on the osascript + System
+    Events pair regardless of exit code or stderr content — far more often
+    that combination is TCC denial than something else.
+    """
+    if 'osascript' not in error_msg:
+        return False
+    if 'System Events' not in error_msg:
+        return False
+    return 'command failed (exit' in error_msg
 
 
 # -- Hub phase ----------------------------------------------------------------
@@ -397,14 +431,11 @@ async def _set_hub_input_to_remote_mic(service: DispatchService, plan: _Plan) ->
     Apps on the hub then consume the mesh-distributed mic via the self-loopback
     leg of roc-send (127.0.0.1:10001 → Claude Remote Mic), giving consistent
     behavior across the entire mesh: every Mac's "default mic" is the hub's
-    physical input. Volume is pinned to max for the same reason as on peers —
-    Claude Remote Mic is a digital intermediate; gain belongs at the physical
-    mic. Crucially this only touches the INPUT side; the hub's OUTPUT (which
-    is the user's physical headphones, e.g. AirPods) is never touched.
-    Tracked for upgrade to a device-by-UID approach in #39.
+    physical input. Volume pinned to max — gain belongs at the physical mic,
+    not the digital intermediate.
     """
     await _run(service, plan.hub_alias, 'SwitchAudioSource -t input -s "Claude Remote Mic"')
-    await _run(service, plan.hub_alias, "osascript -e 'set volume input volume 100'")
+    await _run(service, plan.hub_alias, 'claude-coreaudio-volume set "Claude Remote Mic" input 1.0')
     return ['set default input → Claude Remote Mic (volume → max)']
 
 
@@ -606,25 +637,22 @@ async def _route_peer_output_to_hub(service: DispatchService, peer: str) -> Sequ
     """Route ``peer``'s default + system-effects output to Claude Remote Speaker at max volume.
 
     Volume pinned to max because Claude Remote Speaker is a digital intermediate;
-    gain belongs at the hub's analog endpoint, which the user controls. Tracked
-    for upgrade to a device-by-UID approach in #39.
+    gain belongs at the hub's analog endpoint, which the user controls.
     """
     await _run(service, peer, 'SwitchAudioSource -t output -s "Claude Remote Speaker"')
     await _run(service, peer, 'SwitchAudioSource -t system -s "Claude Remote Speaker"')
-    await _run(service, peer, "osascript -e 'set volume output volume 100'")
+    await _run(service, peer, 'claude-coreaudio-volume set "Claude Remote Speaker" output 1.0')
     return ['set default output + system output → Claude Remote Speaker (volume → max)']
 
 
 async def _route_peer_input_from_hub(service: DispatchService, peer: str) -> Sequence[str]:
     """Set ``peer``'s Core Audio default input to ``Claude Remote Mic`` at full volume.
 
-    Volume is pinned to max because Claude Remote Mic is a digital intermediate
-    in the mesh — gain belongs at the analog endpoint (the hub's physical mic,
-    controlled by its hardware knob or hub-side Sound prefs). Tracked for
-    upgrade to a device-by-UID approach in #39.
+    Volume pinned to max because Claude Remote Mic is a digital intermediate;
+    gain belongs at the hub's physical mic.
     """
     await _run(service, peer, 'SwitchAudioSource -t input -s "Claude Remote Mic"')
-    await _run(service, peer, "osascript -e 'set volume input volume 100'")
+    await _run(service, peer, 'claude-coreaudio-volume set "Claude Remote Mic" input 1.0')
     return ['set default input → Claude Remote Mic (volume → max)']
 
 
@@ -881,13 +909,15 @@ async def _ensure_prereqs(
     if has_output:
         hub_binaries += ['roc-recv']
     if has_input:
-        hub_binaries += ['roc-send']
+        hub_binaries += ['roc-send', 'claude-coreaudio-volume']
 
     peer_binaries = ['roc-vad']
-    if has_output:
-        # Peers' default output flips to Claude Remote Speaker via SwitchAudioSource
-        # so their audio enters the RTP path back to the hub.
-        peer_binaries += ['SwitchAudioSource']
+    if has_output or has_input:
+        # Peers flip their default output/input to Claude Remote Speaker/Mic via
+        # SwitchAudioSource so their audio enters/exits the RTP path. The volume
+        # tool pins the digital intermediates to max so attenuation only happens
+        # at the analog endpoints.
+        peer_binaries += ['SwitchAudioSource', 'claude-coreaudio-volume']
 
     host_reqs: dict[str, Sequence[str]] = {hub_alias: hub_binaries}
     for peer in target_peer_aliases:
@@ -1093,17 +1123,27 @@ async def _install_prereqs_on_host(
     command (no heredoc quoting, no temp files, no mount). When
     ``sudo_password`` is set, an ``export SUDO_PASSWORD=...`` line is prepended
     to the payload — the script's install step pipes that into ``sudo -S``.
-    Timeout is generous (15 min) because cold first runs include a scons
-    compile of roc-toolkit (~5 min on Apple Silicon).
+    The Swift source for ``claude-coreaudio-volume`` is also base64-encoded and
+    shipped via ``CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64`` env var; bootstrap.sh
+    decodes it, compiles with ``swiftc``, and installs the binary. Timeout is
+    generous (15 min) because cold first runs include a scons compile of
+    roc-toolkit (~5 min on Apple Silicon).
     """
     script_text = _bootstrap_script_path().read_text(encoding='utf-8')
-    payload = (
-        f'export SUDO_PASSWORD={shlex.quote(sudo_password)}\n{script_text}'
-        if sudo_password is not None
-        else script_text
-    )
+    swift_source_b64 = base64.b64encode(_coreaudio_volume_swift_source_path().read_bytes()).decode('ascii')
+    exports = [f'export CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64={shlex.quote(swift_source_b64)}']
+    if sudo_password is not None:
+        exports.append(f'export SUDO_PASSWORD={shlex.quote(sudo_password)}')
+    payload = '\n'.join((*exports, script_text))
     encoded = base64.b64encode(payload.encode('utf-8')).decode('ascii')
-    cmd = f'echo {shlex.quote(encoded)} | base64 -d | bash'
+    # Write the script to a temp file and exec with stdin from /dev/null.
+    # Piping the script to `bash` (the obvious variant) leaves bash's stdin
+    # as the pipe — any interactive child (brew install with auto-update
+    # prompts, scons, etc.) inherits and consumes the rest of the script as
+    # if it were user input, silently swallowing every line past the first
+    # interactive command. The file-plus-`</dev/null` form gives child
+    # commands a clean empty stdin.
+    cmd = f'echo {shlex.quote(encoded)} | base64 -d > /tmp/cra-bootstrap.sh && bash /tmp/cra-bootstrap.sh </dev/null'
 
     logger.info('%s: bootstrap dispatching (timeout 15min; cold compile ~5min)', host)
     started = asyncio.get_event_loop().time()
@@ -1129,3 +1169,8 @@ async def _install_prereqs_on_host(
 def _bootstrap_script_path() -> Path:
     """Locate ``scripts/bootstrap.sh`` next to the ``claude_remote_audio`` package."""
     return Path(__file__).resolve().parent.parent / 'scripts' / 'bootstrap.sh'
+
+
+def _coreaudio_volume_swift_source_path() -> Path:
+    """Locate ``swift/claude-coreaudio-volume.swift`` next to the package."""
+    return Path(__file__).resolve().parent.parent / 'swift' / 'claude-coreaudio-volume.swift'
