@@ -741,26 +741,22 @@ def _roc_recv_command(bind_ports: Sequence[int]) -> str:
 
 
 def _roc_send_command(input_device: str, peer_ips: Sequence[str]) -> str:
-    """Shell command that restarts the ffmpeg→roc-send pipeline broadcasting the mic.
+    """Shell command that restarts roc-send broadcasting the mic to peer IPs + self-loopback.
 
-    roc-send's ``core://`` URI routes through SoX's CoreAudio backend, which
-    truncates device names so badly that even simple names like ``DJI MIC MINI``
-    fail to open (``backend dispatcher: failed to open source``). ffmpeg's
-    AVFoundation indev handles full Core Audio device names correctly; we pipe
-    its WAV stdout to roc-send via stdin.
+    Direct ``core://<device>`` — roc-send reads CoreAudio with real-time HAL
+    scheduling. The earlier ffmpeg→roc-send pipe variant introduced crackling
+    from pipe-buffer underruns and was reverted; if SoX fails to open the
+    device, the symptom is typically a wedged ``coreaudiod`` on the hub
+    (kill it with ``sudo killall coreaudiod`` and it respawns clean).
     """
+    quoted_input = shlex.quote(f'core://{input_device}')
     dest_flags = ' '.join(f'-s rtp://{ip}:{_MIC_RECEIVE_PORT}' for ip in peer_ips)
-    avf_uri = shlex.quote(f':{input_device}')
-    pipeline = (
-        f'ffmpeg -loglevel error -f avfoundation -i {avf_uri} '
-        f'-ar 48000 -ac 2 -f wav - 2>/tmp/ffmpeg-mic.log | '
-        f'/usr/local/bin/roc-send --input-format=wav -i file:- '
-        f'{dest_flags} -s rtp://127.0.0.1:{_MIC_RECEIVE_PORT} 2>/tmp/roc-send.log'
-    )
     return (
         'pkill -f roc-send 2>/dev/null; pkill -f "ffmpeg.*-f avfoundation" 2>/dev/null; '
         'sleep 1; '
-        f'(nohup bash -c {shlex.quote(pipeline)} > /dev/null 2>&1 < /dev/null &)'
+        f'(nohup /usr/local/bin/roc-send -i {quoted_input} '
+        f'{dest_flags} -s rtp://127.0.0.1:{_MIC_RECEIVE_PORT} '
+        '> /tmp/roc-send.log 2>&1 < /dev/null &)'
     )
 
 
