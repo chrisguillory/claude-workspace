@@ -1257,6 +1257,8 @@ async def _info_async(session_id: str, format: OutputFormat, source_project: Pat
             typer.echo(f'  Machine: {context.machine_id}')
         if context.claude_pid:
             typer.echo(f'  Claude PID: {context.claude_pid}')
+        if context.mcp_pid:
+            typer.echo(f'  MCP PID: {context.mcp_pid}')
         if context.claude_version:
             typer.echo(f'  Claude Version: {context.claude_version}')
         if context.temp_dir:

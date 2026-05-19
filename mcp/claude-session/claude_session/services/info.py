@@ -16,9 +16,11 @@ from pathlib import Path
 
 import psutil
 import pydantic
+from cc_lib.mcp import registry
 from cc_lib.session_tracker import Session, SessionDatabase
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
 
+from claude_session import PROJECT
 from claude_session.schemas.operations.context import SessionContext
 from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.services.artifacts import extract_custom_title_from_file
@@ -47,7 +49,8 @@ class CurrentSessionContext:
 
     session_id: str
     project_path: Path
-    claude_pid: int
+    claude_pid: int  # Parent Claude Code process PID
+    mcp_pid: int  # This MCP server's own PID (always a child of claude_pid for current session)
     temp_dir: str
 
     def matches(self, session_id: str, session_folder: Path) -> bool:
@@ -134,12 +137,15 @@ class SessionInfoService:
             claude_pid: int | None = current_context.claude_pid
             temp_dir: str | None = current_context.temp_dir
             machine_id: str | None = get_machine_id()
+            mcp_pid: int | None = current_context.mcp_pid
         else:
             # For non-current sessions, get historical PID from sessions.json if available
             claude_pid = workspace_session.metadata.claude_pid if workspace_session else None
             temp_dir = None  # Only available for current session
             # If session is in sessions.json, it was created on this machine
             machine_id = get_machine_id() if workspace_session else None
+            entry = registry.find_one(full_session_id, PROJECT.name) if workspace_session else None
+            mcp_pid = entry.mcp_pid if entry is not None else None
 
         claude_version = await self._get_claude_version(
             session_file=session_file,
@@ -168,6 +174,7 @@ class SessionInfoService:
             # Environment
             machine_id=machine_id,
             claude_pid=claude_pid,
+            mcp_pid=mcp_pid,
             claude_version=claude_version,
             temp_dir=temp_dir,
             # Origin
