@@ -388,6 +388,8 @@ async def _apply_hub(service: DispatchService, plan: _Plan) -> HostApplyOutcome:
         actions.extend(await _set_hub_output(service, plan))
         actions.extend(await _restart_roc_recv(service, plan))
     if plan.input_device is not None:
+        hub_devices = (await _run(service, plan.hub_alias, 'roc-vad device list')).stdout
+        actions.extend(await _ensure_claude_remote_mic(service, plan.hub_alias, hub_devices))
         actions.extend(await _restart_roc_send(service, plan))
         actions.extend(await _set_hub_input_to_remote_mic(service, plan))
     return HostApplyOutcome(host=plan.hub_alias, role='hub', actions=actions, success=True)
@@ -541,7 +543,7 @@ async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostA
     """
     list_text = (await _run(service, peer, 'roc-vad device list')).stdout
     actions: list[str] = []
-    actions.extend(await _ensure_peer_mic(service, peer, list_text))
+    actions.extend(await _ensure_claude_remote_mic(service, peer, list_text))
     actions.extend(await _ensure_peer_speaker(service, plan, peer, list_text))
     if plan.output_device is not None:
         actions.extend(await _route_peer_output_to_hub(service, peer))
@@ -578,21 +580,27 @@ async def _route_peer_input_from_hub(service: DispatchService, peer: str) -> Seq
     return ['set default input → Claude Remote Mic (volume → max)']
 
 
-async def _ensure_peer_mic(service: DispatchService, peer: str, list_text: str) -> Sequence[str]:
-    """Ensure peer has a Claude Remote Mic receiver bound to ``rtp://0.0.0.0:10001``."""
+async def _ensure_claude_remote_mic(service: DispatchService, host: str, list_text: str) -> Sequence[str]:
+    """Ensure ``host`` has a Claude Remote Mic receiver bound to ``rtp://0.0.0.0:10001``.
+
+    Role-agnostic — used for both peers (so apps reading the mesh mic find a
+    device) and the hub (the hub's roc-send self-loopback ships mic packets to
+    127.0.0.1:10001; without this receiver, those packets have no consumer and
+    apps on the hub can't read the mesh mic).
+    """
     actions: list[str] = []
     mic_idx = _parse_device_index(list_text, name='Claude Remote Mic')
     if mic_idx is None:
-        add_out = await _run(service, peer, 'roc-vad device add receiver -n "Claude Remote Mic" -r 48000')
+        add_out = await _run(service, host, 'roc-vad device add receiver -n "Claude Remote Mic" -r 48000')
         mic_idx = _parse_added_idx(add_out.stdout)
         actions.append(f'added Claude Remote Mic (idx={mic_idx})')
 
     if mic_idx is None:
         return actions
 
-    mic_show = (await _run(service, peer, f'roc-vad device show {mic_idx}')).stdout
+    mic_show = (await _run(service, host, f'roc-vad device show {mic_idx}')).stdout
     if f'rtp://0.0.0.0:{_MIC_RECEIVE_PORT}' not in mic_show:
-        await _run(service, peer, f'roc-vad device bind {mic_idx} --source rtp://0.0.0.0:{_MIC_RECEIVE_PORT}')
+        await _run(service, host, f'roc-vad device bind {mic_idx} --source rtp://0.0.0.0:{_MIC_RECEIVE_PORT}')
         actions.append(f'bound Claude Remote Mic → 0.0.0.0:{_MIC_RECEIVE_PORT}')
     return actions
 
