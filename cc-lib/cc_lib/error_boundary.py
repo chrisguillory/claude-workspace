@@ -152,6 +152,7 @@ from __future__ import annotations
 __all__ = [
     'ErrorBoundary',
     'ErrorHandler',
+    'render_recovery',
 ]
 
 import asyncio
@@ -161,7 +162,10 @@ import traceback
 from collections.abc import Callable
 from functools import singledispatch
 from types import TracebackType
-from typing import Any, Self, TypeVar, cast
+from typing import Any, Self, TextIO, TypeVar, cast
+
+from cc_lib.claude_context import in_claude_code
+from cc_lib.exceptions import ResolvableError
 
 type ErrorHandler = Callable[[Exception], Any]
 
@@ -358,6 +362,67 @@ class ErrorBoundary:
             sys.exit(self._exit_code)
 
         return result
+
+
+def render_recovery(exc: ResolvableError, *, stream: TextIO | None = None) -> None:
+    """Emit a context-aware recovery footer for a ``ResolvableError`` to ``stream``.
+
+    Three rendering modes, decided by environment, in precedence order:
+
+    1. Inside Claude Code (``CLAUDECODE=1``) — emit a parseable agent-engagement
+       block. The block names the ``code``, lists ``suggestions`` numbered, and
+       surfaces ``docs_url`` if present. Tells the in-loop LLM that this is a
+       recognized failure pattern and how to engage.
+    2. Bare terminal (stream is a TTY, not in Claude Code) — emit a red-text
+       block with the same structured info plus a CTA pointing the human at
+       Claude Code for adaptive diagnosis.
+    3. Piped / non-TTY output — emit nothing. The exception's ``__str__`` (the
+       upstream rendering) already carries the message; appending decoration to
+       piped output is noise.
+
+    The structured fields on ``exc`` are the source of truth — this function
+    renders them; it doesn't add information. Consumers that need a different
+    medium (JSON output, log records, MCP tool-result blocks) read the fields
+    directly and render their own way.
+    """
+    target = stream if stream is not None else sys.stderr
+    if in_claude_code():
+        _write_claude_code_footer(exc, target)
+    elif target.isatty():
+        _write_tty_footer(exc, target)
+
+
+def _write_claude_code_footer(exc: ResolvableError, stream: TextIO) -> None:
+    """Emit the agent-engagement footer to ``stream``. No ANSI — Claude Code reads plain."""
+    stream.write(f'\n[Claude Code: resolvable error (code={exc.code}).')
+    if exc.title:
+        stream.write(f' {exc.title}.')
+    stream.write('\n')
+    if exc.suggestions:
+        stream.write('Suggested steps:\n')
+        for i, step in enumerate(exc.suggestions, 1):
+            stream.write(f'  {i}. {step}\n')
+    if exc.docs_url:
+        stream.write(f'Workflow: {exc.docs_url}\n')
+    stream.write('Apply judgment: follow the steps; fetch the workflow if needed; ')
+    stream.write('ask the user for context (recent state changes, env shifts) when ambiguous.]\n')
+
+
+def _write_tty_footer(exc: ResolvableError, stream: TextIO) -> None:
+    """Emit the human-readable red footer with structured info + escalation CTA."""
+    red, reset = '\033[31m', '\033[0m'
+    stream.write(f'\n{red}── resolvable error: code={exc.code}')
+    if exc.title:
+        stream.write(f' — {exc.title}')
+    stream.write(f' ──{reset}\n')
+    if exc.suggestions:
+        for i, step in enumerate(exc.suggestions, 1):
+            stream.write(f'  {i}. {step}\n')
+    if exc.docs_url:
+        stream.write(f'  Workflow: {exc.docs_url}\n')
+    stream.write(
+        f'{red}For adaptive diagnosis, run from a Claude Code session, or paste this output into one.{reset}\n'
+    )
 
 
 def _default_handler(exc: Exception) -> None:

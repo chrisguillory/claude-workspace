@@ -9,14 +9,16 @@ from typing import Annotated
 
 import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
-from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.error_boundary import ErrorBoundary, render_recovery
+from cc_lib.exceptions import ResolvableError
 from cc_lib.types import OutputFormat
 from claude_remote_bash.exceptions import RemoteBashError
 from claude_remote_bash.selector import SelectorError
 
 from claude_remote_audio import paths
 from claude_remote_audio.cli import completion
-from claude_remote_audio.orchestrator import ApplyError, ApplyResult, apply
+from claude_remote_audio.exceptions import ApplyError
+from claude_remote_audio.orchestrator import ApplyResult, apply
 
 __all__ = [
     'main',
@@ -154,8 +156,15 @@ def _configure_apply_logging() -> Path:
 
 @error_boundary.handler(ApplyError)
 def _handle_apply_error(exc: ApplyError) -> None:
-    """User-facing configuration / constraint violation — clean message, no traceback."""
+    """User-facing configuration / constraint violation — clean message, no traceback.
+
+    For ``ResolvableApplyError`` (or any ApplyError that also subclasses
+    ``ResolvableError``), append a context-aware recovery footer — agent-engagement
+    hint inside Claude Code, red-text CTA in a bare terminal, silent when piped.
+    """
     typer.echo(f'apply: {exc}', err=True)
+    if isinstance(exc, ResolvableError):
+        render_recovery(exc)
 
 
 @error_boundary.handler(RemoteBashError)
