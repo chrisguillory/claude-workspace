@@ -389,7 +389,20 @@ async def _apply_hub(service: DispatchService, plan: _Plan) -> HostApplyOutcome:
         actions.extend(await _restart_roc_recv(service, plan))
     if plan.input_device is not None:
         actions.extend(await _restart_roc_send(service, plan))
+        actions.extend(await _set_hub_input_to_remote_mic(service, plan))
     return HostApplyOutcome(host=plan.hub_alias, role='hub', actions=actions, success=True)
+
+
+async def _set_hub_input_to_remote_mic(service: DispatchService, plan: _Plan) -> Sequence[str]:
+    """Set the hub's Core Audio default input to ``Claude Remote Mic``.
+
+    Apps on the hub then consume the mesh-distributed mic via the self-loopback
+    leg of roc-send (127.0.0.1:10001 → Claude Remote Mic), giving consistent
+    behavior across the entire mesh: every Mac's "default mic" is the hub's
+    physical input. The slight loopback latency is acceptable for voice apps.
+    """
+    await _run(service, plan.hub_alias, 'SwitchAudioSource -t input -s "Claude Remote Mic"')
+    return ['set default input → Claude Remote Mic']
 
 
 async def _guard_feedback_loop(service: DispatchService, plan: _Plan) -> None:
@@ -482,10 +495,29 @@ async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[s
 
 
 async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[str]:
-    """Kill any running roc-send on the hub; relaunch broadcasting to all topology peers + self-loopback."""
+    """Kill any running roc-send on the hub; relaunch the ffmpeg→roc-send pipeline.
+
+    The pipeline is detached via ``nohup`` so the dispatch returns immediately
+    even when the child crashes on startup (bad device name, format mismatch,
+    TCC denial, etc.). Verifies survival via a post-launch pgrep so apply fails
+    loudly instead of silently reporting success against a dead pipeline.
+    """
     assert plan.input_device is not None  # guaranteed by caller
     peer_ips = [plan.topology_peer_to_ip[p] for p in plan.topology_peer_aliases]
     await _run(service, plan.hub_alias, _roc_send_command(plan.input_device, peer_ips))
+    await asyncio.sleep(3)
+    alive = await _run(service, plan.hub_alias, 'pgrep -f roc-send >/dev/null && echo alive || echo dead')
+    if alive.stdout.strip() != 'alive':
+        logs = await _run(
+            service,
+            plan.hub_alias,
+            'echo "--- roc-send.log ---"; tail -20 /tmp/roc-send.log 2>/dev/null; '
+            'echo "--- ffmpeg-mic.log ---"; tail -20 /tmp/ffmpeg-mic.log 2>/dev/null',
+        )
+        raise ApplyError(
+            f'{plan.hub_alias}: roc-send pipeline died within 3s of launch — '
+            f'input={plan.input_device!r}. Diagnostic logs:\n{logs.stdout}'
+        )
     return [f'restarted roc-send (input={plan.input_device})']
 
 
@@ -496,8 +528,11 @@ async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostA
     """Ensure peer has Claude Remote Mic + Claude Remote Speaker devices wired to the hub.
 
     When the hub is managing output (``--output`` was passed), the peer's default
-    output is also flipped to ``Claude Remote Speaker`` — otherwise the peer's audio
-    plays out locally and never reaches the hub via Flow 2.
+    output is also flipped to ``Claude Remote Speaker`` so peer-app audio enters
+    the RTP path. Symmetrically, when the hub is managing input (``--input``),
+    the peer's default input is flipped to ``Claude Remote Mic`` so peer-app mic
+    reads consume the mesh-broadcast hub mic instead of whatever local device
+    happened to be set.
     """
     list_text = (await _run(service, peer, 'roc-vad device list')).stdout
     actions: list[str] = []
@@ -505,6 +540,8 @@ async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostA
     actions.extend(await _ensure_peer_speaker(service, plan, peer, list_text))
     if plan.output_device is not None:
         actions.extend(await _route_peer_output_to_hub(service, peer))
+    if plan.input_device is not None:
+        actions.extend(await _route_peer_input_from_hub(service, peer))
     return HostApplyOutcome(host=peer, role='peer', actions=actions, success=True)
 
 
@@ -517,6 +554,17 @@ async def _route_peer_output_to_hub(service: DispatchService, peer: str) -> Sequ
     """
     await _run(service, peer, 'SwitchAudioSource -t output -s "Claude Remote Speaker"')
     return ['set default output → Claude Remote Speaker']
+
+
+async def _route_peer_input_from_hub(service: DispatchService, peer: str) -> Sequence[str]:
+    """Set ``peer``'s Core Audio default input to ``Claude Remote Mic``.
+
+    Without this, peer-application mic reads stay pinned to whatever local
+    device the peer had set and never consume the mesh-broadcast hub mic.
+    Idempotent.
+    """
+    await _run(service, peer, 'SwitchAudioSource -t input -s "Claude Remote Mic"')
+    return ['set default input → Claude Remote Mic']
 
 
 async def _ensure_peer_mic(service: DispatchService, peer: str, list_text: str) -> Sequence[str]:
@@ -682,14 +730,26 @@ def _roc_recv_command(bind_ports: Sequence[int]) -> str:
 
 
 def _roc_send_command(input_device: str, peer_ips: Sequence[str]) -> str:
-    """Shell command that restarts roc-send broadcasting the mic to peer IPs + self-loopback."""
-    quoted_input = shlex.quote(f'core://{input_device}')
+    """Shell command that restarts the ffmpeg→roc-send pipeline broadcasting the mic.
+
+    roc-send's ``core://`` URI routes through SoX's CoreAudio backend, which
+    truncates device names so badly that even simple names like ``DJI MIC MINI``
+    fail to open (``backend dispatcher: failed to open source``). ffmpeg's
+    AVFoundation indev handles full Core Audio device names correctly; we pipe
+    its WAV stdout to roc-send via stdin.
+    """
     dest_flags = ' '.join(f'-s rtp://{ip}:{_MIC_RECEIVE_PORT}' for ip in peer_ips)
+    avf_uri = shlex.quote(f':{input_device}')
+    pipeline = (
+        f'ffmpeg -loglevel error -f avfoundation -i {avf_uri} '
+        f'-ar 48000 -ac 2 -f wav - 2>/tmp/ffmpeg-mic.log | '
+        f'/usr/local/bin/roc-send --input-format=wav -i file:- '
+        f'{dest_flags} -s rtp://127.0.0.1:{_MIC_RECEIVE_PORT} 2>/tmp/roc-send.log'
+    )
     return (
-        'pkill -f roc-send 2>/dev/null; sleep 1; '
-        f'(nohup /usr/local/bin/roc-send -i {quoted_input} '
-        f'{dest_flags} -s rtp://127.0.0.1:{_MIC_RECEIVE_PORT} '
-        '> /tmp/roc-send.log 2>&1 < /dev/null &)'
+        'pkill -f roc-send 2>/dev/null; pkill -f "ffmpeg.*-f avfoundation" 2>/dev/null; '
+        'sleep 1; '
+        f'(nohup bash -c {shlex.quote(pipeline)} > /dev/null 2>&1 < /dev/null &)'
     )
 
 
