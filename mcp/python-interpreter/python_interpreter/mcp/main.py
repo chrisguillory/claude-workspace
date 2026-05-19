@@ -17,9 +17,7 @@ Setup:
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import logging
 import pathlib
 import sys
 import traceback
@@ -29,8 +27,12 @@ from collections.abc import Mapping, Sequence
 import fastapi
 import mcp.server.fastmcp
 import mcp.types
-import uvicorn
+from cc_lib.logging_setup import configure_logging
+from cc_lib.mcp.bridge import start_uds_bridge
+from cc_lib.mcp.registry import register_self
+from cc_lib.mcp.socket_name import get_socket_path
 
+from python_interpreter import PROJECT
 from python_interpreter.models import ExecuteRequest, InterpreterInfo
 from python_interpreter.service import PythonInterpreterService, ServerState
 
@@ -199,12 +201,7 @@ async def lifespan(
     server_instance: mcp.server.fastmcp.FastMCP,
 ) -> typing.AsyncIterator[None]:
     """Manage server lifecycle - initialization before requests, cleanup after shutdown."""
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        stream=sys.stderr,
-    )
+    configure_logging()
 
     state = ServerState.create()
     service = PythonInterpreterService(state)
@@ -213,33 +210,31 @@ async def lifespan(
     # Store service on fastapi_app for HTTP endpoint access
     fastapi_app.state.service = service
 
-    # Start FastAPI in background on Unix socket
-    config = uvicorn.Config(fastapi_app, uds=state.socket_path.as_posix(), log_level='warning')
-    uvicorn_server = uvicorn.Server(config)
-    uvicorn_task = asyncio.create_task(uvicorn_server.serve())
+    try:
+        async with contextlib.AsyncExitStack() as stack:
+            bridge = await start_uds_bridge(fastapi_app, PROJECT.name)
+            stack.push_async_callback(bridge.stop)
+            socket_path = get_socket_path(PROJECT.name)
+            await stack.enter_async_context(
+                register_self(
+                    server_instance,
+                    claude_context=state.claude_context,
+                    sock_path=str(socket_path),
+                    capabilities=['bridge'],
+                )
+            )
+            print('Server initialized', file=sys.stderr)
+            print(f'  Output directory: {state.output_dir}', file=sys.stderr)
+            print(f'  Unix socket: {socket_path}', file=sys.stderr)
+            yield
+    finally:
+        print('Shutting down interpreters...', file=sys.stderr)
+        state.interpreter_manager.shutdown_all()
+        state.temp_dir.cleanup()
+        print('Server cleanup complete', file=sys.stderr)
 
-    print('Server initialized', file=sys.stderr)
-    print(f'  Output directory: {state.output_dir}', file=sys.stderr)
-    print(f'  Unix socket: {state.socket_path}', file=sys.stderr)
 
-    yield
-
-    # Shutdown
-    uvicorn_server.should_exit = True
-    uvicorn_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await uvicorn_task
-
-    print('Shutting down interpreters...', file=sys.stderr)
-    state.interpreter_manager.shutdown_all()
-    state.temp_dir.cleanup()
-    if state.socket_path.exists():
-        state.socket_path.unlink()
-    print('Server cleanup complete', file=sys.stderr)
-
-
-# Initialize FastMCP with lifespan
-server = mcp.server.fastmcp.FastMCP('python-interpreter', lifespan=lifespan)
+server = mcp.server.fastmcp.FastMCP(PROJECT.name, lifespan=lifespan)
 
 
 @fastapi_app.exception_handler(Exception)
