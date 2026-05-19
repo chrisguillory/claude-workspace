@@ -394,15 +394,20 @@ async def _apply_hub(service: DispatchService, plan: _Plan) -> HostApplyOutcome:
 
 
 async def _set_hub_input_to_remote_mic(service: DispatchService, plan: _Plan) -> Sequence[str]:
-    """Set the hub's Core Audio default input to ``Claude Remote Mic``.
+    """Set the hub's Core Audio default input to ``Claude Remote Mic`` at full volume.
 
     Apps on the hub then consume the mesh-distributed mic via the self-loopback
     leg of roc-send (127.0.0.1:10001 → Claude Remote Mic), giving consistent
     behavior across the entire mesh: every Mac's "default mic" is the hub's
-    physical input. The slight loopback latency is acceptable for voice apps.
+    physical input. Volume is pinned to max for the same reason as on peers —
+    Claude Remote Mic is a digital intermediate; gain belongs at the physical
+    mic. Crucially this only touches the INPUT side; the hub's OUTPUT (which
+    is the user's physical headphones, e.g. AirPods) is never touched.
+    Tracked for upgrade to a device-by-UID approach in #39.
     """
     await _run(service, plan.hub_alias, 'SwitchAudioSource -t input -s "Claude Remote Mic"')
-    return ['set default input → Claude Remote Mic']
+    await _run(service, plan.hub_alias, "osascript -e 'set volume input volume 100'")
+    return ['set default input → Claude Remote Mic (volume → max)']
 
 
 async def _guard_feedback_loop(service: DispatchService, plan: _Plan) -> None:
@@ -546,25 +551,31 @@ async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostA
 
 
 async def _route_peer_output_to_hub(service: DispatchService, peer: str) -> Sequence[str]:
-    """Set ``peer``'s Core Audio default output to ``Claude Remote Speaker``.
+    """Set ``peer``'s Core Audio default output to ``Claude Remote Speaker`` at full volume.
 
-    Without this, peer-application audio plays out the peer's local speakers and
-    never enters the RTP path to the hub. Idempotent — SwitchAudioSource on the
-    already-current device is a no-op.
+    Volume is pinned to max because Claude Remote Speaker is a digital
+    intermediate in the mesh — attenuation belongs at the analog endpoint
+    (the hub's physical output, e.g. AirPods), which the user controls.
+    The ``osascript set volume output volume 100`` call acts on the current
+    default output; the preceding ``SwitchAudioSource`` ensures that's CRS
+    on this peer. Tracked for upgrade to a device-by-UID approach in #39.
     """
     await _run(service, peer, 'SwitchAudioSource -t output -s "Claude Remote Speaker"')
-    return ['set default output → Claude Remote Speaker']
+    await _run(service, peer, "osascript -e 'set volume output volume 100'")
+    return ['set default output → Claude Remote Speaker (volume → max)']
 
 
 async def _route_peer_input_from_hub(service: DispatchService, peer: str) -> Sequence[str]:
-    """Set ``peer``'s Core Audio default input to ``Claude Remote Mic``.
+    """Set ``peer``'s Core Audio default input to ``Claude Remote Mic`` at full volume.
 
-    Without this, peer-application mic reads stay pinned to whatever local
-    device the peer had set and never consume the mesh-broadcast hub mic.
-    Idempotent.
+    Volume is pinned to max because Claude Remote Mic is a digital intermediate
+    in the mesh — gain belongs at the analog endpoint (the hub's physical mic,
+    controlled by its hardware knob or hub-side Sound prefs). Tracked for
+    upgrade to a device-by-UID approach in #39.
     """
     await _run(service, peer, 'SwitchAudioSource -t input -s "Claude Remote Mic"')
-    return ['set default input → Claude Remote Mic']
+    await _run(service, peer, "osascript -e 'set volume input volume 100'")
+    return ['set default input → Claude Remote Mic (volume → max)']
 
 
 async def _ensure_peer_mic(service: DispatchService, peer: str, list_text: str) -> Sequence[str]:
