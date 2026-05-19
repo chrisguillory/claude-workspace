@@ -123,18 +123,20 @@ def apply_cmd(
     raise SystemExit(0 if result.overall_success else 1)
 
 
-class _StderrTee:
-    """Tee ``sys.stderr`` writes to multiple streams (terminal + log file).
+class _TeeStream:
+    """Tee writes to multiple file-like streams (terminal + log file).
 
-    Replacing ``sys.stderr`` here means any ``typer.echo(err=True)`` /
-    ``render_recovery`` / direct ``print(file=sys.stderr)`` write naturally
-    lands in BOTH the real terminal and the per-run log file — no per-handler
-    bookkeeping in user-facing error paths. ``isatty`` / ``fileno`` delegate
-    to the first stream so context-aware renderers (e.g. ``render_recovery``'s
-    TTY-vs-piped branch) keep detecting the terminal correctly.
+    Replace ``sys.stderr`` and/or ``sys.stdout`` with one of these and any
+    code writing to those streams — ``typer.echo``, ``render_recovery``,
+    ``print``, third-party libraries — naturally lands in every backing
+    stream. No per-handler bookkeeping in user-facing output paths.
 
-    The composition-tee idiom (vs. ``os.dup2`` FD redirect, ``StreamToLogger``
-    coercion, or ``contextlib.redirect_stderr``) is the right shape for a
+    ``isatty`` / ``fileno`` delegate to the first stream so context-aware
+    renderers (e.g. ``render_recovery``'s TTY-vs-piped branch) keep detecting
+    the terminal correctly.
+
+    Composition-tee idiom (vs. ``os.dup2`` FD redirect, ``StreamToLogger``
+    coercion, or ``contextlib.redirect_stderr``) — the right shape for a
     pure-Python CLI that wants raw-text capture with the terminal untouched.
     """
 
@@ -159,22 +161,23 @@ class _StderrTee:
 
 
 def _configure_apply_logging() -> Path:
-    """Wire stderr-tee + root logger to per-run log file.
+    """Wire stdout/stderr tees + root logger to per-run log file.
 
-    Two write paths, both landing in the same log file:
+    Three write paths, all landing in the same log file:
 
-    - **Stderr tee**: ``sys.stderr`` is replaced with ``_StderrTee(real_stderr,
-      log_fp)``. Raw user-facing output (``typer.echo(err=True)``,
-      ``render_recovery``, anything else writing to ``sys.stderr``) flows to
-      terminal AND log file at write time.
+    - **Stderr tee**: ``sys.stderr`` becomes ``_TeeStream(real_stderr, log_fp)``.
+      Raw user-facing output via ``typer.echo(err=True)``, ``render_recovery``,
+      and anything else writing to ``sys.stderr`` flows to terminal AND log.
+    - **Stdout tee**: ``sys.stdout`` becomes ``_TeeStream(real_stdout, log_fp)``.
+      Captures the success path (``_print_text`` action lines, ``apply: ok``
+      summary, ``--format json`` payload) into the log too.
     - **File logger**: a ``StreamHandler`` bound to the same ``log_fp``
       captures ``logger.*`` calls with timestamp + level prefix.
 
-    The console handler is bound to ``sys.__stderr__`` (real terminal),
-    deliberately NOT to the tee — otherwise every ``logger.*`` event would
-    flow through the tee and appear twice in the log file. The console
-    therefore receives logger lines once; the log file receives logger lines
-    formatted via the file handler AND any raw stderr writes via the tee.
+    The console handlers are bound to the real ``sys.__stderr__`` /
+    ``sys.__stdout__`` (not the tees), so ``logger.*`` events land in the log
+    file once (via the file handler with timestamp) rather than twice (via the
+    tee on top of the file handler).
     """
     paths.LOGS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime('%Y%m%d-%H%M%S')
@@ -182,13 +185,16 @@ def _configure_apply_logging() -> Path:
     log_fp = log_path.open('a', buffering=1, encoding='utf-8')
 
     real_stderr = sys.__stderr__
-    if real_stderr is None:
-        raise RuntimeError('sys.__stderr__ is None — cannot configure apply logging')
+    real_stdout = sys.__stdout__
+    if real_stderr is None or real_stdout is None:
+        raise RuntimeError('sys.__stderr__ / sys.__stdout__ is None — cannot configure apply logging')
 
-    # Wrap sys.stderr BEFORE constructing the console StreamHandler — the
-    # handler binds its stream eagerly at __init__, so we bind it to
-    # sys.__stderr__ explicitly to bypass the tee.
-    sys.stderr = _StderrTee(real_stderr, log_fp)
+    # Wrap stdout/stderr BEFORE constructing the console StreamHandler — the
+    # handler binds its stream eagerly at __init__, so we bind it to the real
+    # underlying stream explicitly to bypass the tee (avoiding double-write
+    # to the log file when logger events fire).
+    sys.stderr = _TeeStream(real_stderr, log_fp)
+    sys.stdout = _TeeStream(real_stdout, log_fp)
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
