@@ -426,15 +426,13 @@ async def _guard_feedback_loop(service: DispatchService, plan: _Plan) -> None:
 
 
 async def _set_hub_output(service: DispatchService, plan: _Plan) -> Sequence[str]:
-    """Resolve user-typed device name to canonical (against pre-fetched list), then set hub default output."""
+    """Resolve ``--output`` against the canonical list; set hub default + system-effects output."""
     assert plan.output_device is not None  # guaranteed by caller
     canonical = _resolve_output_device(plan.hub_outputs, plan.hub_alias, plan.output_device)
-    await _run(
-        service,
-        plan.hub_alias,
-        f'SwitchAudioSource -t output -s {shlex.quote(canonical)}',
-    )
-    return [f'set default output → {canonical}']
+    quoted = shlex.quote(canonical)
+    await _run(service, plan.hub_alias, f'SwitchAudioSource -t output -s {quoted}')
+    await _run(service, plan.hub_alias, f'SwitchAudioSource -t system -s {quoted}')
+    return [f'set default output + system output → {canonical}']
 
 
 def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: str) -> str:
@@ -605,18 +603,16 @@ async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostA
 
 
 async def _route_peer_output_to_hub(service: DispatchService, peer: str) -> Sequence[str]:
-    """Set ``peer``'s Core Audio default output to ``Claude Remote Speaker`` at full volume.
+    """Route ``peer``'s default + system-effects output to Claude Remote Speaker at max volume.
 
-    Volume is pinned to max because Claude Remote Speaker is a digital
-    intermediate in the mesh — attenuation belongs at the analog endpoint
-    (the hub's physical output, e.g. AirPods), which the user controls.
-    The ``osascript set volume output volume 100`` call acts on the current
-    default output; the preceding ``SwitchAudioSource`` ensures that's CRS
-    on this peer. Tracked for upgrade to a device-by-UID approach in #39.
+    Volume pinned to max because Claude Remote Speaker is a digital intermediate;
+    gain belongs at the hub's analog endpoint, which the user controls. Tracked
+    for upgrade to a device-by-UID approach in #39.
     """
     await _run(service, peer, 'SwitchAudioSource -t output -s "Claude Remote Speaker"')
+    await _run(service, peer, 'SwitchAudioSource -t system -s "Claude Remote Speaker"')
     await _run(service, peer, "osascript -e 'set volume output volume 100'")
-    return ['set default output → Claude Remote Speaker (volume → max)']
+    return ['set default output + system output → Claude Remote Speaker (volume → max)']
 
 
 async def _route_peer_input_from_hub(service: DispatchService, peer: str) -> Sequence[str]:
