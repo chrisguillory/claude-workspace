@@ -502,12 +502,14 @@ async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[s
 
 
 async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[str]:
-    """Kill any running roc-send on the hub; relaunch the ffmpeg→roc-send pipeline.
+    """Kill any running roc-send on the hub; relaunch with direct ``core://`` capture.
 
-    The pipeline is detached via ``nohup`` so the dispatch returns immediately
-    even when the child crashes on startup (bad device name, format mismatch,
-    TCC denial, etc.). Verifies survival via a post-launch pgrep so apply fails
-    loudly instead of silently reporting success against a dead pipeline.
+    Detached via ``nohup`` so the dispatch returns immediately even when the
+    child crashes on startup (bad device name, TCC denial, wedged CoreAudio
+    HAL, etc.). Verifies survival via post-launch pgrep so apply fails loudly
+    instead of silently reporting success against a dead process. On failure,
+    runs a HAL-wedge probe so the user gets actionable recovery steps in the
+    error message, not just "it died."
     """
     assert plan.input_device is not None  # guaranteed by caller
     peer_ips = [plan.topology_peer_to_ip[p] for p in plan.topology_peer_aliases]
@@ -515,17 +517,57 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
     await asyncio.sleep(3)
     alive = await _run(service, plan.hub_alias, 'pgrep -f roc-send >/dev/null && echo alive || echo dead')
     if alive.stdout.strip() != 'alive':
-        logs = await _run(
-            service,
-            plan.hub_alias,
-            'echo "--- roc-send.log ---"; tail -20 /tmp/roc-send.log 2>/dev/null; '
-            'echo "--- ffmpeg-mic.log ---"; tail -20 /tmp/ffmpeg-mic.log 2>/dev/null',
-        )
+        logs = await _run(service, plan.hub_alias, 'tail -20 /tmp/roc-send.log 2>/dev/null')
+        diagnosis = await _diagnose_core_audio_wedge(service, plan.hub_alias)
         raise ApplyError(
-            f'{plan.hub_alias}: roc-send pipeline died within 3s of launch — '
-            f'input={plan.input_device!r}. Diagnostic logs:\n{logs.stdout}'
+            f'{plan.hub_alias}: roc-send died within 3s of launch — input={plan.input_device!r}.\n\n'
+            f'{diagnosis}\n\n'
+            f'--- /tmp/roc-send.log ---\n{logs.stdout}'
         )
     return [f'restarted roc-send (input={plan.input_device})']
+
+
+async def _diagnose_core_audio_wedge(service: DispatchService, host: str) -> str:
+    """Distinguish a CoreAudio HAL wedge from a device-specific failure on ``host``.
+
+    Probes ``core://Claude Remote Mic`` — a roc-vad virtual device that
+    requires no physical hardware and no Microphone TCC. If even THIS fails,
+    SoX can't open *any* CoreAudio device and the HAL is wedged; the empirical
+    recovery is to reset the audio stack (kill coreaudiod, then reboot). If
+    the virtual probe succeeds, the failure is specific to the requested
+    device (TCC denial, exclusive access, format negotiation, unplugged USB,
+    etc.) and the user should look at the device side, not the HAL.
+
+    This codifies the diagnostic that would have saved a full session of
+    misdiagnosis: when EVERY ``core://`` device fails, the signal is "wedge,"
+    not "specific bug per device." Two devices failing identically is enough.
+    """
+    probe = await _run(
+        service,
+        host,
+        '/usr/local/bin/roc-send -i "core://Claude Remote Mic" -s "rtp://127.0.0.1:9991" '
+        '> /tmp/wedge-probe.log 2>&1 & P=$!; sleep 1; '
+        'if kill -0 $P 2>/dev/null; then kill -9 $P 2>/dev/null; echo HEALTHY; '
+        'else echo WEDGED; fi',
+    )
+    verdict = probe.stdout.strip().split('\n')[-1]
+    if verdict == 'WEDGED':
+        return (
+            'Diagnosis: CoreAudio HAL on the hub is wedged — '
+            'roc-send cannot open ANY core:// device, including the roc-vad virtual mic '
+            '(which depends on no physical hardware or Microphone TCC). The HAL itself is '
+            'in a bad state.\n'
+            'Recovery, in order of escalation:\n'
+            '  1. On the hub, run: sudo killall coreaudiod         (lightest; often enough)\n'
+            '  2. If step 1 does not help, reboot the hub.\n'
+            'After recovery, re-run apply.'
+        )
+    return (
+        'Diagnosis: CoreAudio HAL is healthy (virtual mic opens). Failure is specific to '
+        'the requested input device — check that the device is connected, the dispatching '
+        'daemon has Microphone permission in Privacy & Security, and no other process holds '
+        'the device exclusively.'
+    )
 
 
 # -- Peer phase ---------------------------------------------------------------
