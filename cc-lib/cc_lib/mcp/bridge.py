@@ -6,6 +6,7 @@ __all__ = [
 ]
 
 import asyncio
+from pathlib import Path
 from typing import Any, Protocol
 
 import uvicorn
@@ -16,14 +17,16 @@ from cc_lib.mcp.socket_name import get_socket_path
 class UdsBridge:
     """A running UDS bridge; call ``stop`` on MCP server shutdown."""
 
-    def __init__(self, server: uvicorn.Server, task: asyncio.Task[None]) -> None:
+    def __init__(self, server: uvicorn.Server, task: asyncio.Task[None], socket_path: Path) -> None:
         self._server = server
         self._task = task
+        self._socket_path = socket_path
 
     async def stop(self) -> None:
-        """Signal the uvicorn server to exit and await the serving task."""
+        """Signal the uvicorn server to exit, await the serving task, unlink the socket."""
         self._server.should_exit = True
         await self._task
+        self._socket_path.unlink(missing_ok=True)
 
 
 async def start_uds_bridge(app: ASGIApp, mcp_name: str) -> UdsBridge:
@@ -40,7 +43,7 @@ async def start_uds_bridge(app: ASGIApp, mcp_name: str) -> UdsBridge:
     config = uvicorn.Config(app, uds=str(socket_path), log_config=None, ws='none')
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve())
-    return UdsBridge(server, task)
+    return UdsBridge(server, task, socket_path)
 
 
 class ASGIApp(Protocol):
