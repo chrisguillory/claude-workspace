@@ -340,6 +340,22 @@ async def _ensure_bluetooth_output(
         try:
             await bluetooth.steal(service, hub_alias, bt_device.address, mesh_aliases)
         except bluetooth.BluetoothError as exc:
+            if _looks_like_bluetooth_tcc_denial(str(exc)):
+                raise ResolvableApplyError(
+                    f'{hub_alias}: Bluetooth control blocked — the dispatching app on '
+                    f'{hub_alias} has not been granted Bluetooth permission.',
+                    code='bluetooth-tcc-denied',
+                    title='Bluetooth permission required',
+                    suggestions=(
+                        f'On {hub_alias}: click Allow on the macOS dialog if visible '
+                        f'(the dispatching app — iTerm, Terminal, or your IDE — needs '
+                        f'Bluetooth access).',
+                        'If no dialog or already dismissed: System Settings → Privacy '
+                        "& Security → Bluetooth → enable the dispatching app's entry.",
+                        'Re-run apply after granting permission. The grant persists.',
+                    ),
+                    context={'host': hub_alias, 'device': bt_device.name},
+                ) from exc
             raise ApplyError(f'{hub_alias}: failed to claim Bluetooth device {bt_device.name!r}: {exc}') from exc
         # A2DP engagement / Core Audio registration lags the BT control link by
         # ~1-3s. Wait so the verification below sees the warm path before we
@@ -405,6 +421,42 @@ def _looks_like_applescript_tcc_denial(error_msg: str) -> bool:
     if 'System Events' not in error_msg:
         return False
     return 'command failed (exit' in error_msg
+
+
+def _looks_like_bluetooth_tcc_denial(error_msg: str) -> bool:
+    """True when a BluetoothError matches blueutil's documented TCC denial signal.
+
+    Two distinct OS-level states, both detectable deterministically:
+
+    - **Already denied**: blueutil v2.13.0 installs a ``SIGABRT`` handler
+      (``handle_abort`` in ``blueutil.m``) that runs when CoreBluetooth aborts
+      on a permission failure. It writes a verbatim diagnostic to stderr —
+      ``"Error: Received abort signal, it may be due to absence of access to
+      Bluetooth API..."`` — and exits with ``EX_SIGABRT`` (134). No other
+      failure mode produces exit 134 from blueutil.
+    - **Pending dialog**: macOS holds the process while the permission prompt
+      awaits user action, and the daemon-side dispatch timeout
+      (``claude_remote_bash.executor``) kills the held process before
+      blueutil's handler runs. That path emits ``stdout='[TIMEOUT]'``,
+      ``stderr=''``, ``exit_code=-1``; the orchestrator's BluetoothError
+      currently surfaces stderr (not stdout), so we match on the exit-1 +
+      empty-stderr pair as the timeout's stderr-visible footprint.
+
+    Note: an earlier heuristic only checked ``stderr: <empty>``, which
+    accidentally caught only the pending-dialog branch and silently
+    misclassified already-denied cases as generic failures.
+    """
+    if 'blueutil' not in error_msg:
+        return False
+    # Already denied: blueutil ran, SIGABRT fired, handler wrote the marker.
+    if 'absence of access to Bluetooth API' in error_msg:
+        return True
+    if 'command failed (exit 134)' in error_msg:
+        return True
+    # Pending dialog: daemon timeout killed blueutil before its handler ran.
+    if 'command failed (exit -1)' in error_msg and 'stderr: <empty>' in error_msg:
+        return True
+    return False
 
 
 # -- Hub phase ----------------------------------------------------------------
