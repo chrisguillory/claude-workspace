@@ -161,6 +161,23 @@ class TestLineEndings:
         # \n followed by stray \r at EOF — normalize.
         assert fix_bytes(b'foo\n\r', Path('test.md')) == b'foo\n'
 
+    def test_preserves_crlf_with_extra_trailing_crlf(self, fix_bytes: FixBytesFn) -> None:
+        # CRLF file with one blank line at EOF: collapse to single trailing CRLF
+        # (matches upstream — Windows file's line-ending style is preserved).
+        assert fix_bytes(b'foo\r\n\r\n', Path('test.md')) == b'foo\r\n'
+
+    def test_preserves_crlf_with_many_trailing_crlf(self, fix_bytes: FixBytesFn) -> None:
+        # CRLF file with many trailing blank lines: collapse to one.
+        assert fix_bytes(b'foo\r\n\r\n\r\n', Path('test.md')) == b'foo\r\n'
+
+    def test_preserves_crlf_with_mixed_trailing_lf(self, fix_bytes: FixBytesFn) -> None:
+        # Trailing run starting with CRLF then LF: preserve CRLF style at EOF.
+        assert fix_bytes(b'foo\r\n\n', Path('test.md')) == b'foo\r\n'
+
+    def test_multiline_crlf_with_blank_at_end(self, fix_bytes: FixBytesFn) -> None:
+        # Realistic Windows-authored file with trailing blank line.
+        assert fix_bytes(b'line1\r\nline2\r\n\r\n', Path('test.md')) == b'line1\r\nline2\r\n'
+
 
 class TestBOMHandling:
     """UTF-8 BOM is stripped after trailing-newline normalization (matches upstream chain)."""
@@ -267,36 +284,6 @@ class TestModuleStructure:
 
 
 # --- Integration tests (full hook flow via subprocess) -------------------------------
-
-
-def _payload(file_path: Path) -> bytes:
-    return json.dumps(
-        {
-            'session_id': 'x',
-            'transcript_path': '/tmp/x',
-            'cwd': str(REPO_ROOT),
-            'tool_name': 'Edit',
-            'tool_input': {'file_path': str(file_path)},
-            'tool_use_id': 'x',
-            'hook_event_name': 'PostToolUse',
-        }
-    ).encode()
-
-
-def _run_hook(file_path: Path) -> tuple[int, bytes]:
-    """Run the hook in a subprocess with CLAUDE_EXEC_LAUNCH_DIR pointed at the worktree."""
-    env = {**os.environ, 'CLAUDE_EXEC_LAUNCH_DIR': str(REPO_ROOT)}
-    proc = subprocess.run(
-        [str(HOOK_SCRIPT)],
-        input=_payload(file_path),
-        capture_output=True,
-        cwd=str(REPO_ROOT),
-        env=env,
-        timeout=30,
-        check=False,
-    )
-    after = file_path.read_bytes() if file_path.exists() else b''
-    return proc.returncode, after
 
 
 @pytest.fixture
@@ -417,3 +404,36 @@ class TestScopeGate:
         ec, after = _run_hook(nonexistent)
         assert ec == 0
         assert after == b''
+
+
+# --- Private helpers ----------------------------------------------------------------
+
+
+def _payload(file_path: Path) -> bytes:
+    return json.dumps(
+        {
+            'session_id': 'x',
+            'transcript_path': '/tmp/x',
+            'cwd': str(REPO_ROOT),
+            'tool_name': 'Edit',
+            'tool_input': {'file_path': str(file_path)},
+            'tool_use_id': 'x',
+            'hook_event_name': 'PostToolUse',
+        }
+    ).encode()
+
+
+def _run_hook(file_path: Path) -> tuple[int, bytes]:
+    """Run the hook in a subprocess with CLAUDE_EXEC_LAUNCH_DIR pointed at the worktree."""
+    env = {**os.environ, 'CLAUDE_EXEC_LAUNCH_DIR': str(REPO_ROOT)}
+    proc = subprocess.run(
+        [str(HOOK_SCRIPT)],
+        input=_payload(file_path),
+        capture_output=True,
+        cwd=str(REPO_ROOT),
+        env=env,
+        timeout=30,
+        check=False,
+    )
+    after = file_path.read_bytes() if file_path.exists() else b''
+    return proc.returncode, after

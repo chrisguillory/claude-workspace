@@ -14,16 +14,9 @@ Fires on every Edit/Write to a non-Python text file in the workspace. Layer-2
 backstop is upstream ``pre-commit/pre-commit-hooks`` (``trailing-whitespace``,
 ``end-of-file-fixer``, ``fix-byte-order-marker``, ``mixed-line-ending``).
 
-Fix logic (pure, idempotent):
-
-1. Empty / all-whitespace file → unchanged (more conservative than upstream
-   ``end-of-file-fixer`` which truncates all-``\\n`` files to empty).
-2. CRLF detected (``\\r`` in bytes) → ``MixedLineEndingsError`` (fail loud,
-   exit 2). CSV/TSV are excluded at the extension layer above.
-3. Strip ``[ \\t]+$`` per line. For ``.md`` / ``.markdown``: preserve exactly
-   two trailing spaces (CommonMark hard-line-break syntax) to match upstream's
-   ``--markdown-linebreak-ext=md``.
-4. Collapse trailing ``\\n`` runs to exactly one.
+The byte-level normalization rules — markdown hard-break preservation, BOM
+stripping, CRLF preservation, all-whitespace truncation, idempotency — are
+documented on the :func:`fix_bytes` function below (the canonical source).
 
 File-type gate:
 
@@ -147,8 +140,11 @@ def fix_bytes(data: bytes, path: Path) -> bytes:
             out.append(content.rstrip() + eol)
     joined = b''.join(out)
 
-    # End-of-file-fixer: walk back trailing \n/\r run, normalize to one trailing \n
-    # (or preserve final \r\n exactly).
+    # End-of-file-fixer: walk back trailing \n/\r run, normalize to one trailing
+    # newline. Matches upstream's iteration order (b'\n', b'\r\n', b'\r') — preserve
+    # the file's existing trailing line-ending style. Files with CRLF anywhere in
+    # the trailing run keep \r\n; pure-LF runs collapse to a single \n; trailing
+    # bare CR (rare) is preserved as a single \r.
     i = len(joined)
     while i > 0 and joined[i - 1 : i] in (b'\n', b'\r'):
         i -= 1
@@ -157,10 +153,13 @@ def fix_bytes(data: bytes, path: Path) -> bytes:
 
     if not prefix:
         result = b''
-    elif trailing == b'\r\n':
-        result = prefix + b'\r\n'
     else:
-        result = prefix + b'\n'
+        for seq in (b'\n', b'\r\n', b'\r'):
+            if trailing.startswith(seq):
+                result = prefix + seq
+                break
+        else:
+            result = prefix + b'\n'
 
     # Strip UTF-8 BOM at the END (matches Layer 2's hook order: trailing-whitespace +
     # end-of-file-fixer run BEFORE fix-byte-order-marker).
