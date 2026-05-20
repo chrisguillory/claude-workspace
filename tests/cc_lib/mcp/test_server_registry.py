@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from cc_lib.mcp.server_registry import McpServerInfo, read_all, register
+from cc_lib.types import CCVersion
 
 
 class TestRegistry:
@@ -49,7 +50,7 @@ def info() -> McpServerInfo:
         mcp_pid=os.getpid(),
         claude_pid=999,
         session_id='test-session-abc',
-        claude_version='2.1.138',
+        claude_version=CCVersion('2.1.138'),
         started_at=datetime.now(UTC),
     )
 

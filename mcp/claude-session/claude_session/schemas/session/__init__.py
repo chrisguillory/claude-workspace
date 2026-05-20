@@ -7,7 +7,13 @@ All models are currently in models.py - see README.md for planned structure.
 from __future__ import annotations
 
 # Re-export markers for convenience
-from claude_session.schemas.session.markers import PathField, PathListField, PathMarker
+from claude_session.schemas.session.markers import (
+    CCVersionMarker,
+    CCVersionStrField,
+    PathField,
+    PathListField,
+    PathMarker,
+)
 
 # Re-export all public symbols from models
 from claude_session.schemas.session.models import (
@@ -36,6 +42,7 @@ from claude_session.schemas.session.models import (
     # Records
     AssistantRecord,
     AsyncTaskLaunchResult,
+    AwaySummarySystemRecord,
     BackgroundTask,
     BaseRecord,
     BashOutputToolInput,
@@ -277,6 +284,7 @@ __all__ = [
     'AgentTeammateSpawnedResult',
     'AskUserQuestionToolResult',
     'AsyncTaskLaunchResult',
+    'AwaySummarySystemRecord',
     'BackgroundTask',
     'BashToolResult',
     'BashOutputToolResult',
@@ -358,6 +366,8 @@ __all__ = [
     'SessionMetadata',
     'SessionAnalysis',
     # Markers
+    'CCVersionMarker',
+    'CCVersionStrField',
     'PathField',
     'PathListField',
     'PathMarker',

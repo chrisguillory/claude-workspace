@@ -89,7 +89,7 @@ async def register_self(
         mcp_pid=os.getpid(),
         claude_pid=claude_context.claude_pid,
         session_id=claude_context.session_id,
-        claude_version=str(claude_context.claude_version),
+        claude_version=claude_context.claude_version,
         started_at=datetime.now(UTC),
         sock_path=sock_path,
         capabilities=tuple(capabilities),

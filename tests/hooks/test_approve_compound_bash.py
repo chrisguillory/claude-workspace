@@ -903,11 +903,10 @@ class TestMainIntegration:
         (home / '.claude').mkdir(parents=True)
         (home / '.claude' / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Bash(echo:*)']}}))
         monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
-
         payload = json.dumps(
             {
                 'session_id': 'test',
-                'cwd': '/tmp',
+                'cwd': str(home),
                 'transcript_path': '/tmp/transcript.jsonl',
                 'hook_event_name': 'PreToolUse',
                 'tool_name': 'Bash',
@@ -918,7 +917,7 @@ class TestMainIntegration:
         )
         monkeypatch.setattr('sys.stdin', io.StringIO(payload))
 
-        hook_module.handle_hook()
+        hook_module.handle_hook.__wrapped__()
 
         captured = capsys.readouterr()
         output = json.loads(captured.out)

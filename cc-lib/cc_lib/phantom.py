@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING
 
 from filelock import FileLock
 
+from cc_lib.types import CCVersion
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
 if TYPE_CHECKING:
@@ -81,7 +82,7 @@ class PhantomHandler:
         phantom.print_diagnostics()
     """
 
-    def __init__(self, manager: SessionManager, claude_pid: int, claude_version: str) -> None:
+    def __init__(self, manager: SessionManager, claude_pid: int, claude_version: CCVersion) -> None:
         self._manager = manager
         self._pid = claude_pid
         self._version = claude_version
@@ -147,10 +148,11 @@ class PhantomHandler:
             if PHANTOM_LOG_PATH.exists():
                 phantom_log = json.loads(PHANTOM_LOG_PATH.read_text())
 
-            entry = phantom_log.get(self._version, {'count': 0})
+            version_key = str(self._version)
+            entry = phantom_log.get(version_key, {'count': 0})
             entry['count'] = int(entry['count']) + count
             entry['last_seen'] = datetime.now(UTC).astimezone().isoformat()
-            phantom_log[self._version] = entry
+            phantom_log[version_key] = entry
 
             with tempfile.NamedTemporaryFile(mode='w', dir=PHANTOM_LOG_PATH.parent, delete=False, suffix='.tmp') as f:
                 json.dump(phantom_log, f, indent=2)

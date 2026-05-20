@@ -10,6 +10,7 @@ Aggregates data from multiple sources:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +19,9 @@ import psutil
 import pydantic
 from cc_lib.mcp import find_one
 from cc_lib.session_tracker import Session, SessionDatabase
+from cc_lib.types import CCVersion
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
+from packaging.version import InvalidVersion
 
 from claude_session import PROJECT
 from claude_session.schemas.operations.context import SessionContext
@@ -33,6 +36,9 @@ __all__ = [
     'CurrentSessionContext',
     'SessionInfoService',
 ]
+
+
+logger = logging.getLogger(__name__)
 
 
 # Claude workspace sessions.json location (our own data, NOT affected by CLAUDE_CONFIG_DIR)
@@ -286,8 +292,8 @@ class SessionInfoService:
     async def _get_claude_version(
         self,
         session_file: Path,
-        workspace_version: str | None,
-    ) -> str | None:
+        workspace_version: CCVersion | None,
+    ) -> CCVersion | None:
         """Get Claude Code version, preferring workspace sessions.json.
 
         Falls back to scanning JSONL records when sessions.json doesn't carry a
@@ -301,8 +307,13 @@ class SessionInfoService:
                 for line in f:
                     record = json.loads(line)
                     version = record.get('version')
-                    if isinstance(version, str):
-                        return version
+                    if not isinstance(version, str):
+                        continue
+                    try:
+                        return CCVersion.parse(version)
+                    except InvalidVersion:
+                        logger.exception('Skipping unparseable JSONL version: %r', version)
+                        continue
 
         return None
 

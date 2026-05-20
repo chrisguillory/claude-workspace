@@ -6,46 +6,38 @@ e.g., orphaned sessions on disk without a corresponding workspace entry.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 
-from claude_session.schemas.session import (
-    ApiErrorSystemRecord,
-    AssistantRecord,
-    CompactBoundarySystemRecord,
-    InformationalSystemRecord,
-    LocalCommandSystemRecord,
-    SessionRecord,
-    TurnDurationSystemRecord,
-    UserRecord,
-)
+from cc_lib.types import CCVersion
+from packaging.version import InvalidVersion
+
+from claude_session.introspection import get_cc_version_fields
+from claude_session.schemas.session import SessionRecord
 
 __all__ = [
-    'VERSION_RECORD_TYPES',
     'get_version_from_records',
 ]
 
-
-# All record types that have a version field
-VERSION_RECORD_TYPES = (
-    UserRecord,
-    AssistantRecord,
-    LocalCommandSystemRecord,
-    CompactBoundarySystemRecord,
-    ApiErrorSystemRecord,
-    InformationalSystemRecord,
-    TurnDurationSystemRecord,
-)
+logger = logging.getLogger(__name__)
 
 
-def get_version_from_records(records: Sequence[SessionRecord]) -> str | None:
+def get_version_from_records(records: Sequence[SessionRecord]) -> CCVersion | None:
     """Extract Claude Code version from session records.
 
-    Searches through records to find the first one with a version field.
-    Used when sessions.json doesn't have a workspace_version for the session.
+    Walks records, finds the first one with a ``CCVersionMarker``-annotated
+    field carrying a parseable PEP 440 string. Used when sessions.json doesn't
+    have a workspace_version for the session.
 
-    Returns version string (e.g., "2.0.76"), or None if no version found.
+    Returns CCVersion, or None if no parseable version found.
     """
     for record in records:
-        if isinstance(record, VERSION_RECORD_TYPES) and record.version:
-            return record.version
+        for value in get_cc_version_fields(record).values():
+            if not value:
+                continue
+            try:
+                return CCVersion.parse(value)
+            except InvalidVersion:
+                logger.exception('Skipping unparseable record version: %r', value)
+                continue
     return None

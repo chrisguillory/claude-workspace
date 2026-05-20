@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from cc_lib.types import CCVersion
+
 from claude_session.schemas.base import StrictModel
 from claude_session.schemas.types import JsonDatetime
 
@@ -62,7 +64,7 @@ class SessionContext(StrictModel):
     machine_id: str | None  # user@hostname identifier
     claude_pid: int | None  # Claude Code process ID (parent of mcp_pid)
     mcp_pid: int | None  # claude-session MCP server's own PID (child of claude_pid; None for CLI queries)
-    claude_version: str | None  # Claude Code CLI version (e.g., "2.1.12")
+    claude_version: CCVersion | None  # Claude Code CLI version (e.g., "2.1.12")
     temp_dir: str | None  # MCP server's temp directory
 
     # Origin (from claude-workspace sessions.json, defaults to 'unknown' if unavailable)

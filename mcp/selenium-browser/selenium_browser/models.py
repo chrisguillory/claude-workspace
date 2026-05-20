@@ -246,6 +246,7 @@ class ChromeLocalState(OpenModel):
     variations_country: str | None = None
     variations_crash_streak: int | None = None
     variations_failed_to_fetch_seed_streak: int | None = None
+    variations_geo_level1: str | None = None
     variations_google_groups: JsonObject | None = None
     variations_last_fetch_time: str | None = None
     variations_permanent_consistency_country: Sequence[str] | None = None

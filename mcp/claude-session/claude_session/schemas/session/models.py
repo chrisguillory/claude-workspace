@@ -251,8 +251,9 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
 
 import pydantic
+from cc_lib.types import CCVersion
 
-from claude_session.schemas.session.markers import PathField, PathListField
+from claude_session.schemas.session.markers import CCVersionStrField, PathField, PathListField
 from claude_session.schemas.types import BaseStrictModel, EmptySequence, ModelId, PermissiveModel
 
 __all__ = [
@@ -505,8 +506,8 @@ __all__ = [
 # -- Schema Version ------------------------------------------------------------
 
 SCHEMA_VERSION = '0.2.34'
-CLAUDE_CODE_MIN_VERSION = '2.0.35'
-CLAUDE_CODE_MAX_VERSION = '2.1.138'
+CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.138')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -2469,7 +2470,7 @@ class UserRecord(BaseRecord):
     parentUuid: str | None
     isSidechain: bool
     userType: Literal['external']
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     message: Message
     origin: UserRecordOrigin | None = None  # Message origin metadata (Claude Code 2.1.87+)
@@ -2571,7 +2572,9 @@ class AssistantRecord(BaseRecord):
         None, description='Indicates sidechain/subprocess execution (present in agent records)'
     )
     userType: str | None = pydantic.Field(None, description='User type (present in agent records)')
-    version: str | None = pydantic.Field(None, description='Claude Code version (present in agent records)')
+    version: CCVersionStrField | None = pydantic.Field(
+        None, description='Claude Code version (present in agent records)'
+    )
     gitBranch: str | None = pydantic.Field(None, description='Git branch (present in agent records)')
     isApiErrorMessage: bool | None = pydantic.Field(None, description='Indicates this message represents an API error')
     apiError: Literal['max_output_tokens'] | None = pydantic.Field(
@@ -2650,7 +2653,7 @@ class LocalCommandSystemRecord(BaseRecord):
     isMeta: bool  # UI visibility flag: true = internal plumbing hidden from terminal
     isSidechain: bool
     userType: str
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     slug: str | None = pydantic.Field(None, description='Human-readable session slug (Claude Code 2.0.51+)')
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
@@ -2671,7 +2674,7 @@ class CompactBoundarySystemRecord(BaseRecord):
     isMeta: bool
     isSidechain: bool
     userType: str
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     slug: str | None = pydantic.Field(None, description='Human-readable session slug (Claude Code 2.0.51+)')
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
@@ -2694,7 +2697,7 @@ class MicrocompactBoundarySystemRecord(BaseRecord):
     isMeta: bool
     isSidechain: bool
     userType: str
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
@@ -2714,7 +2717,7 @@ class ApiErrorSystemRecord(BaseRecord):
     level: Literal['error', 'warning'] | None = None
     isSidechain: bool | None = None  # Optional for api_error
     userType: str | None = None  # Optional for api_error
-    version: str | None = None  # Optional for api_error
+    version: CCVersionStrField | None = None  # Optional for api_error
     gitBranch: str | None = None  # Optional for api_error
     slug: str | None = pydantic.Field(None, description='Human-readable session slug (Claude Code 2.0.51+)')
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
@@ -2742,7 +2745,7 @@ class InformationalSystemRecord(BaseRecord):
     isMeta: bool | None = None
     isSidechain: bool | None = None
     userType: str | None = None
-    version: str | None = None
+    version: CCVersionStrField | None = None
     gitBranch: str | None = None
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
     slug: str | None = None
@@ -2763,7 +2766,7 @@ class TurnDurationSystemRecord(BaseRecord):
     isMeta: bool
     isSidechain: bool
     userType: str
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
@@ -2795,7 +2798,7 @@ class StopHookSummarySystemRecord(BaseRecord):
     level: Literal['info', 'error', 'warning', 'suggestion'] | None = None
     isSidechain: bool | None = None
     userType: str | None = None
-    version: str | None = None
+    version: CCVersionStrField | None = None
     gitBranch: str | None = None
     toolUseID: str | None = None  # Tool use ID if triggered by tool
     slug: str | None = None  # Human-readable session slug
@@ -2817,7 +2820,7 @@ class BridgeStatusSystemRecord(BaseRecord):
     isMeta: bool
     isSidechain: bool
     userType: str
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None  # Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)
@@ -2840,7 +2843,7 @@ class ScheduledTaskFireSystemRecord(BaseRecord):
     isMeta: bool
     isSidechain: bool
     userType: str
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None
@@ -2862,7 +2865,7 @@ class AwaySummarySystemRecord(BaseRecord):
     isMeta: bool
     isSidechain: bool
     userType: str
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None
@@ -3056,7 +3059,7 @@ class ProgressRecord(StrictModel):
     parentUuid: str | None
     isSidechain: bool
     userType: Literal['external']
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     data: ProgressData
     parentToolUseID: str
@@ -3096,7 +3099,7 @@ class SavedHookContextRecord(StrictModel):
     parentUuid: str | None
     isSidechain: bool
     userType: Literal['external']
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     content: Sequence[str]
     hookName: str
@@ -3609,7 +3612,7 @@ class AttachmentRecord(BaseRecord):
     parentUuid: str | None  # Null on the first record of a session
     isSidechain: bool
     userType: Literal['external']
-    version: str
+    version: CCVersionStrField
     gitBranch: str
     slug: str | None = None
     entrypoint: str | None = None

@@ -9,7 +9,6 @@ See: https://code.claude.com/docs/en/hooks#sessionstart
 # dependencies = [
 #   "cc_lib",
 #   "click",
-#   "packaging",
 #   "pydantic>=2.0.0",
 # ]
 #
@@ -24,7 +23,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import click
-import packaging.version
 import psutil
 from cc_lib.claude_context import find_claude_pid
 from cc_lib.error_boundary import ErrorBoundary
@@ -33,6 +31,7 @@ from cc_lib.phantom import PhantomHandler
 from cc_lib.schemas.base import SubsetModel
 from cc_lib.schemas.hooks import SessionStartHookInput
 from cc_lib.session_tracker import SessionManager
+from cc_lib.types import CCVersion
 from cc_lib.utils import Timer
 
 boundary = ErrorBoundary(exit_code=2)
@@ -101,10 +100,10 @@ def main() -> None:
 # -- Helpers ------------------------------------------------------------------
 
 
-def _get_claude_version(claude_pid: int) -> str:
+def _get_claude_version(claude_pid: int) -> CCVersion:
     """Extract Claude Code version from the running process's executable path."""
     exe_path = Path(psutil.Process(claude_pid).exe())
-    return str(packaging.version.Version(exe_path.name))
+    return CCVersion(exe_path.name)
 
 
 def _get_process_created_at(claude_pid: int) -> datetime:
