@@ -677,7 +677,7 @@ Iterate steps 2-5 until all records validate. Multiple rounds are normal.
 Update the version constants in `models.py`:
 ```python
 SCHEMA_VERSION = '0.2.XX'
-CLAUDE_CODE_MAX_VERSION = '2.1.XX'
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.XX')
 ```
 Add a changelog line to the module docstring header. The `CLAUDE CODE VERSION COMPATIBILITY:` block is **chronological** (oldest at top, latest at bottom) — append new entries **after** the most recent existing entry, not above it. Bump `pyproject.toml` version (patch for additive optional fields, minor for new record types or breaking changes).
 

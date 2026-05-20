@@ -116,7 +116,7 @@ from cc_lib.claude_context import lookup_session_by_id
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
-from cc_lib.types import EffortLevel
+from cc_lib.types import CCVersion, EffortLevel
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
 # Credential Models — External Data (login files, config, keychain)
@@ -331,7 +331,7 @@ class StatusLineInput(StrictModel):
     context_window: ContextWindow
     session_id: str
     transcript_path: str
-    version: str
+    version: CCVersion
     exceeds_200k_tokens: bool
     """Vestigial field — no longer actionable.
 

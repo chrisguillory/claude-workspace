@@ -619,7 +619,7 @@ PATCHES: Sequence[PatchDef] = (
         old=b'behavior==="ask"',
         new=b'behavior==="xsk"',
         window=200,
-        min_version='2.1.109',
+        min_version=CCVersion('2.1.109'),
     ),
     PatchDef(
         name='inject-searching-past-context-prompt',
@@ -632,7 +632,7 @@ PATCHES: Sequence[PatchDef] = (
         old=b'if(!M_("tengu_coral_fern",!1))return[]',
         new=b'if(0/*coral_fern_gate_check*/)return[]',
         window=80,
-        min_version='2.1.138',
+        min_version=CCVersion('2.1.138'),
         required_setting=[
             RequiredSetting(
                 key='autoMemoryEnabled',
@@ -650,7 +650,7 @@ PATCHES: Sequence[PatchDef] = (
         old=b'function XHH(){return M_("tengu_scratch",!1)}',
         new=b'function XHH(){return!0/*scratchpad always*/}',
         window=50,
-        min_version='2.1.138',
+        min_version=CCVersion('2.1.138'),
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
@@ -676,7 +676,7 @@ PATCHES: Sequence[PatchDef] = (
             b'!K&&w8.createElement(V,{dimColor:!0},"  ",w8.createElement(EM,null)))'
         ),
         window=800,
-        min_version='2.1.138',
+        min_version=CCVersion('2.1.138'),
     ),
     PatchDef(
         name='statusline',
@@ -685,7 +685,7 @@ PATCHES: Sequence[PatchDef] = (
         anchor=b'statusLine?.padding',
         old=b'wrap:"truncate"',
         new=b'wrap:"wrap"    ',
-        min_version='2.1.51',
+        min_version=CCVersion('2.1.51'),
     ),
 )
 

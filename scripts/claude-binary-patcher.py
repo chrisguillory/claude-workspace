@@ -57,6 +57,7 @@ from cc_lib.claude_process import kill_and_copy_resume
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.exceptions import ClaudeContextError
+from cc_lib.types import CCVersion
 from cc_lib.utils.atomic_write import atomic_write
 
 
@@ -382,8 +383,8 @@ class BinaryPatcher:
         return self._path
 
     @property
-    def version(self) -> str:
-        return self._path.name
+    def version(self) -> CCVersion:
+        return CCVersion(self._path.name)
 
     @property
     def size_mb(self) -> float:
@@ -470,7 +471,7 @@ class BinaryPatcher:
     def _save_original(self) -> Path:
         """Save the original binary to our workspace directory."""
         ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
-        original_path = ORIGINALS_DIR / self.version
+        original_path = ORIGINALS_DIR / str(self.version)
         if not original_path.exists():
             atomic_write(original_path, self._data, reference=self._path)
             print(f'\nOriginal saved to {original_path}')
