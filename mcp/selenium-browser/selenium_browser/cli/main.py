@@ -15,10 +15,12 @@ from typing import Annotated
 
 import httpx
 import typer
-from cc_lib.claude_context import ClaudeContext
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.mcp import find_live_sock_path
 from cc_lib.types import OutputFormat
+
+from selenium_browser import PROJECT
 
 from ..models import (
     Browser,
@@ -569,12 +571,11 @@ def _configure_logging(
 
 
 def _get_socket_path() -> pathlib.Path:
-    """Find the Unix socket for the running MCP server's HTTP bridge."""
-    claude_pid = ClaudeContext.from_env().claude_pid
-    sock = pathlib.Path(f'/tmp/selenium-browser-{claude_pid}.sock')
-    if not sock.exists():
-        typer.secho(f'Error: Socket not found at {sock}', fg=typer.colors.RED, err=True)
-        typer.echo('Is the selenium-browser MCP server running?', err=True)
+    """Find the Unix socket for the running MCP server's HTTP bridge via the registry."""
+    sock = find_live_sock_path(PROJECT.name)
+    if sock is None:
+        typer.secho(f'Error: no live {PROJECT.name} MCP for current session', fg=typer.colors.RED, err=True)
+        typer.echo(f'Is the {PROJECT.name} MCP server running?', err=True)
         raise SystemExit(1)
     return sock
 
