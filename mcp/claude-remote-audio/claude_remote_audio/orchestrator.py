@@ -426,37 +426,32 @@ def _looks_like_applescript_tcc_denial(error_msg: str) -> bool:
 def _looks_like_bluetooth_tcc_denial(error_msg: str) -> bool:
     """True when a BluetoothError matches blueutil's documented TCC denial signal.
 
-    Two distinct OS-level states, both detectable deterministically:
+    Only deterministic markers — no inference from timeout signatures, which
+    are indistinguishable from device-unreachable failures (Apple's BT layer
+    waits ~30s on unreachable connects; the daemon-side dispatch timeout
+    fires first with the same ``exit -1 + empty stderr`` signature as a TCC
+    pending-dialog hold). A previous version's third clause matching that
+    pair caused false positives for "device not reachable" errors, sending
+    users to grant permissions they already had.
 
-    - **Already denied**: blueutil v2.13.0 installs a ``SIGABRT`` handler
+    Two clauses, both load-bearing on blueutil v2.13.0's source behavior:
+
+    - **Already denied**: blueutil installs a ``SIGABRT`` handler
       (``handle_abort`` in ``blueutil.m``) that runs when CoreBluetooth aborts
-      on a permission failure. It writes a verbatim diagnostic to stderr —
-      ``"Error: Received abort signal, it may be due to absence of access to
-      Bluetooth API..."`` — and exits with ``EX_SIGABRT`` (134). No other
-      failure mode produces exit 134 from blueutil.
-    - **Pending dialog**: macOS holds the process while the permission prompt
-      awaits user action, and the daemon-side dispatch timeout
-      (``claude_remote_bash.executor``) kills the held process before
-      blueutil's handler runs. That path emits ``stdout='[TIMEOUT]'``,
-      ``stderr=''``, ``exit_code=-1``; the orchestrator's BluetoothError
-      currently surfaces stderr (not stdout), so we match on the exit-1 +
-      empty-stderr pair as the timeout's stderr-visible footprint.
+      on a permission failure. It writes ``"Error: Received abort signal, it
+      may be due to absence of access to Bluetooth API..."`` to stderr and
+      exits with ``EX_SIGABRT`` (134). No other failure mode in blueutil
+      produces exit 134.
 
-    Note: an earlier heuristic only checked ``stderr: <empty>``, which
-    accidentally caught only the pending-dialog branch and silently
-    misclassified already-denied cases as generic failures.
+    For pending-dialog state (rarer — the user is mid-dialog), the failure
+    surfaces as a generic ApplyError with the underlying timeout text. Less
+    actionable than a structured error, but not WRONG.
     """
     if 'blueutil' not in error_msg:
         return False
-    # Already denied: blueutil ran, SIGABRT fired, handler wrote the marker.
     if 'absence of access to Bluetooth API' in error_msg:
         return True
-    if 'command failed (exit 134)' in error_msg:
-        return True
-    # Pending dialog: daemon timeout killed blueutil before its handler ran.
-    if 'command failed (exit -1)' in error_msg and 'stderr: <empty>' in error_msg:
-        return True
-    return False
+    return 'command failed (exit 134)' in error_msg
 
 
 # -- Hub phase ----------------------------------------------------------------
