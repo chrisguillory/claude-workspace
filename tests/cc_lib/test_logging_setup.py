@@ -22,8 +22,8 @@ class TestParseCcLog:
         )
 
     def test_whitespace_tolerated(self) -> None:
-        root, per_logger = _parse_cc_log(' warning , cc_lib.mcp.bridge = debug ')
-        assert (root, dict(per_logger)) == ('WARNING', {'cc_lib.mcp.bridge': 'DEBUG'})
+        root, per_logger = _parse_cc_log(' warning , cc_lib.mcp.uds_bridge = debug ')
+        assert (root, dict(per_logger)) == ('WARNING', {'cc_lib.mcp.uds_bridge': 'DEBUG'})
 
     def test_levels_uppercased(self) -> None:
         _, per_logger = _parse_cc_log('foo=DeBuG')
@@ -41,10 +41,10 @@ class TestParseCcLog:
 class TestConfigureLogging:
     def test_env_var_sets_per_module_levels(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The dispositive integration: per-module override flows env → setLevel."""
-        monkeypatch.setenv('CC_LOG', 'warning,cc_lib.mcp.bridge=debug')
+        monkeypatch.setenv('CC_LOG', 'warning,cc_lib.mcp.uds_bridge=debug')
         configure_logging()
         assert logging.getLogger().level == logging.WARNING
-        assert logging.getLogger('cc_lib.mcp.bridge').level == logging.DEBUG
+        assert logging.getLogger('cc_lib.mcp.uds_bridge').level == logging.DEBUG
 
 
 @pytest.fixture(autouse=True)

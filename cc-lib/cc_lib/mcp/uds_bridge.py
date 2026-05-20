@@ -32,8 +32,10 @@ class UdsBridge:
 async def start_uds_bridge(app: ASGIApp, mcp_name: str) -> UdsBridge:
     """Serve ``app`` on the MCP server's per-PID Unix domain socket.
 
-    A stale socket file at the path is removed before binding. Returns a
-    handle whose ``stop`` must be awaited on server shutdown.
+    A stale socket file at the path is removed before binding. Awaits
+    ``server.started`` so the returned handle is guaranteed bound — a bind
+    failure raises here instead of surfacing as connection-refused at the
+    next CLI invocation.
     """
     socket_path = get_socket_path(mcp_name)
     socket_path.unlink(missing_ok=True)
@@ -43,6 +45,10 @@ async def start_uds_bridge(app: ASGIApp, mcp_name: str) -> UdsBridge:
     config = uvicorn.Config(app, uds=str(socket_path), log_config=None, ws='none')
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve())
+    while not server.started and not task.done():
+        await asyncio.sleep(0.02)
+    if task.done():
+        task.result()  # re-raise bind failure if startup aborted
     return UdsBridge(server, task, socket_path)
 
 

@@ -1,5 +1,3 @@
-"""Selenium Browser MCP Server package."""
-
 from __future__ import annotations
 
 __all__ = ['PROJECT']

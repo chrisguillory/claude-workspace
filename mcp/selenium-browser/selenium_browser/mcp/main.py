@@ -23,9 +23,9 @@ import typing
 # Third-Party Libraries
 from cc_lib.claude_context import ClaudeContext
 from cc_lib.logging_setup import configure_logging
-from cc_lib.mcp.bridge import start_uds_bridge
-from cc_lib.mcp.registry import register_self
+from cc_lib.mcp.server_registry import register_self
 from cc_lib.mcp.socket_name import get_socket_path
+from cc_lib.mcp.uds_bridge import start_uds_bridge
 from mcp.server.fastmcp import FastMCP
 
 # Local

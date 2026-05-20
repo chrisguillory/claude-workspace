@@ -20,7 +20,7 @@ def configure_logging() -> None:
 
     Examples::
 
-        CC_LOG = warning, cc_lib.mcp.bridge = debug  # bridge DEBUG, rest WARNING
+        CC_LOG = warning, cc_lib.mcp.uds_bridge = debug  # bridge DEBUG, rest WARNING
         CC_LOG = warning, cc_lib.mcp = debug  # all cc_lib.mcp.* at DEBUG
         CC_LOG = info, uvicorn.access = warning  # quiet just access logs
         CC_LOG = debug  # firehose

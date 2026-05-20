@@ -2,7 +2,6 @@ from __future__ import annotations
 
 __all__ = [
     'McpServerInfo',
-    'clear_session',
     'find_live_sock_path',
     'find_one',
     'read_all',
@@ -11,7 +10,6 @@ __all__ = [
 ]
 
 import os
-import shutil
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -109,7 +107,7 @@ def find_one(session_id: str, name: str) -> McpServerInfo | None:
     registry_dir = _session_dir(session_id)
     if not registry_dir.is_dir():
         return None
-    for entry_path in sorted(registry_dir.glob(f'{name}-*.json')):
+    for entry_path in sorted(registry_dir.glob(f'{name}-*.json'), key=_pid_from_entry_path):
         try:
             info = McpServerInfo.model_validate_json(entry_path.read_bytes())
         except (OSError, pydantic.ValidationError):
@@ -152,13 +150,8 @@ def read_all(session_id: str) -> Sequence[McpServerInfo]:
     return live
 
 
-def clear_session(session_id: str) -> None:
-    """Remove a session's registry directory.
-
-    Stale entries are filtered on read but accumulate on disk; this clears
-    them when a session ends.
-    """
-    shutil.rmtree(_session_dir(session_id), ignore_errors=True)
+def _pid_from_entry_path(entry_path: Path) -> int:
+    return int(entry_path.stem.rsplit('-', 1)[1])
 
 
 def _session_dir(session_id: str) -> Path:

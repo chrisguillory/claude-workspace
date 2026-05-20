@@ -5,7 +5,7 @@ Exposes tools via FastMCP (stdio) and an HTTP bridge (Unix socket) for heredoc u
 
 Architecture:
     Claude Code ─[stdio]─> FastMCP server
-    python-interpreter ─[HTTP]─> FastAPI on /tmp/python-interpreter-{pid}.sock
+    python-interpreter ─[HTTP]─> FastAPI on /tmp/python-interpreter-{mcp_pid}.sock
     External interpreters ─[subprocess]─> driver.py (length-prefixed JSON)
 
 Tools: execute, register_interpreter, stop_interpreter, list_interpreters
@@ -28,9 +28,9 @@ import fastapi
 import mcp.server.fastmcp
 import mcp.types
 from cc_lib.logging_setup import configure_logging
-from cc_lib.mcp.bridge import start_uds_bridge
-from cc_lib.mcp.registry import register_self
+from cc_lib.mcp.server_registry import register_self
 from cc_lib.mcp.socket_name import get_socket_path
+from cc_lib.mcp.uds_bridge import start_uds_bridge
 
 from python_interpreter import PROJECT
 from python_interpreter.models import ExecuteRequest, InterpreterInfo

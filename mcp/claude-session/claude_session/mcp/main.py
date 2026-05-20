@@ -24,7 +24,7 @@ from typing import Literal
 
 from cc_lib.claude_context import ClaudeContext
 from cc_lib.logging_setup import configure_logging
-from cc_lib.mcp.registry import register_self
+from cc_lib.mcp.server_registry import register_self
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 from mcp.server.fastmcp import FastMCP
 

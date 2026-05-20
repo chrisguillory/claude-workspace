@@ -16,7 +16,7 @@ from pathlib import Path
 
 import psutil
 import pydantic
-from cc_lib.mcp import registry
+from cc_lib.mcp import find_one
 from cc_lib.session_tracker import Session, SessionDatabase
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
 
@@ -144,7 +144,7 @@ class SessionInfoService:
             temp_dir = None  # Only available for current session
             # If session is in sessions.json, it was created on this machine
             machine_id = get_machine_id() if workspace_session else None
-            entry = registry.find_one(full_session_id, PROJECT.name) if workspace_session else None
+            entry = find_one(full_session_id, PROJECT.name) if workspace_session else None
             mcp_pid = entry.mcp_pid if entry is not None else None
 
         claude_version = await self._get_claude_version(

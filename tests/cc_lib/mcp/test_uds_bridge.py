@@ -1,4 +1,4 @@
-"""Tests for cc_lib.mcp.bridge -- start_uds_bridge + UdsBridge lifecycle."""
+"""Tests for cc_lib.mcp.uds_bridge -- start_uds_bridge + UdsBridge lifecycle."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from cc_lib.mcp.bridge import start_uds_bridge
 from cc_lib.mcp.socket_name import get_socket_path
+from cc_lib.mcp.uds_bridge import start_uds_bridge
 
 
 async def test_bridge_binds_and_stops_cleanly() -> None:

@@ -1,5 +1,3 @@
-"""Python Interpreter MCP Server package."""
-
 from __future__ import annotations
 
 __all__ = ['PROJECT']

@@ -1,4 +1,4 @@
-"""Tests for cc_lib.mcp.registry -- McpServerInfo, register (CM), read_all, clear_session."""
+"""Tests for cc_lib.mcp.server_registry -- McpServerInfo, register (CM), read_all."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from cc_lib.mcp.registry import McpServerInfo, clear_session, read_all, register
+from cc_lib.mcp.server_registry import McpServerInfo, read_all, register
 
 
 class TestRegistry:
@@ -24,7 +24,7 @@ class TestRegistry:
     async def test_skips_dead_pid(self, info: McpServerInfo, monkeypatch: pytest.MonkeyPatch) -> None:
         """The dispositive read_all behavior — without this, stale entries leak."""
         async with register(info):
-            monkeypatch.setattr('cc_lib.mcp.registry.psutil.pid_exists', lambda _pid: False)
+            monkeypatch.setattr('cc_lib.mcp.server_registry.psutil.pid_exists', lambda _pid: False)
             assert list(read_all(info.session_id)) == []
 
     async def test_skips_corrupt_file(self, info: McpServerInfo, workspace_dir: Path) -> None:
@@ -41,9 +41,6 @@ class TestRegistry:
             assert path.is_file()
         assert not path.exists()
 
-    def test_clear_missing_session_is_no_op(self) -> None:
-        clear_session('no-such-session')  # must not raise
-
 
 @pytest.fixture
 def info() -> McpServerInfo:
@@ -59,5 +56,5 @@ def info() -> McpServerInfo:
 
 @pytest.fixture(autouse=True)
 def workspace_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr('cc_lib.mcp.registry.get_claude_workspace_config_home_dir', lambda: tmp_path)
+    monkeypatch.setattr('cc_lib.mcp.server_registry.get_claude_workspace_config_home_dir', lambda: tmp_path)
     return tmp_path
