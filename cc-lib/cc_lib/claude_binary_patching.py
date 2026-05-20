@@ -720,7 +720,7 @@ PATCHES: Sequence[PatchDef] = (
         old=b'_==="true"&&(!Eq()||gQ_())',
         new=b'_==="true"&&(!0/*Eq||gQ*/)',
         window=200,
-        min_version='2.1.138',
+        min_version=CCVersion('2.1.138'),
     ),
     PatchDef(
         name='force-429-retry-status',
@@ -738,7 +738,7 @@ PATCHES: Sequence[PatchDef] = (
         old=b'if(H.status===429)return!Eq()||gQ_();',
         new=b'if(H.status===429)return!0;/*Eq||gQ*/',
         window=600,
-        min_version='2.1.138',
+        min_version=CCVersion('2.1.138'),
     ),
     PatchDef(
         name='hook-ask-no-override',
