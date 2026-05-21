@@ -576,22 +576,49 @@ async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[s
 async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[str]:
     """Kill any running roc-send on the hub; relaunch with direct ``core://`` capture.
 
-    Detached via ``nohup`` so the dispatch returns immediately even when the
-    child crashes on startup (bad device name, TCC denial, wedged CoreAudio
-    HAL, etc.). Verifies survival via post-launch pgrep so apply fails loudly
-    instead of silently reporting success against a dead process. On failure,
-    runs a HAL-wedge probe so the diagnosis becomes a ``ResolvableApplyError``
-    with a stable ``code`` + actionable ``suggestions`` — consumers (humans,
-    agents, log pipelines) dispatch on the structure rather than parsing prose.
+    Preflights Microphone TCC before spawning roc-send. macOS blocks daemon-
+    spawned mic-touching processes on the TCC prompt — they stay *alive* but
+    do nothing useful, fooling the post-launch ``pgrep`` survival check into
+    reporting success against a stuck process (observed empirically on
+    2026-05-21). Catching the ``notDetermined`` / ``denied`` state at preflight
+    avoids creating the zombie entirely.
+
+    Spawns roc-send detached via ``nohup`` so the dispatch returns immediately
+    even when the child crashes on startup (bad device name, channel-count
+    mismatch, etc.). Verifies survival via post-launch pgrep. On failure, runs
+    the multi-tier diagnostic so the resulting ``ResolvableApplyError`` carries
+    a stable ``code`` + actionable ``suggestions`` — consumers (humans, agents,
+    log pipelines) dispatch on the structure rather than parsing prose.
     """
     assert plan.input_device is not None  # guaranteed by caller
+
+    # Preflight: Microphone TCC. notDetermined leads to the blocked-on-prompt
+    # zombie; denied/restricted lead to silent failure. Either way, surface the
+    # same ResolvableApplyError the post-mortem diagnostic would have produced.
+    mic_status = await _check_microphone_tcc(service, plan.hub_alias)
+    if mic_status in ('denied', 'notDetermined', 'restricted'):
+        code, title, diagnosis_msg, suggestions = await _diagnose_roc_send_start_failure(
+            service, plan.hub_alias, roc_send_log=''
+        )
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: Microphone TCC preflight failed (status={mic_status}) — '
+            f'aborting before roc-send launch to avoid a TCC-blocked zombie process.\n\n'
+            f'{diagnosis_msg}',
+            code=code,
+            title=title,
+            suggestions=suggestions,
+            context={'host': plan.hub_alias, 'input_device': plan.input_device, 'tcc_status': mic_status},
+        )
+
     peer_ips = [plan.topology_peer_to_ip[p] for p in plan.topology_peer_aliases]
     await _run(service, plan.hub_alias, _roc_send_command(plan.input_device, peer_ips))
     await asyncio.sleep(3)
     alive = await _run(service, plan.hub_alias, 'pgrep -f roc-send >/dev/null && echo alive || echo dead')
     if alive.stdout.strip() != 'alive':
         logs = await _run(service, plan.hub_alias, 'tail -20 /tmp/roc-send.log 2>/dev/null')
-        code, title, diagnosis_msg, suggestions = await _diagnose_core_audio_wedge(service, plan.hub_alias)
+        code, title, diagnosis_msg, suggestions = await _diagnose_roc_send_start_failure(
+            service, plan.hub_alias, roc_send_log=logs.stdout
+        )
         raise ResolvableApplyError(
             f'{plan.hub_alias}: roc-send died within 3s of launch — input={plan.input_device!r}.\n\n'
             f'{diagnosis_msg}\n\n'
@@ -604,23 +631,123 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
     return [f'restarted roc-send (input={plan.input_device})']
 
 
-async def _diagnose_core_audio_wedge(service: DispatchService, host: str) -> tuple[str, str, str, Sequence[str]]:
-    """Distinguish a CoreAudio HAL wedge from a device-specific failure on ``host``.
+async def _check_microphone_tcc(service: DispatchService, host: str) -> str:
+    """Return the responsible-app's Microphone TCC status on ``host``.
 
-    Probes ``core://Claude Remote Mic`` — a roc-vad virtual device that
-    requires no physical hardware and no Microphone TCC. If even THIS fails,
-    SoX can't open *any* CoreAudio device and the HAL is wedged; the empirical
-    recovery is to reset the audio stack (kill coreaudiod, then reboot). If
-    the virtual probe succeeds, the failure is specific to the requested
-    device (TCC denial, exclusive access, format negotiation, unplugged USB,
-    etc.) and the caller should look at the device side, not the HAL.
+    Runs ``claude-tcc-probe microphone`` — a tiny stdlib-only Swift CLI that
+    wraps ``AVCaptureDevice.authorizationStatus(for: .audio)``. The probe runs
+    in the same dispatch chain as ``roc-send``, so the authorization status
+    reflects whatever TCC subject our daemon-spawned grandchildren inherit
+    (typically the parent terminal app when the daemon is ``nohup``-launched
+    from a shell).
 
-    Returns a ``(code, title, diagnosis_msg, suggestions)`` tuple suitable for
-    populating a ``ResolvableApplyError``. Codifies the diagnostic that would
-    have saved a full session of misdiagnosis: when EVERY ``core://`` device
-    fails, the signal is "wedge," not "specific bug per device." Two devices
-    failing identically is enough.
+    Returns one of ``authorized`` / ``denied`` / ``notDetermined`` /
+    ``restricted`` / ``unknown``. ``unknown`` if the probe binary is missing
+    (not yet bootstrapped) or the probe fails for any other reason — the
+    caller treats that as "couldn't determine, fall through to HAL probe."
     """
+    result = await _run(service, host, '/usr/local/bin/claude-tcc-probe microphone 2>/dev/null || echo unknown')
+    return result.stdout.strip().split('\n')[-1] or 'unknown'
+
+
+async def _diagnose_roc_send_start_failure(
+    service: DispatchService,
+    host: str,
+    *,
+    roc_send_log: str = '',
+) -> tuple[str, str, str, Sequence[str]]:
+    """Diagnose why ``roc-send`` couldn't start on ``host`` in failure-likelihood order.
+
+    SoX wraps every input-open error as a generic ``roc_sndio: backend
+    dispatcher: failed to open source`` — TCC denial, HAL wedge, channel-count
+    mismatch, and device-specific issues all produce that wrapper line. The
+    libsox layer below sometimes leaves a more specific message (``sox source:
+    can't open input file or device with the requested channel count`` etc.)
+    just above it. This function walks four tiers, each cheap, each falsifying
+    the prior:
+
+    1. **Microphone TCC** — probe the responsible app's mic auth status. When
+       the daemon is iTerm's grandchild (the typical ``nohup ... &`` setup),
+       TCC attributes to iTerm; if iTerm has no mic consent, every roc-send
+       through the chain fails silently. This was the actual cause of a
+       multi-hour misdiagnosis (mistaken for HAL wedge) on 5/20/2026.
+    2. **Log-marker patterns** — scan ``roc_send_log`` for specific libsox
+       errors that already tell us the cause: channel-count mismatch is the
+       canonical example. Catching these short-circuits past the unreliable
+       HAL probe (which uses Claude Remote Mic — itself broken on some Macs
+       for reasons unrelated to HAL state).
+    3. **HAL wedge** — TCC OK, no log-marker hit, but roc-send still can't
+       open the roc-vad virtual mic. HAL may be wedged; empirically only a
+       reboot clears it (``killall coreaudiod`` and mass-killing audio clients
+       have been observed NOT to work). This tier can also false-positive when
+       Claude Remote Mic itself is the problem — kept as last-resort signal.
+    4. **Device-specific** — generic fallthrough when no tier matched.
+
+    Returns ``(code, title, diagnosis_msg, suggestions)`` for
+    ``ResolvableApplyError``.
+    """
+    # Tier 1: Microphone TCC
+    mic_status = await _check_microphone_tcc(service, host)
+    if mic_status in ('denied', 'notDetermined'):
+        return (
+            'microphone-tcc-denied',
+            f'Microphone TCC not granted on {host}',
+            f'Diagnosis: AVCaptureDevice mic auth status on {host} is `{mic_status}`. '
+            'macOS gates microphone access via TCC against the *responsible app* — '
+            'when the dispatching daemon is launched as a child of a terminal '
+            '(e.g. via `nohup ... &` from iTerm), every roc-send through the chain '
+            "inherits the terminal's consent. If that terminal has no Microphone "
+            'TCC, the denial is silent and SoX wraps the failure as a generic '
+            '"backend dispatcher: failed to open source" error — indistinguishable '
+            'from a HAL wedge.',
+            (
+                f'On {host}: open System Settings → Privacy & Security → Microphone',
+                "Enable Microphone access for the daemon's parent app (typically iTerm.app — check `ps` to confirm)",
+                f'OR: in that terminal app on {host}, run `sox -d -n trim 0 0.1` '
+                'to trigger a TCC prompt, then click Allow',
+                'Re-run apply once consent is granted',
+            ),
+        )
+    if mic_status == 'restricted':
+        return (
+            'microphone-tcc-restricted',
+            f'Microphone TCC blocked by policy on {host}',
+            f'Diagnosis: AVCaptureDevice mic auth status on {host} is `restricted` '
+            '— an MDM profile or parental control is blocking mic access. Cannot '
+            'be overridden from a CLI; requires admin intervention.',
+            (
+                f'Contact the admin managing {host} to grant Microphone access',
+                'Or temporarily relax the policy via Profile Manager / Jamf / MDM',
+            ),
+        )
+
+    # Tier 2: parse roc-send.log for specific libsox markers that already
+    # name the cause — short-circuits past the unreliable HAL probe.
+    channel_match = re.search(
+        r'requested channel count:\s*required_by_input=(\d+)\s+requested_by_user=(\d+)',
+        roc_send_log,
+    )
+    if channel_match:
+        device_ch, requested_ch = channel_match.group(1), channel_match.group(2)
+        return (
+            'roc-send-channel-count-mismatch',
+            f'roc-send channel-count mismatch on {host}',
+            f'Diagnosis: The input device on {host} has {device_ch} channel(s) but '
+            f'roc-send was invoked requesting {requested_ch} channel(s). libsox '
+            "won't negotiate down. The orchestrator is supposed to detect the "
+            "device's native channel count and pass `-c N` accordingly (task #21) — "
+            'this path is currently regressed (the original fix lived in the '
+            'ffmpeg pipeline that was reverted in commit 970040d8).',
+            (
+                f'On {host}: confirm the input device is mono with `claude-coreaudio-volume list`',
+                'Workaround: choose an input device whose native channel count matches '
+                "roc-send's default (stereo / 2 channels)",
+                'Fix: re-engage task #21 — add per-device channel-count detection in '
+                '`_roc_send_command` and inject `-c {channels}` into the roc-send args',
+            ),
+        )
+
+    # Tier 3: HAL probe via the roc-vad virtual mic
     probe = await _run(
         service,
         host,
@@ -633,25 +760,33 @@ async def _diagnose_core_audio_wedge(service: DispatchService, host: str) -> tup
     if verdict == 'WEDGED':
         return (
             'core-audio-hal-wedge',
-            'CoreAudio HAL wedge on the hub',
-            'Diagnosis: CoreAudio HAL on the hub is wedged — roc-send cannot open ANY '
-            'core:// device, including the roc-vad virtual mic (which depends on no '
-            'physical hardware or Microphone TCC). The HAL itself is in a bad state.',
+            f'CoreAudio HAL wedge on {host}',
+            f'Diagnosis: Microphone TCC is `{mic_status}` (good), but roc-send still '
+            'cannot open the roc-vad virtual mic. The CoreAudio HAL itself is '
+            'wedged — empirically the only reliable recovery is a reboot.',
             (
-                f'On {host}: sudo killall coreaudiod   (lightest; often enough)',
-                f'If step 1 does not clear it, reboot {host}',
-                'After recovery, re-run apply',
+                f'Reboot {host} — empirically, `killall coreaudiod`, killing '
+                '`AudioComponentRegistrar`, and mass-killing every audio-framework '
+                'client process (including the roc_vad HAL plugin host) have all '
+                'been observed to NOT clear the wedge state. Reboot is the '
+                'documented and reliable recovery.',
+                'After reboot, re-run apply',
             ),
         )
+
+    # Tier 4: Device-specific (no marker matched, HAL probe says healthy)
     return (
         'roc-send-device-specific-open-failure',
-        'roc-send cannot open the requested input device',
-        'Diagnosis: CoreAudio HAL is healthy (the virtual mic opens). Failure is '
-        'specific to the requested input device — not a workspace-wide HAL issue.',
+        f'roc-send cannot open the requested input device on {host}',
+        f'Diagnosis: Microphone TCC is `{mic_status}` (good), CoreAudio HAL is '
+        'healthy (the roc-vad virtual mic opens), no recognized libsox marker '
+        "matched the log, but this particular device couldn't be opened. "
+        'Likely: device unplugged, exclusively held by another process, or '
+        'format negotiation failure.',
         (
-            'Check that the device is connected to the hub',
-            'Check that the dispatching daemon has Microphone permission in System Settings → Privacy & Security',
+            'Check that the device is connected to the hub and recognized by Core Audio',
             'Check that no other process holds the device exclusively',
+            'Inspect `/tmp/roc-send.log` on the hub for additional clues',
         ),
     )
 
@@ -956,7 +1091,11 @@ async def _ensure_prereqs(
     if has_output:
         hub_binaries += ['roc-recv']
     if has_input:
-        hub_binaries += ['roc-send', 'claude-coreaudio-volume']
+        # claude-tcc-probe powers the Tier-1 Microphone-TCC check in the
+        # roc-send-start-failure diagnostic — without it the diagnostic falls
+        # through to the HAL probe and risks misclassifying TCC denials as
+        # HAL wedges (the misdiagnosis that motivated shipping the probe).
+        hub_binaries += ['roc-send', 'claude-coreaudio-volume', 'claude-tcc-probe']
 
     peer_binaries = ['roc-vad']
     if has_output or has_input:
@@ -1170,15 +1309,19 @@ async def _install_prereqs_on_host(
     command (no heredoc quoting, no temp files, no mount). When
     ``sudo_password`` is set, an ``export SUDO_PASSWORD=...`` line is prepended
     to the payload — the script's install step pipes that into ``sudo -S``.
-    The Swift source for ``claude-coreaudio-volume`` is also base64-encoded and
-    shipped via ``CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64`` env var; bootstrap.sh
-    decodes it, compiles with ``swiftc``, and installs the binary. Timeout is
-    generous (15 min) because cold first runs include a scons compile of
-    roc-toolkit (~5 min on Apple Silicon).
+    Swift sources for ``claude-coreaudio-volume`` and ``claude-tcc-probe`` are
+    base64-encoded and shipped via env vars (``CRA_SWIFT_CLAUDE_*_B64``);
+    bootstrap.sh decodes, compiles with ``swiftc``, and installs each binary.
+    Timeout is generous (15 min) because cold first runs include a scons
+    compile of roc-toolkit (~5 min on Apple Silicon).
     """
     script_text = _bootstrap_script_path().read_text(encoding='utf-8')
-    swift_source_b64 = base64.b64encode(_coreaudio_volume_swift_source_path().read_bytes()).decode('ascii')
-    exports = [f'export CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64={shlex.quote(swift_source_b64)}']
+    volume_b64 = base64.b64encode(_coreaudio_volume_swift_source_path().read_bytes()).decode('ascii')
+    tcc_probe_b64 = base64.b64encode(_tcc_probe_swift_source_path().read_bytes()).decode('ascii')
+    exports = [
+        f'export CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64={shlex.quote(volume_b64)}',
+        f'export CRA_SWIFT_CLAUDE_TCC_PROBE_B64={shlex.quote(tcc_probe_b64)}',
+    ]
     if sudo_password is not None:
         exports.append(f'export SUDO_PASSWORD={shlex.quote(sudo_password)}')
     payload = '\n'.join((*exports, script_text))
@@ -1221,3 +1364,8 @@ def _bootstrap_script_path() -> Path:
 def _coreaudio_volume_swift_source_path() -> Path:
     """Locate ``swift/claude-coreaudio-volume.swift`` next to the package."""
     return Path(__file__).resolve().parent.parent / 'swift' / 'claude-coreaudio-volume.swift'
+
+
+def _tcc_probe_swift_source_path() -> Path:
+    """Locate ``swift/claude-tcc-probe.swift`` next to the package."""
+    return Path(__file__).resolve().parent.parent / 'swift' / 'claude-tcc-probe.swift'

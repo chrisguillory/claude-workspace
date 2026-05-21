@@ -1,3 +1,4 @@
-# Compiled artifact — kept locally for fast iteration; rebuilt by
-# scripts/bootstrap.sh on each host. Source of truth is the .swift file.
+# Compiled artifacts — kept locally for fast iteration; rebuilt by
+# scripts/bootstrap.sh on each host. Source of truth is each .swift file.
 swift/claude-coreaudio-volume
+swift/claude-tcc-probe

@@ -9,7 +9,10 @@
 #   - roc-toolkit build deps   (brew)    scons + libs needed to compile roc-toolkit
 #   - roc-toolkit              (source)  roc-send + roc-recv installed to /usr/local/bin
 #   - claude-coreaudio-volume  (source)  Swift CLI for per-device Core Audio volume,
-#                                        compiled from inlined source (see env var below)
+#                                        compiled from inlined source (see env vars below)
+#   - claude-tcc-probe         (source)  Swift CLI that prints AVCaptureDevice mic auth
+#                                        status — disambiguates TCC denial from HAL
+#                                        wedge in the roc-send-start diagnostic
 #
 # Excluded (deliberately — needs interactive setup or sudo+reboot):
 #   - roc-vad kernel driver    one-time `curl ... | sudo bash` + sudo killall coreaudiod
@@ -20,8 +23,10 @@
 #
 # Env vars consumed (set by _install_prereqs_on_host before dispatch):
 #   - SUDO_PASSWORD                          (optional) piped into sudo -S for non-TTY installs
-#   - CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64  (required for the Swift compile) base64-encoded
-#                                            source of swift/claude-coreaudio-volume.swift
+#   - CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64  (required) base64-encoded source of
+#                                            swift/claude-coreaudio-volume.swift
+#   - CRA_SWIFT_CLAUDE_TCC_PROBE_B64         (required) base64-encoded source of
+#                                            swift/claude-tcc-probe.swift
 
 set -euo pipefail
 
@@ -118,6 +123,31 @@ elif command -v claude-coreaudio-volume >/dev/null; then
     ok "claude-coreaudio-volume (already installed)"
 else
     err "claude-coreaudio-volume not installed and no source provided via CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64"
+fi
+
+echo
+echo "=== claude-tcc-probe ==="
+if [[ -n "${CRA_SWIFT_CLAUDE_TCC_PROBE_B64:-}" ]]; then
+    info "compiling claude-tcc-probe from inlined Swift source..."
+    swift_src=/tmp/claude-tcc-probe.swift
+    swift_bin=/tmp/claude-tcc-probe
+    echo "$CRA_SWIFT_CLAUDE_TCC_PROBE_B64" | base64 -d > "$swift_src"
+    swiftc -O "$swift_src" -o "$swift_bin" -framework AVFoundation -framework Foundation
+
+    info "installing to /usr/local/bin..."
+    if [[ -w /usr/local/bin ]]; then
+        mv "$swift_bin" /usr/local/bin/
+    elif [[ -n "${SUDO_PASSWORD:-}" ]]; then
+        echo "$SUDO_PASSWORD" | sudo -S -p "" mv "$swift_bin" /usr/local/bin/
+    else
+        sudo mv "$swift_bin" /usr/local/bin/
+    fi
+    rm -f "$swift_src"
+    ok "claude-tcc-probe installed"
+elif command -v claude-tcc-probe >/dev/null; then
+    ok "claude-tcc-probe (already installed)"
+else
+    err "claude-tcc-probe not installed and no source provided via CRA_SWIFT_CLAUDE_TCC_PROBE_B64"
 fi
 
 echo
