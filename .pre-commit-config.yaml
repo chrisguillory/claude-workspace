@@ -10,6 +10,20 @@
 # all dev dependencies (ruff, mypy, etc.) are installed.
 
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md, --markdown-linebreak-ext=markdown]
+        exclude: '\.(csv|tsv|pyi?)$'  # csv/tsv: legitimate CRLF (RFC 4180); py/pyi: handled by ruff
+      - id: end-of-file-fixer
+        exclude: '\.(csv|tsv|pyi?)$'
+      - id: fix-byte-order-marker
+        exclude: '\.(csv|tsv|pyi?)$'
+      - id: mixed-line-ending
+        args: [--fix=no]
+        exclude: '\.(csv|tsv|pyi?)$'
+
   - repo: local
     hooks:
       - id: ruff

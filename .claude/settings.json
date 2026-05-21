@@ -9,7 +9,8 @@
           { "type": "command", "command": "\"$CLAUDE_EXEC_LAUNCH_DIR\"/hooks/run-linter.py linters/strict_typing_linter.py" },
           { "type": "command", "command": "\"$CLAUDE_EXEC_LAUNCH_DIR\"/hooks/run-linter.py linters/suppression_rationale_linter.py" },
           { "type": "command", "command": "\"$CLAUDE_EXEC_LAUNCH_DIR\"/hooks/run-linter.py linters/uv_script_linter.py" },
-          { "type": "command", "command": "\"$CLAUDE_EXEC_LAUNCH_DIR\"/hooks/run-ruff.py" }
+          { "type": "command", "command": "\"$CLAUDE_EXEC_LAUNCH_DIR\"/hooks/run-ruff.py" },
+          { "type": "command", "command": "\"$CLAUDE_EXEC_LAUNCH_DIR\"/hooks/run-trailing-whitespace-and-newline-fix.py" }
         ]
       }
     ]
