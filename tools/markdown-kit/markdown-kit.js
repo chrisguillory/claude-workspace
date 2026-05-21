@@ -1291,17 +1291,14 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     );
   }
 
-  // --macos-spoken-content: replace ASCII < and > in code blocks with U+2039/U+203A
-  // single guillemets so macOS Spoken Content's "<TAG>" stripping heuristic does not
-  // match. Guillemets are 1ch wide in monospace (East Asian Width: Narrow), NFKC-stable,
-  // and visually similar enough to angle brackets that code remains readable.
+  // --macos-spoken-content: substitute ASCII < > in code blocks with U+2039/U+203A
+  // single guillemets so macOS Spoken Content's tag-stripping heuristic does not
+  // match. Guillemets are 1ch wide in monospace (East Asian Width: Narrow) and
+  // NFKC-stable, so they survive Chrome's clipboard-based TTS pathway.
   //
-  // Previous approach used fullwidth U+FF1C/U+FF1E inside <span class="tts-bracket">
-  // with CSS to shrink them to ~1ch — but no CSS combination kept alignment across
-  // Safari x browser-zoom. U+2060 WORD JOINER injection failed empirically because
-  // Safari's matcher strips <[^>]*> regardless of what is between the brackets.
-  // Guillemets are the only candidate that both align in monospace AND escape the
-  // tag-stripping heuristic (verified empirically).
+  // Safari's matcher strips <[^>]*> regardless of what's between the brackets, so
+  // zero-width separators (U+2060 etc.) inside the tag don't help — the substitute
+  // must be a distinct code point.
   if (opts['macos-spoken-content']) {
     // Skip diagram/chart languages — these are parsed by Mermaid/Graphviz/Vega-Lite, not displayed as text
     const diagramLangs = /language-(?:mermaid|dot|graphviz|vega-lite|chart)/i;
@@ -1408,6 +1405,8 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
   // Document-level copy handler: restore ASCII < > from guillemets and strip the
   // sr-only pronunciation text so pasted code is plain ASCII.
   // Fires on any copy, not just code blocks, since inline <code> is also processed.
+  // Known trade-off: a user who authors literal ‹/› in source markdown code (rare)
+  // will see them rewritten to </> on copy. Acceptable given the feature is opt-in.
   const spokenContentCopyScript = (opts['macos-spoken-content'] && (forServe || forStandalone)) ? `
   <script>
     document.addEventListener('copy', function(e) {
