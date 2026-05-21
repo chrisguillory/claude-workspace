@@ -610,6 +610,31 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             context={'host': plan.hub_alias, 'input_device': plan.input_device, 'tcc_status': mic_status},
         )
 
+    # Preflight: input device must be stereo. roc-send has no channel-count
+    # override flag — it always requests 2 channels — and SoX's deprecated
+    # CoreAudio backend can't negotiate down. The post-mortem diagnostic's
+    # libsox log marker would catch this on the back end, but failing fast at
+    # preflight (a) avoids a wasted roc-send launch, (b) gives a more direct
+    # error message, (c) handles the case before /tmp/roc-send.log is even
+    # written. Mono support is real work (sox upmix pipeline reintroduces
+    # the crackling that 970040d8 reverted); track separately.
+    in_channels = await _detect_input_device_channel_count(service, plan.hub_alias, plan.input_device)
+    if in_channels is not None and in_channels < 2:
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: input device {plan.input_device!r} has {in_channels} channel(s); '
+            f'roc-send requires stereo (2 channels) and has no negotiation flag.',
+            code='input-device-channel-count-too-low',
+            title=f'Mono input not supported on {plan.hub_alias}',
+            suggestions=(
+                f'On {plan.hub_alias}: run `claude-coreaudio-volume list` to see channel counts per device',
+                'Choose a stereo input device (in=2ch or higher) — USB mics like Samson Q2U, '
+                'AirPods Pro/Max with mic, most external interfaces',
+                "MacBook built-in mics and AirPods 1st/2nd-gen are mono and won't work "
+                'until upstream mono-upmix support is added',
+            ),
+            context={'host': plan.hub_alias, 'input_device': plan.input_device, 'in_channels': str(in_channels)},
+        )
+
     peer_ips = [plan.topology_peer_to_ip[p] for p in plan.topology_peer_aliases]
     await _run(service, plan.hub_alias, _roc_send_command(plan.input_device, peer_ips))
     await asyncio.sleep(3)
@@ -650,6 +675,34 @@ async def _check_microphone_tcc(service: DispatchService, host: str) -> str:
     return result.stdout.strip().split('\n')[-1] or 'unknown'
 
 
+async def _detect_input_device_channel_count(service: DispatchService, host: str, device_name: str) -> int | None:
+    """Return the native input channel count of ``device_name`` on ``host``, or ``None`` if unresolvable.
+
+    Parses ``claude-coreaudio-volume list`` output — each line has the form
+    ``id=N  in=Xch vol=Y  out=Zch vol=W  name=DEVICE``. Matches on the
+    trailing ``name=`` field for an exact name. Multiple devices can share
+    the same name on macOS (USB devices often register both input and output
+    endpoints separately); returns the channel count of the FIRST match with
+    a non-zero input scope — that's the input-side device.
+
+    Returns ``None`` when the device isn't in the list at all, or when no
+    matching entry has any input channels. The caller treats ``None`` as
+    "can't determine; let the orchestrator proceed and surface roc-send's
+    error directly rather than guessing."
+    """
+    result = await _run(service, host, 'claude-coreaudio-volume list 2>/dev/null')
+    # Format: id=N  in=Xch vol=Y  out=Zch vol=W  name=DEVICE NAME
+    pattern = re.compile(r'id=\d+\s+in=(\d+)ch\s+vol=\S+\s+out=\d+ch\s+vol=\S+\s+name=(.+?)\s*$')
+    for line in result.stdout.splitlines():
+        match = pattern.match(line)
+        if match is None:
+            continue
+        in_channels, name = int(match.group(1)), match.group(2)
+        if name == device_name and in_channels > 0:
+            return in_channels
+    return None
+
+
 async def _diagnose_roc_send_start_failure(
     service: DispatchService,
     host: str,
@@ -676,12 +729,16 @@ async def _diagnose_roc_send_start_failure(
        canonical example. Catching these short-circuits past the unreliable
        HAL probe (which uses Claude Remote Mic — itself broken on some Macs
        for reasons unrelated to HAL state).
-    3. **HAL wedge** — TCC OK, no log-marker hit, but roc-send still can't
-       open the roc-vad virtual mic. HAL may be wedged; empirically only a
-       reboot clears it (``killall coreaudiod`` and mass-killing audio clients
-       have been observed NOT to work). This tier can also false-positive when
-       Claude Remote Mic itself is the problem — kept as last-resort signal.
-    4. **Device-specific** — generic fallthrough when no tier matched.
+    3. **HAL wedge** — TCC OK, no log-marker hit, but ``sox -d -n`` (a minimal
+       default-input probe) also fails. SoX's CoreAudio backend can't open any
+       input — HAL is wedged; empirically only a reboot clears it (``killall
+       coreaudiod`` and mass-killing audio clients have been observed NOT to
+       work). Earlier versions of this probe used ``roc-send -i core://Claude
+       Remote Mic`` and were always false-positive because that virtual device
+       is a roc-vad RECEIVER (no upstream data → SoX always fails to open).
+    4. **Device-specific** — generic fallthrough when HAL is healthy but the
+       requested device couldn't be opened (name collision among same-named
+       devices, USB unplugged, exclusive lock, etc.).
 
     Returns ``(code, title, diagnosis_msg, suggestions)`` for
     ``ResolvableApplyError``.
@@ -747,23 +804,29 @@ async def _diagnose_roc_send_start_failure(
             ),
         )
 
-    # Tier 3: HAL probe via the roc-vad virtual mic
+    # Tier 3: HAL probe via `sox -d -n` against the default input device.
+    # Earlier versions used `roc-send -i core://Claude Remote Mic` as the
+    # probe — but Claude Remote Mic is a roc-vad RECEIVER device. It has no
+    # upstream data unless an active RTP feed is wired to it, so SoX trying
+    # to open it for read always fails regardless of HAL state. That made
+    # the probe a near-guaranteed false-positive "WEDGED" verdict on any
+    # host without an active mesh. `sox -d -n trim 0 0.1` exercises SoX's
+    # CoreAudio backend against the default input — succeeds if the path
+    # is healthy, fails if HAL is genuinely wedged.
     probe = await _run(
         service,
         host,
-        '/usr/local/bin/roc-send -i "core://Claude Remote Mic" -s "rtp://127.0.0.1:9991" '
-        '> /tmp/wedge-probe.log 2>&1 & P=$!; sleep 1; '
-        'if kill -0 $P 2>/dev/null; then kill -9 $P 2>/dev/null; echo HEALTHY; '
-        'else echo WEDGED; fi',
+        'gtimeout 3 sox -d -n trim 0 0.1 2>/tmp/wedge-probe.log >/dev/null && echo HEALTHY || echo WEDGED',
     )
     verdict = probe.stdout.strip().split('\n')[-1]
     if verdict == 'WEDGED':
         return (
             'core-audio-hal-wedge',
             f'CoreAudio HAL wedge on {host}',
-            f'Diagnosis: Microphone TCC is `{mic_status}` (good), but roc-send still '
-            'cannot open the roc-vad virtual mic. The CoreAudio HAL itself is '
-            'wedged — empirically the only reliable recovery is a reboot.',
+            f'Diagnosis: Microphone TCC is `{mic_status}` (good), no libsox log marker '
+            'matched the channel-count or other recognized patterns, but `sox -d -n` '
+            "(a minimal default-device probe) ALSO fails. SoX's CoreAudio backend "
+            f"can't open any input on {host} — the HAL itself is wedged.",
             (
                 f'Reboot {host} — empirically, `killall coreaudiod`, killing '
                 '`AudioComponentRegistrar`, and mass-killing every audio-framework '
