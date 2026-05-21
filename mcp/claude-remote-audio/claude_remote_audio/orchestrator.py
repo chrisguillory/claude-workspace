@@ -565,7 +565,29 @@ def _nfkc_casefold(s: str) -> str:
 
 
 async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[str]:
-    """Kill any running roc-recv on the hub; relaunch bound to all topology peer ports + self-loopback."""
+    """Kill any running roc-recv on the hub; relaunch bound to all topology peer ports + self-loopback.
+
+    Preflights the Application Firewall for roc-recv — when it's blocked or
+    not-listed, the firewall pops a GUI prompt the daemon chain can't
+    reliably get clicked, and incoming UDP packets get silently dropped.
+    Same shape as the TCC preflight in `_restart_roc_send`.
+    """
+    recv_fw = await _check_application_firewall(service, plan.hub_alias, '/usr/local/bin/roc-recv')
+    if recv_fw in ('blocked', 'not-listed'):
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: macOS Application Firewall blocks /usr/local/bin/roc-recv '
+            f'(status={recv_fw}). Incoming UDP packets from mesh peers would be silently dropped.',
+            code='roc-recv-firewall-blocked',
+            title=f'roc-recv blocked by Application Firewall on {plan.hub_alias}',
+            suggestions=(
+                f'On {plan.hub_alias}, pre-authorize via:',
+                '  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/roc-recv',
+                '  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/local/bin/roc-recv',
+                'Then re-run apply. (Alternative: open System Settings → Network → Firewall '
+                '→ Options, find roc-recv, set to Allow.)',
+            ),
+            context={'host': plan.hub_alias, 'binary': '/usr/local/bin/roc-recv', 'status': recv_fw},
+        )
     bind_ports = [plan.topology_peer_to_port[p] for p in plan.topology_peer_aliases]
     if plan.hub_loopback_port is not None:
         bind_ports.append(plan.hub_loopback_port)
@@ -591,6 +613,28 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
     log pipelines) dispatch on the structure rather than parsing prose.
     """
     assert plan.input_device is not None  # guaranteed by caller
+
+    # Preflight: macOS Application Firewall. Same shape as TCC — a permission
+    # gate that surfaces as a GUI prompt and silently blocks until granted. If
+    # the binary isn't already permitted, daemon-spawned children can't get
+    # the prompt clicked in time. Refuse here rather than letting roc-send
+    # appear alive while its outbound UDP packets get dropped.
+    send_fw = await _check_application_firewall(service, plan.hub_alias, '/usr/local/bin/roc-send')
+    if send_fw in ('blocked', 'not-listed'):
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: macOS Application Firewall blocks /usr/local/bin/roc-send '
+            f'(status={send_fw}). Outbound UDP packets to mesh peers would be silently dropped.',
+            code='roc-send-firewall-blocked',
+            title=f'roc-send blocked by Application Firewall on {plan.hub_alias}',
+            suggestions=(
+                f'On {plan.hub_alias}, pre-authorize via:',
+                '  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/roc-send',
+                '  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/local/bin/roc-send',
+                'Then re-run apply. (Alternative: open System Settings → Network → Firewall '
+                '→ Options, find roc-send, set to Allow.)',
+            ),
+            context={'host': plan.hub_alias, 'binary': '/usr/local/bin/roc-send', 'status': send_fw},
+        )
 
     # Preflight: Microphone TCC. notDetermined leads to the blocked-on-prompt
     # zombie; denied/restricted lead to silent failure. Either way, surface the
@@ -716,6 +760,50 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             context={'host': plan.hub_alias, 'input_device': plan.input_device},
         )
     return [f'restarted roc-send (input={plan.input_device})']
+
+
+async def _check_application_firewall(service: DispatchService, host: str, binary_path: str) -> str:
+    """Return macOS Application Firewall status for ``binary_path`` on ``host``.
+
+    macOS' Application Firewall is a SEPARATE permission gate from TCC. When
+    a binary not previously classified by the firewall tries to accept an
+    incoming connection, macOS pops a GUI prompt — "Do you want X to accept
+    incoming network connections?". For daemon-spawned processes (our chain),
+    the prompt may surface to the user-session app (iTerm); if the user
+    doesn't see/click it, the connection is silently blocked. Same shape as
+    the TCC failure modes we already detect — different mechanism, identical
+    consequence: ``pgrep`` reports alive while packets are dropped.
+
+    Uses ``/usr/libexec/ApplicationFirewall/socketfilterfw`` which (verified
+    empirically 2026-05-21 on M4) accepts query operations at non-root uid.
+
+    Returns one of:
+
+    - ``firewall-disabled`` — global firewall off; no prompts/blocks possible
+    - ``permitted`` — binary explicitly allowed; safe to proceed
+    - ``blocked`` — binary explicitly denied; refuse with helpful error
+    - ``not-listed`` — binary not yet classified; FIRST incoming connection
+      triggers a GUI prompt. Refuse — daemon-spawned processes can't reliably
+      get the prompt clicked in time.
+    - ``unknown`` — socketfilterfw query failed or returned unexpected text;
+      caller treats as "couldn't determine, proceed cautiously."
+    """
+    state = await _run(service, host, '/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null')
+    if 'state = 0' in state.stdout.lower() or 'disabled' in state.stdout.lower():
+        return 'firewall-disabled'
+    result = await _run(
+        service,
+        host,
+        f'/usr/libexec/ApplicationFirewall/socketfilterfw --getappblocked {shlex.quote(binary_path)} 2>/dev/null',
+    )
+    output = result.stdout.lower()
+    if 'permitted' in output:
+        return 'permitted'
+    if 'blocked' in output:
+        return 'blocked'
+    if 'not listed' in output or 'not in the firewall' in output:
+        return 'not-listed'
+    return 'unknown'
 
 
 async def _check_microphone_tcc(service: DispatchService, host: str) -> str:
