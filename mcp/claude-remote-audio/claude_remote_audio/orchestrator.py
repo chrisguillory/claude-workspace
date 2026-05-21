@@ -610,15 +610,46 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             context={'host': plan.hub_alias, 'input_device': plan.input_device, 'tcc_status': mic_status},
         )
 
-    # Preflight: input device must be stereo. roc-send has no channel-count
-    # override flag — it always requests 2 channels — and SoX's deprecated
-    # CoreAudio backend can't negotiate down. The post-mortem diagnostic's
-    # libsox log marker would catch this on the back end, but failing fast at
-    # preflight (a) avoids a wasted roc-send launch, (b) gives a more direct
-    # error message, (c) handles the case before /tmp/roc-send.log is even
-    # written. Mono support is real work (sox upmix pipeline reintroduces
-    # the crackling that 970040d8 reverted); track separately.
-    in_channels = await _detect_input_device_channel_count(service, plan.hub_alias, plan.input_device)
+    # Preflight: input device sanity checks (SoX-CoreAudio shortcomings that
+    # the post-mortem diagnostic would otherwise catch as generic open failures).
+    # Failing fast here gives more direct error messages, avoids wasted roc-send
+    # launches, and handles cases before /tmp/roc-send.log is even written.
+    match_count, in_channels = await _probe_input_device(service, plan.hub_alias, plan.input_device)
+
+    # (a) Name collision — same name applied to multiple Core Audio devices
+    # (USB mics with built-in monitoring expose input + output as separate
+    # devices sharing the display name). SoX's deprecated CoreAudio backend
+    # has no scope filter; it picks the first match and fails. The clean
+    # user-facing workaround is to create an AMS Aggregate Device wrapping
+    # only the input substream and give it a unique name. (Physical-device
+    # names are immutable in AMS — only aggregate-device names are editable.)
+    if match_count >= 2:
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: input device {plan.input_device!r} matches {match_count} distinct '
+            "Core Audio devices with the same name. SoX's deprecated CoreAudio backend cannot "
+            'disambiguate by scope — it picks the first match (often the output side) and fails.',
+            code='input-device-name-collision',
+            title=f'Same-named input devices on {plan.hub_alias}',
+            suggestions=(
+                f'On {plan.hub_alias}: run `claude-coreaudio-volume list` to see all matching entries',
+                'Open Audio MIDI Setup.app (in /Applications/Utilities/) on that host',
+                f'Create a new Aggregate Device (+ button) containing ONLY the input substream of {plan.input_device!r}',
+                'Give the aggregate a unique name (e.g. "Samson Q2U Mic"); apply will then open that '
+                'unique name without the SoX collision (physical-device names are immutable in macOS; '
+                'aggregates are the official disambiguation mechanism)',
+                'Re-run apply with `--input "<your unique aggregate name>"`',
+            ),
+            context={
+                'host': plan.hub_alias,
+                'input_device': plan.input_device,
+                'match_count': str(match_count),
+            },
+        )
+
+    # (b) Mono input — roc-send always requests 2 channels and has no negotiation
+    # flag; SoX's deprecated CoreAudio backend can't downmix. Mono SUPPORT is
+    # real work (sox upmix pipeline reintroduces the crackling that 970040d8
+    # reverted); tracked separately as task #50.
     if in_channels is not None and in_channels < 2:
         raise ResolvableApplyError(
             f'{plan.hub_alias}: input device {plan.input_device!r} has {in_channels} channel(s); '
@@ -630,7 +661,7 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
                 'Choose a stereo input device (in=2ch or higher) — USB mics like Samson Q2U, '
                 'AirPods Pro/Max with mic, most external interfaces',
                 "MacBook built-in mics and AirPods 1st/2nd-gen are mono and won't work "
-                'until upstream mono-upmix support is added',
+                'until upstream mono-upmix support is added (task #50)',
             ),
             context={'host': plan.hub_alias, 'input_device': plan.input_device, 'in_channels': str(in_channels)},
         )
@@ -675,32 +706,45 @@ async def _check_microphone_tcc(service: DispatchService, host: str) -> str:
     return result.stdout.strip().split('\n')[-1] or 'unknown'
 
 
-async def _detect_input_device_channel_count(service: DispatchService, host: str, device_name: str) -> int | None:
-    """Return the native input channel count of ``device_name`` on ``host``, or ``None`` if unresolvable.
+async def _probe_input_device(service: DispatchService, host: str, device_name: str) -> tuple[int, int | None]:
+    """Inventory same-named CoreAudio devices for ``device_name`` on ``host``.
 
-    Parses ``claude-coreaudio-volume list`` output — each line has the form
-    ``id=N  in=Xch vol=Y  out=Zch vol=W  name=DEVICE``. Matches on the
-    trailing ``name=`` field for an exact name. Multiple devices can share
-    the same name on macOS (USB devices often register both input and output
-    endpoints separately); returns the channel count of the FIRST match with
-    a non-zero input scope — that's the input-side device.
+    Returns ``(match_count, input_channels)``:
 
-    Returns ``None`` when the device isn't in the list at all, or when no
-    matching entry has any input channels. The caller treats ``None`` as
-    "can't determine; let the orchestrator proceed and surface roc-send's
-    error directly rather than guessing."
+    - ``match_count`` is the total number of Core Audio devices on the hub
+      whose ``kAudioDevicePropertyDeviceNameCFString`` matches the requested
+      name. USB audio interfaces with built-in headphone monitoring commonly
+      expose two devices with the same display name — one for the mic input
+      scope, one for the headphone output scope — so ``match_count >= 2`` is
+      a name-collision signal that SoX's deprecated CoreAudio backend cannot
+      disambiguate (it picks the first match without scope-filtering).
+    - ``input_channels`` is the native channel count of the first matching
+      device with a non-zero input scope, or ``None`` when no matching device
+      has an input scope at all (e.g., the user passed an output-only device).
+
+    Both fields independently let the caller refuse with different
+    ResolvableApplyError codes (collision vs mono).
+
+    Parses ``claude-coreaudio-volume list`` output. Each line:
+    ``id=N  in=Xch vol=Y  out=Zch vol=W  name=DEVICE NAME``. Counts every
+    matching name (collision signal) AND finds the input channel count of
+    the first input-scoped match. Both fields independently let the caller
+    refuse with different ResolvableApplyError codes (collision vs mono).
     """
     result = await _run(service, host, 'claude-coreaudio-volume list 2>/dev/null')
-    # Format: id=N  in=Xch vol=Y  out=Zch vol=W  name=DEVICE NAME
     pattern = re.compile(r'id=\d+\s+in=(\d+)ch\s+vol=\S+\s+out=\d+ch\s+vol=\S+\s+name=(.+?)\s*$')
+    match_count = 0
+    input_channels: int | None = None
     for line in result.stdout.splitlines():
         match = pattern.match(line)
         if match is None:
             continue
         in_channels, name = int(match.group(1)), match.group(2)
-        if name == device_name and in_channels > 0:
-            return in_channels
-    return None
+        if name == device_name:
+            match_count += 1
+            if input_channels is None and in_channels > 0:
+                input_channels = in_channels
+    return match_count, input_channels
 
 
 async def _diagnose_roc_send_start_failure(
