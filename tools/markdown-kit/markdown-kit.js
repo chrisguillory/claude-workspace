@@ -195,7 +195,7 @@ Options:
   -m, --mobile              Optimize for phone reading (430px, smaller fonts)
   --rich-highlighting       Color built-ins and types distinctly (print, Optional, List, etc.)
   --toc-nav <features>      TOC navigation: inject, backlinks, smooth, float, all (comma-separated)
-  --macos-spoken-content    TTS-safe code blocks (fullwidth angle brackets for macOS Spoken Content)
+  --macos-spoken-content    TTS-safe code blocks (single guillemets for macOS Spoken Content)
   --embed-images            Embed images as base64 data URIs
   --copy-assets             Copy local images alongside output HTML
   --absolute-paths          Rewrite image paths to absolute (local machine only)
@@ -1291,11 +1291,14 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     );
   }
 
-  // --macos-spoken-content: replace angle brackets in code blocks with fullwidth Unicode
-  // (U+FF1C/U+FF1E) to prevent macOS Spoken Content from stripping content between < and >.
-  // Known issue: Chrome uses a clipboard-based TTS pathway (evidenced by Maccy issue #968)
-  // that applies NFKC normalization, converting fullwidth back to ASCII. Works in Safari
-  // and Chromium. No fix available — Chrome's accessibility text extraction is proprietary.
+  // --macos-spoken-content: substitute ASCII < > in code blocks with U+2039/U+203A
+  // single guillemets so macOS Spoken Content's tag-stripping heuristic does not
+  // match. Guillemets are 1ch wide in monospace (East Asian Width: Narrow) and
+  // NFKC-stable, so they survive Chrome's clipboard-based TTS pathway.
+  //
+  // Safari's matcher strips <[^>]*> regardless of what's between the brackets, so
+  // zero-width separators (U+2060 etc.) inside the tag don't help — the substitute
+  // must be a distinct code point.
   if (opts['macos-spoken-content']) {
     // Skip diagram/chart languages — these are parsed by Mermaid/Graphviz/Vega-Lite, not displayed as text
     const diagramLangs = /language-(?:mermaid|dot|graphviz|vega-lite|chart)/i;
@@ -1304,23 +1307,15 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
       (match, attrs, inner) => {
         if (diagramLangs.test(attrs)) return match; // leave diagram blocks untouched
         let result = inner;
-        // Replace HTML entities with styled fullwidth chars
-        result = result.replace(/&lt;/g, '<span class="tts-bracket">\uFF1C</span>');
-        result = result.replace(/&gt;/g, '<span class="tts-bracket">\uFF1E</span>');
-        // sr-only pronunciation for comparison operators (space-delimited context)
-        result = result.replace(
-          / <span class="tts-bracket">\uFF1E<\/span> /g,
-          ' <span class="tts-bracket">\uFF1E</span><span class="sr-only"> greater than </span> '
-        );
-        result = result.replace(
-          / <span class="tts-bracket">\uFF1C<\/span> /g,
-          ' <span class="tts-bracket">\uFF1C</span><span class="sr-only"> less than </span> '
-        );
-        // sr-only pronunciation for arrow functions (=＞)
-        result = result.replace(
-          /=<span class="tts-bracket">\uFF1E<\/span>/g,
-          '=<span class="tts-bracket">\uFF1E</span><span class="sr-only"> arrow </span>'
-        );
+        // Substitute ASCII < > with guillemets ‹ › wrapped in .tts-bracket so CSS
+        // can visually upscale them to ~ASCII size without touching the 1ch layout box.
+        result = result.replace(/&lt;/g, '<span class="tts-bracket">‹</span>');
+        result = result.replace(/&gt;/g, '<span class="tts-bracket">›</span>');
+        // sr-only pronunciation hints in specific contexts. Read alongside the
+        // guillemet; harmless duplicate if TTS already pronounces the guillemet.
+        result = result.replace(/ <span class="tts-bracket">›<\/span> /g, ' <span class="tts-bracket">›</span><span class="sr-only"> greater than </span> ');
+        result = result.replace(/ <span class="tts-bracket">‹<\/span> /g, ' <span class="tts-bracket">‹</span><span class="sr-only"> less than </span> ');
+        result = result.replace(/=<span class="tts-bracket">›<\/span>/g, '=<span class="tts-bracket">›</span><span class="sr-only"> arrow </span>');
         return `<pre><code${attrs}>${result}</code></pre>`;
       }
     );
@@ -1333,8 +1328,8 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
       (match, inner) => {
         if (!inner.includes('&lt;') && !inner.includes('&gt;')) return match;
         let result = inner;
-        result = result.replace(/&lt;/g, '<span class="tts-bracket">\uFF1C</span>');
-        result = result.replace(/&gt;/g, '<span class="tts-bracket">\uFF1E</span>');
+        result = result.replace(/&lt;/g, '<span class="tts-bracket">‹</span>');
+        result = result.replace(/&gt;/g, '<span class="tts-bracket">›</span>');
         return `<code>${result}</code>`;
       }
     );
@@ -1407,15 +1402,17 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     })();
   </script>` : '';
 
-  // Copy handler: restore ASCII angle brackets and strip sr-only text on clipboard
-  // Document-level copy handler: restore ASCII angle brackets and strip sr-only text.
+  // Document-level copy handler: restore ASCII < > from guillemets and strip the
+  // sr-only pronunciation text so pasted code is plain ASCII.
   // Fires on any copy, not just code blocks, since inline <code> is also processed.
+  // Known trade-off: a user who authors literal ‹/› in source markdown code (rare)
+  // will see them rewritten to </> on copy. Acceptable given the feature is opt-in.
   const spokenContentCopyScript = (opts['macos-spoken-content'] && (forServe || forStandalone)) ? `
   <script>
     document.addEventListener('copy', function(e) {
       var sel = window.getSelection().toString();
-      if (sel.indexOf('\uFF1C') === -1 && sel.indexOf('\uFF1E') === -1) return; // no fullwidth chars, don't interfere
-      sel = sel.replace(/\uFF1C/g, '<').replace(/\uFF1E/g, '>');
+      if (sel.indexOf('\u2039') === -1 && sel.indexOf('\u203A') === -1) return; // no guillemets, don't interfere
+      sel = sel.replace(/\u2039/g, '<').replace(/\u203A/g, '>');
       // Strip sr-only pronunciation text only when adjacent to operators (avoids false positives on prose)
       sel = sel.replace(/> greater than /g, '> ').replace(/< less than /g, '< ').replace(/=> arrow /g, '=>');
       e.clipboardData.setData('text/plain', sel);
@@ -1665,12 +1662,13 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
       left: 12px;
       z-index: 999;
     }
-    /* macOS Spoken Content: fullwidth angle bracket sizing (--macos-spoken-content) */
+    /* macOS Spoken Content: scale guillemets visually closer to ASCII < > size.
+       Guillemets are punctuation (x-height), so they read as small. Inline-block +
+       transform scales the visible glyph without affecting the 1ch layout box. */
     .tts-bracket {
       display: inline-block;
-      transform: scaleX(0.85);
-      margin-left: -0.15em;
-      margin-right: -0.15em;
+      transform: scale(1.4);
+      font-weight: 600;
     }
     .sr-only {
       position: absolute;
