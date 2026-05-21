@@ -595,6 +595,25 @@ async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[s
     return ['restarted roc-recv']
 
 
+# SoX's deprecated ``coreaudio.c`` reads device names via the C-string variant
+# of ``kAudioDevicePropertyDeviceName`` into a fixed-size buffer. Names ≤ this
+# many UTF-8 bytes survive enumeration intact; longer names get truncated
+# mid-string and either fail lookup or collide with other devices sharing the
+# truncated prefix. Empirical data points (verbose ``roc-send`` enums on M4/M2):
+#
+#   - ``BenQ PD3200U`` (12 bytes)          → shown in full   ✓
+#   - ``Kuycon G32P`` (11 bytes)           → shown in full   ✓
+#   - ``DJI MIC MINI`` (12 bytes)          → known-working in M5 reference apply ✓
+#   - ``Claude Remote Mic`` (17 bytes)     → truncated to ``"Claude Remo"``
+#   - ``Samson Q2U Microphone`` (21 bytes) → truncated to ``"Samson Q2U "``
+#
+# So the boundary is 12 bytes (with NUL terminator that's a 13-byte buffer).
+# Used only by the truncation preflight below; kept near its consumer rather
+# than with the network/dispatch knobs at module top. sox_ng fixes the
+# underlying API choice — see task #52.
+_SOX_DEVICE_NAME_MAX_BYTES = 12
+
+
 async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[str]:
     """Kill any running roc-send on the hub; relaunch with direct ``core://`` capture.
 
@@ -659,27 +678,29 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
     # Failing fast here gives more direct error messages, avoids wasted roc-send
     # launches, and handles cases before /tmp/roc-send.log is even written.
 
-    # (z) SoX truncates device names to ~11 UTF-8 bytes during its CoreAudio
-    # enumeration (deprecated `kAudioDevicePropertyDeviceName` C-string variant,
-    # SoX bug #354). Empirically observed 2026-05-21: 12+ byte names lose their
-    # tail, the resulting prefix may not match any device or may accidentally
-    # match a different device sharing the same prefix. The fix is name <= 11
-    # bytes (verified by `Q2U Mic` working). Refuse longer names here.
+    # (z) SoX truncates device names at _SOX_DEVICE_NAME_MAX_BYTES during its
+    # CoreAudio enumeration (SoX bug #354 — see constant docstring above for
+    # the empirical data points). Longer names lose their tail mid-string;
+    # the resulting prefix may not match any device or may accidentally match
+    # a different device sharing the truncated prefix. Refuse longer names
+    # here rather than letting roc-send fail generically.
     input_bytes = len(plan.input_device.encode('utf-8'))
-    if input_bytes > 11:
+    if input_bytes > _SOX_DEVICE_NAME_MAX_BYTES:
         raise ResolvableApplyError(
             f'{plan.hub_alias}: input device {plan.input_device!r} is {input_bytes} UTF-8 bytes; '
-            "SoX's deprecated CoreAudio backend truncates device names to ~11 bytes during "
-            'enumeration (SoX bug #354). Longer names fail to match any device — or worse, '
-            'accidentally match a different device sharing the truncated prefix.',
+            f"SoX's deprecated CoreAudio backend truncates device names at "
+            f'{_SOX_DEVICE_NAME_MAX_BYTES} bytes during enumeration (SoX bug #354). '
+            'Longer names fail to match any device — or worse, accidentally match a '
+            'different device sharing the truncated prefix.',
             code='input-device-name-too-long-for-sox',
             title=f'Input device name too long for SoX on {plan.hub_alias}',
             suggestions=(
                 f'On {plan.hub_alias}: rename the device (via Audio MIDI Setup → Aggregate '
-                'Device) to ≤11 UTF-8 bytes with a unique prefix no other device shares.',
-                'Safe examples: "Q2U Mic" (7), "Hub Mic" (7), "CRA Mic" (7), "Mic" (3).',
-                "Avoid names starting with any existing device's first 11 bytes (run "
-                '`claude-coreaudio-volume list` to inventory).',
+                f'Device) to ≤{_SOX_DEVICE_NAME_MAX_BYTES} UTF-8 bytes with a unique prefix '
+                'no other device shares.',
+                'Safe examples: "DJI MIC MINI" (12), "Q2U Mic" (7), "Hub Mic" (7), "CRA Mic" (7), "Mic" (3).',
+                f"Avoid names starting with any existing device's first {_SOX_DEVICE_NAME_MAX_BYTES} "
+                'bytes (run `claude-coreaudio-volume list` to inventory).',
                 'This bug is fixed in sox_ng (the modernized SoX fork) — see task #52 for adoption work.',
             ),
             context={
