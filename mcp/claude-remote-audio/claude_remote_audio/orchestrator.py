@@ -614,6 +614,37 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
     # the post-mortem diagnostic would otherwise catch as generic open failures).
     # Failing fast here gives more direct error messages, avoids wasted roc-send
     # launches, and handles cases before /tmp/roc-send.log is even written.
+
+    # (z) SoX truncates device names to ~11 UTF-8 bytes during its CoreAudio
+    # enumeration (deprecated `kAudioDevicePropertyDeviceName` C-string variant,
+    # SoX bug #354). Empirically observed 2026-05-21: 12+ byte names lose their
+    # tail, the resulting prefix may not match any device or may accidentally
+    # match a different device sharing the same prefix. The fix is name <= 11
+    # bytes (verified by `Q2U Mic` working). Refuse longer names here.
+    input_bytes = len(plan.input_device.encode('utf-8'))
+    if input_bytes > 11:
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: input device {plan.input_device!r} is {input_bytes} UTF-8 bytes; '
+            "SoX's deprecated CoreAudio backend truncates device names to ~11 bytes during "
+            'enumeration (SoX bug #354). Longer names fail to match any device — or worse, '
+            'accidentally match a different device sharing the truncated prefix.',
+            code='input-device-name-too-long-for-sox',
+            title=f'Input device name too long for SoX on {plan.hub_alias}',
+            suggestions=(
+                f'On {plan.hub_alias}: rename the device (via Audio MIDI Setup → Aggregate '
+                'Device) to ≤11 UTF-8 bytes with a unique prefix no other device shares.',
+                'Safe examples: "Q2U Mic" (7), "Hub Mic" (7), "CRA Mic" (7), "Mic" (3).',
+                "Avoid names starting with any existing device's first 11 bytes (run "
+                '`claude-coreaudio-volume list` to inventory).',
+                'This bug is fixed in sox_ng (the modernized SoX fork) — see task #52 for adoption work.',
+            ),
+            context={
+                'host': plan.hub_alias,
+                'input_device': plan.input_device,
+                'input_bytes': str(input_bytes),
+            },
+        )
+
     match_count, in_channels = await _probe_input_device(service, plan.hub_alias, plan.input_device)
 
     # (a) Name collision — same name applied to multiple Core Audio devices
