@@ -753,28 +753,17 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             },
         )
 
-    # (b) Mono input — roc-send always requests 2 channels and has no negotiation
-    # flag; SoX's deprecated CoreAudio backend can't downmix. Mono SUPPORT is
-    # real work (sox upmix pipeline reintroduces the crackling that 970040d8
-    # reverted); tracked separately as task #50.
-    if in_channels is not None and in_channels < 2:
-        raise ResolvableApplyError(
-            f'{plan.hub_alias}: input device {plan.input_device!r} has {in_channels} channel(s); '
-            f'roc-send requires stereo (2 channels) and has no negotiation flag.',
-            code='input-device-channel-count-too-low',
-            title=f'Mono input not supported on {plan.hub_alias}',
-            suggestions=(
-                f'On {plan.hub_alias}: run `claude-coreaudio-volume list` to see channel counts per device',
-                'Choose a stereo input device (in=2ch or higher) — USB mics like Samson Q2U, '
-                'AirPods Pro/Max with mic, most external interfaces',
-                "MacBook built-in mics and AirPods 1st/2nd-gen are mono and won't work "
-                'until upstream mono-upmix support is added (task #50)',
-            ),
-            context={'host': plan.hub_alias, 'input_device': plan.input_device, 'in_channels': str(in_channels)},
-        )
+    # (b) Mono input — roc-send always requests 2 channels and has no
+    # negotiation flag, so we wrap mono devices in a sox stdin pipe that
+    # upmixes mono → stereo before roc-send sees the stream. See
+    # `_roc_send_command` for the pipeline details + buffer sizing.
+    # `mono = True` when the probe found 0 or 1 input channels (or didn't
+    # find the device at all — fall through to letting roc-send fail loudly
+    # with a real error rather than guessing).
+    mono = in_channels is not None and in_channels < 2
 
     peer_ips = [plan.topology_peer_to_ip[p] for p in plan.topology_peer_aliases]
-    await _run(service, plan.hub_alias, _roc_send_command(plan.input_device, peer_ips))
+    await _run(service, plan.hub_alias, _roc_send_command(plan.input_device, peer_ips, mono=mono))
     await asyncio.sleep(3)
     alive = await _run(service, plan.hub_alias, 'pgrep -f roc-send >/dev/null && echo alive || echo dead')
     if alive.stdout.strip() != 'alive':
@@ -1291,23 +1280,54 @@ def _roc_recv_command(bind_ports: Sequence[int]) -> str:
     )
 
 
-def _roc_send_command(input_device: str, peer_ips: Sequence[str]) -> str:
+def _roc_send_command(input_device: str, peer_ips: Sequence[str], *, mono: bool) -> str:
     """Shell command that restarts roc-send broadcasting the mic to peer IPs + self-loopback.
 
-    Direct ``core://<device>`` — roc-send reads CoreAudio with real-time HAL
-    scheduling. The earlier ffmpeg→roc-send pipe variant introduced crackling
-    from pipe-buffer underruns and was reverted; if SoX fails to open the
-    device, the symptom is typically a wedged ``coreaudiod`` on the hub
-    (kill it with ``sudo killall coreaudiod`` and it respawns clean).
+    Two paths depending on whether the input device is mono:
+
+    - **Stereo or higher** (``mono=False``): direct ``roc-send -i core://<device>``.
+      Real-time HAL scheduling, lowest latency. Multichannel (5.1, 7.1, etc.)
+      takes this path — roc-send/SoX accept arbitrary channel counts as long as
+      ``>= 2`` (which is what they request by default).
+    - **Mono** (``mono=True``): sox captures + upmixes to stereo, pipes raw WAV
+      through stdin to ``roc-send -i file:-``. Required because roc-send has no
+      channel-count override flag and SoX's CoreAudio backend can't negotiate
+      channels down — without the upmix, mono devices die at open. The prior
+      ``ffmpeg | roc-send`` pipeline crackled from pipe-buffer underruns
+      (default ~64 KB kernel pipe buffer + ffmpeg's default output buffer);
+      ``sox --buffer 524288`` enlarges SoX's internal buffer to 512 KB (~2.7s
+      of headroom at 48 kHz / 16-bit / 2ch) so the consumer can ride out
+      scheduling jitter. WAV (vs raw) carries rate/channels/bit-depth in its
+      header so roc-send infers the stream format automatically.
     """
-    quoted_input = shlex.quote(f'core://{input_device}')
     dest_flags = ' '.join(f'-s rtp://{ip}:{_MIC_RECEIVE_PORT}' for ip in peer_ips)
+    dest_flags += f' -s rtp://127.0.0.1:{_MIC_RECEIVE_PORT}'
+
+    if not mono:
+        quoted_uri = shlex.quote(f'core://{input_device}')
+        return (
+            'pkill -f roc-send 2>/dev/null; '
+            'pkill -f "sox --buffer 524288 -t coreaudio" 2>/dev/null; '
+            'sleep 1; '
+            f'(nohup /usr/local/bin/roc-send -i {quoted_uri} {dest_flags} '
+            '> /tmp/roc-send.log 2>&1 < /dev/null &)'
+        )
+
+    quoted_device = shlex.quote(input_device)
+    # ``--input-format=wav`` is mandatory when reading from stdin — roc-send
+    # can't sniff the format from the byte stream (``-i file:-``). SoX writes
+    # a streaming-WAV header with a placeholder length field (it warns about
+    # this); libsox on the read side accepts it fine.
+    pipeline = (
+        f'sox --buffer 524288 -t coreaudio {quoted_device} '
+        '-c 2 -r 48000 -e signed-integer -b 16 -t wav - | '
+        f'/usr/local/bin/roc-send --input-format=wav -i file:- {dest_flags}'
+    )
     return (
-        'pkill -f roc-send 2>/dev/null; pkill -f "ffmpeg.*-f avfoundation" 2>/dev/null; '
+        'pkill -f roc-send 2>/dev/null; '
+        'pkill -f "sox --buffer 524288 -t coreaudio" 2>/dev/null; '
         'sleep 1; '
-        f'(nohup /usr/local/bin/roc-send -i {quoted_input} '
-        f'{dest_flags} -s rtp://127.0.0.1:{_MIC_RECEIVE_PORT} '
-        '> /tmp/roc-send.log 2>&1 < /dev/null &)'
+        f'(nohup sh -c {shlex.quote(pipeline)} > /tmp/roc-send.log 2>&1 < /dev/null &)'
     )
 
 
