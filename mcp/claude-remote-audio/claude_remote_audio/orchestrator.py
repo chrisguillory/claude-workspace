@@ -655,11 +655,22 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             context={'host': plan.hub_alias, 'binary': '/usr/local/bin/roc-send', 'status': send_fw},
         )
 
-    # Preflight: Microphone TCC. notDetermined leads to the blocked-on-prompt
-    # zombie; denied/restricted lead to silent failure. Either way, surface the
-    # same ResolvableApplyError the post-mortem diagnostic would have produced.
+    # Preflight: Microphone TCC. notDetermined means "never asked" — instead of
+    # refusing and making the user manually run sox-d-n to trigger the prompt,
+    # we ask the hub to trigger it itself via `claude-tcc-probe --request`
+    # (wraps `AVCaptureDevice.requestAccess(.audio)`). The macOS prompt pops on
+    # the hub's screen; user clicks; the dispatch returns the resolved status.
+    # Denied / restricted are NOT auto-recoverable from CLI (require Settings
+    # toggle on / MDM policy change) — refuse in both those cases.
     mic_status = await _check_microphone_tcc(service, plan.hub_alias)
-    if mic_status in ('denied', 'notDetermined', 'restricted'):
+    if mic_status == 'notDetermined':
+        logger.info(
+            '%s: Microphone TCC notDetermined — triggering prompt on hub (click Allow when it appears)',
+            plan.hub_alias,
+        )
+        mic_status = await _request_microphone_tcc(service, plan.hub_alias)
+        logger.info('%s: Microphone TCC request resolved: %s', plan.hub_alias, mic_status)
+    if mic_status in ('denied', 'restricted'):
         code, title, diagnosis_msg, suggestions = await _diagnose_roc_send_start_failure(
             service, plan.hub_alias, roc_send_log=''
         )
@@ -844,6 +855,33 @@ async def _check_microphone_tcc(service: DispatchService, host: str) -> str:
     """
     result = await _run(service, host, '/usr/local/bin/claude-tcc-probe microphone 2>/dev/null || echo unknown')
     return result.stdout.strip().split('\n')[-1] or 'unknown'
+
+
+async def _request_microphone_tcc(service: DispatchService, host: str) -> str:
+    """Trigger Microphone TCC prompt on ``host``, block until user resolves, return final status.
+
+    Runs ``claude-tcc-probe microphone --request`` which wraps
+    ``AVCaptureDevice.requestAccess(.audio)``. When the current state is
+    ``notDetermined`` macOS shows the system Microphone prompt on the hub's
+    screen and the binary blocks on a ``DispatchSemaphore`` until the user
+    clicks Allow / Don't Allow; for any other state the request callback
+    fires immediately with the cached result.
+
+    Dispatch timeout is raised to 5 minutes — long enough for a user to walk
+    over and click without the daemon-side timeout firing while they're
+    deciding. If they don't respond within that window the dispatch fails
+    upstream and the caller can re-run apply to re-trigger the prompt.
+    """
+    result = await service.run_target(
+        host,
+        '/usr/local/bin/claude-tcc-probe microphone --request 2>/dev/null || echo unknown',
+        session_id=_DISPATCH_SESSION,
+        agent_id=None,
+        timeout=300.0,
+    )
+    if not result.results:
+        return 'unknown'
+    return result.results[0].stdout.strip().split('\n')[-1] or 'unknown'
 
 
 async def _probe_input_device(service: DispatchService, host: str, device_name: str) -> tuple[int, int | None]:
@@ -1365,8 +1403,19 @@ async def _ensure_prereqs(
     else:
         logger.info('prereqs satisfied on all hosts')
 
-    if install_prereqs and any(missing_by_host.values()):
-        hosts_to_bootstrap = [h for h, m in missing_by_host.items() if m]
+    if install_prereqs:
+        # `--install-prereqs` means "ensure latest binaries deployed," not "only
+        # install when something is missing." The bootstrap is idempotent for
+        # heavy steps (brew checks skip-if-installed, roc-toolkit checks
+        # `command -v roc-send`) but ALWAYS recompiles the Swift CLIs when their
+        # source env vars are set — which is what we need to redeploy fixes to
+        # claude-tcc-probe / claude-coreaudio-volume without uninstalling first.
+        # If nothing is missing, bootstrap every host that has any requirements;
+        # if something IS missing, bootstrap only those (saves password dance on
+        # hosts whose binaries are fine).
+        hosts_to_bootstrap = (
+            [h for h, m in missing_by_host.items() if m] if any(missing_by_host.values()) else list(host_reqs.keys())
+        )
         logger.info('prereqs: authorizing installs on %s', hosts_to_bootstrap)
         passwords = await _authorize_installs(service, hosts_to_bootstrap)
         logger.info('prereqs: dispatching bootstrap to %s (parallel)', hosts_to_bootstrap)
@@ -1503,12 +1552,16 @@ async def _validate_sudo_password(service: DispatchService, host: str, password:
 def _confirm_install_dialog(host: str, *, with_saved_password: bool) -> bool:
     """Pop a yes/no install-consent dialog for ``host``. Returns ``True`` on accept."""
     suffix = ' (using saved password)' if with_saved_password else ''
+    # `with timeout` + `giving up after` — see _prompt_sudo_password_dialog for rationale.
     script = (
+        'with timeout of 86400 seconds\n'
         'tell application "System Events" to activate\n'
         'tell application "System Events" to '
         f'display dialog "Install prereqs on {host}{suffix} (~5 min)?" '
         'with title "claude-remote-audio install-prereqs" '
-        'buttons {"Cancel", "Install"} default button "Install"'
+        'buttons {"Cancel", "Install"} default button "Install" '
+        'giving up after 86400\n'
+        'end timeout'
     )
     return subprocess.run(['osascript', '-e', script], capture_output=True, text=True, check=False).returncode == 0
 
@@ -1522,13 +1575,23 @@ def _prompt_sudo_password_dialog(host: str, retry: bool) -> str:
     variant for subsequent attempts.
     """
     prompt = f'Wrong password — sudo password for {host}:' if retry else f'sudo password for {host}:'
+    # AppleScript has two independent timeouts that BOTH default to short
+    # values in non-TTY osascript contexts:
+    #   - `giving up after N`     gates the dialog's own auto-dismiss
+    #   - `with timeout of N`     gates the AppleEvent `tell` to System Events
+    # Without `with timeout`, osascript times out the tell call after seconds,
+    # exits non-zero, and the dialog is left orphaned in System Events (still
+    # visible, but no listener for the user's response).
     script = (
+        'with timeout of 86400 seconds\n'
         'tell application "System Events" to activate\n'
         'tell application "System Events" to '
         f'display dialog "{prompt}" '
         'with title "claude-remote-audio install-prereqs" '
         'default answer "" with hidden answer '
-        'buttons {"Cancel", "OK"} default button "OK"'
+        'buttons {"Cancel", "OK"} default button "OK" '
+        'giving up after 86400\n'
+        'end timeout'
     )
     try:
         result = subprocess.run(
@@ -1539,7 +1602,12 @@ def _prompt_sudo_password_dialog(host: str, retry: bool) -> str:
         )
     except subprocess.CalledProcessError as exc:
         raise ApplyError(f'sudo password prompt for {host!r} cancelled — aborting install.') from exc
-    match = re.search(r'text returned:(.*)$', result.stdout.rstrip('\n'))
+    # osascript's `display dialog` returns a record like
+    # `button returned:OK, text returned:thepass, gave up:false` when `giving
+    # up after` is present (without it, only the first two fields appear).
+    # Lookahead stops the capture at `, gave up:` if present, else at EOL —
+    # so the password is captured cleanly in both shapes.
+    match = re.search(r'text returned:(.*?)(?=, gave up:|$)', result.stdout.rstrip('\n'))
     if match is None:
         raise ApplyError(f'unexpected osascript output: {result.stdout!r}')
     return match.group(1)
