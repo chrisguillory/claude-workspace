@@ -1097,13 +1097,27 @@ async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostA
 
 
 async def _teardown_stale_hub_processes(service: DispatchService, peer: str) -> Sequence[str]:
-    """Kill any roc-send / roc-recv / sox-pipe left over from when ``peer`` was last hub.
+    """Kill any roc-send / roc-recv left over from when ``peer`` was last hub.
 
     Empirically observed 2026-05-22/23: hub-flip transitions (M5→M2→M3→M5)
     left the former hub's roc-send running and broadcasting indefinitely.
     ``_restart_roc_send`` does its own pkill on the NEW hub before relaunching,
     but never reaches demoting Macs through the peer-apply path. This helper
     closes that gap so the post-flip mesh has exactly one mic broadcaster.
+
+    Implementation note — uses ``killall NAME`` (comm-based, exact-match on the
+    process name) rather than ``pkill -f PATTERN`` (full-argv regex). The
+    dispatch bash shell's argv contains the literal strings ``roc-send`` /
+    ``roc-recv`` (they're in the script we send it), so ``pkill -f`` would
+    match the running shell and kill it mid-script — the `echo` driving the
+    action-line never fires, and the helper falsely reports no-op while the
+    roc-send actually survived. ``killall`` matches against the comm field
+    (``bash`` for the shell, ``roc-send`` for the real target) so the shell is
+    safe.
+
+    The sox-pipe (when peer was last a mono-input hub) isn't killed directly
+    — sox dies of broken-pipe shortly after roc-send exits and stops reading
+    stdin, which is sufficient and avoids killing unrelated sox invocations.
 
     Reports an action only when something was killed — steady-state applies on
     peers that never were hub produce no output line, keeping logs clean.
@@ -1112,9 +1126,8 @@ async def _teardown_stale_hub_processes(service: DispatchService, peer: str) -> 
         service,
         peer,
         'killed=0; '
-        'for pat in "roc-send" "roc-recv" "sox --buffer 524288 -t coreaudio"; do '
-        '  pgrep -fc "$pat" >/dev/null 2>&1 && { pkill -f "$pat" 2>/dev/null; killed=1; }; '
-        'done; '
+        'killall roc-send 2>/dev/null && killed=1; '
+        'killall roc-recv 2>/dev/null && killed=1; '
         'echo "killed=$killed"',
     )
     return ['tore down stale hub processes'] if 'killed=1' in result.stdout else []
