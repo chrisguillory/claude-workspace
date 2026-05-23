@@ -688,7 +688,6 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
                 'Safe examples: "DJI MIC MINI" (12), "Q2U Mic" (7), "Hub Mic" (7), "CRA Mic" (7), "Mic" (3).',
                 f"Avoid names starting with any existing device's first {_SOX_DEVICE_NAME_MAX_BYTES} "
                 'bytes (run `claude-coreaudio-volume list` to inventory).',
-                'This bug is fixed in sox_ng (the modernized SoX fork) — see task #52 for adoption work.',
             ),
             context={
                 'host': plan.hub_alias,
@@ -978,16 +977,14 @@ async def _diagnose_roc_send_start_failure(
             f'roc-send channel-count mismatch on {host}',
             f'Diagnosis: The input device on {host} has {device_ch} channel(s) but '
             f'roc-send was invoked requesting {requested_ch} channel(s). libsox '
-            "won't negotiate down. The orchestrator is supposed to detect the "
-            "device's native channel count and pass `-c N` accordingly (task #21) — "
-            'this path is currently regressed (the original fix lived in the '
-            'ffmpeg pipeline that was reverted in commit 970040d8).',
+            "won't negotiate channels down. Mono devices are normally routed through "
+            'a sox upmix pipeline before reaching roc-send; this error indicates the '
+            "channel-count probe failed to detect the device's native channel count "
+            'before launch.',
             (
-                f'On {host}: confirm the input device is mono with `claude-coreaudio-volume list`',
+                f'On {host}: confirm the input device channel count with `claude-coreaudio-volume list`',
                 'Workaround: choose an input device whose native channel count matches '
                 "roc-send's default (stereo / 2 channels)",
-                'Fix: re-engage task #21 — add per-device channel-count detection in '
-                '`_roc_send_command` and inject `-c {channels}` into the roc-send args',
             ),
         )
 
