@@ -1077,9 +1077,16 @@ async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostA
     the peer's default input is flipped to ``Claude Remote Mic`` so peer-app mic
     reads consume the mesh-broadcast hub mic instead of whatever local device
     happened to be set.
+
+    Tears down any stale roc-send / roc-recv / sox-pipe from when ``peer`` was
+    previously the hub — without this, hub-flip transitions leave the old hub's
+    mic broadcasting indefinitely. Every peer's Claude Remote Mic would then
+    receive N audio streams mixed (one per Mac that has ever been hub), causing
+    chipmunk-pitched playback when streams overlap.
     """
-    list_text = (await _run(service, peer, 'roc-vad device list')).stdout
     actions: list[str] = []
+    actions.extend(await _teardown_stale_hub_processes(service, peer))
+    list_text = (await _run(service, peer, 'roc-vad device list')).stdout
     actions.extend(await _ensure_claude_remote_mic(service, peer, list_text))
     actions.extend(await _ensure_peer_speaker(service, plan, peer, list_text))
     if plan.output_device is not None:
@@ -1087,6 +1094,30 @@ async def _apply_peer(service: DispatchService, plan: _Plan, peer: str) -> HostA
     if plan.input_device is not None:
         actions.extend(await _route_peer_input_from_hub(service, peer))
     return HostApplyOutcome(host=peer, role='peer', actions=actions, success=True)
+
+
+async def _teardown_stale_hub_processes(service: DispatchService, peer: str) -> Sequence[str]:
+    """Kill any roc-send / roc-recv / sox-pipe left over from when ``peer`` was last hub.
+
+    Empirically observed 2026-05-22/23: hub-flip transitions (M5→M2→M3→M5)
+    left the former hub's roc-send running and broadcasting indefinitely.
+    ``_restart_roc_send`` does its own pkill on the NEW hub before relaunching,
+    but never reaches demoting Macs through the peer-apply path. This helper
+    closes that gap so the post-flip mesh has exactly one mic broadcaster.
+
+    Reports an action only when something was killed — steady-state applies on
+    peers that never were hub produce no output line, keeping logs clean.
+    """
+    result = await _run(
+        service,
+        peer,
+        'killed=0; '
+        'for pat in "roc-send" "roc-recv" "sox --buffer 524288 -t coreaudio"; do '
+        '  pgrep -fc "$pat" >/dev/null 2>&1 && { pkill -f "$pat" 2>/dev/null; killed=1; }; '
+        'done; '
+        'echo "killed=$killed"',
+    )
+    return ['tore down stale hub processes'] if 'killed=1' in result.stdout else []
 
 
 async def _route_peer_output_to_hub(service: DispatchService, peer: str) -> Sequence[str]:
