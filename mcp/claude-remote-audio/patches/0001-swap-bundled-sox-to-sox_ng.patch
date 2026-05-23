@@ -1,0 +1,58 @@
+diff --git a/3rdparty/SConscript b/3rdparty/SConscript
+index 11bc05ff..bd3cfe9c 100644
+--- a/3rdparty/SConscript
++++ b/3rdparty/SConscript
+@@ -25,7 +25,7 @@ thirdparty_versions = {
+     'openssl':          '3.0.8',
+     'pulseaudio':       '12.2',
+     'sndfile':          '1.0.26',
+-    'sox':              '14.4.2',
++    'sox':              '14.8.0',
+     'speexdsp':         '1.2.0',
+ 
+     # CLI tools
+diff --git a/scripts/scons_helpers/build-3rdparty.py b/scripts/scons_helpers/build-3rdparty.py
+index 4035b91c..715d9ca5 100644
+--- a/scripts/scons_helpers/build-3rdparty.py
++++ b/scripts/scons_helpers/build-3rdparty.py
+@@ -1258,16 +1258,21 @@ elif ctx.pkg_name == 'sndfile':
+     install_files(ctx, 'src/sndfile.h', ctx.pkg_inc_dir)
+     install_files(ctx, 'src/.libs/libsndfile.a', ctx.pkg_lib_dir)
+ elif ctx.pkg_name == 'sox':
++    # claude-remote-audio patch: substitute sox_ng (active fork) for sox 14.4.2
++    # (deprecated CoreAudio backend since 2014). sox_ng's autotools build
++    # produces libsox_ng.a + sox_ng.h; the compat symlinks below let
++    # roc-toolkit's install_files calls (which expect sox.h + libsox.a)
++    # succeed without further patching of roc_sndio.
+     download(
+         ctx,
+-        'https://downloads.sourceforge.net/project/sox/sox/'
+-            '{ctx.pkg_ver}/sox-{ctx.pkg_ver}.tar.gz',
+-        'sox-{ctx.pkg_ver}.tar.gz')
++        'https://codeberg.org/sox_ng/sox_ng/releases/download/'
++            'sox_ng-{ctx.pkg_ver}/sox_ng-{ctx.pkg_ver}.tar.gz',
++        'sox_ng-{ctx.pkg_ver}.tar.gz')
+     unpack(
+         ctx,
+-        'sox-{ctx.pkg_ver}.tar.gz',
+-        'sox-{ctx.pkg_ver}')
+-    changedir(ctx, 'src/sox-{ctx.pkg_ver}')
++        'sox_ng-{ctx.pkg_ver}.tar.gz',
++        'sox_ng-{ctx.pkg_ver}')
++    changedir(ctx, 'src/sox_ng-{ctx.pkg_ver}')
+     execute(ctx, './configure --host={host} {vars} {flags} {opts}'.format(
+         host=ctx.toolchain,
+         vars=format_vars(ctx),
+@@ -1305,6 +1310,12 @@ elif ctx.pkg_name == 'sox':
+             '--without-twolame',
+         ])))
+     execute_make(ctx)
++    # claude-remote-audio patch: create libsox.a + sox.h compat symlinks in
++    # the build tree so install_files can pick them up. sox_ng's --enable-
++    # replace flag only creates these during `make install`, but roc-toolkit
++    # doesn't run install — it copies straight from the build tree.
++    execute(ctx, 'ln -sf libsox_ng.a src/.libs/libsox.a')
++    execute(ctx, 'ln -sf sox_ng.h src/sox.h')
+     install_files(ctx, 'src/sox.h', ctx.pkg_inc_dir)
+     install_files(ctx, 'src/.libs/libsox.a', ctx.pkg_lib_dir)
+ elif ctx.pkg_name == 'alsa':
