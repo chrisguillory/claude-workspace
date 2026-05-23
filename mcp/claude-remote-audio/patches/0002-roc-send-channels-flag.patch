@@ -1,0 +1,38 @@
+diff --git a/src/tools/roc_send/cmdline.ggo b/src/tools/roc_send/cmdline.ggo
+index 90e48d17..2fbd9023 100644
+--- a/src/tools/roc_send/cmdline.ggo
++++ b/src/tools/roc_send/cmdline.ggo
+@@ -50,6 +50,9 @@ section "Options"
+     option "rate" - "Override input sample rate, Hz"
+         int optional
+ 
++    option "channels" - "Override input channel count"
++        int optional
++
+     option "latency-backend" - "Which latency to use in latency tuner"
+         values="niq" default="niq" enum optional
+ 
+diff --git a/src/tools/roc_send/main.cpp b/src/tools/roc_send/main.cpp
+index ca3af5dd..eccdca49 100644
+--- a/src/tools/roc_send/main.cpp
++++ b/src/tools/roc_send/main.cpp
+@@ -98,6 +98,19 @@ int main(int argc, char** argv) {
+         io_config.sample_spec.set_sample_rate((size_t)args.rate_arg);
+     }
+ 
++    // claude-remote-audio patch: --channels override for mono devices.
++    // Eliminates the need for an external sox upmix pipe upstream of
++    // roc-send when capturing from mono CoreAudio devices.
++    if (args.channels_given) {
++        if (args.channels_arg <= 0) {
++            roc_log(LogError, "invalid --channels: should be > 0");
++            return 1;
++        }
++        io_config.sample_spec.channel_set().set_layout(audio::ChanLayout_Surround);
++        io_config.sample_spec.channel_set().set_order(audio::ChanOrder_Smpte);
++        io_config.sample_spec.channel_set().set_count((size_t)args.channels_arg);
++    }
++
+     // TODO(gh-568): remove set_frame_size() after removing sox
+     sndio::BackendMap::instance().set_frame_size(io_config.frame_length,
+                                                  sender_config.input_sample_spec);
