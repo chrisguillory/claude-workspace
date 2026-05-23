@@ -67,6 +67,8 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 | **Assertions only in tests/**                 | Application code raises exceptions explicitly                                                                  |
 | **Tests earn their place**                    | Automated tests cover what empirical use can't — regressions and hard-to-stage edge cases. Happy-path coverage is redundant with manual end-to-end. |
 | **Ideal state over backwards compat**         | Dev-only repo — fix sources over workarounds; rename cleanly, no migration shims or doc-as-bandaid              |
+| **Fork or patch, don't wait**                 | Bleeding edge by default. Take the best from across forks and sister projects; patch what's missing; don't block on third-party release cadence. |
+| **Layered architecture**                      | Place each unit in the layer that owns its concern; trace symptoms to the layer that owns the cause; create a missing layer when duplication signals one |
 | **DI via closures**                           | FastMCP pattern for dependency injection                                                                       |
 
 ### Ideal State
@@ -89,6 +91,31 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 **When to consider a doc-side note instead of a code fix:** the tool is owned by an upstream you can't change (and a PR is impractical), or the behavior is intentional and a code change would break other consumers. Almost never the case in this repo — when in doubt, fix the source.
 
 **Lead options with the ideal-state choice.** When presenting design alternatives, the option that best matches stated principles goes first. Don't order by smallest-diff or least-disruptive — that's a generic engineering bias that contradicts the dev-only repo's stated values.
+
+### Fork or patch, don't wait
+
+**Bleeding edge is the default. We bring the best of the ecosystem into the fold rather than wait for it.** When a library is deprecated, we adopt the active fork. When it lacks a feature, we carry a patch series. When a CLI doesn't exist, we write one. When multiple implementations each get part of a problem right, we combine the best of each into a single tool that gets all of it right.
+
+Already lived in this workspace:
+
+- **`mcp/imessage-kit/`** — "combines the best of five MIT-licensed implementations" of iMessage access, handling things "no existing tool gets fully right" (attributedBody parsing, edited messages, HEIC conversion, contact resolution)
+- **`cc_lib/claude_binary_patching.py`** — patches the Claude Code binary across its daily upstream releases
+- **`mcp/claude-remote-audio/swift/`** — wraps macOS APIs Apple doesn't ship as CLIs
+- **`mcp/claude-remote-audio/patches/`** (planned) — carries roc-toolkit patches against a pinned master SHA
+
+Extension of *Ideal state over backwards compat*: "fix the source" includes upstream libraries. "The source" might be a fork, multiple forks combined, or our own patches — whatever gets us to the right behavior fastest.
+
+### Layered architecture
+
+**Every unit lives in a layer; layers stack with dependencies pointing down.** Higher layers compose lower ones. The principle applies at design time (which layer is this new code's home?) and at fix time (which layer owns the symptom's cause?) — they're the same question asked at different moments.
+
+**Design-time placement.** Before writing, locate the layer. A Swift CLI wrapping a Core Audio framework belongs at the OS-adapter layer, not inlined in the orchestrator. A regex validator shared by `click`, `hover`, and `wait_for_selector` belongs in `validators.py`, not duplicated into each MCP tool. Once a unit has a clear home, its dependencies become obvious — and the higher-layer callers stay thin.
+
+**Maintenance-time fix placement.** When a symptom surfaces, trace it down. `roc-send` crashing on mono input is a symptom; the cause is libsox's missing channel negotiation. Document which layer owns the cause; the ideal-state fix lives there even when a higher-layer band-aid ships first. `mcp/claude-remote-audio/README.md`'s workaround inventory makes this explicit — every entry names the *owner* and the *ideal-state fix* layer.
+
+**Missing-layer detection.** When the same concern duplicates across higher layers, a lower layer is missing. `_nfkc_casefold` duplicated between `orchestrator.py` and `bluetooth.py` with the comment *"if a third caller emerges, extract to a shared `unicode_match` module"* is the signal — that lower layer should exist. Two callsites is the signal to consider extraction; three makes it overdue. W8 and W14 both stem from "our dispatch shape is shell-script-as-message" — one cause, two symptoms across the orchestrator, retired together by a typed-RPC layer.
+
+**Unfixable lower layers get an adapter, not pollution.** When the cause is upstream and unmovable — AirPods BT codec quirks, macOS Continuity steal, TCC's responsible-app chain — wrap the foundation in a detect-and-recover adapter at the lowest layer we own. Don't scatter the workaround across the orchestrator.
 
 ### Exception Handling
 
