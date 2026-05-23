@@ -1336,13 +1336,25 @@ def _roc_send_command(input_device: str, peer_ips: Sequence[str], *, mono: bool)
     - **Mono** (``mono=True``): sox captures + upmixes to stereo, pipes raw WAV
       through stdin to ``roc-send -i file:-``. Required because roc-send has no
       channel-count override flag and SoX's CoreAudio backend can't negotiate
-      channels down — without the upmix, mono devices die at open. The prior
-      ``ffmpeg | roc-send`` pipeline crackled from pipe-buffer underruns
-      (default ~64 KB kernel pipe buffer + ffmpeg's default output buffer);
-      ``sox --buffer 524288`` enlarges SoX's internal buffer to 512 KB (~2.7s
-      of headroom at 48 kHz / 16-bit / 2ch) so the consumer can ride out
-      scheduling jitter. WAV (vs raw) carries rate/channels/bit-depth in its
-      header so roc-send infers the stream format automatically.
+      channels down — without the upmix, mono devices die at open. SoX's
+      default block size (8192 B ≈ 42 ms at 48 kHz/16-bit/2ch) keeps the
+      pipe fed on modern macOS; an earlier implementation used
+      ``--buffer 524288`` (~2.7 s of headroom) after a previous
+      ``ffmpeg | roc-send`` attempt crackled from pipe underruns, but that
+      buffer added 5-6 s of one-way latency that broke push-to-talk on LAN.
+      Empirical 2026-05-23: default buffer is sufficient on M3-class
+      hardware; revisit with a tunable knob only if underruns reappear. WAV
+      (vs raw) carries rate/channels/bit-depth in its header so roc-send
+      infers the stream format automatically.
+
+    Kill prelude uses ``killall`` (comm-match) rather than ``pkill -f``
+    (argv-regex). The dispatched bash shell's argv contains the literal
+    ``roc-send`` (in the script we're sending), so ``pkill -f roc-send``
+    matches the shell itself and can SIGTERM it mid-script before the
+    subsequent launch line executes. ``killall`` matches the process's comm
+    field (``bash`` for the shell, ``roc-send`` for the real target), so
+    the shell is safe. sox dies of broken-pipe shortly after roc-send
+    exits — no explicit kill needed for it.
     """
     dest_flags = ' '.join(f'-s rtp://{ip}:{_MIC_RECEIVE_PORT}' for ip in peer_ips)
     dest_flags += f' -s rtp://127.0.0.1:{_MIC_RECEIVE_PORT}'
@@ -1350,8 +1362,7 @@ def _roc_send_command(input_device: str, peer_ips: Sequence[str], *, mono: bool)
     if not mono:
         quoted_uri = shlex.quote(f'core://{input_device}')
         return (
-            'pkill -f roc-send 2>/dev/null; '
-            'pkill -f "sox --buffer 524288 -t coreaudio" 2>/dev/null; '
+            'killall roc-send 2>/dev/null; '
             'sleep 1; '
             f'(nohup /usr/local/bin/roc-send -i {quoted_uri} {dest_flags} '
             '> /tmp/roc-send.log 2>&1 < /dev/null &)'
@@ -1363,13 +1374,12 @@ def _roc_send_command(input_device: str, peer_ips: Sequence[str], *, mono: bool)
     # a streaming-WAV header with a placeholder length field (it warns about
     # this); libsox on the read side accepts it fine.
     pipeline = (
-        f'sox --buffer 524288 -t coreaudio {quoted_device} '
+        f'sox -t coreaudio {quoted_device} '
         '-c 2 -r 48000 -e signed-integer -b 16 -t wav - | '
         f'/usr/local/bin/roc-send --input-format=wav -i file:- {dest_flags}'
     )
     return (
-        'pkill -f roc-send 2>/dev/null; '
-        'pkill -f "sox --buffer 524288 -t coreaudio" 2>/dev/null; '
+        'killall roc-send 2>/dev/null; '
         'sleep 1; '
         f'(nohup sh -c {shlex.quote(pipeline)} > /tmp/roc-send.log 2>&1 < /dev/null &)'
     )
