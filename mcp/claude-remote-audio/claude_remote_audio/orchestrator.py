@@ -7,12 +7,12 @@ import logging
 import re
 import shlex
 import subprocess
-import unicodedata
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
 from cc_lib.schemas import ClosedModel
+from cc_lib.utils.unicode_match import nfkc_casefold
 from claude_remote_bash import DispatchService
 from claude_remote_bash.client_config import ClientConfig
 from claude_remote_bash.discovery import DiscoveredHost, browse_hosts
@@ -401,8 +401,8 @@ async def _ensure_bluetooth_output(
 async def _device_in_hub_outputs(service: DispatchService, hub_alias: str, name: str) -> bool:
     """True if ``name`` (smart-quote-folded) appears in ``SwitchAudioSource -a -t output``."""
     raw = (await _run(service, hub_alias, 'SwitchAudioSource -a -t output')).stdout
-    folded = _nfkc_casefold(name)
-    return any(_nfkc_casefold(line.strip()) == folded for line in raw.splitlines() if line.strip())
+    folded = nfkc_casefold(name)
+    return any(nfkc_casefold(line.strip()) == folded for line in raw.splitlines() if line.strip())
 
 
 def _looks_like_applescript_tcc_denial(error_msg: str) -> bool:
@@ -528,8 +528,8 @@ def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: 
     if requested in canonical:
         return requested
 
-    folded_req = _nfkc_casefold(requested)
-    matches = [c for c in canonical if _nfkc_casefold(c) == folded_req]
+    folded_req = nfkc_casefold(requested)
+    matches = [c for c in canonical if nfkc_casefold(c) == folded_req]
     if len(matches) == 1:
         return matches[0]
     if matches:
@@ -538,30 +538,6 @@ def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: 
     suggestion = difflib.get_close_matches(requested, list(canonical), n=1, cutoff=0.6)
     hint = f' Did you mean {suggestion[0]!r}?' if suggestion else ''
     raise ApplyError(f'{hub_alias}: --output {requested!r} not found. Available: {list(canonical)}.{hint}')
-
-
-_QUOTE_FOLD_TABLE = str.maketrans(
-    {
-        '\u2018': "'",  # left single quote → ASCII apostrophe
-        '\u2019': "'",  # right single quote / apostrophe — what Core Audio uses for Chris's AirPods Max
-        '\u201c': '"',  # left double quote → ASCII double quote
-        '\u201d': '"',  # right double quote → ASCII double quote
-        '\u00a0': ' ',  # NBSP → ASCII space
-    }
-)
-
-
-def _nfkc_casefold(s: str) -> str:
-    """NFKC-normalize, fold smart quotes and NBSP to ASCII, then case-fold.
-
-    The smart-quote fold is the load-bearing piece: Core Audio uses U+2019
-    (curly apostrophe) in user-renamed devices like ``Chris's AirPods Max``,
-    but keyboards type U+0027 (straight). NFKC alone does not bridge those —
-    they are different semantic characters, not Unicode-equivalence variants.
-    Folding is safe because callers always pass the *canonical* matched name
-    to destructive commands; the fold only widens matching, not side effects.
-    """
-    return unicodedata.normalize('NFKC', s).translate(_QUOTE_FOLD_TABLE).casefold()
 
 
 async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[str]:

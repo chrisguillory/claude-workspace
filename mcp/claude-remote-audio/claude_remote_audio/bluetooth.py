@@ -4,10 +4,10 @@ import asyncio
 import json
 import logging
 import shlex
-import unicodedata
 from collections.abc import Sequence
 
 from cc_lib.schemas import ClosedModel
+from cc_lib.utils.unicode_match import nfkc_casefold
 from claude_remote_bash import DispatchService
 from claude_remote_bash.dispatch import HostRunResult
 
@@ -80,8 +80,8 @@ async def find_device(
     apostrophe matches Core Audio's curly form.
     """
     devices = await list_devices(service, host_alias)
-    folded = _nfkc_casefold(name)
-    return next((d for d in devices if _nfkc_casefold(d.name) == folded), None)
+    folded = nfkc_casefold(name)
+    return next((d for d in devices if nfkc_casefold(d.name) == folded), None)
 
 
 async def where_is(
@@ -213,7 +213,7 @@ async def engage_via_sound_menu(
     prev_default = await _current_default_output(service, host_alias)
     row_count = await _open_sound_popover_and_count_rows(service, host_alias)
     logger.info('%s: Sound popover open, %d candidate rows — looking for %r', host_alias, row_count, name)
-    folded_target = _nfkc_casefold(name)
+    folded_target = nfkc_casefold(name)
     hit = False
     try:
         for idx in range(1, row_count + 1):
@@ -221,7 +221,7 @@ async def engage_via_sound_menu(
             await _click_sound_row(service, host_alias, idx)
             await asyncio.sleep(0.4)
             outputs = await _list_core_audio_outputs(service, host_alias)
-            if any(_nfkc_casefold(o) == folded_target for o in outputs):
+            if any(nfkc_casefold(o) == folded_target for o in outputs):
                 logger.info('%s: rescue hit on row %d → %r in Core Audio', host_alias, idx, name)
                 hit = True
                 return True
@@ -309,32 +309,13 @@ async def _is_connected_via_system_profiler(
 ) -> bool:
     """True if ``name`` appears in ``device_connected`` on ``host_alias`` (no TCC needed)."""
     devices = await list_devices(service, host_alias)
-    folded = _nfkc_casefold(name)
-    return any(d.connected and _nfkc_casefold(d.name) == folded for d in devices)
+    folded = nfkc_casefold(name)
+    return any(d.connected and nfkc_casefold(d.name) == folded for d in devices)
 
 
 def _normalize_address(addr: str) -> str:
     """Normalize MAC address to blueutil's canonical form: lowercase, dash-separated."""
     return addr.replace(':', '-').lower()
-
-
-_QUOTE_FOLD_TABLE = str.maketrans(
-    {
-        '\u2018': "'",  # left single quote
-        '\u2019': "'",  # right single quote / apostrophe (the Core Audio apostrophe)
-        '\u201c': '"',  # left double quote
-        '\u201d': '"',  # right double quote
-        '\u00a0': ' ',  # NBSP
-    }
-)
-
-
-def _nfkc_casefold(s: str) -> str:
-    """Same fold as ``orchestrator._nfkc_casefold``. Duplicated to avoid a circular import.
-
-    If a third caller emerges, extract to a shared ``unicode_match`` module.
-    """
-    return unicodedata.normalize('NFKC', s).translate(_QUOTE_FOLD_TABLE).casefold()
 
 
 async def _current_default_output(service: DispatchService, host_alias: str) -> str:
