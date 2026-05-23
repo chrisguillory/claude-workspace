@@ -265,9 +265,6 @@ def test_edge_case_no_unexpected(edge_case_results: tuple[ViolationMap, Set[str]
     assert not unexpected, '\n'.join(sorted(unexpected))
 
 
-# -- Private Helpers ----------------------------------------------------------
-
-
 # -- Linter Output Parsing ----------------------------------------------------
 
 
@@ -322,6 +319,9 @@ def map_violations_to_classes(
             result.setdefault(best[0], set()).add(kind)
 
     return result
+
+
+# -- Private Helpers ----------------------------------------------------------
 
 
 def _build_actual_map(test_file: Path) -> tuple[ViolationMap, Set[str]]:
