@@ -56,22 +56,77 @@ brew_install_if_missing blueutil
 
 echo
 echo "=== roc-toolkit ==="
-if command -v roc-send >/dev/null && command -v roc-recv >/dev/null; then
+# Pinned to roc-toolkit master HEAD that includes "fix #829: panicks with sox
+# 14.6.1-1" — required for our sox_ng 14.8.0 patch to drive enough internal
+# driver slots. Bump this SHA when adopting a newer master; verify patches
+# still apply with `git apply --check`.
+ROC_TOOLKIT_PIN_SHA=f37b5b90c3414c9a6eccf0cbcfbf00e0f5be7c38
+if command -v roc-send >/dev/null && command -v roc-recv >/dev/null && [[ -z "${CRA_FORCE_REBUILD:-}" ]]; then
     ok "roc-toolkit (already installed: $(roc-send --version 2>&1 | head -1))"
+    info "(set CRA_FORCE_REBUILD=1 to force rebuild from pinned SHA + apply patch series)"
 else
     info "installing roc-toolkit build dependencies..."
     for pkg in scons libuv speexdsp sox libsndfile openssl@3 pkg-config ragel gengetopt cmake autoconf automake libtool; do
         brew_install_if_missing "$pkg"
     done
 
-    info "cloning roc-toolkit source to ~/src/roc-toolkit (if missing)..."
-    mkdir -p ~/src
-    if [[ ! -d ~/src/roc-toolkit ]]; then
-        git clone https://github.com/roc-streaming/roc-toolkit.git ~/src/roc-toolkit
+    # Build tree lives under our managed-state dir — same convention as apply logs
+    # at ~/.claude-workspace/mcp/claude-remote-audio/logs/. Avoids squatting on
+    # the user's ~/src/ namespace and gives the orchestrator a single place
+    # to enumerate everything claude-remote-audio owns on this host.
+    ROC_TOOLKIT_DIR=~/.claude-workspace/mcp/claude-remote-audio/build/roc-toolkit
+    mkdir -p "$(dirname "$ROC_TOOLKIT_DIR")"
+
+    # One-time migration: move legacy ~/src/roc-toolkit/ checkout forward so we
+    # don't lose its incremental scons build state on the next reset+rebuild.
+    if [[ -d ~/src/roc-toolkit && ! -d "$ROC_TOOLKIT_DIR" ]]; then
+        info "migrating ~/src/roc-toolkit/ → $ROC_TOOLKIT_DIR/"
+        mv ~/src/roc-toolkit "$ROC_TOOLKIT_DIR"
+        rmdir ~/src 2>/dev/null || true   # only succeeds if ~/src was ours-only
     fi
 
-    info "building roc-toolkit (~5 min compile)..."
-    cd ~/src/roc-toolkit
+    info "cloning roc-toolkit source to $ROC_TOOLKIT_DIR (if missing)..."
+    if [[ ! -d "$ROC_TOOLKIT_DIR" ]]; then
+        git clone https://github.com/roc-streaming/roc-toolkit.git "$ROC_TOOLKIT_DIR"
+    fi
+
+    info "resetting $ROC_TOOLKIT_DIR to pinned SHA ${ROC_TOOLKIT_PIN_SHA:0:10}..."
+    cd "$ROC_TOOLKIT_DIR"
+    git fetch --quiet origin
+    git checkout --quiet "$ROC_TOOLKIT_PIN_SHA"
+    git reset --hard --quiet
+    # Don't clean build/ — scons is incremental and clean tree forces a 10-min
+    # 3rdparty rebuild every time. Just clean uncommitted source changes that
+    # would conflict with patch application.
+    git clean -fd --quiet -- src/ scripts/ 3rdparty/SConscript 2>/dev/null || true
+
+    # Apply our patch series. Patches come from one of:
+    #   1. CRA_PATCHES_TARBALL_B64 env var (orchestrator dispatch via
+    #      --install-prereqs base64-tars the patches/ dir before sending)
+    #   2. Repo-local patches/ dir adjacent to this script (when bootstrap.sh
+    #      runs directly from a checkout)
+    info "locating claude-remote-audio patch series..."
+    if [[ -n "${CRA_PATCHES_TARBALL_B64:-}" ]]; then
+        PATCH_DIR=$(mktemp -d)
+        printf '%s' "$CRA_PATCHES_TARBALL_B64" | base64 -d | tar -xz -C "$PATCH_DIR"
+        info "  patches loaded from env var → $PATCH_DIR"
+    elif [[ -d "$(cd "$(dirname "$0")/.." && pwd)/patches" ]]; then
+        PATCH_DIR="$(cd "$(dirname "$0")/.." && pwd)/patches"
+        info "  patches loaded from repo → $PATCH_DIR"
+    else
+        err "no patches found (set CRA_PATCHES_TARBALL_B64 or run from repo with patches/ dir)"
+    fi
+
+    for patch in "$PATCH_DIR"/*.patch; do
+        [[ -e "$patch" ]] || continue
+        info "  applying $(basename "$patch")"
+        if ! git apply --check "$patch" 2>/dev/null; then
+            err "patch $(basename "$patch") does not apply cleanly against pinned SHA"
+        fi
+        git apply "$patch"
+    done
+
+    info "building roc-toolkit (~5 min compile, incremental after first)..."
     # --build-3rdparty=all is load-bearing on BOTH the build and the install;
     # without it on install, scons re-runs config without bundled deps and
     # errors with "openfec not found".
@@ -94,6 +149,11 @@ else
     fi
 
     ok "roc-toolkit installed: $(roc-send --version 2>&1 | head -1)"
+    if /usr/local/bin/roc-send --help 2>&1 | grep -q -- '--channels'; then
+        ok "  patched: --channels flag present"
+    else
+        err "post-install verification failed: --channels flag missing from installed roc-send"
+    fi
 fi
 
 echo
