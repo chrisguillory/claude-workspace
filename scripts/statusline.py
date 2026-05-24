@@ -613,10 +613,7 @@ def _write_cache(creds: ResolvedCredentials) -> None:
         timestamp=datetime.now(UTC).timestamp(),
         credentials=creds,
     )
-    with contextlib.suppress(OSError):
-        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_PATH.write_text(cached.model_dump_json())
-        CACHE_PATH.chmod(0o600)
+    _atomic_write_json(CACHE_PATH, cached.model_dump_json())
 
 
 def _snapshot_path(session_id: str) -> Path:
@@ -624,9 +621,13 @@ def _snapshot_path(session_id: str) -> Path:
 
 
 def _atomic_write_json(path: Path, data: str) -> None:
-    """Atomically write JSON string to file (temp → fsync → rename, 0o600)."""
+    """Atomically write JSON string to file (temp → fsync → rename, 0o600).
+
+    Temp path is PID-keyed so concurrent writers don't share an inode and
+    interleave bytes into a single .tmp before either renames.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix('.tmp')
+    tmp = path.with_suffix(f'.{os.getpid()}.tmp')
     try:
         with tmp.open('w') as f:
             f.write(data)
