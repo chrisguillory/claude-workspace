@@ -30,6 +30,11 @@
 
 set -euo pipefail
 
+# Resolve script's absolute directory at the top — needed because the body
+# `cd`s into the roc-toolkit checkout before referencing repo-local files,
+# and `$(dirname "$0")` would then resolve relative to the new cwd.
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
 err() {
     echo "ERROR: $*" >&2
     exit 1
@@ -110,8 +115,8 @@ else
         PATCH_DIR=$(mktemp -d)
         printf '%s' "$CRA_PATCHES_TARBALL_B64" | base64 -d | tar -xz -C "$PATCH_DIR"
         info "  patches loaded from env var → $PATCH_DIR"
-    elif [[ -d "$(cd "$(dirname "$0")/.." && pwd)/patches" ]]; then
-        PATCH_DIR="$(cd "$(dirname "$0")/.." && pwd)/patches"
+    elif [[ -d "$SCRIPT_DIR/../patches" ]]; then
+        PATCH_DIR="$SCRIPT_DIR/../patches"
         info "  patches loaded from repo → $PATCH_DIR"
     else
         err "no patches found (set CRA_PATCHES_TARBALL_B64 or run from repo with patches/ dir)"
@@ -147,6 +152,24 @@ else
         info "(sudo needed — /usr/local subdirs aren't user-writable)"
         sudo scons -Q --build-3rdparty=all install
     fi
+
+    # Ad-hoc re-sign the installed binaries. macOS attaches a
+    # `com.apple.provenance` xattr when sudo copies a binary from a
+    # user-built location to a system path; Gatekeeper then refuses to
+    # launch the binary (the symptom is roc-send/roc-recv hanging silently,
+    # exit 137 under timeout, no stderr). The provenance xattr is
+    # SIP-protected and cannot be stripped even by root; the workable
+    # bypass is to re-sign with an ad-hoc signature, which Gatekeeper
+    # accepts. Same shape as any custom-built binary going into /usr/local
+    # via sudo on macOS Sequoia+.
+    info "ad-hoc codesigning installed binaries (bypass Gatekeeper provenance block)..."
+    for bin in /usr/local/bin/roc-send /usr/local/bin/roc-recv /usr/local/bin/roc-copy; do
+        if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+            echo "$SUDO_PASSWORD" | sudo -S -p "" codesign --force --sign - "$bin" 2>&1
+        else
+            sudo codesign --force --sign - "$bin"
+        fi
+    done
 
     ok "roc-toolkit installed: $(roc-send --version 2>&1 | head -1)"
     if /usr/local/bin/roc-send --help 2>&1 | grep -q -- '--channels'; then

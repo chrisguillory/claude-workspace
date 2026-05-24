@@ -728,17 +728,16 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             },
         )
 
-    # (b) Mono input — roc-send always requests 2 channels and has no
-    # negotiation flag, so we wrap mono devices in a sox stdin pipe that
-    # upmixes mono → stereo before roc-send sees the stream. See
-    # `_roc_send_command` for the pipeline details + buffer sizing.
-    # `mono = True` when the probe found 0 or 1 input channels (or didn't
-    # find the device at all — fall through to letting roc-send fail loudly
-    # with a real error rather than guessing).
-    mono = in_channels is not None and in_channels < 2
-
+    # Pass the probed channel count straight through to roc-send via our
+    # patched --channels flag. Mono devices open at 1ch, stereo at 2ch, etc.
+    # When the probe couldn't determine the count (in_channels is None),
+    # let roc-send use its default and fail loudly with a real error.
     peer_ips = [plan.topology_peer_to_ip[p] for p in plan.topology_peer_aliases]
-    await _run(service, plan.hub_alias, _roc_send_command(plan.input_device, peer_ips, mono=mono))
+    await _run(
+        service,
+        plan.hub_alias,
+        _roc_send_command(plan.input_device, peer_ips, channels=in_channels),
+    )
     await asyncio.sleep(3)
     alive = await _run(service, plan.hub_alias, 'pgrep -f roc-send >/dev/null && echo alive || echo dead')
     if alive.stdout.strip() != 'alive':
@@ -1297,28 +1296,18 @@ def _roc_recv_command(bind_ports: Sequence[int]) -> str:
     )
 
 
-def _roc_send_command(input_device: str, peer_ips: Sequence[str], *, mono: bool) -> str:
+def _roc_send_command(input_device: str, peer_ips: Sequence[str], *, channels: int | None) -> str:
     """Shell command that restarts roc-send broadcasting the mic to peer IPs + self-loopback.
 
-    Two paths depending on whether the input device is mono:
-
-    - **Stereo or higher** (``mono=False``): direct ``roc-send -i core://<device>``.
-      Real-time HAL scheduling, lowest latency. Multichannel (5.1, 7.1, etc.)
-      takes this path — roc-send/SoX accept arbitrary channel counts as long as
-      ``>= 2`` (which is what they request by default).
-    - **Mono** (``mono=True``): sox captures + upmixes to stereo, pipes raw WAV
-      through stdin to ``roc-send -i file:-``. Required because roc-send has no
-      channel-count override flag and SoX's CoreAudio backend can't negotiate
-      channels down — without the upmix, mono devices die at open. SoX's
-      default block size (8192 B ≈ 42 ms at 48 kHz/16-bit/2ch) keeps the
-      pipe fed on modern macOS; an earlier implementation used
-      ``--buffer 524288`` (~2.7 s of headroom) after a previous
-      ``ffmpeg | roc-send`` attempt crackled from pipe underruns, but that
-      buffer added 5-6 s of one-way latency that broke push-to-talk on LAN.
-      Empirical 2026-05-23: default buffer is sufficient on M3-class
-      hardware; revisit with a tunable knob only if underruns reappear. WAV
-      (vs raw) carries rate/channels/bit-depth in its header so roc-send
-      infers the stream format automatically.
+    When ``channels`` is set (the orchestrator's input-device probe found the
+    native channel count), passes ``--channels=N`` to roc-send so it opens
+    the device at that count. This is a feature of our patched roc-send
+    (patch 0002 in ``mcp/claude-remote-audio/patches/``); upstream roc-send
+    has no such flag and hardcodes a stereo request, which causes mono
+    devices to fail at libsox open. With ``--channels``, mono devices open
+    natively and roc-send transports the appropriate channel count over
+    RTP. When ``channels`` is None (probe couldn't detect), no flag is
+    passed and roc-send uses its default 2-channel request.
 
     Kill prelude uses ``killall`` (comm-match) rather than ``pkill -f``
     (argv-regex). The dispatched bash shell's argv contains the literal
@@ -1326,35 +1315,18 @@ def _roc_send_command(input_device: str, peer_ips: Sequence[str], *, mono: bool)
     matches the shell itself and can SIGTERM it mid-script before the
     subsequent launch line executes. ``killall`` matches the process's comm
     field (``bash`` for the shell, ``roc-send`` for the real target), so
-    the shell is safe. sox dies of broken-pipe shortly after roc-send
-    exits — no explicit kill needed for it.
+    the shell is safe.
     """
     dest_flags = ' '.join(f'-s rtp://{ip}:{_MIC_RECEIVE_PORT}' for ip in peer_ips)
     dest_flags += f' -s rtp://127.0.0.1:{_MIC_RECEIVE_PORT}'
 
-    if not mono:
-        quoted_uri = shlex.quote(f'core://{input_device}')
-        return (
-            'killall roc-send 2>/dev/null; '
-            'sleep 1; '
-            f'(nohup /usr/local/bin/roc-send -i {quoted_uri} {dest_flags} '
-            '> /tmp/roc-send.log 2>&1 < /dev/null &)'
-        )
-
-    quoted_device = shlex.quote(input_device)
-    # ``--input-format=wav`` is mandatory when reading from stdin — roc-send
-    # can't sniff the format from the byte stream (``-i file:-``). SoX writes
-    # a streaming-WAV header with a placeholder length field (it warns about
-    # this); libsox on the read side accepts it fine.
-    pipeline = (
-        f'sox -t coreaudio {quoted_device} '
-        '-c 2 -r 48000 -e signed-integer -b 16 -t wav - | '
-        f'/usr/local/bin/roc-send --input-format=wav -i file:- {dest_flags}'
-    )
+    quoted_uri = shlex.quote(f'core://{input_device}')
+    channels_flag = f'--channels={channels} ' if channels is not None else ''
     return (
         'killall roc-send 2>/dev/null; '
         'sleep 1; '
-        f'(nohup sh -c {shlex.quote(pipeline)} > /tmp/roc-send.log 2>&1 < /dev/null &)'
+        f'(nohup /usr/local/bin/roc-send {channels_flag}-i {quoted_uri} {dest_flags} '
+        '> /tmp/roc-send.log 2>&1 < /dev/null &)'
     )
 
 
