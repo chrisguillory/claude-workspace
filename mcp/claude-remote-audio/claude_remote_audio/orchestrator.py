@@ -1299,16 +1299,14 @@ def _roc_recv_command(bind_ports: Sequence[int]) -> str:
 def _roc_send_command(input_device: str, peer_ips: Sequence[str], *, channels: int | None) -> str:
     """Shell command that restarts roc-send broadcasting the mic to peer IPs + self-loopback.
 
-    When ``channels`` is set and not equal to the upstream default (2),
-    passes ``--channels=N`` to roc-send so it opens the device at that
-    count. This is a feature of our patched roc-send (patch 0002 in
-    ``mcp/claude-remote-audio/patches/``); upstream roc-send has no such
-    flag. With ``--channels``, mono devices open natively and roc-send
-    transports the appropriate channel count over RTP. When ``channels``
-    is None (probe couldn't detect) OR ``channels == 2`` (the upstream
-    default — no flag needed), no flag is passed. The latter keeps this
-    function backward-compatible with un-patched hubs (e.g., a peer that
-    becomes the hub before its bootstrap has run the patched build).
+    When ``channels`` is set (the orchestrator's input-device probe found the
+    native channel count), passes ``--channels=N`` to roc-send so it opens
+    the device at that count. This is a feature of our patched roc-send
+    (patch 0002 in ``mcp/claude-remote-audio/patches/``); upstream roc-send
+    has no such flag. With ``--channels``, mono devices open natively and
+    roc-send transports the appropriate channel count over RTP. When
+    ``channels`` is None (probe couldn't detect), no flag is passed and
+    roc-send uses its default 2-channel request.
 
     Kill prelude uses ``killall`` (comm-match) rather than ``pkill -f``
     (argv-regex). The dispatched bash shell's argv contains the literal
