@@ -298,13 +298,13 @@ async def edge_sync_nested_in_async() -> None:
     is unusual but doesn't break cancellation semantics.
     """
 
-    def sync_handler() -> None:
+    def sync_handler_in_async() -> None:
         try:
             risky()
         except CancelledError:  # NOT EXC007: sync context
             cleanup()  # Unusual but not a violation
 
-    sync_handler()
+    sync_handler_in_async()
 
 
 # -- EXC008: GeneratorExit in Generators --------------------------------------
@@ -397,13 +397,13 @@ def edge_sync_nested_in_generator() -> Generator[object]:
     but doesn't break generator semantics.
     """
 
-    def sync_handler() -> None:
+    def sync_handler_in_generator() -> None:
         try:
             risky()
         except GeneratorExit:  # NOT EXC008: not a generator
             cleanup()
 
-    sync_handler()
+    sync_handler_in_generator()
     yield 1
 
 
