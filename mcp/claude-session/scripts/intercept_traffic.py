@@ -94,6 +94,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 import psutil
+from cc_lib import os_process
 from cc_lib.claude_context import cached_sessions_by_pid
 from cc_lib.session_tracker import Session
 from cc_lib.utils import get_claude_workspace_config_home_dir
@@ -205,9 +206,8 @@ def _should_retry_session_lookup(pid: int) -> tuple[bool, tuple[int, float] | No
 
     # Get create_time for deduplication
     try:
-        proc = psutil.Process(pid)
-        create_time = proc.create_time()
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        create_time = os_process.create_time(pid).timestamp()
+    except (os_process.ProcessGone, os_process.ProcessAccessDenied, os_process.ProcessZombie):
         return False, None
 
     key = (pid, create_time)

@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 import click
-import psutil
+from cc_lib import os_process
 from cc_lib.claude_context import find_claude_pid
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.exceptions import RivalSessionError
@@ -102,14 +102,12 @@ def main() -> None:
 
 def _get_claude_version(claude_pid: int) -> CCVersion:
     """Extract Claude Code version from the running process's executable path."""
-    exe_path = Path(psutil.Process(claude_pid).exe())
-    return CCVersion(exe_path.name)
+    return CCVersion(os_process.exe_path(claude_pid).name)
 
 
 def _get_process_created_at(claude_pid: int) -> datetime:
-    """Get process creation time from the OS via psutil."""
-    create_time = psutil.Process(claude_pid).create_time()
-    return datetime.fromtimestamp(create_time, UTC).astimezone()
+    """Get process creation time from the OS."""
+    return os_process.create_time(claude_pid).astimezone()
 
 
 class _TranscriptFirstLine(SubsetModel):
@@ -153,7 +151,7 @@ def _handle_rival_session(exc: RivalSessionError) -> None:
     print(msg_kill, file=sys.stderr)
     _emit_to_tty(msg_owner, msg_kill)
     _notify_macos(exc)
-    psutil.Process(exc.claude_pid).terminate()
+    os_process.terminate(exc.claude_pid)
 
 
 if __name__ == '__main__':

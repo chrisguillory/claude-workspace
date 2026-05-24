@@ -112,11 +112,12 @@ from typing import Literal
 import psutil
 import pydantic
 import pydantic.alias_generators
+from cc_lib import os_process
 from cc_lib.claude_context import lookup_session_by_id
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
-from cc_lib.types import CCVersion, EffortLevel
+from cc_lib.types import CCVersion, EffortLevel, JsonDatetime
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
 # Credential Models — External Data (login files, config, keychain)
@@ -223,7 +224,7 @@ class CredentialSnapshot(ClosedModel):
 
     session_id: str
     claude_pid: int
-    claude_pid_created_at: float = 0.0  # psutil create_time(); 0.0 for pre-existing snapshots
+    claude_pid_created_at: JsonDatetime
     created_at: str
     credentials: ResolvedCredentials
 
@@ -789,7 +790,7 @@ def _resolve_pending_from_config() -> str:
 def _get_active_credentials(
     session_id: str,
     claude_pid: int,
-    claude_pid_created_at: float,
+    claude_pid_created_at: datetime,
     transcript_path: str,
 ) -> tuple[ResolvedCredentials, str]:
     """Return (credentials_to_display, pending_login_name).
@@ -881,11 +882,10 @@ def _cleanup_orphan_snapshots(current_session_id: str) -> None:
                 pid = HealthSidecar.model_validate_json(path.read_text()).claude_pid
             else:
                 pid = CredentialSnapshot.model_validate_json(path.read_text()).claude_pid
-            os.kill(pid, 0)
-        except (ProcessLookupError, OSError, pydantic.ValidationError, json.JSONDecodeError):
+            if not os_process.is_alive(pid):
+                path.unlink(missing_ok=True)
+        except (OSError, pydantic.ValidationError, json.JSONDecodeError):
             path.unlink(missing_ok=True)
-        except PermissionError:
-            pass  # Process exists but owned by another user
 
 
 def _iter_logins() -> Sequence[LoginFile]:
@@ -1439,8 +1439,8 @@ def _format_health(sample: HealthSample, sidecar: HealthSidecar) -> str:
 
 
 def _get_process_uptime_ms(claude_pid: int) -> float:
-    """Get process uptime in milliseconds from psutil."""
-    return (time.time() - psutil.Process(claude_pid).create_time()) * 1000
+    """Get process uptime in milliseconds."""
+    return (time.time() - os_process.create_time(claude_pid).timestamp()) * 1000
 
 
 def _get_session_age_ms(transcript_path: str) -> float | None:
@@ -1572,7 +1572,7 @@ def main() -> None:
     if health_sample is not None:
         health_sidecar = _update_health_sidecar(data.session_id, claude_pid, health_sample)
 
-    claude_pid_created_at = psutil.Process(claude_pid).create_time()
+    claude_pid_created_at = os_process.create_time(claude_pid)
     static, pending_login = _get_active_credentials(
         data.session_id,
         claude_pid,

@@ -12,11 +12,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
-import psutil
 import pydantic
+from cc_lib import os_process
+from cc_lib.os_process import ProcessHandle
 from cc_lib.session_tracker import Session, SessionDatabase
 from cc_lib.types import CCVersion
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir, get_claude_workspace_config_home_dir
@@ -210,21 +211,15 @@ class SessionInfoService:
         pid = workspace_session.metadata.claude_pid
         expected_created_at = workspace_session.metadata.process_created_at
 
-        try:
-            proc = psutil.Process(pid)
-            actual_created_at = datetime.fromtimestamp(proc.create_time(), UTC)
+        if expected_created_at is None:
+            # Legacy session without anchor — fall back to alive-check only.
+            if os_process.is_alive(pid):
+                return (True, pid)
+            return False, None
 
-            # Verify creation time matches (guards against PID recycling)
-            if expected_created_at is not None:
-                # Allow 1 second tolerance for timestamp precision differences
-                time_diff = abs((actual_created_at - expected_created_at).total_seconds())
-                if time_diff > 1.0:
-                    # PID was recycled - different process
-                    return False, None
-
-            return (True, pid)
-        except psutil.NoSuchProcess:
-            return False, None  # Process is gone
+        if ProcessHandle(pid, expected_created_at).is_alive():
+            return True, pid
+        return False, None
 
     async def resolve_session(self, session_id_or_prefix: str, *, project_filter: Path | None = None) -> SessionInfo:
         """Resolve a session ID or prefix to a full session.
@@ -358,11 +353,8 @@ class SessionInfoService:
             return fallback
 
         try:
-            proc = psutil.Process(pid)
-            create_time = proc.create_time()
-            # Note: AccessDenied not caught per fail-fast policy - handle if observed
-            return datetime.fromtimestamp(create_time, UTC).astimezone()
-        except psutil.NoSuchProcess:
+            return os_process.create_time(pid).astimezone()
+        except os_process.ProcessGone:
             # Process gone - use cached fallback from sessions.json
             return fallback
 
