@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import difflib
+import io
 import logging
 import re
 import shlex
 import subprocess
+import tarfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
@@ -1415,10 +1417,19 @@ async def _ensure_prereqs(
     logger.info('prereqs: probing %d host(s)', len(host_reqs))
     missing_by_host = await _probe_missing_binaries(service, host_reqs)
 
+    # Hub-feature preflight: the orchestrator now always passes --channels=N
+    # to roc-send (patch 0002), so a hub running upstream roc-send would die
+    # at apply time on the unrecognized flag. Detect upfront and route to
+    # the bootstrap path (with `--install-prereqs`) or fail-fast with a
+    # ResolvableApplyError that names --install-prereqs as the recovery.
+    hub_unpatched = has_input and not await _check_hub_roc_send_is_patched(service, hub_alias)
+    if hub_unpatched:
+        logger.info('prereqs: hub %s has unpatched roc-send (missing --channels)', hub_alias)
+
     if any(missing_by_host.values()):
         summary = ', '.join(f'{h}=[{", ".join(m)}]' for h, m in missing_by_host.items() if m)
         logger.info('prereqs missing: %s', summary)
-    else:
+    elif not hub_unpatched:
         logger.info('prereqs satisfied on all hosts')
 
     if install_prereqs:
@@ -1434,21 +1445,30 @@ async def _ensure_prereqs(
         hosts_to_bootstrap = (
             [h for h, m in missing_by_host.items() if m] if any(missing_by_host.values()) else list(host_reqs.keys())
         )
+        # Hub needs the patched roc-send → include even if no binaries are
+        # missing (the bootstrap's patch-apply + force-rebuild path lands it).
+        if hub_unpatched and hub_alias not in hosts_to_bootstrap:
+            hosts_to_bootstrap.append(hub_alias)
         logger.info('prereqs: authorizing installs on %s', hosts_to_bootstrap)
         passwords = await _authorize_installs(service, hosts_to_bootstrap)
         logger.info('prereqs: dispatching bootstrap to %s (parallel)', hosts_to_bootstrap)
         await asyncio.gather(*(_install_prereqs_on_host(service, h, passwords[h]) for h in hosts_to_bootstrap))
         logger.info('prereqs: re-probing %s', hosts_to_bootstrap)
         missing_by_host = await _probe_missing_binaries(service, {h: host_reqs[h] for h in hosts_to_bootstrap})
-        if not any(missing_by_host.values()):
+        if hub_unpatched:
+            hub_unpatched = has_input and not await _check_hub_roc_send_is_patched(service, hub_alias)
+        if not any(missing_by_host.values()) and not hub_unpatched:
             logger.info('prereqs: all hosts satisfied after bootstrap')
 
-    if any(missing_by_host.values()):
+    if any(missing_by_host.values()) or hub_unpatched:
         issues = [f'{h}: {", ".join(m)}' for h, m in missing_by_host.items() if m]
+        if hub_unpatched:
+            issues.append(f'{hub_alias}: roc-send missing --channels patch (patch 0002)')
         hint = (
-            '\n\nBootstrap was attempted but binaries are still missing — review the bootstrap output above.'
+            '\n\nBootstrap was attempted but issues remain — review the bootstrap output above.'
             if install_prereqs
-            else '\n\nRe-run with --install-prereqs to bootstrap these hosts (or see the claude-remote-audio README).'
+            else f'\n\nRe-run with --install-prereqs --target {hub_alias} to install the patched roc-send '
+            '(or include --install-prereqs in this run; see the claude-remote-audio README).'
         )
         body = '\n  '.join(issues)
         raise ApplyError(f'missing prerequisite(s):\n  {body}{hint}')
@@ -1651,9 +1671,17 @@ async def _install_prereqs_on_host(
     script_text = _bootstrap_script_path().read_text(encoding='utf-8')
     volume_b64 = base64.b64encode(_coreaudio_volume_swift_source_path().read_bytes()).decode('ascii')
     tcc_probe_b64 = base64.b64encode(_tcc_probe_swift_source_path().read_bytes()).decode('ascii')
+    patches_b64 = _patches_tarball_b64()
     exports = [
         f'export CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64={shlex.quote(volume_b64)}',
         f'export CRA_SWIFT_CLAUDE_TCC_PROBE_B64={shlex.quote(tcc_probe_b64)}',
+        f'export CRA_PATCHES_TARBALL_B64={shlex.quote(patches_b64)}',
+        # `--install-prereqs` always means "deploy current patches" — force the
+        # roc-toolkit rebuild path even if a stale unpatched binary is already
+        # at /usr/local/bin/roc-send. The bootstrap's reset-to-pin + patch
+        # apply + scons rebuild are all idempotent; cost is ~10 sec when the
+        # build dir already exists (incremental link) or ~5 min on first run.
+        'export CRA_FORCE_REBUILD=1',
     ]
     if sudo_password is not None:
         exports.append(f'export SUDO_PASSWORD={shlex.quote(sudo_password)}')
@@ -1692,6 +1720,45 @@ async def _install_prereqs_on_host(
 def _bootstrap_script_path() -> Path:
     """Locate ``scripts/bootstrap.sh`` next to the ``claude_remote_audio`` package."""
     return Path(__file__).resolve().parent.parent / 'scripts' / 'bootstrap.sh'
+
+
+def _patches_dir() -> Path:
+    """Locate ``patches/`` next to the ``claude_remote_audio`` package."""
+    return Path(__file__).resolve().parent.parent / 'patches'
+
+
+def _patches_tarball_b64() -> str:
+    """Pack the patches/ directory as a gzipped tarball, base64-encoded.
+
+    Read by bootstrap.sh from the ``CRA_PATCHES_TARBALL_B64`` env var; bootstrap
+    decodes to a tempdir and ``git apply``s each .patch file in name order.
+    Bootstrap's own loop short-circuits with an actionable error if any patch
+    fails ``git apply --check`` against the pinned roc-toolkit SHA.
+    """
+    patches_dir = _patches_dir()
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w:gz') as tf:
+        for patch in sorted(patches_dir.glob('*.patch')):
+            tf.add(patch, arcname=patch.name)
+    return base64.b64encode(buf.getvalue()).decode('ascii')
+
+
+async def _check_hub_roc_send_is_patched(service: DispatchService, host: str) -> bool:
+    """Probe whether ``host``'s roc-send recognizes ``--channels`` (patch 0002).
+
+    The orchestrator always passes ``--channels=N`` to roc-send when the
+    input-device probe knows the channel count. Without patch 0002, roc-send
+    rejects the flag and dies at launch — the failure surfaces only ~3 sec
+    later via the pgrep-alive check, with a generic diagnostic that doesn't
+    mention the patch series. Catching it here lets ``_ensure_prereqs`` raise
+    a ResolvableApplyError that names ``--install-prereqs`` as the recovery.
+    """
+    result = await _run(
+        service,
+        host,
+        '/usr/local/bin/roc-send --help 2>&1 | grep -q -- "--channels" && echo PATCHED || echo UNPATCHED',
+    )
+    return result.stdout.strip() == 'PATCHED'
 
 
 def _coreaudio_volume_swift_source_path() -> Path:
