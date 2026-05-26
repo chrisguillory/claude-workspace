@@ -75,7 +75,6 @@ from .models import (
     ProfileStateOriginStorage,
     ProxyConfig,
     RequestTiming,
-    ResizeWindowResult,
     SaveProfileStateResult,
     ScrollBehavior,
     ScrollDirection,
@@ -87,6 +86,7 @@ from .models import (
     TTFBMetric,
     WaitForSelectorResult,
     WaitForSelectorState,
+    WindowSize,
 )
 from .scripts import (
     ARIA_SNAPSHOT_SCRIPT,
@@ -149,6 +149,7 @@ class BrowserService:
         enable_har_capture: bool = False,
         browser: Browser | None = None,
         user_data_dir: str | None = None,
+        window_size: WindowSize | None = None,
     ) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
@@ -158,6 +159,11 @@ class BrowserService:
                     the currently running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when
                     your personal Chrome is running (different bundle ID).
+            window_size: Optional initial window dimensions. When provided, sets the
+                    --window-size Chrome flag and follows up with set_window_size()
+                    after CDP injection for reliability. When None, Chrome uses its
+                    native default. On macOS, OS may clamp width to ~500px minimum;
+                    actual size is reflected in NavigationResult.window_size.
             user_data_dir: Optional persistent profile directory. When provided,
                     the chosen browser uses this path as its --user-data-dir, so
                     cookies, localStorage, IndexedDB (including non-extractable
@@ -237,7 +243,8 @@ class BrowserService:
             logger.info('Using Chromium: %s', chromium_path)
 
         opts.add_argument('--disable-blink-features=AutomationControlled')
-        opts.add_argument('--window-size=1920,1080')
+        if window_size is not None:
+            opts.add_argument(f'--window-size={window_size.width},{window_size.height}')
         opts.add_experimental_option('excludeSwitches', ['enable-automation'])
         opts.add_experimental_option('useAutomationExtension', False)
         opts.add_experimental_option(
@@ -292,6 +299,16 @@ class BrowserService:
                 """,
             },
         )
+
+        # Explicit post-launch resize for reliability. The --window-size flag is
+        # advisory on some OSes (macOS may clamp on first paint); set_window_size
+        # gives a synchronous return point with a value we can read back.
+        if window_size is not None:
+            await asyncio.to_thread(
+                self.state.driver.set_window_size,
+                window_size.width,
+                window_size.height,
+            )
 
         return self.state.driver
 
@@ -1664,26 +1681,26 @@ class BrowserService:
         return result
 
     @tool_registry.register_tool
-    async def resize_window(self, width: int, height: int) -> ResizeWindowResult:
+    async def resize_window(self, window_size: WindowSize) -> WindowSize:
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
 
         Args:
-            width: Window width in pixels
-            height: Window height in pixels
+            window_size: Target window dimensions. Both width and height required
+                    (positive ints, validated by the WindowSize model).
 
         Returns:
-            Dict with actual width and height after resize
+            WindowSize with actual width and height after resize.
 
         Common presets:
-            - Mobile (iPhone SE): 375 x 667
-            - Tablet (iPad): 768 x 1024
-            - Desktop (1080p): 1920 x 1080
-            - Desktop (1440p): 2560 x 1440
+            - Mobile (iPhone SE): WindowSize(width=375, height=667)
+            - Tablet (iPad): WindowSize(width=768, height=1024)
+            - Desktop (1080p): WindowSize(width=1920, height=1080)
+            - Desktop (1440p): WindowSize(width=2560, height=1440)
 
         Example:
-            resize_window(375, 667)  # Mobile viewport
+            resize_window(WindowSize(width=375, height=667))  # Mobile viewport
             screenshot("mobile-view.png")
 
         Note:
@@ -1693,20 +1710,16 @@ class BrowserService:
         """
         driver = await self.get_browser()
 
-        # Validation: positive integers only
-        if width <= 0 or height <= 0:
-            raise ValueError(f'Width and height must be positive integers. Got: {width}x{height}')
+        logger.info('Resizing window to %sx%s', window_size.width, window_size.height)
 
-        logger.info('Resizing window to %sx%s', width, height)
-
-        await asyncio.to_thread(driver.set_window_size, width, height)
+        await asyncio.to_thread(driver.set_window_size, window_size.width, window_size.height)
 
         # Get actual size (may differ due to OS constraints)
         size = await asyncio.to_thread(driver.get_window_size)
 
         logger.info('Window resized to %sx%s', size['width'], size['height'])
 
-        return ResizeWindowResult(width=size['width'], height=size['height'])
+        return WindowSize(width=size['width'], height=size['height'])
 
     @tool_registry.register_tool
     async def capture_web_vitals(self, timeout_ms: int = 5000) -> CoreWebVitals:
@@ -2316,6 +2329,7 @@ class BrowserService:
         fresh_browser: bool = False,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
         browser: Browser | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -2331,6 +2345,11 @@ class BrowserService:
             init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
+            window_size: Optional initial window dimensions (WindowSize(width=..., height=...)).
+                        Applied at browser launch only (no effect if a session already exists;
+                        use resize_window() to change size mid-session). On macOS, OS may clamp
+                        width to ~500px minimum; actual size is reflected in the returned
+                        NavigationResult.window_size.
             browser: Which browser to use - "chrome" or "chromium". Defaults to the currently
                     running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when
@@ -2412,7 +2431,11 @@ class BrowserService:
         if fresh_browser:
             await self.close_browser()
 
-        driver = await self.get_browser(enable_har_capture=enable_har_capture, browser=browser)
+        driver = await self.get_browser(
+            enable_har_capture=enable_har_capture,
+            browser=browser,
+            window_size=window_size,
+        )
 
         # Install user init scripts (after browser creation, before navigation)
         # Scripts registered here run on EVERY new document in this session
@@ -2447,7 +2470,12 @@ class BrowserService:
         # The helper is idempotent and checks restored_origins to avoid double-restore.
         await _restore_pending_profile_state_for_current_origin(self, driver)
 
-        return NavigationResult(current_url=driver.current_url, title=driver.title)
+        actual_size = await asyncio.to_thread(driver.get_window_size)
+        return NavigationResult(
+            current_url=driver.current_url,
+            title=driver.title,
+            window_size=WindowSize(width=actual_size['width'], height=actual_size['height']),
+        )
 
     @tool_registry.register_tool
     async def navigate_with_profile_state(
@@ -2462,6 +2490,7 @@ class BrowserService:
         browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
     ) -> NavigationResult:
         """Launch fresh browser with imported profile state and navigate.
 
@@ -2643,7 +2672,11 @@ class BrowserService:
         await self.close_browser()
 
         # Get browser with configuration
-        driver = await self.get_browser(enable_har_capture=enable_har_capture, browser=browser)
+        driver = await self.get_browser(
+            enable_har_capture=enable_har_capture,
+            browser=browser,
+            window_size=window_size,
+        )
 
         # Build and register storage init script for localStorage/sessionStorage
         # This runs BEFORE page JavaScript on every new document (Playwright-style)
@@ -2706,10 +2739,12 @@ class BrowserService:
         # Restore storage for current origin immediately
         await _restore_pending_profile_state_for_current_origin(self, driver)
 
+        actual_size = await asyncio.to_thread(driver.get_window_size)
         return NavigationResult(
             current_url=driver.current_url,
             title=driver.title,
             elapsed_seconds=round(timer.elapsed(), 3),
+            window_size=WindowSize(width=actual_size['width'], height=actual_size['height']),
         )
 
     @tool_registry.register_tool
@@ -2720,6 +2755,7 @@ class BrowserService:
         browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
     ) -> NavigationResult:
         """Launch fresh browser using a persistent --user-data-dir and navigate.
 
@@ -2783,6 +2819,7 @@ class BrowserService:
             enable_har_capture=enable_har_capture,
             browser=browser,
             user_data_dir=user_data_dir,
+            window_size=window_size,
         )
 
         # Install user init scripts (after browser creation, before navigation)
@@ -2811,10 +2848,12 @@ class BrowserService:
 
         logger.info('Successfully navigated to %s (tracked origins: %s)', final_url, len(self.state.origin_tracker))
 
+        actual_size = await asyncio.to_thread(driver.get_window_size)
         return NavigationResult(
             current_url=driver.current_url,
             title=driver.title,
             elapsed_seconds=round(timer.elapsed(), 3),
+            window_size=WindowSize(width=actual_size['width'], height=actual_size['height']),
         )
 
     @tool_registry.register_tool

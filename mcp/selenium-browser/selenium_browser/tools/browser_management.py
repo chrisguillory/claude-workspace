@@ -10,7 +10,7 @@ from mcp.types import ToolAnnotations
 from ..models import (
     DownloadResourceResult,
     JavaScriptResult,
-    ResizeWindowResult,
+    WindowSize,
 )
 from ..service import BrowserService
 
@@ -25,26 +25,26 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=True,
         ),
     )
-    async def resize_window(width: int, height: int) -> ResizeWindowResult:
+    async def resize_window(window_size: WindowSize) -> WindowSize:
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
 
         Args:
-            width: Window width in pixels
-            height: Window height in pixels
+            window_size: Target window dimensions (WindowSize(width=..., height=...)).
+                Both fields required; positive ints validated by the WindowSize model.
 
         Returns:
-            Dict with actual width and height after resize
+            WindowSize with actual width and height after resize.
 
         Common presets:
-            - Mobile (iPhone SE): 375 x 667
-            - Tablet (iPad): 768 x 1024
-            - Desktop (1080p): 1920 x 1080
-            - Desktop (1440p): 2560 x 1440
+            - Mobile (iPhone SE): WindowSize(width=375, height=667)
+            - Tablet (iPad): WindowSize(width=768, height=1024)
+            - Desktop (1080p): WindowSize(width=1920, height=1080)
+            - Desktop (1440p): WindowSize(width=2560, height=1440)
 
         Example:
-            resize_window(375, 667)  # Mobile viewport
+            resize_window(WindowSize(width=375, height=667))  # Mobile viewport
             screenshot("mobile-view.png")
 
         Note:
@@ -52,7 +52,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             (e.g., macOS enforces minimum ~500px width). The returned dimensions
             reflect the actual size achieved.
         """
-        return await service.resize_window(width=width, height=height)
+        return await service.resize_window(window_size=window_size)
 
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
     async def download_resource(url: str, output_filename: str) -> DownloadResourceResult:

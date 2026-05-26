@@ -27,6 +27,7 @@ from ..models import (
     ScrollDirection,
     ScrollPosition,
     WaitForSelectorState,
+    WindowSize,
 )
 from ..wire import OnErrorPolicy
 
@@ -48,11 +49,26 @@ def navigate(
     init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')
     ] = None,
+    width: Annotated[
+        int | None, typer.Option('--width', help='Initial window width in pixels (requires --height).')
+    ] = None,
+    height: Annotated[
+        int | None, typer.Option('--height', help='Initial window height in pixels (requires --width).')
+    ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Navigate to a URL."""
+    if (width is None) != (height is None):
+        raise typer.BadParameter('--width and --height must be passed together (or neither).')
+    window_size = WindowSize(width=width, height=height) if width is not None and height is not None else None
     result = _call_tool(
-        'navigate', url=url, fresh_browser=fresh, browser=browser, enable_har_capture=har, init_scripts=init_script
+        'navigate',
+        url=url,
+        fresh_browser=fresh,
+        browser=browser,
+        enable_har_capture=har,
+        init_scripts=init_script,
+        window_size=window_size,
     )
     _print_result(result, format)
 
@@ -286,9 +302,18 @@ def navigate_with_profile_state(
     init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')
     ] = None,
+    width: Annotated[
+        int | None, typer.Option('--width', help='Initial window width in pixels (requires --height).')
+    ] = None,
+    height: Annotated[
+        int | None, typer.Option('--height', help='Initial window height in pixels (requires --width).')
+    ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Navigate with imported profile state (cookies, localStorage)."""
+    if (width is None) != (height is None):
+        raise typer.BadParameter('--width and --height must be passed together (or neither).')
+    window_size = WindowSize(width=width, height=height) if width is not None and height is not None else None
     result = _call_tool(
         'navigate_with_profile_state',
         url=url,
@@ -299,6 +324,7 @@ def navigate_with_profile_state(
         browser=browser,
         enable_har_capture=har,
         init_scripts=init_script,
+        window_size=window_size,
     )
     _print_result(result, format)
 
@@ -356,7 +382,7 @@ def resize_window(
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Resize the browser window."""
-    result = _call_tool('resize_window', width=width, height=height)
+    result = _call_tool('resize_window', window_size=WindowSize(width=width, height=height))
     _print_result(result, format)
 
 
