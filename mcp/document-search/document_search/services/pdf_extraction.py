@@ -26,6 +26,7 @@ import pdfplumber
 
 __all__ = [
     'EncryptedPDFError',
+    'MalformedPDFError',
     'PDFExtractionResult',
     'PDFPageData',
     'extract_pdf',
@@ -76,6 +77,25 @@ class EncryptedPDFError(Exception):
         return f'PDF is password-protected: {self.path}'
 
 
+class MalformedPDFError(Exception):
+    """PDF file is empty, truncated, or otherwise unreadable by PyMuPDF.
+
+    Wraps fitz.FileDataError (parent of EmptyFileError) raised by fitz.open()
+    on 0-byte files, missing trailers, or other structural corruption.
+    """
+
+    def __init__(self, path: str) -> None:
+        # args=(path,) so pickle roundtrip through ProcessPoolExecutor reconstructs cleanly.
+        super().__init__(path)
+        self.path = path
+
+    def __str__(self) -> str:
+        cause = self.__cause__
+        if cause is not None:
+            return f'PDF is malformed: {self.path} ({type(cause).__name__}: {cause})'
+        return f'PDF is malformed: {self.path}'
+
+
 def extract_pdf(path: str) -> PDFExtractionResult:
     """Extract all content from a PDF file.
 
@@ -91,7 +111,10 @@ def extract_pdf(path: str) -> PDFExtractionResult:
     Raises:
         Any exception from PyMuPDF or pdfplumber - not swallowed.
     """
-    doc = fitz.open(path)
+    try:
+        doc = fitz.open(path)
+    except fitz.FileDataError as e:
+        raise MalformedPDFError(path) from e
     try:
         # Owner-only encryption (copy-protection) clears with an empty password.
         # Genuine user-password encryption does not — raise so the pipeline can skip.

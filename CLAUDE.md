@@ -100,8 +100,9 @@ Already lived in this workspace:
 
 - **`mcp/imessage-kit/`** — "combines the best of five MIT-licensed implementations" of iMessage access, handling things "no existing tool gets fully right" (attributedBody parsing, edited messages, HEIC conversion, contact resolution)
 - **`cc_lib/claude_binary_patching.py`** — patches the Claude Code binary across its daily upstream releases
+- **`cc_lib/types.py:CCVersion`** — subclasses `packaging.version.Version` to add Claude Code-specific parsing (strips the `(Claude Code)` suffix from `claude --version` output) rather than waiting for upstream packaging to accommodate it
 - **`mcp/claude-remote-audio/swift/`** — wraps macOS APIs Apple doesn't ship as CLIs
-- **`mcp/claude-remote-audio/patches/`** (planned) — carries roc-toolkit patches against a pinned master SHA
+- **`mcp/claude-remote-audio/patches/`** — carries roc-toolkit patches against a pinned master SHA
 
 Extension of *Ideal state over backwards compat*: "fix the source" includes upstream libraries. "The source" might be a fork, multiple forks combined, or our own patches — whatever gets us to the right behavior fastest.
 
@@ -109,7 +110,7 @@ Extension of *Ideal state over backwards compat*: "fix the source" includes upst
 
 **Every unit lives in a layer; layers stack with dependencies pointing down.** Higher layers compose lower ones. The principle applies at design time (which layer is this new code's home?) and at fix time (which layer owns the symptom's cause?) — they're the same question asked at different moments.
 
-**Design-time placement.** Before writing, locate the layer. A Swift CLI wrapping a Core Audio framework belongs at the OS-adapter layer, not inlined in the orchestrator. A regex validator shared by `click`, `hover`, and `wait_for_selector` belongs in `validators.py`, not duplicated into each MCP tool. Once a unit has a clear home, its dependencies become obvious — and the higher-layer callers stay thin.
+**Design-time placement.** Before writing, locate the layer. A Swift CLI wrapping a Core Audio framework belongs at the OS-adapter layer, not inlined in the orchestrator. A regex validator shared by `click`, `hover`, and `wait_for_selector` belongs in `selenium_browser/validators.py` (returning the `CssSelector` `NewType` brand), not duplicated into each MCP tool. Once a unit has a clear home, its dependencies become obvious — and the higher-layer callers stay thin.
 
 **Maintenance-time fix placement.** When a symptom surfaces, trace it down. `roc-send` crashing on mono input is a symptom; the cause is libsox's missing channel negotiation. Document which layer owns the cause; the ideal-state fix lives there even when a higher-layer band-aid ships first. `mcp/claude-remote-audio/README.md`'s workaround inventory makes this explicit — every entry names the *owner* and the *ideal-state fix* layer.
 

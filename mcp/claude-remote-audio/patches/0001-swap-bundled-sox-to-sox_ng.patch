@@ -9,7 +9,7 @@ index 11bc05ff..bd3cfe9c 100644
 -    'sox':              '14.4.2',
 +    'sox':              '14.8.0',
      'speexdsp':         '1.2.0',
- 
+
      # CLI tools
 diff --git a/scripts/scons_helpers/build-3rdparty.py b/scripts/scons_helpers/build-3rdparty.py
 index 4035b91c..715d9ca5 100644

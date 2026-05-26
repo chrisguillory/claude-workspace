@@ -50,8 +50,8 @@ def export_schema(
     # Add version info
     schema['x-schema-version'] = SCHEMA_VERSION
     schema['x-claude-code-compatibility'] = {
-        'min': CLAUDE_CODE_MIN_VERSION,
-        'max': CLAUDE_CODE_MAX_VERSION,
+        'min': str(CLAUDE_CODE_MIN_VERSION),
+        'max': str(CLAUDE_CODE_MAX_VERSION),
     }
 
     # Write to file

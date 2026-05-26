@@ -5,13 +5,13 @@ index 90e48d17..2fbd9023 100644
 @@ -50,6 +50,9 @@ section "Options"
      option "rate" - "Override input sample rate, Hz"
          int optional
- 
+
 +    option "channels" - "Override input channel count"
 +        int optional
 +
      option "latency-backend" - "Which latency to use in latency tuner"
          values="niq" default="niq" enum optional
- 
+
 diff --git a/src/tools/roc_send/main.cpp b/src/tools/roc_send/main.cpp
 index ca3af5dd..eccdca49 100644
 --- a/src/tools/roc_send/main.cpp
@@ -19,7 +19,7 @@ index ca3af5dd..eccdca49 100644
 @@ -98,6 +98,19 @@ int main(int argc, char** argv) {
          io_config.sample_spec.set_sample_rate((size_t)args.rate_arg);
      }
- 
+
 +    // claude-remote-audio patch: --channels override for mono devices.
 +    // Eliminates the need for an external sox upmix pipe upstream of
 +    // roc-send when capturing from mono CoreAudio devices.

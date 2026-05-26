@@ -56,7 +56,7 @@ from document_search.schemas.vectors import ClearResult
 from document_search.search_path import ResolvedIndexPaths, ResolvedPaths
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbedCache, EmbeddingService
-from document_search.services.pdf_extraction import EncryptedPDFError
+from document_search.services.pdf_extraction import EncryptedPDFError, MalformedPDFError
 from document_search.services.sparse_embedding import SparseEmbeddingService, SparseVector
 from document_search.services.tracing import PipelineTracer
 
@@ -1075,7 +1075,7 @@ class IndexingService:
                         len(deleted_ids),
                     )
 
-            except (TimeoutError, OSError, UnicodeDecodeError, EncryptedPDFError) as e:
+            except (TimeoutError, OSError, UnicodeDecodeError, EncryptedPDFError, MalformedPDFError) as e:
                 # Known file-level errors: record and continue.
                 # Include errored file bytes so ETA estimate converges correctly.
                 try:

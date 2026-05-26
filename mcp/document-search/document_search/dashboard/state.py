@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -55,9 +56,16 @@ class DashboardStateManager:
             self._state_path.unlink(missing_ok=True)
 
     def get_dashboard_port(self) -> int | None:
-        """Return dashboard port if alive, None otherwise."""
+        """Return dashboard port if alive, None otherwise.
+
+        Probes the port in addition to the PID: PIDs get recycled, so a stale
+        server_pid can collide with an unrelated process and pass an
+        os.kill(pid, 0) check while nothing is actually serving the port.
+        """
         state = self.load()
         if state is None or not _process_exists(state.server_pid):
+            return None
+        if not _port_is_serving(state.port):
             return None
         return state.port
 
@@ -130,3 +138,14 @@ def _process_exists(pid: int) -> bool:
         return False
     except PermissionError:
         return True  # Exists but no permission
+
+
+def _port_is_serving(port: int, timeout: float = 0.1) -> bool:
+    """Check whether something is accepting TCP connections on 127.0.0.1:port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        try:
+            s.connect(('127.0.0.1', port))
+        except (ConnectionRefusedError, TimeoutError, OSError):
+            return False
+        return True

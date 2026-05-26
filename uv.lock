@@ -148,7 +148,7 @@ wheels = [
 
 [[package]]
 name = "cc-lib"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "cc-lib" }
 dependencies = [
     { name = "fastmcp" },
@@ -539,7 +539,7 @@ wheels = [
 
 [[package]]
 name = "document-search"
-version = "0.7.4"
+version = "0.7.5"
 source = { editable = "mcp/document-search" }
 dependencies = [
     { name = "bm25-rs" },

@@ -666,7 +666,7 @@ graph LR
     R[Script Registry<br/>in BrowserState] --> |"apply on create"| T1[Target A]
     R --> |"apply on create"| T2[Target B]
     R --> |"apply on create"| T3[Target C]
-    
+
     subgraph "Registry Contents"
         S1[stealth.js]
         S2[user init script 1]

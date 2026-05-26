@@ -7,15 +7,16 @@ and schema evolution tracking.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, TypedDict, Union, get_args, get_origin
+from typing import Any, TypedDict, Union, get_args, get_origin, overload
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from claude_session.schemas.session.markers import PathMarker
+from claude_session.schemas.session.markers import CCVersionMarker, PathMarker
 
 __all__ = [
     'ModelSummary',
+    'get_cc_version_fields',
     'get_field_version_info',
     'get_literal_values',
     'get_path_fields',
@@ -38,59 +39,56 @@ class ModelSummary(TypedDict):
     docstring: str | None
 
 
-def get_path_fields(model: type[BaseModel]) -> Sequence[str]:
+@overload
+def get_path_fields(target: type[BaseModel]) -> Sequence[str]: ...
+@overload
+def get_path_fields(target: BaseModel) -> Mapping[str, str | Sequence[str]]: ...
+def get_path_fields(target: BaseModel | type[BaseModel]) -> Sequence[str] | Mapping[str, str | Sequence[str]]:
     """Find all fields marked with PathMarker.
 
-    Handles Python 3.12+ type aliases and Union types (e.g., PathField | None).
-
-    Args:
-        model: Pydantic model class to inspect
-
-    Returns:
-        List of field names containing filesystem paths
+    Passing the model class returns the field names; passing a model instance
+    returns a mapping of name → value for every marked field that is set
+    (None values are filtered). Handles Python 3.12+ type aliases and Union
+    types (e.g., ``PathField | None``).
 
     Example:
         >>> from claude_session.schemas.session import UserRecord
         >>> get_path_fields(UserRecord)
         ['cwd', 'projectPaths']
     """
+    cls = target if isinstance(target, type) else type(target)
+    names = [
+        name for name, info in cls.model_fields.items() if _annotation_contains_marker(info.annotation, PathMarker)
+    ]
+    if isinstance(target, type):
+        return names
+    return {name: value for name, value in target if name in names and value is not None}
 
-    def check_for_path_marker(
-        annotation: Any,
-    ) -> bool:  # strict_typing_linter.py: loose-typing — FieldInfo.annotation is Any in Pydantic's API
-        """Check if annotation contains PathMarker, handling type aliases and unions."""
-        # Check Annotated directly
-        if get_origin(annotation) is not None:
-            args = get_args(annotation)
-            for arg in args[1:]:
-                if isinstance(arg, PathMarker):
-                    return True
 
-        # Check Python 3.12+ type alias (__value__ attribute)
-        if hasattr(annotation, '__value__'):
-            actual_type = annotation.__value__
-            if get_origin(actual_type) is not None:
-                args = get_args(actual_type)
-                for arg in args[1:]:
-                    if isinstance(arg, PathMarker):
-                        return True
+@overload
+def get_cc_version_fields(target: type[BaseModel]) -> Sequence[str]: ...
+@overload
+def get_cc_version_fields(target: BaseModel) -> Mapping[str, str]: ...
+def get_cc_version_fields(target: BaseModel | type[BaseModel]) -> Sequence[str] | Mapping[str, str]:
+    """Find all fields marked with CCVersionMarker.
 
-        # Check Union types (e.g., PathField | None)
-        origin = get_origin(annotation)
-        if origin is Union or (origin is not None and getattr(origin, '__name__', '') == 'UnionType'):
-            for union_arg in get_args(annotation):
-                if check_for_path_marker(union_arg):
-                    return True
+    Passing the model class returns the field names; passing a model instance
+    returns a mapping of name → value for every marked field that is set
+    (None values are filtered). Handles Python 3.12+ type aliases and Union
+    types (e.g., ``CCVersionStrField | None``).
 
-        return False
-
-    path_fields = []
-
-    for field_name, field_info in model.model_fields.items():
-        if check_for_path_marker(field_info.annotation):
-            path_fields.append(field_name)
-
-    return path_fields
+    Example:
+        >>> from claude_session.schemas.session import UserRecord
+        >>> get_cc_version_fields(UserRecord)
+        ['version']
+    """
+    cls = target if isinstance(target, type) else type(target)
+    names = [
+        name for name, info in cls.model_fields.items() if _annotation_contains_marker(info.annotation, CCVersionMarker)
+    ]
+    if isinstance(target, type):
+        return names
+    return {name: value for name, value in target if name in names and value is not None}
 
 
 def get_reserved_fields(model: type[BaseModel]) -> Mapping[str, Mapping[str, object]]:
@@ -238,6 +236,38 @@ def print_model_summary(model: type[BaseModel]) -> None:
         print('  Versioned fields:')
         for field, version in summary['versioned_fields'].items():
             print(f'    {field}: added in {version}')
+
+
+def _annotation_contains_marker(
+    annotation: Any,
+    marker_class: type,
+) -> bool:
+    """Check if a Pydantic field annotation carries a marker instance.
+
+    Handles direct ``Annotated[T, Marker()]``, PEP 695 type aliases
+    (``type X = Annotated[...]``), and unions like ``X | None``.
+    """
+    if get_origin(annotation) is not None:
+        args = get_args(annotation)
+        for arg in args[1:]:
+            if isinstance(arg, marker_class):
+                return True
+
+    if hasattr(annotation, '__value__'):
+        actual_type = annotation.__value__
+        if get_origin(actual_type) is not None:
+            args = get_args(actual_type)
+            for arg in args[1:]:
+                if isinstance(arg, marker_class):
+                    return True
+
+    origin = get_origin(annotation)
+    if origin is Union or (origin is not None and getattr(origin, '__name__', '') == 'UnionType'):
+        for union_arg in get_args(annotation):
+            if _annotation_contains_marker(union_arg, marker_class):
+                return True
+
+    return False
 
 
 if __name__ == '__main__':

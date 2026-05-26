@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Literal
 
 from cc_lib.claude_context import ClaudeContext
+from cc_lib.types import CCVersion
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 from mcp.server.fastmcp import FastMCP
 
@@ -92,7 +93,7 @@ class ServerState:
     session_id: str
     project_path: Path
     claude_pid: int
-    claude_version: str
+    claude_version: CCVersion
     temp_dir: tempfile.TemporaryDirectory[str]
     parser_service: SessionParserService
     archive_service: SessionArchiveService
@@ -114,7 +115,7 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
 
     try:
         parser_service = SessionParserService()
-        claude_version = str(claude_context.claude_version)
+        claude_version = claude_context.claude_version
         archive_service = SessionArchiveService(
             session_id=claude_context.session_id,
             temp_dir=temp_path,
@@ -750,7 +751,7 @@ def register_tools(state: ServerState) -> None:
         # - current session: from state (set at lifespan)
         # - other session: from workspace sessions.json (if tracked)
         if _is_same_running_session(session_info, state):
-            archive_claude_version: str | None = state.claude_version
+            archive_claude_version: CCVersion | None = state.claude_version
         else:
             workspace_session = info_service._load_workspace_session(target_id, session_info.session_folder)
             archive_claude_version = workspace_session.metadata.claude_version if workspace_session else None
