@@ -260,7 +260,19 @@ async def crb_mount_blocking(
 
 
 async def _resolve(peer_alias: str) -> tuple[Sequence[str], int]:
-    """Find ``peer_alias`` in the mDNS cache (fresh-browses on cache miss)."""
+    """Find ``peer_alias`` in the mDNS cache and enforce canonical-case match.
+
+    Aliases are advertised via mDNS in a specific canonical case (whatever the
+    target set via ``set-name``). ``crb discover`` prints them verbatim. Mount
+    is strict about case: typing ``m2`` when the alias is ``M2`` is user error
+    we surface, not paper over — silently normalizing leads to mountpoint paths
+    that don't match the kernel's APFS-canonical case, which then break
+    verification, registry lookup, and umount in ways that look like unrelated
+    bugs (this PR's original symptom).
+
+    Lookup-the-cache is case-insensitive (ergonomic typo tolerance for finding
+    the host); the post-lookup canonical check is what gates mounting.
+    """
     cache = await browse_and_cache()
     hit = lookup_alias(cache, peer_alias)
     if hit is None:
@@ -269,6 +281,17 @@ async def _resolve(peer_alias: str) -> tuple[Sequence[str], int]:
     if hit is None:
         raise_host_not_found(peer_alias)
         raise HostNotFoundError(peer_alias)  # unreachable but satisfies the type checker
+
+    canonical = next(
+        (e.alias for e in cache.all_hosts() if e.alias.lower() == peer_alias.lower()),
+        None,
+    )
+    if canonical is not None and canonical != peer_alias:
+        raise MountError(
+            f"Alias '{peer_alias}' is not canonical. Use '{canonical}' "
+            f'(aliases are case-sensitive at mount time; run `crb discover` for canonical names).'
+        )
+
     ips, port = hit
     return list(ips), port
 
@@ -405,13 +428,11 @@ async def _run_mount_nfs(local_port: int, mountpoint: Path, *, browse: bool) -> 
     while not await _kernel_has_mount_at(mountpoint):
         if asyncio.get_running_loop().time() >= deadline:
             # Defensive umount — mount_nfs may have a live entry the registry
-            # can't see. Without this, the failure leaves a zombie.
+            # can't see. Without this, the failure leaves a zombie. Result is
+            # logged unconditionally for diagnostics; the MountError below is
+            # the user-facing failure regardless of umount outcome.
             rc, stderr_text = await _run_umount(mountpoint)
-            if rc != 0:
-                # 'not currently mounted' is expected when mount_nfs's returncode lied.
-                # Surface other failures at info level — informational, not actionable
-                # (the MountError below is the user-facing failure).
-                logger.info('best-effort umount returned %s: %s', rc, stderr_text)
+            logger.info('defensive umount rc=%s stderr=%s', rc, stderr_text)
             raise MountError(f'mount_nfs returned 0 but {mountpoint} is not a kernel mount point')
         await asyncio.sleep(MOUNT_VERIFY_POLL_INTERVAL_SECONDS)
 
@@ -419,14 +440,12 @@ async def _run_mount_nfs(local_port: int, mountpoint: Path, *, browse: bool) -> 
 async def _kernel_has_mount_at(mountpoint: Path) -> bool:
     """True iff ``/sbin/mount`` lists an entry with destination matching ``mountpoint``.
 
-    Case-insensitive comparison handles macOS APFS's case-preserving-but-case-insensitive
-    semantics: a user typing ``m2:/Users`` produces a mountpoint string with lowercase
-    ``m2``, but ``mount_nfs`` canonicalizes to the on-disk dir (``M2``) which the
-    kernel mount table records. Lowercasing both sides treats them as equivalent.
+    Exact string match — ``_resolve`` upstream enforces canonical-case alias, so
+    ``mountpoint`` always contains the canonical case the kernel mount table records.
 
-    Uses ``/sbin/mount`` rather than ``lstat`` because lstat on an NFS mountpoint
-    blocks on a GETATTR RPC that traverses this process's own local bridge —
-    self-deadlock while we hold the event loop.
+    Uses ``/sbin/mount`` (reads ``getfsstat``) rather than ``Path.is_mount()`` because
+    ``lstat`` on an NFS mountpoint blocks on a GETATTR RPC that traverses this
+    process's own local bridge — self-deadlock while we hold the event loop.
     """
     proc = await asyncio.create_subprocess_exec(
         '/sbin/mount',
