@@ -175,12 +175,14 @@ Load-bearing band-aids currently in the codebase. **Living document** — entrie
 | W12 | `claude-coreaudio-volume` Swift CLI for per-device volume                                | `swift/claude-coreaudio-volume.swift`                                    | macOS has no stock CLI that names-then-controls a device's volume scalar                                  | macOS gap                                               | Building our own Swift CLI **is** the first-class fix — not a workaround                                      |
 | W13 | AppleScript dialog with dual `with timeout` + `giving up after`                          | `orchestrator.py` `_run_via_applescript_dialog`                          | AppleScript has two independent timeouts that both default to seconds in non-TTY contexts                 | AppleScript spec                                        | Replace with Swift NSAlert when bundle ships                                                                  |
 | W14 | `nohup ... &` detachment + post-launch `pgrep` survival check                            | `orchestrator.py` `_restart_roc_send` / `_restart_roc_recv`              | Dispatch expects bounded execution; roc-send is a daemon                                                  | Our dispatch + lack of launchd integration for roc-send | Register roc-send / roc-recv as launchd transient units; lifecycle is OS-managed                              |
+| W15 | `claude-coreaudio-probe` Swift CLI for per-device HAL open                               | `swift/claude-coreaudio-probe.swift` + `orchestrator.py` Tier 1.5        | SoX/sox_ng collapses every CoreAudio input-open failure into one generic message; OSStatus is discarded   | libsox + sox_ng                                         | Building our own Swift CLI **is** the first-class fix — composable with patching sox_ng if/when needed        |
 
 **Concentration by owner:**
 - **libsox (deprecated)**: W1, W2, W3 — all retire under sox_ng adoption
 - **Apple (closed, evolving)**: W4 (partial), W5, W6, W7, W9, W10, W13 — these are *correct* ideal-state for unfixable upstream
 - **roc-vad / roc-toolkit (active, slow)**: W11, W14 — minor
 - **Our dispatch shape**: W8, W14 — long-term typed RPC retires both
+- **Gap-fillers (Swift CLIs we own)**: W12, W15 — first-class adapters at the lowest layer we own when upstream has no CLI / no symbolic-error surface
 - **Us (self-inflicted, already healed)**: removed/healed entries get retired from this table; we don't keep historic band-aids around
 
 ---
@@ -216,7 +218,7 @@ Lives here so we don't lose track of the layered move. Each item is independentl
    - **Add our patches** (each retires a specific workaround):
      - `-c N` channel-count flag to `roc-send` → retires W3 (sox upmix pipe deleted entirely)
      - `--bind-source IP` flag to `roc-recv` → fixes task #29 dual-interface chipmunk at the source
-     - Surface OSStatus in libsox dispatcher errors → collapses the 4-tier `_diagnose_roc_send_start_failure` cascade
+   - **OSStatus surfacing for input-open failures** is handled out-of-tree via `claude-coreaudio-probe` (W15) — Swift CLI at the lowest layer we own. Composable with a future sox_ng patch if one ships; we don't block on upstream cadence.
    - **Patches live at** `mcp/claude-remote-audio/patches/*.patch`. Reviewable diffs in our PRs. Self-pruning when upstream lands the same fix (patch starts conflicting → drop it).
    - **Risk**: initial engineering bounded by roc-toolkit's C++ codebase + scons build complexity. Mitigation: empirical mesh validation per patch. If a patch breaks something, drop it; we still have the floor of "upstream master + sox_ng" without our additions.
 

@@ -650,7 +650,7 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
         logger.info('%s: Microphone TCC request resolved: %s', plan.hub_alias, mic_status)
     if mic_status in ('denied', 'restricted'):
         code, title, diagnosis_msg, suggestions = await _diagnose_roc_send_start_failure(
-            service, plan.hub_alias, roc_send_log=''
+            service, plan.hub_alias, input_device=plan.input_device, roc_send_log=''
         )
         raise ResolvableApplyError(
             f'{plan.hub_alias}: Microphone TCC preflight failed (status={mic_status}) — '
@@ -745,7 +745,7 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
     if alive.stdout.strip() != 'alive':
         logs = await _run(service, plan.hub_alias, 'tail -20 /tmp/roc-send.log 2>/dev/null')
         code, title, diagnosis_msg, suggestions = await _diagnose_roc_send_start_failure(
-            service, plan.hub_alias, roc_send_log=logs.stdout
+            service, plan.hub_alias, input_device=plan.input_device, roc_send_log=logs.stdout
         )
         raise ResolvableApplyError(
             f'{plan.hub_alias}: roc-send died within 3s of launch — input={plan.input_device!r}.\n\n'
@@ -849,6 +849,36 @@ async def _request_microphone_tcc(service: DispatchService, host: str) -> str:
     return result.results[0].stdout.strip().split('\n')[-1] or 'unknown'
 
 
+async def _probe_coreaudio_device(
+    service: DispatchService, host: str, device_name: str
+) -> tuple[str, Mapping[str, str]]:
+    """Run ``claude-coreaudio-probe device`` against ``device_name`` on ``host``.
+
+    Wraps the public Core Audio HAL APIs to open the named device step-by-step
+    and capture the OSStatus from each step. SoX/sox_ng collapses every failure
+    into a single generic "backend dispatcher" message; this probe is our own
+    adapter at the lowest layer we own, surfacing the specific cause as a
+    symbolic verdict.
+
+    Returns ``(verdict, fields)`` where ``verdict`` is the symbolic result and
+    ``fields`` is the parsed key=value lines from the probe (for diagnostic
+    text). Verdict ``unknown`` covers the case where the probe binary is
+    missing or output didn't parse — caller falls through to the next tier.
+
+    Verdicts: ``ok``, ``device-missing``, ``device-not-alive``,
+    ``no-input-scope``, ``format-unreadable``, ``unknown``.
+    """
+    cmd = f'/usr/local/bin/claude-coreaudio-probe device {shlex.quote(device_name)} 2>/dev/null || echo verdict=unknown'
+    result = await _run(service, host, cmd)
+    fields: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if '=' in line:
+            key, _, value = line.partition('=')
+            fields[key.strip()] = value.strip()
+    verdict = fields.get('verdict', 'unknown')
+    return verdict, fields
+
+
 async def _probe_input_device(service: DispatchService, host: str, device_name: str) -> tuple[int, int | None]:
     """Inventory same-named CoreAudio devices for ``device_name`` on ``host``.
 
@@ -894,6 +924,7 @@ async def _diagnose_roc_send_start_failure(
     service: DispatchService,
     host: str,
     *,
+    input_device: str | None,
     roc_send_log: str = '',
 ) -> tuple[str, str, str, Sequence[str]]:
     """Diagnose why ``roc-send`` couldn't start on ``host`` in failure-likelihood order.
@@ -903,14 +934,19 @@ async def _diagnose_roc_send_start_failure(
     mismatch, and device-specific issues all produce that wrapper line. The
     libsox layer below sometimes leaves a more specific message (``sox source:
     can't open input file or device with the requested channel count`` etc.)
-    just above it. This function walks four tiers, each cheap, each falsifying
-    the prior:
+    just above it. This function walks tiers in failure-likelihood order, each
+    cheap, each falsifying the prior:
 
     1. **Microphone TCC** — probe the responsible app's mic auth status. When
        the daemon is iTerm's grandchild (the typical ``nohup ... &`` setup),
        TCC attributes to iTerm; if iTerm has no mic consent, every roc-send
-       through the chain fails silently. This was the actual cause of a
-       multi-hour misdiagnosis (mistaken for HAL wedge) on 5/20/2026.
+       through the chain fails silently.
+    1.5. **CoreAudio device open** (``claude-coreaudio-probe``) — open the
+       named input device step-by-step via public HAL APIs and report the
+       OSStatus from each step as a symbolic verdict. Catches device-missing,
+       output-only (wrong-scope), and device-not-alive cases that SoX collapses
+       into a generic "failed to open source." Only runs when ``input_device``
+       is known.
     2. **Log-marker patterns** — scan ``roc_send_log`` for specific libsox
        errors that already tell us the cause: channel-count mismatch is the
        canonical example. Catching these short-circuits past the unreliable
@@ -920,12 +956,10 @@ async def _diagnose_roc_send_start_failure(
        default-input probe) also fails. SoX's CoreAudio backend can't open any
        input — HAL is wedged; empirically only a reboot clears it (``killall
        coreaudiod`` and mass-killing audio clients have been observed NOT to
-       work). Earlier versions of this probe used ``roc-send -i core://Claude
-       Remote Mic`` and were always false-positive because that virtual device
-       is a roc-vad RECEIVER (no upstream data → SoX always fails to open).
+       work).
     4. **Device-specific** — generic fallthrough when HAL is healthy but the
-       requested device couldn't be opened (name collision among same-named
-       devices, USB unplugged, exclusive lock, etc.).
+       requested device couldn't be opened (exclusive lock, format negotiation,
+       etc.).
 
     Returns ``(code, title, diagnosis_msg, suggestions)`` for
     ``ResolvableApplyError``.
@@ -964,6 +998,72 @@ async def _diagnose_roc_send_start_failure(
                 'Or temporarily relax the policy via Profile Manager / Jamf / MDM',
             ),
         )
+
+    # Tier 1.5: per-device CoreAudio open probe. Only meaningful when we know
+    # which device roc-send was asked to open.
+    if input_device is not None:
+        verdict, fields = await _probe_coreaudio_device(service, host, input_device)
+        if verdict == 'device-missing':
+            return (
+                'input-device-missing',
+                f'Input device {input_device!r} not found on {host}',
+                f'Diagnosis: `claude-coreaudio-probe device` returned `device-missing` — no '
+                f'Core Audio device on {host} matches the name {input_device!r}. The device '
+                'may have been unplugged, renamed, or never present. SoX collapses this into '
+                'a generic "backend dispatcher: failed to open source" error; the HAL-level '
+                'probe disambiguates.',
+                (
+                    f'On {host}: run `claude-coreaudio-volume list` to see all current device names',
+                    'Re-run apply with `--input "<exact name from list>"`',
+                    'If the device should be present: reconnect it (USB / Bluetooth) and retry',
+                ),
+            )
+        if verdict == 'device-not-alive':
+            return (
+                'input-device-not-alive',
+                f'Input device {input_device!r} not alive on {host}',
+                f'Diagnosis: Core Audio reports `kAudioDevicePropertyDeviceIsAlive == 0` for '
+                f'{input_device!r} on {host} — the device is enumerable but not in a usable '
+                'state. Usually transient: the device was just unplugged, or its driver is '
+                'still initializing.',
+                (
+                    f'On {host}: physically reconnect or power-cycle {input_device!r}',
+                    'Wait a few seconds and re-run apply',
+                ),
+            )
+        if verdict == 'no-input-scope':
+            return (
+                'input-device-no-input-scope',
+                f'Device {input_device!r} has no input scope on {host}',
+                f'Diagnosis: `claude-coreaudio-probe` found {input_device!r} on {host} but it '
+                'has 0 input-scope channels — it is output-only (e.g. a speaker or virtual '
+                'output device). roc-send needs an INPUT-scope device.',
+                (
+                    f'On {host}: run `claude-coreaudio-volume list` and choose a device with `in=Nch` (N>0)',
+                    'Re-run apply with `--input "<that device name>"`',
+                ),
+            )
+        if verdict == 'format-unreadable':
+            stream_status = (
+                fields.get('stream-config-status')
+                or fields.get('stream-format-status')
+                or fields.get('alive-status')
+                or 'unknown'
+            )
+            return (
+                'input-device-format-unreadable',
+                f'Core Audio stream properties unreadable on {host} for {input_device!r}',
+                f'Diagnosis: Core Audio enumerated {input_device!r} on {host} but failed to '
+                f'read its stream configuration / format properties (status={stream_status}). '
+                'Usually indicates the device driver is in a transient bad state — different '
+                'from a global HAL wedge (which would fail the default-input probe too).',
+                (
+                    f'On {host}: physically reconnect the device',
+                    'If reconnection fails: reboot the host',
+                    'Re-run apply',
+                ),
+            )
+        # verdict in ('ok', 'unknown') → fall through to Tier 2
 
     # Tier 2: parse roc-send.log for specific libsox markers that already
     # name the cause — short-circuits past the unreliable HAL probe.
@@ -1413,11 +1513,12 @@ async def _ensure_prereqs(
     if has_output:
         hub_binaries += ['roc-recv']
     if has_input:
-        # claude-tcc-probe powers the Tier-1 Microphone-TCC check in the
-        # roc-send-start-failure diagnostic — without it the diagnostic falls
-        # through to the HAL probe and risks misclassifying TCC denials as
-        # HAL wedges (the misdiagnosis that motivated shipping the probe).
-        hub_binaries += ['roc-send', 'claude-coreaudio-volume', 'claude-tcc-probe']
+        # claude-tcc-probe powers Tier 1 (Microphone TCC) and claude-coreaudio-
+        # probe powers Tier 1.5 (per-device HAL open) of the roc-send-start
+        # diagnostic — without them the diagnostic falls through to the generic
+        # HAL probe and risks misclassifying TCC denials or missing/output-only
+        # devices as HAL wedges.
+        hub_binaries += ['roc-send', 'claude-coreaudio-volume', 'claude-tcc-probe', 'claude-coreaudio-probe']
 
     peer_binaries = ['roc-vad']
     if has_output or has_input:
@@ -1679,19 +1780,21 @@ async def _install_prereqs_on_host(
     command (no heredoc quoting, no temp files, no mount). When
     ``sudo_password`` is set, an ``export SUDO_PASSWORD=...`` line is prepended
     to the payload — the script's install step pipes that into ``sudo -S``.
-    Swift sources for ``claude-coreaudio-volume`` and ``claude-tcc-probe`` are
-    base64-encoded and shipped via env vars (``CRA_SWIFT_CLAUDE_*_B64``);
-    bootstrap.sh decodes, compiles with ``swiftc``, and installs each binary.
-    Timeout is generous (15 min) because cold first runs include a scons
-    compile of roc-toolkit (~5 min on Apple Silicon).
+    Swift sources for the three CLIs (``claude-coreaudio-volume``, ``claude-tcc-probe``,
+    ``claude-coreaudio-probe``) are base64-encoded and shipped via env vars
+    (``CRA_SWIFT_CLAUDE_*_B64``); bootstrap.sh decodes, compiles with ``swiftc``,
+    and installs each binary. Timeout is generous (15 min) because cold first
+    runs include a scons compile of roc-toolkit (~5 min on Apple Silicon).
     """
     script_text = _bootstrap_script_path().read_text(encoding='utf-8')
     volume_b64 = base64.b64encode(_coreaudio_volume_swift_source_path().read_bytes()).decode('ascii')
     tcc_probe_b64 = base64.b64encode(_tcc_probe_swift_source_path().read_bytes()).decode('ascii')
+    coreaudio_probe_b64 = base64.b64encode(_coreaudio_probe_swift_source_path().read_bytes()).decode('ascii')
     patches_b64 = _patches_tarball_b64()
     exports = [
         f'export CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64={shlex.quote(volume_b64)}',
         f'export CRA_SWIFT_CLAUDE_TCC_PROBE_B64={shlex.quote(tcc_probe_b64)}',
+        f'export CRA_SWIFT_CLAUDE_COREAUDIO_PROBE_B64={shlex.quote(coreaudio_probe_b64)}',
         f'export CRA_PATCHES_TARBALL_B64={shlex.quote(patches_b64)}',
         # `--install-prereqs` always means "deploy current patches" — force the
         # roc-toolkit rebuild path even if a stale unpatched binary is already
@@ -1786,3 +1889,8 @@ def _coreaudio_volume_swift_source_path() -> Path:
 def _tcc_probe_swift_source_path() -> Path:
     """Locate ``swift/claude-tcc-probe.swift`` next to the package."""
     return Path(__file__).resolve().parent.parent / 'swift' / 'claude-tcc-probe.swift'
+
+
+def _coreaudio_probe_swift_source_path() -> Path:
+    """Locate ``swift/claude-coreaudio-probe.swift`` next to the package."""
+    return Path(__file__).resolve().parent.parent / 'swift' / 'claude-coreaudio-probe.swift'

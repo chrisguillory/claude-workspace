@@ -13,6 +13,11 @@
 #   - claude-tcc-probe         (source)  Swift CLI that prints AVCaptureDevice mic auth
 #                                        status — disambiguates TCC denial from HAL
 #                                        wedge in the roc-send-start diagnostic
+#   - claude-coreaudio-probe   (source)  Swift CLI that opens a named Core Audio input
+#                                        device step-by-step and reports OSStatus as a
+#                                        symbolic verdict (device-missing, no-input-
+#                                        scope, etc.) — powers Tier 1.5 of the same
+#                                        diagnostic
 #
 # Excluded (deliberately — needs interactive setup or sudo+reboot):
 #   - roc-vad kernel driver    one-time `curl ... | sudo bash` + sudo killall coreaudiod
@@ -27,6 +32,8 @@
 #                                            swift/claude-coreaudio-volume.swift
 #   - CRA_SWIFT_CLAUDE_TCC_PROBE_B64         (required) base64-encoded source of
 #                                            swift/claude-tcc-probe.swift
+#   - CRA_SWIFT_CLAUDE_COREAUDIO_PROBE_B64   (required) base64-encoded source of
+#                                            swift/claude-coreaudio-probe.swift
 
 set -euo pipefail
 
@@ -241,6 +248,31 @@ elif command -v claude-tcc-probe >/dev/null; then
     ok "claude-tcc-probe (already installed)"
 else
     err "claude-tcc-probe not installed and no source provided via CRA_SWIFT_CLAUDE_TCC_PROBE_B64"
+fi
+
+echo
+echo "=== claude-coreaudio-probe ==="
+if [[ -n "${CRA_SWIFT_CLAUDE_COREAUDIO_PROBE_B64:-}" ]]; then
+    info "compiling claude-coreaudio-probe from inlined Swift source..."
+    swift_src=/tmp/claude-coreaudio-probe.swift
+    swift_bin=/tmp/claude-coreaudio-probe
+    echo "$CRA_SWIFT_CLAUDE_COREAUDIO_PROBE_B64" | base64 -d > "$swift_src"
+    swiftc -O "$swift_src" -o "$swift_bin" -framework CoreAudio -framework Foundation
+
+    info "installing to /usr/local/bin..."
+    if [[ -w /usr/local/bin ]]; then
+        mv "$swift_bin" /usr/local/bin/
+    elif [[ -n "${SUDO_PASSWORD:-}" ]]; then
+        echo "$SUDO_PASSWORD" | sudo -S -p "" mv "$swift_bin" /usr/local/bin/
+    else
+        sudo mv "$swift_bin" /usr/local/bin/
+    fi
+    rm -f "$swift_src"
+    ok "claude-coreaudio-probe installed"
+elif command -v claude-coreaudio-probe >/dev/null; then
+    ok "claude-coreaudio-probe (already installed)"
+else
+    err "claude-coreaudio-probe not installed and no source provided via CRA_SWIFT_CLAUDE_COREAUDIO_PROBE_B64"
 fi
 
 echo
