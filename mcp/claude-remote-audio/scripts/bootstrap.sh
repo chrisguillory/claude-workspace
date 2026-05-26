@@ -6,6 +6,8 @@
 # Installs, when missing:
 #   - switchaudio-osx          (brew)    default audio device control
 #   - blueutil                 (brew)    Bluetooth CLI
+#   - coreutils                (brew)    provides `gtimeout` for the HAL-wedge preflight
+#                                        + Tier 3 HAL probe in the roc-send-start diagnostic
 #   - roc-toolkit build deps   (brew)    scons + libs needed to compile roc-toolkit
 #   - roc-toolkit              (source)  roc-send + roc-recv installed to /usr/local/bin
 #   - claude-coreaudio-volume  (source)  Swift CLI for per-device Core Audio volume,
@@ -34,6 +36,13 @@
 #                                            swift/claude-tcc-probe.swift
 #   - CRA_SWIFT_CLAUDE_COREAUDIO_PROBE_B64   (required) base64-encoded source of
 #                                            swift/claude-coreaudio-probe.swift
+#   - CRA_PATCHES_TARBALL_B64                (optional) base64-encoded tar.gz of the
+#                                            patches/ directory for the roc-toolkit
+#                                            patch series. When absent, falls back to
+#                                            $SCRIPT_DIR/../patches when invoked directly.
+#   - CRA_FORCE_REBUILD                      (optional) force roc-toolkit reset-to-pin +
+#                                            patch-apply + scons rebuild even when binaries
+#                                            already exist (set to "1" by --install-prereqs)
 
 set -euo pipefail
 
@@ -77,8 +86,15 @@ echo "=== roc-toolkit ==="
 # driver slots. Bump this SHA when adopting a newer master; verify patches
 # still apply with `git apply --check`.
 ROC_TOOLKIT_PIN_SHA=f37b5b90c3414c9a6eccf0cbcfbf00e0f5be7c38
-if command -v roc-send >/dev/null && command -v roc-recv >/dev/null && [[ -z "${CRA_FORCE_REBUILD:-}" ]]; then
-    ok "roc-toolkit (already installed: $(roc-send --version 2>&1 | head -1))"
+if command -v roc-send >/dev/null \
+   && command -v roc-recv >/dev/null \
+   && /usr/local/bin/roc-send --help 2>&1 | grep -q -- '--channels' \
+   && [[ -z "${CRA_FORCE_REBUILD:-}" ]]; then
+    # Pre-install gate matches the post-install verification: installed AND patched
+    # (--channels flag from patch 0002 present). Without the --channels check, a
+    # previously-failed install leaves an unpatched binary in PATH and direct
+    # `bash bootstrap.sh` would silently green-checkmark with a broken binary.
+    ok "roc-toolkit (already installed + patched: $(roc-send --version 2>&1 | head -1))"
     info "(set CRA_FORCE_REBUILD=1 to force rebuild from pinned SHA + apply patch series)"
 else
     info "installing roc-toolkit build dependencies..."
@@ -208,8 +224,11 @@ echo "=== claude-coreaudio-volume ==="
 # always installs the latest version during dispatched bootstraps.
 if [[ -n "${CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64:-}" ]]; then
     info "compiling claude-coreaudio-volume from inlined Swift source..."
-    swift_src=/tmp/claude-coreaudio-volume.swift
-    swift_bin=/tmp/claude-coreaudio-volume
+    # Per-run mktemp paths so two concurrent `apply --install-prereqs` to the
+    # same host don't interleave compile + mv (would silently install one
+    # process's source compiled against the other's binary slot).
+    swift_src=$(mktemp -t claude-coreaudio-volume.XXXXXX).swift
+    swift_bin=${swift_src%.swift}
     echo "$CRA_SWIFT_CLAUDE_COREAUDIO_VOLUME_B64" | base64 -d > "$swift_src"
     swiftc -O "$swift_src" -o "$swift_bin" -framework CoreAudio -framework Foundation
 
@@ -233,8 +252,8 @@ echo
 echo "=== claude-tcc-probe ==="
 if [[ -n "${CRA_SWIFT_CLAUDE_TCC_PROBE_B64:-}" ]]; then
     info "compiling claude-tcc-probe from inlined Swift source..."
-    swift_src=/tmp/claude-tcc-probe.swift
-    swift_bin=/tmp/claude-tcc-probe
+    swift_src=$(mktemp -t claude-tcc-probe.XXXXXX).swift
+    swift_bin=${swift_src%.swift}
     echo "$CRA_SWIFT_CLAUDE_TCC_PROBE_B64" | base64 -d > "$swift_src"
     swiftc -O "$swift_src" -o "$swift_bin" -framework AVFoundation -framework Foundation
 
@@ -258,8 +277,8 @@ echo
 echo "=== claude-coreaudio-probe ==="
 if [[ -n "${CRA_SWIFT_CLAUDE_COREAUDIO_PROBE_B64:-}" ]]; then
     info "compiling claude-coreaudio-probe from inlined Swift source..."
-    swift_src=/tmp/claude-coreaudio-probe.swift
-    swift_bin=/tmp/claude-coreaudio-probe
+    swift_src=$(mktemp -t claude-coreaudio-probe.XXXXXX).swift
+    swift_bin=${swift_src%.swift}
     echo "$CRA_SWIFT_CLAUDE_COREAUDIO_PROBE_B64" | base64 -d > "$swift_src"
     swiftc -O "$swift_src" -o "$swift_bin" -framework CoreAudio -framework Foundation
 

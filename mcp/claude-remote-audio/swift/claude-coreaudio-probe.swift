@@ -38,13 +38,20 @@
 //   input-bytes-per-frame=4
 //   verdict=ok
 //
-// Verdicts:
+// Verdicts emitted by this binary (5):
 //   ok                  every probe step succeeded; sox_ng's open failure is elsewhere
 //   device-missing      no Core Audio device matches the name
 //   device-not-alive    found by name but `kAudioDevicePropertyDeviceIsAlive == 0`
 //   no-input-scope      found and alive but 0 input-scope channels (output-only device)
-//   format-unreadable   stream config / format property reads failed with non-noErr OSStatus
-//   unknown             usage error or unexpected probe failure (rare)
+//   device-properties-unreadable
+//                       device-is-alive / stream-config / stream-format property reads
+//                       failed with non-noErr OSStatus (any of three reads)
+//
+// Note: a 6th verdict — `unknown` — is synthesized externally by the
+// orchestrator's shell fallback (`|| echo verdict=unknown`) when this binary
+// is missing or exits non-zero (e.g., usage error). The binary itself only
+// emits the 5 verdicts above, and on usage error writes to stderr + exit(2)
+// without printing a `verdict=` line.
 //
 // Exit codes: 0 when the probe ran (verdict is on stdout); 2 on usage error.
 
@@ -60,8 +67,12 @@ func formatStatus(_ status: OSStatus) -> String {
         UInt8(u & 0xff),
     ]
     let printable = bytes.allSatisfy { (0x20...0x7e).contains($0) }
+    // Concatenate the printable chars OUTSIDE the format string — they originate
+    // from an arbitrary OSStatus (potentially from a third-party HAL driver) and
+    // could contain `%` followed by a format-specifier letter, which would be
+    // re-interpreted by String(format:) as a format directive.
     if printable, let chars = String(bytes: bytes, encoding: .ascii) {
-        return String(format: "%d (0x%08x '\(chars)')", status, u)
+        return String(format: "%d (0x%08x '", status, u) + chars + "')"
     }
     return String(format: "%d (0x%08x)", status, u)
 }
@@ -182,7 +193,7 @@ func probeDevice(name: String) {
     guard let aliveValue = alive else {
         print("device-alive=unknown")
         print("alive-status=\(formatStatus(aliveStatus))")
-        print("verdict=format-unreadable")
+        print("verdict=device-properties-unreadable")
         return
     }
     print("device-alive=\(aliveValue)")
@@ -196,7 +207,7 @@ func probeDevice(name: String) {
     guard let channelCount = channels else {
         print("input-channels=unknown")
         print("stream-config-status=\(formatStatus(channelsStatus))")
-        print("verdict=format-unreadable")
+        print("verdict=device-properties-unreadable")
         return
     }
     print("input-channels=\(channelCount)")
@@ -209,7 +220,7 @@ func probeDevice(name: String) {
     let (format, fmtStatus) = inputStreamFormat(deviceID)
     guard let asbd = format else {
         print("stream-format-status=\(formatStatus(fmtStatus))")
-        print("verdict=format-unreadable")
+        print("verdict=device-properties-unreadable")
         return
     }
     print("input-sample-rate=\(asbd.mSampleRate)")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 from datetime import UTC, datetime
@@ -105,15 +106,26 @@ def apply_cmd(
     log_path = _configure_apply_logging()
     typer.echo(f'apply log: {log_path}', err=True)
 
-    result = asyncio.run(
-        apply(
-            target=target,
-            hub=hub,
-            input_device=input_device,
-            output_device=output_device,
-            install_prereqs=install_prereqs,
+    try:
+        result = asyncio.run(
+            apply(
+                target=target,
+                hub=hub,
+                input_device=input_device,
+                output_device=output_device,
+                install_prereqs=install_prereqs,
+            )
         )
-    )
+    except (ApplyError, RemoteBashError, SelectorError) as exc:
+        # `--format json` users want JSON on every code path — including errors.
+        # Without this, the documented "machine-readable for scripting" contract
+        # is silently broken on failure (ErrorBoundary prints prose-to-stderr).
+        # For text-format callers, re-raise so the boundary's handler runs
+        # unchanged (preserves the recovery footer + structured-error rendering).
+        if format == 'json':
+            _emit_json_error(exc)
+            raise SystemExit(1) from exc
+        raise
 
     if format == 'json':
         typer.echo(result.model_dump_json())
@@ -121,6 +133,24 @@ def apply_cmd(
         _print_text(result)
 
     raise SystemExit(0 if result.overall_success else 1)
+
+
+def _emit_json_error(exc: ApplyError | RemoteBashError | SelectorError) -> None:
+    """Emit a JSON error envelope on stdout, mirroring ApplyResult's shape.
+
+    Carries the structured ``ResolvableError`` fields (``code`` / ``title`` /
+    ``suggestions`` / ``docs_url`` / ``context``) when present so machine
+    consumers can branch on the same identifiers a human sees in the prose
+    rendering.
+    """
+    error: dict[str, object] = {'message': str(exc)}
+    if isinstance(exc, ResolvableError):
+        error['code'] = exc.code
+        error['title'] = exc.title
+        error['suggestions'] = list(exc.suggestions)
+        error['docs_url'] = exc.docs_url
+        error['context'] = dict(exc.context) if exc.context else None
+    typer.echo(json.dumps({'overall_success': False, 'hosts': [], 'error': error}))
 
 
 class _TeeStream:

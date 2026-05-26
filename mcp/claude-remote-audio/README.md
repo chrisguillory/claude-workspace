@@ -69,13 +69,28 @@ Recover after the hub's speaker stops working, without changing peers or the mic
 claude-remote-audio apply --target M5 --hub M5 --output "Chris's AirPods Max"
 ```
 
-Read-only probe of current state (no `--input` / `--output` → no mutations):
+Re-converge mesh scaffolding without changing inputs/outputs — ensures `Claude Remote Mic`/`Claude Remote Speaker` devices exist on every target, peer speaker slots point at the current hub, stale hub processes are torn down on demoted peers. Does NOT change default-routing devices.
 
 ```bash
 claude-remote-audio apply --target mac-mesh --hub M5
 ```
 
+> ⚠️ This form still **mutates** mesh state (it kills stale roc-send/roc-recv on demoted peers, recreates roc-vad device slots when they drift, retires hub-side stale speaker entries). For a true read-only inspection, use `claude-coreaudio-volume list` dispatched per host or `roc-vad device list`.
+
 See `claude-remote-audio apply --help` for full flag semantics. `--format json` emits machine-readable output for scripting.
+
+---
+
+## Security model
+
+This package assumes a **trusted LAN** — typically a home/lab network where every connected device is administratively yours.
+
+- **Dispatch channel (claude-remote-bash):** TCP, framed JSON, pre-shared-key authenticated at handshake. **No per-message encryption.** Anyone on the same LAN who can sniff packets can read every dispatched command, including the `SUDO_PASSWORD` env-var ship during `--install-prereqs` (the password is base64-encoded for transport, not encrypted). An active MITM can substitute payloads.
+- **Sudo password at rest:** during install-prereqs, the password lands in `/tmp/cra-bootstrap.sh` on each target host (mode 0600, deleted on bash exit). Window: bootstrap duration.
+- **mDNS-advertised host aliases** flow into AppleScript dialogs via `osascript` argv (NOT source interpolation) — eliminates the `"name" & (do shell script "...")` injection class.
+- **What this means in practice:** use this package on a network you control. Don't run `--install-prereqs` from a coffee-shop Wi-Fi. Don't add hosts to the mesh whose mDNS broadcasts you can't trust.
+
+The ideal-state fix for the cleartext dispatch is channel encryption at the claude-remote-bash protocol level (Noise / TLS-PSK). That's significant CRB work captured as a follow-up task.
 
 ---
 
@@ -86,30 +101,31 @@ See `claude-remote-audio apply --help` for full flag semantics. `--format json` 
 ```
 [ User ]
    │
-[ claude-remote-audio orchestrator (Python) ]                ← our code
+[ claude-remote-audio orchestrator (Python) ]                          ← our code
    │
-   ├─ [ claude-remote-bash (CRB) daemon + client ]           ← our code
+   ├─ [ claude-remote-bash (CRB) daemon + client ]                     ← our code
    │
-   ├─ [ roc-toolkit 0.4.0 (Jun 2024 release; master active 2026-03) ]
-   │     └─ [ libsox 14.4.2 (statically linked, deprecated 2014) ]  ← LOAD-BEARING DEPRECATED
+   ├─ [ roc-toolkit master pinned SHA + our patch series ]             ← our patches (R1)
+   │     └─ [ sox_ng 14.8.0 (statically linked, active fork) ]
    │           └─ [ macOS Core Audio HAL ]
    │
-   ├─ [ roc-vad 0.0.4 (Mar 2025) ]                           ← HAL plugin, slow but maintained
+   ├─ [ roc-vad 0.0.4 (Mar 2025) ]                                     ← HAL plugin, slow but maintained
    │
-   ├─ [ sox CLI (external pipeline for mono devices) ]       ← same libsox 14.4.2
+   ├─ [ sox CLI (Tier 3 HAL-wedge probe only — sox -d -n) ]            ← one-shot diagnostic
    │
-   ├─ [ Swift CLIs: claude-coreaudio-volume, claude-tcc-probe ]  ← our code
+   ├─ [ Swift CLIs: claude-coreaudio-volume,                           ← our code
+   │     claude-tcc-probe, claude-coreaudio-probe ]
    │
-   ├─ [ blueutil, switchaudio-osx ]                          ← stable thin wrappers
+   ├─ [ blueutil, switchaudio-osx, coreutils (gtimeout) ]              ← stable thin wrappers
    │
-   └─ [ AppleScript / System Events ]                        ← used only for the Sound-popover rescue
+   └─ [ AppleScript / System Events ]                                  ← used only for the Sound-popover rescue
 ```
 
 ### Stability matrix
 
 | Layer                                             | Version                                         | Maintained                             | Stability         | Evidence / notes                                                                                                                                                   |
 |---------------------------------------------------|-------------------------------------------------|----------------------------------------|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **libsox 14.4.2** (linked into roc-toolkit)       | 14.4.2 (2014)                                   | **No — abandoned upstream since 2015** | **Deprecated**    | Drives 12-byte truncation (W1), same-name collision (W2), no channel negotiation (W3). `sox_ng 14.8.0` (released 2026-05-18) fixes all three.                      |
+| **libsox 14.4.2** (linked into roc-toolkit)       | 14.4.2 (2014)                                   | **No — abandoned upstream since 2015** | **Deprecated**    | Drives 12-byte truncation (W1), same-name collision (W2). `sox_ng 14.8.0` (released 2026-05-18) fixes both, and patch 0002 already added `--channels=N` to roc-send to retire the mono-upmix band-aid.       |
 | **roc-toolkit**                                   | 0.4.0 (Jun 2024 release; master HEAD ~Mar 2026) | Yes (slow)                             | Evolving          | No `-c N` channel flag. No `--bind-source` on `roc-recv`. Next major (`rocd`, Rust daemon) is 12–24 months out — too far to wait.                                  |
 | **roc-vad**                                       | 0.0.4 (Mar 2025)                                | Yes (slow)                             | Evolving          | HAL plugin, not kext. No `disconnect` verb → we use `del+add` to retire slots (orchestrator.py `_ensure_peer_speaker`).                                            |
 | **switchaudio-osx**, **blueutil**, our Swift CLIs | brew current / source                           | Yes                                    | Stable            | Tiny surface, predictable behavior.                                                                                                                                |
@@ -163,22 +179,21 @@ Load-bearing band-aids currently in the codebase. **Living document** — entrie
 |-----|------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|---------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
 | W1  | 12-byte input-device name preflight refusal                                              | `orchestrator.py` `_SOX_DEVICE_NAME_MAX_BYTES`                           | libsox 14.4.2 deprecated `kAudioDevicePropertyDeviceName` C-string truncation                             | libsox                                                  | sox_ng 14.8.0                                                                                                 |
 | W2  | Same-name input/output device collision refusal                                          | `orchestrator.py` `_probe_input_device` match-count check                | libsox `findDevice` walks devices without scope filter                                                    | libsox                                                  | sox_ng 14.8.0                                                                                                 |
-| W3  | Mono-input sox-pipe upmix to stereo                                                      | `orchestrator.py` `_roc_send_command` mono branch                        | `roc-send` CLI has no `-c N`; libsox can't negotiate channels down                                        | libsox + roc-toolkit                                    | Inject `-c $native_channels` via `_probe_input_device` channel count (small fix); full retirement with sox_ng |
 | W4  | Microphone TCC preflight + auto-trigger prompt                                           | `orchestrator.py` `_check_microphone_tcc` + `claude-tcc-probe` Swift CLI | macOS TCC responsible-app chain attributes mic to iTerm/Cursor/Terminal                                   | macOS TCC                                               | Signed Mac app bundle (task #47)                                                                              |
 | W5  | HAL-wedge diagnostic → "reboot required"                                                 | `orchestrator.py` `_diagnose_roc_send_start_failure` tier 3              | macOS coreaudiod occasional wedge; only reboot clears it                                                  | Apple Core Audio                                        | Cannot fix upstream — detect + tell user to reboot is correct ideal-state                                     |
 | W6  | AppleScript Sound-menu rescue                                                            | `bluetooth.py` `engage_via_sound_menu`                                   | Apple gates the "available routes" promotion behind a real Sound-popover click                            | Apple Continuity + HAL                                  | No code fix; AppleScript-into-System-Events is the only path                                                  |
 | W7  | Cross-Mac Bluetooth steal                                                                | `bluetooth.py` `steal`                                                   | macOS Continuity lets BT audio appear "connected" on multiple iCloud Macs simultaneously                  | Apple Continuity                                        | Cannot fix — disconnect-then-connect is documented unblock                                                    |
-| W8  | `killall` (comm-match) instead of `pkill -f` (argv-regex) for roc-send/roc-recv teardown | `orchestrator.py` `_teardown_stale_hub_processes`, `_roc_send_command`   | Dispatch shell's argv contains literal "roc-send" → `pkill -f` self-kills the carrier shell               | Our dispatch shape (shell-script-as-message)            | Long-term: typed RPC dispatch retires this entire bug class                                                   |
+| W8  | `killall` (comm-match) instead of `pkill -f` (argv-regex) for stale-hub teardown + roc-send restart | `orchestrator.py` `_teardown_stale_hub_processes`, `_roc_send_command` (roc-recv's own restart at `_roc_recv_command` still uses `pkill -f` — documented exception) | Dispatch shell's argv contains literal "roc-send" → `pkill -f` self-kills the carrier shell               | Our dispatch shape (shell-script-as-message)            | Long-term: typed RPC dispatch retires this entire bug class                                                   |
 | W9  | NFKC + smart-quote/NBSP fold for `--output` matching                                     | `cc_lib/utils/unicode_match.py` (`nfkc_casefold`)                        | Core Audio stores renamed devices with U+2019 (curly apostrophe); keyboards type U+0027                   | Apple                                                   | Folding is the correct fix; shared helper now lives in `cc_lib/utils/unicode_match.py` (R4)                   |
 | W10 | Application Firewall preflight for roc-send/roc-recv binding                             | `orchestrator.py` `_check_application_firewall`                          | macOS firewall silently drops UDP from unauthorized binaries; daemon-spawned can't get the prompt clicked | Apple                                                   | Preflight + actionable refusal is correct ideal-state                                                         |
 | W11 | roc-vad slot recreation via `del + add`                                                  | `orchestrator.py` `_ensure_peer_speaker`                                 | roc-vad has no `disconnect` verb to clear an occupied slot                                                | roc-vad                                                 | UID-preservation trick is correct given current API                                                           |
 | W12 | `claude-coreaudio-volume` Swift CLI for per-device volume                                | `swift/claude-coreaudio-volume.swift`                                    | macOS has no stock CLI that names-then-controls a device's volume scalar                                  | macOS gap                                               | Building our own Swift CLI **is** the first-class fix — not a workaround                                      |
-| W13 | AppleScript dialog with dual `with timeout` + `giving up after`                          | `orchestrator.py` `_run_via_applescript_dialog`                          | AppleScript has two independent timeouts that both default to seconds in non-TTY contexts                 | AppleScript spec                                        | Replace with Swift NSAlert when bundle ships                                                                  |
-| W14 | `nohup ... &` detachment + post-launch `pgrep` survival check                            | `orchestrator.py` `_restart_roc_send` / `_restart_roc_recv`              | Dispatch expects bounded execution; roc-send is a daemon                                                  | Our dispatch + lack of launchd integration for roc-send | Register roc-send / roc-recv as launchd transient units; lifecycle is OS-managed                              |
+| W13 | AppleScript dialog with dual `with timeout` + `giving up after`                          | `orchestrator.py` `_confirm_install_dialog` + `_prompt_sudo_password_dialog` | AppleScript has two independent timeouts that both default to seconds in non-TTY contexts                 | AppleScript spec                                        | Replace with Swift NSAlert when bundle ships                                                                  |
+| W14 | `nohup ... &` detachment + post-launch `pgrep` survival check                            | `orchestrator.py` `_restart_roc_send` (survival check); `_restart_roc_recv` (detach only) | Dispatch expects bounded execution; roc-send is a daemon                                                  | Our dispatch + lack of launchd integration for roc-send | Register roc-send / roc-recv as launchd transient units; lifecycle is OS-managed                              |
 | W15 | `claude-coreaudio-probe` Swift CLI for per-device HAL open                               | `swift/claude-coreaudio-probe.swift` + `orchestrator.py` Tier 1.5        | SoX/sox_ng collapses every CoreAudio input-open failure into one generic message; OSStatus is discarded   | libsox + sox_ng                                         | Building our own Swift CLI **is** the first-class fix — composable with patching sox_ng if/when needed        |
 
 **Concentration by owner:**
-- **libsox (deprecated)**: W1, W2, W3 — all retire under sox_ng adoption
+- **libsox (deprecated)**: W1, W2 — retire under sox_ng adoption
 - **Apple (closed, evolving)**: W4 (partial), W5, W6, W7, W9, W10, W13 — these are *correct* ideal-state for unfixable upstream
 - **roc-vad / roc-toolkit (active, slow)**: W11, W14 — minor
 - **Our dispatch shape**: W8, W14 — long-term typed RPC retires both
@@ -199,7 +214,7 @@ Apple-provided foundations we can't change but **can test** continuously. Each i
 | BT device disconnected silently                              | `blueutil --is-connected <MAC>`                                                       | Reconnect via `blueutil --connect` or AppleScript Sound-popover engagement                 |
 | HAL wedge (rare, unrecoverable in-process)                   | `sox -d -n trim 0 0.1` returns 0 when HAL is healthy                                  | Tell user to reboot (only known recovery)                                                  |
 | Application Firewall blocks bind                             | `socketfilterfw --getappblocked` per binary at preflight                              | Surface `ResolvableApplyError` with click-through Settings instructions                    |
-| Dual Wi-Fi+Ethernet on same subnet causes packet duplication | Detect via interface enumeration on hub                                               | Bind roc-recv `-s rtp://<specific-IP>:<port>` instead of `0.0.0.0` (under investigation)   |
+| Dual Wi-Fi+Ethernet on same subnet causes packet duplication | Detect via interface enumeration on hub                                               | roc-recv binds `-s rtp://<specific-hub-IP>:<port>` instead of `0.0.0.0` — orchestrator-layer fix |
 
 ---
 
@@ -207,31 +222,30 @@ Apple-provided foundations we can't change but **can test** continuously. Each i
 
 Lives here so we don't lose track of the layered move. Each item is independently shippable; ordering is by leverage (impact ÷ effort), not by dependency chain.
 
-### Tier 1 — in flight
+### Tier 1 — landed in this PR
 
-1. **R2 — Inject `-c $native_channels` into `_roc_send_command`**. ~15 LOC. Closes the regressed mono channel-count handling (#21). Validates `_probe_input_device`'s reliability for the bigger sox_ng adoption. Removes journey-residue prose ("task #21 regressed", "commit 970040d8") from user-facing errors.
-2. **R4 — Extract `_nfkc_casefold` to `cc_lib/unicode_match.py`**. ~10 LOC + 1 file. Retires duplicated helper across `orchestrator.py` and `bluetooth.py`. Honors CLAUDE.md DRY.
-3. **R5 — Strip journey-residue from error prose**. Editorial pass. No commit SHAs, no internal task numbers, no apologetic "this is regressed" language in user-visible strings.
-4. **R1 — Maintain a patch series against roc-toolkit master + sox_ng**. The lever. Since we already validate every change empirically on the full mesh, "tracking upstream" buys us nothing while costing us features we could add ourselves. We fork-via-patches: pin to a tested roc-toolkit master SHA, apply our patches at build time, install our binaries.
-   - **Bootstrap pulls roc-toolkit master pinned to a specific SHA** (not the 0.4.0 release, not a moving target). Closes 18 months of upstream development.
-   - **Swap bundled libsox for sox_ng 14.8.0** in roc-toolkit's scons 3rdparty config. Deletes W1, W2.
-   - **Add our patches** (each retires a specific workaround):
-     - `-c N` channel-count flag to `roc-send` → retires W3 (sox upmix pipe deleted entirely)
-     - `--bind-source IP` flag to `roc-recv` → fixes task #29 dual-interface chipmunk at the source
+1. **R1 — Patch series against roc-toolkit master + sox_ng.** The lever. Since we validate every change empirically on the full mesh, "tracking upstream" buys nothing while costing features we could add ourselves. Fork-via-patches: pin to a tested roc-toolkit master SHA, apply our patches at build time, install our binaries.
+   - **Bootstrap pulls roc-toolkit master pinned to a specific SHA** (not 0.4.0 release, not a moving target).
+   - **Swap bundled libsox for sox_ng 14.8.0** in roc-toolkit's scons 3rdparty config (patch 0001). Deletes W1, W2.
+   - **`--channels=N` flag added to `roc-send`** (patch 0002). Retired the sox upmix pipe (deleted entirely).
+   - **`roc-recv` binds to specific hub-IP** instead of `0.0.0.0` (orchestrator-layer change using stock `-s` flag, not a roc-toolkit patch). Fixes task #29 dual-interface chipmunk.
    - **OSStatus surfacing for input-open failures** is handled out-of-tree via `claude-coreaudio-probe` (W15) — Swift CLI at the lowest layer we own. Composable with a future sox_ng patch if one ships; we don't block on upstream cadence.
    - **Patches live at** `mcp/claude-remote-audio/patches/*.patch`. Reviewable diffs in our PRs. Self-pruning when upstream lands the same fix (patch starts conflicting → drop it).
-   - **Risk**: initial engineering bounded by roc-toolkit's C++ codebase + scons build complexity. Mitigation: empirical mesh validation per patch. If a patch breaks something, drop it; we still have the floor of "upstream master + sox_ng" without our additions.
+2. **R2 — `--channels=N` injection in `_roc_send_command`.** Closes the mono channel-count case via the patch-0002 flag.
+3. **R4 — `_nfkc_casefold` extracted to `cc_lib/utils/unicode_match.py`.** Shared helper for orchestrator + bluetooth.
+4. **R5 — Journey-residue stripped from user-facing error prose.** No commit SHAs, no internal task numbers, no apologetic "this is regressed" language in user-visible strings.
+5. **Audit-driven polish lap** (commit `ebc40042` + this lap): #41 BluetoothError migration to exceptions module + codes; #43 [TIMEOUT] marker in error messages; #53 fail-fast on unknown TCC + firewall states; #55 HAL-enumeration-race poll; #57 Accessibility vs Automation TCC disambiguation; #61 hub-side stale-speaker retirement; #64 HAL-wedge preflight.
 
-### Tier 2 — after Tier 1 lands
+### Tier 2 — follow-up PRs
 
-5. **R3 — Split `orchestrator.py` into 8 focused modules**: `plan.py`, `prereqs.py`, `hub.py`, `peer.py`, `rocvad.py`, `roc_cli.py`, `tcc.py`, `diagnose.py`. Pure refactor; do AFTER sox_ng deletes the dead preflights so the split is cleaner.
+5. **R3 — Split `orchestrator.py` into 8 focused modules**: `plan.py`, `prereqs.py`, `hub.py`, `peer.py`, `rocvad.py`, `roc_cli.py`, `tcc.py`, `diagnose.py`. Pure refactor; cleaner after sox_ng deletes the dead preflights.
 6. **Sign daemon as Mac app bundle (#47)**. Collapses TCC complexity. Drops the "iTerm as responsible app" chain. Persistent consent across rebuilds.
-7. **Swift CLIs replace remaining AppleScript** (#34 sound-popover rescue, password dialog, claude-coreaudio-resolve #51). Once last AppleScript use is gone, we can drop Automation TCC handling entirely.
-8. **Apply absorbs recovery primitives** (#60 input drift, #62 BT-duplex recovery) — no separate `recover` subcommand.
+7. **Swift CLIs replace remaining AppleScript** (#34 sound-popover rescue, password dialog, claude-coreaudio-resolve #51). Once last AppleScript use is gone, drop Automation TCC handling entirely.
+8. **Apply absorbs recovery primitives** (#35 AirPods Continuity drift, #60 input drift, #62 BT-duplex recovery) — no separate `recover` subcommand.
 
-### Tier 3 — our own house
+### Tier 3 — CRB roadmap (separate package, separate PRs)
 
-9. CRB roadmap: #19 (interface-change reaction), #23 (mid-flight IP flux), #36 (dispatch timeout propagation), #37/#38 (cancel protocol), #41 (BluetoothError migration), #43 (TIMEOUT marker), #59 (launchd auto-start).
+9. #19 (interface-change reaction), #23 (mid-flight IP flux), #30 (DiscoveredAddress in errors), #31 (auto-refresh hosts-cache), #36 (dispatch timeout propagation), #37/#38 (cancel protocol), #59 (launchd auto-start).
 
 ### Perhaps Never
 

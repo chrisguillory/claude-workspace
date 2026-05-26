@@ -7,6 +7,8 @@ from pathlib import Path
 
 from cc_lib.schemas import ClosedModel
 from cc_lib.utils.atomic_write import atomic_write
+from pydantic import ConfigDict
+from pydantic.alias_generators import to_camel
 
 __all__ = [
     'CACHE_TTL_SECONDS',
@@ -21,7 +23,14 @@ CACHE_TTL_SECONDS = 60.0
 
 
 class DeviceCache(ClosedModel):
-    """A snapshot of one host's Core Audio inputs + outputs."""
+    """A snapshot of one host's Core Audio inputs + outputs.
+
+    JSON output uses camelCase aliases per CLAUDE.md (``fetchedAt``). Old cache
+    files written with snake_case keys still parse via ``validate_by_name=True``
+    inherited from ClosedModel — smooth transition, no manual cache eviction needed.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel)
 
     hub: str
     fetched_at: float

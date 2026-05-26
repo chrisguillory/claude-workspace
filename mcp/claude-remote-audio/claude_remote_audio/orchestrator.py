@@ -20,6 +20,8 @@ from claude_remote_bash.client_config import ClientConfig
 from claude_remote_bash.discovery import DiscoveredHost, browse_hosts
 from claude_remote_bash.dispatch import HostRunResult
 from claude_remote_bash.selector import parse as parse_selector
+from pydantic import ConfigDict
+from pydantic.alias_generators import to_camel
 
 from claude_remote_audio import bluetooth
 from claude_remote_audio.cache import DeviceCache, write_devices
@@ -48,6 +50,8 @@ logger = logging.getLogger(__name__)
 class HostApplyOutcome(ClosedModel):
     """Result of apply operations against a single host."""
 
+    model_config = ConfigDict(alias_generator=to_camel)
+
     host: str
     role: Literal['hub', 'peer']
     actions: Sequence[str]
@@ -56,7 +60,14 @@ class HostApplyOutcome(ClosedModel):
 
 
 class ApplyResult(ClosedModel):
-    """Aggregate apply outcome across every host in ``--target``."""
+    """Aggregate apply outcome across every host in ``--target``.
+
+    JSON output uses camelCase aliases per CLAUDE.md's "JSON Serialization for
+    JavaScript Consumers" convention (e.g. ``overallSuccess``). Input still
+    accepts snake_case via ``validate_by_name=True`` inherited from ClosedModel.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel)
 
     hosts: Sequence[HostApplyOutcome]
     overall_success: bool
@@ -100,8 +111,20 @@ async def apply(
 
     outcomes: list[HostApplyOutcome] = []
     if plan.hub_in_target:
-        outcomes.append(await _apply_hub(service, plan))
-    peer_outcomes = await asyncio.gather(*(_apply_peer(service, plan, peer) for peer in plan.target_peer_aliases))
+        outcomes.append(await _apply_hub_safe(service, plan))
+
+    async def _apply_peer_safe(peer: str) -> HostApplyOutcome:
+        try:
+            return await _apply_peer(service, plan, peer)
+        except Exception as exc:
+            # exception_safety_linter.py: swallowed-exception — intentional per-host
+            # boundary. Per-host failures become HostApplyOutcome(success=False)
+            # so siblings keep running and `apply()` returns a complete per-host
+            # picture (the documented HostApplyOutcome schema contract).
+            logger.exception('%s: peer apply failed', peer)
+            return HostApplyOutcome(host=peer, role='peer', actions=[], success=False, error=str(exc))
+
+    peer_outcomes = await asyncio.gather(*(_apply_peer_safe(peer) for peer in plan.target_peer_aliases))
     outcomes.extend(peer_outcomes)
 
     return ApplyResult(
@@ -242,6 +265,8 @@ async def _build_plan(
     topology_peer_to_ip = {p: _best_ip(aliases[p]) for p in topology_peer_aliases}
     topology_peer_to_port = await _assign_peer_ports(service, topology_peer_aliases, hub_ip)
 
+    canonical_input = _resolve_input_device(hub_devices.inputs, hub, input_device) if input_device is not None else None
+
     return _Plan(
         hub_alias=hub,
         hub_in_target=hub_in_target,
@@ -253,7 +278,7 @@ async def _build_plan(
         topology_peer_to_ip=topology_peer_to_ip,
         topology_peer_to_port=topology_peer_to_port,
         target_peer_aliases=target_peer_aliases,
-        input_device=input_device,
+        input_device=canonical_input,
         output_device=output_device,
     )
 
@@ -372,6 +397,31 @@ async def _ensure_bluetooth_output(
     try:
         engaged = await bluetooth.engage_via_sound_menu(service, hub_alias, bt_device.name)
     except BluetoothError as exc:
+        # Structured-code dispatch first: the BluetoothError codes set by the
+        # popover module (bluetooth.py:380-397) carry stable identifiers that
+        # the string-match heuristics below can't see — the structured-error
+        # path emits AppleScript-side ERROR_OPEN payloads, not the raw
+        # "command failed (exit ..." shape `_run` produces.
+        if exc.code in ('bluetooth-sound-menu-popover-not-open', 'bluetooth-sound-menu-row-introspection-failed'):
+            raise ResolvableApplyError(
+                f'{hub_alias}: Sound-menu rescue blocked — AppleScript could not '
+                'open the Sound popover or introspect its rows. Most often an '
+                'Accessibility TCC denial (UI-interaction permission); occasionally '
+                'an Automation TCC denial.',
+                code='sound-menu-applescript-blocked',
+                title='Accessibility or Automation TCC permission required',
+                suggestions=(
+                    f'On {hub_alias}: System Settings → Privacy & Security → '
+                    "**Accessibility** → enable the dispatching app's entry "
+                    '(typically iTerm, Terminal, or your IDE) — most common cause.',
+                    f'Also check {hub_alias}: System Settings → Privacy & Security → '
+                    "**Automation** → dispatching app → enable 'System Events' — "
+                    'the two are independent permissions in different panels.',
+                    f'Underlying AppleScript error: {exc}',
+                    'Re-run apply after granting permission. The grant persists.',
+                ),
+                context={'host': hub_alias, 'device': bt_device.name, 'bluetooth_error_code': exc.code},
+            ) from exc
         if _looks_like_accessibility_tcc_denial(str(exc)):
             raise ResolvableApplyError(
                 f'{hub_alias}: Sound-menu rescue blocked by Accessibility permission '
@@ -501,6 +551,26 @@ def _looks_like_bluetooth_tcc_denial(error_msg: str) -> bool:
 # -- Hub phase ----------------------------------------------------------------
 
 
+async def _apply_hub_safe(service: DispatchService, plan: _Plan) -> HostApplyOutcome:
+    """Boundary wrapper for ``_apply_hub`` — converts raised failures to ``HostApplyOutcome``.
+
+    Without this wrapper, a hub failure escapes ``apply()``, bypasses every peer's
+    apply attempt entirely, and skips per-host outcome accounting. With it, the
+    failure lands in the ``HostApplyOutcome.success``/``error`` schema fields
+    (which were previously dead-code paths in ``_print_text``) and peer applies
+    still run — consumers see a complete per-host picture.
+    """
+    try:
+        return await _apply_hub(service, plan)
+    except Exception as exc:
+        # exception_safety_linter.py: swallowed-exception — intentional per-host
+        # boundary. Hub failure becomes HostApplyOutcome(success=False) so peer
+        # applies still run and the user sees a complete per-host picture
+        # rather than just the first failure that bubbled out of apply().
+        logger.exception('%s: hub apply failed', plan.hub_alias)
+        return HostApplyOutcome(host=plan.hub_alias, role='hub', actions=[], success=False, error=str(exc))
+
+
 async def _apply_hub(service: DispatchService, plan: _Plan) -> HostApplyOutcome:
     """Run hub-side mutations: feedback-loop guard, then opt-in output and input management."""
     await _guard_feedback_loop(service, plan)
@@ -587,15 +657,33 @@ async def _set_hub_output(service: DispatchService, plan: _Plan) -> Sequence[str
 
 
 def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: str) -> str:
-    """Match ``requested`` against the pre-fetched canonical output list.
+    """Match ``requested`` against the pre-fetched canonical output list."""
+    return _resolve_device_name(canonical, hub_alias, requested, flag='--output')
+
+
+def _resolve_input_device(canonical: Sequence[str], hub_alias: str, requested: str) -> str:
+    """Match ``requested`` against the pre-fetched canonical input list.
+
+    Canonical name flows downstream to ``_probe_input_device`` (byte-exact
+    Python compare against Core Audio's stored name), ``_probe_coreaudio_device``
+    (byte-exact Swift compare via ``findDevice(named:)``), and ``_roc_send_command``
+    (``roc-send -i core://NAME``). Without this resolver, a user-typed straight
+    apostrophe ``'`` wouldn't match a device whose Core Audio canonical form
+    uses U+2019 ``'`` — false ``device-missing`` verdicts throughout.
+    """
+    return _resolve_device_name(canonical, hub_alias, requested, flag='--input')
+
+
+def _resolve_device_name(canonical: Sequence[str], hub_alias: str, requested: str, *, flag: str) -> str:
+    """Match ``requested`` against ``canonical`` with NFKC + smart-quote folding.
 
     Strategy:
 
     1. Exact match.
     2. NFKC case-folded match with smart-quote / NBSP folding (U+2019 → U+0027,
        U+201C/D → U+0022, U+00A0 → ASCII space). Safe because the matched
-       canonical name is what gets passed to ``SwitchAudioSource -s``; lenient
-       matching only widens resolution, never execution.
+       canonical name is what flows downstream; lenient matching only widens
+       resolution, never execution.
     3. Miss → raise ``ApplyError`` with a ``difflib.get_close_matches`` "did you mean" hint.
     """
     if requested in canonical:
@@ -606,11 +694,11 @@ def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: 
     if len(matches) == 1:
         return matches[0]
     if matches:
-        raise ApplyError(f'{hub_alias}: --output {requested!r} ambiguous: {matches}')
+        raise ApplyError(f'{hub_alias}: {flag} {requested!r} ambiguous: {matches}')
 
     suggestion = difflib.get_close_matches(requested, list(canonical), n=1, cutoff=0.6)
     hint = f' Did you mean {suggestion[0]!r}?' if suggestion else ''
-    raise ApplyError(f'{hub_alias}: --output {requested!r} not found. Available: {list(canonical)}.{hint}')
+    raise ApplyError(f'{hub_alias}: {flag} {requested!r} not found. Available: {list(canonical)}.{hint}')
 
 
 async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[str]:
@@ -634,6 +722,19 @@ async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[s
                 '  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/local/bin/roc-recv',
                 'Then re-run apply. (Alternative: open System Settings → Network → Firewall '
                 '→ Options, find roc-recv, set to Allow.)',
+            ),
+            context={'host': plan.hub_alias, 'binary': '/usr/local/bin/roc-recv', 'status': recv_fw},
+        )
+    if recv_fw == 'unknown':
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: cannot determine Application Firewall status for /usr/local/bin/roc-recv '
+            '— socketfilterfw returned unexpected output. Refusing to launch roc-recv blind.',
+            code='roc-recv-firewall-status-unknown',
+            title=f'Application Firewall status unknown on {plan.hub_alias}',
+            suggestions=(
+                f'On {plan.hub_alias}, query the firewall manually: '
+                '`/usr/libexec/ApplicationFirewall/socketfilterfw --getappblocked /usr/local/bin/roc-recv`',
+                'If MDM-managed (corporate Mac), socketfilterfw may be query-only — request that the binary be allow-listed centrally',
             ),
             context={'host': plan.hub_alias, 'binary': '/usr/local/bin/roc-recv', 'status': recv_fw},
         )
@@ -942,7 +1043,14 @@ async def _request_microphone_tcc(service: DispatchService, host: str) -> str:
     )
     if not result.results:
         return 'unknown'
-    return result.results[0].stdout.strip().split('\n')[-1] or 'unknown'
+    hr = result.results[0]
+    # Daemon-side timeout SIGKILLs the shell before its `|| echo unknown` runs,
+    # surfacing as stdout='[TIMEOUT]' + exit_code=-1. Treat any non-zero exit
+    # or dispatch error as `unknown` so the caller's fail-fast path triggers
+    # rather than passing the [TIMEOUT] literal through as a TCC status.
+    if hr.exit_code != 0 or hr.error is not None:
+        return 'unknown'
+    return hr.stdout.strip().split('\n')[-1] or 'unknown'
 
 
 async def _probe_coreaudio_device(
@@ -962,7 +1070,7 @@ async def _probe_coreaudio_device(
     missing or output didn't parse — caller falls through to the next tier.
 
     Verdicts: ``ok``, ``device-missing``, ``device-not-alive``,
-    ``no-input-scope``, ``format-unreadable``, ``unknown``.
+    ``no-input-scope``, ``device-properties-unreadable``, ``unknown``.
     """
     cmd = f'/usr/local/bin/claude-coreaudio-probe device {shlex.quote(device_name)} 2>/dev/null || echo verdict=unknown'
     result = await _run(service, host, cmd)
@@ -1177,20 +1285,21 @@ async def _diagnose_roc_send_start_failure(
                     'Re-run apply with `--input "<that device name>"`',
                 ),
             )
-        if verdict == 'format-unreadable':
-            stream_status = (
+        if verdict == 'device-properties-unreadable':
+            property_status = (
                 fields.get('stream-config-status')
                 or fields.get('stream-format-status')
                 or fields.get('alive-status')
                 or 'unknown'
             )
             return (
-                'input-device-format-unreadable',
-                f'Core Audio stream properties unreadable on {host} for {input_device!r}',
-                f'Diagnosis: Core Audio enumerated {input_device!r} on {host} but failed to '
-                f'read its stream configuration / format properties (status={stream_status}). '
-                'Usually indicates the device driver is in a transient bad state — different '
-                'from a global HAL wedge (which would fail the default-input probe too).',
+                'input-device-properties-unreadable',
+                f'Core Audio properties unreadable on {host} for {input_device!r}',
+                f'Diagnosis: Core Audio enumerated {input_device!r} on {host} but a property '
+                f'read (is-alive / stream-config / stream-format) returned non-noErr '
+                f'(status={property_status}). Usually indicates the device driver is in a '
+                'transient bad state — different from a global HAL wedge (which would fail '
+                'the default-input probe too).',
                 (
                     f'On {host}: physically reconnect the device',
                     'If reconnection fails: reboot the host',
@@ -1261,8 +1370,8 @@ async def _diagnose_roc_send_start_failure(
         'roc-send-device-specific-open-failure',
         f'roc-send cannot open the requested input device on {host}',
         f'Diagnosis: Microphone TCC is `{mic_status}` (good), CoreAudio HAL is '
-        'healthy (the roc-vad virtual mic opens), no recognized libsox marker '
-        "matched the log, but this particular device couldn't be opened. "
+        'healthy (`sox -d -n` against the default input succeeded), no recognized '
+        "libsox marker matched the log, but this particular device couldn't be opened. "
         'Likely: device unplugged, exclusively held by another process, or '
         'format negotiation failure.',
         (
@@ -1377,6 +1486,10 @@ async def _ensure_claude_remote_mic(service: DispatchService, host: str, list_te
     if mic_idx is None:
         add_out = await _run(service, host, 'roc-vad device add receiver -n "Claude Remote Mic" -r 48000')
         mic_idx = _parse_added_idx(add_out.stdout)
+        if mic_idx is None:
+            raise ApplyError(
+                f'{host}: failed to parse Claude Remote Mic index from `roc-vad device add` output: {add_out.stdout!r}'
+            )
         actions.append(f'added Claude Remote Mic (idx={mic_idx})')
         # macOS's CoreAudio HAL doesn't always reflect new roc-vad devices in its
         # enumeration cache immediately after `roc-vad device add` returns success.
@@ -1384,9 +1497,6 @@ async def _ensure_claude_remote_mic(service: DispatchService, host: str, list_te
         # "device not found" if they run during the sub-second race window. Block
         # until the device is visible to Core Audio, not just to roc-vad.
         await _wait_for_coreaudio_visibility(service, host, 'Claude Remote Mic')
-
-    if mic_idx is None:
-        return actions
 
     mic_show = (await _run(service, host, f'roc-vad device show {mic_idx}')).stdout
     if f'rtp://0.0.0.0:{_MIC_RECEIVE_PORT}' not in mic_show:
@@ -1729,7 +1839,19 @@ async def _ensure_prereqs(
         logger.info('prereqs: authorizing installs on %s', hosts_to_bootstrap)
         passwords = await _authorize_installs(service, hosts_to_bootstrap)
         logger.info('prereqs: dispatching bootstrap to %s (parallel)', hosts_to_bootstrap)
-        await asyncio.gather(*(_install_prereqs_on_host(service, h, passwords[h]) for h in hosts_to_bootstrap))
+        # `return_exceptions=True` so one bootstrap failure doesn't mask sibling
+        # outcomes — when 3 hosts bootstrap in parallel and only 1 fails, the
+        # user sees all 3 results and the failure is aggregated with context.
+        bootstrap_results = await asyncio.gather(
+            *(_install_prereqs_on_host(service, h, passwords[h]) for h in hosts_to_bootstrap),
+            return_exceptions=True,
+        )
+        bootstrap_failures = [
+            (h, r) for h, r in zip(hosts_to_bootstrap, bootstrap_results, strict=True) if isinstance(r, BaseException)
+        ]
+        if bootstrap_failures:
+            body = '\n'.join(f'  {h}: {exc}' for h, exc in bootstrap_failures)
+            raise ApplyError(f'bootstrap failed on {len(bootstrap_failures)} host(s):\n{body}')
         logger.info('prereqs: re-probing %s', hosts_to_bootstrap)
         missing_by_host = await _probe_missing_binaries(service, {h: host_reqs[h] for h in hosts_to_bootstrap})
         if hub_unpatched:
@@ -1907,6 +2029,11 @@ async def _validate_sudo_password(service: DispatchService, host: str, password:
     ``sudo -K`` clears any cached credential first so a stale timestamp can't
     masquerade as a successful validation. ``sudo -S -v`` reads from stdin
     and only refreshes the timestamp — no command is executed under privilege.
+
+    Raises ``ApplyError`` on dispatch failure (host unreachable, no results
+    returned) so the caller's "wrong password — retry" loop doesn't masquerade
+    a network/dispatch issue as a credential issue. Wrong password is signalled
+    by ``False`` return (exit_code != 0 on a successful dispatch).
     """
     quoted = shlex.quote(password)
     cmd = f'sudo -K; echo {quoted} | sudo -S -p "" -v 2>/dev/null'
@@ -1918,25 +2045,47 @@ async def _validate_sudo_password(service: DispatchService, host: str, password:
         timeout=15.0,
     )
     if not result.results:
-        return False
-    return result.results[0].exit_code == 0
+        raise ApplyError(f'{host}: dispatch returned no result during sudo validation — host unreachable?')
+    hr = result.results[0]
+    if hr.error is not None:
+        raise ApplyError(f'{host}: dispatch failed during sudo validation: {hr.error}')
+    return hr.exit_code == 0
 
 
 def _confirm_install_dialog(host: str, *, with_saved_password: bool) -> bool:
-    """Pop a yes/no install-consent dialog for ``host``. Returns ``True`` on accept."""
+    """Pop a yes/no install-consent dialog for ``host``. Returns ``True`` on accept.
+
+    ``host`` flows in via mDNS-advertised alias and would be attacker-controlled
+    on a hostile LAN. It is passed as ``osascript`` argv (``on run argv``), NOT
+    via source interpolation — AppleScript treats argv items as opaque strings,
+    eliminating the ``"X" & (do shell script "...") & "Y"`` injection class that
+    f-string interpolation would expose.
+    """
     suffix = ' (using saved password)' if with_saved_password else ''
     # `with timeout` + `giving up after` — see _prompt_sudo_password_dialog for rationale.
     script = (
-        'with timeout of 86400 seconds\n'
-        'tell application "System Events" to activate\n'
-        'tell application "System Events" to '
-        f'display dialog "Install prereqs on {host}{suffix} (~5 min)?" '
-        'with title "claude-remote-audio install-prereqs" '
-        'buttons {"Cancel", "Install"} default button "Install" '
-        'giving up after 86400\n'
-        'end timeout'
+        'on run argv\n'
+        '  set hostName to item 1 of argv\n'
+        '  set suffixText to item 2 of argv\n'
+        '  with timeout of 86400 seconds\n'
+        '    tell application "System Events" to activate\n'
+        '    tell application "System Events" to '
+        '      display dialog ("Install prereqs on " & hostName & suffixText & " (~5 min)?") '
+        '      with title "claude-remote-audio install-prereqs" '
+        '      buttons {"Cancel", "Install"} default button "Install" '
+        '      giving up after 86400\n'
+        '  end timeout\n'
+        'end run'
     )
-    return subprocess.run(['osascript', '-e', script], capture_output=True, text=True, check=False).returncode == 0
+    return (
+        subprocess.run(
+            ['osascript', '-e', script, '--', host, suffix],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).returncode
+        == 0
+    )
 
 
 def _prompt_sudo_password_dialog(host: str, retry: bool) -> str:
@@ -1946,8 +2095,14 @@ def _prompt_sudo_password_dialog(host: str, retry: bool) -> str:
     Mac-native input field. Returns the entered text. Raises ``ApplyError``
     when the user cancels. ``retry`` swaps the message to a "wrong password"
     variant for subsequent attempts.
+
+    ``host`` flows in via mDNS-advertised alias and would be attacker-controlled
+    on a hostile LAN. It is passed as ``osascript`` argv (``on run argv``), NOT
+    via source interpolation — AppleScript treats argv items as opaque strings,
+    eliminating the ``"X" & (do shell script "...") & "Y"`` injection class that
+    f-string interpolation would expose.
     """
-    prompt = f'Wrong password — sudo password for {host}:' if retry else f'sudo password for {host}:'
+    prompt_base = 'Wrong password — sudo password for ' if retry else 'sudo password for '
     # AppleScript has two independent timeouts that BOTH default to short
     # values in non-TTY osascript contexts:
     #   - `giving up after N`     gates the dialog's own auto-dismiss
@@ -1956,19 +2111,23 @@ def _prompt_sudo_password_dialog(host: str, retry: bool) -> str:
     # exits non-zero, and the dialog is left orphaned in System Events (still
     # visible, but no listener for the user's response).
     script = (
-        'with timeout of 86400 seconds\n'
-        'tell application "System Events" to activate\n'
-        'tell application "System Events" to '
-        f'display dialog "{prompt}" '
-        'with title "claude-remote-audio install-prereqs" '
-        'default answer "" with hidden answer '
-        'buttons {"Cancel", "OK"} default button "OK" '
-        'giving up after 86400\n'
-        'end timeout'
+        'on run argv\n'
+        '  set hostName to item 1 of argv\n'
+        '  set promptBase to item 2 of argv\n'
+        '  with timeout of 86400 seconds\n'
+        '    tell application "System Events" to activate\n'
+        '    tell application "System Events" to '
+        '      display dialog (promptBase & hostName & ":") '
+        '      with title "claude-remote-audio install-prereqs" '
+        '      default answer "" with hidden answer '
+        '      buttons {"Cancel", "OK"} default button "OK" '
+        '      giving up after 86400\n'
+        '  end timeout\n'
+        'end run'
     )
     try:
         result = subprocess.run(
-            ['osascript', '-e', script],
+            ['osascript', '-e', script, '--', host, prompt_base],
             check=True,
             capture_output=True,
             text=True,
@@ -2031,7 +2190,18 @@ async def _install_prereqs_on_host(
     # if it were user input, silently swallowing every line past the first
     # interactive command. The file-plus-`</dev/null` form gives child
     # commands a clean empty stdin.
-    cmd = f'echo {shlex.quote(encoded)} | base64 -d > /tmp/cra-bootstrap.sh && bash /tmp/cra-bootstrap.sh </dev/null'
+    #
+    # `umask 077` before the write so the script file is created mode 0600 —
+    # the payload contains `export SUDO_PASSWORD='...'` so a default 0644 file
+    # would expose the credential to every local non-privileged process until
+    # `/tmp` clears at next boot. Cleanup-on-exit (success or failure) removes
+    # the file the moment bash returns so the at-rest exposure window matches
+    # the bootstrap's execution.
+    cmd = (
+        '(umask 077 && '
+        f'echo {shlex.quote(encoded)} | base64 -d > /tmp/cra-bootstrap.sh) && '
+        '{ bash /tmp/cra-bootstrap.sh </dev/null; rc=$?; rm -f /tmp/cra-bootstrap.sh; exit $rc; }'
+    )
 
     logger.info('%s: bootstrap dispatching (timeout 15min; cold compile ~5min)', host)
     started = asyncio.get_event_loop().time()
