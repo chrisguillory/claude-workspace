@@ -1527,6 +1527,12 @@ async def _ensure_prereqs(
         # tool pins the digital intermediates to max so attenuation only happens
         # at the analog endpoints.
         peer_binaries += ['SwitchAudioSource', 'claude-coreaudio-volume']
+    if has_input:
+        # Hub-flip readiness: any mesh member may become the hub in a subsequent
+        # apply. Pre-installing the hub-eligibility probes on peers means the
+        # first apply that promotes a Mac to hub doesn't also need to dispatch
+        # bootstrap to compile them. The probes are inert when not invoked.
+        peer_binaries += ['claude-tcc-probe', 'claude-coreaudio-probe']
 
     host_reqs: dict[str, Sequence[str]] = {hub_alias: hub_binaries}
     for peer in target_peer_aliases:
