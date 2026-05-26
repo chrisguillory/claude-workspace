@@ -50,10 +50,10 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
             window_size: Optional initial window dimensions (WindowSize(width=..., height=...)).
-                        Applied at browser launch only. To change size mid-session, use
-                        resize_window(). When omitted, Chrome uses its native default size.
-                        On macOS the OS may clamp width to ~500px minimum; actual size is
-                        reflected in the returned NavigationResult.window_size.
+                        Requires fresh_browser=True; raises ValidationError otherwise (use
+                        resize_window() to change size mid-session). When omitted, Chrome uses
+                        its native default size. On macOS the OS may clamp width to ~500px
+                        minimum; actual size is reflected in the returned NavigationResult.window_size.
             browser: Which browser to use - "chrome" or "chromium". Defaults to the currently
                     running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when

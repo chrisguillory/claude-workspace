@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated
 
 import httpx
+import pydantic
 import typer
 from cc_lib.claude_context import ClaudeContext
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
@@ -605,14 +606,22 @@ def _get_socket_path() -> pathlib.Path:
     return sock
 
 
+def _serialize_param(value: object) -> object:
+    """Convert Pydantic BaseModel values to plain dicts for JSON serialization."""
+    if isinstance(value, pydantic.BaseModel):
+        return value.model_dump(mode='json')
+    return value
+
+
 def _call_tool(tool: str, **params: object) -> object:
     """Call a single tool via the HTTP bridge."""
     socket_path = _get_socket_path()
     transport = httpx.HTTPTransport(uds=socket_path.as_posix())
+    serialized = {k: _serialize_param(v) for k, v in params.items() if v is not None}
     with httpx.Client(transport=transport, timeout=120.0) as client:
         response = client.post(
             'http://localhost/tool',
-            json={'tool': tool, 'params': {k: v for k, v in params.items() if v is not None}},
+            json={'tool': tool, 'params': serialized},
         )
         response.raise_for_status()
         return response.json()

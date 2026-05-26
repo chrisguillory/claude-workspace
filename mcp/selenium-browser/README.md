@@ -716,7 +716,7 @@ get_page_text(include_images=True)
 - `hover(selector, duration_ms?)` - Hover over element to trigger CSS `:hover` (see [Hover Testing](#hover-testing-2025-12-29))
 - `press_key(key)` - Keyboard input (ENTER, ESCAPE, CONTROL+A, etc.)
 - `type_text(text, delay_ms?)` - Type text character by character
-- `resize_window(width, height)` - Set browser dimensions for responsive testing
+- `resize_window(window_size)` - Set browser dimensions for responsive testing
 
 ### Wait Strategy (2025-12-30)
 

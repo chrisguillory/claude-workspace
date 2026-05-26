@@ -2346,8 +2346,8 @@ class BrowserService:
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
             window_size: Optional initial window dimensions (WindowSize(width=..., height=...)).
-                        Applied at browser launch only (no effect if a session already exists;
-                        use resize_window() to change size mid-session). On macOS, OS may clamp
+                        Requires fresh_browser=True; raises ValidationError otherwise (use
+                        resize_window() to change size mid-session). On macOS, OS may clamp
                         width to ~500px minimum; actual size is reflected in the returned
                         NavigationResult.window_size.
             browser: Which browser to use - "chrome" or "chromium". Defaults to the currently
@@ -2418,6 +2418,12 @@ class BrowserService:
         if init_scripts and not fresh_browser:
             raise fastmcp.exceptions.ValidationError(
                 'init_scripts requires fresh_browser=True (scripts must be registered before first navigation)',
+            )
+
+        if window_size is not None and not fresh_browser:
+            raise fastmcp.exceptions.ValidationError(
+                'window_size requires fresh_browser=True (window size is set at browser init; '
+                'use resize_window() to change size mid-session)',
             )
 
         logger.info(
