@@ -569,7 +569,7 @@ async def _restart_roc_recv(service: DispatchService, plan: _Plan) -> Sequence[s
     bind_ports = [plan.topology_peer_to_port[p] for p in plan.topology_peer_aliases]
     if plan.hub_loopback_port is not None:
         bind_ports.append(plan.hub_loopback_port)
-    await _run(service, plan.hub_alias, _roc_recv_command(bind_ports))
+    await _run(service, plan.hub_alias, _roc_recv_command(bind_ports, bind_ip=plan.hub_ip))
     return ['restarted roc-recv']
 
 
@@ -1288,9 +1288,26 @@ def _parse_added_idx(stdout: str) -> int | None:
 # -- roc-toolkit command builders ---------------------------------------------
 
 
-def _roc_recv_command(bind_ports: Sequence[int]) -> str:
-    """Shell command that kills any running roc-recv and starts a fresh one bound to the given UDP ports."""
-    bind_flags = ' '.join(f'-s rtp://0.0.0.0:{p}' for p in bind_ports)
+def _roc_recv_command(bind_ports: Sequence[int], *, bind_ip: str) -> str:
+    """Shell command that kills any running roc-recv and starts a fresh one bound to ``bind_ip:port``.
+
+    ``bind_ip`` is the hub's specific interface address (e.g. ``192.168.4.46`` for
+    M5's ethernet) — the same IP peers' Claude Remote Speaker slots target. Binding
+    to the specific IP rather than ``0.0.0.0`` defends against task #29: when the
+    hub has multiple interfaces on the same /22 subnet (Wi-Fi + Ethernet), a
+    ``0.0.0.0`` bind accepts any incoming UDP destined to ANY of the host's IPs
+    on that port, which empirically led to dual-path packet reception and 2x
+    sample-rate chipmunk playback. With the specific-IP bind, packets addressed
+    to a different interface IP are rejected at the socket layer; the dual-path
+    case can't materialize.
+
+    Kill prelude here is ``pkill -f roc-recv`` — kept as-is because the older
+    self-kill concern (shell argv containing the literal name) hasn't fired in
+    practice for this short, single-pkill command. See `_teardown_stale_hub_processes`
+    and `_roc_send_command` for the killall-by-comm pattern used where the
+    self-kill risk was empirically observed.
+    """
+    bind_flags = ' '.join(f'-s rtp://{bind_ip}:{p}' for p in bind_ports)
     return (
         'pkill -f roc-recv 2>/dev/null; sleep 1; '
         f'(nohup /usr/local/bin/roc-recv -o "core://default" {bind_flags} '
