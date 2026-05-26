@@ -510,15 +510,10 @@ class HARExportResult(ClosedModel):
 
 
 class WindowSize(ClosedModel):
-    """Initial window dimensions for a navigate-* call.
+    """Browser window dimensions in CSS pixels."""
 
-    Both fields required when present. Passed as ``window_size=WindowSize(width=..., height=...)``
-    to ``navigate``, ``navigate_with_profile_state``, or ``navigate_with_user_data_dir``.
-    Omit to let Chrome use its native default.
-    """
-
-    width: int = pydantic.Field(gt=0, description='Initial window width in pixels.')
-    height: int = pydantic.Field(gt=0, description='Initial window height in pixels.')
+    width: int = pydantic.Field(gt=0, description='Window width in pixels.')
+    height: int = pydantic.Field(gt=0, description='Window height in pixels.')
 
 
 class NavigationResult(ClosedModel):
