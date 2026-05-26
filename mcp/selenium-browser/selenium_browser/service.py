@@ -96,6 +96,7 @@ from .scripts import (
     INDEXEDDB_RESTORE_SCRIPT,
     NETWORK_MONITOR_CHECK_SCRIPT,
     NETWORK_MONITOR_SETUP_SCRIPT,
+    REQUEST_LOG_INSTALL_SCRIPT,
     RESOURCE_TIMING_SCRIPT,
     RESPONSE_BODY_CAPTURE_SCRIPT,
     TEXT_EXTRACTION_SCRIPT,
@@ -143,6 +144,8 @@ class BrowserService:
         self.state.restored_origins.clear()
         # Reset response body capture state - new browser needs interceptor reinstalled
         self.state.response_body_capture_enabled = False
+        # Reset request log install state - new browser needs interceptor reinstalled
+        self.state.request_log_installed = False
 
     async def get_browser(
         self,
@@ -597,23 +600,34 @@ class BrowserService:
 
     @tool_registry.register_tool
     async def download_resource(self, url: str, output_filename: str) -> DownloadResourceResult:
-        """Download specific resource using current browser session's cookies and headers.
+        """Download a resource using the current browser session's auth state.
 
-        Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
-        session to build browser-realistic requests. Critical for sites with bot detection
-        or CDN hotlink protection — the CDN sees the request as coming from the same browser.
+        Headers are replayed from the page's own recent XHR/fetch traffic, so any
+        SPA HttpInterceptor injections (tenant scoping like `unitid`, market/feature
+        flags, CSRF tokens, traceparent, etc.) flow through automatically. Cookies
+        — including HttpOnly — come from the live Selenium session. Routes through
+        mitmproxy when proxy is configured.
 
-        PREREQUISITE: Call navigate() first to establish browser session.
-        Without prior navigation, still works but may encounter bot detection.
+        PREREQUISITE: Call navigate() first. The request log is populated at navigate
+        time; before that, the tool falls back to bare User-Agent + Referer.
 
         Args:
             url: Full URL to resource (http:// or https://) or file:// for local files.
             output_filename: Filename to save as (no path). Saved to screenshot temp dir.
 
         Returns:
-            {'path': '/tmp/.../file.js', 'size_bytes': 26703, 'content_type': '...', 'status': 200, 'url': '...'}
+            DownloadResourceResult with path, size_bytes, content_type, status, url.
 
         Errors: Raises ToolError if response status >= 400, network failure, or local file not found.
+
+        Known limitations:
+            - Service Workers intercept fetch/XHR in a separate scope; PWAs that
+              route API traffic through a SW will not populate the request log,
+              and replayed downloads will only carry browser-default headers.
+            - Per-request signature/HMAC/digest headers (AWS SigV4, `x-amz-*`,
+              `Content-MD5`, anything matching signature/hmac/digest) are stripped
+              from replay because they encode a specific request body and won't
+              validate on a different request.
         """
         if not url.startswith(('http://', 'https://', 'file://')):
             raise fastmcp.exceptions.ValidationError('URL must start with http://, https://, or file://')
@@ -2457,6 +2471,10 @@ class BrowserService:
         # Must run BEFORE first navigation to capture all fetch/XHR responses
         await _install_response_body_capture_if_needed(driver, self, enable_har_capture, 'navigate')
 
+        # Install request log interceptor for download_resource header replay
+        # Must run BEFORE first navigation to observe SPA HttpInterceptor headers
+        await _install_request_log_if_needed(driver, self)
+
         # PRE-ACTION: Capture localStorage before navigating away
         # (CDP can't query departed origins - frame is gone after navigation)
         await _capture_current_origin_storage(self, driver)
@@ -2722,6 +2740,9 @@ class BrowserService:
             'navigate_with_profile_state',
         )
 
+        # Install request log interceptor for download_resource header replay
+        await _install_request_log_if_needed(driver, self)
+
         # Inject cookies via CDP BEFORE navigation
         cookies_injected = await _inject_cookies_via_cdp(driver, profile_state.cookies)
 
@@ -2844,6 +2865,9 @@ class BrowserService:
             enable_har_capture,
             'navigate_with_user_data_dir',
         )
+
+        # Install request log interceptor for download_resource header replay
+        await _install_request_log_if_needed(driver, self)
 
         # Navigate (blocking operation)
         await asyncio.to_thread(driver.get, url)
@@ -3671,31 +3695,125 @@ async def _install_response_body_capture_if_needed(
         logger.info('Response body capture interceptor installed')
 
 
+async def _install_request_log_if_needed(driver: webdriver.Chrome, service: BrowserService) -> None:
+    """Install JS interceptor that records outgoing request headers for download replay.
+
+    Always installed at navigate time. download_resource uses the captured
+    request log to find headers the page would attach (tenant scoping, CSRF
+    tokens, SPA HttpInterceptor injections) and replays them on the outgoing
+    httpx call so the request looks identical to one the page would have made.
+
+    Idempotent — script is also self-guarded by window.__downloadRequestLogInstalled.
+    """
+    if service.state.request_log_installed:
+        return
+    await asyncio.to_thread(
+        driver.execute_cdp_cmd,
+        'Page.addScriptToEvaluateOnNewDocument',
+        {'source': REQUEST_LOG_INSTALL_SCRIPT},
+    )
+    service.state.request_log_installed = True
+    logger.info('Request log interceptor installed')
+
+
 # -- CDP and storage helpers (shared by BrowserService methods) --
+
+
+# Headers the browser/httpx will manage itself; never replay from the request log.
+_BROWSER_MANAGED_HEADERS: frozenset[str] = frozenset(
+    {
+        'host',
+        'connection',
+        'content-length',
+        'cookie',
+        'transfer-encoding',
+        'upgrade',
+        'expect',
+    }
+)
+
+# Per-request signature/digest patterns. Replaying these on a different request
+# either fails verification or, worse, silently authenticates a request we
+# didn't intend. AWS SigV4, GCS, body hashes, HMAC schemes, content digests.
+_SIGNATURE_HEADER_PATTERN = re.compile(
+    r'(?i)(^|-)(signature|hmac|digest)($|-)|^content-md5$|^x-amz-|^x-goog-',
+)
+
+
+async def _query_download_request_log(driver: webdriver.Chrome, target_url: str) -> Mapping[str, str]:
+    """Return headers from a recent page request that best matches `target_url`.
+
+    Match priority:
+      1. Same origin AND same path (query/fragment ignored) — most recent wins
+      2. Same origin only — most recent wins
+      3. No match — empty mapping
+
+    Browser-managed and per-request-signature headers are stripped (see
+    _BROWSER_MANAGED_HEADERS and _SIGNATURE_HEADER_PATTERN).
+    """
+    target = urlparse(target_url)
+    target_origin = f'{target.scheme}://{target.netloc}'
+    target_path = target.path
+
+    entries = await asyncio.to_thread(
+        driver.execute_script,
+        'return window.__downloadRequestLog || [];',
+    )
+    if not entries:
+        return {}
+
+    same_path: Mapping[str, str] | None = None
+    same_origin: Mapping[str, str] | None = None
+    # Iterate newest-first so the first hit at each tier wins.
+    for entry in reversed(entries):
+        entry_url = entry.get('url', '')
+        if not entry_url:
+            continue
+        parsed = urlparse(entry_url)
+        entry_origin = f'{parsed.scheme}://{parsed.netloc}'
+        if entry_origin != target_origin:
+            continue
+        headers = entry.get('headers') or {}
+        if same_origin is None:
+            same_origin = headers
+        if parsed.path == target_path:
+            same_path = headers
+            break
+
+    raw = same_path if same_path is not None else (same_origin or {})
+
+    return {
+        name: value
+        for name, value in raw.items()
+        if name.lower() not in _BROWSER_MANAGED_HEADERS and not _SIGNATURE_HEADER_PATTERN.search(name)
+    }
 
 
 async def _download_with_browser_context(
     service: BrowserService, driver: webdriver.Chrome, url: str
 ) -> tuple[bytes, int, str]:
-    """Download a URL using httpx with headers and cookies extracted from the browser session.
+    """Download a URL via httpx, replaying headers from the page's own recent requests.
 
-    Builds browser-realistic request headers (User-Agent, Referer, Sec-Fetch-*) and
-    forwards domain-scoped cookies so CDNs see the request as coming from the same
-    browser. Routes through mitmproxy when proxy is configured.
+    Headers are sourced from `window.__downloadRequestLog` (installed at navigate
+    time) — whatever the page's HttpClient sent on its last matching request flows
+    through here, including SPA HttpInterceptor injections (tenant scoping, CSRF,
+    feature flags, traceparent). Browser-managed and per-request-signature headers
+    are filtered out.
+
+    Cookies (including HttpOnly) flow via `driver.get_cookies()`. Routes through
+    mitmproxy when proxy is configured.
+
+    Empty-log fallback (e.g., download called before any in-page request fired):
+    fall back to extracting User-Agent and Referer the old way.
     """
-    user_agent = await asyncio.to_thread(driver.execute_script, 'return navigator.userAgent')
-    current_url = await asyncio.to_thread(lambda: driver.current_url)
+    headers = dict(await _query_download_request_log(driver, url))
 
-    headers = {
-        'User-Agent': user_agent,
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Referer': current_url,
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Site': 'cross-site',
-    }
+    if 'user-agent' not in {k.lower() for k in headers}:
+        # No log entry yet — fall back to the bare-minimum browser identity.
+        user_agent = await asyncio.to_thread(driver.execute_script, 'return navigator.userAgent')
+        current_url = await asyncio.to_thread(lambda: driver.current_url)
+        headers['User-Agent'] = user_agent
+        headers['Referer'] = current_url
 
     selenium_cookies = await asyncio.to_thread(driver.get_cookies)
     jar = httpx.Cookies()

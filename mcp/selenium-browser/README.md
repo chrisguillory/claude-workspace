@@ -223,7 +223,7 @@ How CiC tools map to SMCP tools:
 | -                       | `capture_web_vitals`                            | SMCP-only | LCP, CLS, INP, FCP, TTFB with good/needs-improvement/poor ratings                                         |
 | -                       | `export_har`                                    | SMCP-only | Export network traffic to HAR 1.2 format for DevTools analysis                                            |
 | -                       | `configure_proxy`, `clear_proxy`                | SMCP-only | Configure/clear authenticated proxy via mitmproxy for IP rotation                                         |
-| -                       | `download_resource`                             | SMCP-only | Download files using browser session cookies (bypasses bot detection)                                     |
+| -                       | `download_resource`                             | SMCP-only | Download files via the session's cookies + replayed SPA HttpInterceptor headers                            |
 | -                       | `list_chrome_profiles`                          | SMCP-only | List available Chrome profiles with name, email, directory metadata                                       |
 | -                       | `save_profile_state`                            | SMCP-only | Export cookies + localStorage (+ IndexedDB opt-in) to Playwright-compatible JSON                         |
 | -                       | `set_blocked_urls`                              | SMCP-only | Block network requests by URL pattern (wildcards, CDP Network.setBlockedURLs)                            |
@@ -768,7 +768,7 @@ See [Wait Strategy Architecture](PLAN-interaction-tools.md#wait-strategy-archite
 - `export_chrome_profile_state(output_file, chrome_profile?, origins_filter?, ...)` - Export profile state from Chrome files
 
 ### Utilities
-- `download_resource(url, output_filename)` - Download with session cookies
+- `download_resource(url, output_filename)` - Download with session cookies + replayed SPA HttpInterceptor headers
 - `list_chrome_profiles(verbose?)` - Available Chrome profiles
 
 ### Network Control

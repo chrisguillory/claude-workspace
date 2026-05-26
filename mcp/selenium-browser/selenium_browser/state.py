@@ -111,5 +111,6 @@ class BrowserState:
         self.pending_profile_state: ProfileState | None = None
         self.restored_origins: set[str] = set()
         self.response_body_capture_enabled: bool = False
+        self.request_log_installed: bool = False
         self.cli_lock: asyncio.Lock | None = None  # Set by lifespan when bridge starts
         # fmt: on

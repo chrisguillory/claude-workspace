@@ -370,7 +370,7 @@ def download_resource(
     output_filename: Annotated[str, typer.Argument(help='Filename to save as.')],
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
-    """Download a resource using browser session cookies."""
+    """Download a resource using the browser session's auth + replayed SPA headers."""
     result = _call_tool('download_resource', url=url, output_filename=output_filename)
     _print_result(result, format)
 
