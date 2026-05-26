@@ -160,16 +160,26 @@ else
     # exit 137 under timeout, no stderr). The provenance xattr is
     # SIP-protected and cannot be stripped even by root; the workable
     # bypass is to re-sign with an ad-hoc signature, which Gatekeeper
-    # accepts. Same shape as any custom-built binary going into /usr/local
-    # via sudo on macOS Sequoia+.
-    info "ad-hoc codesigning installed binaries (bypass Gatekeeper provenance block)..."
-    for bin in /usr/local/bin/roc-send /usr/local/bin/roc-recv /usr/local/bin/roc-copy; do
-        if [[ -n "${SUDO_PASSWORD:-}" ]]; then
-            echo "$SUDO_PASSWORD" | sudo -S -p "" codesign --force --sign - "$bin" 2>&1
-        else
-            sudo codesign --force --sign - "$bin"
-        fi
-    done
+    # accepts.
+    #
+    # Only needed when sudo was actually used for install. On a host with
+    # user-writable /usr/local (e.g., a fresh Apple Silicon Mac that has
+    # never run a sudo-based install), scons installs directly as the
+    # user — no privilege crossing, no provenance xattr, no Gatekeeper
+    # block. Codesigning would still work but isn't necessary; we skip
+    # to avoid demanding a sudo prompt for an unneeded operation.
+    if [[ -w /usr/local/bin && -w /usr/local/lib && -w /usr/local/include ]]; then
+        info "(skipping codesign — install was user-direct, no provenance xattr to bypass)"
+    else
+        info "ad-hoc codesigning installed binaries (bypass Gatekeeper provenance block)..."
+        for bin in /usr/local/bin/roc-send /usr/local/bin/roc-recv /usr/local/bin/roc-copy; do
+            if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+                echo "$SUDO_PASSWORD" | sudo -S -p "" codesign --force --sign - "$bin" 2>&1
+            else
+                sudo codesign --force --sign - "$bin"
+            fi
+        done
+    fi
 
     ok "roc-toolkit installed: $(roc-send --version 2>&1 | head -1)"
     if /usr/local/bin/roc-send --help 2>&1 | grep -q -- '--channels'; then
