@@ -11,9 +11,10 @@ from cc_lib.utils.unicode_match import nfkc_casefold
 from claude_remote_bash import DispatchService
 from claude_remote_bash.dispatch import HostRunResult
 
+from claude_remote_audio.exceptions import BluetoothError
+
 __all__ = [
     'BluetoothDevice',
-    'BluetoothError',
     'connect',
     'disconnect',
     'engage_via_sound_menu',
@@ -30,10 +31,6 @@ _DISPATCH_SESSION = 'claude-remote-audio-bluetooth'
 _DISPATCH_TIMEOUT_S = 15.0
 
 logger = logging.getLogger(__name__)
-
-
-class BluetoothError(RuntimeError):
-    """A Bluetooth operation failed in a way that needs the user to act."""
 
 
 class BluetoothDevice(ClosedModel):
@@ -261,13 +258,30 @@ async def _run(
         timeout=timeout,
     )
     if not result.results:
-        raise BluetoothError(f'{host}: no host results returned from dispatch')
+        raise BluetoothError(
+            f'{host}: no host results returned from dispatch',
+            code='bluetooth-dispatch-no-result',
+        )
     hr = result.results[0]
     if hr.error is not None:
-        raise BluetoothError(f'{host}: dispatch failed: {hr.error}')
-    if hr.exit_code != 0:
         raise BluetoothError(
-            f'{host}: command failed (exit {hr.exit_code}): {command[:80]}\n  stderr: {hr.stderr.strip() or "<empty>"}'
+            f'{host}: dispatch failed: {hr.error}',
+            code='bluetooth-dispatch-failed',
+        )
+    if hr.exit_code != 0:
+        stdout = hr.stdout.strip()
+        stderr = hr.stderr.strip()
+        # The dispatch daemon emits `[TIMEOUT]` to stdout when it kills a child for
+        # exceeding the timeout — surface stdout so callers (TCC heuristics, etc.)
+        # can distinguish "timed out" from "exited non-zero with empty stderr."
+        # 200-char command truncation gives heuristics enough context to detect
+        # AppleScript intent (click/keystroke → Accessibility TCC).
+        raise BluetoothError(
+            f'{host}: command failed (exit {hr.exit_code}): {command[:200]}\n'
+            f'  stdout: {stdout or "<empty>"}\n'
+            f'  stderr: {stderr or "<empty>"}',
+            code='bluetooth-command-failed',
+            context={'host': host, 'exit_code': str(hr.exit_code)},
         )
     return hr
 
@@ -364,11 +378,23 @@ async def _open_sound_popover_and_count_rows(service: DispatchService, host_alia
     result = await _run(service, host_alias, cmd)
     out = result.stdout.strip()
     if out.startswith('ERROR_OPEN'):
-        raise BluetoothError(f'{host_alias}: Sound popover did not open. AppleScript said: {out}')
+        raise BluetoothError(
+            f'{host_alias}: Sound popover did not open. AppleScript said: {out}',
+            code='bluetooth-sound-menu-popover-not-open',
+            context={'host': host_alias, 'applescript_output': out[:200]},
+        )
     if out == 'ERROR_NOWINDOW':
-        raise BluetoothError(f'{host_alias}: Sound popover did not appear after menu bar click')
+        raise BluetoothError(
+            f'{host_alias}: Sound popover did not appear after menu bar click',
+            code='bluetooth-sound-menu-popover-not-appearing',
+            context={'host': host_alias},
+        )
     if out.startswith('ERROR_COUNT'):
-        raise BluetoothError(f'{host_alias}: Sound popover opened but row introspection failed: {out}')
+        raise BluetoothError(
+            f'{host_alias}: Sound popover opened but row introspection failed: {out}',
+            code='bluetooth-sound-menu-row-introspection-failed',
+            context={'host': host_alias, 'applescript_output': out[:200]},
+        )
     return int(out)
 
 

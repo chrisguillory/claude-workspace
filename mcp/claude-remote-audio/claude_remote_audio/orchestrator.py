@@ -23,7 +23,7 @@ from claude_remote_bash.selector import parse as parse_selector
 
 from claude_remote_audio import bluetooth
 from claude_remote_audio.cache import DeviceCache, write_devices
-from claude_remote_audio.exceptions import ApplyError, ResolvableApplyError
+from claude_remote_audio.exceptions import ApplyError, BluetoothError, ResolvableApplyError
 
 __all__ = [
     'ApplyResult',
@@ -331,7 +331,7 @@ async def _ensure_bluetooth_output(
     logger.info('%s: ensuring Bluetooth output %r', hub_alias, output_device)
     try:
         bt_device = await bluetooth.find_device(service, hub_alias, output_device)
-    except bluetooth.BluetoothError as exc:
+    except BluetoothError as exc:
         raise ApplyError(f'{hub_alias}: bluetooth probe failed: {exc}') from exc
 
     if bt_device is None:
@@ -341,7 +341,7 @@ async def _ensure_bluetooth_output(
     if not bt_device.connected:
         try:
             await bluetooth.steal(service, hub_alias, bt_device.address, mesh_aliases)
-        except bluetooth.BluetoothError as exc:
+        except BluetoothError as exc:
             if _looks_like_bluetooth_tcc_denial(str(exc)):
                 raise ResolvableApplyError(
                     f'{hub_alias}: Bluetooth control blocked — the dispatching app on '
@@ -371,7 +371,24 @@ async def _ensure_bluetooth_output(
     logger.info('%s: %r BT link-up but absent from Core Audio — Sound-menu rescue', hub_alias, bt_device.name)
     try:
         engaged = await bluetooth.engage_via_sound_menu(service, hub_alias, bt_device.name)
-    except bluetooth.BluetoothError as exc:
+    except BluetoothError as exc:
+        if _looks_like_accessibility_tcc_denial(str(exc)):
+            raise ResolvableApplyError(
+                f'{hub_alias}: Sound-menu rescue blocked by Accessibility permission '
+                '(UI interaction — click/keystroke — needs Accessibility, NOT Automation).',
+                code='accessibility-tcc-denied',
+                title='Accessibility permission required',
+                suggestions=(
+                    f'On {hub_alias}: System Settings → Privacy & Security → '
+                    "**Accessibility** → enable the dispatching app's entry "
+                    '(typically iTerm, Terminal, or your IDE).',
+                    'Note: Automation and Accessibility are TWO DIFFERENT permissions '
+                    'in DIFFERENT Settings panels — even if Automation is already granted, '
+                    'Accessibility may not be. Both are needed for the Sound-menu rescue.',
+                    'Re-run apply after granting permission. The grant persists.',
+                ),
+                context={'host': hub_alias, 'device': bt_device.name},
+            ) from exc
         if _looks_like_applescript_tcc_denial(str(exc)):
             raise ResolvableApplyError(
                 f'{hub_alias}: Sound-menu rescue blocked by AppleScript automation permission.',
@@ -407,6 +424,22 @@ async def _device_in_hub_outputs(service: DispatchService, hub_alias: str, name:
     return any(nfkc_casefold(line.strip()) == folded for line in raw.splitlines() if line.strip())
 
 
+def _looks_like_accessibility_tcc_denial(error_msg: str) -> bool:
+    """True when an AppleScript failure looks like an Accessibility TCC denial.
+
+    Distinct from Automation TCC (handled by ``_looks_like_applescript_tcc_denial``).
+    Accessibility (``kTCCServiceAccessibility``) gates UI interactions: ``click``,
+    ``keystroke``, manipulation of ``UI element``. Automation (``kTCCServiceAppleEvents``)
+    gates ``tell application "X"`` AppleEvent dispatch. They're granted separately
+    (different Settings panels) — telling the user to grant Automation when they
+    actually need Accessibility is the bug this disambiguates.
+    """
+    if 'osascript' not in error_msg:
+        return False
+    accessibility_signals = ('click ', 'click checkbox', 'keystroke', 'UI element', 'set value of')
+    return any(sig in error_msg for sig in accessibility_signals)
+
+
 def _looks_like_applescript_tcc_denial(error_msg: str) -> bool:
     """True when a BluetoothError looks like an AppleScript Automation TCC denial.
 
@@ -417,12 +450,21 @@ def _looks_like_applescript_tcc_denial(error_msg: str) -> bool:
     and reports exit -1 with empty stderr). We match on the osascript + System
     Events pair regardless of exit code or stderr content — far more often
     that combination is TCC denial than something else.
+
+    Yields to ``_looks_like_accessibility_tcc_denial`` when the script involves
+    UI interactions (click, keystroke, UI element) — those need Accessibility
+    TCC, not Automation. Claiming Automation when the actual gate is
+    Accessibility sends users to the wrong Settings panel.
     """
     if 'osascript' not in error_msg:
         return False
     if 'System Events' not in error_msg:
         return False
-    return 'command failed (exit' in error_msg
+    if 'command failed (exit' not in error_msg:
+        return False
+    if _looks_like_accessibility_tcc_denial(error_msg):
+        return False
+    return True
 
 
 def _looks_like_bluetooth_tcc_denial(error_msg: str) -> bool:
@@ -463,6 +505,7 @@ async def _apply_hub(service: DispatchService, plan: _Plan) -> HostApplyOutcome:
     """Run hub-side mutations: feedback-loop guard, then opt-in output and input management."""
     await _guard_feedback_loop(service, plan)
     actions: list[str] = []
+    actions.extend(await _retire_stale_hub_speaker(service, plan))
     if plan.output_device is not None:
         actions.extend(await _set_hub_output(service, plan))
         actions.extend(await _restart_roc_recv(service, plan))
@@ -472,6 +515,34 @@ async def _apply_hub(service: DispatchService, plan: _Plan) -> HostApplyOutcome:
         actions.extend(await _restart_roc_send(service, plan))
         actions.extend(await _set_hub_input_to_remote_mic(service, plan))
     return HostApplyOutcome(host=plan.hub_alias, role='hub', actions=actions, success=True)
+
+
+async def _retire_stale_hub_speaker(service: DispatchService, plan: _Plan) -> Sequence[str]:
+    """Delete the hub's Claude Remote Speaker when it carries only stale peer-mode slots.
+
+    After a hub-flip (e.g., M5→M3), the new hub's Claude Remote Speaker may still
+    carry slots from when it was a peer (e.g. ``rtp://OLD-HUB-IP:11003``). The
+    hub doesn't USE Claude Remote Speaker for routing — outbound is ``roc-send``
+    broadcasting the mic, not the speaker bouncing audio back through RTP. Stale
+    slots are dead state that violates the "exactly one consistent topology
+    after apply" invariant.
+
+    Conservative: only delete when there's no ``127.0.0.1`` audiosrc (hub self-
+    loopback) AND there is at least one ``audiosrc`` entry (otherwise nothing
+    to retire). When ``plan.hub_loopback_port`` is set, the speaker is in active
+    use as a loopback — leave it alone.
+    """
+    if plan.hub_loopback_port is not None:
+        return []
+    list_text = (await _run(service, plan.hub_alias, 'roc-vad device list')).stdout
+    speaker_idx = _parse_device_index(list_text, name='Claude Remote Speaker')
+    if speaker_idx is None:
+        return []
+    show_text = (await _run(service, plan.hub_alias, f'roc-vad device show {speaker_idx}')).stdout
+    if '127.0.0.1' in show_text or 'audiosrc' not in show_text:
+        return []
+    await _run(service, plan.hub_alias, f'roc-vad device del {speaker_idx}')
+    return [f'retired stale Claude Remote Speaker (idx={speaker_idx}) — peer-mode leftover from prior hub role']
 
 
 async def _set_hub_input_to_remote_mic(service: DispatchService, plan: _Plan) -> Sequence[str]:
@@ -632,6 +703,19 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             ),
             context={'host': plan.hub_alias, 'binary': '/usr/local/bin/roc-send', 'status': send_fw},
         )
+    if send_fw == 'unknown':
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: cannot determine Application Firewall status for /usr/local/bin/roc-send '
+            '— socketfilterfw returned unexpected output. Refusing to launch roc-send blind.',
+            code='roc-send-firewall-status-unknown',
+            title=f'Application Firewall status unknown on {plan.hub_alias}',
+            suggestions=(
+                f'On {plan.hub_alias}, query the firewall manually: '
+                '`/usr/libexec/ApplicationFirewall/socketfilterfw --getappblocked /usr/local/bin/roc-send`',
+                'If MDM-managed (corporate Mac), socketfilterfw may be query-only — request that the binary be allow-listed centrally',
+            ),
+            context={'host': plan.hub_alias, 'binary': '/usr/local/bin/roc-send', 'status': send_fw},
+        )
 
     # Preflight: Microphone TCC. notDetermined means "never asked" — instead of
     # refusing and making the user manually run sox-d-n to trigger the prompt,
@@ -660,6 +744,18 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             title=title,
             suggestions=suggestions,
             context={'host': plan.hub_alias, 'input_device': plan.input_device, 'tcc_status': mic_status},
+        )
+    if mic_status == 'unknown':
+        raise ResolvableApplyError(
+            f'{plan.hub_alias}: cannot determine Microphone TCC status — `claude-tcc-probe` either '
+            'is missing or returned an unexpected value. Refusing to launch roc-send blind.',
+            code='microphone-tcc-probe-unavailable',
+            title=f'Microphone TCC probe unavailable on {plan.hub_alias}',
+            suggestions=(
+                f'Re-run apply with `--install-prereqs --target {plan.hub_alias}` to install claude-tcc-probe',
+                'After bootstrap completes, re-run apply',
+            ),
+            context={'host': plan.hub_alias, 'tcc_status': mic_status},
         )
 
     # Preflight: input device sanity checks (SoX-CoreAudio shortcomings that
@@ -877,6 +973,44 @@ async def _probe_coreaudio_device(
             fields[key.strip()] = value.strip()
     verdict = fields.get('verdict', 'unknown')
     return verdict, fields
+
+
+async def _wait_for_coreaudio_visibility(
+    service: DispatchService,
+    host: str,
+    name: str,
+    *,
+    timeout: float = 5.0,
+    poll_interval: float = 0.2,
+) -> None:
+    """Block until ``name`` appears in ``claude-coreaudio-volume list`` on ``host``.
+
+    macOS's CoreAudio HAL maintains an enumeration cache that doesn't always
+    reflect new ``roc-vad`` devices immediately after ``roc-vad device add``
+    returns success. Empirically observed sub-second race window where the
+    device is in ``roc-vad device list`` but not yet in Core Audio's HAL —
+    breaking ``claude-coreaudio-volume set`` and ``SwitchAudioSource`` calls
+    that touch the device by name.
+
+    Polls every ``poll_interval`` until ``timeout``. Logs a warning and returns
+    (rather than raising) on timeout — the caller's subsequent operation will
+    fail-loud if the device truly isn't there, with a more specific error than
+    a generic "wait timeout."
+    """
+    deadline = asyncio.get_event_loop().time() + timeout
+    while True:
+        result = await _run(service, host, 'claude-coreaudio-volume list 2>/dev/null')
+        if any(line.rstrip().endswith(f'name={name}') for line in result.stdout.splitlines()):
+            return
+        if asyncio.get_event_loop().time() > deadline:
+            logger.warning(
+                '%s: %r not visible in Core Audio enumeration after %.1fs — proceeding anyway',
+                host,
+                name,
+                timeout,
+            )
+            return
+        await asyncio.sleep(poll_interval)
 
 
 async def _probe_input_device(service: DispatchService, host: str, device_name: str) -> tuple[int, int | None]:
@@ -1244,6 +1378,12 @@ async def _ensure_claude_remote_mic(service: DispatchService, host: str, list_te
         add_out = await _run(service, host, 'roc-vad device add receiver -n "Claude Remote Mic" -r 48000')
         mic_idx = _parse_added_idx(add_out.stdout)
         actions.append(f'added Claude Remote Mic (idx={mic_idx})')
+        # macOS's CoreAudio HAL doesn't always reflect new roc-vad devices in its
+        # enumeration cache immediately after `roc-vad device add` returns success.
+        # Subsequent calls (e.g. claude-coreaudio-volume set) can fail with
+        # "device not found" if they run during the sub-second race window. Block
+        # until the device is visible to Core Audio, not just to roc-vad.
+        await _wait_for_coreaudio_visibility(service, host, 'Claude Remote Mic')
 
     if mic_idx is None:
         return actions
@@ -1309,6 +1449,10 @@ async def _add_peer_speaker(service: DispatchService, host: str, *, uid: str | N
         raise ApplyError(
             f'{host}: failed to parse Claude Remote Speaker index from `roc-vad device add` output: {add_out.stdout!r}'
         )
+    # Same HAL-enumeration race as Claude Remote Mic — wait for Core Audio to
+    # see the device before returning so downstream callers (volume set,
+    # SwitchAudioSource) don't hit a transient "device not found."
+    await _wait_for_coreaudio_visibility(service, host, 'Claude Remote Speaker')
     return idx
 
 
@@ -1481,9 +1625,18 @@ async def _run(service: DispatchService, host: str, command: str) -> HostRunResu
     if host_result.error is not None:
         raise ApplyError(f'{host}: dispatch failed: {host_result.error}')
     if host_result.exit_code != 0:
+        stdout = host_result.stdout.strip()
+        stderr = host_result.stderr.strip()
+        # The dispatch daemon emits `[TIMEOUT]` to stdout when it kills a child for
+        # exceeding the timeout — surface it explicitly so downstream heuristics
+        # (TCC denial detection, etc.) can distinguish "timed out" from
+        # "exited non-zero with empty stderr." 200-char command truncation gives
+        # heuristics enough context to detect AppleScript intent (click/keystroke
+        # → Accessibility TCC vs tell-application → Automation TCC).
         raise ApplyError(
-            f'{host}: command failed (exit {host_result.exit_code}): {command[:80]}\n'
-            f'  stderr: {host_result.stderr.strip() or "<empty>"}'
+            f'{host}: command failed (exit {host_result.exit_code}): {command[:200]}\n'
+            f'  stdout: {stdout or "<empty>"}\n'
+            f'  stderr: {stderr or "<empty>"}'
         )
     return host_result
 
@@ -1596,6 +1749,64 @@ async def _ensure_prereqs(
         )
         body = '\n  '.join(issues)
         raise ApplyError(f'missing prerequisite(s):\n  {body}{hint}')
+
+    # HAL-wedge preflight. When CoreAudio HAL wedges, every device-enumeration
+    # operation hangs forever — `roc-vad device list`, `system_profiler`, Sound
+    # Settings UI, etc. The wedge is per-system, not per-process. Without this
+    # probe, apply hangs mid-flow on the first device-list call (deep into the
+    # apply sequence) with no actionable diagnostic. Fail-fast here so the user
+    # sees "reboot required" before any state changes.
+    wedged_hosts = await _detect_hal_wedge(service, list(host_reqs.keys()))
+    if wedged_hosts:
+        wedged_list = ', '.join(wedged_hosts)
+        raise ResolvableApplyError(
+            f'CoreAudio HAL wedged on: {wedged_list}. `roc-vad device list` does not respond '
+            'within 3 seconds. Every subsequent apply step against these hosts would hang.',
+            code='core-audio-hal-wedge-preflight',
+            title=f'CoreAudio HAL wedge preflight detected on {wedged_list}',
+            suggestions=(
+                f'Reboot {wedged_list}. Empirically — `killall coreaudiod`, killing '
+                'AudioComponentRegistrar, and mass-killing every audio-framework client '
+                '(including the roc-vad HAL plugin host) have all been observed NOT to '
+                'clear the wedge. Reboot is the documented and reliable recovery.',
+                'After reboot, re-run apply.',
+            ),
+            context={'wedged_hosts': wedged_list},
+        )
+
+
+async def _detect_hal_wedge(service: DispatchService, hosts: Sequence[str]) -> Sequence[str]:
+    """Return the subset of ``hosts`` whose CoreAudio HAL is wedged (probed in parallel).
+
+    Probe: ``gtimeout 3 roc-vad device list`` per host. A successful exit means
+    HAL responded within 3s (healthy). Non-zero (timeout) means HAL didn't
+    respond — wedged.
+
+    Robust against ``gtimeout`` missing: when the binary isn't installed
+    (``command -v gtimeout`` fails), prints ``SKIP`` and the host is treated as
+    not-wedged. Without ``gtimeout``, the probe degrades gracefully rather than
+    false-positiving as "wedged" — the bootstrap installs coreutils, so this
+    branch only fires on hosts that haven't been bootstrapped yet.
+
+    3s is empirically generous; live mesh applies see ``roc-vad device list``
+    complete in <100ms.
+    """
+
+    async def _one(host: str) -> tuple[str, bool]:
+        result = await _run(
+            service,
+            host,
+            'if ! command -v gtimeout >/dev/null 2>&1; then echo SKIP; '
+            'else gtimeout 3 roc-vad device list > /dev/null 2>&1 && echo OK || echo WEDGED; fi',
+        )
+        verdict = result.stdout.strip()
+        if verdict == 'SKIP':
+            logger.warning('%s: skipping HAL-wedge probe (gtimeout not installed; run --install-prereqs)', host)
+            return host, False
+        return host, verdict == 'WEDGED'
+
+    results = await asyncio.gather(*(_one(h) for h in hosts))
+    return [h for h, wedged in results if wedged]
 
 
 async def _probe_missing_binaries(

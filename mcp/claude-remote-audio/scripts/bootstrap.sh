@@ -65,6 +65,10 @@ brew_install_if_missing() {
 echo "=== audio-mesh tooling ==="
 brew_install_if_missing switchaudio-osx
 brew_install_if_missing blueutil
+# coreutils provides `gtimeout` — used by the orchestrator's HAL-wedge preflight
+# (`_detect_hal_wedge`) and the Tier 3 HAL probe in
+# `_diagnose_roc_send_start_failure`. Without it both probes false-positive.
+brew_install_if_missing coreutils
 
 echo
 echo "=== roc-toolkit ==="
