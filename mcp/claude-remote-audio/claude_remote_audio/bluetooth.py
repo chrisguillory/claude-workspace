@@ -56,10 +56,12 @@ class BluetoothDevice(ClosedModel):
 
 
 async def list_devices(service: DispatchService, host_alias: str) -> Sequence[BluetoothDevice]:
-    """List paired Bluetooth audio devices on ``host_alias``.
+    """List every paired Bluetooth device on ``host_alias`` (audio and non-audio alike).
 
-    Filters to devices that expose at least one audio profile (A2DP or HFP).
-    Keyboards, mice, and other non-audio peripherals are excluded.
+    Callers narrow by name — and because the names that reach this module come
+    from Core Audio output enumeration, the narrowing inherently selects audio
+    devices. Filtering here would couple us to Apple's evolving minor-type
+    strings for no gain. See ``_parse_system_profiler`` for the rationale.
     """
     raw = (await _run(service, host_alias, 'system_profiler SPBluetoothDataType -json')).stdout
     return _parse_system_profiler(raw)
@@ -220,11 +222,15 @@ async def engage_via_sound_menu(
     commands on ``host_alias``.
     """
     prev_default = await _current_default_output(service, host_alias)
-    row_count = await _open_sound_popover_and_count_rows(service, host_alias)
-    logger.info('%s: Sound popover open, %d candidate rows — looking for %r', host_alias, row_count, name)
     folded_target = nfkc_casefold(name)
     hit = False
     try:
+        # Inside the try so the finally's _close_popover runs even when row
+        # enumeration raises after the popover has visually opened (e.g.
+        # row-introspection-failed, row-count-parse-failed). Without this,
+        # the popover lingers on the user's screen until they dismiss it.
+        row_count = await _open_sound_popover_and_count_rows(service, host_alias)
+        logger.info('%s: Sound popover open, %d candidate rows — looking for %r', host_alias, row_count, name)
         for idx in range(1, row_count + 1):
             logger.debug('%s: click checkbox %d/%d', host_alias, idx, row_count)
             await _click_sound_row(service, host_alias, idx)

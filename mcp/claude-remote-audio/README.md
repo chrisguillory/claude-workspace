@@ -86,7 +86,7 @@ See `claude-remote-audio apply --help` for full flag semantics. `--format json` 
 This package assumes a **trusted LAN** — typically a home/lab network where every connected device is administratively yours.
 
 - **Dispatch channel (claude-remote-bash):** TCP, framed JSON, pre-shared-key authenticated at handshake. **No per-message encryption.** Anyone on the same LAN who can sniff packets can read every dispatched command, including the `SUDO_PASSWORD` env-var ship during `--install-prereqs` (the password is base64-encoded for transport, not encrypted). An active MITM can substitute payloads.
-- **Sudo password at rest:** during install-prereqs, the password lands in `/tmp/cra-bootstrap.sh` on each target host (mode 0600, deleted on bash exit). Window: bootstrap duration.
+- **Sudo password at rest:** during install-prereqs, the password lands in `/tmp/cra-bootstrap.sh.<random>` on each target host (per-run `mktemp` path, mode 0600). The script self-deletes via `trap` on EXIT/SIGINT/SIGTERM. SIGKILL of the bash process is unsurvivable — the file then persists until next reboot (`/tmp` clears at boot on macOS). Window: typically bootstrap duration; up to next reboot under SIGKILL.
 - **mDNS-advertised host aliases** flow into AppleScript dialogs via `osascript` argv (NOT source interpolation) — eliminates the `"name" & (do shell script "...")` injection class.
 - **What this means in practice:** use this package on a network you control. Don't run `--install-prereqs` from a coffee-shop Wi-Fi. Don't add hosts to the mesh whose mDNS broadcasts you can't trust.
 
@@ -208,8 +208,8 @@ Apple-provided foundations we can't change but **can test** continuously. Each i
 
 | Apple quirk                                                  | Probe (where + how)                                                                   | Recovery                                                                                   |
 |--------------------------------------------------------------|---------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
-| AirPods Pro BT codec drops to 24 kHz duplex                  | Read `kAudioDevicePropertyNominalSampleRate` on the active output id; alert if 24 kHz | Re-assert default input ≠ AirPods Pro; restart roc-recv; BT renegotiates A2DP within ~1 s  |
-| Default-device drift (input → AirPods auto-flip)             | Poll `SwitchAudioSource -c -t input` periodically                                     | Re-assert intended input. Long-term: roc-vad registers higher-priority default eligibility |
+| AirPods Pro BT codec drops to 24 kHz duplex                  | **(deferred — Tier 2)** Read `kAudioDevicePropertyNominalSampleRate` on the active output id; alert if 24 kHz | Re-assert default input ≠ AirPods Pro; restart roc-recv; BT renegotiates A2DP within ~1 s  |
+| Default-device drift (input → AirPods auto-flip)             | **(deferred — Tier 2)** Poll `SwitchAudioSource -c -t input` periodically             | Re-assert intended input. Long-term: roc-vad registers higher-priority default eligibility |
 | TCC consent revoked between applies                          | Each Swift CLI probes its own framework before action; structured error if denied     | Surface `ResolvableApplyError` with explicit Settings path                                 |
 | BT device disconnected silently                              | `blueutil --is-connected <MAC>`                                                       | Reconnect via `blueutil --connect` or AppleScript Sound-popover engagement                 |
 | HAL wedge (rare, unrecoverable in-process)                   | `sox -d -n trim 0 0.1` returns 0 when HAL is healthy                                  | Tell user to reboot (only known recovery)                                                  |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -119,12 +120,15 @@ def apply_cmd(
                 install_prereqs=install_prereqs,
             )
         )
-    except (ApplyError, RemoteBashError, SelectorError) as exc:
+    except Exception as exc:
         # `--format json` users want JSON on every code path — including errors.
         # Without this, the documented "machine-readable for scripting" contract
         # is silently broken on failure (ErrorBoundary prints prose-to-stderr).
-        # For text-format callers, re-raise so the boundary's handler runs
-        # unchanged (preserves the recovery footer + structured-error rendering).
+        # Catches the full Exception hierarchy so unexpected types (KeyError,
+        # OSError, etc.) still produce a JSON envelope rather than escaping to
+        # the boundary's default prose-on-stderr path. For text-format callers,
+        # re-raise so the boundary's typed handlers run unchanged (preserves
+        # the recovery footer + structured-error rendering per exception type).
         if format == 'json':
             _emit_json_error(exc)
             raise SystemExit(1) from exc
@@ -154,16 +158,21 @@ class _ApplyErrorEnvelope(ClosedModel):
     error: HostError
 
 
-def _emit_json_error(exc: ApplyError | RemoteBashError | SelectorError) -> None:
+def _emit_json_error(exc: Exception) -> None:
     """Emit a JSON error envelope on stdout, mirroring ApplyResult's shape.
 
-    Goes through a Pydantic envelope model (rather than hand-built dict) so the
+    Accepts any ``Exception`` so the JSON contract holds across both the
+    documented per-host failure types (``ApplyError`` / ``RemoteBashError`` /
+    ``SelectorError``) and unexpected types (``KeyError``, ``OSError``, etc.)
+    that would otherwise escape to the boundary's prose-on-stderr path. Goes
+    through a Pydantic envelope model (rather than hand-built dict) so the
     output stays structurally symmetric with the success path: same camelCase
     aliases (``overallSuccess``, ``docsUrl``), same ``Mapping[str, str]`` shape
     for ``context`` (empty dict, never null), same Pydantic-validated types
     across both code paths. The ``ResolvableError`` fields are carried as a
     nested ``ErrorEnvelope`` matching ``HostError``'s shape for cross-path
-    consistency.
+    consistency; non-resolvable exceptions surface as a message-only
+    ``HostError``.
     """
     error = (
         HostError(
@@ -181,41 +190,54 @@ def _emit_json_error(exc: ApplyError | RemoteBashError | SelectorError) -> None:
     typer.echo(envelope.model_dump_json(by_alias=True))
 
 
+# Strip CSI escape sequences from log-file writes. Click/typer auto-color
+# when the target ``isatty()`` returns True — the tee reports True (delegated
+# to the real terminal) so colorized output flows to both streams. Without
+# stripping, the log file fills with ``^[[31mERROR^[[0m``-style bytes that
+# defeat grep. Covers the common ESC [ ... letter form; rarer OSC/DCS
+# escapes (hyperlinks, etc.) we don't emit aren't worth a more elaborate
+# parser.
+_ANSI_CSI_PATTERN = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
+
+
 class _TeeStream:
-    """Tee writes to multiple file-like streams (terminal + log file).
+    """Tee writes to the real terminal stream + the apply-log file.
 
     Replace ``sys.stderr`` and/or ``sys.stdout`` with one of these and any
     code writing to those streams — ``typer.echo``, ``render_recovery``,
-    ``print``, third-party libraries — naturally lands in every backing
-    stream. No per-handler bookkeeping in user-facing output paths.
+    ``print``, third-party libraries — naturally lands in both. No per-handler
+    bookkeeping in user-facing output paths.
 
-    ``isatty`` / ``fileno`` delegate to the first stream so context-aware
-    renderers (e.g. ``render_recovery``'s TTY-vs-piped branch) keep detecting
-    the terminal correctly.
+    Terminal writes pass through verbatim (color/style preserved); log writes
+    have CSI escapes stripped so the file stays grep-friendly. ``isatty`` /
+    ``fileno`` delegate to the real terminal so context-aware renderers (e.g.
+    ``render_recovery``'s TTY-vs-piped branch) keep detecting the terminal.
 
     Composition-tee idiom (vs. ``os.dup2`` FD redirect, ``StreamToLogger``
     coercion, or ``contextlib.redirect_stderr``) — the right shape for a
     pure-Python CLI that wants raw-text capture with the terminal untouched.
     """
 
-    def __init__(self, *streams: TextIO) -> None:
-        self._streams = streams
+    def __init__(self, real: TextIO, log: TextIO) -> None:
+        self._real = real
+        self._log = log
 
     def write(self, data: str) -> int:
-        for stream in self._streams:
-            stream.write(data)
-            stream.flush()
+        self._real.write(data)
+        self._real.flush()
+        self._log.write(_ANSI_CSI_PATTERN.sub('', data))
+        self._log.flush()
         return len(data)
 
     def flush(self) -> None:
-        for stream in self._streams:
-            stream.flush()
+        self._real.flush()
+        self._log.flush()
 
     def isatty(self) -> bool:
-        return bool(self._streams) and self._streams[0].isatty()
+        return self._real.isatty()
 
     def fileno(self) -> int:
-        return self._streams[0].fileno()
+        return self._real.fileno()
 
 
 def _configure_apply_logging() -> Path:
@@ -238,7 +260,9 @@ def _configure_apply_logging() -> Path:
     tee on top of the file handler).
     """
     paths.LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime('%Y%m%d-%H%M%S')
+    # Microsecond precision so back-to-back hot-cache applies (sub-second on a
+    # single host) don't share a filename and interleave output via append mode.
+    timestamp = datetime.now(UTC).strftime('%Y%m%d-%H%M%S-%f')
     log_path = paths.LOGS_DIR / f'apply-{timestamp}.log'
     log_fp = log_path.open('a', buffering=1, encoding='utf-8')
 

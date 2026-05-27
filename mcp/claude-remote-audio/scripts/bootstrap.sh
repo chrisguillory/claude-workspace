@@ -46,6 +46,29 @@
 
 set -euo pipefail
 
+# Self-cleanup on SIGINT / SIGTERM / normal exit. The orchestrator's outer
+# wrapper also `rm -f "$p"` on normal bash exit, but that wrapper itself can
+# be killed (e.g. dispatch-daemon SIGKILL on timeout). The trap inside this
+# script narrows the window to "SIGKILL of this bash process," which is
+# unsurvivable. The script body contains `export SUDO_PASSWORD='...'` when
+# dispatched with --install-prereqs, so leaving it on disk past execution
+# leaks the credential per the README's Security model.
+trap 'rm -f "$0"' EXIT INT TERM
+
+# Single-flight lock so two concurrent `apply --install-prereqs` against
+# this host can't race on ~/.claude-workspace/.../build/roc-toolkit/ (git
+# checkout, patch application, swiftc output, `sudo make install`). `mkdir`
+# is atomic on POSIX — only one process creates the directory. Extends the
+# trap above so an unclean exit still releases the lock.
+LOCKDIR=/tmp/cra-bootstrap.lock
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    echo "ERROR: another bootstrap is already running on this host (lock: $LOCKDIR)." >&2
+    echo "If you're certain no other run is in progress, remove the lock dir and retry:" >&2
+    echo "    rm -rf $LOCKDIR" >&2
+    exit 1
+fi
+trap 'rm -f "$0"; rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
+
 # Resolve script's absolute directory at the top — needed because the body
 # `cd`s into the roc-toolkit checkout before referencing repo-local files,
 # and `$(dirname "$0")` would then resolve relative to the new cwd.

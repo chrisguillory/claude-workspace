@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Sequence
 from pathlib import Path
 
+import pydantic
 from cc_lib.schemas import ClosedModel
 from cc_lib.utils.atomic_write import atomic_write
 from pydantic import ConfigDict
@@ -45,15 +47,19 @@ def cache_path(hub: str) -> Path:
 
 
 def read_devices(hub: str) -> DeviceCache | None:
-    """Return cached devices for ``hub`` if present and within ``CACHE_TTL_SECONDS``, else ``None``.
+    """Return cached devices for ``hub`` if present, parseable, and fresh — else ``None``.
 
-    A stale cache is the same as no cache — completion treats both as a miss and
-    triggers a fresh dispatch. Apply overwrites the hub's cache on every run.
+    Any unusable cache (missing, TTL-expired, corrupt JSON, schema-drifted,
+    unreadable) returns ``None`` so completion treats it as a miss and triggers
+    a fresh dispatch. Apply overwrites the hub's cache on every run.
     """
     path = cache_path(hub)
     if not path.exists():
         return None
-    cache = DeviceCache.model_validate_json(path.read_text())
+    try:
+        cache = DeviceCache.model_validate_json(path.read_text())
+    except (pydantic.ValidationError, json.JSONDecodeError, OSError):
+        return None
     if time.time() - cache.fetched_at > CACHE_TTL_SECONDS:
         return None
     return cache

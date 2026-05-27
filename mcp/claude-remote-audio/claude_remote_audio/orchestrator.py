@@ -109,9 +109,9 @@ async def apply(
     """Resolve ``target`` into hosts and converge each toward the declared audio topology.
 
     ``hub=None`` defaults to the local machine — the discovered daemon whose advertised
-    IPs overlap with this host's interface IPs (``DiscoveredHost.is_self``). Locality
-    model: the command acts on the machine you ran it from. Pass ``hub`` explicitly to
-    override.
+    IPs overlap with this host's interface IPs (returned as ``BrowseResult.local_daemon``
+    from ``browse_hosts``). Locality model: the command acts on the machine you ran it
+    from. Pass ``hub`` explicitly to override.
     """
     logger.info(
         'apply: target=%s hub=%s input=%r output=%r install_prereqs=%s',
@@ -288,6 +288,9 @@ async def _build_plan(
     topology_peer_to_port = await _assign_peer_ports(service, topology_peer_aliases, hub_ip)
 
     canonical_input = _resolve_input_device(hub_devices.inputs, hub, input_device) if input_device is not None else None
+    canonical_output = (
+        _resolve_output_device(hub_devices.outputs, hub, output_device) if output_device is not None else None
+    )
 
     return _Plan(
         hub_alias=hub,
@@ -301,7 +304,7 @@ async def _build_plan(
         topology_peer_to_port=topology_peer_to_port,
         target_peer_aliases=target_peer_aliases,
         input_device=canonical_input,
-        output_device=output_device,
+        output_device=canonical_output,
     )
 
 
@@ -443,6 +446,34 @@ async def _ensure_bluetooth_output(
                     'Re-run apply after granting permission. The grant persists.',
                 ),
                 context={'host': hub_alias, 'device': bt_device.name, 'bluetooth_error_code': exc.code},
+            ) from exc
+        if exc.code == 'bluetooth-sound-menu-popover-not-appearing':
+            raise ResolvableApplyError(
+                f'{hub_alias}: Sound menu-bar click succeeded but the Sound popover '
+                'did not appear — almost always because the Sound module is hidden '
+                'from the menu bar.',
+                code='sound-menu-not-in-menu-bar',
+                title='Sound module hidden from menu bar',
+                suggestions=(
+                    f'On {hub_alias}: System Settings → Control Center → Sound → '
+                    "set to 'Always Show in Menu Bar' (or 'Show When Active').",
+                    'Re-run apply once the Sound icon is visible in the menu bar.',
+                ),
+                context={'host': hub_alias, 'device': bt_device.name},
+            ) from exc
+        if exc.code == 'bluetooth-sound-menu-row-count-parse-failed':
+            raise ResolvableApplyError(
+                f'{hub_alias}: Sound popover opened but AppleScript returned unexpected '
+                'output — likely macOS popover schema drift (AXScrollArea structure '
+                'changed) or a transient race.',
+                code='sound-menu-popover-schema-drift',
+                title='Sound popover row enumeration returned unexpected output',
+                suggestions=(
+                    'Re-run apply — transient races usually clear on the next attempt.',
+                    f'If it persists across runs, file a claude-remote-audio bug with '
+                    f'the macOS version on {hub_alias} and the AppleScript output shown above.',
+                ),
+                context={'host': hub_alias, 'device': bt_device.name},
             ) from exc
         if _looks_like_accessibility_tcc_denial(str(exc)):
             raise ResolvableApplyError(
@@ -691,13 +722,12 @@ async def _guard_feedback_loop(service: DispatchService, plan: _Plan) -> None:
 
 
 async def _set_hub_output(service: DispatchService, plan: _Plan) -> Sequence[str]:
-    """Resolve ``--output`` against the canonical list; set hub default + system-effects output."""
-    assert plan.output_device is not None  # guaranteed by caller
-    canonical = _resolve_output_device(plan.hub_outputs, plan.hub_alias, plan.output_device)
-    quoted = shlex.quote(canonical)
+    """Set hub default + system-effects output to the plan-resolved output device."""
+    assert plan.output_device is not None  # guaranteed by caller (canonicalized at plan-build)
+    quoted = shlex.quote(plan.output_device)
     await _run(service, plan.hub_alias, f'SwitchAudioSource -t output -s {quoted}')
     await _run(service, plan.hub_alias, f'SwitchAudioSource -t system -s {quoted}')
-    return [f'set default output + system output → {canonical}']
+    return [f'set default output + system output → {plan.output_device}']
 
 
 def _resolve_output_device(canonical: Sequence[str], hub_alias: str, requested: str) -> str:
@@ -1026,13 +1056,21 @@ async def _check_application_firewall(service: DispatchService, host: str, binar
     - ``unknown`` — socketfilterfw query failed or returned unexpected text;
       caller treats as "couldn't determine, proceed cautiously."
     """
-    state = await _run(service, host, '/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null')
+    # `|| echo unknown` so a missing socketfilterfw or permission-denied query
+    # falls through to the docstring-promised 'unknown' return rather than
+    # raising out of the diagnostic and aborting apply on the firewall probe.
+    state = await _run(
+        service,
+        host,
+        '/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null || echo unknown',
+    )
     if 'state = 0' in state.stdout.lower() or 'disabled' in state.stdout.lower():
         return 'firewall-disabled'
     result = await _run(
         service,
         host,
-        f'/usr/libexec/ApplicationFirewall/socketfilterfw --getappblocked {shlex.quote(binary_path)} 2>/dev/null',
+        f'/usr/libexec/ApplicationFirewall/socketfilterfw --getappblocked {shlex.quote(binary_path)} 2>/dev/null '
+        f'|| echo unknown',
     )
     output = result.stdout.lower()
     if 'permitted' in output:
@@ -1376,38 +1414,56 @@ async def _diagnose_roc_send_start_failure(
             ),
         )
 
-    # Tier 3: HAL probe via `sox -d -n` against the default input device.
-    # Earlier versions used `roc-send -i core://Claude Remote Mic` as the
-    # probe — but Claude Remote Mic is a roc-vad RECEIVER device. It has no
-    # upstream data unless an active RTP feed is wired to it, so SoX trying
-    # to open it for read always fails regardless of HAL state. That made
-    # the probe a near-guaranteed false-positive "WEDGED" verdict on any
-    # host without an active mesh. `sox -d -n trim 0 0.1` exercises SoX's
-    # CoreAudio backend against the default input — succeeds if the path
-    # is healthy, fails if HAL is genuinely wedged.
-    probe = await _run(
-        service,
-        host,
-        'gtimeout 3 sox -d -n trim 0 0.1 2>/tmp/wedge-probe.log >/dev/null && echo HEALTHY || echo WEDGED',
+    # Tier 3: HAL probe via sox against a known physical input. Targeting `-d`
+    # (default input) gives a false WEDGED verdict after any successful apply,
+    # because that apply sets default to `Claude Remote Mic` — a roc-vad
+    # receiver with no upstream feed, which fails regardless of HAL state.
+    # Pick the first input that isn't one of our virtual devices so the probe
+    # actually exercises SoX's CoreAudio backend against something real.
+    inputs_raw = await _run(service, host, 'SwitchAudioSource -a -t input')
+    probe_target = next(
+        (
+            line.strip()
+            for line in inputs_raw.stdout.splitlines()
+            if line.strip() and not line.strip().startswith('Claude Remote')
+        ),
+        None,
     )
-    verdict = probe.stdout.strip().split('\n')[-1]
-    if verdict == 'WEDGED':
-        return (
-            'core-audio-hal-wedge',
-            f'CoreAudio HAL wedge on {host}',
-            f'Diagnosis: Microphone TCC is `{mic_status}` (good), no libsox log marker '
-            'matched the channel-count or other recognized patterns, but `sox -d -n` '
-            "(a minimal default-device probe) ALSO fails. SoX's CoreAudio backend "
-            f"can't open any input on {host} — the HAL itself is wedged.",
-            (
-                f'Reboot {host} — empirically, `killall coreaudiod`, killing '
-                '`AudioComponentRegistrar`, and mass-killing every audio-framework '
-                'client process (including the roc_vad HAL plugin host) have all '
-                'been observed to NOT clear the wedge state. Reboot is the '
-                'documented and reliable recovery.',
-                'After reboot, re-run apply',
-            ),
+    if probe_target is not None:
+        quoted = shlex.quote(probe_target)
+        # `command -v gtimeout` guard mirrors `_detect_hal_wedge` — without it,
+        # a missing gtimeout (host hasn't been bootstrapped yet) makes the
+        # shell exit non-zero → WEDGED → false reboot recommendation.
+        probe = await _run(
+            service,
+            host,
+            f'if ! command -v gtimeout >/dev/null 2>&1; then echo SKIP; '
+            f'else gtimeout 3 sox -t coreaudio {quoted} -n trim 0 0.1 '
+            f'2>/tmp/wedge-probe.log >/dev/null && echo HEALTHY || echo WEDGED; fi',
         )
+        verdict = probe.stdout.strip().split('\n')[-1]
+        if verdict == 'SKIP':
+            logger.warning('%s: skipping Tier 3 HAL probe (gtimeout not installed; run --install-prereqs)', host)
+        elif verdict == 'WEDGED':
+            return (
+                'core-audio-hal-wedge',
+                f'CoreAudio HAL wedge on {host}',
+                f'Diagnosis: Microphone TCC is `{mic_status}` (good), no libsox log marker '
+                f'matched the channel-count or other recognized patterns, but a probe '
+                f"against {probe_target!r} (a physical input) ALSO fails. SoX's CoreAudio "
+                f"backend can't open any input on {host} — the HAL itself is wedged.",
+                (
+                    f'Reboot {host} — empirically, `killall coreaudiod`, killing '
+                    '`AudioComponentRegistrar`, and mass-killing every audio-framework '
+                    'client process (including the roc_vad HAL plugin host) have all '
+                    'been observed to NOT clear the wedge state. Reboot is the '
+                    'documented and reliable recovery.',
+                    'After reboot, re-run apply',
+                ),
+            )
+    # If no physical input exists (only roc-vad virtual devices), skip the
+    # probe and fall through to Tier 4 — we can't meaningfully test HAL state
+    # without a real device to open.
 
     # Tier 4: Device-specific (no marker matched, HAL probe says healthy)
     return (
@@ -1914,7 +1970,20 @@ async def _ensure_prereqs(
             '(or include --install-prereqs in this run; see the claude-remote-audio README).'
         )
         body = '\n  '.join(issues)
-        raise ApplyError(f'missing prerequisite(s):\n  {body}{hint}')
+        raise ResolvableApplyError(
+            f'missing prerequisite(s):\n  {body}{hint}',
+            code='prereqs-not-satisfied',
+            title='Prerequisites not satisfied',
+            suggestions=(
+                f'Re-run with `--install-prereqs --target {hub_alias}` (or include `--install-prereqs` in this run).',
+                'See `mcp/claude-remote-audio/README.md` for the patch series + required binary list.',
+            ),
+            context={
+                'hub': hub_alias,
+                'hub_unpatched': str(hub_unpatched),
+                'missing_count': str(len(issues)),
+            },
+        )
 
     # HAL-wedge preflight. When CoreAudio HAL wedges, every device-enumeration
     # operation hangs forever — `roc-vad device list`, `system_profiler`, Sound
@@ -2235,16 +2304,19 @@ async def _install_prereqs_on_host(
     # interactive command. The file-plus-`</dev/null` form gives child
     # commands a clean empty stdin.
     #
-    # `umask 077` before the write so the script file is created mode 0600 —
-    # the payload contains `export SUDO_PASSWORD='...'` so a default 0644 file
-    # would expose the credential to every local non-privileged process until
-    # `/tmp` clears at next boot. Cleanup-on-exit (success or failure) removes
-    # the file the moment bash returns so the at-rest exposure window matches
-    # the bootstrap's execution.
+    # `mktemp /tmp/cra-bootstrap.sh.XXXXXX` (X's must trail on macOS) gives a
+    # per-run path so two concurrent `apply --install-prereqs` dispatches to
+    # the same host don't truncate-and-rewrite each other's script — the prior
+    # fixed-path form would cross credentials between operators on a multi-admin
+    # mesh. `mktemp` creates the file mode 0600 by default; truncating via `>`
+    # preserves the mode. The trailing `rm -f` cleans up on normal exit;
+    # bootstrap.sh's own `trap` (top of file) extends cleanup to SIGINT/SIGTERM.
+    # SIGKILL is unsurvivable in either layer — the README's Security model
+    # documents this residual window honestly.
     cmd = (
-        '(umask 077 && '
-        f'echo {shlex.quote(encoded)} | base64 -d > /tmp/cra-bootstrap.sh) && '
-        '{ bash /tmp/cra-bootstrap.sh </dev/null; rc=$?; rm -f /tmp/cra-bootstrap.sh; exit $rc; }'
+        'p=$(mktemp /tmp/cra-bootstrap.sh.XXXXXX) && '
+        f'echo {shlex.quote(encoded)} | base64 -d > "$p" && '
+        '{ bash "$p" </dev/null; rc=$?; rm -f "$p"; exit $rc; }'
     )
 
     logger.info('%s: bootstrap dispatching (timeout 15min; cold compile ~5min)', host)
