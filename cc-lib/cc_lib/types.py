@@ -64,6 +64,27 @@ type EffortLevel = Literal['low', 'medium', 'high', 'xhigh', 'max']
 # -- CLI output format --------------------------------------------------------
 
 type OutputFormat = Literal['text', 'json']
+"""The common-case ``--format`` vocabulary and the error-rendering vocabulary.
+
+Two roles, intentionally aligned: most CLIs only need text/json for their
+``--format`` flag, and errors only render meaningfully in universal
+serialization formats — text/json — not data-shape-specific ones like
+``tree`` (parent-child graphs), ``html``/``markdown`` (rich content), or
+``csv`` (tabular data).
+
+CLIs with data-shape-specific success formats (e.g. ``claude-session
+lineage`` emitting ``tree`` for parent-child session graphs, or
+``playwright-browser`` extracting ``html``/``markdown`` page content)
+declare their own narrower Literal locally — ``OutputFormat`` deliberately
+does NOT try to be a workspace-wide catalog of every known format string.
+The cost of widening would be every common-case CLI either accepting
+formats it can't render or having to redeclare its own narrow Literal —
+inverting the load for the volume of outliers.
+
+If a future workspace consumer wants tree/html/etc. centrally cataloged
+(e.g. to power a help-text generator or completion script), define a
+separate ``AnyFormat`` type — don't widen ``OutputFormat``.
+"""
 
 # -- Claude Code versioning ---------------------------------------------------
 

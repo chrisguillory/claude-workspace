@@ -7,6 +7,7 @@ Provides:
     add_install_command         Register install/uninstall/completion subcommands (standalone scripts)
     add_completion_command      Register completion-only subcommands (uv tool install packages)
     add_help_command            Register a `help` subcommand for top-level / per-subcommand / recursive help
+    read_typer_format           Read the active command's --format parameter (for ErrorBoundary renderers)
     run_app                     Entry-point helper: derives prog_name from sys.argv[0]
 """
 
@@ -17,6 +18,7 @@ __all__ = [
     'add_help_command',
     'add_install_command',
     'create_app',
+    'read_typer_format',
     'run_app',
 ]
 
@@ -271,6 +273,26 @@ def add_help_command(app: typer.Typer) -> None:
                 return
 
             typer.echo(root_ctx.get_help())
+
+
+def read_typer_format() -> str | None:
+    """Return the active typer command's ``--format`` parameter value, or ``None``.
+
+    Built for ``ErrorBoundary(format_resolver=...)`` — the boundary needs to
+    know what format the user asked for so it can pick a format-specific
+    renderer at exception-handling time. Click's per-invocation context
+    already holds bound parameters; this reads them.
+
+    Returns ``None`` when no command is active (e.g. import-time), no
+    ``--format`` parameter was bound, or the bound value isn't a string.
+    Callers (typically renderer registries) treat ``None`` as "no format
+    selected — use type-only handler fallback."
+    """
+    ctx = click.get_current_context(silent=True)
+    if ctx is None:
+        return None
+    fmt = ctx.params.get('format')
+    return fmt if isinstance(fmt, str) else None
 
 
 def run_app(app: typer.Typer) -> None:
