@@ -64,7 +64,8 @@ class ExecuteRequest(ClosedModel):
     command: str
     session_id: str
     agent_id: str | None = None
-    timeout: float = 120.0
+    timeout: float | None = None
+    """Seconds before SIGKILL; ``None`` (default) runs without limit."""
 
 
 class ExecuteResult(ClosedModel):
