@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pydantic
+from cc_lib import os_process
 from cc_lib.claude_context import ClaudeContext
 from cc_lib.exceptions import ClaudeProcessNotFoundError
 from cc_lib.utils import get_claude_config_home_dir
@@ -164,14 +165,8 @@ def _auto_detect_session() -> DaemonContext | None:
 
 
 def _is_process_alive(pid: int) -> bool:
-    """Check if a process is still running via kill -0."""
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # Exists but different user
-    return True
+    """Check if a process is still running."""
+    return os_process.is_alive(pid)
 
 
 # -- JSONL Tail State ----------------------------------------------------------

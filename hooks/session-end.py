@@ -19,7 +19,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cc_lib.claude_context import find_claude_pid
+from cc_lib.claude_context import find_claude_process
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.exceptions import RivalSessionError
 from cc_lib.schemas.hooks import SessionEndHookInput
@@ -33,7 +33,7 @@ boundary = ErrorBoundary(exit_code=2)
 def main() -> None:
     timer = Timer()
     hook_data = SessionEndHookInput.model_validate_json(sys.stdin.read())
-    claude_pid = find_claude_pid()
+    claude_pid = find_claude_process().pid
 
     with SessionManager(hook_data.cwd) as manager:
         if Path(hook_data.transcript_path).exists():

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -11,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import filelock
+from cc_lib import os_process
 
 from document_search.paths import DASHBOARD_LOCK_PATH, DASHBOARD_STATE_PATH
 from document_search.schemas.dashboard import DashboardState, ProcessType, RegisteredProcess
@@ -130,14 +130,8 @@ class DashboardStateManager:
 
 
 def _process_exists(pid: int) -> bool:
-    """Check if process exists via signal 0."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # Exists but no permission
+    """Check if process exists."""
+    return os_process.is_alive(pid)
 
 
 def _port_is_serving(port: int, timeout: float = 0.1) -> bool:

@@ -14,6 +14,8 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from cc_lib import os_process
+
 from claude_remote_bash.client import authenticate, open_connection_any
 from claude_remote_bash.exceptions import (
     DaemonError,
@@ -158,11 +160,7 @@ def spawn_detached_supervisor(
 
 def supervisor_alive(pid: int) -> bool:
     """Return True iff the supervisor process is still running."""
-    try:
-        os.kill(pid, 0)
-    except (OSError, ProcessLookupError):
-        return False
-    return True
+    return os_process.is_alive(pid)
 
 
 def terminate_supervisor(mountpoint: Path) -> None:
