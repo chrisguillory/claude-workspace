@@ -74,7 +74,7 @@ class DispatchService:
         *,
         session_id: str,
         agent_id: str | None,
-        timeout: float,
+        timeout: float | None,
     ) -> DispatchResult:
         """Parse the selector, fan out across hosts in parallel, return aggregated results."""
         cache = await self._hosts_resolver()
@@ -138,7 +138,7 @@ async def _run_one(
     *,
     session_id: str,
     agent_id: str | None,
-    timeout: float,
+    timeout: float | None,
 ) -> HostRunResult:
     """Run on one host; capture wire-level failures into ``HostRunResult.error`` instead of aborting the batch."""
     started = time.monotonic()

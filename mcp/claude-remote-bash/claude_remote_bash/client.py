@@ -27,7 +27,7 @@ async def execute_at(
     command: str,
     session_id: str,
     agent_id: str | None,
-    timeout: float,
+    timeout: float | None,
 ) -> ExecuteResult:
     """Run a command on the daemon at ``(ips, port)`` — connect, authenticate, execute."""
     reader, writer = await open_connection_any(ips, port)

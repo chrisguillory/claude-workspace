@@ -62,7 +62,10 @@ def execute(
     agent_id: Annotated[
         str | None, typer.Option('--agent-id', envvar='CLAUDE_CODE_AGENT_ID', help='Agent ID for sub-agent isolation')
     ] = None,
-    timeout: Annotated[float, typer.Option('--timeout', help='Command timeout in seconds')] = 120.0,
+    timeout: Annotated[
+        float | None,
+        typer.Option('--timeout', help='Command timeout in seconds (no limit by default)'),
+    ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Execute a command on one or more remote hosts.
@@ -333,7 +336,7 @@ async def _drive_dispatch(
     command: str,
     session_id: str,
     agent_id: str | None,
-    timeout: float,
+    timeout: float | None,
     output_format: OutputFormat,
 ) -> None:
     """Invoke ``DispatchService.run_target`` and format the result for the terminal.

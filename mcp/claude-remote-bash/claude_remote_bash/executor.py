@@ -33,7 +33,7 @@ async def execute_command(
     *,
     cwd: str | None = None,
     shell: str = '/bin/zsh',
-    timeout: float = 120.0,
+    timeout: float | None = None,
 ) -> CommandResult:
     """Execute a command in a fresh login shell and capture the result.
 
@@ -45,7 +45,7 @@ async def execute_command(
         command: Shell command to execute.
         cwd: Working directory. Defaults to $HOME.
         shell: Shell binary. Defaults to /bin/zsh.
-        timeout: Seconds before SIGKILL. Defaults to 120.
+        timeout: Seconds before SIGKILL. ``None`` (default) runs without limit.
 
     Returns:
         CommandResult with stdout, stderr, exit_code, and cwd.
@@ -73,7 +73,10 @@ async def execute_command(
         wrapped,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env={**os.environ, 'PS1': '', 'TERM': 'dumb'},
+        # ``DIRENV_LOG_FORMAT=''`` silences direnv — the wrapped ``cd`` would
+        # otherwise trigger its zsh chpwd hook and leak ``loading/unloading``
+        # writes onto command stderr.
+        env={**os.environ, 'PS1': '', 'TERM': 'dumb', 'DIRENV_LOG_FORMAT': ''},
         limit=1024 * 1024,  # 1 MB per-stream buffer
         # Run the shell + its descendants in a dedicated process group so a
         # single killpg cleans up the whole tree (the user's command and any
@@ -82,10 +85,13 @@ async def execute_command(
     )
 
     try:
-        raw_stdout, raw_stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=timeout,
-        )
+        if timeout is None:
+            raw_stdout, raw_stderr = await process.communicate()
+        else:
+            raw_stdout, raw_stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout,
+            )
     except TimeoutError:
         _killpg_session_leader(process)
         await process.wait()
