@@ -56,23 +56,32 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
     async def download_resource(url: str, output_filename: str) -> DownloadResourceResult:
-        """Download specific resource using current browser session's cookies and headers.
+        """Download a resource using the current browser session's auth state.
 
-        Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
-        session to build browser-realistic requests. Critical for sites with bot detection
-        or CDN hotlink protection — the CDN sees the request as coming from the same browser.
+        Headers are replayed from the page's own recent XHR/fetch traffic, so SPA
+        HttpInterceptor injections (tenant scoping, CSRF tokens, feature flags,
+        traceparent) flow through automatically. Cookies — including HttpOnly —
+        come from the live Selenium session.
 
-        PREREQUISITE: Call navigate() first to establish browser session.
-        Without prior navigation, still works but may encounter bot detection.
+        PREREQUISITE: Call navigate() first. The request log is populated at navigate
+        time; before that, the tool falls back to browser-realistic defaults
+        (User-Agent, Referer, Accept-Language, Sec-Fetch-Dest/Mode/Site).
 
         Args:
             url: Full URL to resource (http:// or https://) or file:// for local files.
             output_filename: Filename to save as (no path). Saved to screenshot temp dir.
 
         Returns:
-            {'path': '/tmp/.../file.js', 'size_bytes': 26703, 'content_type': '...', 'status': 200, 'url': '...'}
+            DownloadResourceResult with path, size_bytes, content_type, status, url.
 
         Errors: Raises ToolError if response status >= 400, network failure, or local file not found.
+
+        Known limitations:
+            - Service Workers intercept fetch/XHR in a separate scope; PWAs that route
+              API traffic through a SW will not populate the request log.
+            - Per-request signature headers (AWS SigV4, x-amz-*, Content-MD5, anything
+              matching signature/hmac/digest) are stripped — they encode a specific
+              request body and won't validate on a different one.
         """
         return await service.download_resource(url=url, output_filename=output_filename)
 
