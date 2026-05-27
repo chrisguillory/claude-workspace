@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, TextIO
@@ -12,14 +12,17 @@ import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary, render_recovery
 from cc_lib.exceptions import ResolvableError
+from cc_lib.schemas import ClosedModel
 from cc_lib.types import OutputFormat
 from claude_remote_bash.exceptions import RemoteBashError
 from claude_remote_bash.selector import SelectorError
+from pydantic import ConfigDict
+from pydantic.alias_generators import to_camel
 
 from claude_remote_audio import paths
 from claude_remote_audio.cli import completion
 from claude_remote_audio.exceptions import ApplyError
-from claude_remote_audio.orchestrator import ApplyResult, apply
+from claude_remote_audio.orchestrator import ApplyResult, HostApplyOutcome, HostError, apply
 
 __all__ = [
     'main',
@@ -135,22 +138,47 @@ def apply_cmd(
     raise SystemExit(0 if result.overall_success else 1)
 
 
+class _ApplyErrorEnvelope(ClosedModel):
+    """Error-path JSON envelope matching ``ApplyResult``'s shape.
+
+    Same ``alias_generator=to_camel`` as ``ApplyResult`` so the wire shape is
+    structurally symmetric across success and failure paths. ``hosts`` is empty
+    on top-level (non-per-host) failures; the carried ``error`` is a
+    ``HostError`` mirroring the per-host outcome shape.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel)
+
+    hosts: Sequence[HostApplyOutcome]
+    overall_success: bool
+    error: HostError
+
+
 def _emit_json_error(exc: ApplyError | RemoteBashError | SelectorError) -> None:
     """Emit a JSON error envelope on stdout, mirroring ApplyResult's shape.
 
-    Carries the structured ``ResolvableError`` fields (``code`` / ``title`` /
-    ``suggestions`` / ``docs_url`` / ``context``) when present so machine
-    consumers can branch on the same identifiers a human sees in the prose
-    rendering.
+    Goes through a Pydantic envelope model (rather than hand-built dict) so the
+    output stays structurally symmetric with the success path: same camelCase
+    aliases (``overallSuccess``, ``docsUrl``), same ``Mapping[str, str]`` shape
+    for ``context`` (empty dict, never null), same Pydantic-validated types
+    across both code paths. The ``ResolvableError`` fields are carried as a
+    nested ``ErrorEnvelope`` matching ``HostError``'s shape for cross-path
+    consistency.
     """
-    error: dict[str, object] = {'message': str(exc)}
-    if isinstance(exc, ResolvableError):
-        error['code'] = exc.code
-        error['title'] = exc.title
-        error['suggestions'] = list(exc.suggestions)
-        error['docs_url'] = exc.docs_url
-        error['context'] = dict(exc.context) if exc.context else None
-    typer.echo(json.dumps({'overall_success': False, 'hosts': [], 'error': error}))
+    error = (
+        HostError(
+            message=str(exc),
+            code=exc.code,
+            title=exc.title,
+            suggestions=tuple(exc.suggestions),
+            docs_url=exc.docs_url,
+            context=dict(exc.context),
+        )
+        if isinstance(exc, ResolvableError)
+        else HostError(message=str(exc))
+    )
+    envelope = _ApplyErrorEnvelope(overall_success=False, hosts=(), error=error)
+    typer.echo(envelope.model_dump_json(by_alias=True))
 
 
 class _TeeStream:
@@ -270,14 +298,39 @@ def _handle_selector_error(exc: SelectorError) -> None:
 
 
 def _print_text(result: ApplyResult) -> None:
-    """Render per-host apply outcomes as human-readable lines + a one-line summary."""
+    """Render per-host apply outcomes as human-readable lines + a one-line summary.
+
+    When a host's ``error`` carries a structured ``code`` (from a
+    ``ResolvableError`` subclass), call ``render_recovery`` per failing host so
+    the in-loop agent-engagement footer + bare-terminal CTA fire for each
+    failure, not just the top-level escape path.
+    """
     for host in result.hosts:
         status = 'ok' if host.success else 'failed'
         typer.echo(f'[{status}] {host.host} ({host.role})')
         for action in host.actions:
             typer.echo(f'  - {action}')
-        if host.error:
-            typer.echo(f'  ERROR: {host.error}', err=True)
+        if host.error is not None:
+            typer.echo(f'  ERROR: {host.error.message}', err=True)
+            if host.error.code is not None:
+                render_recovery(_render_recovery_shim(host.error))
 
     summary = 'ok' if result.overall_success else 'failed'
     typer.echo(f'\napply: {summary}')
+
+
+def _render_recovery_shim(host_error: HostError) -> ResolvableError:
+    """Adapter: build a transient ``ResolvableError`` from ``HostError`` for ``render_recovery``.
+
+    ``render_recovery`` accepts any ``ResolvableError``-typed object; we synthesize
+    one whose fields mirror the ``HostError`` so the renderer treats it
+    identically to a freshly-raised exception.
+    """
+    return ResolvableError(
+        host_error.message,
+        code=host_error.code or 'host-error',
+        title=host_error.title,
+        suggestions=host_error.suggestions,
+        docs_url=host_error.docs_url,
+        context=host_error.context,
+    )

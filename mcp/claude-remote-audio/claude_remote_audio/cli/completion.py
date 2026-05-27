@@ -87,11 +87,18 @@ def complete_hub(incomplete: str) -> Sequence[str | tuple[str, str]]:
 
 @_completion_safe
 def complete_target(incomplete: str) -> Sequence[str | tuple[str, str]]:
-    """Tab-complete ``--target`` from aliases + group names; preserves comma-list prefix."""
+    """Tab-complete ``--target`` from aliases + group names; preserves comma-list prefix.
+
+    Excludes atoms already present in the comma-list prefix so completion never
+    offers ``M5,M2,M5`` or ``M5,M2,M2``. Behavior is conventional in some CLIs
+    (git/kubectl re-offer freely) but the mesh is a small fixed set and the
+    duplicates are noise.
+    """
     atoms = [*_alias_atoms(), *ClientConfig.load().groups.keys()]
     if ',' in incomplete:
         prefix, _, suffix = incomplete.rpartition(',')
-        return [f'{prefix},{a}' for a in atoms if a.startswith(suffix)]
+        already = set(prefix.split(','))
+        return [f'{prefix},{a}' for a in atoms if a.startswith(suffix) and a not in already]
     return [a for a in atoms if a.startswith(incomplete)]
 
 

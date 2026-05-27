@@ -2,3 +2,4 @@
 # scripts/bootstrap.sh on each host. Source of truth is each .swift file.
 swift/claude-coreaudio-volume
 swift/claude-tcc-probe
+swift/claude-coreaudio-probe

@@ -169,7 +169,19 @@ async def steal(
             *(is_connected(service, h, address) for h in sources),
             return_exceptions=True,
         )
-        owners = [h for h, r in zip(sources, owner_flags, strict=True) if r is True]
+        owners = []
+        for h, r in zip(sources, owner_flags, strict=True):
+            if r is True:
+                owners.append(h)
+            elif isinstance(r, BaseException):
+                # `is_connected` probe failed (transient dispatch hiccup, host
+                # unreachable). Steal's exclusivity contract requires complete
+                # owner-set knowledge — silently treating a probe failure as
+                # "not connected" risks leaving the host BT-linked and
+                # multi-link audio mixing from Continuity. Log so the apply
+                # log records the unknown without raising (a transient probe
+                # failure shouldn't abort an otherwise-recoverable steal).
+                logger.warning('%s: is_connected probe failed; possible owner not disconnected: %s', h, r)
     else:
         owners = []
 
@@ -227,11 +239,20 @@ async def engage_via_sound_menu(
     finally:
         await _close_popover(service, host_alias)
         if not hit and prev_default:
-            await _run(
-                service,
-                host_alias,
-                f'SwitchAudioSource -t output -s {shlex.quote(prev_default)}',
-            )
+            # Best-effort restore — mirror _close_popover's swallow. Without this
+            # guard, a transient dispatch failure during the restore step inside
+            # a `finally` triggered by an in-flight exception would mask the
+            # original cause (Python finally semantics: new exception replaces
+            # the propagating one) and callers branching on BluetoothError.code
+            # would see the wrong identifier.
+            try:
+                await _run(
+                    service,
+                    host_alias,
+                    f'SwitchAudioSource -t output -s {shlex.quote(prev_default)}',
+                )
+            except BluetoothError:
+                logger.exception('%s: failed to restore prior default output %r', host_alias, prev_default)
 
 
 # -- Internal helpers ---------------------------------------------------------
@@ -395,7 +416,18 @@ async def _open_sound_popover_and_count_rows(service: DispatchService, host_alia
             code='bluetooth-sound-menu-row-introspection-failed',
             context={'host': host_alias, 'applescript_output': out[:200]},
         )
-    return int(out)
+    try:
+        return int(out)
+    except ValueError as exc:
+        # AppleScript exited 0 but stdout isn't one of the three ERROR_* prefixes
+        # or a parseable integer. Surface as a structured BluetoothError matching
+        # the sibling raise sites above rather than leaking ValueError past the
+        # documented BluetoothError contract.
+        raise BluetoothError(
+            f'{host_alias}: Sound popover row count parse failed: {out!r}',
+            code='bluetooth-sound-menu-row-count-parse-failed',
+            context={'host': host_alias, 'applescript_output': out[:200]},
+        ) from exc
 
 
 _CLOSE_POPOVER_APPLESCRIPT = 'tell application "System Events" to key code 53'

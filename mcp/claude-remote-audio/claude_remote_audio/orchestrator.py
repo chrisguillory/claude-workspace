@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
+from cc_lib.exceptions import ResolvableError
 from cc_lib.schemas import ClosedModel
 from cc_lib.utils.unicode_match import nfkc_casefold
 from claude_remote_bash import DispatchService
@@ -30,6 +31,7 @@ from claude_remote_audio.exceptions import ApplyError, BluetoothError, Resolvabl
 __all__ = [
     'ApplyResult',
     'HostApplyOutcome',
+    'HostError',
     'apply',
     'enumerate_devices',
 ]
@@ -47,6 +49,26 @@ logger = logging.getLogger(__name__)
 # -- Public schemas -----------------------------------------------------------
 
 
+class HostError(ClosedModel):
+    """Structured per-host failure carried inside ``HostApplyOutcome``.
+
+    Mirrors the ``ResolvableError`` shape so per-host failures from
+    ``ResolvableApplyError`` raises preserve ``code`` / ``title`` /
+    ``suggestions`` / ``docs_url`` / ``context`` to text consumers (via
+    ``render_recovery``) and JSON consumers (via normal Pydantic
+    serialization). For plain ``ApplyError`` raises only ``message`` is set.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel)
+
+    message: str
+    code: str | None = None
+    title: str | None = None
+    suggestions: Sequence[str] = ()
+    docs_url: str | None = None
+    context: Mapping[str, str] = {}
+
+
 class HostApplyOutcome(ClosedModel):
     """Result of apply operations against a single host."""
 
@@ -56,7 +78,7 @@ class HostApplyOutcome(ClosedModel):
     role: Literal['hub', 'peer']
     actions: Sequence[str]
     success: bool
-    error: str | None = None
+    error: HostError | None = None
 
 
 class ApplyResult(ClosedModel):
@@ -122,7 +144,7 @@ async def apply(
             # so siblings keep running and `apply()` returns a complete per-host
             # picture (the documented HostApplyOutcome schema contract).
             logger.exception('%s: peer apply failed', peer)
-            return HostApplyOutcome(host=peer, role='peer', actions=[], success=False, error=str(exc))
+            return HostApplyOutcome(host=peer, role='peer', actions=[], success=False, error=_host_error_from(exc))
 
     peer_outcomes = await asyncio.gather(*(_apply_peer_safe(peer) for peer in plan.target_peer_aliases))
     outcomes.extend(peer_outcomes)
@@ -568,7 +590,29 @@ async def _apply_hub_safe(service: DispatchService, plan: _Plan) -> HostApplyOut
         # applies still run and the user sees a complete per-host picture
         # rather than just the first failure that bubbled out of apply().
         logger.exception('%s: hub apply failed', plan.hub_alias)
-        return HostApplyOutcome(host=plan.hub_alias, role='hub', actions=[], success=False, error=str(exc))
+        return HostApplyOutcome(host=plan.hub_alias, role='hub', actions=[], success=False, error=_host_error_from(exc))
+
+
+def _host_error_from(exc: BaseException) -> HostError:
+    """Build a ``HostError`` carrying ResolvableError fields when present.
+
+    For ``ResolvableError`` subclasses (the common case — ``ResolvableApplyError``
+    from preflights + post-mortem diagnostics, ``BluetoothError`` from the BT
+    subsystem) the structured ``code`` / ``title`` / ``suggestions`` / ``docs_url``
+    / ``context`` are preserved so text consumers can call ``render_recovery``
+    per failing host and JSON consumers can dispatch on ``code``. Plain
+    ``ApplyError`` raises serialize as message-only.
+    """
+    if isinstance(exc, ResolvableError):
+        return HostError(
+            message=str(exc),
+            code=exc.code,
+            title=exc.title,
+            suggestions=tuple(exc.suggestions),
+            docs_url=exc.docs_url,
+            context=dict(exc.context),
+        )
+    return HostError(message=str(exc))
 
 
 async def _apply_hub(service: DispatchService, plan: _Plan) -> HostApplyOutcome:
