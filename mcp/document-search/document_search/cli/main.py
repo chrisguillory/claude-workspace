@@ -16,7 +16,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypedDict
-from uuid import UUID
 
 import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
@@ -35,7 +34,6 @@ from document_search.schemas.config import create_config, default_config
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import StopAfterStage
 from document_search.schemas.vectors import (
-    ClearResult,
     CollectionMetadata,
     EmbeddingInfo,
     IndexInfo,
@@ -50,7 +48,6 @@ from document_search.search_path import (
     resolve_search_paths,
     to_repo_filter,
 )
-from document_search.services.embedding import FileCacheIndex
 
 logger = logging.getLogger(__name__)
 
@@ -591,51 +588,48 @@ async def _clear_async(
             typer.secho(f"Collection '{collection_name}' not found.", fg=typer.colors.RED, err=True)
             raise typer.Exit(1)
 
+        config = default_config(collection.provider)
+        embedding_client = create_embedding_client(
+            create_config(
+                provider=collection.provider,
+                embedding_model=collection.model,
+                embedding_dimensions=collection.dimensions,
+            )
+        )
+
+        # fmt: off — lazy imports: ML frameworks add ~1s startup
+        from document_search.services.chunking import ChunkingService  # noqa: PLC0415 — lazy
+        from document_search.services.embedding import EmbeddingService  # noqa: PLC0415 — lazy
+        from document_search.services.indexing import IndexingService  # noqa: PLC0415 — lazy
+        from document_search.services.sparse_embedding import SparseEmbeddingService  # noqa: PLC0415 — lazy
+        # fmt: on
+
+        chunking_service = await ChunkingService.create()
+        sparse_service = await SparseEmbeddingService.create()
+        embedding_service = EmbeddingService(
+            embedding_client,
+            batch_size=config.batch_size,
+            redis=ctx.redis,
+            model=collection.model,
+            dimensions=collection.dimensions,
+        )
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        if any(p == '**' for p in paths):
-            if clear_cache:
-                total_invalidated = 0
-                async for index_key in ctx.redis.scan_iter(match=FileCacheIndex.glob()):
-                    cache_keys = await ctx.redis.smembers(index_key)
-                    if cache_keys:
-                        await ctx.redis.unlink(*cache_keys, index_key)
-                        total_invalidated += len(cache_keys)
-                logger.info('Invalidated %d cached embeddings', total_invalidated)
+        indexing_service = IndexingService(
+            chunking_service=chunking_service,
+            embedding_service=embedding_service,
+            sparse_embedding_service=sparse_service,
+            repository=repository,
+            state_store=state_store,
+        )
 
-            chunks_count = await repository.count()
-            await repository.delete_collection()
-            await state_store.clear_collection()
-            result = ClearResult(files_removed=0, chunks_removed=chunks_count, paths=None)
-        else:
-            total_files = 0
-            total_chunks = 0
-            for resolved_path in paths:
-                if clear_cache:
-                    async for index_key in ctx.redis.scan_iter(match=FileCacheIndex.glob(resolved_path)):
-                        cache_keys = await ctx.redis.smembers(index_key)
-                        if cache_keys:
-                            await ctx.redis.unlink(*cache_keys, index_key)
-
-                file_state = await state_store.get_file_state(resolved_path)
-                if file_state is not None:
-                    chunk_ids = list(file_state.chunk_ids)
-                    if chunk_ids:
-                        await repository.delete(chunk_ids)
-                    await state_store.delete_file_state(resolved_path)
-                    total_files += 1
-                    total_chunks += len(chunk_ids)
-                else:
-                    all_chunk_ids = await state_store.get_chunk_ids_under_path(resolved_path)
-                    if all_chunk_ids:
-                        await repository.delete([UUID(cid) for cid in all_chunk_ids])
-                    files_under = await state_store.get_files_under_path(resolved_path)
-                    await state_store.delete_files_under_path(resolved_path)
-                    total_files += len(files_under)
-                    total_chunks += len(all_chunk_ids)
-
-            result = ClearResult(files_removed=total_files, chunks_removed=total_chunks, paths=paths)
+        try:
+            result = await indexing_service.clear_documents(paths, clear_cache=clear_cache)
+        finally:
+            chunking_service.shutdown()
+            sparse_service.shutdown()
+            await embedding_client.close()
 
         if format == 'json':
             typer.echo(result.model_dump_json(indent=2))
