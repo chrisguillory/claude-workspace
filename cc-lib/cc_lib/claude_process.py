@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from cc_lib import os_process
 from cc_lib.exceptions import ClaudeProcessNotFoundError
+from cc_lib.macho import MachOSignature
 from cc_lib.os_process import ProcessHandle
 from cc_lib.session_tracker import SessionMetadata
 from cc_lib.settings_env import claude_binary_name
@@ -145,20 +146,16 @@ def kill_and_copy_resume(
 
 
 def _is_claude_pid(pid: int) -> bool:
-    """True if ``pid`` runs the Claude Code binary (codesign Identifier verified).
+    """True if ``pid`` runs a binary with the Claude Code codesign Identifier.
 
-    Anthropic embeds ``Identifier=com.anthropic.claude-code`` in the binary's
-    code signature, bound to the code-directory hash. The Identifier is
-    preserved across the patcher's adhoc re-sign. macOS-only.
+    Anthropic embeds the Identifier and the patcher preserves it via
+    ``--preserve-metadata=identifier`` — so this matches both stock and
+    patched binaries.
     """
-    result = subprocess.run(
-        ['codesign', '-dvv', f'+{pid}'],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    # codesign writes the Identifier= line to stderr.
-    return 'Identifier=com.anthropic.claude-code' in result.stderr.splitlines()
+    path = os_process.try_exe_path(pid)
+    if path is None:
+        return False
+    return MachOSignature.identifier(path) == 'com.anthropic.claude-code'
 
 
 _KILL_SCRIPT = """\

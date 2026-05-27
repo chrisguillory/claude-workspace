@@ -22,6 +22,7 @@ __all__ = [
     'exe_path',
     'is_alive',
     'terminate',
+    'try_exe_path',
 ]
 
 
@@ -74,6 +75,14 @@ def create_time(pid: int) -> datetime:
 def exe_path(pid: int) -> Path:
     """Process executable path. Raises ProcessGone if dead, ProcessAccessDenied for kernel pids (0)."""
     return Path(psutil.Process(pid).exe())
+
+
+def try_exe_path(pid: int) -> Path | None:
+    """Probe variant of ``exe_path`` — ``None`` if the pid is gone or protected."""
+    try:
+        return exe_path(pid)
+    except (ProcessGone, ProcessAccessDenied):
+        return None
 
 
 def terminate(pid: int) -> None:
