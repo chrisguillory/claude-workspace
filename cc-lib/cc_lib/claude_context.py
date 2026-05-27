@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pydantic
 
+from cc_lib.claude_process import ClaudeProcess
 from cc_lib.exceptions import (
     ClaudeContextError,
     ClaudeProcessNotFoundError,
@@ -24,7 +25,7 @@ from cc_lib.types import CCVersion
 __all__ = [
     'ClaudeContext',
     'cached_sessions_by_pid',
-    'find_claude_pid',
+    'find_claude_process',
     'lookup_active_session_by_pid',
     'lookup_session_by_id',
 ]
@@ -37,12 +38,13 @@ class ClaudeContext:
         from_env       — Bash-tool subprocess (CLAUDE_CODE_SESSION_ID since 2.1.132)
         from_pid_walk  — long-running process spawned by Claude (e.g., MCP server)
 
-    Wraps the persisted Session record from sessions.json. Convenience accessors
-    lift the most-read fields up; consumers needing other Session fields read
-    `ctx.session.<field>` directly.
+    Wraps the persisted Session record from sessions.json and the verified
+    ClaudeProcess for the owning Claude binary. Convenience accessors lift the
+    most-read fields up; consumers needing other Session fields read
+    ``ctx.session.<field>`` directly.
     """
 
-    __slots__ = ('_claude_version', '_session')
+    __slots__ = ('_claude_process', '_claude_version', '_session')
 
     @classmethod
     def from_env(cls) -> ClaudeContext:
@@ -50,20 +52,22 @@ class ClaudeContext:
         session_id = os.environ.get('CLAUDE_CODE_SESSION_ID')
         if not session_id:
             raise MissingEnvVarError('CLAUDE_CODE_SESSION_ID')
-        return cls(lookup_session_by_id(session_id))
+        session = lookup_session_by_id(session_id)
+        return cls(session, ClaudeProcess.from_session_metadata(session.metadata))
 
     @classmethod
     def from_pid_walk(cls) -> ClaudeContext:
         """Long-running-process context. Walks parent tree, codesign-verifies."""
-        pid = find_claude_pid()
-        return cls(lookup_active_session_by_pid(pid))
+        process = find_claude_process()
+        return cls(lookup_active_session_by_pid(process.pid), process)
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, claude_process: ClaudeProcess) -> None:
         if session.state != 'active':
             raise InactiveSessionError(f"Session {session.session_id} is in state {session.state!r}, expected 'active'")
         if session.metadata.claude_version is None:
             raise ClaudeContextError(f'Session {session.session_id} has no claude_version in sessions.json')
         self._session = session
+        self._claude_process = claude_process
         self._claude_version = session.metadata.claude_version
 
     @property
@@ -71,8 +75,13 @@ class ClaudeContext:
         return self._session
 
     @property
+    def claude_process(self) -> ClaudeProcess:
+        return self._claude_process
+
+    @property
     def claude_pid(self) -> int:
-        return self._session.metadata.claude_pid
+        """Alias for ``ctx.claude_process.pid`` — convenience accessor."""
+        return self._claude_process.pid
 
     @property
     def session_id(self) -> str:
@@ -99,15 +108,16 @@ class ClaudeContext:
         )
 
 
-def find_claude_pid() -> int:
-    """Walk parent process tree; verify each candidate via macOS codesign.
+def find_claude_process() -> ClaudeProcess:
+    """Walk parent process tree; return the first codesign-verified Claude ancestor.
 
-    Anthropic embeds Identifier=com.anthropic.claude-code in the binary's
-    code signature, bound to the code-directory hash. Identifier is preserved
-    across the patcher's adhoc re-sign. macOS-only.
+    Raises:
+        ClaudeProcessNotFoundError — walk exhausted without finding a Claude binary.
     """
     current = os.getppid()
     for _ in range(20):
+        if (proc := ClaudeProcess.from_pid(current)) is not None:
+            return proc
         result = subprocess.run(
             ['ps', '-p', str(current), '-o', 'ppid='],
             check=False,
@@ -116,8 +126,6 @@ def find_claude_pid() -> int:
         )
         if not result.stdout.strip():
             break
-        if _is_claude_binary(current):
-            return current
         current = int(result.stdout.strip())
     raise ClaudeProcessNotFoundError('No Claude Code process found in parent tree')
 
@@ -177,18 +185,6 @@ class _SessionsByPidCache:
             cls._by_pid = {s.metadata.claude_pid: s for s in db.sessions if s.state == 'active'}
             cls._mtime = mtime
         return cls._by_pid
-
-
-def _is_claude_binary(pid: int) -> bool:
-    """True if pid runs the Claude Code binary (codesign Identifier verified)."""
-    result = subprocess.run(
-        ['codesign', '-dvv', f'+{pid}'],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    # codesign writes the Identifier= line to stderr.
-    return 'Identifier=com.anthropic.claude-code' in result.stderr.splitlines()
 
 
 def _load_sessions() -> SessionDatabase:

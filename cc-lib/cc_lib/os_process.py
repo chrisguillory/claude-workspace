@@ -72,10 +72,10 @@ def create_time(pid: int) -> datetime:
 
 
 def exe_path(pid: int) -> Path:
-    """Process executable path. Raises ProcessGone if dead."""
+    """Process executable path. Raises ProcessGone if dead, ProcessAccessDenied for kernel pids (0)."""
     return Path(psutil.Process(pid).exe())
 
 
 def terminate(pid: int) -> None:
-    """SIGTERM the process. Raises ProcessGone if already dead."""
+    """SIGTERM the process. Raises ProcessGone if already dead, ProcessAccessDenied for protected pids (1)."""
     psutil.Process(pid).terminate()
