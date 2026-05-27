@@ -261,7 +261,7 @@ wheels = [
 
 [[package]]
 name = "claude-remote-bash"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "mcp/claude-remote-bash" }
 dependencies = [
     { name = "cc-lib" },
@@ -284,7 +284,7 @@ requires-dist = [
 
 [[package]]
 name = "claude-session"
-version = "0.3.10"
+version = "0.3.11"
 source = { editable = "mcp/claude-session" }
 dependencies = [
     { name = "cc-lib" },

@@ -190,6 +190,16 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   the 1108-session corpus, and no `prompt` field in the binary's SendMessage
                   zod schema. (6) TeamCreateToolInput.agent_type (str | None) — assigned to
                   team lead at creation (e.g., 'team-lead').
+- Schema v0.2.35: Expanded ApiError.type and ApiErrorDetail.type literals to include
+                  'rate_limit_error' alongside the existing 'overloaded_error' — both the
+                  top-level ApiError.type (Claude Code 2.1.100+) and the nested
+                  ApiErrorDetail.type. HTTP 429 rate-limit responses populate both fields with
+                  'rate_limit_error', and the previous single-value Literal caused
+                  ApiErrorSystemRecord validation to fall through the
+                  ApiError | NetworkError | EmptyError union and land on BaseRecord (14
+                  union-cascade extra_forbidden errors per failing record). Empirically:
+                  108 outer + 108 inner 'rate_limit_error' occurrences across the local corpus;
+                  binary string verification confirmed 'rate_limit_error' in Claude Code 2.1.138.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -505,7 +515,7 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.34'
+SCHEMA_VERSION = '0.2.35'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
 CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.138')
 
@@ -1588,7 +1598,7 @@ class MicrocompactMetadata(StrictModel):
 class ApiErrorDetail(StrictModel):
     """Nested API error details."""
 
-    type: Literal['overloaded_error']  # Only value observed across all sessions
+    type: Literal['overloaded_error', 'rate_limit_error']
     message: str
 
 
@@ -1607,7 +1617,7 @@ class ApiError(StrictModel):
     headers: Mapping[str, str | Sequence[str]]
     requestID: str | None = None  # Can be null for some errors
     error: ApiErrorResponse | None = None  # Can be missing for some errors (e.g., 503)
-    type: Literal['overloaded_error'] | None = None  # Top-level error type (Claude Code 2.1.100+)
+    type: Literal['overloaded_error', 'rate_limit_error'] | None = None  # Top-level error type (Claude Code 2.1.100+)
 
 
 # noinspection PyShadowingBuiltins
