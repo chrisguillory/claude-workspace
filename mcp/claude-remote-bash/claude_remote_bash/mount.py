@@ -453,16 +453,24 @@ async def _kernel_has_mount_at(mountpoint: Path) -> bool:
         stderr=asyncio.subprocess.DEVNULL,
     )
     stdout, _ = await proc.communicate()
-    target = str(mountpoint).lower()
-    for line in stdout.decode('utf-8', errors='replace').splitlines():
-        # macOS mount(8) output: "src on dest (opts)"
-        _, _, after_on = line.partition(' on ')
-        if not after_on:
-            continue
-        dest = after_on.rpartition(' (')[0]
-        if dest.lower() == target:
-            return True
-    return False
+    target = str(mountpoint)
+    return any(_parse_mount_dest(line) == target for line in stdout.decode('utf-8', errors='replace').splitlines())
+
+
+def _parse_mount_dest(line: str) -> str | None:
+    """Extract the destination path from one ``/sbin/mount`` output line, or ``None`` if unparseable.
+
+    macOS ``mount(8)`` format: ``<src> on <dest> (<opts>)``. The src has no
+    spaces (always ``host:/path`` for NFS, ``/dev/...`` for block devices);
+    the dest can contain spaces, parens, and even the literal ``" on "``.
+    ``partition`` finds the first ``" on "`` (separating src from rest);
+    ``rpartition`` finds the trailing ``" ("`` (anchoring the opts blob).
+    """
+    _, _, after_on = line.partition(' on ')
+    if not after_on:
+        return None
+    dest, sep, _opts = after_on.rpartition(' (')
+    return dest if sep else None
 
 
 async def _run_umount(mountpoint: Path) -> tuple[int | None, str]:
