@@ -7,8 +7,8 @@ Provides:
     add_install_command         Register install/uninstall/completion subcommands (standalone scripts)
     add_completion_command      Register completion-only subcommands (uv tool install packages)
     add_help_command            Register a `help` subcommand for top-level / per-subcommand / recursive help
-    read_typer_format           Read the active command's --format parameter (for ErrorBoundary renderers)
     run_app                     Entry-point helper: derives prog_name from sys.argv[0]
+    with_json_envelope          Decorator: emit a JSON error envelope when --format=json
 """
 
 from __future__ import annotations
@@ -18,11 +18,12 @@ __all__ = [
     'add_help_command',
     'add_install_command',
     'create_app',
-    'read_typer_format',
     'run_app',
+    'with_json_envelope',
 ]
 
 import difflib
+import functools
 import os
 import re
 import sys
@@ -36,6 +37,7 @@ import typer
 import typer.completion
 import typer.main
 
+from cc_lib.schemas import ClosedModel
 from cc_lib.utils.atomic_write import atomic_write
 
 
@@ -275,26 +277,6 @@ def add_help_command(app: typer.Typer) -> None:
             typer.echo(root_ctx.get_help())
 
 
-def read_typer_format() -> str | None:
-    """Return the active typer command's ``--format`` parameter value, or ``None``.
-
-    Built for ``ErrorBoundary(format_resolver=...)`` — the boundary needs to
-    know what format the user asked for so it can pick a format-specific
-    renderer at exception-handling time. Click's per-invocation context
-    already holds bound parameters; this reads them.
-
-    Returns ``None`` when no command is active (e.g. import-time), no
-    ``--format`` parameter was bound, or the bound value isn't a string.
-    Callers (typically renderer registries) treat ``None`` as "no format
-    selected — use type-only handler fallback."
-    """
-    ctx = click.get_current_context(silent=True)
-    if ctx is None:
-        return None
-    fmt = ctx.params.get('format')
-    return fmt if isinstance(fmt, str) else None
-
-
 def run_app(app: typer.Typer) -> None:
     """Run the app with a clean prog_name derived from sys.argv[0].
 
@@ -302,6 +284,54 @@ def run_app(app: typer.Typer) -> None:
     launcher name regardless of invocation method.
     """
     app(prog_name=os.path.basename(sys.argv[0]).removesuffix('.py'))
+
+
+def with_json_envelope(
+    envelope_factory: Callable[[Exception], ClosedModel],
+) -> Callable[  # strict_typing_linter.py: loose-typing — generic decorator factory, return type must accept arbitrary callables
+    [Callable[..., Any]],
+    Callable[..., Any],
+]:
+    """Wrap a typer command so unhandled exceptions emit a JSON envelope on ``--format=json``.
+
+    Reads the ``format`` value from the typer command's bound kwargs (typer
+    binds parameter values as kwargs when invoking the wrapped function).
+    When ``format == 'json'``, calls ``envelope_factory(exc)``, emits its
+    camelCase JSON to stdout, and exits with code 1. For any other format —
+    including absence of ``--format`` — re-raises so an outer
+    ``@error_boundary`` (or any other layer) handles the exception unchanged.
+
+    Stack BELOW ``@error_boundary`` so JSON callers get JSON before the
+    boundary's text-format handlers fire::
+
+        @app.command(name='apply')
+        @error_boundary
+        @with_json_envelope(_apply_error_envelope)
+        def apply_cmd(..., format: OutputFormat = 'text') -> None: ...
+
+    The factory returns a ``ClosedModel`` per CLAUDE.md's "internal data we
+    construct" trust level — unknown fields are bugs in the envelope shape,
+    not forward-compat slack. Output goes through ``model_dump_json(by_alias=True)``
+    so the envelope's ``alias_generator=to_camel`` (or absence thereof) decides
+    the wire shape.
+    """
+
+    def decorator(
+        func: Callable[..., Any],  # strict_typing_linter.py: loose-typing — wraps an arbitrary typer command
+    ) -> Callable[..., Any]:  # strict_typing_linter.py: loose-typing — preserves the wrapped function's signature
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except Exception as exc:
+                if kwargs.get('format') == 'json':
+                    typer.echo(envelope_factory(exc).model_dump_json(by_alias=True))
+                    raise SystemExit(1) from exc
+                raise
+
+        return wrapper
+
+    return decorator
 
 
 class Pep695AliasPatcher:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, TextIO
 
 import typer
-from cc_lib.cli import add_completion_command, add_help_command, create_app, read_typer_format, run_app
+from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app, with_json_envelope
 from cc_lib.error_boundary import ErrorBoundary, render_recovery
 from cc_lib.exceptions import ResolvableError
 from cc_lib.schemas import ClosedModel
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 app = create_app(help='Multi-Mac audio topology orchestration over roc-vad + roc-toolkit.')
 add_completion_command(app)
 add_help_command(app)
-error_boundary = ErrorBoundary(exit_code=1, format_resolver=read_typer_format)
+error_boundary = ErrorBoundary(exit_code=1)
 
 # Must come AFTER create_app — that's what calls typer's completion_init() and
 # registers the default ZshComplete. Our override has to land last to win.
@@ -46,8 +46,48 @@ def main() -> None:
     run_app(app)
 
 
+class _ApplyErrorEnvelope(ClosedModel):
+    """Error-path JSON envelope matching ``ApplyResult``'s shape.
+
+    Same ``alias_generator=to_camel`` as ``ApplyResult`` so the wire shape is
+    structurally symmetric across success and failure paths. ``hosts`` is empty
+    on top-level (non-per-host) failures; the carried ``error`` is a
+    ``HostError`` mirroring the per-host outcome shape.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel)
+
+    hosts: Sequence[HostApplyOutcome]
+    overall_success: bool
+    error: HostError
+
+
+def _apply_error_envelope(exc: Exception) -> _ApplyErrorEnvelope:
+    """Build a JSON error envelope from any exception.
+
+    ``ResolvableError`` subclasses preserve all structured fields (``code``,
+    ``title``, ``suggestions``, ``docs_url``, ``context``) so machine consumers
+    can dispatch on ``code``. Plain exceptions surface as a message-only
+    ``HostError``. Pluggable via ``with_json_envelope`` on the apply command.
+    """
+    error = (
+        HostError(
+            message=str(exc),
+            code=exc.code,
+            title=exc.title,
+            suggestions=tuple(exc.suggestions),
+            docs_url=exc.docs_url,
+            context=dict(exc.context),
+        )
+        if isinstance(exc, ResolvableError)
+        else HostError(message=str(exc))
+    )
+    return _ApplyErrorEnvelope(overall_success=False, hosts=(), error=error)
+
+
 @app.command(name='apply')
 @error_boundary
+@with_json_envelope(_apply_error_envelope)
 def apply_cmd(
     target: Annotated[
         str,
@@ -126,22 +166,6 @@ def apply_cmd(
         _print_text(result)
 
     raise SystemExit(0 if result.overall_success else 1)
-
-
-class _ApplyErrorEnvelope(ClosedModel):
-    """Error-path JSON envelope matching ``ApplyResult``'s shape.
-
-    Same ``alias_generator=to_camel`` as ``ApplyResult`` so the wire shape is
-    structurally symmetric across success and failure paths. ``hosts`` is empty
-    on top-level (non-per-host) failures; the carried ``error`` is a
-    ``HostError`` mirroring the per-host outcome shape.
-    """
-
-    model_config = ConfigDict(alias_generator=to_camel)
-
-    hosts: Sequence[HostApplyOutcome]
-    overall_success: bool
-    error: HostError
 
 
 # Strip CSI escape sequences from log-file writes. Click/typer auto-color
@@ -250,8 +274,8 @@ def _configure_apply_logging() -> Path:
     return log_path
 
 
-@error_boundary.handler(ApplyError, format='text')
-def _handle_apply_error_text(exc: ApplyError) -> None:
+@error_boundary.handler(ApplyError)
+def _handle_apply_error(exc: ApplyError) -> None:
     """User-facing configuration / constraint violation — clean message, no traceback.
 
     For ``ResolvableApplyError`` (or any ApplyError that also subclasses
@@ -263,51 +287,16 @@ def _handle_apply_error_text(exc: ApplyError) -> None:
         render_recovery(exc)
 
 
-@error_boundary.handler(RemoteBashError, format='text')
-def _handle_dispatch_error_text(exc: RemoteBashError) -> None:
+@error_boundary.handler(RemoteBashError)
+def _handle_dispatch_error(exc: RemoteBashError) -> None:
     """Fallback: dispatch-layer failure that escaped the orchestrator's wrapping — print cleanly."""
     typer.echo(f'dispatch: {exc}', err=True)
 
 
-@error_boundary.handler(SelectorError, format='text')
-def _handle_selector_error_text(exc: SelectorError) -> None:
+@error_boundary.handler(SelectorError)
+def _handle_selector_error(exc: SelectorError) -> None:
     """``--target`` selector grammar / discovery-mismatch errors — clean message, no traceback."""
     typer.echo(f'target: {exc}', err=True)
-
-
-@error_boundary.handler(Exception, format='json')
-def _handle_exception_json(exc: Exception) -> None:
-    """Emit a JSON error envelope on stdout, mirroring ``ApplyResult``'s shape.
-
-    Per-format catch-all (registered for ``Exception``) so the JSON contract
-    holds across both the documented per-host failure types (``ApplyError`` /
-    ``RemoteBashError`` / ``SelectorError``) and unexpected types
-    (``KeyError``, ``OSError``, etc.) that would otherwise escape to the
-    boundary's default-handler prose-on-stderr path.
-
-    Goes through a Pydantic envelope model (rather than hand-built dict) so
-    the output stays structurally symmetric with the success path: same
-    camelCase aliases (``overallSuccess``, ``docsUrl``), same
-    ``Mapping[str, str]`` shape for ``context`` (empty dict, never null),
-    same Pydantic-validated types across both code paths. The
-    ``ResolvableError`` fields are carried as a nested ``HostError`` for
-    cross-path consistency; non-resolvable exceptions surface as a
-    message-only ``HostError``.
-    """
-    error = (
-        HostError(
-            message=str(exc),
-            code=exc.code,
-            title=exc.title,
-            suggestions=tuple(exc.suggestions),
-            docs_url=exc.docs_url,
-            context=dict(exc.context),
-        )
-        if isinstance(exc, ResolvableError)
-        else HostError(message=str(exc))
-    )
-    envelope = _ApplyErrorEnvelope(overall_success=False, hosts=(), error=error)
-    typer.echo(envelope.model_dump_json(by_alias=True))
 
 
 def _print_text(result: ApplyResult) -> None:
