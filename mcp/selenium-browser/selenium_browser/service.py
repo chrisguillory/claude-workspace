@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, cast
@@ -3720,17 +3720,15 @@ async def _install_request_log_if_needed(driver: webdriver.Chrome, service: Brow
 
 
 # Headers the browser/httpx will manage itself; never replay from the request log.
-_BROWSER_MANAGED_HEADERS: frozenset[str] = frozenset(
-    {
-        'host',
-        'connection',
-        'content-length',
-        'cookie',
-        'transfer-encoding',
-        'upgrade',
-        'expect',
-    }
-)
+_BROWSER_MANAGED_HEADERS: Set[str] = {
+    'host',
+    'connection',
+    'content-length',
+    'cookie',
+    'transfer-encoding',
+    'upgrade',
+    'expect',
+}
 
 # Per-request signature/digest patterns. Replaying these on a different request
 # either fails verification or, worse, silently authenticates a request we
@@ -3738,6 +3736,13 @@ _BROWSER_MANAGED_HEADERS: frozenset[str] = frozenset(
 _SIGNATURE_HEADER_PATTERN = re.compile(
     r'(?i)(^|-)(signature|hmac|digest)($|-)|^content-md5$|^x-amz-|^x-goog-',
 )
+
+# Headers tied to the OUTGOING request's purpose, not the inbound replay.
+# - Accept: SPAs typically set `application/json` framework-wide; download_resource
+#   wants binary, and httpx's default `*/*` is the universally-safe value.
+# - Content-Type: describes a request body. download_resource does GET — no body,
+#   so this is meaningless at best and triggers strict-server rejections at worst.
+_RESPONSE_NEGOTIATION_HEADERS: Set[str] = {'accept', 'content-type'}
 
 
 async def _query_download_request_log(driver: webdriver.Chrome, target_url: str) -> Mapping[str, str]:
@@ -3748,8 +3753,9 @@ async def _query_download_request_log(driver: webdriver.Chrome, target_url: str)
       2. Same origin only — most recent wins
       3. No match — empty mapping
 
-    Browser-managed and per-request-signature headers are stripped (see
-    _BROWSER_MANAGED_HEADERS and _SIGNATURE_HEADER_PATTERN).
+    Browser-managed, content-negotiation, and per-request-signature headers are
+    stripped (see _BROWSER_MANAGED_HEADERS, _RESPONSE_NEGOTIATION_HEADERS, and
+    _SIGNATURE_HEADER_PATTERN).
     """
     target = urlparse(target_url)
     target_origin = f'{target.scheme}://{target.netloc}'
@@ -3785,7 +3791,9 @@ async def _query_download_request_log(driver: webdriver.Chrome, target_url: str)
     return {
         name: value
         for name, value in raw.items()
-        if name.lower() not in _BROWSER_MANAGED_HEADERS and not _SIGNATURE_HEADER_PATTERN.search(name)
+        if name.lower() not in _BROWSER_MANAGED_HEADERS
+        and name.lower() not in _RESPONSE_NEGOTIATION_HEADERS
+        and not _SIGNATURE_HEADER_PATTERN.search(name)
     }
 
 
@@ -3800,20 +3808,41 @@ async def _download_with_browser_context(
     feature flags, traceparent). Browser-managed and per-request-signature headers
     are filtered out.
 
+    Sec-Fetch-* and Referer are spec-forbidden in fetch/XHR
+    (https://fetch.spec.whatwg.org/#forbidden-header-name), so the page can never
+    set them and they can never appear in the replay log. We add browser-realistic
+    defaults for them here so anti-bot layers (Cloudflare, Datadome) see a complete
+    request shape. Replay still wins for anything the page actually sets explicitly.
+
     Cookies (including HttpOnly) flow via `driver.get_cookies()`. Routes through
     mitmproxy when proxy is configured.
-
-    Empty-log fallback (e.g., download called before any in-page request fired):
-    fall back to extracting User-Agent and Referer the old way.
     """
-    headers = dict(await _query_download_request_log(driver, url))
+    replayed = dict(await _query_download_request_log(driver, url))
+    current_url = await asyncio.to_thread(lambda: driver.current_url)
 
-    if 'user-agent' not in {k.lower() for k in headers}:
-        # No log entry yet — fall back to the bare-minimum browser identity.
-        user_agent = await asyncio.to_thread(driver.execute_script, 'return navigator.userAgent')
-        current_url = await asyncio.to_thread(lambda: driver.current_url)
-        headers['User-Agent'] = user_agent
-        headers['Referer'] = current_url
+    target = urlparse(url)
+    page = urlparse(current_url)
+    sec_fetch_site = 'same-origin' if target.scheme == page.scheme and target.netloc == page.netloc else 'cross-site'
+
+    # Lowercase keys throughout — request_log.js stores captured headers
+    # lowercase, so mixing cases here would let two same-semantic keys
+    # (e.g., `Accept-Language` from defaults + `accept-language` from replay)
+    # land in the merged dict as separate entries and ship as duplicate
+    # headers on the wire.
+    defaults: dict[str, str] = {
+        'accept-language': 'en-US,en;q=0.9',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': sec_fetch_site,
+        'referer': current_url,
+    }
+    if 'user-agent' not in replayed:
+        defaults['user-agent'] = await asyncio.to_thread(
+            driver.execute_script,
+            'return navigator.userAgent',
+        )
+
+    headers = {**defaults, **replayed}
 
     selenium_cookies = await asyncio.to_thread(driver.get_cookies)
     jar = httpx.Cookies()

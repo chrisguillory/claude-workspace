@@ -44,6 +44,14 @@
         }
     }
 
+    // Lowercase header keys at the write boundary. HTTP/2 lowercases on the
+    // wire anyway, and consistent casing prevents two same-semantic keys
+    // (X-Tenant-Id vs x-tenant-id) from landing in the same captured dict on
+    // pages that mix XHR and fetch+Headers APIs.
+    function setHeader(map, name, value) {
+        map[String(name).toLowerCase()] = value;
+    }
+
     // =========================================================================
     // XMLHttpRequest Interception
     // =========================================================================
@@ -63,7 +71,7 @@
 
     XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
         if (this.__dlReqLog) {
-            this.__dlReqLog.headers[name] = value;
+            setHeader(this.__dlReqLog.headers, name, value);
         }
         return origXHRSetHeader.apply(this, arguments);
     };
@@ -89,7 +97,7 @@
         if (input instanceof Request) {
             url = input.url;
             method = (input.method || 'GET').toUpperCase();
-            input.headers.forEach(function(v, k) { headers[k] = v; });
+            input.headers.forEach(function(v, k) { setHeader(headers, k, v); });
         } else {
             url = String(input);
             method = (initObj.method || 'GET').toUpperCase();
@@ -97,15 +105,17 @@
 
         if (initObj.headers) {
             if (initObj.headers instanceof Headers) {
-                initObj.headers.forEach(function(v, k) { headers[k] = v; });
+                initObj.headers.forEach(function(v, k) { setHeader(headers, k, v); });
             } else if (Array.isArray(initObj.headers)) {
                 for (const pair of initObj.headers) {
                     if (pair && pair.length >= 2) {
-                        headers[pair[0]] = pair[1];
+                        setHeader(headers, pair[0], pair[1]);
                     }
                 }
             } else {
-                Object.assign(headers, initObj.headers);
+                for (const k of Object.keys(initObj.headers)) {
+                    setHeader(headers, k, initObj.headers[k]);
+                }
             }
         }
 
