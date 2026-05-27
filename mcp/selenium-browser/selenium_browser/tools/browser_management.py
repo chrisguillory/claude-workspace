@@ -64,7 +64,8 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         come from the live Selenium session.
 
         PREREQUISITE: Call navigate() first. The request log is populated at navigate
-        time; before that, the tool falls back to bare User-Agent + Referer.
+        time; before that, the tool falls back to browser-realistic defaults
+        (User-Agent, Referer, Accept-Language, Sec-Fetch-Dest/Mode/Site).
 
         Args:
             url: Full URL to resource (http:// or https://) or file:// for local files.

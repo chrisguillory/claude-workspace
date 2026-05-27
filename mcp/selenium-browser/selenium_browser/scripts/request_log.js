@@ -48,8 +48,14 @@
     // wire anyway, and consistent casing prevents two same-semantic keys
     // (X-Tenant-Id vs x-tenant-id) from landing in the same captured dict on
     // pages that mix XHR and fetch+Headers APIs.
+    //
+    // Repeated sets for the same header combine values with `, ` per the XHR
+    // spec (https://xhr.spec.whatwg.org/#the-setrequestheader()-method): two
+    // setRequestHeader('Accept', ...) calls produce `Accept: A, B` on the wire,
+    // not just the last value.
     function setHeader(map, name, value) {
-        map[String(name).toLowerCase()] = value;
+        const key = String(name).toLowerCase();
+        map[key] = key in map ? map[key] + ', ' + value : value;
     }
 
     // =========================================================================
@@ -97,7 +103,12 @@
         if (input instanceof Request) {
             url = input.url;
             method = (input.method || 'GET').toUpperCase();
-            input.headers.forEach(function(v, k) { setHeader(headers, k, v); });
+            // Per Fetch spec, init.headers REPLACES a Request's headers (does
+            // not merge) — only capture input.headers when init doesn't carry
+            // its own.
+            if (!initObj.headers) {
+                input.headers.forEach(function(v, k) { setHeader(headers, k, v); });
+            }
         } else {
             url = String(input);
             method = (initObj.method || 'GET').toUpperCase();
@@ -107,6 +118,15 @@
             if (initObj.headers instanceof Headers) {
                 initObj.headers.forEach(function(v, k) { setHeader(headers, k, v); });
             } else if (Array.isArray(initObj.headers)) {
+                for (const pair of initObj.headers) {
+                    if (pair && pair.length >= 2) {
+                        setHeader(headers, pair[0], pair[1]);
+                    }
+                }
+            } else if (typeof initObj.headers[Symbol.iterator] === 'function') {
+                // Map (or other iterable of [k, v] pairs) — valid HeadersInit
+                // per WebIDL. Object.keys() returns [] for Map because entries
+                // live in [[MapData]], not own enumerable properties.
                 for (const pair of initObj.headers) {
                     if (pair && pair.length >= 2) {
                         setHeader(headers, pair[0], pair[1]);

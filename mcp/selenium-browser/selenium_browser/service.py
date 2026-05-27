@@ -609,7 +609,8 @@ class BrowserService:
         mitmproxy when proxy is configured.
 
         PREREQUISITE: Call navigate() first. The request log is populated at navigate
-        time; before that, the tool falls back to bare User-Agent + Referer.
+        time; before that, the tool falls back to browser-realistic defaults
+        (User-Agent, Referer, Accept-Language, Sec-Fetch-Dest/Mode/Site).
 
         Args:
             url: Full URL to resource (http:// or https://) or file:// for local files.
@@ -3720,6 +3721,10 @@ async def _install_request_log_if_needed(driver: webdriver.Chrome, service: Brow
 
 
 # Headers the browser/httpx will manage itself; never replay from the request log.
+# Includes Fetch-spec forbidden headers (Referer, Origin, Sec-*) — request_log.js
+# captures page-attempted setRequestHeader calls before the browser silently
+# drops them on the wire, so the captured value would otherwise leak into the
+# httpx call and override our computed defaults.
 _BROWSER_MANAGED_HEADERS: Set[str] = {
     'host',
     'connection',
@@ -3728,7 +3733,14 @@ _BROWSER_MANAGED_HEADERS: Set[str] = {
     'transfer-encoding',
     'upgrade',
     'expect',
+    'referer',
+    'origin',
 }
+
+# Sec-* family is forbidden per Fetch spec (Sec-Fetch-*, Sec-WebSocket-*,
+# Sec-CH-*). Browser sets these; page-attempted values that reach the log
+# shouldn't override our defaults.
+_FORBIDDEN_SEC_HEADER_PATTERN = re.compile(r'(?i)^sec-')
 
 # Per-request signature/digest patterns. Replaying these on a different request
 # either fails verification or, worse, silently authenticates a request we
@@ -3737,12 +3749,53 @@ _SIGNATURE_HEADER_PATTERN = re.compile(
     r'(?i)(^|-)(signature|hmac|digest)($|-)|^content-md5$|^x-amz-|^x-goog-',
 )
 
+# AWS SigV4, GCS HMAC, and Azure SharedKey carry the signature inside the
+# Authorization value, not as a separate header — so name-based stripping
+# misses them. Replaying these on a different URL fails verification (403
+# SignatureDoesNotMatch). Bearer/Basic/Token-style auth uses different
+# scheme prefixes and is safe to replay.
+_SIGNATURE_AUTH_SCHEME_PATTERN = re.compile(r'(?i)^(AWS4-HMAC|GOOG4-HMAC|SharedKey\s)')
+
 # Headers tied to the OUTGOING request's purpose, not the inbound replay.
 # - Accept: SPAs typically set `application/json` framework-wide; download_resource
 #   wants binary, and httpx's default `*/*` is the universally-safe value.
 # - Content-Type: describes a request body. download_resource does GET — no body,
 #   so this is meaningless at best and triggers strict-server rejections at worst.
 _RESPONSE_NEGOTIATION_HEADERS: Set[str] = {'accept', 'content-type'}
+
+# Headers that scope a request to a subset of the full resource (byte range,
+# ETag/timestamp precondition). Replaying these produces 206 Partial Content
+# or 304 Not Modified — neither is a full download, but both pass the
+# `status >= 400` check and would be written to disk and reported as success.
+# Strip from replay so download_resource always fetches the whole resource.
+_REQUEST_SCOPING_HEADERS: Set[str] = {
+    'range',
+    'if-match',
+    'if-none-match',
+    'if-modified-since',
+    'if-unmodified-since',
+    'if-range',
+}
+
+_DEFAULT_PORTS: Mapping[str, int] = {'http': 80, 'https': 443}
+
+
+def _canonicalize_url(url: str) -> tuple[str, str, str]:
+    """Return (scheme, netloc, path) with WHATWG-style URL normalization.
+
+    Mirrors what `new URL(url, base).href` does in request_log.js so origin/path
+    comparisons against the JS-normalized log entries don't silently miss on
+    superficial differences:
+      - hostname lowercased
+      - default ports (80/443 for http/https) stripped
+      - naked-origin path defaults to '/'
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or '').lower()
+    port = parsed.port if parsed.port is not None and parsed.port != _DEFAULT_PORTS.get(parsed.scheme) else None
+    netloc = f'{host}:{port}' if port else host
+    path = parsed.path or '/'
+    return parsed.scheme, netloc, path
 
 
 async def _query_download_request_log(driver: webdriver.Chrome, target_url: str) -> Mapping[str, str]:
@@ -3753,13 +3806,15 @@ async def _query_download_request_log(driver: webdriver.Chrome, target_url: str)
       2. Same origin only — most recent wins
       3. No match — empty mapping
 
-    Browser-managed, content-negotiation, and per-request-signature headers are
-    stripped (see _BROWSER_MANAGED_HEADERS, _RESPONSE_NEGOTIATION_HEADERS, and
-    _SIGNATURE_HEADER_PATTERN).
+    Stripped from replay: browser-managed (`_BROWSER_MANAGED_HEADERS`),
+    content-negotiation (`_RESPONSE_NEGOTIATION_HEADERS`), request-scoping
+    Range/If-* (`_REQUEST_SCOPING_HEADERS`), per-request signature name
+    patterns (`_SIGNATURE_HEADER_PATTERN`), the Sec-* forbidden family
+    (`_FORBIDDEN_SEC_HEADER_PATTERN`), and Authorization values that begin
+    with a per-request signing scheme (`_SIGNATURE_AUTH_SCHEME_PATTERN`).
     """
-    target = urlparse(target_url)
-    target_origin = f'{target.scheme}://{target.netloc}'
-    target_path = target.path
+    target_scheme, target_netloc, target_path = _canonicalize_url(target_url)
+    target_origin = f'{target_scheme}://{target_netloc}'
 
     entries = await asyncio.to_thread(
         driver.execute_script,
@@ -3775,14 +3830,19 @@ async def _query_download_request_log(driver: webdriver.Chrome, target_url: str)
         entry_url = entry.get('url', '')
         if not entry_url:
             continue
-        parsed = urlparse(entry_url)
-        entry_origin = f'{parsed.scheme}://{parsed.netloc}'
-        if entry_origin != target_origin:
+        entry_scheme, entry_netloc, entry_path = _canonicalize_url(entry_url)
+        if f'{entry_scheme}://{entry_netloc}' != target_origin:
             continue
         headers = entry.get('headers') or {}
+        # Skip entries with no page-set headers (vanilla fetch() with no init,
+        # analytics beacons, image preloads) — locking onto them would mask
+        # older rich-header entries from SPA HttpInterceptors and silently
+        # regress replay to bare defaults.
+        if not headers:
+            continue
         if same_origin is None:
             same_origin = headers
-        if parsed.path == target_path:
+        if entry_path == target_path:
             same_path = headers
             break
 
@@ -3793,7 +3853,10 @@ async def _query_download_request_log(driver: webdriver.Chrome, target_url: str)
         for name, value in raw.items()
         if name.lower() not in _BROWSER_MANAGED_HEADERS
         and name.lower() not in _RESPONSE_NEGOTIATION_HEADERS
+        and name.lower() not in _REQUEST_SCOPING_HEADERS
         and not _SIGNATURE_HEADER_PATTERN.search(name)
+        and not _FORBIDDEN_SEC_HEADER_PATTERN.match(name)
+        and not (name.lower() == 'authorization' and _SIGNATURE_AUTH_SCHEME_PATTERN.match(value))
     }
 
 
@@ -3820,9 +3883,9 @@ async def _download_with_browser_context(
     replayed = dict(await _query_download_request_log(driver, url))
     current_url = await asyncio.to_thread(lambda: driver.current_url)
 
-    target = urlparse(url)
-    page = urlparse(current_url)
-    sec_fetch_site = 'same-origin' if target.scheme == page.scheme and target.netloc == page.netloc else 'cross-site'
+    target_scheme, target_netloc, _ = _canonicalize_url(url)
+    page_scheme, page_netloc, _ = _canonicalize_url(current_url)
+    sec_fetch_site = 'same-origin' if target_scheme == page_scheme and target_netloc == page_netloc else 'cross-site'
 
     # Lowercase keys throughout — request_log.js stores captured headers
     # lowercase, so mixing cases here would let two same-semantic keys
