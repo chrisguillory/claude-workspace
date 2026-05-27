@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated
 
 import httpx
+import pydantic
 import typer
 from cc_lib.claude_context import ClaudeContext
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
@@ -27,6 +28,7 @@ from ..models import (
     ScrollDirection,
     ScrollPosition,
     WaitForSelectorState,
+    WindowSize,
 )
 from ..wire import OnErrorPolicy
 
@@ -48,11 +50,26 @@ def navigate(
     init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')
     ] = None,
+    width: Annotated[
+        int | None, typer.Option('--width', help='Initial window width in pixels (requires --height).')
+    ] = None,
+    height: Annotated[
+        int | None, typer.Option('--height', help='Initial window height in pixels (requires --width).')
+    ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Navigate to a URL."""
+    if (width is None) != (height is None):
+        raise typer.BadParameter('--width and --height must be passed together (or neither).')
+    window_size = WindowSize(width=width, height=height) if width is not None and height is not None else None
     result = _call_tool(
-        'navigate', url=url, fresh_browser=fresh, browser=browser, enable_har_capture=har, init_scripts=init_script
+        'navigate',
+        url=url,
+        fresh_browser=fresh,
+        browser=browser,
+        enable_har_capture=har,
+        init_scripts=init_script,
+        window_size=window_size,
     )
     _print_result(result, format)
 
@@ -286,9 +303,18 @@ def navigate_with_profile_state(
     init_script: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str] | None, typer.Option('--init-script', help='JS to inject before page load (repeatable).')
     ] = None,
+    width: Annotated[
+        int | None, typer.Option('--width', help='Initial window width in pixels (requires --height).')
+    ] = None,
+    height: Annotated[
+        int | None, typer.Option('--height', help='Initial window height in pixels (requires --width).')
+    ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Navigate with imported profile state (cookies, localStorage)."""
+    if (width is None) != (height is None):
+        raise typer.BadParameter('--width and --height must be passed together (or neither).')
+    window_size = WindowSize(width=width, height=height) if width is not None and height is not None else None
     result = _call_tool(
         'navigate_with_profile_state',
         url=url,
@@ -299,6 +325,7 @@ def navigate_with_profile_state(
         browser=browser,
         enable_har_capture=har,
         init_scripts=init_script,
+        window_size=window_size,
     )
     _print_result(result, format)
 
@@ -356,7 +383,7 @@ def resize_window(
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Resize the browser window."""
-    result = _call_tool('resize_window', width=width, height=height)
+    result = _call_tool('resize_window', window_size=WindowSize(width=width, height=height))
     _print_result(result, format)
 
 
@@ -579,14 +606,22 @@ def _get_socket_path() -> pathlib.Path:
     return sock
 
 
+def _serialize_param(value: object) -> object:
+    """Convert Pydantic BaseModel values to plain dicts for JSON serialization."""
+    if isinstance(value, pydantic.BaseModel):
+        return value.model_dump(mode='json')
+    return value
+
+
 def _call_tool(tool: str, **params: object) -> object:
     """Call a single tool via the HTTP bridge."""
     socket_path = _get_socket_path()
     transport = httpx.HTTPTransport(uds=socket_path.as_posix())
+    serialized = {k: _serialize_param(v) for k, v in params.items() if v is not None}
     with httpx.Client(transport=transport, timeout=120.0) as client:
         response = client.post(
             'http://localhost/tool',
-            json={'tool': tool, 'params': {k: v for k, v in params.items() if v is not None}},
+            json={'tool': tool, 'params': serialized},
         )
         response.raise_for_status()
         return response.json()

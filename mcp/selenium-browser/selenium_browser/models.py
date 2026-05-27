@@ -45,7 +45,6 @@ __all__ = [
     'ProfileStateOriginStorage',
     'ProxyConfig',
     'RequestTiming',
-    'ResizeWindowResult',
     'ResourceCapture',
     'SameSitePolicy',
     'SaveProfileStateResult',
@@ -56,6 +55,7 @@ __all__ = [
     'TTFBPhases',
     'WaitForSelectorResult',
     'WebVitalMetric',
+    'WindowSize',
 ]
 
 from collections.abc import Mapping, Sequence
@@ -509,6 +509,13 @@ class HARExportResult(ClosedModel):
     errors: Sequence[str] = []
 
 
+class WindowSize(ClosedModel):
+    """Browser window dimensions in CSS pixels."""
+
+    width: int = pydantic.Field(gt=0, description='Window width in pixels.')
+    height: int = pydantic.Field(gt=0, description='Window height in pixels.')
+
+
 class NavigationResult(ClosedModel):
     """Result of navigation operation."""
 
@@ -516,6 +523,7 @@ class NavigationResult(ClosedModel):
     title: str
     resources: ResourceCapture | None = None
     elapsed_seconds: float | None = None  # Time taken for the operation in seconds
+    window_size: WindowSize | None = None  # Actual driver window size after launch (post OS clamping)
 
 
 class InteractiveElement(ClosedModel):
@@ -819,13 +827,6 @@ class WaitForSelectorResult(ClosedModel):
     elapsed_ms: int
     element_count: int | None = None
     reason: str | None = None
-
-
-class ResizeWindowResult(ClosedModel):
-    """Result of resize_window tool."""
-
-    width: int
-    height: int
 
 
 class ProxyConfig(ClosedModel):

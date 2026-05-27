@@ -12,6 +12,7 @@ from mcp.types import ToolAnnotations
 from ..models import (
     Browser,
     NavigationResult,
+    WindowSize,
 )
 from ..service import BrowserService
 
@@ -32,6 +33,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         fresh_browser: bool = False,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
         browser: Browser | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -47,6 +49,11 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
+            window_size: Optional initial window dimensions (WindowSize(width=..., height=...)).
+                        Requires fresh_browser=True; raises ValidationError otherwise (use
+                        resize_window() to change size mid-session). When omitted, Chrome uses
+                        its native default size. On macOS the OS may clamp width to ~500px
+                        minimum; actual size is reflected in the returned NavigationResult.window_size.
             browser: Which browser to use - "chrome" or "chromium". Defaults to the currently
                     running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when
@@ -97,6 +104,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             fresh_browser=fresh_browser,
             enable_har_capture=enable_har_capture,
             init_scripts=init_scripts,
+            window_size=window_size,
             browser=browser,
         )
 
@@ -119,6 +127,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
     ) -> NavigationResult:
         """Launch fresh browser with imported profile state and navigate.
 
@@ -151,6 +160,9 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
                 your personal Chrome is running (different bundle ID).
             enable_har_capture: Enable performance logging for HAR export
             init_scripts: JavaScript to inject before every page load
+            window_size: Optional initial window dimensions (WindowSize(width=..., height=...)).
+                Applied at fresh-browser launch only. On macOS, OS may clamp width to ~500px;
+                actual size is reflected in NavigationResult.window_size.
 
         Returns:
             NavigationResult with current_url and title
@@ -179,6 +191,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             browser=browser,
             enable_har_capture=enable_har_capture,
             init_scripts=init_scripts,
+            window_size=window_size,
         )
 
     @mcp.tool(
@@ -195,6 +208,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
     ) -> NavigationResult:
         """Launch fresh browser using a persistent --user-data-dir and navigate.
 
@@ -240,6 +254,10 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
                 of a directory silently breaks cookie decryption.
             enable_har_capture: Enable performance logging for HAR export.
             init_scripts: JavaScript to inject before every page load.
+            window_size: Optional initial window dimensions (WindowSize(width=..., height=...)).
+                Applied at fresh-browser launch, overriding any persisted window geometry in
+                user_data_dir. On macOS, OS may clamp width to ~500px; actual size is
+                reflected in NavigationResult.window_size.
 
         Returns:
             NavigationResult with current_url and title
@@ -261,4 +279,5 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             browser=browser,
             enable_har_capture=enable_har_capture,
             init_scripts=init_scripts,
+            window_size=window_size,
         )
