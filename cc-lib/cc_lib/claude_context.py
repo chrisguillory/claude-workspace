@@ -25,6 +25,7 @@ __all__ = [
     'ClaudeContext',
     'cached_sessions_by_pid',
     'find_claude_pid',
+    'in_claude_code',
     'lookup_active_session_by_pid',
     'lookup_session_by_id',
 ]
@@ -97,6 +98,18 @@ class ClaudeContext:
             f'ClaudeContext(session_id={self.session_id!r}, '
             f'claude_pid={self.claude_pid}, project_dir={str(self.project_dir)!r})'
         )
+
+
+def in_claude_code() -> bool:
+    """True iff this process was launched inside a Claude Code session.
+
+    Claude Code sets ``CLAUDECODE=1`` on every command it invokes — Bash-tool
+    subprocesses, hooks, MCP server starts, anywhere a child process can see
+    inherited env. Consumers use this to choose context-appropriate behavior
+    (e.g., an error renderer might emit an agent-engagement hint when set, a
+    user-facing CTA otherwise).
+    """
+    return os.environ.get('CLAUDECODE') == '1'
 
 
 def find_claude_pid() -> int:

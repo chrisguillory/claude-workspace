@@ -1,0 +1,29 @@
+[project]
+name = "claude-remote-audio"
+version = "0.2.0"
+description = "Multi-Mac audio topology orchestration over roc-vad + roc-toolkit"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "cc-lib",
+    "claude-remote-bash",
+    "pydantic>=2.12.0",
+    "typer>=0.20.0",
+]
+
+[project.scripts]
+claude-remote-audio = "claude_remote_audio.cli.main:main"
+
+[tool.uv.sources]
+cc-lib = { workspace = true }
+claude-remote-bash = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["claude_remote_audio/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
