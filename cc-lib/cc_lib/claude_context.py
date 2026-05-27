@@ -41,7 +41,7 @@ class ClaudeContext:
     Wraps the persisted Session record from sessions.json and the verified
     ClaudeProcess for the owning Claude binary. Convenience accessors lift the
     most-read fields up; consumers needing other Session fields read
-    ``ctx.session.<field>`` directly.
+    ``claude_context.session.<field>`` directly.
     """
 
     __slots__ = ('_claude_process', '_claude_version', '_session')
@@ -58,8 +58,8 @@ class ClaudeContext:
     @classmethod
     def from_pid_walk(cls) -> ClaudeContext:
         """Long-running-process context. Walks parent tree, codesign-verifies."""
-        process = find_claude_process()
-        return cls(lookup_active_session_by_pid(process.pid), process)
+        claude_process = find_claude_process()
+        return cls(lookup_active_session_by_pid(claude_process.pid), claude_process)
 
     def __init__(self, session: Session, claude_process: ClaudeProcess) -> None:
         if session.state != 'active':

@@ -50,10 +50,10 @@ def main() -> None:
         encoded_from_cwd = '-' + encoded_from_cwd
     encoding_matches = encoded_project == encoded_from_cwd
 
-    process = find_claude_process()
-    claude_pid = process.pid
-    claude_version = CCVersion(process.exe_path().name)
-    process_created_at = process.created_at.astimezone()
+    claude_process = find_claude_process()
+    claude_pid = claude_process.pid
+    claude_version = CCVersion(claude_process.exe_path().name)
+    process_created_at = claude_process.created_at.astimezone()
 
     # Extract parent_id from first line of transcript
     parent_id = _extract_parent_id(Path(hook_data.transcript_path))
