@@ -200,6 +200,16 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   union-cascade extra_forbidden errors per failing record). Empirically:
                   108 outer + 108 inner 'rate_limit_error' occurrences across the local corpus;
                   binary string verification confirmed 'rate_limit_error' in Claude Code 2.1.138.
+- Schema v0.2.36: Added HookCancelledAttachment for the 'hook_cancelled' attachment type emitted
+                  when a hook is aborted before completion (observed in JSONL on Stop-hook
+                  cancellation paths). Shape mirrors HookNonBlockingErrorAttachment minus the
+                  stdout/stderr/exitCode trio that an unfinished hook can't produce: type,
+                  hookName, toolUseID, hookEvent, command, durationMs (all required; 6/6 fields
+                  present across observed records). Without this variant the AttachmentRecord
+                  discriminated union rejects the record with union_tag_invalid, breaking
+                  save_current_session / clone / archive for any session containing a cancelled
+                  hook. Binary verification: 15 'hook_cancelled' occurrences in Claude Code 2.1.138,
+                  16 in 2.1.77, 0 in 1.0.50 (introduced pre-2.1.77; exact version not pinned).
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -360,6 +370,7 @@ __all__ = [
     'HookAdditionalContextAttachment',
     'HookBlockingErrorAttachment',
     'HookBlockingErrorData',
+    'HookCancelledAttachment',
     'HookInfo',
     'HookNonBlockingErrorAttachment',
     'HookProgressData',
@@ -515,7 +526,7 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.35'
+SCHEMA_VERSION = '0.2.36'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
 CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.138')
 
@@ -3314,6 +3325,17 @@ class HookNonBlockingErrorAttachment(StrictModel):
     durationMs: int
 
 
+class HookCancelledAttachment(StrictModel):
+    """Hook execution was cancelled (e.g., aborted before completion)."""
+
+    type: Literal['hook_cancelled']
+    hookName: str
+    toolUseID: str
+    hookEvent: str
+    command: str
+    durationMs: int
+
+
 class HookAdditionalContextAttachment(StrictModel):
     """Hook returned additional context to inject into the conversation."""
 
@@ -3585,6 +3607,7 @@ AttachmentData = Annotated[
     | HookSuccessAttachment
     | HookBlockingErrorAttachment
     | HookNonBlockingErrorAttachment
+    | HookCancelledAttachment
     | HookAdditionalContextAttachment
     | QueuedCommandAttachment
     | DynamicSkillAttachment

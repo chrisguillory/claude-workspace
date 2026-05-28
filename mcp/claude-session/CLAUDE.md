@@ -50,6 +50,7 @@ Records with `type='attachment'` (discriminated by `attachment.type` field). Att
 | `hook_success` | Hook executed successfully — stdout/exit injected (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `content`, `stdout`, `stderr`, `exitCode`, `command`, `durationMs` |
 | `hook_blocking_error` | Hook returned a blocking error; tool execution halted (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `blockingError` |
 | `hook_non_blocking_error` | Hook returned a non-blocking error; tool continued (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `stderr`, `stdout`, `exitCode`, `command`, `durationMs` |
+| `hook_cancelled` | Hook execution was cancelled before completion (v0.2.36) | `hookName`, `toolUseID`, `hookEvent`, `command`, `durationMs` |
 | `hook_additional_context` | Hook returned context to inject into the conversation (v0.2.22) | `content` (str \| Sequence[str]), `hookName`, `toolUseID`, `hookEvent` |
 | `queued_command` | User command queued while Claude was working (v0.2.22) | `prompt` (str \| Sequence), `commandMode`, `imagePasteIds` |
 | `dynamic_skill` | Skill discovered at a non-default location (v0.2.22) | `skillDir`, `skillNames`, `displayPath` |
