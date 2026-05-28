@@ -198,6 +198,26 @@ filterwarnings = [
 
 [tool.exception-safety-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
+# Pre-existing pickle bugs surfaced by EXC010 init-not-pickleable. Each file
+# has Exception subclasses with custom __init__ that don't propagate args
+# verbatim to super(), so pickle.loads(pickle.dumps(exc)) either double-suffixes
+# the message or raises TypeError. Fixed file-by-file in follow-up PRs (add
+# __reduce__ to each class) — remove the entry when the file's classes are
+# repaired. See flake8-bugbear B042 docs + ruff issue #8579 for upstream context.
+"cc-lib/cc_lib/exceptions.py" = ["init-not-pickleable"]
+"mcp/claude-session/claude_session/exceptions.py" = ["init-not-pickleable"]
+"mcp/document-search/document_search/clients/openrouter_errors.py" = ["init-not-pickleable"]
+"mcp/imessage-kit/imessage_kit/db.py" = ["init-not-pickleable"]
+"mcp/selenium-browser/selenium_browser/applescript_session_storage.py" = ["init-not-pickleable"]
+"scripts/claude-binary-patcher.py" = ["init-not-pickleable"]
+"scripts/claude-session-patcher.py" = ["init-not-pickleable"]
+"scripts/claude-version-manager.py" = ["init-not-pickleable"]
+"scripts/statusline.py" = ["init-not-pickleable"]
+"scripts/toggle-ask-before-auto-approval.py" = ["init-not-pickleable"]
+# Test fixture: exception class with intentional non-passthrough __init__ for
+# library-boundary translation tests. Not a candidate for __reduce__ since the
+# class exists only as a test target.
+"tests/cc_lib/test_library_boundary.py" = ["init-not-pickleable"]
 
 [tool.reexport-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]

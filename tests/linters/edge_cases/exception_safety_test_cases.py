@@ -826,3 +826,122 @@ async def task_b() -> None:
 def validate(item: str) -> bool:
     """Placeholder for validation."""
     return True
+
+
+# -- EXC010: init-not-pickleable ---------------------------------------------
+
+
+def exc010_violation_kw_only() -> None:
+    """Triggers EXC010: kw-only init args can't survive pickle's positional reconstruction."""
+
+    class KwOnlyError(Exception):
+        def __init__(self, *, name: str) -> None:
+            super().__init__(name)
+            self.name = name
+
+    raise KwOnlyError(name='x')
+
+
+def exc010_violation_kwargs() -> None:
+    """Triggers EXC010: **kwargs in init can't survive pickle round-trip."""
+
+    class KwargsError(Exception):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__('error')
+            self.kwargs = kwargs
+
+    raise KwargsError(x=1)
+
+
+def exc010_violation_transformed_message() -> None:
+    """Triggers EXC010: super() receives a derived value, not the raw param.
+
+    This is the most common workspace bug pattern — arg count matches but pickle
+    reconstructs by calling cls(formatted_message), interpreting the formatted
+    string as the original var.
+    """
+
+    class TransformedError(Exception):
+        def __init__(self, var_name: str) -> None:
+            super().__init__(f'{var_name} is broken')
+            self.var_name = var_name
+
+    raise TransformedError('FOO')
+
+
+def exc010_violation_arg_count_mismatch() -> None:
+    """Triggers EXC010: __init__ drops one of its params before calling super()."""
+
+    class MismatchError(Exception):
+        def __init__(self, code: int, detail: str) -> None:
+            super().__init__(code)
+            self.code = code
+            self.detail = detail
+
+    raise MismatchError(1, 'bad')
+
+
+def exc010_violation_no_super_call() -> None:
+    """Triggers EXC010: __init__ has params but never calls super().__init__()."""
+
+    class NoSuperError(Exception):
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+    raise NoSuperError(42)
+
+
+def exc010_correct_passthrough() -> None:
+    """No EXC010: __init__ passes its only param verbatim to super()."""
+
+    class PassError(Exception):
+        def __init__(self, msg: str) -> None:
+            super().__init__(msg)
+            self.msg = msg
+
+    raise PassError('error')
+
+
+def exc010_correct_multi_passthrough() -> None:
+    """No EXC010: __init__ passes all params verbatim, in order, to super()."""
+
+    class MultiError(Exception):
+        def __init__(self, code: int, detail: str) -> None:
+            super().__init__(code, detail)
+            self.code = code
+            self.detail = detail
+
+    raise MultiError(1, 'bad')
+
+
+def exc010_correct_with_reduce() -> None:
+    """No EXC010: class defines __reduce__ as the explicit pickle escape hatch."""
+
+    class ReduceError(Exception):
+        def __init__(self, var_name: str) -> None:
+            super().__init__(f'{var_name} broken')
+            self.var_name = var_name
+
+        def __reduce__(self) -> tuple[type[ReduceError], tuple[str]]:
+            return (self.__class__, (self.var_name,))
+
+    raise ReduceError('FOO')
+
+
+def exc010_correct_no_init() -> None:
+    """No EXC010: class doesn't define __init__ at all (inherits Exception's)."""
+
+    class BareError(Exception):
+        pass
+
+    raise BareError('test')
+
+
+def exc010_correct_vararg_passthrough() -> None:
+    """No EXC010: super() receives the vararg as a starred unpack."""
+
+    class VarargError(Exception):
+        def __init__(self, *args: object) -> None:
+            super().__init__(*args)
+
+    raise VarargError(1, 2, 3)

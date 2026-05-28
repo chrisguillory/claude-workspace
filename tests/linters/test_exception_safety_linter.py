@@ -64,6 +64,12 @@ EXPECTED_VIOLATIONS: ViolationMap = {
     'exc007_violation_return_in_worker': {'EXC007'},
     # EXC008: GeneratorExit not raised
     'exc008_violation_basic': {'EXC008'},
+    # EXC010: init-not-pickleable
+    'exc010_violation_kw_only': {'EXC010'},
+    'exc010_violation_kwargs': {'EXC010'},
+    'exc010_violation_transformed_message': {'EXC010'},
+    'exc010_violation_arg_count_mismatch': {'EXC010'},
+    'exc010_violation_no_super_call': {'EXC010'},
 }
 
 # Functions with suppression directives (should NOT appear in linter output)

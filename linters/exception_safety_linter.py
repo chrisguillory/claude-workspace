@@ -18,6 +18,7 @@ Rules:
     EXC006 logger-no-exc-info       Logger error/warning calls in except without exc_info
     EXC007 cancelled-not-raised     CancelledError caught but not re-raised in async
     EXC008 generator-exit-not-raised GeneratorExit caught but not re-raised in generator
+    EXC010 init-not-pickleable     Exception subclass __init__ breaks pickle round-trip (see EXC010 docstring)
 
 Escape hatches (inline suppression):
     # exception_safety_linter.py: skip-file
@@ -142,6 +143,22 @@ LOGGER_ERROR_METHODS: Set[str] = {
     'warn',
 }
 
+# Suffixes that mark a class as an exception subclass (heuristic match on class name
+# or any direct base name). Mirrors flake8-bugbear B042's classification.
+# Stored as a tuple literal so it can be passed directly to ``str.endswith``.
+EXCEPTION_NAME_SUFFIXES = ('Exception', 'Error', 'Warning', 'ExceptionGroup')
+
+# Pickle-protocol dunders. Defining any of these is treated as the escape hatch
+# for EXC010 — the class has explicitly taken responsibility for pickle behavior.
+PICKLE_DUNDERS: Set[str] = {
+    '__reduce__',
+    '__reduce_ex__',
+    '__getstate__',
+    '__setstate__',
+    '__getnewargs__',
+    '__getnewargs_ex__',
+}
+
 # -- Data Types ---------------------------------------------------------------
 
 # Violation kind - used as directive codes and internal identifiers
@@ -155,6 +172,7 @@ type ViolationKind = Literal[
     'cancelled-not-raised',
     'generator-exit-not-raised',
     'unused-directive',
+    'init-not-pickleable',
 ]
 
 # Maps kind to error code for display
@@ -168,6 +186,7 @@ ERROR_CODES: Mapping[ViolationKind, ErrorCode] = {
     'cancelled-not-raised': 'EXC007',
     'generator-exit-not-raised': 'EXC008',
     'unused-directive': 'EXC009',
+    'init-not-pickleable': 'EXC010',
 }
 
 # Short descriptions for each violation
@@ -181,6 +200,7 @@ VIOLATION_MESSAGES: Mapping[ViolationKind, str] = {
     'cancelled-not-raised': 'CancelledError swallowed (task.cancelled() returns False, breaking orchestrator logic)',
     'generator-exit-not-raised': 'GeneratorExit swallowed (generator.close() cannot complete, resources leak)',
     'unused-directive': 'Suppression directive does not match any violation',
+    'init-not-pickleable': 'Exception subclass __init__ does not forward args verbatim to super(); pickle round-trip breaks',
 }
 
 # Fix suggestions for each violation
@@ -194,6 +214,7 @@ FIX_SUGGESTIONS: Mapping[ViolationKind, str] = {
     'cancelled-not-raised': "Add 'raise' after cleanup, or remove the try/except entirely if no cleanup needed",
     'generator-exit-not-raised': "Add 'raise' after cleanup, or use 'finally' block instead (preferred)",
     'unused-directive': 'Remove the stale suppression directive',
+    'init-not-pickleable': "Define __reduce__ (e.g., 'return (self.__class__, (self.field,), self.__dict__)') or pass args verbatim",
 }
 
 
@@ -633,6 +654,44 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
             self._check_logger_call(node)
         self.generic_visit(node)
 
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Check EXC010: Exception subclass __init__ that breaks pickle round-trip.
+
+        Provenance:
+            Upstream rule is flake8-bugbear B042 (merged June 2025, PR
+            pycqa/flake8-bugbear#512). Ruff has not yet ported it — tracked at
+            astral-sh/ruff#8579, open since November 2023. The workspace's ruff
+            config already selects the ``B`` set; we'll get B042 for free
+            whenever ruff ships it, at which point this rule can be retired or
+            kept as a stricter local variant.
+
+            EXC010 is intentionally stricter than B042. B042 only flags kw-only
+            init and positional arg count mismatch — it does NOT catch the
+            "transformed message" pattern where ``__init__(self, var):
+            super().__init__(f'{var} broken')`` has matching arg counts but
+            passes a derived string. That pattern is the workspace's most
+            common pickle-bug shape (empirically demonstrated against
+            ``cc_lib/exceptions.py`` and ``claude_session/exceptions.py``).
+            EXC010 catches it by requiring super().__init__'s args to be
+            verbatim Name references to the __init__'s params (or starred
+            unpack of vararg).
+
+            The escape hatch is defining any pickle dunder (__reduce__,
+            __reduce_ex__, __getstate__/__setstate__, __getnewargs__/
+            __getnewargs_ex__). B042 additionally requires __str__; we don't,
+            because with a correctly-built ``self.args``, ``Exception.__str__``
+            already does the right thing.
+
+            Closes the gap where validate-plan agents catch this empirically
+            via pickle round-trip tests. Static rule → deterministic
+            enforcement on every pre-commit.
+        """
+        if self._is_exception_class(node) and not self._has_pickle_escape_hatch(node):
+            init = self._find_init(node)
+            if init is not None and not self._init_is_pickleable(init):
+                self._add_violation(init, 'init-not-pickleable')
+        self.generic_visit(node)
+
     # -- Private Helper Methods -----------------------------------------------
 
     def _get_source_line(self, lineno: int) -> str:
@@ -826,6 +885,125 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
 
         if not has_exc_info:
             self._add_violation(node, 'logger-no-exc-info')
+
+    def _is_exception_class(self, node: ast.ClassDef) -> bool:
+        """True if class name or any direct base name ends in an exception suffix."""
+        if node.name.endswith(EXCEPTION_NAME_SUFFIXES):
+            return True
+        for base in node.bases:
+            base_name = self._get_base_name(base)
+            if base_name is not None and base_name.endswith(EXCEPTION_NAME_SUFFIXES):
+                return True
+        return False
+
+    def _get_base_name(self, node: ast.expr) -> str | None:
+        """Trailing name component of a base-class expression (Name or Attribute)."""
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return node.attr
+        return None
+
+    def _has_pickle_escape_hatch(self, cls_node: ast.ClassDef) -> bool:
+        """True if class defines any pickle protocol dunder."""
+        for stmt in cls_node.body:
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef) and stmt.name in PICKLE_DUNDERS:
+                return True
+        return False
+
+    def _find_init(self, cls_node: ast.ClassDef) -> ast.FunctionDef | None:
+        """Return __init__ method (non-@overload) or None."""
+        for stmt in cls_node.body:
+            if isinstance(stmt, ast.FunctionDef) and stmt.name == '__init__':
+                if self._is_overloaded(stmt):
+                    continue
+                return stmt
+        return None
+
+    def _is_overloaded(self, func: ast.FunctionDef) -> bool:
+        """Check if function has @overload decorator (typing.overload)."""
+        for dec in func.decorator_list:
+            if isinstance(dec, ast.Name) and dec.id == 'overload':
+                return True
+            if isinstance(dec, ast.Attribute) and dec.attr == 'overload':
+                return True
+        return False
+
+    def _init_is_pickleable(self, init: ast.FunctionDef) -> bool:
+        """True if __init__ either takes no params (just self) or forwards all params verbatim."""
+        args = init.args
+
+        # kw-only and **kwargs are unrecoverable from pickle's positional reconstruction
+        if args.kwonlyargs or args.kwarg:
+            return False
+
+        # Compute positional param names (excluding self)
+        all_positional = [a.arg for a in args.posonlyargs] + [a.arg for a in args.args]
+        if all_positional and all_positional[0] == 'self':
+            param_names = all_positional[1:]
+        else:
+            param_names = all_positional
+        vararg_name = args.vararg.arg if args.vararg else None
+
+        # No extra params → default Exception() pickle works
+        if not param_names and not vararg_name:
+            return True
+
+        # Must call super().__init__ with verbatim arg passthrough
+        super_call = self._find_super_init_call(init)
+        if super_call is None:
+            return False
+        return self._args_are_verbatim_passthrough(super_call, param_names, vararg_name)
+
+    def _find_super_init_call(self, func: ast.FunctionDef) -> ast.Call | None:
+        """Return super().__init__(...) call from func's top-level statements, or None."""
+        for stmt in func.body:
+            call = self._extract_super_init_call(stmt)
+            if call is not None:
+                return call
+        return None
+
+    def _extract_super_init_call(self, stmt: ast.stmt) -> ast.Call | None:
+        """If stmt is an expression statement that's a super().__init__(...) call, return it."""
+        if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)):
+            return None
+        call = stmt.value
+        if not isinstance(call.func, ast.Attribute) or call.func.attr != '__init__':
+            return None
+        inner = call.func.value
+        if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) and inner.func.id == 'super'):
+            return None
+        return call
+
+    def _args_are_verbatim_passthrough(
+        self,
+        call: ast.Call,
+        param_names: Sequence[str],
+        vararg_name: str | None,
+    ) -> bool:
+        """True iff every super().__init__ arg is a Name referencing the corresponding __init__ param.
+
+        Allows a trailing ``*args`` Starred unpack matching the __init__'s vararg.
+        Rejects keyword arguments — pickle's reconstruction is purely positional.
+        """
+        if call.keywords:
+            return False
+
+        actual = list(call.args)
+        # Allow trailing Starred unpack of vararg
+        if vararg_name is not None and actual and isinstance(actual[-1], ast.Starred):
+            starred = actual[-1]
+            if not (isinstance(starred.value, ast.Name) and starred.value.id == vararg_name):
+                return False
+            actual = actual[:-1]
+
+        if len(actual) != len(param_names):
+            return False
+
+        for arg, expected_name in zip(actual, param_names, strict=True):
+            if not (isinstance(arg, ast.Name) and arg.id == expected_name):
+                return False
+        return True
 
 
 class _RaiseFinder(ast.NodeVisitor):
