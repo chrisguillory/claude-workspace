@@ -46,28 +46,16 @@ def get_class_ranges(filepath: Path) -> Mapping[str, LineRange]:
 
 
 def get_def_ranges(filepath: Path) -> Mapping[str, LineRange]:
-    """Return {function_name: LineRange} for every (Async)FunctionDef in the file.
+    """Return {function_name: LineRange} for module-level + nested-function defs.
 
-    Uses ast.walk, so functions nested inside compound statements (try/if/with)
-    or other functions are included. Dunder methods (``__init__``, ``__reduce__``,
-    etc.) are skipped — they're nested inside test classes and routinely collide
-    on name; tests map violations to top-level ``excNNN_*`` functions, not to
-    methods. Raises ValueError on duplicate non-dunder names.
+    Recurses into compound statements (if/try/with) and nested functions, but
+    stops at ``ClassDef`` bodies — methods on test-fixture classes (``__init__``,
+    ``__reduce__``, etc.) are not test targets; tests map violations to
+    top-level ``excNNN_*`` functions. Raises ValueError on duplicate names
+    among the included functions.
     """
     ranges: dict[str, LineRange] = {}
-    for node in ast.walk(ast.parse(filepath.read_text(encoding='utf-8'))):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if node.name.startswith('__') and node.name.endswith('__'):
-                continue
-            # end_lineno is always set for nodes parsed from source.
-            assert node.end_lineno is not None
-            if node.name in ranges:
-                prior = ranges[node.name]
-                raise ValueError(
-                    f'duplicate function name {node.name!r} in {filepath}: '
-                    f'lines {prior.start}-{prior.end} and {node.lineno}-{node.end_lineno}',
-                )
-            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
+    _collect_function_ranges(ast.parse(filepath.read_text(encoding='utf-8')), ranges, filepath)
     return ranges
 
 
@@ -81,3 +69,21 @@ def run_linter(test_file: Path, linter: Path) -> str:
         check=False,
     )
     return result.stdout + result.stderr
+
+
+def _collect_function_ranges(node: ast.AST, ranges: dict[str, LineRange], filepath: Path) -> None:
+    """Walk children, recording (Async)FunctionDef ranges but stopping at ClassDef bodies."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.ClassDef):
+            continue
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            # end_lineno is always set for nodes parsed from source.
+            assert child.end_lineno is not None
+            if child.name in ranges:
+                prior = ranges[child.name]
+                raise ValueError(
+                    f'duplicate function name {child.name!r} in {filepath}: '
+                    f'lines {prior.start}-{prior.end} and {child.lineno}-{child.end_lineno}',
+                )
+            ranges[child.name] = LineRange(child.lineno, child.end_lineno)
+        _collect_function_ranges(child, ranges, filepath)
