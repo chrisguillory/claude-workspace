@@ -18,7 +18,8 @@ Rules:
     EXC006 logger-no-exc-info       Logger error/warning calls in except without exc_info
     EXC007 cancelled-not-raised     CancelledError caught but not re-raised in async
     EXC008 generator-exit-not-raised GeneratorExit caught but not re-raised in generator
-    EXC010 init-not-pickleable     Exception subclass __init__ breaks pickle round-trip (see EXC010 docstring)
+    EXC009 unused-directive         Suppression directive does not match any violation
+    EXC010 init-not-pickleable      Exception subclass __init__ breaks pickle round-trip (see EXC010 docstring)
 
 Escape hatches (inline suppression):
     # exception_safety_linter.py: skip-file
