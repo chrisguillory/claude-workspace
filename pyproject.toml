@@ -218,6 +218,17 @@ filterwarnings = [
 # library-boundary translation tests. Not a candidate for __reduce__ since the
 # class exists only as a test target.
 "tests/cc_lib/test_library_boundary.py" = ["init-not-pickleable"]
+# Files whose transitive imports pull in deps not present in the workspace env
+# (PEP 723 script deps, optional integrations, workspace-root path assumptions).
+# The linter can't import these to run the empirical pickle check.
+"mcp/claude-session/scripts/intercept_traffic.py" = ["init-not-pickleable"]
+"mcp/document-search/document_search/clients/gemini.py" = ["init-not-pickleable"]
+"tests/plugins/test_pydantic_replace.py" = ["init-not-pickleable"]
+# Test runner files: import pytest, which may not be present in the env that
+# invokes the linter (Claude Code's run-linter hook uses a different env than
+# pre-commit). The empirical check has no semantic value on test runners anyway —
+# they have no production Exception subclasses, just pytest scaffolding.
+"tests/linters/test_exception_safety_linter.py" = ["init-not-pickleable"]
 
 [tool.reexport-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]

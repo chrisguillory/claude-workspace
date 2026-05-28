@@ -1,8 +1,4 @@
-#!/usr/bin/env -S uv run --no-project --script
-# /// script
-# requires-python = ">=3.13"
-# dependencies = []
-# ///
+#!/usr/bin/env -S uv run
 """Exception safety linter for Python code.
 
 Detects common exception handling anti-patterns that cause silent failures,
@@ -28,7 +24,8 @@ Escape hatches (inline suppression):
 
 Design Philosophy:
     - Error-only, no auto-fix: Forces conscious decision at each occurrence
-    - Standalone: No external dependencies, works with any Python 3.13+ install
+    - Workspace-aware: runs in the workspace uv env; the empirical EXC010 check
+      imports workspace modules to pickle-test Exception subclasses
     - Instructive: Points to test cases file for correct patterns
 
 Usage:
@@ -56,11 +53,15 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
+import inspect
+import pickle
 import sys
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from types import ModuleType
+from typing import Any, ClassVar, Literal, get_type_hints
 
 from _lib.config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
 from _lib.hashability_inspector import QualifiedName
@@ -142,22 +143,6 @@ LOGGER_ERROR_METHODS: Set[str] = {
     'fatal',
     'warning',
     'warn',
-}
-
-# Suffixes that mark a class as an exception subclass (heuristic match on class name
-# or any direct base name). Mirrors flake8-bugbear B042's classification.
-# Stored as a tuple literal so it can be passed directly to ``str.endswith``.
-EXCEPTION_NAME_SUFFIXES = ('Exception', 'Error', 'Warning', 'ExceptionGroup')
-
-# Pickle-protocol dunders. Defining any of these is treated as the escape hatch
-# for EXC010 — the class has explicitly taken responsibility for pickle behavior.
-PICKLE_DUNDERS: Set[str] = {
-    '__reduce__',
-    '__reduce_ex__',
-    '__getstate__',
-    '__setstate__',
-    '__getnewargs__',
-    '__getnewargs_ex__',
 }
 
 # -- Data Types ---------------------------------------------------------------
@@ -306,6 +291,9 @@ def main() -> int:
                 respect_skip_file=not args.no_skip_file,
                 report_unused_directives=args.report_unused_directives,
             )
+
+            if _EmpiricalPickleChecker.KIND not in per_file_codes:
+                violations = list(violations) + list(_EmpiricalPickleChecker(filepath).check())
 
             # Filter by per-file ignored codes (codes are violation kinds directly)
             if per_file_codes:
@@ -655,44 +643,6 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
             self._check_logger_call(node)
         self.generic_visit(node)
 
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Check EXC010: Exception subclass __init__ that breaks pickle round-trip.
-
-        Provenance:
-            Upstream rule is flake8-bugbear B042 (merged June 2025, PR
-            pycqa/flake8-bugbear#512). Ruff has not yet ported it — tracked at
-            astral-sh/ruff#8579, open since November 2023. The workspace's ruff
-            config already selects the ``B`` set; we'll get B042 for free
-            whenever ruff ships it, at which point this rule can be retired or
-            kept as a stricter local variant.
-
-            EXC010 is intentionally stricter than B042. B042 only flags kw-only
-            init and positional arg count mismatch — it does NOT catch the
-            "transformed message" pattern where ``__init__(self, var):
-            super().__init__(f'{var} broken')`` has matching arg counts but
-            passes a derived string. That pattern is the workspace's most
-            common pickle-bug shape (empirically demonstrated against
-            ``cc_lib/exceptions.py`` and ``claude_session/exceptions.py``).
-            EXC010 catches it by requiring super().__init__'s args to be
-            verbatim Name references to the __init__'s params (or starred
-            unpack of vararg).
-
-            The escape hatch is defining any pickle dunder (__reduce__,
-            __reduce_ex__, __getstate__/__setstate__, __getnewargs__/
-            __getnewargs_ex__). B042 additionally requires __str__; we don't,
-            because with a correctly-built ``self.args``, ``Exception.__str__``
-            already does the right thing.
-
-            Closes the gap where validate-plan agents catch this empirically
-            via pickle round-trip tests. Static rule → deterministic
-            enforcement on every pre-commit.
-        """
-        if self._is_exception_class(node) and not self._has_pickle_escape_hatch(node):
-            init = self._find_init(node)
-            if init is not None and not self._init_is_pickleable(init):
-                self._add_violation(init, 'init-not-pickleable')
-        self.generic_visit(node)
-
     # -- Private Helper Methods -----------------------------------------------
 
     def _get_source_line(self, lineno: int) -> str:
@@ -886,125 +836,6 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
 
         if not has_exc_info:
             self._add_violation(node, 'logger-no-exc-info')
-
-    def _is_exception_class(self, node: ast.ClassDef) -> bool:
-        """True if class name or any direct base name ends in an exception suffix."""
-        if node.name.endswith(EXCEPTION_NAME_SUFFIXES):
-            return True
-        for base in node.bases:
-            base_name = self._get_base_name(base)
-            if base_name is not None and base_name.endswith(EXCEPTION_NAME_SUFFIXES):
-                return True
-        return False
-
-    def _get_base_name(self, node: ast.expr) -> str | None:
-        """Trailing name component of a base-class expression (Name or Attribute)."""
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            return node.attr
-        return None
-
-    def _has_pickle_escape_hatch(self, cls_node: ast.ClassDef) -> bool:
-        """True if class defines any pickle protocol dunder."""
-        for stmt in cls_node.body:
-            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef) and stmt.name in PICKLE_DUNDERS:
-                return True
-        return False
-
-    def _find_init(self, cls_node: ast.ClassDef) -> ast.FunctionDef | None:
-        """Return __init__ method (non-@overload) or None."""
-        for stmt in cls_node.body:
-            if isinstance(stmt, ast.FunctionDef) and stmt.name == '__init__':
-                if self._is_overloaded(stmt):
-                    continue
-                return stmt
-        return None
-
-    def _is_overloaded(self, func: ast.FunctionDef) -> bool:
-        """Check if function has @overload decorator (typing.overload)."""
-        for dec in func.decorator_list:
-            if isinstance(dec, ast.Name) and dec.id == 'overload':
-                return True
-            if isinstance(dec, ast.Attribute) and dec.attr == 'overload':
-                return True
-        return False
-
-    def _init_is_pickleable(self, init: ast.FunctionDef) -> bool:
-        """True if __init__ either takes no params (just self) or forwards all params verbatim."""
-        args = init.args
-
-        # kw-only and **kwargs are unrecoverable from pickle's positional reconstruction
-        if args.kwonlyargs or args.kwarg:
-            return False
-
-        # Compute positional param names (excluding self)
-        all_positional = [a.arg for a in args.posonlyargs] + [a.arg for a in args.args]
-        if all_positional and all_positional[0] == 'self':
-            param_names = all_positional[1:]
-        else:
-            param_names = all_positional
-        vararg_name = args.vararg.arg if args.vararg else None
-
-        # No extra params → default Exception() pickle works
-        if not param_names and not vararg_name:
-            return True
-
-        # Must call super().__init__ with verbatim arg passthrough
-        super_call = self._find_super_init_call(init)
-        if super_call is None:
-            return False
-        return self._args_are_verbatim_passthrough(super_call, param_names, vararg_name)
-
-    def _find_super_init_call(self, func: ast.FunctionDef) -> ast.Call | None:
-        """Return super().__init__(...) call from func's top-level statements, or None."""
-        for stmt in func.body:
-            call = self._extract_super_init_call(stmt)
-            if call is not None:
-                return call
-        return None
-
-    def _extract_super_init_call(self, stmt: ast.stmt) -> ast.Call | None:
-        """If stmt is an expression statement that's a super().__init__(...) call, return it."""
-        if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)):
-            return None
-        call = stmt.value
-        if not isinstance(call.func, ast.Attribute) or call.func.attr != '__init__':
-            return None
-        inner = call.func.value
-        if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) and inner.func.id == 'super'):
-            return None
-        return call
-
-    def _args_are_verbatim_passthrough(
-        self,
-        call: ast.Call,
-        param_names: Sequence[str],
-        vararg_name: str | None,
-    ) -> bool:
-        """True iff every super().__init__ arg is a Name referencing the corresponding __init__ param.
-
-        Allows a trailing ``*args`` Starred unpack matching the __init__'s vararg.
-        Rejects keyword arguments — pickle's reconstruction is purely positional.
-        """
-        if call.keywords:
-            return False
-
-        actual = list(call.args)
-        # Allow trailing Starred unpack of vararg
-        if vararg_name is not None and actual and isinstance(actual[-1], ast.Starred):
-            starred = actual[-1]
-            if not (isinstance(starred.value, ast.Name) and starred.value.id == vararg_name):
-                return False
-            actual = actual[:-1]
-
-        if len(actual) != len(param_names):
-            return False
-
-        for arg, expected_name in zip(actual, param_names, strict=True):
-            if not (isinstance(arg, ast.Name) and arg.id == expected_name):
-                return False
-        return True
 
 
 class _RaiseFinder(ast.NodeVisitor):
@@ -1264,6 +1095,174 @@ def find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestRef
                         )
 
     return references
+
+
+# -- EXC010 Empirical Pickle Check --------------------------------------------
+#
+# Closest upstream rule: flake8-bugbear B042 (pycqa/flake8-bugbear#512). Ruff has
+# not ported B042 (astral-sh/ruff#8579). The workspace ruff config selects the
+# ``B`` set; B042 will land for free when ruff ports it.
+
+
+class _EmpiricalPickleChecker:
+    """EXC010 — pickle-round-trip each Exception subclass.
+
+    Construction failures bubble; pickle-protocol exceptions raised during the
+    round-trip are converted to diagnostics (the bug class this rule catches).
+    """
+
+    KIND: ClassVar[ViolationKind] = 'init-not-pickleable'
+
+    def __init__(self, filepath: Path) -> None:
+        self._filepath = filepath
+        self._source_lines: Sequence[str] | None = None
+
+    def check(self) -> Sequence[Violation]:
+        """Run the empirical pickle check on every Exception subclass in the file."""
+        source_roots = self._discover_source_roots()
+        original_path = sys.path[:]
+        sys.path = [str(r) for r in source_roots] + sys.path
+        try:
+            module = self._import_module()
+        finally:
+            sys.path[:] = original_path
+        violations: list[Violation] = []
+        for cls_name, cls in inspect.getmembers(module, inspect.isclass):
+            if not issubclass(cls, BaseException):
+                continue
+            if cls.__module__ != module.__name__:
+                continue
+            diagnostic = self._diagnose_pickle_roundtrip(cls)
+            if diagnostic is not None:
+                violations.append(self._make_violation(cls_name, diagnostic))
+        return violations
+
+    def _diagnose_pickle_roundtrip(self, cls: type[BaseException]) -> str | None:
+        """Pickle-round-trip an instance of ``cls``. Returns a diagnostic if broken."""
+        instance = self._construct_with_synthesized_args(cls)
+        try:
+            restored = pickle.loads(pickle.dumps(instance))
+        except (pickle.PickleError, TypeError, AttributeError) as exc:
+            return f'pickle round-trip raises {type(exc).__name__}: {exc}'
+        if str(instance) != str(restored):
+            return f'message changed across pickle: {str(instance)!r} -> {str(restored)!r}'
+        if type(instance) is not type(restored):
+            return 'type identity changed across pickle'
+        if dict(vars(instance)) != dict(vars(restored)):
+            return f'attribute state changed: {dict(vars(instance))} -> {dict(vars(restored))}'
+        return None
+
+    def _construct_with_synthesized_args(self, cls: type[BaseException]) -> BaseException:
+        """Instantiate ``cls`` using type-hint-synthesized values for each parameter."""
+        sig = inspect.signature(cls.__init__)
+        hints = get_type_hints(cls.__init__)
+        positional: list[Any] = []
+        keyword: dict[str, Any] = {}
+        for name, param in sig.parameters.items():
+            if name == 'self':
+                continue
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            if name not in hints:
+                msg = f'{cls.__module__}.{cls.__qualname__}.__init__ param {name!r} has no type hint'
+                raise TypeError(msg)
+            value = self._synthesize_value(hints[name])
+            if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                keyword[name] = value
+            else:
+                positional.append(value)
+        instance = cls(*positional, **keyword)
+        if not isinstance(instance, BaseException):
+            msg = f'{cls.__module__}.{cls.__qualname__} did not produce a BaseException instance'
+            raise TypeError(msg)
+        return instance
+
+    def _synthesize_value(self, type_hint: Any) -> Any:
+        """Return a default instance of ``type_hint`` via its no-arg constructor."""
+        if type_hint is type(None):
+            return None
+        union_args = getattr(type_hint, '__args__', None)
+        if union_args:
+            non_none = [a for a in union_args if a is not type(None)]
+            if non_none:
+                return self._synthesize_value(non_none[0])
+            return None
+        return type_hint()
+
+    def _import_module(self) -> ModuleType:
+        """Load ``self._filepath`` as its qualified module so relative imports resolve."""
+        package_root = self._package_root_for_file()
+        relative = self._filepath.resolve().relative_to(package_root)
+        module_name = '.'.join(relative.with_suffix('').parts)
+        spec = importlib.util.spec_from_file_location(module_name, self._filepath)
+        if spec is None or spec.loader is None:
+            msg = f'Cannot create import spec for {self._filepath}'
+            raise ImportError(msg)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _package_root_for_file(self) -> Path:
+        """Walk up from filepath leaving the __init__.py chain; the first non-package ancestor."""
+        current = self._filepath.resolve().parent
+        while (current / '__init__.py').exists() and current.parent != current:
+            current = current.parent
+        return current
+
+    def _discover_source_roots(self) -> Sequence[Path]:
+        """Find sys.path entries needed to import this file and its workspace deps."""
+        roots: list[Path] = []
+        current = self._filepath.resolve().parent
+        while (current / '__init__.py').exists() and current.parent != current:
+            current = current.parent
+        roots.append(current)
+        workspace = self._workspace_root()
+        if workspace is not None:
+            cc_lib = workspace / 'cc-lib'
+            if cc_lib.is_dir():
+                roots.append(cc_lib)
+            mcp_dir = workspace / 'mcp'
+            if mcp_dir.is_dir():
+                roots.extend(sub for sub in mcp_dir.iterdir() if sub.is_dir())
+        return roots
+
+    def _workspace_root(self) -> Path | None:
+        """Walk up looking for a directory with both pyproject.toml and .git."""
+        current = self._filepath.resolve().parent
+        while current.parent != current:
+            if (current / 'pyproject.toml').exists() and (current / '.git').exists():
+                return current
+            current = current.parent
+        return None
+
+    def _make_violation(self, cls_name: str, diagnostic: str) -> Violation:
+        lineno = self._find_class_def_line(cls_name)
+        return Violation(
+            filepath=self._filepath,
+            line=lineno,
+            column=0,
+            kind=self.KIND,
+            source_line=f'class {cls_name}  # {diagnostic}',
+        )
+
+    def _find_class_def_line(self, cls_name: str) -> int:
+        """Find the source line where ``class <cls_name>`` is defined. Returns 1 if not found."""
+        needle = f'class {cls_name}'
+        for i, line in enumerate(self._read_source_lines(), start=1):
+            stripped = line.lstrip()
+            if not stripped.startswith(needle):
+                continue
+            rest = stripped[len(needle) :].lstrip()
+            if rest.startswith(('(', ':')):
+                return i
+        return 1
+
+    def _read_source_lines(self) -> Sequence[str]:
+        """Lazily read and cache the file's source lines."""
+        if self._source_lines is None:
+            self._source_lines = self._filepath.read_text(encoding='utf-8').splitlines()
+        return self._source_lines
 
 
 # -- Output Formatting --------------------------------------------------------
