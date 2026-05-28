@@ -417,7 +417,9 @@ class Database(BaseModel):
 
 ### Scripting
 
-Use `uv run --no-project -` with heredoc + PEP 723 inline dependencies:
+Generally prefer heredoc execution over throwaway script files for interactive work or analysis.
+
+**Python** — `uv run --no-project -` with heredoc + PEP 723 inline dependencies:
 
 ```bash
 uv run --no-project - <<'PY'
@@ -430,6 +432,15 @@ uv run --no-project - <<'PY'
 import pandas as pd
 print("Hello!")
 PY
+```
+
+**JS/TS** — `bun run -` with heredoc:
+
+```bash
+bun run - <<'JS'
+import chalk from "chalk";
+console.log(chalk.green("hi"));
+JS
 ```
 
 ## Tooling & Workflow
