@@ -49,11 +49,16 @@ def get_def_ranges(filepath: Path) -> Mapping[str, LineRange]:
     """Return {function_name: LineRange} for every (Async)FunctionDef in the file.
 
     Uses ast.walk, so functions nested inside compound statements (try/if/with)
-    or other functions are included. Raises ValueError on duplicate names.
+    or other functions are included. Dunder methods (``__init__``, ``__reduce__``,
+    etc.) are skipped — they're nested inside test classes and routinely collide
+    on name; tests map violations to top-level ``excNNN_*`` functions, not to
+    methods. Raises ValueError on duplicate non-dunder names.
     """
     ranges: dict[str, LineRange] = {}
     for node in ast.walk(ast.parse(filepath.read_text(encoding='utf-8'))):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            if node.name.startswith('__') and node.name.endswith('__'):
+                continue
             # end_lineno is always set for nodes parsed from source.
             assert node.end_lineno is not None
             if node.name in ranges:
