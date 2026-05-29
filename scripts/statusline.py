@@ -308,6 +308,7 @@ class StatusLineInput(StrictModel):
     session_name: str | None = None  # Added in v2.1.41
     rate_limits: RateLimits | None = None  # Added in v2.1.80
     worktree: WorktreeInfo | None = None  # Added in v2.1.69
+    pr: PrInfo | None = None  # Added in v2.1.145
     fast_mode: bool | None = None  # Added in v2.1.119
     effort: EffortInfo | None = None  # Added in v2.1.119
     thinking: ThinkingInfo | None = None  # Added in v2.1.119
@@ -383,6 +384,14 @@ class WorktreeInfo(StrictModel):
     branch: str | None = None
     original_cwd: str
     original_branch: str | None = None
+
+
+class PrInfo(StrictModel):
+    """Open PR for the current branch (mirrors the footer PR badge). Added in v2.1.145."""
+
+    number: int
+    url: str
+    review_state: Literal['approved', 'pending', 'changes_requested', 'draft'] | None = None
 
 
 class EffortInfo(StrictModel):
