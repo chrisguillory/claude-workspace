@@ -76,9 +76,8 @@ State (all under ~/.claude-workspace/statusline/):
     error.log                       Last error details (clickable OSC8 link)
 
 Schema Validation:
-    Sub-objects use extra='forbid' — any new field in a nested object fails immediately.
-    Top-level StatusLineInput uses extra='allow' — Claude Code can add new root fields
-    without breaking. External data models use SubsetModel (extra='ignore').
+    Claude Code input uses StrictModel; external data (credentials, keychain) uses
+    SubsetModel.
 
 Possible Improvements:
     Token insights (requires per-turn history infrastructure):
@@ -282,48 +281,8 @@ class HealthSidecar(StrictModel):
 # -- Status Line Input Models — strict, fail-fast on schema drift --------------
 
 
-class ModelInfo(StrictModel):
-    id: str
-    display_name: str
-
-
-class WorkspaceInfo(StrictModel):
-    current_dir: str
-    project_dir: str
-    added_dirs: Sequence[str] = ()  # Added in v2.1.47
-    git_worktree: str | None = None  # Added in v2.1.97
-
-
-class CostInfo(StrictModel):
-    total_cost_usd: float | None = None
-    total_duration_ms: float | None = None
-    total_api_duration_ms: float | None = None
-    total_lines_added: int | None = None
-    total_lines_removed: int | None = None
-
-
-class CurrentUsage(StrictModel):
-    input_tokens: int
-    output_tokens: int
-    cache_creation_input_tokens: int
-    cache_read_input_tokens: int
-
-
-class ContextWindow(StrictModel):
-    total_input_tokens: int
-    total_output_tokens: int
-    context_window_size: int
-    used_percentage: float | None = None
-    remaining_percentage: float | None = None
-    current_usage: CurrentUsage | None = None
-
-
 class StatusLineInput(StrictModel):
-    """Top-level JSON received on stdin.
-
-    Uses extra='allow' at top level since Claude Code may add new fields.
-    Sub-objects use extra='forbid' to catch structural changes.
-    """
+    """Top-level JSON received on stdin."""
 
     model: ModelInfo
     cwd: str
@@ -355,6 +314,51 @@ class StatusLineInput(StrictModel):
     vim: Mapping[str, str] | None = None
     agent: Mapping[str, str] | None = None
     output_style: Mapping[str, str] | None = None
+
+
+class ModelInfo(StrictModel):
+    id: str
+    display_name: str
+
+
+class WorkspaceInfo(StrictModel):
+    current_dir: str
+    project_dir: str
+    added_dirs: Sequence[str] = ()  # Added in v2.1.47
+    git_worktree: str | None = None  # Added in v2.1.97
+    repo: RepoInfo | None = None  # Added in v2.1.145
+
+
+class RepoInfo(StrictModel):
+    """Git repository identity from the origin remote. Added in v2.1.145."""
+
+    host: str
+    owner: str
+    name: str
+
+
+class CostInfo(StrictModel):
+    total_cost_usd: float | None = None
+    total_duration_ms: float | None = None
+    total_api_duration_ms: float | None = None
+    total_lines_added: int | None = None
+    total_lines_removed: int | None = None
+
+
+class ContextWindow(StrictModel):
+    total_input_tokens: int
+    total_output_tokens: int
+    context_window_size: int
+    used_percentage: float | None = None
+    remaining_percentage: float | None = None
+    current_usage: CurrentUsage | None = None
+
+
+class CurrentUsage(StrictModel):
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
 
 
 class RateLimits(StrictModel):
