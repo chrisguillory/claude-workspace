@@ -25,8 +25,7 @@ Install:
 Output Lines:
     Line 1 — Identity:
         model+version, pid+up:(process uptime), session_id+age:(conversation age),
-        process health (mem/cpu/trends/anomalies), account (login·tier), git branch,
-        vim mode
+        process health (mem/cpu/trends/anomalies), account (login·tier), vim mode
 
     Line 2 — Metrics:
         Context bar (used/total +Nk delta) │ remaining% │ $cost │ run:duration │
@@ -34,7 +33,8 @@ Output Lines:
 
     Line 3 — Workspace:
         cwd (color-coded: dim=project, cyan=added dir, yellow=unknown) │ project │
-        +dir: added dirs │ transcript link
+        +dir: added dirs │ ⎇ branch │ PR #N (color: review state) │ worktree │
+        venv │ transcript link
 
     Line 4 — Detail:
         session: cumulative tokens │ last: per-turn tokens │
@@ -66,7 +66,7 @@ Data Sources:
     psutil            PID, process uptime, health (RSS, CPU, FDs, children)
     ~/.claude.json    oauthAccount (email, org, billing type)
     macOS keychain    subscription type, rate limit tier
-    git               branch, remote URL
+    git               branch
     transcript file   session age (first line), session title (mmap rfind)
 
 State (all under ~/.claude-workspace/statusline/):
@@ -426,6 +426,15 @@ EFFORT_COLORS: Mapping[EffortLevel, str] = {
     'high': YELLOW,
     'medium': YELLOW,
     'low': RED,
+}
+
+
+# PR review-state colors — green=approved; the rest escalate attention.
+PR_REVIEW_COLORS: Mapping[str, str] = {
+    'approved': GREEN,
+    'pending': YELLOW,
+    'changes_requested': RED,
+    'draft': DIM,
 }
 
 
@@ -1039,30 +1048,6 @@ def _git_branch() -> str:
     return ''
 
 
-def _git_remote_url() -> str:
-    """Get GitHub HTTPS URL for origin remote, or empty string."""
-    try:
-        result = subprocess.run(
-            ['git', 'remote', 'get-url', 'origin'],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        if result.returncode == 0:
-            url = result.stdout.strip()
-            # Convert git@github.com:user/repo.git → https://github.com/user/repo
-            if url.startswith('git@github.com:'):
-                url = 'https://github.com/' + url[15:]
-            if url.endswith('.git'):
-                url = url[:-4]
-            if 'github.com' in url:
-                return url
-    except (subprocess.TimeoutExpired, OSError):
-        pass
-    return ''
-
-
 # -- Formatting ----------------------------------------------------------------
 
 
@@ -1594,7 +1579,6 @@ def main() -> None:
         data.transcript_path,
     )
     branch = _git_branch()
-    remote_url = _git_remote_url()
 
     # ── Line 1: Identity + Model ─────────────────────────────────────────
     parts: list[str] = []
@@ -1645,14 +1629,6 @@ def main() -> None:
 
     if pending_login:
         parts.append(f'{YELLOW}(switch pending: {pending_login} — restart to activate){RESET}')
-
-    # Git branch — links to GitHub branch page
-    if branch:
-        if remote_url:
-            branch_link = _osc8_link(f'{remote_url}/tree/{branch}', branch)
-            parts.append(f'{DIM}⎇{RESET} {branch_link}')
-        else:
-            parts.append(f'{DIM}⎇ {branch}{RESET}')
 
     # Vim mode
     if data.vim and 'mode' in data.vim:
@@ -1734,8 +1710,19 @@ def main() -> None:
     if not os.environ.get('CLAUDE_EXEC_LAUNCH_DIR'):
         line3.append(f'{BOLD}{RED}⚠ NOT LAUNCHED VIA claude-exec{RESET}')
 
-    # Venv provenance — where did .venv/bin on PATH come from?
-    line3.append(_detect_venv_provenance(data.cwd))
+    # VCS cluster — branch (link sourced from workspace.repo), open PR, worktree
+    if branch:
+        repo = data.workspace.repo
+        if repo is not None:
+            branch_link = _osc8_link(f'https://{repo.host}/{repo.owner}/{repo.name}/tree/{branch}', branch)
+            line3.append(f'{DIM}⎇{RESET} {branch_link}')
+        else:
+            line3.append(f'{DIM}⎇ {branch}{RESET}')
+
+    if data.pr is not None:
+        pr_color = PR_REVIEW_COLORS.get(data.pr.review_state or '', DIM)
+        pr_link = _osc8_link(data.pr.url, f'PR #{data.pr.number}')
+        line3.append(f'{pr_color}{pr_link}{RESET}')
 
     # Worktree context — CC-managed (v2.1.69+) or detected via git
     if data.worktree:
@@ -1745,6 +1732,9 @@ def main() -> None:
         wt_info = _detect_git_worktree(data.cwd)
         if wt_info:
             line3.append(f'{CYAN}worktree:{RESET} {wt_info}')
+
+    # Venv provenance — where did .venv/bin on PATH come from?
+    line3.append(_detect_venv_provenance(data.cwd))
 
     # Transcript path
     line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, _shorten_path(data.transcript_path))}')
