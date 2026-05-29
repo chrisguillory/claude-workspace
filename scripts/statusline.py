@@ -386,12 +386,15 @@ class WorktreeInfo(StrictModel):
     original_branch: str | None = None
 
 
+type PrReviewState = Literal['approved', 'pending', 'changes_requested', 'draft']
+
+
 class PrInfo(StrictModel):
     """Open PR for the current branch (mirrors the footer PR badge). Added in v2.1.145."""
 
     number: int
     url: str
-    review_state: Literal['approved', 'pending', 'changes_requested', 'draft'] | None = None
+    review_state: PrReviewState | None = None
 
 
 class EffortInfo(StrictModel):
@@ -430,7 +433,7 @@ EFFORT_COLORS: Mapping[EffortLevel, str] = {
 
 
 # PR review-state colors — green=approved; the rest escalate attention.
-PR_REVIEW_COLORS: Mapping[str, str] = {
+PR_REVIEW_COLORS: Mapping[PrReviewState, str] = {
     'approved': GREEN,
     'pending': YELLOW,
     'changes_requested': RED,
@@ -1720,7 +1723,8 @@ def main() -> None:
             line3.append(f'{DIM}⎇ {branch}{RESET}')
 
     if data.pr is not None:
-        pr_color = PR_REVIEW_COLORS.get(data.pr.review_state or '', DIM)
+        review_state = data.pr.review_state
+        pr_color = PR_REVIEW_COLORS.get(review_state, DIM) if review_state else DIM
         pr_link = _osc8_link(data.pr.url, f'PR #{data.pr.number}')
         line3.append(f'{pr_color}{pr_link}{RESET}')
 
