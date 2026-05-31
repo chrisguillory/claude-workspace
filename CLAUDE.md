@@ -580,8 +580,10 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 
 ```
 /Users/chris/claude-workspace/
-├── .claude/                    # Claude Code configuration
-│   └── settings.local.json     # Hook and permission settings
+├── .claude/                    # Project Claude Code config (tracked; settings.local.json is gitignored)
+│   ├── settings.json           # Project settings
+│   ├── agents/                 # Project subagents
+│   └── skills/                 # Project skills — auto-discovered in this repo
 ├── hooks/                      # Claude Code hooks (SessionStart, SessionEnd, etc.)
 ├── mcp/                        # MCP servers (acronym, stays singular)
 │   ├── claude-session/
@@ -595,7 +597,7 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 │       ├── session_tracker.py
 │       └── utils.py
 ├── commands/                   # Custom slash commands
-├── skills/                     # Auto-activating skills
+├── skills/                     # placeholder; real skills: .claude/skills/ (project), ~/.claude/skills/ (user)
 ├── configs/                    # Configuration templates
 └── claude-docs/                # Reference docs for Claude (not auto-loaded)
 ```
