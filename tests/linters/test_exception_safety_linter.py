@@ -56,6 +56,10 @@ EXPECTED_EXC010: ViolationMap = {
     'NoSuperCallError_pickle_ok': set(),
     # Breaks pickle, but an inline directive suppresses the violation.
     'InlineSuppressedError_pickle_breaks': set(),
+    # Mixin + synthesis coverage (generics, Literal, pickle-equivalence, ValidationError factory).
+    'MixinSeqLiteralError_pickle_ok': set(),
+    'WrappedCauseError_pickle_ok': set(),
+    'ValidationErrorParamError_pickle_ok': set(),
 }
 
 # -- Expected Violations: Instructive Test File -------------------------------

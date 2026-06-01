@@ -10,9 +10,6 @@ CCLibError                                # base for all cc_lib exceptions
 │   └── MissingEnvVarError                # expected env var not set
 ├── HookTreeMismatchError                 # hook tree != CLAUDE_EXEC_LAUNCH_DIR/hooks
 └── RivalSessionError                     # another live claude process owns this session_id
-
-Exceptions with a custom __init__ mix in PickleByInitArgs (listed first) to stay
-picklable; see cc_lib.picklable.
 """
 
 from __future__ import annotations

@@ -198,7 +198,7 @@ FIX_SUGGESTIONS: Mapping[ViolationKind, str] = {
     'cancelled-not-raised': "Add 'raise' after cleanup, or remove the try/except entirely if no cleanup needed",
     'generator-exit-not-raised': "Add 'raise' after cleanup, or use 'finally' block instead (preferred)",
     'unused-directive': 'Remove the stale suppression directive',
-    'init-not-pickleable': "Define __reduce__ (e.g., 'return (self.__class__, (self.field,), self.__dict__)') or pass args verbatim",
+    'init-not-pickleable': 'Mix in cc_lib.picklable.PickleByInitArgs (first base), storing each __init__ param as a same-named attribute; or define __reduce__',
 }
 
 
@@ -1114,8 +1114,6 @@ def find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestRef
 # not ported B042 (astral-sh/ruff#8579). The workspace ruff config selects the
 # ``B`` set; B042 will land for free when ruff ports it.
 
-_PROBE_PATH = Path(__file__).parent / '_lib' / 'pickle_probe.py'
-
 
 class _EmpiricalPickleChecker:
     """EXC010 — pickle-round-trip each Exception subclass in an isolated subprocess.
@@ -1129,6 +1127,7 @@ class _EmpiricalPickleChecker:
     """
 
     KIND: ClassVar[ViolationKind] = 'init-not-pickleable'
+    PROBE_PATH: ClassVar[Path] = Path(__file__).parent / '_lib' / 'pickle_probe.py'
 
     def __init__(self, filepath: Path) -> None:
         self._filepath = filepath
@@ -1143,7 +1142,7 @@ class _EmpiricalPickleChecker:
         interpreter = self._interpreter_for_file()
         roots = [str(r) for r in self._discover_source_roots()]
         result = subprocess.run(
-            [interpreter, str(_PROBE_PATH), str(self._filepath), *roots],
+            [interpreter, str(self.PROBE_PATH), str(self._filepath), *roots],
             capture_output=True,
             text=True,
             check=False,

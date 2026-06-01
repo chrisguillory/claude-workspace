@@ -6,6 +6,13 @@ The test framework runs the linter on this file; the EXPECTED dict in
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Literal
+
+import pydantic
+from cc_lib.picklable import PickleByInitArgs
+
 # -- Should fire EXC010 ------------------------------------------------------
 
 
@@ -108,3 +115,41 @@ class InlineSuppressedError_pickle_breaks(Exception):  # exception_safety_linter
     def __init__(self, var_name: str) -> None:
         super().__init__(f'{var_name} is broken')
         self.var_name = var_name
+
+
+# -- Mixin + synthesis coverage — should NOT fire EXC010 ---------------------
+
+
+class MixinSeqLiteralError_pickle_ok(PickleByInitArgs, Exception):
+    """Keyword-only init with an iterated Sequence[Path] and a Literal.
+
+    The mixin round-trips it; synthesis must yield [] for the sequence (else the
+    iteration raises) and a Literal member (else calling the string value raises).
+    """
+
+    def __init__(self, *, name: str, paths: Sequence[Path], mode: Literal['fast', 'slow']) -> None:
+        self.name = name
+        self.paths = paths
+        self.mode = mode
+        joined = ', '.join(str(p) for p in paths)
+        super().__init__(f'{name} [{mode}]: {joined}')
+
+
+class WrappedCauseError_pickle_ok(PickleByInitArgs, Exception):
+    """Stores an Exception attribute (no value-equality).
+
+    The round-trip yields an equivalent-but-distinct cause, so attribute state must
+    be compared by pickle bytes, not ``==``, to avoid a false positive.
+    """
+
+    def __init__(self, cause: Exception) -> None:
+        self.cause = cause
+        super().__init__(f'wrapped: {cause}')
+
+
+class ValidationErrorParamError_pickle_ok(PickleByInitArgs, Exception):
+    """Takes a pydantic.ValidationError, which has no no-arg form — synthesis mints one via its factory."""
+
+    def __init__(self, error: pydantic.ValidationError) -> None:
+        self.error = error
+        super().__init__(str(error))
