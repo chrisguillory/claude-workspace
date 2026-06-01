@@ -319,6 +319,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -631,6 +642,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -922,6 +944,17 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -1362,6 +1395,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -1665,6 +1709,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -1862,6 +1917,17 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2456,6 +2522,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -2825,6 +2902,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -3072,6 +3160,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/PreservedCompactSegment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preservedMessages": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreservedCompactMessages"
             },
             {
               "type": "null"
@@ -4220,6 +4319,26 @@
       "title": "FileInfo",
       "type": "object"
     },
+    "ForkOrigin": {
+      "additionalProperties": true,
+      "description": "Backpointer to the source session/message a forked session branched from.",
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "messageUuid": {
+          "title": "Messageuuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "messageUuid"
+      ],
+      "title": "ForkOrigin",
+      "type": "object"
+    },
     "GlobToolInput": {
       "additionalProperties": true,
       "description": "Input for Glob tool - file pattern matching.\n\nFields:\n    pattern: Glob pattern to match files (e.g., \"**/*.py\")\n    path: Directory to search in (defaults to cwd)\n    limit: Max number of files to return (Claude Code 2.1.100+)",
@@ -4846,13 +4965,20 @@
           "type": "string"
         },
         "durationMs": {
-          "title": "Durationms",
-          "type": "integer"
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Durationms"
         }
       },
       "required": [
-        "command",
-        "durationMs"
+        "command"
       ],
       "title": "HookInfo",
       "type": "object"
@@ -5102,7 +5228,9 @@
         "media_type": {
           "enum": [
             "image/jpeg",
-            "image/png"
+            "image/png",
+            "image/gif",
+            "image/webp"
           ],
           "title": "Media Type",
           "type": "string"
@@ -5140,6 +5268,17 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -5585,6 +5724,17 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -6315,6 +6465,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -6508,23 +6669,37 @@
           "title": "Description",
           "type": "string"
         },
-        "timeout_ms": {
-          "title": "Timeout Ms",
-          "type": "integer"
-        },
-        "persistent": {
-          "title": "Persistent",
-          "type": "boolean"
-        },
         "command": {
           "title": "Command",
           "type": "string"
+        },
+        "timeout_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Ms"
+        },
+        "persistent": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Persistent"
         }
       },
       "required": [
         "description",
-        "timeout_ms",
-        "persistent",
         "command"
       ],
       "title": "MonitorToolInput",
@@ -6997,9 +7172,40 @@
       "title": "PrLinkRecord",
       "type": "object"
     },
+    "PreservedCompactMessages": {
+      "additionalProperties": true,
+      "description": "Preserved-message anchors carried across a compaction.",
+      "properties": {
+        "anchorUuid": {
+          "title": "Anchoruuid",
+          "type": "string"
+        },
+        "uuids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Uuids",
+          "type": "array"
+        },
+        "allUuids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Alluuids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "anchorUuid",
+        "uuids",
+        "allUuids"
+      ],
+      "title": "PreservedCompactMessages",
+      "type": "object"
+    },
     "PreservedCompactSegment": {
       "additionalProperties": true,
-      "description": "Anchor UUIDs identifying the conversation segment preserved across an auto-compact.\n\nPydantic resolves the forward reference from CompactMetadata.preservedSegment.",
+      "description": "Anchor UUIDs identifying the conversation segment preserved across an auto-compact.",
       "properties": {
         "headUuid": {
           "title": "Headuuid",
@@ -7880,6 +8086,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -7957,6 +8174,30 @@
           ],
           "default": null,
           "title": "Agentid"
+        },
+        "teamName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Teamname"
+        },
+        "agentName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentname"
         }
       },
       "required": [
@@ -8048,6 +8289,44 @@
       "title": "SelectedLinesInIdeAttachment",
       "type": "object"
     },
+    "SendMessageLegacyToolInput": {
+      "additionalProperties": true,
+      "description": "Pre-refactor SendMessage wire shape (Claude Code 2.1.63): type/recipient/content, no to/message.",
+      "properties": {
+        "type": {
+          "const": "message",
+          "title": "Type",
+          "type": "string"
+        },
+        "recipient": {
+          "title": "Recipient",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        }
+      },
+      "required": [
+        "type",
+        "recipient",
+        "content"
+      ],
+      "title": "SendMessageLegacyToolInput",
+      "type": "object"
+    },
     "SendMessageRouting": {
       "additionalProperties": true,
       "description": "Routing metadata for a sent message between team members.",
@@ -8102,6 +8381,72 @@
       "title": "SendMessageRouting",
       "type": "object"
     },
+    "SendMessageShutdownRequest": {
+      "additionalProperties": true,
+      "description": "Control-message body requesting a teammate shut down.",
+      "properties": {
+        "type": {
+          "const": "shutdown_request",
+          "title": "Type",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "SendMessageShutdownRequest",
+      "type": "object"
+    },
+    "SendMessageShutdownResponse": {
+      "additionalProperties": true,
+      "description": "Control-message body answering a shutdown request.",
+      "properties": {
+        "type": {
+          "const": "shutdown_response",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "approve": {
+          "title": "Approve",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "approve"
+      ],
+      "title": "SendMessageShutdownResponse",
+      "type": "object"
+    },
     "SendMessageSimpleToolInput": {
       "additionalProperties": true,
       "description": "Simplified SendMessage input format (Claude Code 2.1.81+).",
@@ -8124,18 +8469,43 @@
     },
     "SendMessageToolInput": {
       "additionalProperties": true,
-      "description": "Input for SendMessage tool \u2014 post-backfill wire shape.\n\nClaude Code's `backfillObservableInput` derives `type`/`recipient`/`content` from\n`to`/`message` before serialization, so the recorded shape carries all six fields\nwhen `type=='message'`. The raw two-field form is captured by SendMessageSimpleToolInput.",
+      "description": "Input for SendMessage tool \u2014 post-backfill wire shape.\n\nClaude Code's `backfillObservableInput` derives `type`/`recipient`/`content` from\n`to`/`message` before serialization. `message` is a plain string or a control body\n(shutdown handshake), and `type` mirrors it. The raw two-field form is SendMessageSimpleToolInput.",
       "properties": {
         "to": {
           "title": "To",
           "type": "string"
         },
         "message": {
-          "title": "Message",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "discriminator": {
+                "mapping": {
+                  "shutdown_request": "#/$defs/SendMessageShutdownRequest",
+                  "shutdown_response": "#/$defs/SendMessageShutdownResponse"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SendMessageShutdownRequest"
+                },
+                {
+                  "$ref": "#/$defs/SendMessageShutdownResponse"
+                }
+              ]
+            }
+          ],
+          "title": "Message"
         },
         "type": {
-          "const": "message",
+          "enum": [
+            "message",
+            "shutdown_request",
+            "shutdown_response"
+          ],
           "title": "Type",
           "type": "string"
         },
@@ -8405,6 +8775,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -8644,6 +9025,17 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -10186,6 +10578,9 @@
               "$ref": "#/$defs/SendMessageSimpleToolInput"
             },
             {
+              "$ref": "#/$defs/SendMessageLegacyToolInput"
+            },
+            {
               "$ref": "#/$defs/TaskToolInput"
             },
             {
@@ -10326,6 +10721,17 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -10372,6 +10778,18 @@
           ],
           "default": null,
           "title": "Pendingbackgroundagentcount"
+        },
+        "pendingWorkflowCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pendingworkflowcount"
         },
         "isMeta": {
           "title": "Ismeta",
@@ -10580,6 +10998,17 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -11667,9 +12096,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.37",
+  "x-schema-version": "0.2.38",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.156"
+    "max": "2.1.157"
   }
 }

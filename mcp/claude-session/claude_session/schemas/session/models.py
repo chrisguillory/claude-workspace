@@ -235,6 +235,22 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   /remote-control bridge sessions — binary-confirmed, surfaced in JSONL once a live
                   bridge session ran (deferred at first pass per empirical-only: zero JSONL then).
                   Extended CLAUDE_CODE_MAX_VERSION to 2.1.156.
+- Schema v0.2.38: Cross-machine sweep (M2, ~1.3M records, Claude Code 2.1.157) surfaced 8 real gaps
+                  + 1 misfire. forkedFrom: ForkOrigin {sessionId, messageUuid} on BaseRecord — a
+                  session-fork backpointer present on every record of a forked session (Claude Code
+                  2.1.8+, binary-bisected; 94% of M2's failures). MonitorToolInput timeout_ms/persistent
+                  -> optional (binary: only description/command required). HookInfo.durationMs -> optional
+                  (absent on pre-2.1.120 records; reverse of v0.2.31). ScheduledTaskFireSystemRecord +=
+                  teamName/agentName (missed when v0.2.15 added them to all record types). SendMessage:
+                  control bodies (SendMessageControl = shutdown_request | shutdown_response, discriminated)
+                  widen SendMessageToolInput.message to str|control and type; SendMessageLegacyToolInput
+                  for the 2.1.63 pre-refactor {type, recipient, content} shape. CompactMetadata.
+                  preservedMessages (PreservedCompactMessages {anchorUuid, uuids, allUuids}).
+                  ImageSource.media_type widened to the Anthropic 4-value enum (+image/gif, image/webp).
+                  TurnDurationSystemRecord.pendingWorkflowCount — the binary-only sibling v0.2.37 deferred,
+                  now observable once workflows ran. The lone misfire (a SendMessage {to, prompt}
+                  hallucination, the shape v0.2.34 already removed) was data-cleaned, not modeled.
+                  Extended CLAUDE_CODE_MAX_VERSION to 2.1.157.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -390,6 +406,7 @@ __all__ = [
     'FileHistorySnapshot',
     'FileHistorySnapshotRecord',
     'FileInfo',
+    'ForkOrigin',
     'GlobToolInput',
     'GlobToolResult',
     'GrepToolInput',
@@ -451,6 +468,7 @@ __all__ = [
     'PlanModeExitAttachment',
     'PlanModeReentryAttachment',
     'PrLinkRecord',
+    'PreservedCompactMessages',
     'PreservedCompactSegment',
     'ProgressData',
     'ProgressRecord',
@@ -476,7 +494,11 @@ __all__ = [
     'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
     'SelectedLinesInIdeAttachment',
+    'SendMessageControl',
+    'SendMessageLegacyToolInput',
     'SendMessageRouting',
+    'SendMessageShutdownRequest',
+    'SendMessageShutdownResponse',
     'SendMessageSimpleToolInput',
     'SendMessageToolInput',
     'SendMessageToolResult',
@@ -558,9 +580,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.37'
+SCHEMA_VERSION = '0.2.38'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.156')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.157')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -656,9 +678,11 @@ class MonitorToolInput(StrictModel):
     """Input for Monitor tool - streams events from a long-running background script (Claude Code 2.1.98+)."""
 
     description: str  # Short human-readable description of what is being monitored
-    timeout_ms: int  # Kill deadline in milliseconds
-    persistent: bool  # If True, runs for the lifetime of the session (ignores timeout_ms)
     command: str  # Shell command or script to run
+    timeout_ms: int | None = None  # Kill deadline in ms; omitted when persistent=True (binary: optional, min 1000)
+    persistent: bool | None = (
+        None  # Runs for the session lifetime, ignoring timeout_ms (binary: optional, default false)
+    )
 
 
 class PushNotificationToolInput(StrictModel):
@@ -814,17 +838,39 @@ class TeamCreateToolInput(StrictModel):
 # -- SendMessage Tool Input (Claude Code 2.1.63+) ------------------------------
 
 
+class SendMessageShutdownRequest(StrictModel):
+    """Control-message body requesting a teammate shut down."""
+
+    type: Literal['shutdown_request']
+    reason: str | None = None
+
+
+class SendMessageShutdownResponse(StrictModel):
+    """Control-message body answering a shutdown request."""
+
+    type: Literal['shutdown_response']
+    request_id: str
+    approve: bool
+    reason: str | None = None
+
+
+SendMessageControl = Annotated[
+    SendMessageShutdownRequest | SendMessageShutdownResponse,
+    pydantic.Field(discriminator='type'),
+]
+
+
 class SendMessageToolInput(StrictModel):
     """Input for SendMessage tool — post-backfill wire shape.
 
     Claude Code's `backfillObservableInput` derives `type`/`recipient`/`content` from
-    `to`/`message` before serialization, so the recorded shape carries all six fields
-    when `type=='message'`. The raw two-field form is captured by SendMessageSimpleToolInput.
+    `to`/`message` before serialization. `message` is a plain string or a control body
+    (shutdown handshake), and `type` mirrors it. The raw two-field form is SendMessageSimpleToolInput.
     """
 
     to: str
-    message: str
-    type: Literal['message']  # Backfilled from message.type
+    message: str | SendMessageControl
+    type: Literal['message', 'shutdown_request', 'shutdown_response']  # Mirrors message.type
     recipient: str  # Backfilled from to
     content: str  # Backfilled from message
     summary: str | None = None  # Binary: v.string().optional()
@@ -835,6 +881,15 @@ class SendMessageSimpleToolInput(StrictModel):
 
     to: str
     message: str
+
+
+class SendMessageLegacyToolInput(StrictModel):
+    """Pre-refactor SendMessage wire shape (Claude Code 2.1.63): type/recipient/content, no to/message."""
+
+    type: Literal['message']
+    recipient: str
+    content: str
+    summary: str | None = None
 
 
 # -- TaskCreate Tool Input (Claude Code 2.1.17+) -------------------------------
@@ -1173,6 +1228,7 @@ ToolInput = Annotated[
     # Multi-field tools
     | SendMessageToolInput  # to, message, type, recipient, content required (backfilled wire shape)
     | SendMessageSimpleToolInput  # to, message required (2.1.81+)
+    | SendMessageLegacyToolInput  # type, recipient, content required; no to/message (2.1.63 pre-refactor)
     | TaskToolInput  # prompt, description, subagent_type required
     | TaskCreateToolInput  # subject, description required (2.1.17+)
     | TeamCreateToolInput  # team_name, description required (2.1.63+)
@@ -1218,7 +1274,9 @@ class ImageSource(StrictModel):
     """Image source data for image content."""
 
     type: Literal['base64']
-    media_type: Literal['image/jpeg', 'image/png']  # Only value observed across all sessions
+    media_type: Literal[
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp'
+    ]  # Anthropic image-source enum (binary-confirmed)
     data: str  # Base64 encoded image data
 
 
@@ -1600,13 +1658,21 @@ class CompactMetadata(StrictModel):
     postTokens: int | None = None  # Token count after compaction (Claude Code 2.1.100+)
     durationMs: int | None = None  # Compaction runtime in milliseconds (Claude Code 2.1.100+)
     preservedSegment: PreservedCompactSegment | None = None  # Anchor pointers preserved across compaction
+    preservedMessages: PreservedCompactMessages | None = (
+        None  # Preserved-message anchors (richer sibling of preservedSegment)
+    )
+
+
+class PreservedCompactMessages(StrictModel):
+    """Preserved-message anchors carried across a compaction."""
+
+    anchorUuid: str
+    uuids: Sequence[str]
+    allUuids: Sequence[str]
 
 
 class PreservedCompactSegment(StrictModel):
-    """Anchor UUIDs identifying the conversation segment preserved across an auto-compact.
-
-    Pydantic resolves the forward reference from CompactMetadata.preservedSegment.
-    """
+    """Anchor UUIDs identifying the conversation segment preserved across an auto-compact."""
 
     headUuid: str  # Earliest preserved record
     anchorUuid: str  # Anchor record within the preserved segment
@@ -2499,6 +2565,16 @@ class BaseRecord(StrictModel):
     uuid: str
     timestamp: str
     sessionId: str
+    forkedFrom: ForkOrigin | None = (
+        None  # Source session/message when this record belongs to a forked session (Claude Code 2.1.8+)
+    )
+
+
+class ForkOrigin(StrictModel):
+    """Backpointer to the source session/message a forked session branched from."""
+
+    sessionId: str
+    messageUuid: str
 
 
 # -- User Record ---------------------------------------------------------------
@@ -2827,6 +2903,9 @@ class TurnDurationSystemRecord(BaseRecord):
     durationMs: int  # Duration of the turn in milliseconds
     messageCount: int | None = None  # Number of messages in the turn (Claude Code 2.1.87+)
     pendingBackgroundAgentCount: int | None = None  # Background agents still running at turn end (Claude Code 2.1.152+)
+    pendingWorkflowCount: int | None = (
+        None  # Workflows still running at turn end (sibling of pendingBackgroundAgentCount)
+    )
     isMeta: bool
     isSidechain: bool
     userType: str
@@ -2843,7 +2922,7 @@ class HookInfo(StrictModel):
     """Information about a hook execution."""
 
     command: str
-    durationMs: int  # Hook execution duration in milliseconds (Claude Code 2.1.120+)
+    durationMs: int | None = None  # Hook duration ms (Claude Code 2.1.120+; absent on pre-2.1.120 records)
 
 
 class StopHookSummarySystemRecord(BaseRecord):
@@ -2912,6 +2991,8 @@ class ScheduledTaskFireSystemRecord(BaseRecord):
     slug: str | None = None
     entrypoint: str | None = None
     agentId: str | None = None  # Present on sidechain subagent records (Claude Code 2.1.112+)
+    teamName: str | None = None
+    agentName: str | None = None
 
 
 class AwaySummarySystemRecord(BaseRecord):
