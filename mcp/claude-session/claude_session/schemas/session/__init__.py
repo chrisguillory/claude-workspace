@@ -97,7 +97,6 @@ from claude_session.schemas.session.models import (
     LastPromptRecord,
     ListMcpResourcesToolInput,
     LocalCommandSystemRecord,
-    MalformedWriteToolInput,
     McpMeta,
     McpResource,
     McpResourceContent,
@@ -232,7 +231,6 @@ __all__ = [
     'GrepToolInput',
     'KillShellToolInput',
     'ListMcpResourcesToolInput',
-    'MalformedWriteToolInput',  # Historical edge case - see fixtures/edge_cases/
     'MCPSearchToolInput',
     'NotebookEditToolInput',
     'ReadMcpResourceToolInput',
