@@ -1001,6 +1001,15 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             },
         )
 
+    # Preflight: the input device must actually produce audio SAMPLES, not just
+    # enumerate. The channel-count probe above and claude-coreaudio-probe both
+    # succeed on a device that opens for control transfers (descriptor/format
+    # reads) yet delivers no isochronous data — a USB-audio endpoint stalled
+    # after sleep/wake (iso bandwidth stranded on the host controller or a hub
+    # Transaction Translator). roc-send would launch, stay pgrep-alive, and
+    # broadcast silence to every peer ("alive but useless"). Catch it here.
+    await _verify_input_produces_samples(service, plan.hub_alias, plan.input_device)
+
     # Pass the probed channel count straight through to roc-send via our
     # patched --channels flag. Mono devices open at 1ch, stereo at 2ch, etc.
     # When the probe couldn't determine the count (in_channels is None),
@@ -1028,6 +1037,62 @@ async def _restart_roc_send(service: DispatchService, plan: _Plan) -> Sequence[s
             context={'host': plan.hub_alias, 'input_device': plan.input_device},
         )
     return [f'restarted roc-send (input={plan.input_device})']
+
+
+async def _verify_input_produces_samples(service: DispatchService, host: str, input_device: str) -> None:
+    """Refuse if ``input_device`` opens but delivers no audio samples.
+
+    A USB-audio endpoint stalled after sleep/wake still enumerates and opens —
+    ``claude-coreaudio-probe`` returns ``verdict=ok`` and the channel-count
+    probe reads the format (both are control-transfer traffic) — but its
+    isochronous stream is dead. roc-send launched against it stays
+    ``pgrep``-alive while broadcasting silence to every peer ("alive but
+    useless"). The existing post-mortem only runs when roc-send *dies*, so it
+    never catches this; this preflight does.
+
+    Discriminator (empirically validated 2026-05-31 against a real port-wedge):
+    a SIGKILL-bounded capture. A live mic returns within the window with a
+    noise-floor maximum amplitude > 0; a stalled endpoint either blocks (sox
+    SIGKILLed → non-zero rc → ``blocked``) or returns an exact ``0.000000``
+    maximum amplitude (``silent``). ``gtimeout -s KILL`` guarantees the probe
+    can never hang the apply even when the device-open blocks uninterruptibly.
+
+    Any prior roc-send is killed first so the probe measures the device, not a
+    contention failure (roc-send would otherwise hold the input).
+    """
+    quoted = shlex.quote(input_device)
+    probe_cmd = (
+        'killall roc-send 2>/dev/null; sleep 1; '
+        f'gtimeout -s KILL 4 sox -t coreaudio {quoted} -n trim 0 1.5 stat >/tmp/cra-input-probe.txt 2>&1; rc=$?; '
+        'if [ "$rc" -ne 0 ]; then echo VERDICT=blocked; '
+        r'elif grep -qiE "Maximum amplitude:[[:space:]]+0\.0+$" /tmp/cra-input-probe.txt; then echo VERDICT=silent; '
+        'else echo VERDICT=alive; fi; '
+        'rm -f /tmp/cra-input-probe.txt'
+    )
+    result = await _run(service, host, probe_cmd)
+    verdict = result.stdout.strip().split('\n')[-1].removeprefix('VERDICT=')
+    if verdict == 'alive':
+        return
+    raise ResolvableApplyError(
+        f'{host}: input device {input_device!r} enumerates and opens but produces no audio '
+        f'samples (capture {verdict}) — a USB-audio endpoint stall, almost always after a '
+        f'sleep/wake. roc-send would broadcast silence to every peer while appearing alive.',
+        code='input-device-no-samples',
+        title=f'Input device produces no audio on {host}',
+        suggestions=(
+            f'Check for a hardware mute switch on {input_device!r} first (some mics zero their output when muted).',
+            f'Most reliable: unplug {input_device!r} and replug into a DIFFERENT USB/Thunderbolt port — '
+            'ideally direct to the Mac, not via a hub or monitor. A fresh port is a fresh controller '
+            'with clean isochronous bandwidth.',
+            'If it runs through a powered USB hub or a monitor hub, power-cycle that hub/monitor '
+            '(~30-60s) — resets the hub Transaction Translator where the stall may live.',
+            f'Else clear the host-controller state with a clean sleep/wake of {host} '
+            '(`sudo pmset sleepnow`, wake, reconnect the device), then re-run apply.',
+            f'If none clear it, reboot {host} — the only deterministic fix for a wedged USB '
+            'controller (the surgical per-controller reset is SIP-blocked on Apple Silicon).',
+        ),
+        context={'host': host, 'input_device': input_device, 'verdict': verdict},
+    )
 
 
 async def _check_application_firewall(service: DispatchService, host: str, binary_path: str) -> str:
