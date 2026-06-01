@@ -54,7 +54,7 @@ __all__ = [
     'terminate_supervisor',
 ]
 
-SUPERVISOR_READY_TIMEOUT_SECONDS = 30.0
+SUPERVISOR_READY_TIMEOUT_SECONDS = 60.0
 """Bound on how long ``crb mount`` waits for the spawned supervisor to print ``READY``."""
 
 SUPERVISOR_SHUTDOWN_TIMEOUT_SECONDS = 30.0

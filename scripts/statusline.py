@@ -25,8 +25,7 @@ Install:
 Output Lines:
     Line 1 — Identity:
         model+version, pid+up:(process uptime), session_id+age:(conversation age),
-        process health (mem/cpu/trends/anomalies), account (login·tier), git branch,
-        vim mode
+        process health (mem/cpu/trends/anomalies), account (login·tier), vim mode
 
     Line 2 — Metrics:
         Context bar (used/total +Nk delta) │ remaining% │ $cost │ run:duration │
@@ -34,7 +33,8 @@ Output Lines:
 
     Line 3 — Workspace:
         cwd (color-coded: dim=project, cyan=added dir, yellow=unknown) │ project │
-        +dir: added dirs │ transcript link
+        +dir: added dirs │ ⎇ branch │ PR #N (color: review state) │ worktree │
+        venv │ transcript link
 
     Line 4 — Detail:
         session: cumulative tokens │ last: per-turn tokens │
@@ -66,7 +66,7 @@ Data Sources:
     psutil            PID, process uptime, health (RSS, CPU, FDs, children)
     ~/.claude.json    oauthAccount (email, org, billing type)
     macOS keychain    subscription type, rate limit tier
-    git               branch, remote URL
+    git               branch
     transcript file   session age (first line), session title (mmap rfind)
 
 State (all under ~/.claude-workspace/statusline/):
@@ -76,9 +76,8 @@ State (all under ~/.claude-workspace/statusline/):
     error.log                       Last error details (clickable OSC8 link)
 
 Schema Validation:
-    Sub-objects use extra='forbid' — any new field in a nested object fails immediately.
-    Top-level StatusLineInput uses extra='allow' — Claude Code can add new root fields
-    without breaking. External data models use SubsetModel (extra='ignore').
+    Claude Code input uses StrictModel; external data (credentials, keychain) uses
+    SubsetModel.
 
 Possible Improvements:
     Token insights (requires per-turn history infrastructure):
@@ -283,48 +282,8 @@ class HealthSidecar(StrictModel):
 # -- Status Line Input Models — strict, fail-fast on schema drift --------------
 
 
-class ModelInfo(StrictModel):
-    id: str
-    display_name: str
-
-
-class WorkspaceInfo(StrictModel):
-    current_dir: str
-    project_dir: str
-    added_dirs: Sequence[str] = ()  # Added in v2.1.47
-    git_worktree: str | None = None  # Added in v2.1.97
-
-
-class CostInfo(StrictModel):
-    total_cost_usd: float | None = None
-    total_duration_ms: float | None = None
-    total_api_duration_ms: float | None = None
-    total_lines_added: int | None = None
-    total_lines_removed: int | None = None
-
-
-class CurrentUsage(StrictModel):
-    input_tokens: int
-    output_tokens: int
-    cache_creation_input_tokens: int
-    cache_read_input_tokens: int
-
-
-class ContextWindow(StrictModel):
-    total_input_tokens: int
-    total_output_tokens: int
-    context_window_size: int
-    used_percentage: float | None = None
-    remaining_percentage: float | None = None
-    current_usage: CurrentUsage | None = None
-
-
 class StatusLineInput(StrictModel):
-    """Top-level JSON received on stdin.
-
-    Uses extra='allow' at top level since Claude Code may add new fields.
-    Sub-objects use extra='forbid' to catch structural changes.
-    """
+    """Top-level JSON received on stdin."""
 
     model: ModelInfo
     cwd: str
@@ -350,12 +309,58 @@ class StatusLineInput(StrictModel):
     session_name: str | None = None  # Added in v2.1.41
     rate_limits: RateLimits | None = None  # Added in v2.1.80
     worktree: WorktreeInfo | None = None  # Added in v2.1.69
+    pr: PrInfo | None = None  # Added in v2.1.145
     fast_mode: bool | None = None  # Added in v2.1.119
     effort: EffortInfo | None = None  # Added in v2.1.119
     thinking: ThinkingInfo | None = None  # Added in v2.1.119
     vim: Mapping[str, str] | None = None
     agent: Mapping[str, str] | None = None
     output_style: Mapping[str, str] | None = None
+
+
+class ModelInfo(StrictModel):
+    id: str
+    display_name: str
+
+
+class WorkspaceInfo(StrictModel):
+    current_dir: str
+    project_dir: str
+    added_dirs: Sequence[str] = ()  # Added in v2.1.47
+    git_worktree: str | None = None  # Added in v2.1.97
+    repo: RepoInfo | None = None  # Added in v2.1.145
+
+
+class RepoInfo(StrictModel):
+    """Git repository identity from the origin remote. Added in v2.1.145."""
+
+    host: str
+    owner: str
+    name: str
+
+
+class CostInfo(StrictModel):
+    total_cost_usd: float | None = None
+    total_duration_ms: float | None = None
+    total_api_duration_ms: float | None = None
+    total_lines_added: int | None = None
+    total_lines_removed: int | None = None
+
+
+class ContextWindow(StrictModel):
+    total_input_tokens: int
+    total_output_tokens: int
+    context_window_size: int
+    used_percentage: float | None = None
+    remaining_percentage: float | None = None
+    current_usage: CurrentUsage | None = None
+
+
+class CurrentUsage(StrictModel):
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
 
 
 class RateLimits(StrictModel):
@@ -380,6 +385,17 @@ class WorktreeInfo(StrictModel):
     branch: str | None = None
     original_cwd: str
     original_branch: str | None = None
+
+
+type PrReviewState = Literal['approved', 'pending', 'changes_requested', 'draft']
+
+
+class PrInfo(StrictModel):
+    """Open PR for the current branch (mirrors the footer PR badge). Added in v2.1.145."""
+
+    number: int
+    url: str
+    review_state: PrReviewState | None = None
 
 
 class EffortInfo(StrictModel):
@@ -414,6 +430,15 @@ EFFORT_COLORS: Mapping[EffortLevel, str] = {
     'high': YELLOW,
     'medium': YELLOW,
     'low': RED,
+}
+
+
+# PR review-state colors — green=approved; the rest escalate attention.
+PR_REVIEW_COLORS: Mapping[PrReviewState, str] = {
+    'approved': GREEN,
+    'pending': YELLOW,
+    'changes_requested': RED,
+    'draft': DIM,
 }
 
 
@@ -1027,30 +1052,6 @@ def _git_branch() -> str:
     return ''
 
 
-def _git_remote_url() -> str:
-    """Get GitHub HTTPS URL for origin remote, or empty string."""
-    try:
-        result = subprocess.run(
-            ['git', 'remote', 'get-url', 'origin'],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        if result.returncode == 0:
-            url = result.stdout.strip()
-            # Convert git@github.com:user/repo.git → https://github.com/user/repo
-            if url.startswith('git@github.com:'):
-                url = 'https://github.com/' + url[15:]
-            if url.endswith('.git'):
-                url = url[:-4]
-            if 'github.com' in url:
-                return url
-    except (subprocess.TimeoutExpired, OSError):
-        pass
-    return ''
-
-
 # -- Formatting ----------------------------------------------------------------
 
 
@@ -1582,7 +1583,6 @@ def main() -> None:
         data.transcript_path,
     )
     branch = _git_branch()
-    remote_url = _git_remote_url()
 
     # ── Line 1: Identity + Model ─────────────────────────────────────────
     parts: list[str] = []
@@ -1633,14 +1633,6 @@ def main() -> None:
 
     if pending_login:
         parts.append(f'{YELLOW}(switch pending: {pending_login} — restart to activate){RESET}')
-
-    # Git branch — links to GitHub branch page
-    if branch:
-        if remote_url:
-            branch_link = _osc8_link(f'{remote_url}/tree/{branch}', branch)
-            parts.append(f'{DIM}⎇{RESET} {branch_link}')
-        else:
-            parts.append(f'{DIM}⎇ {branch}{RESET}')
 
     # Vim mode
     if data.vim and 'mode' in data.vim:
@@ -1722,8 +1714,20 @@ def main() -> None:
     if not os.environ.get('CLAUDE_EXEC_LAUNCH_DIR'):
         line3.append(f'{BOLD}{RED}⚠ NOT LAUNCHED VIA claude-exec{RESET}')
 
-    # Venv provenance — where did .venv/bin on PATH come from?
-    line3.append(_detect_venv_provenance(data.cwd))
+    # VCS cluster — branch (link sourced from workspace.repo), open PR, worktree
+    if branch:
+        repo = data.workspace.repo
+        if repo is not None:
+            branch_link = _osc8_link(f'https://{repo.host}/{repo.owner}/{repo.name}/tree/{branch}', branch)
+            line3.append(f'{DIM}⎇{RESET} {branch_link}')
+        else:
+            line3.append(f'{DIM}⎇ {branch}{RESET}')
+
+    if data.pr is not None:
+        review_state = data.pr.review_state
+        pr_color = PR_REVIEW_COLORS.get(review_state, DIM) if review_state else DIM
+        pr_link = _osc8_link(data.pr.url, f'PR #{data.pr.number}')
+        line3.append(f'{pr_color}{pr_link}{RESET}')
 
     # Worktree context — CC-managed (v2.1.69+) or detected via git
     if data.worktree:
@@ -1733,6 +1737,9 @@ def main() -> None:
         wt_info = _detect_git_worktree(data.cwd)
         if wt_info:
             line3.append(f'{CYAN}worktree:{RESET} {wt_info}')
+
+    # Venv provenance — where did .venv/bin on PATH come from?
+    line3.append(_detect_venv_provenance(data.cwd))
 
     # Transcript path
     line3.append(f'{DIM}transcript:{RESET} {_osc8_link(transcript_url, _shorten_path(data.transcript_path))}')

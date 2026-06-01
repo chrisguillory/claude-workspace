@@ -200,6 +200,57 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   union-cascade extra_forbidden errors per failing record). Empirically:
                   108 outer + 108 inner 'rate_limit_error' occurrences across the local corpus;
                   binary string verification confirmed 'rate_limit_error' in Claude Code 2.1.138.
+- Schema v0.2.36: Added HookCancelledAttachment for the 'hook_cancelled' attachment type emitted
+                  when a hook is aborted before completion (observed in JSONL on Stop-hook
+                  cancellation paths). Shape mirrors HookNonBlockingErrorAttachment minus the
+                  stdout/stderr/exitCode trio that an unfinished hook can't produce: type,
+                  hookName, toolUseID, hookEvent, command, durationMs (all required; 6/6 fields
+                  present across observed records). Without this variant the AttachmentRecord
+                  discriminated union rejects the record with union_tag_invalid, breaking
+                  save_current_session / clone / archive for any session containing a cancelled
+                  hook. Binary verification: 15 'hook_cancelled' occurrences in Claude Code 2.1.138,
+                  16 in 2.1.77, 0 in 1.0.50 (introduced pre-2.1.77; exact version not pinned).
+- Schema v0.2.37: Cluster fix surfaced when cloning a 2.1.156 session (clone crashed on the
+                  unmodeled `mode` record) — closed every gap in the 2.1.139-2.1.156 window
+                  (306 strict failures collapsed to 0 real schema gaps). New record/tool/attachment
+                  types: SessionModeRecord (`mode` session-resumption sidecar, Claude Code 2.1.69+;
+                  {type, mode, sessionId}; mode Literal['normal'], binary domain {normal, coordinator}
+                  via isCoordinatorMode(); v0.2.20 modeled its permission-mode/worktree-state siblings
+                  but missed this one); AgentsKilledSystemRecord (subtype=agents_killed, 2.1.139+, base
+                  envelope only); WorkflowKeywordRequestAttachment (2.1.153+) and UltrathinkEffortAttachment
+                  (2.1.139+), bare {type} markers; ScheduleWakeupToolInput (prompt/delaySeconds:int/reason).
+                  New CacheMissReason variant model_changed (server diagnostic, mirrors existing variants).
+                  New fields: claude-opus-4-8 in ModelId/_AllModelIds (2.1.154+); AssistantRecord.
+                  attributionMcpServer/attributionMcpTool (2.1.149+); UserRecord.interruptedMessageId
+                  (2.1.149+); TurnDurationSystemRecord.pendingBackgroundAgentCount (2.1.152+);
+                  SkillListingAttachment.names; OpenedFileInIdeAttachment.displayPath; TokenUsage.
+                  output_tokens_details (OutputTokensDetails.thinking_tokens, API passthrough);
+                  EmptyError.type=None accepts the bare {"type": null} api_error shape. Every field
+                  binary-verified or classified server-only-diagnostic per precedent; binary-only siblings
+                  (pendingWorkflowCount, attributionSnapshots) and the 'coordinator' mode value deferred
+                  per empirical-only modeling (no JSONL occurrences). Two ScheduleWakeup records carrying a
+                  string `delaySeconds` (model coercion misfire vs the binary's zod number contract) were
+                  data-patched, not accommodated. Added BridgeSessionRecord for the 'bridge-session'
+                  sidecar ({type, sessionId, bridgeSessionId, lastSequenceNum}) emitted by
+                  /remote-control bridge sessions — binary-confirmed, surfaced in JSONL once a live
+                  bridge session ran (deferred at first pass per empirical-only: zero JSONL then).
+                  Extended CLAUDE_CODE_MAX_VERSION to 2.1.156.
+- Schema v0.2.38: Cross-machine sweep (M2, ~1.3M records, Claude Code 2.1.157) surfaced 8 real gaps
+                  + 1 misfire. forkedFrom: ForkOrigin {sessionId, messageUuid} on BaseRecord — a
+                  session-fork backpointer present on every record of a forked session (Claude Code
+                  2.1.8+, binary-bisected; 94% of M2's failures). MonitorToolInput timeout_ms/persistent
+                  -> optional (binary: only description/command required). HookInfo.durationMs -> optional
+                  (absent on pre-2.1.120 records; reverse of v0.2.31). ScheduledTaskFireSystemRecord +=
+                  teamName/agentName (missed when v0.2.15 added them to all record types). SendMessage:
+                  control bodies (SendMessageControl = shutdown_request | shutdown_response, discriminated)
+                  widen SendMessageToolInput.message to str|control and type; SendMessageLegacyToolInput
+                  for the 2.1.63 pre-refactor {type, recipient, content} shape. CompactMetadata.
+                  preservedMessages (PreservedCompactMessages {anchorUuid, uuids, allUuids}).
+                  ImageSource.media_type widened to the Anthropic 4-value enum (+image/gif, image/webp).
+                  TurnDurationSystemRecord.pendingWorkflowCount — the binary-only sibling v0.2.37 deferred,
+                  now observable once workflows ran. The lone misfire (a SendMessage {to, prompt}
+                  hallucination, the shape v0.2.34 already removed) was data-cleaned, not modeled.
+                  Extended CLAUDE_CODE_MAX_VERSION to 2.1.157.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -276,6 +327,7 @@ __all__ = [
     'AgentProgressData',
     'AgentState',
     'AgentTeammateSpawnedResult',
+    'AgentsKilledSystemRecord',
     'AgentsRetrievalResult',
     'AiTitleRecord',
     'AlreadyReadFileAttachment',
@@ -300,10 +352,12 @@ __all__ = [
     'BashProgressData',
     'BashToolInput',
     'BashToolResult',
+    'BridgeSessionRecord',
     'BridgeStatusSystemRecord',
     'CacheCreation',
     'CacheMissReason',
     'CacheMissReasonMessagesChanged',
+    'CacheMissReasonModelChanged',
     'CacheMissReasonParamsChanged',
     'CacheMissReasonPreviousMessageNotFound',
     'CacheMissReasonSystemChanged',
@@ -352,6 +406,7 @@ __all__ = [
     'FileHistorySnapshot',
     'FileHistorySnapshotRecord',
     'FileInfo',
+    'ForkOrigin',
     'GlobToolInput',
     'GlobToolResult',
     'GrepToolInput',
@@ -360,6 +415,7 @@ __all__ = [
     'HookAdditionalContextAttachment',
     'HookBlockingErrorAttachment',
     'HookBlockingErrorData',
+    'HookCancelledAttachment',
     'HookInfo',
     'HookNonBlockingErrorAttachment',
     'HookProgressData',
@@ -384,7 +440,6 @@ __all__ = [
     'MCPStructuredContent',
     'MCPToolInput',
     'MCPToolResult',
-    'MalformedWriteToolInput',
     'McpInstructionsDeltaAttachment',
     'McpMeta',
     'McpMetaMetadata',
@@ -404,6 +459,7 @@ __all__ = [
     'NetworkError',
     'NotebookEditToolInput',
     'OpenedFileInIdeAttachment',
+    'OutputTokensDetails',
     'PatchHunk',
     'PdfFileInfo',
     'PermissionModeRecord',
@@ -412,6 +468,7 @@ __all__ = [
     'PlanModeExitAttachment',
     'PlanModeReentryAttachment',
     'PrLinkRecord',
+    'PreservedCompactMessages',
     'PreservedCompactSegment',
     'ProgressData',
     'ProgressRecord',
@@ -433,16 +490,22 @@ __all__ = [
     'ReadTextToolResult',
     'ReadToolInput',
     'SavedHookContextRecord',
+    'ScheduleWakeupToolInput',
     'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
     'SelectedLinesInIdeAttachment',
+    'SendMessageControl',
+    'SendMessageLegacyToolInput',
     'SendMessageRouting',
+    'SendMessageShutdownRequest',
+    'SendMessageShutdownResponse',
     'SendMessageSimpleToolInput',
     'SendMessageToolInput',
     'SendMessageToolResult',
     'ServerToolUse',
     'SessionAnalysis',
     'SessionMetadata',
+    'SessionModeRecord',
     'SessionRecord',
     'SessionRecordAdapter',
     'SimpleThinkingMetadata',
@@ -493,6 +556,7 @@ __all__ = [
     'ToolUseCaller',
     'ToolUseContent',
     'TurnDurationSystemRecord',
+    'UltrathinkEffortAttachment',
     'UsageIteration',
     'UserQuestion',
     'UserRecord',
@@ -505,6 +569,7 @@ __all__ = [
     'WebSearchResultWrapper',
     'WebSearchToolInput',
     'WebSearchToolResult',
+    'WorkflowKeywordRequestAttachment',
     'WorktreeSessionData',
     'WorktreeStateRecord',
     'WriteToolInput',
@@ -515,9 +580,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.35'
+SCHEMA_VERSION = '0.2.38'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.138')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.157')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -574,55 +639,6 @@ class WriteToolInput(StrictModel):
     content: str
 
 
-class MalformedWriteToolInput(StrictModel):
-    """Malformed Write tool input from historical JSON serialization bug.
-
-    CONTEXT:
-    This model exists to handle exactly 2 session records from December 24, 2025
-    (Claude Code version 2.0.76) where a JSON serialization bug caused malformed
-    tool_use inputs to be recorded in session files.
-
-    WHAT HAPPENED:
-    The model was writing a markdown file documenting Claude-in-Chrome MCP tool
-    invocation patterns. The markdown content contained example XML showing how
-    to invoke tools, including syntax like:
-
-        <parameter name="param1">value1","param2":"value2"}}]
-
-    Something in the serialization chain incorrectly parsed this content. The
-    `param2` substring within the content string was extracted as an actual
-    tool parameter, producing a malformed tool_use input like:
-
-        {"file_path": "...", "content": "...<truncated>...", "param2": "value2"}}]..."}
-
-    OUTCOME:
-    Claude Code's input validation correctly rejected these tool calls with:
-        InputValidationError: An unexpected parameter `param2` was provided
-
-    The writes never executed - the session files contain records of rejected
-    attempts, not successful operations.
-
-    WHY WE MODEL THIS:
-    Our Pydantic models validate session records (what was attempted), not tool
-    execution success. The malformed tool_use attempts exist in the session files
-    and need a matching model to pass validation.
-
-    EVIDENCE:
-    See fixtures/edge_cases/malformed_write_param2.jsonl for sanitized reproduction
-    records. This fixture contains the actual malformed records (paths sanitized)
-    and is validated by tests/test_fixtures.py.
-
-    FUTURE:
-    If Anthropic fixes the serialization bug and cleans up historical session
-    files, this model can be removed. The bug appears fixed in later versions
-    (no occurrences after December 2025).
-    """
-
-    file_path: PathField
-    content: str
-    param2: str  # The malformed field - always present in affected records
-
-
 class EditToolInput(StrictModel):
     """Input for Edit tool."""
 
@@ -662,9 +678,11 @@ class MonitorToolInput(StrictModel):
     """Input for Monitor tool - streams events from a long-running background script (Claude Code 2.1.98+)."""
 
     description: str  # Short human-readable description of what is being monitored
-    timeout_ms: int  # Kill deadline in milliseconds
-    persistent: bool  # If True, runs for the lifetime of the session (ignores timeout_ms)
     command: str  # Shell command or script to run
+    timeout_ms: int | None = None  # Kill deadline in ms; omitted when persistent=True (binary: optional, min 1000)
+    persistent: bool | None = (
+        None  # Runs for the session lifetime, ignoring timeout_ms (binary: optional, default false)
+    )
 
 
 class PushNotificationToolInput(StrictModel):
@@ -820,17 +838,39 @@ class TeamCreateToolInput(StrictModel):
 # -- SendMessage Tool Input (Claude Code 2.1.63+) ------------------------------
 
 
+class SendMessageShutdownRequest(StrictModel):
+    """Control-message body requesting a teammate shut down."""
+
+    type: Literal['shutdown_request']
+    reason: str | None = None
+
+
+class SendMessageShutdownResponse(StrictModel):
+    """Control-message body answering a shutdown request."""
+
+    type: Literal['shutdown_response']
+    request_id: str
+    approve: bool
+    reason: str | None = None
+
+
+SendMessageControl = Annotated[
+    SendMessageShutdownRequest | SendMessageShutdownResponse,
+    pydantic.Field(discriminator='type'),
+]
+
+
 class SendMessageToolInput(StrictModel):
     """Input for SendMessage tool — post-backfill wire shape.
 
     Claude Code's `backfillObservableInput` derives `type`/`recipient`/`content` from
-    `to`/`message` before serialization, so the recorded shape carries all six fields
-    when `type=='message'`. The raw two-field form is captured by SendMessageSimpleToolInput.
+    `to`/`message` before serialization. `message` is a plain string or a control body
+    (shutdown handshake), and `type` mirrors it. The raw two-field form is SendMessageSimpleToolInput.
     """
 
     to: str
-    message: str
-    type: Literal['message']  # Backfilled from message.type
+    message: str | SendMessageControl
+    type: Literal['message', 'shutdown_request', 'shutdown_response']  # Mirrors message.type
     recipient: str  # Backfilled from to
     content: str  # Backfilled from message
     summary: str | None = None  # Binary: v.string().optional()
@@ -841,6 +881,15 @@ class SendMessageSimpleToolInput(StrictModel):
 
     to: str
     message: str
+
+
+class SendMessageLegacyToolInput(StrictModel):
+    """Pre-refactor SendMessage wire shape (Claude Code 2.1.63): type/recipient/content, no to/message."""
+
+    type: Literal['message']
+    recipient: str
+    content: str
+    summary: str | None = None
 
 
 # -- TaskCreate Tool Input (Claude Code 2.1.17+) -------------------------------
@@ -1039,6 +1088,18 @@ class CronListToolInput(StrictModel):
     """Input for CronList tool - lists scheduled cron jobs."""
 
 
+class ScheduleWakeupToolInput(StrictModel):
+    """Input for ScheduleWakeup tool - arms a /loop dynamic-mode wake heartbeat.
+
+    delaySeconds is the API contract type (zod number, clamped to [60, 3600]
+    by the runtime).
+    """
+
+    prompt: str
+    delaySeconds: int
+    reason: str
+
+
 # -- ListMcpResourcesTool Input (5x occurrences) -------------------------------
 
 
@@ -1160,14 +1221,14 @@ class MCPToolInput(PermissiveModel):
 # Models with no required fields must come last before fallback.
 ToolInput = Annotated[
     # Path-based tools (most specific - file_path + other required fields)
-    MalformedWriteToolInput  # file_path, content, param2 required - must be before WriteToolInput!
-    | WriteToolInput  # file_path, content required
+    WriteToolInput  # file_path, content required
     | EditToolInput  # file_path, old_string, new_string required
     | NotebookEditToolInput  # notebook_path, new_source required
     | ReadToolInput  # file_path required
     # Multi-field tools
     | SendMessageToolInput  # to, message, type, recipient, content required (backfilled wire shape)
     | SendMessageSimpleToolInput  # to, message required (2.1.81+)
+    | SendMessageLegacyToolInput  # type, recipient, content required; no to/message (2.1.63 pre-refactor)
     | TaskToolInput  # prompt, description, subagent_type required
     | TaskCreateToolInput  # subject, description required (2.1.17+)
     | TeamCreateToolInput  # team_name, description required (2.1.63+)
@@ -1189,6 +1250,7 @@ ToolInput = Annotated[
     | KillShellToolInput  # shell_id required
     | CronCreateToolInput  # cron, prompt required (2.1.71+)
     | CronDeleteToolInput  # id required (2.1.71+)
+    | ScheduleWakeupToolInput  # prompt, delaySeconds, reason required
     | SkillToolInput  # skill required
     # Optional-only fields (must be near end)
     | ExitPlanModeToolInput  # plan optional, launchSwarm optional
@@ -1212,7 +1274,9 @@ class ImageSource(StrictModel):
     """Image source data for image content."""
 
     type: Literal['base64']
-    media_type: Literal['image/jpeg', 'image/png']  # Only value observed across all sessions
+    media_type: Literal[
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp'
+    ]  # Anthropic image-source enum (binary-confirmed)
     data: str  # Base64 encoded image data
 
 
@@ -1352,6 +1416,19 @@ class CacheMissReasonMessagesChanged(StrictModel):
     cache_missed_input_tokens: int
 
 
+class CacheMissReasonModelChanged(StrictModel):
+    """Cache miss because the model changed mid-session.
+
+    Carries the count of input tokens that were not served from cache.
+    Server-emitted via the cache-diagnosis-2026-04-07 Anthropic API beta
+    header, not present in the client binary (consistent with the other
+    CacheMissReason variants).
+    """
+
+    type: Literal['model_changed']
+    cache_missed_input_tokens: int
+
+
 class CacheMissReasonParamsChanged(StrictModel):
     """Cache miss because request parameters changed.
 
@@ -1398,6 +1475,7 @@ CacheMissReason = Annotated[
     CacheMissReasonPreviousMessageNotFound
     | CacheMissReasonSystemChanged
     | CacheMissReasonMessagesChanged
+    | CacheMissReasonModelChanged
     | CacheMissReasonParamsChanged
     | CacheMissReasonToolsChanged
     | CacheMissReasonUnavailable,
@@ -1487,6 +1565,16 @@ class UsageIteration(StrictModel):
     type: Literal['message']
 
 
+class OutputTokensDetails(StrictModel):
+    """Output-token breakdown (Anthropic API usage passthrough).
+
+    Server-emitted in message.usage; not a client-binary literal (same
+    server-diagnostic precedent as CacheMissReason).
+    """
+
+    thinking_tokens: int
+
+
 class TokenUsage(StrictModel):
     """Token usage information for assistant messages."""
 
@@ -1501,6 +1589,7 @@ class TokenUsage(StrictModel):
     iterations: Sequence[UsageIteration] | None = None  # Internal inference iterations (Claude Code 2.1.100+)
     speed: Literal['standard', 'fast'] | None = None  # Speed tier (Claude Code 2.1.41+, 'fast' added 2.1.112+)
     research_preview_2026_02: str | None = None  # Research preview feature flag (e.g. 'active')
+    output_tokens_details: OutputTokensDetails | None = None  # Output-token breakdown (API passthrough)
 
 
 # -- Thinking Metadata ---------------------------------------------------------
@@ -1569,13 +1658,21 @@ class CompactMetadata(StrictModel):
     postTokens: int | None = None  # Token count after compaction (Claude Code 2.1.100+)
     durationMs: int | None = None  # Compaction runtime in milliseconds (Claude Code 2.1.100+)
     preservedSegment: PreservedCompactSegment | None = None  # Anchor pointers preserved across compaction
+    preservedMessages: PreservedCompactMessages | None = (
+        None  # Preserved-message anchors (richer sibling of preservedSegment)
+    )
+
+
+class PreservedCompactMessages(StrictModel):
+    """Preserved-message anchors carried across a compaction."""
+
+    anchorUuid: str
+    uuids: Sequence[str]
+    allUuids: Sequence[str]
 
 
 class PreservedCompactSegment(StrictModel):
-    """Anchor UUIDs identifying the conversation segment preserved across an auto-compact.
-
-    Pydantic resolves the forward reference from CompactMetadata.preservedSegment.
-    """
+    """Anchor UUIDs identifying the conversation segment preserved across an auto-compact."""
 
     headUuid: str  # Earliest preserved record
     anchorUuid: str  # Anchor record within the preserved segment
@@ -1637,7 +1734,14 @@ class NetworkError(StrictModel):
 
 
 class EmptyError(StrictModel):
-    """Empty error object for unknown/unspecified API errors (Claude Code 2.0.76+)."""
+    """Unspecified API error object (Claude Code 2.0.76+).
+
+    Emitted either fields-less (``{}``) or as a bare ``{"type": null}`` -- a
+    network-error object whose ``cause`` was undefined at write time. The
+    optional null ``type`` mirrors ``NetworkError.type`` / ``ApiError.type``.
+    """
+
+    type: None = None  # Always null when present; mirrors NetworkError.type
 
 
 # -- MCP Metadata (Claude Code 2.1.19+) ----------------------------------------
@@ -2461,6 +2565,16 @@ class BaseRecord(StrictModel):
     uuid: str
     timestamp: str
     sessionId: str
+    forkedFrom: ForkOrigin | None = (
+        None  # Source session/message when this record belongs to a forked session (Claude Code 2.1.8+)
+    )
+
+
+class ForkOrigin(StrictModel):
+    """Backpointer to the source session/message a forked session branched from."""
+
+    sessionId: str
+    messageUuid: str
 
 
 # -- User Record ---------------------------------------------------------------
@@ -2551,6 +2665,11 @@ class UserRecord(BaseRecord):
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
     teamName: str | None = pydantic.Field(None, description='Team name when running in multi-agent team mode')
     agentName: str | None = pydantic.Field(None, description='Agent name within team (may be absent for lead agent)')
+    interruptedMessageId: str | None = pydantic.Field(
+        None,
+        description='API message ID (msg_*) of the assistant message interrupted by this user '
+        'input (Claude Code 2.1.149+).',
+    )
 
 
 # -- Assistant Record ----------------------------------------------------------
@@ -2616,6 +2735,16 @@ class AssistantRecord(BaseRecord):
         None,
         description='Active plugin name (e.g., "codex"); paired with attributionSkill when '
         'the assistant turn is emitted by a plugin-installed skill (Claude Code 2.1.121+).',
+    )
+    attributionMcpServer: str | None = pydantic.Field(
+        None,
+        description='MCP server name attributed to an assistant turn that invoked an MCP tool '
+        '(e.g., "selenium-browser"); paired with attributionMcpTool (Claude Code 2.1.149+).',
+    )
+    attributionMcpTool: str | None = pydantic.Field(
+        None,
+        description='MCP tool name attributed to the turn (e.g., "navigate"); paired with '
+        'attributionMcpServer (Claude Code 2.1.149+).',
     )
 
 
@@ -2773,6 +2902,10 @@ class TurnDurationSystemRecord(BaseRecord):
     subtype: Literal['turn_duration']
     durationMs: int  # Duration of the turn in milliseconds
     messageCount: int | None = None  # Number of messages in the turn (Claude Code 2.1.87+)
+    pendingBackgroundAgentCount: int | None = None  # Background agents still running at turn end (Claude Code 2.1.152+)
+    pendingWorkflowCount: int | None = (
+        None  # Workflows still running at turn end (sibling of pendingBackgroundAgentCount)
+    )
     isMeta: bool
     isSidechain: bool
     userType: str
@@ -2789,7 +2922,7 @@ class HookInfo(StrictModel):
     """Information about a hook execution."""
 
     command: str
-    durationMs: int  # Hook execution duration in milliseconds (Claude Code 2.1.120+)
+    durationMs: int | None = None  # Hook duration ms (Claude Code 2.1.120+; absent on pre-2.1.120 records)
 
 
 class StopHookSummarySystemRecord(BaseRecord):
@@ -2858,6 +2991,8 @@ class ScheduledTaskFireSystemRecord(BaseRecord):
     slug: str | None = None
     entrypoint: str | None = None
     agentId: str | None = None  # Present on sidechain subagent records (Claude Code 2.1.112+)
+    teamName: str | None = None
+    agentName: str | None = None
 
 
 class AwaySummarySystemRecord(BaseRecord):
@@ -2881,6 +3016,26 @@ class AwaySummarySystemRecord(BaseRecord):
     entrypoint: str | None = None
 
 
+class AgentsKilledSystemRecord(BaseRecord):
+    """System record emitted when running subagents are killed (subtype=agents_killed, Claude Code 2.1.139+).
+
+    Carries no payload beyond the base envelope; signals subagent termination
+    (e.g., on Esc / session interrupt).
+    """
+
+    type: Literal['system']
+    cwd: PathField
+    parentUuid: str | None
+    subtype: Literal['agents_killed']
+    isMeta: bool
+    isSidechain: bool
+    userType: str
+    version: CCVersionStrField
+    gitBranch: str
+    slug: str | None = None
+    entrypoint: str | None = None
+
+
 # Union of system subtype records
 SystemSubtypeRecord = Annotated[
     LocalCommandSystemRecord
@@ -2892,7 +3047,8 @@ SystemSubtypeRecord = Annotated[
     | StopHookSummarySystemRecord
     | BridgeStatusSystemRecord
     | ScheduledTaskFireSystemRecord
-    | AwaySummarySystemRecord,
+    | AwaySummarySystemRecord
+    | AgentsKilledSystemRecord,
     pydantic.Field(discriminator='subtype'),
 ]
 
@@ -3202,6 +3358,42 @@ class PermissionModeRecord(StrictModel):
     sessionId: str
 
 
+# -- Session Mode Record (Claude Code 2.1.69+) --------------------------------
+
+
+class SessionModeRecord(StrictModel):
+    """Records the active session mode for a session.
+
+    Resumption-state sidecar written alongside PermissionModeRecord; does NOT
+    inherit from BaseRecord -- minimal schema with no uuid/timestamp. Binary
+    domain is {'normal', 'coordinator'} (a boolean projection of
+    ``isCoordinatorMode()``); modeled Literal['normal'] per empirical-only
+    modeling, with 'coordinator' deferred until observed in JSONL.
+    """
+
+    type: Literal['mode']
+    mode: Literal['normal']
+    sessionId: str
+
+
+# -- Bridge Session Record -----------------------------------------------------
+
+
+class BridgeSessionRecord(StrictModel):
+    """Records the remote-control bridge association for a session.
+
+    Resumption-state sidecar (no uuid/timestamp), written alongside
+    PermissionModeRecord. Binary: ``$.push({type:"bridge-session",sessionId:q,
+    bridgeSessionId:...,lastSequenceNum:...})``; emitted by /remote-control
+    bridge sessions. Distinct from BridgeStatusSystemRecord (a system subtype).
+    """
+
+    type: Literal['bridge-session']
+    sessionId: str
+    bridgeSessionId: str
+    lastSequenceNum: int
+
+
 # -- Attachment Record (Claude Code 2.1.90+) -----------------------------------
 
 
@@ -3314,6 +3506,17 @@ class HookNonBlockingErrorAttachment(StrictModel):
     durationMs: int
 
 
+class HookCancelledAttachment(StrictModel):
+    """Hook execution was cancelled (e.g., aborted before completion)."""
+
+    type: Literal['hook_cancelled']
+    hookName: str
+    toolUseID: str
+    hookEvent: str
+    command: str
+    durationMs: int
+
+
 class HookAdditionalContextAttachment(StrictModel):
     """Hook returned additional context to inject into the conversation."""
 
@@ -3357,6 +3560,7 @@ class SkillListingAttachment(StrictModel):
     content: str
     skillCount: int
     isInitial: bool
+    names: Sequence[str] | None = None  # Skill identifiers in the listing (optional)
 
 
 class InvokedSkill(StrictModel):
@@ -3457,6 +3661,7 @@ class OpenedFileInIdeAttachment(StrictModel):
 
     type: Literal['opened_file_in_ide']
     filename: PathField
+    displayPath: str | None = None  # cwd-relative path; present on a minority of records
 
 
 class SelectedLinesInIdeAttachment(StrictModel):
@@ -3576,6 +3781,26 @@ class AutoModeExitAttachment(StrictModel):
     type: Literal['auto_mode_exit']
 
 
+class WorkflowKeywordRequestAttachment(StrictModel):
+    """Workflow-trigger keyword detected in the prompt (Claude Code 2.1.153+).
+
+    Marker injected when a prompt's "workflow" keyword may trigger a dynamic
+    workflow; carries no payload beyond the type tag.
+    """
+
+    type: Literal['workflow_keyword_request']
+
+
+class UltrathinkEffortAttachment(StrictModel):
+    """Ultrathink effort-level indicator for the turn (Claude Code 2.1.139+).
+
+    Marker injected when an ultrathink trigger raises the turn's thinking
+    effort; carries no payload beyond the type tag.
+    """
+
+    type: Literal['ultrathink_effort']
+
+
 AttachmentData = Annotated[
     CompanionIntroAttachment
     | McpInstructionsDeltaAttachment
@@ -3585,6 +3810,7 @@ AttachmentData = Annotated[
     | HookSuccessAttachment
     | HookBlockingErrorAttachment
     | HookNonBlockingErrorAttachment
+    | HookCancelledAttachment
     | HookAdditionalContextAttachment
     | QueuedCommandAttachment
     | DynamicSkillAttachment
@@ -3605,7 +3831,9 @@ AttachmentData = Annotated[
     | CommandPermissionsAttachment
     | DateChangeAttachment
     | AutoModeAttachment
-    | AutoModeExitAttachment,
+    | AutoModeExitAttachment
+    | WorkflowKeywordRequestAttachment
+    | UltrathinkEffortAttachment,
     pydantic.Field(discriminator='type'),
 ]
 
@@ -3651,6 +3879,7 @@ SessionRecord = Annotated[
     | BridgeStatusSystemRecord  # Must be before SystemRecord!
     | ScheduledTaskFireSystemRecord  # Must be before SystemRecord!
     | AwaySummarySystemRecord  # Must be before SystemRecord!
+    | AgentsKilledSystemRecord  # Must be before SystemRecord!
     | SystemRecord
     | FileHistorySnapshotRecord
     | QueueOperationRecord
@@ -3663,6 +3892,8 @@ SessionRecord = Annotated[
     | LastPromptRecord
     | WorktreeStateRecord
     | PermissionModeRecord
+    | SessionModeRecord
+    | BridgeSessionRecord
     | AttachmentRecord
     | BaseRecord,  # Fallback for unknown system subtypes
     pydantic.Field(union_mode='left_to_right'),
@@ -3760,6 +3991,8 @@ _ai_title_adapter = pydantic.TypeAdapter(AiTitleRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
 _worktree_state_adapter = pydantic.TypeAdapter(WorktreeStateRecord)
 _permission_mode_adapter = pydantic.TypeAdapter(PermissionModeRecord)
+_session_mode_adapter = pydantic.TypeAdapter(SessionModeRecord)
+_bridge_session_adapter = pydantic.TypeAdapter(BridgeSessionRecord)
 _attachment_adapter = pydantic.TypeAdapter(AttachmentRecord)
 
 
@@ -3822,6 +4055,10 @@ def validate_session_record(
         return _worktree_state_adapter.validate_python(data)
     elif record_type == 'permission-mode':
         return _permission_mode_adapter.validate_python(data)
+    elif record_type == 'mode':
+        return _session_mode_adapter.validate_python(data)
+    elif record_type == 'bridge-session':
+        return _bridge_session_adapter.validate_python(data)
     elif record_type == 'attachment':
         return _attachment_adapter.validate_python(data)
     else:

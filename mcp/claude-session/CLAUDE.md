@@ -50,6 +50,7 @@ Records with `type='attachment'` (discriminated by `attachment.type` field). Att
 | `hook_success` | Hook executed successfully — stdout/exit injected (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `content`, `stdout`, `stderr`, `exitCode`, `command`, `durationMs` |
 | `hook_blocking_error` | Hook returned a blocking error; tool execution halted (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `blockingError` |
 | `hook_non_blocking_error` | Hook returned a non-blocking error; tool continued (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `stderr`, `stdout`, `exitCode`, `command`, `durationMs` |
+| `hook_cancelled` | Hook execution was cancelled before completion (v0.2.36) | `hookName`, `toolUseID`, `hookEvent`, `command`, `durationMs` |
 | `hook_additional_context` | Hook returned context to inject into the conversation (v0.2.22) | `content` (str \| Sequence[str]), `hookName`, `toolUseID`, `hookEvent` |
 | `queued_command` | User command queued while Claude was working (v0.2.22) | `prompt` (str \| Sequence), `commandMode`, `imagePasteIds` |
 | `dynamic_skill` | Skill discovered at a non-default location (v0.2.22) | `skillDir`, `skillNames`, `displayPath` |
@@ -549,6 +550,12 @@ An LLM serves as the judge. It enumerates artifacts on both sides, infers catego
 ### Implications
 
 We do not build a regression harness or freeze synthetic session directories. The set of "expected artifact families" is the wrong category — what we need is the set of artifacts the host produced *this run*, which we discover, not declare. Production code handles what we currently know about and surfaces what it doesn't (an `unclassified` tripwire); the ad-hoc loop closes the gaps it finds. Verdicts from the loop — counts, ratios, version-specific field distributions — are ephemeral. They live in the loop's report, not in code comments or docstrings, which document invariants, not survey snapshots that rot. Durable external facts (version cutoffs, behavioral invariants, binary symbols) belong in code; a one-time count or ratio does not. The production code (closing gaps) and this section (keeping the loop replayable) are what persist. Discipline lives in the code's clarity and the loop's rigor, not in green CI that lies about coverage.
+
+### Model the artifact; never exclude it
+
+When the host writes a new artifact category under a session — a sidecar, a journal, an unfamiliar subagent file — classify and **model** it: give it a typed schema and teach the operations (validate, clone, archive, restore) to handle it. Excluding it from validation is never the fix; it is the "100% pass after we stopped enforcing things" lie in a new costume. An artifact the operations don't understand is one they silently corrupt — clone copies references (agentIds, paths) that still point at the source session, archive preserves a shape it can't reconstruct, restore misplaces it. The question that settles model-vs-exclude is never "is this a session *record*?" but "would clone / archive / restore round-trip it correctly?" — and they cannot round-trip what they do not model.
+
+Origin, not convenience, decides this. A third-party payload (an MCP tool result) gets the permissive fallback because its schema is owned elsewhere; a Claude-Code-owned artifact gets modeled, because round-tripping it is our job. Drift-tolerance — the `unclassified` tripwire, lenient extras — is for artifacts we have **not yet characterized**: it buys time to discover a shape, not permission to ignore one we already understand.
 
 ### Bootstrap
 
