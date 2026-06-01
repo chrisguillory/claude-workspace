@@ -10,10 +10,10 @@ the linter process. The interpreter is chosen by the parent: the workspace
 environment for PEP 723 scripts whose deps live outside the workspace.
 
 No top-level third-party imports, so the probe starts under whatever interpreter
-the parent hands it (including a PEP 723 script's lean cached env). Value
-synthesis may still use the target's own types — already in hand via each
-``__init__`` signature — to mint awkward arguments (e.g. a ``pydantic``
-``ValidationError`` via its factory) without importing anything here.
+the parent hands it (including a PEP 723 script's lean cached env). To mint an
+awkward argument (e.g. a ``pydantic`` ``ValidationError`` via its factory),
+synthesis may *lazily* import that library to identify the type definitively —
+never at module load, and only a library the target's signature already required.
 
 Usage: python pickle_probe.py <target_file> [<sys_path_root> ...]
 Output: a ``ProbeOutput`` as JSON — one ``ProbeResult`` per module-level Exception
@@ -39,7 +39,6 @@ from typing import Any, ClassVar, Literal, Union, get_args, get_origin, get_type
 __all__ = [
     'ProbeOutput',
     'ProbeResult',
-    'diagnose_file',
 ]
 
 
@@ -72,7 +71,16 @@ class ProbeOutput:
     classes: Sequence[ProbeResult]
 
 
-def diagnose_file(filepath: Path, roots: Sequence[str]) -> Sequence[ProbeResult]:
+def main() -> int:
+    """Probe the target file named in argv and write diagnostics as JSON."""
+    target = Path(sys.argv[1])
+    roots = sys.argv[2:]
+    results = _diagnose_file(target, roots)
+    json.dump(dataclasses.asdict(ProbeOutput(classes=list(results))), sys.stdout)
+    return 0
+
+
+def _diagnose_file(filepath: Path, roots: Sequence[str]) -> Sequence[ProbeResult]:
     """Import ``filepath`` and pickle-round-trip each Exception subclass it defines.
 
     A class whose ``__init__`` needs an argument that cannot be synthesized from
@@ -94,15 +102,6 @@ def diagnose_file(filepath: Path, roots: Sequence[str]) -> Sequence[ProbeResult]
             continue
         results.append(ProbeResult(class_name=cls_name, diagnostic=_diagnose(instance)))
     return results
-
-
-def main() -> int:
-    """Probe the target file named in argv and write diagnostics as JSON."""
-    target = Path(sys.argv[1])
-    roots = sys.argv[2:]
-    results = diagnose_file(target, roots)
-    json.dump(dataclasses.asdict(ProbeOutput(classes=list(results))), sys.stdout)
-    return 0
 
 
 def _import_module(filepath: Path) -> ModuleType:
@@ -194,19 +193,38 @@ def _synthesize_value(type_hint: Any) -> Any:
 
 
 def _synthesize_via_factory(type_hint: Any) -> Any:
-    """Mint a representative instance of a type that has no no-arg constructor.
+    """Mint a representative instance of a type with no usable no-arg constructor.
 
-    Uses the type's own factory — the type is already imported via the target's
-    ``__init__`` signature, so nothing is imported here. Extend with new cases as
-    un-constructible parameter types appear in real exceptions; a type with no
-    known factory raises ``TypeError`` so the caller discloses it as un-analyzable.
+    Only pydantic's ``ValidationError`` is recognized today (its constructor demands
+    structured error data). A type we can't build raises ``TypeError`` so the caller
+    discloses it as un-synthesizable.
     """
-    # pydantic ValidationError: build an empty one via its documented factory.
-    from_exception_data = getattr(type_hint, 'from_exception_data', None)
-    if callable(from_exception_data):
-        return from_exception_data('probe', [])
+    value = _empty_pydantic_validation_error(type_hint)
+    if value is not None:
+        return value
     msg = f'{type_hint!r} has no no-arg constructor and no known synthesis factory'
     raise TypeError(msg)
+
+
+def _empty_pydantic_validation_error(type_hint: Any) -> Any | None:
+    """An empty pydantic ``ValidationError`` if ``type_hint`` is one, else ``None``.
+
+    Built through pydantic's documented ``from_exception_data`` factory and identified
+    *definitively* via ``issubclass`` — not by duck-typing a method name, which would
+    mis-construct an unrelated type that happened to expose the same method. The
+    ``import`` is lazy so the probe stays stdlib-only at load; a target whose signature
+    is a ``ValidationError`` has already imported pydantic, and if it isn't installed
+    the hint cannot be one.
+    """
+    if not isinstance(type_hint, type):
+        return None
+    try:
+        import pydantic  # noqa: PLC0415  # lazy: probe stays stdlib-only at module load
+    except ImportError:
+        return None
+    if not issubclass(type_hint, pydantic.ValidationError):
+        return None
+    return type_hint.from_exception_data('probe', [])
 
 
 def _empty_for_origin(origin: Any) -> Any:
