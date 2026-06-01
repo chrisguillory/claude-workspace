@@ -10,11 +10,16 @@ CCLibError                                # base for all cc_lib exceptions
 │   └── MissingEnvVarError                # expected env var not set
 ├── HookTreeMismatchError                 # hook tree != CLAUDE_EXEC_LAUNCH_DIR/hooks
 └── RivalSessionError                     # another live claude process owns this session_id
+
+Exceptions with a custom __init__ mix in PickleByInitArgs (listed first) to stay
+picklable; see cc_lib.picklable.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+
+from cc_lib.picklable import PickleByInitArgs
 
 __all__ = [
     'CCLibError',
@@ -61,7 +66,7 @@ class MultipleActiveSessionsForPidError(ClaudeContextError):
     """
 
 
-class MissingEnvVarError(ClaudeContextError):
+class MissingEnvVarError(PickleByInitArgs, ClaudeContextError):
     """A required environment variable is not set."""
 
     def __init__(self, var_name: str) -> None:
@@ -69,7 +74,7 @@ class MissingEnvVarError(ClaudeContextError):
         self.var_name = var_name
 
 
-class HookTreeMismatchError(CCLibError):
+class HookTreeMismatchError(PickleByInitArgs, CCLibError):
     """Hook script's location does not match CLAUDE_EXEC_LAUNCH_DIR/hooks."""
 
     def __init__(self, *, actual: Path, expected: Path) -> None:
@@ -81,7 +86,7 @@ class HookTreeMismatchError(CCLibError):
         )
 
 
-class RivalSessionError(CCLibError):
+class RivalSessionError(PickleByInitArgs, CCLibError):
     """Another live claude process owns this session_id."""
 
     def __init__(self, *, session_id: str, rival_pid: int, claude_pid: int) -> None:

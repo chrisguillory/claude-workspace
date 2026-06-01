@@ -54,6 +54,8 @@ EXPECTED_EXC010: ViolationMap = {
     'NoInitError_pickle_ok': set(),
     'VarargPassthroughError_pickle_ok': set(),
     'NoSuperCallError_pickle_ok': set(),
+    # Breaks pickle, but an inline directive suppresses the violation.
+    'InlineSuppressedError_pickle_breaks': set(),
 }
 
 # -- Expected Violations: Instructive Test File -------------------------------

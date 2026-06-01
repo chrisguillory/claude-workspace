@@ -32,12 +32,14 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
+from cc_lib.picklable import PickleByInitArgs
+
 
 class SeleniumChromeConflictError(Exception):
     """Raised when Selenium Chrome is running and would conflict with AppleScript targeting."""
 
 
-class AppleScriptTabTimeoutError(Exception):
+class AppleScriptTabTimeoutError(PickleByInitArgs, Exception):
     """Raised when AppleScript JS execution times out on a specific tab.
 
     This typically happens with background/suspended tabs that Chrome has throttled.

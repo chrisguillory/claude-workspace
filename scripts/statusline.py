@@ -115,6 +115,7 @@ import pydantic.alias_generators
 from cc_lib import os_process
 from cc_lib.claude_context import lookup_session_by_id
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.picklable import PickleByInitArgs
 from cc_lib.schemas import StrictModel, SubsetModel
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import CCVersion, EffortLevel, JsonDatetime
@@ -1485,7 +1486,7 @@ def _get_session_title(transcript_path: str) -> str | None:
 # multi-line diagnostic output to stdout (the statusline area).
 
 
-class StatusLineValidationError(Exception):
+class StatusLineValidationError(PickleByInitArgs, Exception):
     """Validation failure enriched with raw input for error display."""
 
     def __init__(self, error: pydantic.ValidationError, raw: Mapping[str, object]) -> None:

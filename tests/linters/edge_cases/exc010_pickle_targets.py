@@ -93,3 +93,18 @@ class NoSuperCallError_pickle_ok(Exception):
 
     def __init__(self, value: int) -> None:
         self.value = value
+
+
+# -- Breaks pickle but silenced by an inline directive — should NOT fire EXC010 --
+
+
+class InlineSuppressedError_pickle_breaks(Exception):  # exception_safety_linter.py: init-not-pickleable
+    """Same shape as TransformedMessageError, but the inline directive suppresses EXC010.
+
+    Contrast with the unsuppressed twin proves the empirical checker honors
+    inline directives (not just config per-file-ignores).
+    """
+
+    def __init__(self, var_name: str) -> None:
+        super().__init__(f'{var_name} is broken')
+        self.var_name = var_name

@@ -57,6 +57,7 @@ from cc_lib.claude_process import kill_and_copy_resume
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.exceptions import ClaudeContextError
+from cc_lib.picklable import PickleByInitArgs
 from cc_lib.types import CCVersion
 from cc_lib.utils.atomic_write import atomic_write
 
@@ -65,13 +66,15 @@ class PatchError(Exception):
     """Base for patching errors."""
 
 
-class BinaryNotFoundError(PatchError):
+class BinaryNotFoundError(PickleByInitArgs, PatchError):
     def __init__(self, path: Path) -> None:
+        self.path = path
         super().__init__(f'Claude binary not found at {path}')
 
 
-class CodesignError(PatchError):
+class CodesignError(PickleByInitArgs, PatchError):
     def __init__(self, stderr: str) -> None:
+        self.stderr = stderr
         super().__init__(f'codesign failed: {stderr}')
 
 

@@ -5,6 +5,8 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from cc_lib.picklable import PickleByInitArgs
+
 if TYPE_CHECKING:
     import httpx
 
@@ -18,7 +20,7 @@ __all__ = [
 ]
 
 
-class OpenRouterAPIError(Exception):
+class OpenRouterAPIError(PickleByInitArgs, Exception):
     """Known error from OpenRouter API (has message, code).
 
     May arrive with any HTTP status, including 200.
@@ -54,7 +56,7 @@ class OpenRouterAPIError(Exception):
         super().__init__(line)
 
 
-class OpenRouterEmptyResponse(Exception):
+class OpenRouterEmptyResponse(PickleByInitArgs, Exception):
     """OpenRouter returned HTTP 200 with an empty or whitespace-only body.
 
     Root cause: Cloudflare Worker committed 200 headers, then the upstream
@@ -90,7 +92,7 @@ class OpenRouterEmptyResponse(Exception):
         )
 
 
-class OpenRouterTruncatedResponse(Exception):
+class OpenRouterTruncatedResponse(PickleByInitArgs, Exception):
     """OpenRouter returned a truncated JSON response (valid HTTP, incomplete body).
 
     Root cause: OpenRouter runs on Cloudflare Workers, which enforce CPU time
@@ -203,7 +205,7 @@ class OpenRouterTruncatedResponse(Exception):
         )
 
 
-class OpenRouterUnexpectedResponse(Exception):
+class OpenRouterUnexpectedResponse(PickleByInitArgs, Exception):
     """Unknown response format — neither success nor recognized error.
 
     NOT retryable. Carries diagnostic context for actionable debugging.
@@ -219,6 +221,7 @@ class OpenRouterUnexpectedResponse(Exception):
         model: str,
         batch_size: int,
     ) -> None:
+        self.message = message
         self.body_preview = body_preview
         self.body_keys = body_keys
         self.status_code = status_code

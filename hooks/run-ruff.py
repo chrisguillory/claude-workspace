@@ -52,6 +52,7 @@ from pathlib import Path
 
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.exceptions import HookTreeMismatchError
+from cc_lib.picklable import PickleByInitArgs
 from cc_lib.schemas.hooks import PostToolUseHookInput
 from cc_lib.utils import validate_hook_tree
 
@@ -99,7 +100,7 @@ def main() -> int:
     return 0
 
 
-class RuffNotFoundError(Exception):
+class RuffNotFoundError(PickleByInitArgs, Exception):
     """ruff binary not on PATH — project venv likely not activated."""
 
     def __init__(self) -> None:
