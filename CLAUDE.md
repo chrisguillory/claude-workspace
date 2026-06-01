@@ -604,9 +604,10 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 
 Reference docs in `claude-docs/` are not auto-loaded into context. Read them when the task lands in their domain.
 
-| Topic           | Doc                               |
-|-----------------|-----------------------------------|
-| Installing apps | `claude-docs/app-installation.md` |
+| Topic           | Doc                                 |
+|-----------------|-------------------------------------|
+| granola-kit     | `claude-docs/granola-kit/README.md` |
+| Installing apps | `claude-docs/app-installation.md`   |
 
 ## Architecture
 
