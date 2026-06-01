@@ -19,13 +19,15 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import cast
 
+from cc_lib.picklable import PickleByInitArgs
+
 logger = logging.getLogger(__name__)
 
 APPLE_EPOCH_OFFSET = 978307200  # seconds from Unix epoch (1970) to Apple epoch (2001)
 DB_PATH = pathlib.Path.home() / 'Library' / 'Messages' / 'chat.db'
 
 
-class FullDiskAccessError(Exception):
+class FullDiskAccessError(PickleByInitArgs, Exception):
     """chat.db is not readable — Full Disk Access not granted."""
 
     def __init__(self, db_path: pathlib.Path, cause: Exception, root_app: str | None = None) -> None:
