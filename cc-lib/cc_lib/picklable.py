@@ -21,9 +21,11 @@ class PickleByInitArgs:
     attributes, preserving message, attrs, and post-construction ``__dict__`` state.
 
     List it FIRST in the bases (``class E(PickleByInitArgs, Base)``) so its
-    ``__reduce__`` precedes ``BaseException``'s in the MRO. Requirement: every
-    ``__init__`` parameter is stored as an attribute of the same name — a mismatch
-    raises ``AttributeError`` at pickle time (loud, not silent corruption).
+    ``__reduce__`` precedes ``BaseException``'s in the MRO. Requirement: each
+    ``__init__`` parameter is stored *unmodified* under its own name. A missing
+    attribute raises ``AttributeError`` at pickle time (loud); a derived value
+    (``self.x = f(x)``) silently corrupts the round-trip, so store the raw
+    parameter and derive elsewhere.
     """
 
     def __reduce__(self) -> tuple[Any, ...]:

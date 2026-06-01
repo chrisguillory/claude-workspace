@@ -16,13 +16,15 @@ synthesis may still use the target's own types — already in hand via each
 ``ValidationError`` via its factory) without importing anything here.
 
 Usage: python pickle_probe.py <target_file> [<sys_path_root> ...]
-Output: {"classes": [{"class": "<name>", "diagnostic": "<msg>" | null,
-                      "unsynthesizable": "<msg>"?}, ...]}
+Output: a ``ProbeOutput`` as JSON — one ``ProbeResult`` per module-level Exception
+subclass. The parent imports those entities and validates the payload, so their
+fields (not a hand-drawn shape here) are the single source of truth for the wire.
 """
 
 from __future__ import annotations
 
 import collections.abc
+import dataclasses
 import importlib
 import inspect
 import json
@@ -32,14 +34,45 @@ import types
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
+from typing import Any, ClassVar, Literal, Union, get_args, get_origin, get_type_hints
 
 __all__ = [
+    'ProbeOutput',
+    'ProbeResult',
     'diagnose_file',
 ]
 
 
-def diagnose_file(filepath: Path, roots: Sequence[str]) -> Sequence[Mapping[str, str | None]]:
+@dataclasses.dataclass(frozen=True)
+class ProbeResult:
+    """One Exception subclass's pickle-round-trip outcome.
+
+    ``diagnostic`` is the round-trip failure (the violation), or ``None`` when the
+    class round-trips cleanly. ``unsynthesizable`` is set instead when no instance
+    could be constructed to test — disclosed, never silently dropped.
+
+    The parent validates this via ``pydantic.TypeAdapter``; the ``forbid``/``strict``
+    policy below mirrors ``cc_lib``'s ``ClosedModel`` (internal data — reject unknown
+    fields) but rides as a plain dict so the stdlib-only probe needs no pydantic import.
+    """
+
+    __pydantic_config__: ClassVar[Mapping[str, object]] = {'extra': 'forbid', 'strict': True}
+
+    class_name: str
+    diagnostic: str | None = None
+    unsynthesizable: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeOutput:
+    """The probe's per-file result — one ``ProbeResult`` per Exception subclass."""
+
+    __pydantic_config__: ClassVar[Mapping[str, object]] = {'extra': 'forbid', 'strict': True}
+
+    classes: Sequence[ProbeResult]
+
+
+def diagnose_file(filepath: Path, roots: Sequence[str]) -> Sequence[ProbeResult]:
     """Import ``filepath`` and pickle-round-trip each Exception subclass it defines.
 
     A class whose ``__init__`` needs an argument that cannot be synthesized from
@@ -48,7 +81,7 @@ def diagnose_file(filepath: Path, roots: Sequence[str]) -> Sequence[Mapping[str,
     """
     sys.path[:0] = list(roots)
     module = _import_module(filepath)
-    results: list[dict[str, str | None]] = []
+    results: list[ProbeResult] = []
     for cls_name, cls in inspect.getmembers(module, inspect.isclass):
         if not issubclass(cls, BaseException):
             continue
@@ -57,9 +90,9 @@ def diagnose_file(filepath: Path, roots: Sequence[str]) -> Sequence[Mapping[str,
         try:
             instance = _construct(cls)
         except TypeError as exc:
-            results.append({'class': cls_name, 'diagnostic': None, 'unsynthesizable': f'{type(exc).__name__}: {exc}'})
+            results.append(ProbeResult(class_name=cls_name, unsynthesizable=f'{type(exc).__name__}: {exc}'))
             continue
-        results.append({'class': cls_name, 'diagnostic': _diagnose(instance)})
+        results.append(ProbeResult(class_name=cls_name, diagnostic=_diagnose(instance)))
     return results
 
 
@@ -68,7 +101,7 @@ def main() -> int:
     target = Path(sys.argv[1])
     roots = sys.argv[2:]
     results = diagnose_file(target, roots)
-    json.dump({'classes': list(results)}, sys.stdout)
+    json.dump(dataclasses.asdict(ProbeOutput(classes=list(results))), sys.stdout)
     return 0
 
 

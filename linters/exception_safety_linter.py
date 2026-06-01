@@ -53,7 +53,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import json
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence, Set
@@ -61,8 +60,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
 
+import pydantic
 from _lib.config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
 from _lib.hashability_inspector import QualifiedName
+from _lib.pickle_probe import ProbeOutput, ProbeResult
 
 # Name resolution (import map usage)
 type LocalName = str  # Local identifier as it appears in source (e.g., 'Exception', 'CancelledError')
@@ -184,7 +185,7 @@ VIOLATION_MESSAGES: Mapping[ViolationKind, str] = {
     'cancelled-not-raised': 'CancelledError swallowed (task.cancelled() returns False, breaking orchestrator logic)',
     'generator-exit-not-raised': 'GeneratorExit swallowed (generator.close() cannot complete, resources leak)',
     'unused-directive': 'Suppression directive does not match any violation',
-    'init-not-pickleable': 'Exception subclass __init__ does not forward args verbatim to super(); pickle round-trip breaks',
+    'init-not-pickleable': 'Exception subclass is not pickle-round-trip safe (message, type, or attributes change, or pickling raises)',
 }
 
 # Fix suggestions for each violation
@@ -1128,6 +1129,7 @@ class _EmpiricalPickleChecker:
 
     KIND: ClassVar[ViolationKind] = 'init-not-pickleable'
     PROBE_PATH: ClassVar[Path] = Path(__file__).parent / '_lib' / 'pickle_probe.py'
+    OUTPUT_ADAPTER: ClassVar[pydantic.TypeAdapter[ProbeOutput]] = pydantic.TypeAdapter(ProbeOutput)
 
     def __init__(self, filepath: Path) -> None:
         self._filepath = filepath
@@ -1148,10 +1150,14 @@ class _EmpiricalPickleChecker:
             check=False,
         )
         for entry in self._parse_probe_output(result):
-            cls_name = entry.get('class')
-            diagnostic = entry.get('diagnostic')
-            if cls_name is not None and diagnostic is not None:
-                self._add_violation(cls_name, diagnostic)
+            if entry.diagnostic is not None:
+                self._add_violation(entry.class_name, entry.diagnostic)
+            elif entry.unsynthesizable is not None:
+                print(
+                    f'{self._filepath}: EXC010 could not synthesize {entry.class_name} '
+                    f'({entry.unsynthesizable}); not pickle-tested',
+                    file=sys.stderr,
+                )
         return self.violations
 
     def _defines_possible_exception(self, tree: ast.Module) -> bool:
@@ -1182,21 +1188,19 @@ class _EmpiricalPickleChecker:
     def _parse_probe_output(
         self,
         result: subprocess.CompletedProcess[str],
-    ) -> Sequence[Mapping[str, str | None]]:
-        """Parse the probe's JSON. Empty/non-JSON output is a skip-with-note, never a crash."""
+    ) -> Sequence[ProbeResult]:
+        """Validate the probe's JSON into the shared ``ProbeOutput`` entity.
+
+        Probe non-success — a non-zero exit or empty stdout from the target's
+        import erroring or calling ``sys.exit`` — is a disclosed skip (the file is
+        left un-analyzed, the reason on stderr). The probe's own output is trusted:
+        a schema mismatch raises ``ValidationError`` rather than being papered over.
+        """
         if result.returncode != 0 or not result.stdout.strip():
             reason = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else f'exit {result.returncode}'
-            print(f'{self._filepath}: EXC010 skipped — probe could not import ({reason})', file=sys.stderr)
+            print(f'{self._filepath}: EXC010 skipped — probe could not analyze ({reason})', file=sys.stderr)
             return []
-        try:
-            data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            print(f'{self._filepath}: EXC010 skipped — probe output was not JSON', file=sys.stderr)
-            return []
-        classes = data['classes']
-        if not isinstance(classes, list):
-            return []
-        return classes
+        return self.OUTPUT_ADAPTER.validate_json(result.stdout).classes
 
     def _discover_source_roots(self) -> Sequence[Path]:
         """Find sys.path entries needed to import this file and its workspace deps."""
