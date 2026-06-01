@@ -58,6 +58,7 @@ def export_schema(
     output_file = Path(output_path)
     with open(output_file, 'w') as f:
         json.dump(schema, f, indent=2)
+        f.write('\n')  # trailing newline so the end-of-file-fixer pre-commit hook leaves it untouched
 
     print(f'✓ Exported JSON Schema to: {output_file}', file=sys.stderr)
     print(f'  Schema version: {SCHEMA_VERSION}', file=sys.stderr)
