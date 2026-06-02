@@ -932,10 +932,16 @@ version = "0.1.0"
 source = { editable = "mcp/granola-kit" }
 dependencies = [
     { name = "cc-lib" },
+    { name = "cryptography" },
+    { name = "httpx" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cc-lib", editable = "cc-lib" }]
+requires-dist = [
+    { name = "cc-lib", editable = "cc-lib" },
+    { name = "cryptography", specifier = ">=46.0.3" },
+    { name = "httpx", specifier = ">=0.28.1" },
+]
 
 [[package]]
 name = "greenlet"

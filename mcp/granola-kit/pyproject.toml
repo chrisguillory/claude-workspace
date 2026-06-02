@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "cc-lib",
+    "cryptography>=46.0.3",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]
