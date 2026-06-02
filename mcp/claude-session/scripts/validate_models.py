@@ -46,9 +46,11 @@ from claude_session.schemas.session.models import (
     ToolResultContent,
     ToolUseContent,
     UserRecord,
+    validate_journal_record,
     validate_session_record,
 )
 from claude_session.schemas.types import PermissiveModel
+from claude_session.services.artifacts import is_workflow_journal_path
 from pydantic import ValidationError
 
 # -- Terminal Color Support ----------------------------------------------------
@@ -551,7 +553,10 @@ def find_all_session_files() -> Sequence[Path]:
 
 def validate_session_file(session_file: Path, *, fast: bool = False) -> FileValidationResult:
     """Validate a single session file and return statistics."""
-    session_filename = Path(session_file).name
+    session_path = Path(session_file)
+    session_filename = session_path.name
+    # Workflow run-journals validate against the journal schema, not the SessionRecord union.
+    is_journal = is_workflow_journal_path(session_path)
     total_records = 0
     valid_records = 0
     invalid_records = 0
@@ -579,8 +584,9 @@ def validate_session_file(session_file: Path, *, fast: bool = False) -> FileVali
                 record_type = record_data.get('type', 'UNKNOWN')
                 record_types[record_type] += 1
 
-                # Validate using type-dispatch (avoids 17-member union scan)
-                record = validate_session_record(record_data)
+                # Validate using type-dispatch (avoids 17-member union scan).
+                # Journal files use the journal validator (a separate artifact).
+                record = validate_journal_record(record_data) if is_journal else validate_session_record(record_data)
                 valid_records += 1
 
                 if not fast:

@@ -1,8 +1,4 @@
-#!/usr/bin/env -S uv run --no-project --script
-# /// script
-# requires-python = ">=3.13"
-# dependencies = []
-# ///
+#!/usr/bin/env -S uv run
 """Exception safety linter for Python code.
 
 Detects common exception handling anti-patterns that cause silent failures,
@@ -18,6 +14,8 @@ Rules:
     EXC006 logger-no-exc-info       Logger error/warning calls in except without exc_info
     EXC007 cancelled-not-raised     CancelledError caught but not re-raised in async
     EXC008 generator-exit-not-raised GeneratorExit caught but not re-raised in generator
+    EXC009 unused-directive         Suppression directive does not match any violation
+    EXC010 init-not-pickleable      Exception subclass __init__ breaks pickle round-trip (see EXC010 docstring)
 
 Escape hatches (inline suppression):
     # exception_safety_linter.py: skip-file
@@ -26,7 +24,8 @@ Escape hatches (inline suppression):
 
 Design Philosophy:
     - Error-only, no auto-fix: Forces conscious decision at each occurrence
-    - Standalone: No external dependencies, works with any Python 3.13+ install
+    - Workspace-aware: runs in the workspace uv env; the empirical EXC010 check
+      imports workspace modules to pickle-test Exception subclasses
     - Instructive: Points to test cases file for correct patterns
 
 Usage:
@@ -54,14 +53,17 @@ from __future__ import annotations
 
 import argparse
 import ast
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
+import pydantic
 from _lib.config import find_config, find_python_files, get_per_file_ignored_codes, load_per_file_ignores
 from _lib.hashability_inspector import QualifiedName
+from _lib.pickle_probe import ProbeOutput, ProbeResult
 
 # Name resolution (import map usage)
 type LocalName = str  # Local identifier as it appears in source (e.g., 'Exception', 'CancelledError')
@@ -155,6 +157,7 @@ type ViolationKind = Literal[
     'cancelled-not-raised',
     'generator-exit-not-raised',
     'unused-directive',
+    'init-not-pickleable',
 ]
 
 # Maps kind to error code for display
@@ -168,6 +171,7 @@ ERROR_CODES: Mapping[ViolationKind, ErrorCode] = {
     'cancelled-not-raised': 'EXC007',
     'generator-exit-not-raised': 'EXC008',
     'unused-directive': 'EXC009',
+    'init-not-pickleable': 'EXC010',
 }
 
 # Short descriptions for each violation
@@ -181,6 +185,7 @@ VIOLATION_MESSAGES: Mapping[ViolationKind, str] = {
     'cancelled-not-raised': 'CancelledError swallowed (task.cancelled() returns False, breaking orchestrator logic)',
     'generator-exit-not-raised': 'GeneratorExit swallowed (generator.close() cannot complete, resources leak)',
     'unused-directive': 'Suppression directive does not match any violation',
+    'init-not-pickleable': 'Exception subclass is not pickle-round-trip safe (message, type, or attributes change, or pickling raises)',
 }
 
 # Fix suggestions for each violation
@@ -194,6 +199,7 @@ FIX_SUGGESTIONS: Mapping[ViolationKind, str] = {
     'cancelled-not-raised': "Add 'raise' after cleanup, or remove the try/except entirely if no cleanup needed",
     'generator-exit-not-raised': "Add 'raise' after cleanup, or use 'finally' block instead (preferred)",
     'unused-directive': 'Remove the stale suppression directive',
+    'init-not-pickleable': 'Mix in cc_lib.picklable.PickleByInitArgs (first base), storing each __init__ param as a same-named attribute; or define __reduce__',
 }
 
 
@@ -283,6 +289,7 @@ def main() -> int:
                 filepath,
                 respect_skip_file=not args.no_skip_file,
                 report_unused_directives=args.report_unused_directives,
+                run_empirical_check=_EmpiricalPickleChecker.KIND not in per_file_codes,
             )
 
             # Filter by per-file ignored codes (codes are violation kinds directly)
@@ -393,6 +400,7 @@ def check_file(
     *,
     respect_skip_file: bool = True,
     report_unused_directives: bool = False,
+    run_empirical_check: bool = True,
 ) -> Sequence[Violation]:
     """Check a single file for exception safety violations."""
     source = filepath.read_text(encoding='utf-8')
@@ -436,13 +444,59 @@ def check_file(
         return []
 
     violations = list(checker.violations)
+    raw_violations: list[tuple[int, ViolationKind]] = list(checker.raw_violations)
+
+    if run_empirical_check:
+        empirical = _EmpiricalPickleChecker(filepath)
+        violations.extend(empirical.check(tree))
+        raw_violations.extend(empirical.raw_violations)
 
     if report_unused_directives:
         directives = collect_directives(source_lines)
-        unused = find_unused_directives(directives, checker.raw_violations, filepath, source_lines)
+        unused = find_unused_directives(directives, raw_violations, filepath, source_lines)
         violations.extend(unused)
 
     return violations
+
+
+def _has_inline_directive_at(
+    source_lines: Sequence[str],
+    lineno: int,
+    kind: ViolationKind,
+) -> bool:
+    r"""Check if a violation at ``lineno`` of kind ``kind`` is silenced by an inline directive.
+
+    Scans up to 4 lines forward to handle ruff-format wrapping (e.g.,
+    ``except (\\n Exception\\n):`` placing the directive on a subsequent line).
+    Shared by the AST checker (EXC001-008) and the empirical pickle checker (EXC010).
+    """
+    # unused-directive (EXC009) cannot itself be suppressed
+    if kind == 'unused-directive':
+        return False
+
+    prefix_lower = DIRECTIVE_PREFIX.lower()
+    end = min(lineno + 4, len(source_lines))
+
+    for check_lineno in range(lineno, end + 1):
+        if check_lineno < 1:
+            continue
+        line = source_lines[check_lineno - 1].lower()
+
+        if prefix_lower not in line:
+            continue
+
+        idx = line.find(prefix_lower)
+        codes_part = line[idx + len(DIRECTIVE_PREFIX) :]
+
+        # Strip trailing comment
+        if ' #' in codes_part:
+            codes_part = codes_part.split(' #')[0]
+
+        codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
+        if kind in codes:
+            return True
+
+    return False
 
 
 # -- AST Visitor --------------------------------------------------------------
@@ -642,39 +696,7 @@ class ExceptionSafetyChecker(ast.NodeVisitor):
         return ''
 
     def _has_directive(self, lineno: int, kind: ViolationKind) -> bool:
-        r"""Check if line (or nearby continuation lines) has suppression directive.
-
-        Scans up to 4 lines forward from the violation to handle cases where
-        ruff-format wraps statements across lines (e.g., ``except (\\n Exception\\n):``),
-        placing the directive on a subsequent line.
-        """
-        # unused-directive violations cannot be suppressed (like RUF100)
-        if kind == 'unused-directive':
-            return False
-
-        prefix_lower = DIRECTIVE_PREFIX.lower()
-        end = min(lineno + 4, len(self.source_lines))
-
-        for check_lineno in range(lineno, end + 1):
-            if check_lineno < 1:
-                continue
-            line = self.source_lines[check_lineno - 1].lower()
-
-            if prefix_lower not in line:
-                continue
-
-            idx = line.find(prefix_lower)
-            codes_part = line[idx + len(DIRECTIVE_PREFIX) :]
-
-            # Strip trailing comment
-            if ' #' in codes_part:
-                codes_part = codes_part.split(' #')[0]
-
-            codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
-            if kind in codes:
-                return True
-
-        return False
+        return _has_inline_directive_at(self.source_lines, lineno, kind)
 
     def _add_violation(self, node: ast.AST, kind: ViolationKind) -> None:
         """Add a violation if not suppressed. Always records raw violations."""
@@ -1085,6 +1107,160 @@ def find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestRef
                         )
 
     return references
+
+
+class _EmpiricalPickleChecker:
+    """EXC010 — pickle-round-trip each Exception subclass in an isolated subprocess.
+
+    A cheap AST gate skips files that define no based class (they cannot define
+    an Exception subclass). Survivors are handed to ``_lib/pickle_probe.py`` run
+    as a subprocess — under the workspace interpreter, or a PEP 723 script's
+    cached env (``uv python find --script``). Isolation keeps a target's
+    module-level side effects (``sys.exit``, stdin reads, missing deps) from
+    aborting the linter; an empty or non-JSON result is a skip, never a crash.
+
+    Closest upstream rule: flake8-bugbear B042 (pycqa/flake8-bugbear#512), not yet
+    ported by ruff (astral-sh/ruff#8579); the workspace ruff config selects the
+    ``B`` set, so B042 lands for free once ruff ports it.
+    """
+
+    KIND: ClassVar[ViolationKind] = 'init-not-pickleable'
+    PROBE_PATH: ClassVar[Path] = Path(__file__).parent / '_lib' / 'pickle_probe.py'
+    OUTPUT_ADAPTER: ClassVar[pydantic.TypeAdapter[ProbeOutput]] = pydantic.TypeAdapter(ProbeOutput)
+
+    def __init__(self, filepath: Path) -> None:
+        self._filepath = filepath
+        self._source_lines: Sequence[str] | None = None
+        self.violations: list[Violation] = []
+        self.raw_violations: list[tuple[int, ViolationKind]] = []
+
+    def check(self, tree: ast.Module) -> Sequence[Violation]:
+        """Pickle-test each Exception subclass via an isolated subprocess probe."""
+        if not self._defines_possible_exception(tree):
+            return self.violations
+        interpreter = self._interpreter_for_file()
+        roots = [str(r) for r in self._discover_source_roots()]
+        result = subprocess.run(
+            [interpreter, str(self.PROBE_PATH), str(self._filepath), *roots],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for entry in self._parse_probe_output(result):
+            if entry.diagnostic is not None:
+                self._add_violation(entry.class_name, entry.diagnostic)
+            elif entry.unsynthesizable is not None:
+                print(
+                    f'{self._filepath}: EXC010 could not synthesize {entry.class_name} '
+                    f'({entry.unsynthesizable}); not pickle-tested',
+                    file=sys.stderr,
+                )
+        return self.violations
+
+    def _defines_possible_exception(self, tree: ast.Module) -> bool:
+        """True if any class lists a base — only a based class can subclass Exception.
+
+        A cheap gate so the probe never imports (and never runs the module-level
+        code of) files that cannot define an Exception subclass.
+        """
+        return any(isinstance(node, ast.ClassDef) and node.bases for node in ast.walk(tree))
+
+    def _interpreter_for_file(self) -> str:
+        """The Python that can import this file: its PEP 723 cached env, else the workspace."""
+        if not self._has_pep723_block():
+            return sys.executable
+        subprocess.run(['uv', 'sync', '--script', str(self._filepath)], check=True, capture_output=True)
+        found = subprocess.run(
+            ['uv', 'python', 'find', '--script', str(self._filepath)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return found.stdout.strip()
+
+    def _has_pep723_block(self) -> bool:
+        """True if the file carries a PEP 723 ``# /// script`` metadata block."""
+        return any(line.rstrip() == '# /// script' for line in self._read_source_lines())
+
+    def _parse_probe_output(
+        self,
+        result: subprocess.CompletedProcess[str],
+    ) -> Sequence[ProbeResult]:
+        """Validate the probe's JSON into the shared ``ProbeOutput`` entity.
+
+        Probe non-success — a non-zero exit or empty stdout from the target's
+        import erroring or calling ``sys.exit`` — is a disclosed skip (the file is
+        left un-analyzed, the reason on stderr). The probe's own output is trusted:
+        a schema mismatch raises ``ValidationError`` rather than being papered over.
+        """
+        if result.returncode != 0 or not result.stdout.strip():
+            reason = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else f'exit {result.returncode}'
+            print(f'{self._filepath}: EXC010 skipped — probe could not analyze ({reason})', file=sys.stderr)
+            return []
+        return self.OUTPUT_ADAPTER.validate_json(result.stdout).classes
+
+    def _discover_source_roots(self) -> Sequence[Path]:
+        """Find sys.path entries needed to import this file and its workspace deps."""
+        roots: list[Path] = []
+        current = self._filepath.resolve().parent
+        while (current / '__init__.py').exists() and current.parent != current:
+            current = current.parent
+        roots.append(current)
+        workspace = self._workspace_root()
+        if workspace is not None:
+            # Workspace root on path so files can import root-level packages
+            # (plugins/, tests/) — matches pytest's pythonpath = ["."].
+            roots.append(workspace)
+            cc_lib = workspace / 'cc-lib'
+            if cc_lib.is_dir():
+                roots.append(cc_lib)
+            mcp_dir = workspace / 'mcp'
+            if mcp_dir.is_dir():
+                roots.extend(sub for sub in mcp_dir.iterdir() if sub.is_dir())
+        return roots
+
+    def _workspace_root(self) -> Path | None:
+        """Walk up looking for a directory with both pyproject.toml and .git."""
+        current = self._filepath.resolve().parent
+        while current.parent != current:
+            if (current / 'pyproject.toml').exists() and (current / '.git').exists():
+                return current
+            current = current.parent
+        return None
+
+    def _add_violation(self, cls_name: str, diagnostic: str) -> None:
+        """Record a raw violation; emit unless suppressed by inline directive."""
+        lineno = self._find_class_def_line(cls_name)
+        self.raw_violations.append((lineno, self.KIND))
+        if _has_inline_directive_at(self._read_source_lines(), lineno, self.KIND):
+            return
+        self.violations.append(
+            Violation(
+                filepath=self._filepath,
+                line=lineno,
+                column=0,
+                kind=self.KIND,
+                source_line=f'class {cls_name}  # {diagnostic}',
+            ),
+        )
+
+    def _find_class_def_line(self, cls_name: str) -> int:
+        """Find the source line where ``class <cls_name>`` is defined. Returns 1 if not found."""
+        needle = f'class {cls_name}'
+        for i, line in enumerate(self._read_source_lines(), start=1):
+            stripped = line.lstrip()
+            if not stripped.startswith(needle):
+                continue
+            rest = stripped[len(needle) :].lstrip()
+            if rest.startswith(('(', ':')):
+                return i
+        return 1
+
+    def _read_source_lines(self) -> Sequence[str]:
+        """Lazily read and cache the file's source lines."""
+        if self._source_lines is None:
+            self._source_lines = self._filepath.read_text(encoding='utf-8').splitlines()
+        return self._source_lines
 
 
 # -- Output Formatting --------------------------------------------------------

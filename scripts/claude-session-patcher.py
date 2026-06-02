@@ -131,6 +131,7 @@ from cc_lib import os_process, session_tracker
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.os_process import ProcessHandle
+from cc_lib.picklable import PickleByInitArgs
 from cc_lib.types import CCVersion
 from cc_lib.utils import (
     encode_project_path,
@@ -1669,13 +1670,16 @@ class SessionPatchError(Exception):
     """Base for session patcher errors."""
 
 
-class SessionNotFoundError(SessionPatchError):
+class SessionNotFoundError(PickleByInitArgs, SessionPatchError):
     def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
         super().__init__(f"Session '{session_id}' not found")
 
 
-class BackupExistsError(SessionPatchError):
+class BackupExistsError(PickleByInitArgs, SessionPatchError):
     def __init__(self, backup_path: Path, session_id: str) -> None:
+        self.backup_path = backup_path
+        self.session_id = session_id
         super().__init__(
             f'Backup already exists: {backup_path}\n'
             f"Run 'claude-session-patcher restore {session_id}' first, "
@@ -1683,17 +1687,21 @@ class BackupExistsError(SessionPatchError):
         )
 
 
-class ActiveSessionError(SessionPatchError):
+class ActiveSessionError(PickleByInitArgs, SessionPatchError):
     def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
         super().__init__(
             f'Session {session_id} appears to be in active use by Claude. Exit Claude Code first, then retry.',
         )
 
 
-class RestoreOverwriteError(SessionPatchError):
+class RestoreOverwriteError(PickleByInitArgs, SessionPatchError):
     """Raised when the live file has been modified since the backup was taken."""
 
     def __init__(self, session_id: str, live_lines: int, backup_lines: int) -> None:
+        self.session_id = session_id
+        self.live_lines = live_lines
+        self.backup_lines = backup_lines
         delta = live_lines - backup_lines
         if delta > 0:
             change = f'{delta} record(s) appended'

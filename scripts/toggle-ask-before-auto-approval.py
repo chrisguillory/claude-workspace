@@ -60,6 +60,7 @@ from typing import Annotated
 import typer
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.picklable import PickleByInitArgs
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
 GATE_DIR = get_claude_workspace_config_home_dir() / 'ask-before-auto-approval'
@@ -172,7 +173,7 @@ class CLIError(Exception):
     exit_code: int = 1
 
 
-class NoSessionSpecified(CLIError):
+class NoSessionSpecified(PickleByInitArgs, CLIError):
     """Neither ``--session`` nor ``$CLAUDE_CODE_SESSION_ID`` is available."""
 
     exit_code = 2
@@ -183,7 +184,7 @@ class NoSessionSpecified(CLIError):
         )
 
 
-class SubagentRefused(CLIError):
+class SubagentRefused(PickleByInitArgs, CLIError):
     """A sub-agent attempted a mutation (``off`` or ``on``)."""
 
     exit_code = 3
@@ -197,7 +198,7 @@ class SubagentRefused(CLIError):
         self.agent_id = agent_id
 
 
-class MutuallyExclusiveFlags(CLIError):
+class MutuallyExclusiveFlags(PickleByInitArgs, CLIError):
     """``--all`` and ``--session`` may not be combined."""
 
     exit_code = 2

@@ -251,6 +251,19 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   now observable once workflows ran. The lone misfire (a SendMessage {to, prompt}
                   hallucination, the shape v0.2.34 already removed) was data-cleaned, not modeled.
                   Extended CLAUDE_CODE_MAX_VERSION to 2.1.157.
+- Schema v0.2.39: Workflow tool support + the session-nested workflow layout. SendMessageToolInput
+                  content optional and request_id/approve added (the plan-approval / shutdown reply
+                  fields the harness flattens onto the tool input). WorkflowToolInput (script?,
+                  2.1.146+) and RemoteTriggerToolInput (action, 2.1.81+). WorkflowJournalRecord
+                  (started | result, discriminated) + validate_journal_record for the run-journal
+                  artifact (subagents/workflows/wf_<runId>/journal.jsonl), a distinct stream from the
+                  session transcript. Agent recognition widened to Claude Code's affix-only rule
+                  (agent-*.jsonl / .meta.json carry an opaque id; the typed-id type slug is cosmetic).
+                  Operation support (archive format 2.4): the workflow-nested layout — workflow
+                  agents, their .meta.json sidecars, run-journals, and the sibling <session>/workflows/
+                  run metadata + scripts — now round-trips through clone/move/restore/archive/delete
+                  with agentId / sessionId / scriptPath remap. session-memory tombstoned (removed
+                  upstream ~2.1.128). Extended CLAUDE_CODE_MAX_VERSION to 2.1.159.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -489,6 +502,7 @@ __all__ = [
     'ReadPdfToolResult',
     'ReadTextToolResult',
     'ReadToolInput',
+    'RemoteTriggerToolInput',
     'SavedHookContextRecord',
     'ScheduleWakeupToolInput',
     'ScheduledTaskFireSystemRecord',
@@ -569,20 +583,25 @@ __all__ = [
     'WebSearchResultWrapper',
     'WebSearchToolInput',
     'WebSearchToolResult',
+    'WorkflowJournalRecord',
+    'WorkflowJournalResult',
+    'WorkflowJournalStarted',
     'WorkflowKeywordRequestAttachment',
+    'WorkflowToolInput',
     'WorktreeSessionData',
     'WorktreeStateRecord',
     'WriteToolInput',
     'WriteToolResult',
+    'validate_journal_record',
     'validate_session_record',
     'validated_copy',
 ]
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.38'
+SCHEMA_VERSION = '0.2.39'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.157')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.159')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -863,17 +882,22 @@ SendMessageControl = Annotated[
 class SendMessageToolInput(StrictModel):
     """Input for SendMessage tool — post-backfill wire shape.
 
-    Claude Code's `backfillObservableInput` derives `type`/`recipient`/`content` from
-    `to`/`message` before serialization. `message` is a plain string or a control body
-    (shutdown handshake), and `type` mirrors it. The raw two-field form is SendMessageSimpleToolInput.
+    Claude Code's `backfillObservableInput` derives top-level fields from `to`/`message`.
+    For an object `message` (control body): `type` = message.type, `recipient` = to (always),
+    `request_id`/`approve` are copied up iff present, and `content` = `message.reason ?? message.feedback`
+    (so `content` is absent when the control body carries neither). `reason`/`feedback` never appear as
+    top-level keys. For a string `message`: `type='message'`, `recipient` = to, `content` = message.
+    The raw two-field form is SendMessageSimpleToolInput.
     """
 
     to: str
     message: str | SendMessageControl
     type: Literal['message', 'shutdown_request', 'shutdown_response']  # Mirrors message.type
-    recipient: str  # Backfilled from to
-    content: str  # Backfilled from message
-    summary: str | None = None  # Binary: v.string().optional()
+    recipient: str  # Backfilled from to (always)
+    content: str | None = None  # Backfilled: string message, or control reason/feedback; absent otherwise
+    summary: str | None = None  # Passthrough inputSchema field: v.string().optional()
+    request_id: str | None = None  # Backfilled from message.request_id (control _response bodies)
+    approve: bool | None = None  # Backfilled from message.approve (control _response bodies)
 
 
 class SendMessageSimpleToolInput(StrictModel):
@@ -1100,6 +1124,32 @@ class ScheduleWakeupToolInput(StrictModel):
     reason: str
 
 
+# -- Workflow + RemoteTrigger Tool Inputs --------------------------------------
+
+
+class WorkflowToolInput(StrictModel):
+    """Input for the Workflow tool — multi-agent orchestration (Claude Code 2.1.146+).
+
+    Binary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,
+    description?, title?} — all optional (a refine requires one of script/name/scriptPath).
+    Only `script` appears in observed session data, so it alone is modeled; `| None`
+    mirrors the binary's optionality.
+    """
+
+    script: str | None = None
+
+
+class RemoteTriggerToolInput(StrictModel):
+    """Input for the RemoteTrigger tool — claude.ai routines API (Claude Code 2.1.81+).
+
+    Binary inputSchema: {action: enum[list|get|create|update|run] (required),
+    trigger_id?, body?}. Only `action` appears in observed session data
+    (`{"action": "list"}`), so it alone is modeled.
+    """
+
+    action: Literal['list', 'get', 'create', 'update', 'run']
+
+
 # -- ListMcpResourcesTool Input (5x occurrences) -------------------------------
 
 
@@ -1252,6 +1302,7 @@ ToolInput = Annotated[
     | CronDeleteToolInput  # id required (2.1.71+)
     | ScheduleWakeupToolInput  # prompt, delaySeconds, reason required
     | SkillToolInput  # skill required
+    | RemoteTriggerToolInput  # action required (2.1.81+)
     # Optional-only fields (must be near end)
     | ExitPlanModeToolInput  # plan optional, launchSwarm optional
     | ListMcpResourcesToolInput  # server optional
@@ -1259,6 +1310,7 @@ ToolInput = Annotated[
     | ExitWorktreeToolInput  # action required (2.1.105+)
     | MonitorToolInput  # description, timeout_ms, persistent, command required (2.1.98+)
     | PushNotificationToolInput  # message, status required (2.1.110+)
+    | WorkflowToolInput  # script optional, no required fields (2.1.146+)
     | TaskListToolInput  # No fields (2.1.17+)
     | CronListToolInput  # No fields (2.1.71+)
     | EnterPlanModeToolInput  # No fields - must be last before fallback!
@@ -3941,6 +3993,37 @@ class SessionAnalysis(StrictModel):
     duration_seconds: float | None = None
 
 
+# -- Workflow Run-Journal (subagents/workflows/wf_*/journal.jsonl) -------------
+#
+# Claude Code's Workflow tool writes a per-run resume/cache journal: a `started`
+# entry when an agent begins, a `result` entry when its result is recorded.
+# Structurally distinct from transcript records — no uuid/timestamp/sessionId.
+# `result` is the agent's return value, agent-defined and unbounded.
+
+
+class WorkflowJournalStarted(StrictModel):
+    """Run-journal entry written when a workflow agent begins."""
+
+    type: Literal['started']
+    key: str  # Content-addressed cache key: "v2:" + sha256 hex
+    agentId: str  # The agent this entry concerns; matches sibling agent-<agentId>.jsonl
+
+
+class WorkflowJournalResult(StrictModel):
+    """Run-journal entry written when a workflow agent's result is recorded."""
+
+    type: Literal['result']
+    key: str  # Same key as the paired "started" entry
+    agentId: str  # As above; the runtime may record it as '' (empty)
+    result: Any  # strict_typing_linter.py: loose-typing — agent-defined return value, no fixed shape
+
+
+WorkflowJournalRecord = Annotated[
+    WorkflowJournalStarted | WorkflowJournalResult,
+    pydantic.Field(discriminator='type'),
+]
+
+
 # -- Utility Functions ---------------------------------------------------------
 
 
@@ -4063,3 +4146,17 @@ def validate_session_record(
         return _attachment_adapter.validate_python(data)
     else:
         return SessionRecordAdapter.validate_python(data)
+
+
+_workflow_journal_adapter: pydantic.TypeAdapter[WorkflowJournalRecord] = pydantic.TypeAdapter(WorkflowJournalRecord)
+
+
+def validate_journal_record(
+    data: Mapping[str, Any],  # strict_typing_linter.py: loose-typing — raw JSON-parsed journal record
+) -> WorkflowJournalRecord:
+    """Validate a Workflow run-journal entry (started/result).
+
+    The journal is a distinct artifact from the session transcript, so its records
+    are validated here rather than through the SessionRecord union.
+    """
+    return _workflow_journal_adapter.validate_python(data)

@@ -8,6 +8,7 @@ replacing the implicit filename-keyed mappings of v1.x.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
@@ -38,10 +39,11 @@ __all__ = [
 
 # -- Archive Format Version ----------------------------------------------------
 
-ARCHIVE_FORMAT_VERSION = '2.3'
+ARCHIVE_FORMAT_VERSION = '2.4'
 """Current archive format version. Used when creating new archives.
 
 Version history:
+- 2.4: Workflow-nested layout — agent_metadata workflow_subpath, run journals, run metadata
 - 2.3: Added agent_metadata for agent-*.meta.json sidecars (Claude Code 2.1.70+)
 - 2.2: Added session_env, session_memory, and debug_log
 - 2.1: Added tool_result_dirs for pdf-<uuid>/page-NN.jpg directory structures
@@ -90,6 +92,7 @@ class SessionArchive(StrictModel):
     """Archive format v2.x - explicit artifact models.
 
     Version history:
+    - 2.4: Workflow-nested layout — agent_metadata workflow_subpath, run journals, run metadata
     - 2.3: Added agent_metadata for agent-*.meta.json sidecars (Claude Code 2.1.70+)
     - 2.2: Added session_env, session_memory, and debug_log
     - 2.1: Added tool_result_dirs for directory-based tool results (pdf page renders)
@@ -115,6 +118,12 @@ class SessionArchive(StrictModel):
     main_session: MainSessionFileEntry
     agent_files: Sequence[AgentFileEntry] = ()
     agent_metadata: Sequence[AgentMetadataEntry] = ()
+    workflow_journals: Mapping[str, str] = pydantic.Field(
+        default_factory=dict
+    )  # subagents-relative path -> verbatim journal.jsonl content
+    workflow_runs: Mapping[str, str] = pydantic.Field(
+        default_factory=dict
+    )  # session-relative path -> verbatim workflows/ run metadata (.json) + script (.js)
     plan_files: Sequence[PlanFileEntry] = ()
     tool_results: Sequence[ToolResultEntry] = ()
     tool_result_dirs: Sequence[ToolResultDirectoryEntry] = ()
@@ -152,21 +161,22 @@ class AgentFileEntry(StrictModel):
 
     Derived fields (computed on restore):
     - filename: f"agent-{agent_id}.jsonl"
-    - relative_path: f"subagents/agent-{agent_id}.jsonl" if nested
-                     else f"agent-{agent_id}.jsonl"
+    - relative_path: <sid>/subagents/[<workflow_subpath>/]agent-{agent_id}.jsonl if nested,
+                     else agent-{agent_id}.jsonl
 
     The nested flag indicates directory structure:
     - nested=False: File in <project-folder>/agent-{id}.jsonl (pre-2.1.2)
     - nested=True: File in <project-folder>/<sid>/subagents/agent-{id}.jsonl (2.1.2+)
 
-    Agent ID patterns (Claude Code 2.1.25+):
-    - Plain hex: "5271c147" (agent_type=None)
-    - Typed: "aprompt_suggestion-a12dbf" (agent_type="aprompt_suggestion")
+    agent_id is opaque (Claude Code recognizes agent files by affix, not id shape);
+    agent_type is the cosmetic fork-label slug of a typed id (a<slug>-<hex>), or None
+    for an untyped a<hex> id.
     """
 
-    agent_id: str  # Source of truth (e.g., "aprompt_suggestion-d7f1a0")
-    agent_type: str | None = None  # Parsed type prefix, or None for plain hex
+    agent_id: str  # Opaque agent id, e.g. "acompact-016ed80fcaa022ea"
+    agent_type: str | None = None  # Cosmetic type slug (e.g. "compact"), or None
     nested: bool  # True if in subagents/ directory
+    workflow_subpath: str | None = None  # "workflows/wf_<runId>" for workflow-nested agents, else None
     record_count: int  # Metadata first
     records: Sequence[SessionRecord]
 
@@ -179,7 +189,8 @@ class AgentMetadataEntry(StrictModel):
 
     Derived fields (computed on restore):
     - filename: f"agent-{agent_id}.meta.json"
-    - location: f"<project>/{sid}/subagents/{filename}" (always nested)
+    - location: <project>/{sid}/subagents/[<workflow_subpath>/]agent-{agent_id}.meta.json
+      (beside the paired transcript: directly nested, or under workflows/wf_<runId>/)
 
     Sparse by design: pre-2.1.70 sidechains have no sidecar, and write
     failures are silently swallowed. Content stored raw for forward
@@ -187,6 +198,7 @@ class AgentMetadataEntry(StrictModel):
     """
 
     agent_id: str  # Matches paired AgentFileEntry.agent_id
+    workflow_subpath: str | None = None  # "workflows/wf_<runId>" for workflow agents, else None
     content: str  # Raw JSON of agent-{id}.meta.json
 
 
@@ -265,35 +277,23 @@ class TodoFileEntry(StrictModel):
     content: str  # JSON string (not parsed, may vary)
 
 
+# Typed agent-id: a<slug>-<hex>, slug charset [a-z0-9_-] (fork-label and prompt-derived
+# slugs), hex tail 6+. Untyped ids are a<hex> (no internal dash) and don't match.
+TYPED_AGENT_ID = re.compile(r'^a([a-z0-9_-]+?)-([0-9a-f]{6,})$')
+
+
 def parse_agent_metadata(filename: str) -> tuple[str, str | None]:
-    """Parse agent ID and type from filename.
+    """Decompose agent-<id>.jsonl into (opaque agentId, optional type slug).
+
+    agentId is opaque per Claude Code (recognized via the agent-/.jsonl affixes). The
+    type slug is cosmetic display metadata. The repo's own -clone-<prefix> provenance
+    suffix is split off before type detection, so the type is read from the base id.
 
     Examples:
-        "agent-5271c147.jsonl" -> ("5271c147", None)
-        "agent-aprompt_suggestion-a12dbf.jsonl" -> ("aprompt_suggestion-a12dbf", "aprompt_suggestion")
-
-    Pattern detection:
-        agent-<type>-<6-hex>.jsonl -> typed agent
-        agent-<8-hex>.jsonl -> plain agent (no type)
-        agent-<anything-else>.jsonl -> treat as plain agent ID
-
-    Args:
-        filename: Agent filename like "agent-xxx.jsonl"
-
-    Returns:
-        (agent_id, agent_type) tuple
+        "agent-a00608189fad1602b.jsonl"         -> ("a00608189fad1602b", None)
+        "agent-acompact-016ed80fcaa022ea.jsonl" -> ("acompact-016ed80fcaa022ea", "compact")
     """
-    # Remove "agent-" prefix and ".jsonl" suffix
-    base = filename.removeprefix('agent-').removesuffix('.jsonl')
-
-    # Check for typed agent pattern: <type>-<6-hex>
-    if '-' in base:
-        # Split from the RIGHT to handle types with dashes (e.g., "some-type-abc123")
-        parts = base.rsplit('-', 1)
-        if len(parts) == 2 and len(parts[1]) == 6:
-            # Looks like type-hex pattern
-            agent_type = parts[0]
-            return (base, agent_type)
-
-    # Plain hex or unknown pattern - no type
-    return (base, None)
+    agent_id = filename.removeprefix('agent-').removesuffix('.jsonl')
+    base_id = agent_id.split('-clone-', 1)[0]
+    match = TYPED_AGENT_ID.match(base_id)
+    return (agent_id, match.group(1) if match else None)

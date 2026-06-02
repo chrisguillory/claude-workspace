@@ -155,6 +155,8 @@ def handle_session_end(session_id: str):
 2. The exception is **expected as part of normal flow** (e.g., file existence checks)
 3. The library documentation **explicitly requires** handling specific exceptions
 
+**No anticipatory handlers** — if you haven't seen the exception in practice, don't write a handler for it. Pre-designing responses commits to a specific fix before knowing what's actually broken. Let unobserved failures bubble; when they happen, design the response against the real failure mode rather than the imagined one. This mirrors the *NewType validation barriers* rule below ("Don't NewType against a hypothetical bug class") — the bar is a *real* caller hitting a *known* failure, not a future-self speculation.
+
 **Don't duplicate your infrastructure** — If a decorator, context manager, or handler already covers an error path, the decorated function should not re-handle it. Inline error handling that duplicates infrastructure behavior is a semantic DRY violation and separation of concerns violation simultaneously:
 
 ```python

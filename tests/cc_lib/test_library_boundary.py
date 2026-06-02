@@ -14,6 +14,7 @@ import bashlex
 import bashlex.errors
 import pytest
 from cc_lib.library_boundary import LibraryBoundary
+from cc_lib.picklable import PickleByInitArgs
 
 from tests.cc_lib import fake_lib
 
@@ -26,7 +27,7 @@ class AppErrorSubclass(AppError):
     """Subclass of target -- should also pass through the double-wrap guard."""
 
 
-class NoArgError(Exception):
+class NoArgError(PickleByInitArgs, Exception):
     """Target exception whose __init__ requires no arguments beyond self."""
 
     def __init__(self) -> None:
