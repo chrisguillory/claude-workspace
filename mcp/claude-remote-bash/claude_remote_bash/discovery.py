@@ -9,7 +9,7 @@ import re
 import socket
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from typing import Literal, cast, get_args
 
 import ifaddr
@@ -268,7 +268,7 @@ class _QuietUnreachableInterfaces(logging.Filter):
     than message text) is robust to zeroconf version changes.
     """
 
-    _QUIET_ERRNOS = frozenset({errno.ENETUNREACH, errno.EHOSTUNREACH, errno.EADDRNOTAVAIL})
+    _QUIET_ERRNOS: Set[int] = {errno.ENETUNREACH, errno.EHOSTUNREACH, errno.EADDRNOTAVAIL}
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not record.exc_info:
@@ -279,7 +279,7 @@ class _QuietUnreachableInterfaces(logging.Filter):
         return True
 
 
-_VALID_KINDS: frozenset[str] = frozenset(get_args(InterfaceKind.__value__))
+_VALID_KINDS: Set[str] = set(get_args(InterfaceKind.__value__))
 
 _KIND_RANK: Mapping[InterfaceKind, int] = {
     'ethernet': 0,

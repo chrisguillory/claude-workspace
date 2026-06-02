@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 class FormatDetector:
     """Detects and validates archive format from file extension and format parameter."""
 
-    SUPPORTED_FORMATS: ClassVar[frozenset[str]] = frozenset({'json', 'zst'})  # 'zst' = JSON with zstd compression
+    SUPPORTED_FORMATS: ClassVar[Set[str]] = {'json', 'zst'}  # 'zst' = JSON with zstd compression
 
     # Extension to format mapping
     EXTENSION_MAP: ClassVar[Mapping[str, ArchiveFormat]] = {
