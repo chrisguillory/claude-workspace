@@ -57,6 +57,7 @@ from cc_lib.claude_binary_patching import ORIGINALS_DIR, scan_binary
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.macho import MachOSignature
+from cc_lib.picklable import PickleByInitArgs
 from cc_lib.schemas.base import ClosedModel, OpenModel
 from cc_lib.types import CCVersion
 
@@ -542,7 +543,7 @@ def _is_published_on_npm(version: str) -> bool:
         return True
 
 
-class VersionNotPublished(LookupError):
+class VersionNotPublished(PickleByInitArgs, LookupError):
     """A Claude Code version that was never published (skipped release number or typo).
 
     Distinct from VersionExpiredFromCDN — npm cross-check confirmed the version
@@ -554,7 +555,7 @@ class VersionNotPublished(LookupError):
         super().__init__(f'Version {version} was never published')
 
 
-class VersionExpiredFromCDN(LookupError):
+class VersionExpiredFromCDN(PickleByInitArgs, LookupError):
     """A published version that is no longer available on the CDN (~9 month retention)."""
 
     def __init__(self, version: str) -> None:

@@ -23,6 +23,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from cc_lib.picklable import PickleByInitArgs
+
 __all__ = [
     'AmbiguousSessionError',
     'ClaudeSessionError',
@@ -48,7 +50,7 @@ class SessionResolutionError(ClaudeSessionError):
     """Base exception for session lookup and resolution failures."""
 
 
-class AmbiguousSessionError(SessionResolutionError):
+class AmbiguousSessionError(PickleByInitArgs, SessionResolutionError):
     """Raised when a session ID prefix matches multiple sessions."""
 
     def __init__(self, prefix: str, matches: Sequence[str]) -> None:
@@ -63,7 +65,7 @@ class AmbiguousSessionError(SessionResolutionError):
         )
 
 
-class SourceProjectConflictError(SessionResolutionError):
+class SourceProjectConflictError(PickleByInitArgs, SessionResolutionError):
     """Raised when --source-project is used with an auto-detected session ID."""
 
     def __init__(self) -> None:
@@ -74,7 +76,7 @@ class SessionDeletionError(ClaudeSessionError):
     """Base exception for deletion policy violations."""
 
 
-class NativeSessionDeletionError(SessionDeletionError):
+class NativeSessionDeletionError(PickleByInitArgs, SessionDeletionError):
     """Raised when attempting to delete a native session without --force."""
 
     def __init__(self, session_id: str) -> None:
@@ -84,7 +86,7 @@ class NativeSessionDeletionError(SessionDeletionError):
         )
 
 
-class RunningSessionDeletionError(SessionDeletionError):
+class RunningSessionDeletionError(PickleByInitArgs, SessionDeletionError):
     """Raised when attempting to delete a running session without --terminate."""
 
     def __init__(self, session_id: str, pid: int) -> None:
@@ -93,7 +95,7 @@ class RunningSessionDeletionError(SessionDeletionError):
         super().__init__(f'Session {session_id} is running (PID {pid}). Use --terminate to kill the process.')
 
 
-class CrossSessionArtifactsRequiredError(SessionDeletionError):
+class CrossSessionArtifactsRequiredError(PickleByInitArgs, SessionDeletionError):
     """Raised when siblings exist but delete_cross_session_artifacts is unset."""
 
     def __init__(self, session_id: str, sibling_project_folders: Sequence[Path]) -> None:
@@ -106,7 +108,7 @@ class CrossSessionArtifactsRequiredError(SessionDeletionError):
         )
 
 
-class CrossSessionArtifactsNotApplicableError(SessionDeletionError):
+class CrossSessionArtifactsNotApplicableError(PickleByInitArgs, SessionDeletionError):
     """Raised when delete_cross_session_artifacts is passed but no siblings exist."""
 
     def __init__(self, session_id: str) -> None:
@@ -120,7 +122,7 @@ class SessionMoveError(ClaudeSessionError):
     """Base exception for move policy violations."""
 
 
-class SameProjectMoveError(SessionMoveError):
+class SameProjectMoveError(PickleByInitArgs, SessionMoveError):
     """Raised when attempting to move a session to its current project."""
 
     def __init__(self, session_id: str, project_path: str) -> None:
@@ -129,7 +131,7 @@ class SameProjectMoveError(SessionMoveError):
         super().__init__(f'Session {session_id} is already in project {project_path}.')
 
 
-class NativeSessionMoveError(SessionMoveError):
+class NativeSessionMoveError(PickleByInitArgs, SessionMoveError):
     """Raised when attempting to move a native session without --force."""
 
     def __init__(self, session_id: str) -> None:
@@ -139,7 +141,7 @@ class NativeSessionMoveError(SessionMoveError):
         )
 
 
-class RunningSessionMoveError(SessionMoveError):
+class RunningSessionMoveError(PickleByInitArgs, SessionMoveError):
     """Raised when attempting to move a running session without --terminate."""
 
     def __init__(self, session_id: str, pid: int) -> None:
