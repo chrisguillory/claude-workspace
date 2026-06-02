@@ -21,6 +21,9 @@ from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 from claude_session.services.artifacts import (
+    AgentStructure,
+    agent_dest_path,
+    apply_agent_id_mapping,
     collect_agent_file_info,
     collect_agent_metadata,
     collect_debug_log,
@@ -30,6 +33,8 @@ from claude_session.services.artifacts import (
     collect_task_metadata,
     collect_todos,
     collect_tool_results,
+    collect_workflow_journals,
+    collect_workflow_runs,
     create_session_env_dir,
     detect_agent_structure,
     extract_custom_title_from_records,
@@ -42,7 +47,8 @@ from claude_session.services.artifacts import (
     get_tasks_dir,
     get_todos_dir,
     iter_tasks,
-    transform_agent_metadata_filename,
+    remap_workflow_run_json,
+    transform_agent_metadata_relpath,
     transform_todo_filename,
     write_agent_metadata,
     write_debug_log,
@@ -54,6 +60,8 @@ from claude_session.services.artifacts import (
     write_tasks,
     write_todos,
     write_tool_results,
+    write_workflow_journals,
+    write_workflow_runs,
 )
 from claude_session.services.discovery import SessionDiscoveryService
 from claude_session.services.lineage import LineageService
@@ -131,7 +139,7 @@ class SessionCloneService:
         session_files, agent_structure = await self._discover_session_files(session_info)
 
         logger.info('Found %d session files', len(session_files))
-        nested_count = sum(1 for is_nested in agent_structure.values() if is_nested)
+        nested_count = sum(1 for structure in agent_structure.values() if structure.nested)
         if nested_count:
             logger.info('  %d nested agents (in subagents/)', nested_count)
 
@@ -149,6 +157,16 @@ class SessionCloneService:
         agent_metadata_files = collect_agent_metadata(source_session_dir, session_info.session_id)
         if agent_metadata_files:
             logger.info('Found %d agent metadata sidecars', len(agent_metadata_files))
+
+        # Collect Workflow run-journals (carried verbatim; agent/session ids remapped on write)
+        workflow_journals = collect_workflow_journals(source_session_dir, session_info.session_id)
+        if workflow_journals:
+            logger.info('Found %d workflow run-journals', len(workflow_journals))
+
+        # Collect Workflow run metadata + scripts (<session>/workflows/; ids/paths remapped on write)
+        workflow_runs = collect_workflow_runs(source_session_dir, session_info.session_id)
+        if workflow_runs:
+            logger.info('Found %d workflow run files', len(workflow_runs))
 
         # Collect tool results from source session
         tool_results = collect_tool_results(source_session_dir, session_info.session_id)
@@ -233,22 +251,22 @@ class SessionCloneService:
         # 1. Main session file
         all_output_paths.append(target_dir / f'{new_session_id}.jsonl')
 
-        # 2. Agent files (with nested structure awareness)
+        # 2. Agent files (flat / nested / workflow-nested)
         for info in agent_infos:
             new_agent_id = agent_id_mapping[info.agent_id]
             new_filename = f'agent-{new_agent_id}.jsonl'
+            all_output_paths.append(agent_dest_path(target_dir, new_session_id, info, new_filename))
 
-            if info.nested:
-                # Nested: <target>/<new_session_id>/subagents/agent-*.jsonl
-                all_output_paths.append(target_dir / new_session_id / 'subagents' / new_filename)
-            else:
-                # Flat: <target>/agent-*.jsonl
-                all_output_paths.append(target_dir / new_filename)
+        # 2b. Agent metadata sidecars (nested beside their transcript; agent_id remapped)
+        for old_relpath in agent_metadata_files:
+            new_relpath = transform_agent_metadata_relpath(old_relpath, agent_id_mapping)
+            all_output_paths.append(target_dir / new_session_id / 'subagents' / new_relpath)
 
-        # 2b. Agent metadata sidecars (always nested; agent_id remapped)
-        for old_filename in agent_metadata_files:
-            new_filename = transform_agent_metadata_filename(old_filename, agent_id_mapping)
-            all_output_paths.append(target_dir / new_session_id / 'subagents' / new_filename)
+        # 2c. Workflow run-journals (runId unchanged on fork, so the subagents-relative path is identical)
+        all_output_paths.extend(target_dir / new_session_id / 'subagents' / relpath for relpath in workflow_journals)
+
+        # 2d. Workflow run metadata + scripts (under <session>/workflows/; runId paths preserved on fork)
+        all_output_paths.extend(target_dir / new_session_id / relpath for relpath in workflow_runs)
 
         # 3. Tool results (flat files + directory files)
         if tool_results:
@@ -388,10 +406,7 @@ class SessionCloneService:
             new_agent_id = agent_id_mapping[info.agent_id]
             new_filename = f'agent-{new_agent_id}.jsonl'
 
-            if info.nested:
-                output_path = target_dir / new_session_id / 'subagents' / new_filename
-            else:
-                output_path = target_dir / new_filename
+            output_path = agent_dest_path(target_dir, new_session_id, info, new_filename)
 
             # Create parent directories
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -409,11 +424,43 @@ class SessionCloneService:
         agent_metadata_cloned = 0
         if agent_metadata_files:
             remapped_metadata = {
-                transform_agent_metadata_filename(filename, agent_id_mapping): content
-                for filename, content in agent_metadata_files.items()
+                transform_agent_metadata_relpath(relpath, agent_id_mapping): content
+                for relpath, content in agent_metadata_files.items()
             }
             agent_metadata_cloned = write_agent_metadata(target_dir, new_session_id, remapped_metadata)
             logger.info('Cloned %d agent metadata sidecars', agent_metadata_cloned)
+
+        # Clone Workflow run-journals (agent + session ids remapped; runId path identity preserved)
+        if workflow_journals:
+            remapped_journals = {
+                relpath: apply_agent_id_mapping(content, agent_id_mapping).replace(
+                    session_info.session_id, new_session_id
+                )
+                for relpath, content in workflow_journals.items()
+            }
+            journals_written = write_workflow_journals(target_dir, new_session_id, remapped_journals)
+            logger.info('Cloned %d workflow run-journals', journals_written)
+
+        # Clone Workflow run metadata + scripts (run metadata gets id/path remap; scripts verbatim)
+        if workflow_runs:
+            path_replacements = None
+            if translator:
+                path_replacements = {
+                    str(source_path): str(self.target_project_path),
+                    encode_project_path(source_path): encode_project_path(self.target_project_path),
+                }
+            remapped_runs = {
+                relpath: (
+                    remap_workflow_run_json(
+                        content, agent_id_mapping, session_info.session_id, new_session_id, path_replacements
+                    )
+                    if relpath.endswith('.json')
+                    else content
+                )
+                for relpath, content in workflow_runs.items()
+            }
+            runs_written = write_workflow_runs(target_dir, new_session_id, remapped_runs)
+            logger.info('Cloned %d workflow run files', runs_written)
 
         # Record lineage (source_path already extracted above)
         lineage_service = LineageService()
@@ -478,12 +525,13 @@ class SessionCloneService:
             raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
         return match
 
-    async def _discover_session_files(self, session_info: SessionInfo) -> tuple[Sequence[Path], Mapping[str, bool]]:
+    async def _discover_session_files(
+        self, session_info: SessionInfo
+    ) -> tuple[Sequence[Path], Mapping[str, AgentStructure]]:
         """Discover all JSONL files for a session with structure detection.
 
         Returns:
-            Tuple of (file_paths, agent_structure_map)
-            agent_structure_map: filename -> is_nested
+            Tuple of (file_paths, agent_structure_map: filename -> AgentStructure)
         """
         # Use session folder directly from discovery (no encoding needed)
         session_dir = session_info.session_folder
@@ -514,15 +562,16 @@ class SessionCloneService:
             text=True,
         )
 
-        # Detect nested structure for each agent file
-        agent_structure: dict[str, bool] = {}
+        # Detect structure (flat / nested / workflow-nested) for each agent file
+        agent_structure: dict[str, AgentStructure] = {}
 
         if result.stdout.strip():
             agent_files = [Path(line) for line in result.stdout.strip().split('\n')]
 
             for agent_path in agent_files:
-                is_nested = detect_agent_structure(agent_path, session_info.session_id, session_dir)
-                agent_structure[agent_path.name] = is_nested
+                agent_structure[agent_path.name] = detect_agent_structure(
+                    agent_path, session_info.session_id, session_dir
+                )
 
             session_files.extend(agent_files)
 

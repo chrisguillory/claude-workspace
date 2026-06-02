@@ -32,12 +32,18 @@ import re
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from claude_session.schemas.session import SessionRecord
 
 __all__ = [
     'AGENT_FILENAME_PATTERN',
+    'WORKFLOW_JOURNAL_PATTERN',
+    'WORKFLOW_RUN_ID_PATTERN',
     'AgentFileInfo',
+    'AgentLayout',
+    'AgentStructure',
+    'agent_dest_path',
     'apply_agent_id_mapping',
     'collect_agent_file_info',
     'detect_agent_structure',
@@ -45,24 +51,23 @@ __all__ = [
     'extract_base_agent_id',
     'generate_agent_id_mapping',
     'generate_clone_agent_id',
+    'is_workflow_journal_path',
     'transform_agent_filename',
 ]
 
 
-# Pattern for agent filenames - matches native (hex or typed) and cloned formats:
-# - agent-5271c147.jsonl (native hex)
-# - agent-aprompt_suggestion-d7f1a0.jsonl (native typed, 2.1.25+)
-# - agent-5271c147-clone-019b51bd.jsonl (cloned hex)
-# - agent-aprompt_suggestion-d7f1a0-clone-019b51bd.jsonl (cloned typed)
-AGENT_FILENAME_PATTERN = re.compile(
-    r'^agent-'
-    r'('
-    r'(?:[a-z_]+-)?'  # Optional type prefix (e.g., "aprompt_suggestion-")
-    r'[a-f0-9]+'  # Required hex ID
-    r'(?:-clone-[a-f0-9]+)?'  # Optional clone suffix
-    r')'
-    r'\.jsonl$'
-)
+# Claude Code agent transcripts: agent-<id>.jsonl, where <id> is opaque (Claude Code
+# recognizes these by the agent-/.jsonl affixes alone and never decomposes the id).
+# group(1) is that opaque id, including any repo -clone-<prefix> provenance suffix, which
+# extract_base_agent_id / generate_clone_agent_id split off separately.
+AGENT_FILENAME_PATTERN = re.compile(r'^agent-(.+)\.jsonl$')
+
+
+# Claude Code's Workflow tool writes its run-journal and workflow subagents under a
+# fixed recipe: <session>/subagents/workflows/<runId>/{journal.jsonl, agent-*.jsonl},
+# where <runId> matches Claude Code's own resumeFromRunId pattern ^wf_[a-z0-9-]{6,}$.
+WORKFLOW_RUN_ID_PATTERN = re.compile(r'^wf_[a-z0-9-]{6,}$')
+WORKFLOW_JOURNAL_PATTERN = re.compile(r'(?:^|/)subagents/workflows/wf_[a-z0-9-]{6,}/journal\.jsonl$')
 
 
 @dataclass
@@ -78,35 +83,63 @@ class AgentFileInfo:
     filename: str
     agent_id: str
     nested: bool
+    workflow_subpath: str | None = None  # "workflows/wf_<runId>" for workflow agents, else None
+
+
+@dataclass(frozen=True)
+class AgentStructure:
+    """Where an agent file sits relative to its session, for rebuilding paths on clone/restore.
+
+    nested=False                                          -> flat (<project>/agent-*.jsonl)
+    nested=True,  workflow_subpath=None                   -> <session>/subagents/agent-*.jsonl
+    nested=True,  workflow_subpath="workflows/wf_<runId>" -> workflow-nested
+    """
+
+    nested: bool
+    workflow_subpath: str | None = None
+
+
+class AgentLayout(Protocol):
+    """Structural view of an agent file's on-disk layout: nested flag + optional workflow subpath.
+
+    AgentFileInfo (clone/move) and AgentFileEntry (restore/archive) both satisfy this, so
+    agent_dest_path builds destinations from either without depending on the concrete type.
+    """
+
+    @property
+    def nested(self) -> bool: ...
+
+    @property
+    def workflow_subpath(self) -> str | None: ...
 
 
 def collect_agent_file_info(
     files_data: Mapping[str, Sequence[SessionRecord]],
-    agent_structure: Mapping[str, bool],
+    agent_structure: Mapping[str, AgentStructure],
 ) -> Sequence[AgentFileInfo]:
     """Collect agent file information from loaded session data.
 
     Combines filename parsing with structure detection results.
-    Replaces pattern: `for filename in files_data: if startswith('agent-'): ...`
-
-    Uses AGENT_FILENAME_PATTERN for encapsulated parsing.
 
     Args:
         files_data: Mapping of filename -> records (from parser service)
-        agent_structure: Mapping of filename -> is_nested (from discovery)
+        agent_structure: Mapping of filename -> AgentStructure (from discovery)
 
     Returns:
         List of AgentFileInfo for each agent file found
     """
+    flat = AgentStructure(nested=False)
     result = []
     for filename in files_data:
         match = AGENT_FILENAME_PATTERN.match(filename)
         if match:
+            structure = agent_structure.get(filename, flat)
             result.append(
                 AgentFileInfo(
                     filename=filename,
                     agent_id=match.group(1),
-                    nested=agent_structure.get(filename, False),
+                    nested=structure.nested,
+                    workflow_subpath=structure.workflow_subpath,
                 )
             )
     return result
@@ -265,12 +298,13 @@ def apply_agent_id_mapping(json_str: str, agent_id_mapping: Mapping[str, str]) -
     return result
 
 
-def detect_agent_structure(agent_path: Path, session_id: str, project_folder: Path) -> bool:
-    """Detect if agent file is nested (subagents/) or flat.
+def detect_agent_structure(agent_path: Path, session_id: str, project_folder: Path) -> AgentStructure:
+    """Detect where an agent file sits relative to its session.
 
     Expected structures:
-    - Flat: <project>/agent-*.jsonl
-    - Nested: <project>/<session-id>/subagents/agent-*.jsonl
+    - Flat:            <project>/agent-*.jsonl
+    - Nested:          <project>/<session-id>/subagents/agent-*.jsonl
+    - Workflow-nested: <project>/<session-id>/subagents/workflows/wf_<runId>/agent-*.jsonl
 
     Args:
         agent_path: Absolute path to agent file
@@ -278,7 +312,7 @@ def detect_agent_structure(agent_path: Path, session_id: str, project_folder: Pa
         project_folder: Project folder path
 
     Returns:
-        True if nested, False if flat
+        AgentStructure describing the location.
 
     Raises:
         ValueError: If structure is unexpected (fail-fast)
@@ -292,14 +326,45 @@ def detect_agent_structure(agent_path: Path, session_id: str, project_folder: Pa
 
     # Flat: (agent-*.jsonl,)
     if len(parts) == 1:
-        return False
+        return AgentStructure(nested=False)
 
     # Nested: (<session-id>, 'subagents', agent-*.jsonl)
     if len(parts) == 3 and parts[0] == session_id and parts[1] == 'subagents':
-        return True
+        return AgentStructure(nested=True)
+
+    # Workflow-nested: (<session-id>, 'subagents', 'workflows', wf_<runId>, agent-*.jsonl)
+    if (
+        len(parts) == 5
+        and parts[0] == session_id
+        and parts[1] == 'subagents'
+        and parts[2] == 'workflows'
+        and WORKFLOW_RUN_ID_PATTERN.fullmatch(parts[3])
+    ):
+        return AgentStructure(nested=True, workflow_subpath=f'{parts[2]}/{parts[3]}')
 
     # Unexpected structure - fail fast
     raise ValueError(
         f'Unexpected agent file structure: {rel_path}\n'
-        f'Expected flat (agent-*.jsonl) or nested (<session-id>/subagents/agent-*.jsonl)'
+        f'Expected flat (agent-*.jsonl), nested (<session-id>/subagents/agent-*.jsonl), or '
+        f'workflow-nested (<session-id>/subagents/workflows/wf_<runId>/agent-*.jsonl)'
     )
+
+
+def is_workflow_journal_path(path: Path) -> bool:
+    """True if path is a Workflow run-journal (subagents/workflows/wf_<runId>/journal.jsonl)."""
+    return WORKFLOW_JOURNAL_PATTERN.search(path.as_posix()) is not None
+
+
+def agent_dest_path(base_dir: Path, session_id: str, layout: AgentLayout, filename: str) -> Path:
+    """Destination path for a cloned/restored agent file, preserving its on-disk layout.
+
+    Flat:            <base>/<filename>
+    Nested:          <base>/<session_id>/subagents/<filename>
+    Workflow-nested: <base>/<session_id>/subagents/<workflow_subpath>/<filename>
+    """
+    if not layout.nested:
+        return base_dir / filename
+    dest = base_dir / session_id / 'subagents'
+    if layout.workflow_subpath:
+        dest = dest / layout.workflow_subpath
+    return dest / filename

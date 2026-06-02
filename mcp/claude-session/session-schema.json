@@ -7938,6 +7938,28 @@
       "title": "ReadToolInput",
       "type": "object"
     },
+    "RemoteTriggerToolInput": {
+      "additionalProperties": true,
+      "description": "Input for the RemoteTrigger tool \u2014 claude.ai routines API (Claude Code 2.1.81+).\n\nBinary inputSchema: {action: enum[list|get|create|update|run] (required),\ntrigger_id?, body?}. Only `action` appears in observed session data\n(`{\"action\": \"list\"}`), so it alone is modeled.",
+      "properties": {
+        "action": {
+          "enum": [
+            "list",
+            "get",
+            "create",
+            "update",
+            "run"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "RemoteTriggerToolInput",
+      "type": "object"
+    },
     "SavedHookContextRecord": {
       "additionalProperties": true,
       "description": "Saved hook context record for persisting hook output across session boundaries.",
@@ -8469,7 +8491,7 @@
     },
     "SendMessageToolInput": {
       "additionalProperties": true,
-      "description": "Input for SendMessage tool \u2014 post-backfill wire shape.\n\nClaude Code's `backfillObservableInput` derives `type`/`recipient`/`content` from\n`to`/`message` before serialization. `message` is a plain string or a control body\n(shutdown handshake), and `type` mirrors it. The raw two-field form is SendMessageSimpleToolInput.",
+      "description": "Input for SendMessage tool \u2014 post-backfill wire shape.\n\nClaude Code's `backfillObservableInput` derives top-level fields from `to`/`message`.\nFor an object `message` (control body): `type` = message.type, `recipient` = to (always),\n`request_id`/`approve` are copied up iff present, and `content` = `message.reason ?? message.feedback`\n(so `content` is absent when the control body carries neither). `reason`/`feedback` never appear as\ntop-level keys. For a string `message`: `type='message'`, `recipient` = to, `content` = message.\nThe raw two-field form is SendMessageSimpleToolInput.",
       "properties": {
         "to": {
           "title": "To",
@@ -8514,8 +8536,16 @@
           "type": "string"
         },
         "content": {
-          "title": "Content",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
         },
         "summary": {
           "anyOf": [
@@ -8528,14 +8558,37 @@
           ],
           "default": null,
           "title": "Summary"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "approve": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approve"
         }
       },
       "required": [
         "to",
         "message",
         "type",
-        "recipient",
-        "content"
+        "recipient"
       ],
       "title": "SendMessageToolInput",
       "type": "object"
@@ -10647,6 +10700,9 @@
               "$ref": "#/$defs/SkillToolInput"
             },
             {
+              "$ref": "#/$defs/RemoteTriggerToolInput"
+            },
+            {
               "$ref": "#/$defs/ExitPlanModeToolInput"
             },
             {
@@ -10663,6 +10719,9 @@
             },
             {
               "$ref": "#/$defs/PushNotificationToolInput"
+            },
+            {
+              "$ref": "#/$defs/WorkflowToolInput"
             },
             {
               "$ref": "#/$defs/TaskListToolInput"
@@ -11810,6 +11869,26 @@
       "title": "WorkflowKeywordRequestAttachment",
       "type": "object"
     },
+    "WorkflowToolInput": {
+      "additionalProperties": true,
+      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nOnly `script` appears in observed session data, so it alone is modeled; `| None`\nmirrors the binary's optionality.",
+      "properties": {
+        "script": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Script"
+        }
+      },
+      "title": "WorkflowToolInput",
+      "type": "object"
+    },
     "WorktreeSessionData": {
       "additionalProperties": true,
       "description": "Worktree session metadata embedded in WorktreeStateRecord.",
@@ -12096,9 +12175,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.38",
+  "x-schema-version": "0.2.39",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.157"
+    "max": "2.1.159"
   }
 }
