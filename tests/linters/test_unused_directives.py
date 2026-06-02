@@ -14,7 +14,7 @@ single-purpose fixtures under ``edge_cases/strict_typing/`` and are line-keyed i
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
 
 import pytest
@@ -42,6 +42,8 @@ EXCLUDED_CODES = {'unused-directive', 'skip-file'}
 type CodeMap = Mapping[str, str]
 # (fixture filename, code, is the directive expected unused?) for line-keyed structural cases.
 type StructuralCase = tuple[str, str, bool]
+# A linter run's result: each entity/entry -> its directive line, and the set of lines flagged unused.
+type DirectiveScan = tuple[Mapping[str, int], Set[int]]
 
 
 # -- exception_safety: paths + expectations -----------------------------------
@@ -130,7 +132,7 @@ COVERAGE_SPECS: Sequence[tuple[Path, str, CodeMap, Sequence[StructuralCase]]] = 
 
 
 @pytest.fixture(scope='module')
-def exception_safety_unused() -> tuple[dict[str, int], set[int]]:
+def exception_safety_unused() -> DirectiveScan:
     """Run exception_safety with --report-unused-directives once; return (lines, flagged)."""
     output = run_linter(EXCEPTION_SAFETY_FIXTURE, EXCEPTION_SAFETY, report_unused=True)
     lines = _directive_lines(EXCEPTION_SAFETY_FIXTURE, EXCEPTION_SAFETY, EXPECTED_EXCEPTION_SAFETY)
@@ -138,7 +140,7 @@ def exception_safety_unused() -> tuple[dict[str, int], set[int]]:
 
 
 @pytest.fixture(scope='module')
-def reexport_unused() -> tuple[dict[str, int], set[int]]:
+def reexport_unused() -> DirectiveScan:
     """Run reexport with --report-unused-directives once; return (lines, flagged)."""
     output = run_linter(REEXPORT_FIXTURE, REEXPORT, report_unused=True)
     lines = {entry: _reexport_directive_line(REEXPORT_FIXTURE, entry) for entry in EXPECTED_REEXPORT}
@@ -146,7 +148,7 @@ def reexport_unused() -> tuple[dict[str, int], set[int]]:
 
 
 @pytest.fixture(scope='module')
-def strict_typing_type_unused() -> tuple[dict[str, int], set[int]]:
+def strict_typing_type_unused() -> DirectiveScan:
     """Run strict_typing on the type-rule fixture once; return (lines, flagged)."""
     output = run_linter(STRICT_TYPING_TYPE_FIXTURE, STRICT_TYPING, report_unused=True)
     lines = _directive_lines(STRICT_TYPING_TYPE_FIXTURE, STRICT_TYPING, EXPECTED_STRICT_TYPING_TYPE)
@@ -157,39 +159,39 @@ def strict_typing_type_unused() -> tuple[dict[str, int], set[int]]:
 
 
 @pytest.mark.parametrize('entity', EXPECTED_EXCEPTION_SAFETY, ids=list(EXPECTED_EXCEPTION_SAFETY))
-def test_exception_safety_directive(entity: str, exception_safety_unused: tuple[dict[str, int], set[int]]) -> None:
+def test_exception_safety_directive(entity: str, exception_safety_unused: DirectiveScan) -> None:
     """Each used_ directive suppresses a real violation; each unused_ directive is flagged."""
     lines, unused = exception_safety_unused
     _assert_polarity(entity, lines, unused)
 
 
-def test_exception_safety_no_unexpected(exception_safety_unused: tuple[dict[str, int], set[int]]) -> None:
+def test_exception_safety_no_unexpected(exception_safety_unused: DirectiveScan) -> None:
     """No directive lines beyond the unused_ entities are flagged."""
     lines, unused = exception_safety_unused
     _assert_no_strays(EXPECTED_EXCEPTION_SAFETY, lines, unused)
 
 
 @pytest.mark.parametrize('entry', EXPECTED_REEXPORT, ids=list(EXPECTED_REEXPORT))
-def test_reexport_directive(entry: str, reexport_unused: tuple[dict[str, int], set[int]]) -> None:
+def test_reexport_directive(entry: str, reexport_unused: DirectiveScan) -> None:
     """The imported re-export's directive is used; the local entry's directive is flagged unused."""
     lines, unused = reexport_unused
     _assert_polarity(entry, lines, unused)
 
 
-def test_reexport_no_unexpected(reexport_unused: tuple[dict[str, int], set[int]]) -> None:
+def test_reexport_no_unexpected(reexport_unused: DirectiveScan) -> None:
     """Only the unused_ entry's directive line is flagged."""
     lines, unused = reexport_unused
     _assert_no_strays(EXPECTED_REEXPORT, lines, unused)
 
 
 @pytest.mark.parametrize('entity', EXPECTED_STRICT_TYPING_TYPE, ids=list(EXPECTED_STRICT_TYPING_TYPE))
-def test_strict_typing_type_directive(entity: str, strict_typing_type_unused: tuple[dict[str, int], set[int]]) -> None:
+def test_strict_typing_type_directive(entity: str, strict_typing_type_unused: DirectiveScan) -> None:
     """Each Used type-rule directive suppresses a real violation; each Unused one is flagged."""
     lines, unused = strict_typing_type_unused
     _assert_polarity(entity, lines, unused)
 
 
-def test_strict_typing_type_no_unexpected(strict_typing_type_unused: tuple[dict[str, int], set[int]]) -> None:
+def test_strict_typing_type_no_unexpected(strict_typing_type_unused: DirectiveScan) -> None:
     """No type-rule directive lines beyond the Unused classes are flagged."""
     lines, unused = strict_typing_type_unused
     _assert_no_strays(EXPECTED_STRICT_TYPING_TYPE, lines, unused)
@@ -232,7 +234,7 @@ def _is_unused(entity: str) -> bool:
     return entity.lower().startswith('unused')
 
 
-def _directive_lines(fixture: Path, linter: Path, entities: CodeMap) -> dict[str, int]:
+def _directive_lines(fixture: Path, linter: Path, entities: CodeMap) -> Mapping[str, int]:
     """Map each named entity to its sole directive line (functions and classes)."""
     ranges = {**get_def_ranges(fixture), **get_class_ranges(fixture)}
     missing = sorted(set(entities) - set(ranges))
@@ -240,7 +242,7 @@ def _directive_lines(fixture: Path, linter: Path, entities: CodeMap) -> dict[str
     return {name: sole_directive_line(fixture, ranges[name], linter) for name in entities}
 
 
-def _assert_polarity(entity: str, lines: Mapping[str, int], unused: set[int]) -> None:
+def _assert_polarity(entity: str, lines: Mapping[str, int], unused: Set[int]) -> None:
     """A used_ directive must be absent from the flagged set; an unused_ directive present."""
     line = lines[entity]
     if _is_unused(entity):
@@ -249,7 +251,7 @@ def _assert_polarity(entity: str, lines: Mapping[str, int], unused: set[int]) ->
         assert line not in unused, f'{entity}: directive @{line} should be used (not flagged)'
 
 
-def _assert_no_strays(expected: CodeMap, lines: Mapping[str, int], unused: set[int]) -> None:
+def _assert_no_strays(expected: CodeMap, lines: Mapping[str, int], unused: Set[int]) -> None:
     """Only unused_ entities' directive lines may be flagged."""
     expected_lines = {lines[name] for name in expected if _is_unused(name)}
     assert unused == expected_lines, (
@@ -273,7 +275,7 @@ def _reexport_directive_line(fixture: Path, entry: str) -> int:
     return matches[0]
 
 
-def _structural_directive_lines(fixture: Path) -> list[int]:
+def _structural_directive_lines(fixture: Path) -> Sequence[int]:
     """All strict_typing directive lines in a single-purpose structural fixture (1, or 2 for double-emit)."""
     prefix = '# strict_typing_linter.py:'
     lines = [n for n, line in enumerate(fixture.read_text(encoding='utf-8').splitlines(), 1) if prefix in line]
@@ -281,14 +283,14 @@ def _structural_directive_lines(fixture: Path) -> list[int]:
     return lines
 
 
-def _covered_named(expected: CodeMap) -> set[str]:
+def _covered_named(expected: CodeMap) -> Set[str]:
     """Codes with both a used_ and an unused_ entity in a named-entity EXPECTED map."""
     used = {code for name, code in expected.items() if not _is_unused(name)}
     unused = {code for name, code in expected.items() if _is_unused(name)}
     return used & unused
 
 
-def _covered_structural(cases: Sequence[StructuralCase]) -> set[str]:
+def _covered_structural(cases: Sequence[StructuralCase]) -> Set[str]:
     """Codes with both a used and an unused single-purpose structural fixture."""
     used = {code for _, code, is_unused in cases if not is_unused}
     unused = {code for _, code, is_unused in cases if is_unused}

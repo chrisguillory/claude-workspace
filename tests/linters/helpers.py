@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import tokenize
-from collections.abc import Mapping
+from collections.abc import Mapping, Set
 from pathlib import Path
 from typing import NamedTuple
 
@@ -76,7 +76,7 @@ def run_linter(test_file: Path, linter: Path, *, report_unused: bool = False) ->
     return result.stdout + result.stderr
 
 
-def parse_unused_directives(output: str) -> set[int]:
+def parse_unused_directives(output: str) -> Set[int]:
     """Return the source-line numbers flagged with an unused-directive violation.
 
     Captures the line from each linter's ``:<line>:`` prefix and matches the
@@ -92,7 +92,7 @@ def parse_unused_directives(output: str) -> set[int]:
     return {int(match.group(1)) for line in output.splitlines() if (match := pattern.search(line))}
 
 
-def extract_directive_codes(linter_path: Path, dict_name: str) -> set[str]:
+def extract_directive_codes(linter_path: Path, dict_name: str) -> Set[str]:
     """Return the string keys of a linter's ``dict_name`` mapping, read via AST.
 
     The linters can't be imported (uv-script shebang + ``from _lib …`` + pydantic),
