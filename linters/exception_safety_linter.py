@@ -1109,13 +1109,6 @@ def find_test_references(test_file_path: Path) -> Mapping[ViolationKind, TestRef
     return references
 
 
-# -- EXC010 Empirical Pickle Check --------------------------------------------
-#
-# Closest upstream rule: flake8-bugbear B042 (pycqa/flake8-bugbear#512). Ruff has
-# not ported B042 (astral-sh/ruff#8579). The workspace ruff config selects the
-# ``B`` set; B042 will land for free when ruff ports it.
-
-
 class _EmpiricalPickleChecker:
     """EXC010 — pickle-round-trip each Exception subclass in an isolated subprocess.
 
@@ -1125,6 +1118,10 @@ class _EmpiricalPickleChecker:
     cached env (``uv python find --script``). Isolation keeps a target's
     module-level side effects (``sys.exit``, stdin reads, missing deps) from
     aborting the linter; an empty or non-JSON result is a skip, never a crash.
+
+    Closest upstream rule: flake8-bugbear B042 (pycqa/flake8-bugbear#512), not yet
+    ported by ruff (astral-sh/ruff#8579); the workspace ruff config selects the
+    ``B`` set, so B042 lands for free once ruff ports it.
     """
 
     KIND: ClassVar[ViolationKind] = 'init-not-pickleable'
