@@ -51,6 +51,8 @@ from document_search.clients._retry.openrouter import (
     is_retryable_openrouter_error,
     log_openrouter_retry,
     openrouter_breaker,
+    openrouter_stop,
+    openrouter_wait,
 )
 from document_search.clients._retry.qdrant import is_retryable_qdrant_error, log_qdrant_retry, qdrant_breaker
 
@@ -64,5 +66,7 @@ __all__ = [
     'log_openrouter_retry',
     'log_qdrant_retry',
     'openrouter_breaker',
+    'openrouter_stop',
+    'openrouter_wait',
     'qdrant_breaker',
 ]

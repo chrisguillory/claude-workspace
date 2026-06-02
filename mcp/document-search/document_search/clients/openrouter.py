@@ -149,8 +149,8 @@ class OpenRouterClient:
     @_retry.openrouter_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_openrouter_error),
-        stop=tenacity.stop_after_attempt(3),
-        wait=tenacity.wait_exponential(multiplier=0.5, max=5),
+        stop=_retry.openrouter_stop,
+        wait=_retry.openrouter_wait,
         before_sleep=_retry.log_openrouter_retry,
     )
     async def embed(self, texts: Sequence[str], *, intent: TaskIntent) -> Sequence[EmbeddingVector]:

@@ -24,6 +24,8 @@ __all__ = [
     'is_retryable_openrouter_error',
     'log_openrouter_retry',
     'openrouter_breaker',
+    'openrouter_stop',
+    'openrouter_wait',
 ]
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,19 @@ logger = logging.getLogger(__name__)
 # Circuit breaker - opens after consecutive failures, hard fails until recovery
 OPENROUTER_FAILURE_THRESHOLD = 10
 OPENROUTER_RECOVERY_TIMEOUT = 60
+
+# Backoff profiles. An 'engine_overloaded' rate limit ("Model busy, retry later")
+# persists for seconds-to-minutes, so it gets a deeper window than a transient
+# network blip. OpenRouter signals it as an HTTP-200 body error with no Retry-After
+# header, so the backoff is necessarily blind. Full jitter desynchronizes parallel
+# fan-out so a fleet of indexers doesn't retry in lockstep and re-amplify the overload.
+RATE_LIMIT_MAX_ATTEMPTS = 6
+DEFAULT_MAX_ATTEMPTS = 3
+
+RATE_LIMIT_WAIT = tenacity.wait_random_exponential(multiplier=1, max=60)
+DEFAULT_WAIT = tenacity.wait_random_exponential(multiplier=0.5, max=5)
+RATE_LIMIT_STOP = tenacity.stop_after_attempt(RATE_LIMIT_MAX_ATTEMPTS)
+DEFAULT_STOP = tenacity.stop_after_attempt(DEFAULT_MAX_ATTEMPTS)
 
 type OpenRouterTransientErrorCategory = Literal[
     'bad_gateway',  # 502 — upstream provider down or returned invalid response
@@ -73,6 +88,24 @@ def log_openrouter_retry(retry_state: tenacity.RetryCallState) -> None:
         exc_msg = f'HTTP {exc.response.status_code}: {exc_msg}'
 
     logger.warning('[RETRY] OpenRouter embed attempt %s failed: %s: %s', retry_state.attempt_number, exc_name, exc_msg)
+
+
+def openrouter_wait(retry_state: tenacity.RetryCallState) -> float:
+    """Category-aware backoff: deep + jittered for rate limits, fast + jittered otherwise."""
+    wait = RATE_LIMIT_WAIT if _is_rate_limited(retry_state) else DEFAULT_WAIT
+    return wait(retry_state)
+
+
+def openrouter_stop(retry_state: tenacity.RetryCallState) -> bool:
+    """More attempts for a sustained rate limit than for a transient blip."""
+    stop = RATE_LIMIT_STOP if _is_rate_limited(retry_state) else DEFAULT_STOP
+    return stop(retry_state)
+
+
+def _is_rate_limited(retry_state: tenacity.RetryCallState) -> bool:
+    """Whether the most recent attempt failed with an OpenRouter rate-limit overload."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    return exc is not None and _classify_transient_error(exc) == 'rate_limit'
 
 
 def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCategory | None:
