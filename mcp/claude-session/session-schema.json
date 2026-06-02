@@ -5627,6 +5627,7 @@
       "title": "InvokedSkillsAttachment",
       "type": "object"
     },
+    "JsonValue": {},
     "KillShellMessageResult": {
       "additionalProperties": true,
       "description": "Alternative KillShell result with message format (snake_case shell_id).",
@@ -12089,7 +12090,7 @@
     },
     "WorkflowToolInput": {
       "additionalProperties": true,
-      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nOnly `script` appears in observed session data, so it alone is modeled; `| None`\nmirrors the binary's optionality.",
+      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nThe inline-script form (`script`) and the saved-workflow form (`name` + `args`) both appear\nin observed data; scriptPath/resumeFromRunId/description/title remain binary-only and\nunmodeled. `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.",
       "properties": {
         "script": {
           "anyOf": [
@@ -12102,6 +12103,29 @@
           ],
           "default": null,
           "title": "Script"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "args": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "WorkflowToolInput",

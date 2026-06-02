@@ -273,8 +273,10 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   EnterWorktree attaches to an existing worktree — no branch created). Added
                   StructuredOutputToolInput for the Workflow structured-output built-in (binary
                   inputSchema z.object({}).passthrough(); re-typed from the permissive fallback so it
-                  reads as a built-in rather than MCP). The 2.1.159->2.1.160 release delta is
-                  record-surface-empty; watch item: DesignSync (new first-party built-in tool,
+                  reads as a built-in rather than MCP). WorkflowToolInput gained name + args (the
+                  saved-workflow form — run a registered workflow by name; observed on M5; args is an
+                  arbitrary caller payload, typed pydantic.JsonValue). The 2.1.159->2.1.160 release
+                  delta is record-surface-empty; watch item: DesignSync (new first-party built-in tool,
                   binary-confirmed 0->10, not yet seen in JSONL — needs a typed input on first
                   capture). Extended CLAUDE_CODE_MAX_VERSION to 2.1.160.
 - If validation fails, Claude Code schema may have changed - update models accordingly
@@ -1146,11 +1148,14 @@ class WorkflowToolInput(StrictModel):
 
     Binary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,
     description?, title?} — all optional (a refine requires one of script/name/scriptPath).
-    Only `script` appears in observed session data, so it alone is modeled; `| None`
-    mirrors the binary's optionality.
+    The inline-script form (`script`) and the saved-workflow form (`name` + `args`) both appear
+    in observed data; scriptPath/resumeFromRunId/description/title remain binary-only and
+    unmodeled. `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.
     """
 
     script: str | None = None
+    name: str | None = None  # Saved-workflow name (the name+args form runs a registered workflow)
+    args: pydantic.JsonValue | None = None  # Arbitrary caller-supplied input exposed to the workflow as `args`
 
 
 class RemoteTriggerToolInput(StrictModel):
