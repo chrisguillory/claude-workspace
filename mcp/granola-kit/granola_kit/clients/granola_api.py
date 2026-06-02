@@ -6,9 +6,11 @@ __all__ = [
     'DocumentSetResponse',
     'GranolaAPIClient',
     'GranolaDocument',
+    'granola_api_client',
 ]
 
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from typing import TypeVar
 
 import httpx
@@ -139,6 +141,17 @@ class GranolaAPIClient:
         data = response.json()
         _guard_unsupported_client(data)
         return into.model_validate(data)
+
+
+@asynccontextmanager
+async def granola_api_client() -> AsyncIterator[GranolaAPIClient]:
+    """Open a GranolaAPIClient with the standard timeout and detected identity.
+
+    The single construction seam shared by the CLI (per-invocation) and the MCP
+    server (lifespan-scoped); each owns only the ``async with`` scope.
+    """
+    async with httpx.AsyncClient(timeout=30) as http:
+        yield GranolaAPIClient(http, GranolaIdentity.detect())
 
 
 def _guard_unsupported_client(data: object) -> None:

@@ -5,13 +5,11 @@ import json
 from collections.abc import Sequence
 from typing import Annotated
 
-import httpx
 import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
 
-from granola_kit.clients.granola_api import GranolaAPIClient
-from granola_kit.clients.identity import GranolaIdentity
+from granola_kit.clients.granola_api import granola_api_client
 from granola_kit.exceptions import GranolaError
 from granola_kit.schemas.results import Meeting
 from granola_kit.services.meetings import MeetingService
@@ -39,9 +37,8 @@ def main() -> None:
 
 async def _list_meetings(limit: int) -> Sequence[Meeting]:
     """Resolve meetings through a per-invocation client + service."""
-    async with httpx.AsyncClient(timeout=30) as http:
-        service = MeetingService(GranolaAPIClient(http, GranolaIdentity.detect()))
-        return await service.list_meetings(limit=limit)
+    async with granola_api_client() as client:
+        return await MeetingService(client).list_meetings(limit=limit)
 
 
 @error_boundary.handler(GranolaError)

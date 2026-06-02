@@ -18,6 +18,8 @@ claude-workspace/
 ├── mcp/                        # MCP servers
 │   ├── claude-session/
 │   ├── document-search/
+│   ├── granola-kit/
+│   ├── imessage-kit/
 │   ├── playwright-browser/
 │   ├── python-interpreter/
 │   └── selenium-browser/
@@ -122,6 +124,23 @@ docker compose -f ~/claude-workspace/mcp/document-search/docker-compose.yaml up 
 
 **Requires:** Gemini API key at `~/.claude-workspace/secrets/document_search_api_key`.
 
+#### [granola-kit](mcp/granola-kit)
+
+MCP server and CLI for Granola.ai's private API: meeting notes, transcripts, and chat-based meeting Q&A. **Under construction** — built as vertical slices, each proven against the live API.
+
+| Entry Point       | Purpose            |
+|-------------------|--------------------|
+| `granola-kit-mcp` | MCP server (stdio) |
+| `granola-kit`     | CLI client         |
+
+```bash
+# Editable install from local workspace clone
+uv tool install --editable ~/claude-workspace/mcp/granola-kit
+claude mcp add --scope user granola-kit -- granola-kit-mcp
+```
+
+**Requires:** Granola desktop app installed + signed in (reads its local encrypted auth store via the Keychain).
+
 #### [Playwright Browser MCP](mcp/playwright-browser)
 
 Playwright-based browser control with stealth mode.
@@ -178,13 +197,14 @@ claude mcp add --scope user selenium-browser -- selenium-browser-mcp
 
 Entry points follow the `<name>-mcp` convention for MCP servers and `<name>` for CLIs:
 
-| Package | Entry Points |
-|---------|-------------|
-| `claude-session` | `claude-session-mcp`, `claude-session` |
-| `document-search` | `document-search-mcp`, `document-search`, `document-search-dashboard` |
-| `playwright-browser` | `playwright-browser-mcp` |
-| `python-interpreter` | `python-interpreter-mcp`, `python-interpreter` |
-| `selenium-browser` | `selenium-browser-mcp`, `selenium-browser` |
+| Package              | Entry Points                                                          |
+|----------------------|-----------------------------------------------------------------------|
+| `claude-session`     | `claude-session-mcp`, `claude-session`                                |
+| `document-search`    | `document-search-mcp`, `document-search`, `document-search-dashboard` |
+| `granola-kit`        | `granola-kit-mcp`, `granola-kit`                                      |
+| `playwright-browser` | `playwright-browser-mcp`                                              |
+| `python-interpreter` | `python-interpreter-mcp`, `python-interpreter`                        |
+| `selenium-browser`   | `selenium-browser-mcp`, `selenium-browser`                            |
 
 ### Dependency Resolution and Reproducibility
 
