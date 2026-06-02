@@ -21,10 +21,12 @@ from dataclasses import dataclass
 from typing import Any
 
 __all__ = [
+    'UnusedFrozensetConstant',
     'UnusedHashableField',
     'UnusedLooseTyping',
     'UnusedMutableType',
     'UnusedTupleField',
+    'UsedFrozensetConstant',
     'UsedHashableField',
     'UsedLooseTyping',
     'UsedMutableType',
@@ -88,3 +90,17 @@ class UnusedHashableField:
     __strict_typing_linter__hashable_fields__ = True
 
     value: int  # strict_typing_linter.py: hashable-field
+
+
+@dataclass(frozen=True)
+class UsedFrozensetConstant:
+    """A frozenset field fires frozenset-constant (suggests collections.abc.Set)."""
+
+    value: frozenset[str] = frozenset({'a'})  # strict_typing_linter.py: frozenset-constant
+
+
+@dataclass(frozen=True)
+class UnusedFrozensetConstant:
+    """A scalar field has no frozenset, so the frozenset-constant directive matches nothing."""
+
+    value: int  # strict_typing_linter.py: frozenset-constant
