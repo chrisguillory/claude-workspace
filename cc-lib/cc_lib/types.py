@@ -37,6 +37,7 @@ __all__ = [
     'JsonObject',
     'JsonUuid',
     'OutputFormat',
+    'PydanticVersion',
     'SessionSource',
     'SessionState',
     'StrictJsonObject',
@@ -44,7 +45,7 @@ __all__ = [
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
 import pydantic
@@ -68,27 +69,19 @@ type OutputFormat = Literal['text', 'json']
 # -- Claude Code versioning ---------------------------------------------------
 
 
-class CCVersion(Version):
-    """Claude Code version — a PEP 440 ``Version`` with a relaxed parser.
+class PydanticVersion(Version):
+    """A PEP 440 ``Version`` usable as a Pydantic field — validates from a string, serializes to one.
 
-    Direct construction (``CCVersion('2.1.131')``) requires strict PEP 440
-    input. Use ``CCVersion.parse(raw)`` to handle ``claude --version`` output
-    (``'2.1.131 (Claude Code)'``) — it strips the ``' (Claude Code)'`` suffix
-    before parsing.
-
-    Comparison and hashing follow PEP 440 version order
-    (``CCVersion('2.1.10') > CCVersion('2.1.9')``); ``.major`` / ``.minor`` /
-    ``.micro`` are inherited from ``packaging.version.Version``.
-
-    Pydantic models serialize as a string and deserialize via ``parse``.
+    Subclasses inherit the Pydantic plumbing and override ``parse`` to accept a
+    looser raw form (see ``CCVersion``). Comparison and hashing follow PEP 440
+    version order; ``.major`` / ``.minor`` / ``.micro`` are inherited from
+    ``packaging.version.Version``.
     """
 
     @classmethod
-    def parse(cls, raw: str) -> CCVersion:
-        """Parse raw ``claude --version`` output, stripping the ``(Claude Code)`` suffix."""
-        stripped = raw.strip()
-        cleaned = stripped.split()[0] if stripped else stripped
-        return cls(cleaned)
+    def parse(cls, raw: str) -> Self:
+        """Parse a raw version string; the base implementation trims surrounding whitespace."""
+        return cls(raw.strip())
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -107,16 +100,38 @@ class CCVersion(Version):
         schema: CoreSchema,  # noqa: ARG003 — required by Pydantic protocol
         handler: pydantic.GetJsonSchemaHandler,  # noqa: ARG003 — required by Pydantic protocol
     ) -> Mapping[str, Any]:
-        return {'type': 'string', 'description': 'PEP 440 version string (e.g., "2.1.131")'}
+        return {'type': 'string', 'description': 'PEP 440 version string (e.g., "1.2.3")'}
 
     @classmethod
-    def _pydantic_validate(cls, value: object) -> CCVersion:
+    def _pydantic_validate(cls, value: object) -> Self:
         if isinstance(value, cls):
             return value
         if isinstance(value, str):
             return cls.parse(value)
         # Pydantic wraps ValueError into ValidationError; TypeError would leak through.
-        raise ValueError(f'Cannot construct CCVersion from {type(value).__name__}')
+        raise ValueError(f'Cannot construct {cls.__name__} from {type(value).__name__}')
+
+
+class CCVersion(PydanticVersion):
+    """Claude Code version — a PEP 440 ``Version`` with a relaxed parser.
+
+    Direct construction (``CCVersion('2.1.131')``) requires strict PEP 440
+    input. Use ``CCVersion.parse(raw)`` to handle ``claude --version`` output
+    (``'2.1.131 (Claude Code)'``) — it strips the ``' (Claude Code)'`` suffix
+    before parsing.
+
+    Comparison and hashing follow PEP 440 version order
+    (``CCVersion('2.1.10') > CCVersion('2.1.9')``); ``.major`` / ``.minor`` /
+    ``.micro`` are inherited. Pydantic models serialize as a string and
+    deserialize via ``parse``.
+    """
+
+    @classmethod
+    def parse(cls, raw: str) -> Self:
+        """Parse raw ``claude --version`` output, stripping the ``(Claude Code)`` suffix."""
+        stripped = raw.strip()
+        cleaned = stripped.split()[0] if stripped else stripped
+        return cls(cleaned)
 
 
 # -- JSON serialization helpers -----------------------------------------------
