@@ -1619,15 +1619,33 @@ def _has_fixture_decorator(
     return False
 
 
-def has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
-    """Check if line has ordering suppression directive."""
+def _kinds_for(code: str) -> Set[str]:
+    """Violation kinds the directive ``code`` covers via ``CODE_TO_KINDS``.
+
+    Codes are parsed from directive text (so the key is ``str``); iterating ``.items()`` keeps the
+    Literal-keyed mapping mypy-clean, and an unknown code yields an empty set.
+    """
+    for directive_code, family in CODE_TO_KINDS.items():
+        if directive_code == code:
+            return family
+    return set()
+
+
+def has_structural_directive(source_lines: Sequence[str], lineno: int, kind: OrderingViolationKind) -> bool:
+    """Check whether line ``lineno`` carries a directive whose code covers structural ``kind``.
+
+    A code ``C`` suppresses kind ``K`` when ``K in CODE_TO_KINDS[C]``: the ``ordering`` umbrella
+    suppresses any structural kind, while the specific codes (``class-ordering``, ``missing-all``,
+    ``trailing-comma``) suppress only their own. Replaces the kind-agnostic ``has_ordering_directive``
+    so the specific structural codes actually suppress, not just ``ordering``/``class-ordering``.
+    """
     if 0 < lineno <= len(source_lines):
         line = source_lines[lineno - 1].lower()
         if DIRECTIVE_PREFIX.lower() in line:
             idx = line.find(DIRECTIVE_PREFIX.lower())
             codes_part = line[idx + len(DIRECTIVE_PREFIX) :]
             codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
-            return 'ordering' in codes or 'class-ordering' in codes
+            return any(kind in _kinds_for(code) for code in codes)
     return False
 
 
@@ -1665,7 +1683,7 @@ def check_module_ordering(
             if raw_ordering is not None:
                 raw_ordering.append((actual.line, violation_kind))
 
-            if has_ordering_directive(source_lines, actual.line):
+            if has_structural_directive(source_lines, actual.line, violation_kind):
                 continue
 
             # Describe what's wrong
@@ -1725,6 +1743,9 @@ def check_all_defined(
         # Record raw violation for unused-directive detection
         if raw_ordering is not None:
             raw_ordering.append((line, 'missing-all'))
+
+        if has_structural_directive(source_lines, line, 'missing-all'):
+            return []
 
         return [
             OrderingViolation(
@@ -1793,7 +1814,7 @@ def check_all_trailing_comma(
                             # Record raw violation for unused-directive detection
                             if raw_ordering is not None:
                                 raw_ordering.append((node.lineno, 'trailing-comma'))
-                            if has_ordering_directive(source_lines, node.lineno):
+                            if has_structural_directive(source_lines, node.lineno, 'trailing-comma'):
                                 continue
                             violations.append(
                                 OrderingViolation(
@@ -1845,7 +1866,7 @@ def check_class_method_ordering(
                 if raw_ordering is not None:
                     raw_ordering.append((line, 'ordering'))
 
-                if has_ordering_directive(source_lines, line):
+                if has_structural_directive(source_lines, line, 'ordering'):
                     continue
 
                 violations.append(
@@ -1939,10 +1960,14 @@ def find_unused_directives(
         for code in directive.codes:
             # Strategy 1: scope-aware match recorded during checking
             found = (directive.line, code) in matched
-            # Strategy 2: proximity match (inverse of the 4-line forward window)
+            # Strategy 2: proximity match (inverse of the 4-line forward window). The code may be
+            # an umbrella (``ordering`` → its CODE_TO_KINDS family) while raw structural violations
+            # are stored as kinds; ``| {code}`` also covers type directives, whose raw violations are
+            # stored as the code itself (so ``mutable-type`` would miss ``CODE_TO_KINDS['mutable-type']``).
             if not found:
                 found = any(
-                    kind == code and (directive.line - 4) <= lineno <= directive.line for lineno, kind in raw_violations
+                    kind in (_kinds_for(code) | {code}) and (directive.line - 4) <= lineno <= directive.line
+                    for lineno, kind in raw_violations
                 )
             if not found:
                 unused.append(
