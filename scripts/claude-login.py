@@ -171,7 +171,9 @@ class OAuthAccount(CamelModel):
     # Not present anywhere in the 2.1.138 binary strings; purely a backend label.
     seat_tier: Literal['team_tier_1'] | None = None
     organization_type: Literal['claude_max', 'claude_team'] | None = None
-    organization_rate_limit_tier: Literal['default_claude_max_20x', 'default_raven'] | None = None
+    organization_rate_limit_tier: Literal['default_claude_max_20x', 'default_raven', 'default_claude_max_5x'] | None = (
+        None
+    )
     user_rate_limit_tier: Literal['default_claude_max_5x'] | None = None
 
 
