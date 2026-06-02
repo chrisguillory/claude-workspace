@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci # required-status-check context — keep in sync with the branch ruleset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: '3.13'
+          enable-cache: true
+      - name: Sync workspace
+        run: uv sync --locked --all-packages --all-groups
+      - name: Lint, format, type-check, custom linters (pre-commit)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+      - name: Tests
+        # tests/linters/ only — the rest of tests/ has pre-existing cross-test pollution to fix first.
+        run: uv run pytest tests/linters/
