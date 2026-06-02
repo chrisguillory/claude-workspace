@@ -9,6 +9,7 @@ members = [
     "claude-session",
     "claude-workspace",
     "document-search",
+    "granola-kit",
     "imessage-kit",
     "playwright-browser",
     "python-interpreter",
@@ -924,6 +925,17 @@ wheels = [
 grpc = [
     { name = "grpcio" },
 ]
+
+[[package]]
+name = "granola-kit"
+version = "0.1.0"
+source = { editable = "mcp/granola-kit" }
+dependencies = [
+    { name = "cc-lib" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cc-lib", editable = "cc-lib" }]
 
 [[package]]
 name = "greenlet"

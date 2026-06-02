@@ -1,0 +1,25 @@
+[project]
+name = "granola-kit"
+version = "0.1.0"
+description = "MCP server for Granola.ai meeting notes, transcripts, and chat-based Q&A"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "cc-lib",
+]
+
+[project.scripts]
+granola-kit = "granola_kit.cli.main:main"
+
+[tool.hatch.build]
+include = ["granola_kit/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.uv.sources]
+cc-lib = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
