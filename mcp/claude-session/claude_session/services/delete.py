@@ -53,8 +53,11 @@ from claude_session.services.artifacts import (
     ToolResultDirectory,
     ToolResultDirectoryFile,
     ToolResultFile,
+    agent_dest_path,
+    agent_metadata_relpath,
     classify_subagents_directory,
     classify_task_directory,
+    collect_workflow_runs,
     create_session_env_dir,
     discover_tool_results,
     extract_slugs_from_records,
@@ -62,6 +65,7 @@ from claude_session.services.artifacts import (
     get_tasks_dir,
     get_todos_dir,
     get_tool_results_dir,
+    write_agent_metadata,
     write_debug_log,
     write_jsonl,
     write_plan_files,
@@ -71,6 +75,8 @@ from claude_session.services.artifacts import (
     write_tasks,
     write_todos,
     write_tool_results,
+    write_workflow_journals,
+    write_workflow_runs,
 )
 from claude_session.services.parser import SessionParserService
 from claude_session.storage.local import LocalFileSystemStorage
@@ -221,22 +227,34 @@ class SessionDeleteService:
                     )
                     agent_file_paths.append(str(agent_path))
 
-        # Subagents/ directory contents (jsonl handled above via rg; meta sidecars
-        # captured here; subdirectories and unmatched filenames surfaced for
-        # fail-fast or cleanup).
+        # Subagents/ files (recursive): jsonl transcripts come from the rg pass above; meta
+        # sidecars and workflow run-journals at any depth are unlinked here. Unmatched
+        # basenames surface for fail-fast.
         subagents_contents = classify_subagents_directory(session_dir, session_id)
         if subagents_contents is not None:
             for meta_path in subagents_contents.metadata_files:
                 size = meta_path.stat().st_size
                 artifacts.append(ArtifactFile(path=str(meta_path), size_bytes=size, artifact_type='agent_metadata'))
                 agent_metadata_paths.append(str(meta_path))
-            directories_to_cleanup.extend(str(d) for d in subagents_contents.subdirectories)
+            for journal_path in subagents_contents.journal_files:
+                size = journal_path.stat().st_size
+                artifacts.append(
+                    ArtifactFile(path=str(journal_path), size_bytes=size, artifact_type='workflow_journal')
+                )
             unexpected_files.extend(str(p) for p in subagents_contents.unexpected_files)
-            directories_to_cleanup.append(str(session_dir / session_id / 'subagents'))
 
-        # Also track parent session directory if it exists
+        # Workflow run metadata + scripts under <session>/workflows/
+        for run_relpath in collect_workflow_runs(session_dir, session_id):
+            run_path = session_dir / session_id / run_relpath
+            artifacts.append(
+                ArtifactFile(path=str(run_path), size_bytes=run_path.stat().st_size, artifact_type='workflow_run')
+            )
+
+        # Every directory under <session>/ is rmdir'd deepest-first below (empty-only, so any
+        # untracked file trips it). rglob enumerates the nested workflow/tool-result subtrees.
         session_parent_dir = session_dir / session_id
-        if session_parent_dir.exists() and str(session_parent_dir) not in directories_to_cleanup:
+        if session_parent_dir.exists():
+            directories_to_cleanup.extend(str(d) for d in session_parent_dir.rglob('*') if d.is_dir())
             directories_to_cleanup.append(str(session_parent_dir))
 
         # 3. Extract slugs from session records to find plan files
@@ -841,16 +859,28 @@ class SessionDeleteService:
         # Restore agent files (with nested structure support)
         for agent in archive.agent_files:
             agent_filename = f'agent-{agent.agent_id}.jsonl'
-
-            if agent.nested:
-                agent_dir = target_dir / archive.session_id / 'subagents'
-            else:
-                agent_dir = target_dir
-
-            agent_dir.mkdir(parents=True, exist_ok=True)
-            agent_path = agent_dir / agent_filename
+            agent_path = agent_dest_path(target_dir, archive.session_id, agent, agent_filename)
+            agent_path.parent.mkdir(parents=True, exist_ok=True)
             write_jsonl(agent_path, agent.records, {}, {})
             logger.info('Restored: %s', agent_path)
+
+        # Restore agent metadata sidecars (raw copy; ids preserved on undo)
+        if archive.agent_metadata:
+            metadata = {
+                agent_metadata_relpath(m.agent_id, m.workflow_subpath): m.content for m in archive.agent_metadata
+            }
+            write_agent_metadata(target_dir, archive.session_id, metadata)
+            logger.info('Restored %d agent metadata sidecars', len(metadata))
+
+        # Restore Workflow run-journals (raw copy; ids preserved on undo)
+        if archive.workflow_journals:
+            write_workflow_journals(target_dir, archive.session_id, archive.workflow_journals)
+            logger.info('Restored %d workflow run-journals', len(archive.workflow_journals))
+
+        # Restore Workflow run metadata + scripts (raw copy; ids preserved on undo)
+        if archive.workflow_runs:
+            write_workflow_runs(target_dir, archive.session_id, archive.workflow_runs)
+            logger.info('Restored %d workflow run files', len(archive.workflow_runs))
 
         # Restore tool results (exist_ok=True: files may survive partial deletion)
         if archive.tool_results or archive.tool_result_dirs:
