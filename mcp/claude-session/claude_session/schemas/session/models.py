@@ -264,6 +264,19 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   run metadata + scripts — now round-trips through clone/move/restore/archive/delete
                   with agentId / sessionId / scriptPath remap. session-memory tombstoned (removed
                   upstream ~2.1.128). Extended CLAUDE_CODE_MAX_VERSION to 2.1.159.
+- Schema v0.2.40: Cross-machine sweep (M4, ~460 errors) + Claude Code 2.1.160. Three additive,
+                  binary-confirmed gaps. BaseRecord.sessionKind (Literal['bg'] | None) — session
+                  origin kind from CLAUDE_CODE_SESSION_KIND; interactive sessions omit it, only 'bg'
+                  observed in JSONL (binary enum interactive|bg|daemon|daemon-worker). This one field
+                  also collapsed an apparent system-record error cluster that was union-cascade from
+                  its absence. WorktreeSessionData.worktreeBranch -> optional (absent when
+                  EnterWorktree attaches to an existing worktree — no branch created). Added
+                  StructuredOutputToolInput for the Workflow structured-output built-in (binary
+                  inputSchema z.object({}).passthrough(); re-typed from the permissive fallback so it
+                  reads as a built-in rather than MCP). The 2.1.159->2.1.160 release delta is
+                  record-surface-empty; watch item: DesignSync (new first-party built-in tool,
+                  binary-confirmed 0->10, not yet seen in JSONL — needs a typed input on first
+                  capture). Extended CLAUDE_CODE_MAX_VERSION to 2.1.160.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -529,6 +542,7 @@ __all__ = [
     'StatusChange',
     'StopHookSummarySystemRecord',
     'StrictModel',
+    'StructuredOutputToolInput',
     'SummaryRecord',
     'SystemRecord',
     'SystemSubtypeRecord',
@@ -599,9 +613,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.39'
+SCHEMA_VERSION = '0.2.40'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.159')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.160')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1266,6 +1280,17 @@ class MCPToolInput(PermissiveModel):
     """
 
 
+class StructuredOutputToolInput(PermissiveModel):
+    """Input for the StructuredOutput built-in (Workflow structured output, 2.1.146+).
+
+    The tool's binary inputSchema is z.object({}).passthrough() — an arbitrary, caller-defined
+    payload (the workflow's per-call JSON Schema), so no fields are modeled. A distinct named type
+    (vs the MCP fallback) keeps the artifact observably a Claude Code built-in; ToolUseContent
+    re-types it from the permissive fallback — it is never matched directly, since MCPToolInput
+    catches first in the left-to-right union.
+    """
+
+
 # Union of tool inputs (typed models first, PermissiveModel fallback for MCP tools)
 # NOTE: Order matters! More specific (more required fields) should come first.
 # Models with no required fields must come last before fallback.
@@ -1314,7 +1339,8 @@ ToolInput = Annotated[
     | TaskListToolInput  # No fields (2.1.17+)
     | CronListToolInput  # No fields (2.1.71+)
     | EnterPlanModeToolInput  # No fields - must be last before fallback!
-    | MCPToolInput,  # Fallback for MCP tools (PermissiveModel for observability)
+    | MCPToolInput  # Fallback for MCP tools (PermissiveModel for observability)
+    | StructuredOutputToolInput,  # Open-schema built-in; never matched directly (MCP catches first), re-typed by ToolUseContent
     pydantic.Field(union_mode='left_to_right'),
 ]
 
@@ -1386,6 +1412,11 @@ class ToolUseContent(StrictModel):
             # MCP tools are expected to use the fallback - they're third-party
             if tool_name.startswith('mcp__'):
                 return v
+
+            # StructuredOutput is a built-in whose input schema is intentionally open
+            # (z.object({}).passthrough() in the binary); re-type it from the permissive fallback.
+            if tool_name == 'StructuredOutput':
+                return StructuredOutputToolInput.model_validate(v.model_dump())
 
             # ANY Claude Code tool using fallback is a bug - either:
             # - New tool needs a model, OR
@@ -2620,6 +2651,9 @@ class BaseRecord(StrictModel):
     forkedFrom: ForkOrigin | None = (
         None  # Source session/message when this record belongs to a forked session (Claude Code 2.1.8+)
     )
+    # Session origin kind; absent for interactive sessions (the omitted default). Binary enum is
+    # interactive|bg|daemon|daemon-worker (from CLAUDE_CODE_SESSION_KIND); only 'bg' observed in JSONL.
+    sessionKind: Literal['bg'] | None = None
 
 
 class ForkOrigin(StrictModel):
@@ -3378,7 +3412,7 @@ class WorktreeSessionData(StrictModel):
     originalCwd: str
     worktreePath: str
     worktreeName: str
-    worktreeBranch: str
+    worktreeBranch: str | None = None  # Absent when entering an existing worktree — no branch created (2.1.105+)
     sessionId: str
     originalBranch: str | None = None  # Absent when entering existing worktree (2.1.105+)
     originalHeadCommit: str | None = None  # Absent when entering existing worktree (2.1.105+)

@@ -330,6 +330,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -653,6 +666,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -955,6 +981,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -1406,6 +1445,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -1720,6 +1772,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -1928,6 +1993,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         }
       },
       "required": [
@@ -2533,6 +2611,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -2912,6 +3003,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -5280,6 +5384,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -5735,6 +5852,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -6475,6 +6605,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -8119,6 +8262,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -8839,6 +8995,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -9032,6 +9201,13 @@
       "title": "StopHookSummarySystemRecord",
       "type": "object"
     },
+    "StructuredOutputToolInput": {
+      "additionalProperties": true,
+      "description": "Input for the StructuredOutput built-in (Workflow structured output, 2.1.146+).\n\nThe tool's binary inputSchema is z.object({}).passthrough() \u2014 an arbitrary, caller-defined\npayload (the workflow's per-call JSON Schema), so no fields are modeled. A distinct named type\n(vs the MCP fallback) keeps the artifact observably a Claude Code built-in; ToolUseContent\nre-types it from the permissive fallback \u2014 it is never matched directly, since MCPToolInput\ncatches first in the left-to-right union.",
+      "properties": {},
+      "title": "StructuredOutputToolInput",
+      "type": "object"
+    },
     "SummaryRecord": {
       "additionalProperties": true,
       "description": "Session summary record (minimal schema, no uuid/timestamp).\n\nNOTE: Zero occurrences observed in recent sessions (50+ files, 521K+ records).\nCompaction now uses UserRecord with isCompactSummary=True instead.\nThis type may be from an earlier Claude Code version. Kept for backward compatibility.",
@@ -9089,6 +9265,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -10734,6 +10923,9 @@
             },
             {
               "$ref": "#/$defs/MCPToolInput"
+            },
+            {
+              "$ref": "#/$defs/StructuredOutputToolInput"
             }
           ],
           "title": "Input"
@@ -10790,6 +10982,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -11068,6 +11273,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -11906,8 +12124,16 @@
           "type": "string"
         },
         "worktreeBranch": {
-          "title": "Worktreebranch",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worktreebranch"
         },
         "sessionId": {
           "title": "Sessionid",
@@ -11954,7 +12180,6 @@
         "originalCwd",
         "worktreePath",
         "worktreeName",
-        "worktreeBranch",
         "sessionId"
       ],
       "title": "WorktreeSessionData",
@@ -12175,9 +12400,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.39",
+  "x-schema-version": "0.2.40",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.159"
+    "max": "2.1.160"
   }
 }
