@@ -142,9 +142,10 @@ class GeminiClient:
     @_retry.gemini_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_gemini_error),
-        stop=tenacity.stop_after_attempt(3),
-        wait=tenacity.wait_exponential(multiplier=0.5, max=5),
+        stop=_retry.gemini_stop,
+        wait=_retry.gemini_wait,
         before_sleep=_retry.log_gemini_retry,
+        reraise=True,
     )
     async def embed(
         self,
@@ -166,7 +167,10 @@ class GeminiClient:
             List of embedding vectors.
 
         Raises:
-            google.genai.errors.ClientError: On API errors.
+            google.genai.errors.APIError: API error; on a retryable category,
+                re-raised after the retry budget is exhausted (tenacity reraise=True).
+            circuitbreaker.CircuitBreakerError: Breaker open from a sustained
+                outage, raised before the request.
         """
         # Token estimation calibrated to Google AI Studio dashboard (2026-01-30)
         # IMPORTANT: API count_tokens() returns ~2.6x fewer than dashboard/rate limiter tracks.

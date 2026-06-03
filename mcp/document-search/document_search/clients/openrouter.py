@@ -152,6 +152,7 @@ class OpenRouterClient:
         stop=_retry.openrouter_stop,
         wait=_retry.openrouter_wait,
         before_sleep=_retry.log_openrouter_retry,
+        reraise=True,
     )
     async def embed(self, texts: Sequence[str], *, intent: TaskIntent) -> Sequence[EmbeddingVector]:
         """Embed texts using OpenRouter API.
@@ -172,7 +173,16 @@ class OpenRouterClient:
             List of embedding vectors.
 
         Raises:
-            httpx.HTTPStatusError: On non-retryable API errors.
+            OpenRouterAPIError: API error (any HTTP status, including 200 bodies).
+                On a retryable category, re-raised after the retry budget is
+                exhausted (tenacity reraise=True).
+            OpenRouterEmptyResponse: HTTP 200 with empty body; re-raised after exhaustion.
+            OpenRouterTruncatedResponse: Truncated JSON body; re-raised after exhaustion.
+            OpenRouterUnexpectedResponse: Unknown response format (non-retryable).
+            httpx.HTTPStatusError: Non-retryable HTTP status; retryable ones
+                (429/502/408/500/503/504) re-raised after exhaustion.
+            circuitbreaker.CircuitBreakerError: Breaker open from a sustained outage,
+                raised before the request.
         """
         # Apply instruction prefix for query embeddings (asymmetric retrieval)
         if intent == 'query':
