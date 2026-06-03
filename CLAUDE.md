@@ -58,6 +58,8 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 | **Worse is Better**                           | Simple, working solutions over perfect designs                                                                 |
 | **Make It Work, Make It Right, Make It Fast** | In that order                                                                                                  |
 | **Avoid Premature Optimization**              | Optimize when data shows need                                                                                  |
+| **Concrete over abstract**                    | Favor a focused class; add an ABC/Protocol only when ≥2 implementations dispatch polymorphically               |
+| **Minimal diffs**                             | Change only what the task needs — don't rewrite or reflow unchanged code/prose                                 |
 | **Principle of least surprise**               | Code should behave as expected                                                                                 |
 | **Bubble exceptions**                         | Easier to Ask Forgiveness (EAFP) over Look Before You Leap (LBYL) — let exceptions propagate to handlers       |
 | **Leverage existing infrastructure**          | Don't reimplement what a decorator, handler, or base class already provides                                    |
@@ -195,6 +197,8 @@ Empirical testing — running the system against real conditions — is the prim
 - **Third-party library validation.** Testing the library's behavior, not ours.
 
 The asymmetry: a regression test specifically prevents re-introduction of a real failure mode (high value); a happy-path test re-proves what every empirical run already proves (low value, maintenance cost).
+
+See [`claude-docs/empirical-verification.md`](claude-docs/empirical-verification.md) for the verification loop, techniques, and lexicon; [`claude-docs/agentic-workflows.md`](claude-docs/agentic-workflows.md) for orchestrating multi-agent work (bake-offs, map→judge phasing).
 
 ## Python Specifics
 
@@ -336,6 +340,12 @@ def load_sessions() -> SessionDatabase:
 def _validate_path(path: Path) -> None:
     ...
 ```
+
+**`__all__` declares what *other modules import* — not an entry point.** A `__all__` that just
+lists `main` is cargo-cult: a hook or standalone script run via `if __name__ == '__main__'` is
+*executed*, never imported, so it has nothing to declare. Keep `__all__` when a module exposes
+symbols others import — even one that *also* runs as a script (e.g. `linters/_lib/pickle_probe.py`
+is a subprocess yet exports `ProbeOutput`/`ProbeResult`).
 
 ### Immutable Types in Annotations
 
@@ -606,10 +616,11 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 
 Reference docs in `claude-docs/` are not auto-loaded into context. Read them when the task lands in their domain.
 
-| Topic           | Doc                                 |
-|-----------------|-------------------------------------|
-| granola-kit     | `claude-docs/granola-kit/README.md` |
-| Installing apps | `claude-docs/app-installation.md`   |
+| Topic                  | Doc                                     |
+|------------------------|-----------------------------------------|
+| Agentic workflows      | `claude-docs/agentic-workflows.md`      |
+| Empirical verification | `claude-docs/empirical-verification.md` |
+| Installing apps        | `claude-docs/app-installation.md`       |
 
 ## Architecture
 

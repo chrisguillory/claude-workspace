@@ -330,6 +330,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -653,6 +666,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -955,6 +981,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -1406,6 +1445,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -1720,6 +1772,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -1928,6 +1993,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         }
       },
       "required": [
@@ -2533,6 +2611,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -2912,6 +3003,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -5280,6 +5384,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -5510,6 +5627,7 @@
       "title": "InvokedSkillsAttachment",
       "type": "object"
     },
+    "JsonValue": {},
     "KillShellMessageResult": {
       "additionalProperties": true,
       "description": "Alternative KillShell result with message format (snake_case shell_id).",
@@ -5735,6 +5853,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -6475,6 +6606,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -8119,6 +8263,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -8617,6 +8774,45 @@
       "title": "SendMessageToolResult",
       "type": "object"
     },
+    "SendUserFileToolInput": {
+      "additionalProperties": true,
+      "description": "Input for the SendUserFile tool \u2014 delivers files to the user (Claude Code 2.1.142+).\n\nBinary inputSchema: {files: array(string).min(1) (required), status: enum[normal|proactive]\n(required), caption?}. Surfaces artifacts (screenshots, reports) \u2014 `proactive` pushes\nunprompted, `normal` accompanies a reply.",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "normal",
+            "proactive"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "caption": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        }
+      },
+      "required": [
+        "files",
+        "status"
+      ],
+      "title": "SendUserFileToolInput",
+      "type": "object"
+    },
     "ServerToolUse": {
       "additionalProperties": true,
       "description": "Server-side tool use tracking.",
@@ -8839,6 +9035,19 @@
           ],
           "default": null
         },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -9032,6 +9241,13 @@
       "title": "StopHookSummarySystemRecord",
       "type": "object"
     },
+    "StructuredOutputToolInput": {
+      "additionalProperties": true,
+      "description": "Input for the StructuredOutput built-in (Workflow structured output, 2.1.146+).\n\nThe tool's binary inputSchema is z.object({}).passthrough() \u2014 an arbitrary, caller-defined\npayload (the workflow's per-call JSON Schema), so no fields are modeled. A distinct named type\n(vs the MCP fallback) keeps the artifact observably a Claude Code built-in; ToolUseContent\nre-types it from the permissive fallback \u2014 it is never matched directly, since MCPToolInput\ncatches first in the left-to-right union.",
+      "properties": {},
+      "title": "StructuredOutputToolInput",
+      "type": "object"
+    },
     "SummaryRecord": {
       "additionalProperties": true,
       "description": "Session summary record (minimal schema, no uuid/timestamp).\n\nNOTE: Zero occurrences observed in recent sessions (50+ files, 521K+ records).\nCompaction now uses UserRecord with isCompactSummary=True instead.\nThis type may be from an earlier Claude Code version. Kept for backward compatibility.",
@@ -9089,6 +9305,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -9947,7 +10176,7 @@
     },
     "TaskUpdateToolInput": {
       "additionalProperties": true,
-      "description": "Input for TaskUpdate tool - updates an existing task.\n\nFields:\n    taskId: ID of the task to update (required)\n    status: New status (pending, in_progress, completed)\n    description: New description for the task\n    owner: Agent/worker name to assign the task to\n    addBlockedBy: Task IDs that block this task",
+      "description": "Input for TaskUpdate tool - updates an existing task.\n\nFields:\n    taskId: ID of the task to update (required)\n    status: New status (pending, in_progress, completed)\n    description: New description for the task\n    owner: Agent/worker name to assign the task to\n    addBlockedBy: Task IDs that block this task\n    metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()",
       "properties": {
         "taskId": {
           "title": "Taskid",
@@ -10048,6 +10277,19 @@
           ],
           "default": null,
           "title": "Addblockedby"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
         }
       },
       "required": [
@@ -10634,6 +10876,9 @@
               "$ref": "#/$defs/SendMessageLegacyToolInput"
             },
             {
+              "$ref": "#/$defs/SendUserFileToolInput"
+            },
+            {
               "$ref": "#/$defs/TaskToolInput"
             },
             {
@@ -10734,6 +10979,9 @@
             },
             {
               "$ref": "#/$defs/MCPToolInput"
+            },
+            {
+              "$ref": "#/$defs/StructuredOutputToolInput"
             }
           ],
           "title": "Input"
@@ -10790,6 +11038,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -11068,6 +11329,19 @@
             }
           ],
           "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -11871,7 +12145,7 @@
     },
     "WorkflowToolInput": {
       "additionalProperties": true,
-      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nOnly `script` appears in observed session data, so it alone is modeled; `| None`\nmirrors the binary's optionality.",
+      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nThe inline-script (`script`), on-disk-script (`scriptPath`), and saved-workflow (`name` + `args`)\nforms all appear in observed data; resumeFromRunId/description/title remain binary-only and\nunmodeled. `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.",
       "properties": {
         "script": {
           "anyOf": [
@@ -11884,6 +12158,41 @@
           ],
           "default": null,
           "title": "Script"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "args": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scriptPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scriptpath"
         }
       },
       "title": "WorkflowToolInput",
@@ -11906,8 +12215,16 @@
           "type": "string"
         },
         "worktreeBranch": {
-          "title": "Worktreebranch",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worktreebranch"
         },
         "sessionId": {
           "title": "Sessionid",
@@ -11954,7 +12271,6 @@
         "originalCwd",
         "worktreePath",
         "worktreeName",
-        "worktreeBranch",
         "sessionId"
       ],
       "title": "WorktreeSessionData",
@@ -12175,9 +12491,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.39",
+  "x-schema-version": "0.2.40",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.159"
+    "max": "2.1.160"
   }
 }

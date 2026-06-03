@@ -59,12 +59,19 @@ EXPECTED_VIOLATIONS: ViolationMap = {
     'InnerNotHashable': {'tuple-field'},  # Nested class doesn't inherit flag
     # Regular class with hashable
     'RegularClassHashableViolation': {'hashable-field'},
+    # frozenset-constant violations
+    'FrozensetConstantAnnotation': {'frozenset'},
+    'FrozensetConstantBareValue': {'frozenset'},
+    'FrozensetConstantClassVar': {'frozenset'},
+    'FrozensetConstantUnion': {'frozenset'},
+    'FrozensetConstantHalfMigrated': {'frozenset'},
 }
 
 # Classes/functions with suppression directives (should NOT appear in output)
 SUPPRESSED_NAMES: Set[str] = {
     'TupleFieldSuppressed',
     'HashableFieldSuppressed',
+    'FrozensetSuppressed',
 }
 
 # -- Expected Violations: Edge Case File --------------------------------------
@@ -281,6 +288,7 @@ def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
         (r'.+:(\d+):\d+: error: Unhashable type', 'hashable-field'),
         (r'.+:(\d+):\d+: error: Mutable type', 'mutable'),
         (r'.+:(\d+):\d+: error: Loose type', 'loose'),
+        (r'.+:(\d+):\d+: error: frozenset constant', 'frozenset'),
     ]
 
     for line in output.splitlines():

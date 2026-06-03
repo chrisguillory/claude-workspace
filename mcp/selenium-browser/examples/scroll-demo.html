@@ -442,14 +442,15 @@
       <p>The <code>behavior</code> parameter controls scroll animation.
       <code>'instant'</code> (default) teleports immediately.
       <code>'smooth'</code> uses the browser's native animation (~300&ndash;500ms) and waits
-      for the <code>scrollend</code> event before returning position data. Both return the same
+      for the animation to settle before returning position data. Both return the same
       final position &mdash; only the visual experience differs.</p>
       <p style="margin-top:10px">This page has <code>scroll-behavior: smooth</code> set in CSS.
       The default <code>behavior='instant'</code> overrides it.
       <code>behavior='smooth'</code> respects it.</p>
-      <p style="margin-top:10px">Under the hood, smooth scrolling uses a three-signal waiting
-      strategy: <code>scrollend</code> event (primary), double-rAF no-movement check (~32ms
-      early exit for boundaries), and a 3-second timeout fallback.</p>
+      <p style="margin-top:10px">Under the hood, smooth scrolling resolves once the scroll
+      position holds steady across several animation frames (the animation has settled), with
+      the <code>scrollend</code> event as an accelerator and a no-op grace window plus a
+      3-second timeout as safety nets.</p>
     </div>
     <div style="border-radius: 8px; overflow: hidden; border: 1px solid #334155;">
       <div class="scroll-band" style="background: #1e3a5f; color: #93c5fd;">Band 1</div>

@@ -183,6 +183,7 @@ def _scroll_to_position(
                         return Math.round(el.scrollTop) !== beforeTop
                             || Math.round(el.scrollLeft) !== beforeLeft;
                     }},
+                    position: function() {{ return Math.round(el.scrollTop) + Math.round(el.scrollLeft); }},
                     measure: function() {{
                         return {{
                             scrollTop: Math.round(el.scrollTop),
@@ -244,6 +245,7 @@ def _scroll_to_position(
                     return Math.round(window.scrollX) !== beforeX
                         || Math.round(window.scrollY) !== beforeY;
                 }},
+                position: function() {{ return Math.round(window.scrollX) + Math.round(window.scrollY); }},
                 measure: function() {{
                     return {{
                         scrollX: Math.round(window.scrollX),
@@ -311,6 +313,7 @@ def _scroll_into_view(
                     return Math.round(window.scrollX) !== beforeX
                         || Math.round(window.scrollY) !== beforeY;
                 },
+                position: function() { return Math.round(window.scrollX) + Math.round(window.scrollY); },
                 measure: function() {
                     return {
                         scrollX: Math.round(window.scrollX),
@@ -395,6 +398,7 @@ def _scroll_container(
                     return Math.round(el.scrollTop) !== beforeTop
                         || Math.round(el.scrollLeft) !== beforeLeft;
                 },
+                position: function() { return Math.round(el.scrollTop) + Math.round(el.scrollLeft); },
                 measure: function() {
                     return {
                         scrollTop: Math.round(el.scrollTop),
@@ -471,6 +475,7 @@ def _scroll_viewport(
                     return Math.round(window.scrollX) !== beforeX
                         || Math.round(window.scrollY) !== beforeY;
                 },
+                position: function() { return Math.round(window.scrollX) + Math.round(window.scrollY); },
                 measure: function() {
                     return {
                         scrollX: Math.round(window.scrollX),
