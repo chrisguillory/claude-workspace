@@ -8,6 +8,10 @@ scratch/
 target/
 *.so
 
+# CI caches (mypy incremental; xdist per-worker test scratch)
+.mypy_cache/
+.test-scratch/
+
 # IDE
 .idea/
 .cursor/
