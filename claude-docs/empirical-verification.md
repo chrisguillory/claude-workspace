@@ -12,6 +12,7 @@ Build a small increment → **induce** the real condition → **observe** ground
 - **Apparatus.** A probe promoted to a reusable rig — the repeatable harness around the experiment.
 - **Probe-then-productionize.** Prove the mechanism with a probe first; build the production component only once it's proven — you can't build on a mechanism you haven't confirmed.
 - **Revert → reproduce → reapply.** Put the system in the broken state, confirm the failure, then fix and re-verify — unambiguous before/after proof instead of reconstructing causality from logs.
+- **Falsify the guard.** A regression test proves nothing until you've watched it fail *without* the fix — strip the fix, confirm the test goes red on the exact bug, restore. A test that stays green when the bug is reintroduced is a *false guard*: it locks nothing, yet its green reads as proof.
 - **Capture reality → empirical surface → re-ground.** Capture the real interface from observation (e.g. live traffic) into a doc, and re-ground the plan against that captured surface rather than trusting upstream docs. A captured baseline is valid only for the inputs it was taken against — re-capture when the seeds, schema, or shape change, or a diff against the stale baseline becomes a silent false verdict.
 - **Claim → Test → Verdict.** Every load-bearing claim gets a real run with verbatim output and a ✅ / ⚠️ / ❌ verdict; *"should work because X"* with no actual output is the smell. Interrogate *why* it passed — a pass via a spurious correlation is a false pass — and name the concrete misclassifications instead of banking an aggregate score.
 - **Cross-harness ground truth.** Let independent evidence override assumption — run two harnesses and confirm they agree; trust what a run actually observed over what a single path assumes.
@@ -31,6 +32,7 @@ Build a small increment → **induce** the real condition → **observe** ground
 | **empirical surface**       | the real interface captured from observation (e.g. live traffic), not from docs      |
 | **ground truth**            | observed evidence, treated as authoritative over assumptions or a tool's own verdict |
 | **load-bearing**            | the single decisive empirically-established fact in an argument                      |
+| **false guard**             | a regression test that stays green when its bug is reintroduced — it locks nothing   |
 | **re-grounding**            | re-aligning a plan against freshly captured reality                                  |
 
 ## When a test earns its place instead
