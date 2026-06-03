@@ -22,6 +22,7 @@ Then the orchestrator **independently re-verifies** the winning diff on the real
 - **Typed contracts between agents.** Define a JSON schema per phase (finding / result / verdict). Structured returns let the orchestrator mechanically aggregate, filter, count, and hand off clean data — no fragile prose parsing between stages.
 - **Right-size the fan-out.** Wide for cheap read-heavy enumeration; a deliberately *small* set of competitors for the expensive implementation phase (each isolated environment pays setup overhead). Match the fan-out to the problem's real parallelism and the token/time budget.
 - **Independent re-verification of the winner.** The orchestrator re-runs the empirical check on the winning result before landing it — catching over-claiming and environment-specific results a single agent's self-report hides.
+- **Make competitors self-recovering.** Have each check for and reuse its own prior result before redoing it — a prior run still queryable on the substrate, a marker it left behind — so a resumed run picks up where it left off instead of repeating finished work. A running sub-agent can't be messaged about its past, so the recovery lives in its brief.
 
 ## When a bake-off pays off
 
@@ -48,3 +49,4 @@ If these don't hold, a single focused pass usually beats the orchestration overh
 | **innocent bystander**                                 | a symptom that lands on an arbitrary, blameless location each run — a tell that several symptoms share one upstream cause                                             |
 | **isolated worktree**                                  | a per-agent git worktree off one clean baseline, so conflicting candidate edits build and test in parallel on comparable footing                                      |
 | **independent re-verification**                        | the orchestrator re-running the check on the winner itself before committing — treating a self-report as a claim, not a fact                                          |
+| **self-recovering competitor**                         | one whose brief has it reuse its own prior result (e.g. a run still queryable on the substrate) before redoing it, so a resumed bake-off skips already-finished work   |
