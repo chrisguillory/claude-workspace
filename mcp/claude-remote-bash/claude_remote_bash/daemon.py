@@ -442,10 +442,7 @@ class _Daemon:
                                 # bytes reach the socket, so the connection is still
                                 # framed-clean here. Substitute a bounded ErrorResponse so
                                 # the client gets an actionable message instead of an
-                                # IncompleteReadError on its next read. Named oversize_exc,
-                                # not exc, because the pump-task teardown below reuses `exc`
-                                # and mypy --strict's deleted-variable rule [misc] flags a
-                                # later `exc = ...` once an `except ... as exc:` is in scope.
+                                # IncompleteReadError on its next read.
                                 logger.warning(
                                     'response too large for wire frame on msg.id=%s: %s',
                                     getattr(msg, 'id', None),
