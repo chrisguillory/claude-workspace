@@ -41,6 +41,7 @@ Exit code visibility (Claude Code hook protocol)::
 from __future__ import annotations
 
 import sys
+from collections.abc import Set
 from pathlib import Path
 
 from cc_lib.error_boundary import ErrorBoundary
@@ -51,47 +52,45 @@ from cc_lib.utils.atomic_write import atomic_write
 
 boundary = ErrorBoundary(exit_code=2)
 
-BLOCKED_EXTENSIONS = frozenset(
-    {
-        # Python — handled by run-ruff.py
-        '.py',
-        '.pyi',
-        # Legitimately CRLF per RFC 4180
-        '.csv',
-        '.tsv',
-        # Known binary
-        '.png',
-        '.jpg',
-        '.jpeg',
-        '.gif',
-        '.webp',
-        '.ico',
-        '.pdf',
-        '.zip',
-        '.gz',
-        '.tar',
-        '.tgz',
-        '.so',
-        '.dylib',
-        '.o',
-        '.a',
-        '.lib',
-        '.exe',
-        '.dll',
-        '.bin',
-        '.dat',
-        '.db',
-        '.sqlite',
-        '.parquet',
-        '.pyc',
-        '.pyo',
-        '.ipynb',
-    }
-)
+BLOCKED_EXTENSIONS: Set[str] = {
+    # Python — handled by run-ruff.py
+    '.py',
+    '.pyi',
+    # Legitimately CRLF per RFC 4180
+    '.csv',
+    '.tsv',
+    # Known binary
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.webp',
+    '.ico',
+    '.pdf',
+    '.zip',
+    '.gz',
+    '.tar',
+    '.tgz',
+    '.so',
+    '.dylib',
+    '.o',
+    '.a',
+    '.lib',
+    '.exe',
+    '.dll',
+    '.bin',
+    '.dat',
+    '.db',
+    '.sqlite',
+    '.parquet',
+    '.pyc',
+    '.pyo',
+    '.ipynb',
+}
 
 CONTENT_SNIFF_BYTES = 8192
 
-MARKDOWN_EXTENSIONS = frozenset({'.md', '.markdown'})
+MARKDOWN_EXTENSIONS: Set[str] = {'.md', '.markdown'}
 
 UTF8_BOM = b'\xef\xbb\xbf'
 

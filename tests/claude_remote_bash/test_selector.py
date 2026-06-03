@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Set
+
 import pytest
 from claude_remote_bash.selector import SelectorError, parse
 
-DISCOVERED = frozenset({'m2', 'm3', 'm4', 'm5'})
+DISCOVERED: Set[str] = {'m2', 'm3', 'm4', 'm5'}
 GROUPS = {
     'fleet': ['M2', 'M3', 'M4'],
     'workers': ['M3', 'M4'],
@@ -31,7 +33,7 @@ class TestHappyPath:
         assert parse(
             '192.168.4.22:51648',
             groups={},
-            discovered_aliases=frozenset(),
+            discovered_aliases=set(),
         ) == ['192.168.4.22:51648']
 
     def test_mixed_ip_port_and_alias(self) -> None:
@@ -111,7 +113,7 @@ class TestEdgeCases:
         assert parse(
             '10.0.0.1:1234',
             groups={},
-            discovered_aliases=frozenset(),
+            discovered_aliases=set(),
         ) == ['10.0.0.1:1234']
 
     def test_order_preserved_across_groups(self) -> None:

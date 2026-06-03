@@ -58,6 +58,8 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 | **Worse is Better**                           | Simple, working solutions over perfect designs                                                                 |
 | **Make It Work, Make It Right, Make It Fast** | In that order                                                                                                  |
 | **Avoid Premature Optimization**              | Optimize when data shows need                                                                                  |
+| **Concrete over abstract**                    | Favor a focused class; add an ABC/Protocol only when ≥2 implementations dispatch polymorphically               |
+| **Minimal diffs**                             | Change only what the task needs — don't rewrite or reflow unchanged code/prose                                 |
 | **Principle of least surprise**               | Code should behave as expected                                                                                 |
 | **Bubble exceptions**                         | Easier to Ask Forgiveness (EAFP) over Look Before You Leap (LBYL) — let exceptions propagate to handlers       |
 | **Leverage existing infrastructure**          | Don't reimplement what a decorator, handler, or base class already provides                                    |
@@ -336,6 +338,12 @@ def load_sessions() -> SessionDatabase:
 def _validate_path(path: Path) -> None:
     ...
 ```
+
+**`__all__` declares what *other modules import* — not an entry point.** A `__all__` that just
+lists `main` is cargo-cult: a hook or standalone script run via `if __name__ == '__main__'` is
+*executed*, never imported, so it has nothing to declare. Keep `__all__` when a module exposes
+symbols others import — even one that *also* runs as a script (e.g. `linters/_lib/pickle_probe.py`
+is a subprocess yet exports `ProbeOutput`/`ProbeResult`).
 
 ### Immutable Types in Annotations
 

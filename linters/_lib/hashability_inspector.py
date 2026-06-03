@@ -43,7 +43,7 @@ import logging
 import sys
 import types
 import typing
-from collections.abc import Sequence
+from collections.abc import Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NewType
@@ -64,70 +64,60 @@ type TypeAnnotation = Any
 
 # -- Known type classifications (avoids importing external packages) ----------
 
-HASHABLE_PRIMITIVES: frozenset[type] = frozenset(
-    {
-        int,
-        str,
-        float,
-        bool,
-        bytes,
-        complex,
-        type(None),
-    },
-)
+HASHABLE_PRIMITIVES: Set[type] = {
+    int,
+    str,
+    float,
+    bool,
+    bytes,
+    complex,
+    type(None),
+}
 
-UNHASHABLE_TYPES: frozenset[type] = frozenset(
-    {
-        list,
-        dict,
-        set,
-        bytearray,
-    },
-)
+UNHASHABLE_TYPES: Set[type] = {
+    list,
+    dict,
+    set,
+    bytearray,
+}
 
-UNHASHABLE_ORIGINS: frozenset[type] = frozenset(
-    {
-        list,
-        dict,
-        set,
-        collections.abc.Sequence,
-        collections.abc.MutableSequence,
-        collections.abc.Mapping,
-        collections.abc.MutableMapping,
-        collections.abc.Set,
-        collections.abc.MutableSet,
-    },
-)
+UNHASHABLE_ORIGINS: Set[type] = {
+    list,
+    dict,
+    set,
+    collections.abc.Sequence,
+    collections.abc.MutableSequence,
+    collections.abc.Mapping,
+    collections.abc.MutableMapping,
+    collections.abc.Set,
+    collections.abc.MutableSet,
+}
 
 # External types we can classify without importing
-KNOWN_HASHABLE: frozenset[QualifiedName] = frozenset(
-    {
-        QualifiedName('uuid.UUID'),
-        QualifiedName('datetime.datetime'),
-        QualifiedName('datetime.date'),
-        QualifiedName('datetime.time'),
-        QualifiedName('datetime.timedelta'),
-        QualifiedName('datetime.timezone'),
-        QualifiedName('decimal.Decimal'),
-        QualifiedName('fractions.Fraction'),
-        QualifiedName('pathlib.Path'),
-        QualifiedName('pathlib.PurePath'),
-        QualifiedName('pathlib.PosixPath'),
-        QualifiedName('pathlib.WindowsPath'),
-        QualifiedName('ipaddress.IPv4Address'),
-        QualifiedName('ipaddress.IPv6Address'),
-        QualifiedName('re.Pattern'),
-    },
-)
+KNOWN_HASHABLE: Set[QualifiedName] = {
+    QualifiedName('uuid.UUID'),
+    QualifiedName('datetime.datetime'),
+    QualifiedName('datetime.date'),
+    QualifiedName('datetime.time'),
+    QualifiedName('datetime.timedelta'),
+    QualifiedName('datetime.timezone'),
+    QualifiedName('decimal.Decimal'),
+    QualifiedName('fractions.Fraction'),
+    QualifiedName('pathlib.Path'),
+    QualifiedName('pathlib.PurePath'),
+    QualifiedName('pathlib.PosixPath'),
+    QualifiedName('pathlib.WindowsPath'),
+    QualifiedName('ipaddress.IPv4Address'),
+    QualifiedName('ipaddress.IPv6Address'),
+    QualifiedName('re.Pattern'),
+}
 
-KNOWN_UNHASHABLE: frozenset[QualifiedName] = frozenset(
-    {
-        QualifiedName('numpy.ndarray'),
-        QualifiedName('numpy.matrix'),
-        QualifiedName('pandas.DataFrame'),
-        QualifiedName('pandas.Series'),
-    },
-)
+KNOWN_UNHASHABLE: Set[QualifiedName] = {
+    QualifiedName('numpy.ndarray'),
+    QualifiedName('numpy.matrix'),
+    QualifiedName('pandas.DataFrame'),
+    QualifiedName('pandas.Series'),
+}
 
 
 # -- Result types -------------------------------------------------------------

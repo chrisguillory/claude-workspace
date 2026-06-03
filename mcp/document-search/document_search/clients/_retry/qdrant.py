@@ -6,6 +6,7 @@ Private module - import from _retry package.
 from __future__ import annotations
 
 import logging
+from collections.abc import Set
 
 import circuitbreaker
 import qdrant_client.http.exceptions
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # HTTP status codes that are transient and worth retrying
 # Note: 500 excluded - for Qdrant it often indicates request issues, not transient errors
-RETRYABLE_STATUS_CODES = frozenset({408, 502, 503, 504})
+RETRYABLE_STATUS_CODES: Set[int] = {408, 502, 503, 504}
 
 # Circuit breaker - opens after consecutive failures, hard fails until recovery
 QDRANT_FAILURE_THRESHOLD = 5

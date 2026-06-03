@@ -38,7 +38,7 @@ def _relax_literals_in_schema(schema: CoreSchema) -> CoreSchema:
     schema_type = schema['type']
 
     if schema_type == 'literal':
-        allowed = frozenset(schema['expected'])
+        allowed = set(schema['expected'])
         return core_schema.no_info_after_validator_function(
             _make_relaxed_literal_validator(allowed),
             core_schema.str_schema(),

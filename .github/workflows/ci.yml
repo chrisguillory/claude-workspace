@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci # required-status-check context — keep in sync with the branch ruleset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: '3.13'
+          enable-cache: true
+      - name: System libraries for native deps
+        # python-snappy (selenium-browser -> dfindexeddb) builds from source on Linux; needs libsnappy headers.
+        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
+      - name: Sync workspace
+        run: uv sync --locked --all-packages --all-groups
+      - name: Lint, format, type-check, custom linters (pre-commit)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+      - name: Tests
+        # tests/linters/ only — the rest of tests/ has pre-existing cross-test pollution to fix first.
+        run: uv run pytest tests/linters/
+
+  merge-gatekeeper:
+    name: merge-gatekeeper # required-status-check context — keep in sync with the branch ruleset
+    # One umbrella check: succeeds only once every *other* check on the PR has succeeded, so the
+    # branch ruleset can require this single context instead of enumerating each job by name.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      statuses: read
+    steps:
+      - name: Wait for all other checks to succeed
+        uses: upsidr/merge-gatekeeper@09af7a82c1666d0e64d2bd8c01797a0bcfd3bb5d # v1.2.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          timeout: '1800'
+          interval: '30'
