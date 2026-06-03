@@ -283,7 +283,7 @@ smooth_scroll:
         scrolled: true
 
     - name: smooth_viewport_up_at_top
-      description: Smooth scroll up at top — no-op, resolves quickly via double-rAF
+      description: Smooth scroll up at top — no-op, resolves quickly via the no-op grace window
       direction: up
       behavior: smooth
       expect:
