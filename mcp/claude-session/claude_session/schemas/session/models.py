@@ -235,10 +235,10 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   /remote-control bridge sessions — binary-confirmed, surfaced in JSONL once a live
                   bridge session ran (deferred at first pass per empirical-only: zero JSONL then).
                   Extended CLAUDE_CODE_MAX_VERSION to 2.1.156.
-- Schema v0.2.38: Cross-machine sweep (M2, ~1.3M records, Claude Code 2.1.157) surfaced 8 real gaps
-                  + 1 misfire. forkedFrom: ForkOrigin {sessionId, messageUuid} on BaseRecord — a
-                  session-fork backpointer present on every record of a forked session (Claude Code
-                  2.1.8+, binary-bisected; 94% of M2's failures). MonitorToolInput timeout_ms/persistent
+- Schema v0.2.38: Cross-machine gaps for Claude Code 2.1.157 — 8 modeled, 1 data-cleaned. forkedFrom:
+                  ForkOrigin {sessionId, messageUuid} on BaseRecord — a session-fork backpointer
+                  present on every record of a forked session (Claude Code 2.1.8+, binary-bisected).
+                  MonitorToolInput timeout_ms/persistent
                   -> optional (binary: only description/command required). HookInfo.durationMs -> optional
                   (absent on pre-2.1.120 records; reverse of v0.2.31). ScheduledTaskFireSystemRecord +=
                   teamName/agentName (missed when v0.2.15 added them to all record types). SendMessage:
@@ -264,21 +264,20 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   run metadata + scripts — now round-trips through clone/move/restore/archive/delete
                   with agentId / sessionId / scriptPath remap. session-memory tombstoned (removed
                   upstream ~2.1.128). Extended CLAUDE_CODE_MAX_VERSION to 2.1.159.
-- Schema v0.2.40: Cross-machine sweep (M4, ~460 errors) + Claude Code 2.1.160. Three additive,
-                  binary-confirmed gaps. BaseRecord.sessionKind (Literal['bg'] | None) — session
-                  origin kind from CLAUDE_CODE_SESSION_KIND; interactive sessions omit it, only 'bg'
-                  observed in JSONL (binary enum interactive|bg|daemon|daemon-worker). This one field
-                  also collapsed an apparent system-record error cluster that was union-cascade from
-                  its absence. WorktreeSessionData.worktreeBranch -> optional (absent when
-                  EnterWorktree attaches to an existing worktree — no branch created). Added
-                  StructuredOutputToolInput for the Workflow structured-output built-in (binary
-                  inputSchema z.object({}).passthrough(); re-typed from the permissive fallback so it
-                  reads as a built-in rather than MCP). WorkflowToolInput gained name + args (the
-                  saved-workflow form — run a registered workflow by name; observed on M5; args is an
-                  arbitrary caller payload, typed pydantic.JsonValue). The 2.1.159->2.1.160 release
-                  delta is record-surface-empty; watch item: DesignSync (new first-party built-in tool,
-                  binary-confirmed 0->10, not yet seen in JSONL — needs a typed input on first
-                  capture). Extended CLAUDE_CODE_MAX_VERSION to 2.1.160.
+- Schema v0.2.40: Four additive, binary-confirmed gaps + Claude Code 2.1.160. BaseRecord.sessionKind
+                  (Literal['bg'] | None) — session origin kind from CLAUDE_CODE_SESSION_KIND;
+                  interactive sessions omit it, only 'bg' observed in JSONL (binary enum
+                  interactive|bg|daemon|daemon-worker). On BaseRecord, so it also resolves a
+                  union-cascade across system records (its absence bounced them to BaseRecord).
+                  WorktreeSessionData.worktreeBranch -> optional (absent when EnterWorktree attaches to
+                  an existing worktree — no branch created). StructuredOutputToolInput for the Workflow
+                  structured-output built-in (binary inputSchema z.object({}).passthrough(); re-typed
+                  from the permissive fallback so it reads as a built-in rather than MCP).
+                  WorkflowToolInput gained name + args (the saved-workflow form — run a registered
+                  workflow by name; args an arbitrary caller payload, typed pydantic.JsonValue). The
+                  2.1.159->2.1.160 release delta is record-surface-empty; watch item: DesignSync (new
+                  first-party built-in tool, binary-confirmed, not yet in JSONL — needs a typed input
+                  on first capture). Extended CLAUDE_CODE_MAX_VERSION to 2.1.160.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
