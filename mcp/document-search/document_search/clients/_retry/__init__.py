@@ -45,7 +45,13 @@ Client-Specific Notes
 
 from __future__ import annotations
 
-from document_search.clients._retry.gemini import gemini_breaker, is_retryable_gemini_error, log_gemini_retry
+from document_search.clients._retry.gemini import (
+    gemini_breaker,
+    gemini_stop,
+    gemini_wait,
+    is_retryable_gemini_error,
+    log_gemini_retry,
+)
 from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
 from document_search.clients._retry.openrouter import (
     is_retryable_openrouter_error,
@@ -54,10 +60,12 @@ from document_search.clients._retry.openrouter import (
     openrouter_stop,
     openrouter_wait,
 )
-from document_search.clients._retry.qdrant import is_retryable_qdrant_error, log_qdrant_retry, qdrant_breaker
+from document_search.clients._retry.qdrant import is_retryable_qdrant_error, log_qdrant_retry
 
 __all__ = [
     'gemini_breaker',
+    'gemini_stop',
+    'gemini_wait',
     'is_retryable_gemini_error',
     'is_retryable_httpx_error',
     'is_retryable_openrouter_error',
@@ -68,5 +76,4 @@ __all__ = [
     'openrouter_breaker',
     'openrouter_stop',
     'openrouter_wait',
-    'qdrant_breaker',
 ]

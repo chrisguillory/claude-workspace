@@ -8,15 +8,25 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-import circuitbreaker
 import google.genai.errors
 import tenacity
 
+from document_search.clients._retry.breaker import LoggingCircuitBreaker
 from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
+from document_search.clients._retry.remote import (
+    DEFAULT_STOP,
+    DEFAULT_WAIT,
+    RATE_LIMIT_STOP,
+    RATE_LIMIT_WAIT,
+    category_aware_stop,
+    category_aware_wait,
+)
 
 __all__ = [
     'GeminiTransientErrorCategory',
     'gemini_breaker',
+    'gemini_stop',
+    'gemini_wait',
     'is_retryable_gemini_error',
     'log_gemini_retry',
 ]
@@ -64,6 +74,26 @@ def log_gemini_retry(retry_state: tenacity.RetryCallState) -> None:
     logger.warning('[RETRY] Gemini embed attempt %s failed: %s: %s', retry_state.attempt_number, exc_name, exc_msg)
 
 
+def gemini_wait(retry_state: tenacity.RetryCallState) -> float:
+    """Category-aware backoff: deep + jittered for rate limits, fast + jittered otherwise."""
+    return category_aware_wait(
+        retry_state,
+        classifier=_classify_transient_error,
+        rate_limit_wait=RATE_LIMIT_WAIT,
+        default_wait=DEFAULT_WAIT,
+    )
+
+
+def gemini_stop(retry_state: tenacity.RetryCallState) -> bool:
+    """More attempts for a sustained rate limit than for a transient blip (no intent depth)."""
+    return category_aware_stop(
+        retry_state,
+        classifier=_classify_transient_error,
+        rate_limit_stop=RATE_LIMIT_STOP,
+        default_stop=DEFAULT_STOP,
+    )
+
+
 def _classify_transient_error(exc: BaseException) -> GeminiTransientErrorCategory | None:
     """Classify a Gemini error into a transient category.
 
@@ -89,7 +119,7 @@ def _gemini_circuit_filter(thrown_type: type, thrown_value: BaseException) -> bo
     return _classify_transient_error(thrown_value) is not None
 
 
-gemini_breaker = circuitbreaker.CircuitBreaker(
+gemini_breaker = LoggingCircuitBreaker(
     failure_threshold=GEMINI_FAILURE_THRESHOLD,
     recovery_timeout=GEMINI_RECOVERY_TIMEOUT,
     expected_exception=_gemini_circuit_filter,
