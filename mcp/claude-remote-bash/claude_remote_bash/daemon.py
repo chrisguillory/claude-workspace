@@ -435,7 +435,30 @@ class _Daemon:
                         elif isinstance(msg, UnmountRequest):
                             held_mount_ids.discard(msg.mount_id)
                         async with write_lock:
-                            await write_message(writer, response)
+                            try:
+                                await write_message(writer, response)
+                            except ProtocolError as oversize_exc:
+                                # write_frame's size guard (protocol.py) fires before any
+                                # bytes reach the socket, so the connection is still
+                                # framed-clean here. Substitute a bounded ErrorResponse so
+                                # the client gets an actionable message instead of an
+                                # IncompleteReadError on its next read. Named oversize_exc,
+                                # not exc, because the pump-task teardown below reuses `exc`
+                                # and mypy --strict's deleted-variable rule [misc] flags a
+                                # later `exc = ...` once an `except ... as exc:` is in scope.
+                                logger.warning(
+                                    'response too large for wire frame on msg.id=%s: %s',
+                                    getattr(msg, 'id', None),
+                                    oversize_exc,
+                                    exc_info=True,
+                                )
+                                await write_message(
+                                    writer,
+                                    ErrorResponse(
+                                        id=getattr(msg, 'id', None),
+                                        message=f'response too large for wire frame: {oversize_exc.args[0]}',
+                                    ),
+                                )
                     continue
 
                 entry = channels.get(channel_id)
