@@ -34,6 +34,14 @@ The preconditions that make the overhead worth it:
 
 If these don't hold, a single focused pass usually beats the orchestration overhead.
 
+## Long runs: cap, resume, recover
+
+When competitors each drive a slow external substrate (a CI run, an image build) the bake-off runs long and gets interrupted — stopped, edited, resumed. Three rules keep that cheap:
+
+- **Cap each competitor's budget.** Give every implementer a hard ceiling on its expensive operations (CI runs, build iterations) and have it report its *best* and yield, not chase a marginal gain. An uncapped competitor that keeps re-trying stalls the barrier — every finished agent idles waiting on the one that won't stop.
+- **Resume caching is prefix-based.** A resumed run reuses the longest *unchanged prefix* of agent calls; from the first call that's edited — or that never completed — onward, everything re-runs, including untouched agents downstream of it. So let every competitor *complete* before you stop, and order the agents you're most likely to edit *last* — stopping mid-flight on an early agent forfeits the cache for everything after it.
+- **Make competitors self-recovering.** Have each check for and reuse its own prior result before redoing it — a CI run still queryable on the substrate, a marker it left behind — keyed so the recoverable state outlives the throwaway worktree/branch. An interrupted bake-off then resumes without repeating finished work, even where the prefix cache can't reach. You can't message a running sub-agent about its own past; the recovery has to be designed into its brief.
+
 ## Lexicon
 
 | Term                                                   | Meaning                                                                                                                                                               |
@@ -48,3 +56,6 @@ If these don't hold, a single focused pass usually beats the orchestration overh
 | **innocent bystander**                                 | a symptom that lands on an arbitrary, blameless location each run — a tell that several symptoms share one upstream cause                                             |
 | **isolated worktree**                                  | a per-agent git worktree off one clean baseline, so conflicting candidate edits build and test in parallel on comparable footing                                      |
 | **independent re-verification**                        | the orchestrator re-running the check on the winner itself before committing — treating a self-report as a claim, not a fact                                          |
+| **budget cap**                                         | a hard ceiling on a competitor's expensive operations (CI runs, build iterations) so a straggler reports its best and yields instead of stalling the barrier          |
+| **resume prefix**                                      | the longest unchanged leading run of agent calls a resumed workflow reuses from cache; the first edited-or-incomplete call and everything after it re-runs live       |
+| **self-recovering competitor**                         | a competitor whose brief has it reuse its own prior result (e.g. a CI run still on the substrate) before redoing it, so a resume skips already-finished work          |
