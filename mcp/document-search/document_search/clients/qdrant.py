@@ -188,12 +188,12 @@ class QdrantClient:
         """Delete the entire collection. Raises if collection doesn't exist."""
         await self._client.delete_collection(collection_name)
 
-    @_retry.qdrant_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_qdrant_error),
         stop=tenacity.stop_after_attempt(3),
         wait=tenacity.wait_exponential(multiplier=0.5, max=5),
         before_sleep=_retry.log_qdrant_retry,
+        reraise=True,
     )
     async def upsert(
         self,
