@@ -22,9 +22,10 @@ jobs:
         with:
           python-version: '3.13'
           enable-cache: true
-      - name: System libraries for native deps
-        # python-snappy (selenium-browser -> dfindexeddb) builds from source on Linux; needs libsnappy headers.
-        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
+      - name: System dependencies
+        # libsnappy-dev: python-snappy (selenium-browser -> dfindexeddb) builds from source on Linux.
+        # zsh: claude-remote-bash runs commands in /bin/zsh, exercised by the executor tests.
+        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev zsh
       - name: Sync workspace
         run: uv sync --locked --all-packages --all-groups
       - name: Lint, format, type-check, custom linters (pre-commit)
