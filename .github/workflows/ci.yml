@@ -31,9 +31,11 @@ jobs:
       - name: Lint, format, type-check, custom linters (pre-commit)
         run: uv run pre-commit run --all-files --show-diff-on-failure
       - name: Tests
-        # Full suite except selenium_browser, which needs a real browser the runner lacks
-        # (covered by a dedicated browser job in a follow-up). Deterministic + green here.
-        run: uv run pytest tests/ --ignore=tests/selenium_browser
+        # Full suite including selenium_browser. ubuntu-latest (24.04) preinstalls
+        # google-chrome-stable + chromedriver; selenium-manager (bundled since selenium 4.6)
+        # auto-resolves the driver, and conftest falls through to default Chrome when the
+        # macOS Chromium path is absent. Deterministic + green here.
+        run: uv run pytest tests/
 
   merge-gatekeeper:
     name: merge-gatekeeper # required-status-check context — keep in sync with the branch ruleset

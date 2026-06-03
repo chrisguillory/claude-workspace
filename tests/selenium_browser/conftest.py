@@ -65,6 +65,7 @@ def examples_server() -> Any:
     yield f'http://127.0.0.1:{port}'
 
     server.shutdown()
+    server.server_close()
 
 
 @pytest.fixture(scope='session')
