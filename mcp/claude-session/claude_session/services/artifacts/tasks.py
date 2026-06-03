@@ -9,7 +9,7 @@ On restore/clone:
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,7 +33,7 @@ __all__ = [
 # Known metadata files in task directories (not task data)
 # .lock: process coordination file
 # .highwatermark: next task ID counter (contains integer like "5")
-TASK_METADATA_FILES = frozenset({'.lock', '.highwatermark'})
+TASK_METADATA_FILES: Set[str] = {'.lock', '.highwatermark'}
 
 
 @dataclass(frozen=True)

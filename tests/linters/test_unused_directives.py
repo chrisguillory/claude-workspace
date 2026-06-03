@@ -100,6 +100,8 @@ EXPECTED_STRICT_TYPING_TYPE: CodeMap = {
     'UnusedTupleField': 'tuple-field',
     'UsedHashableField': 'hashable-field',
     'UnusedHashableField': 'hashable-field',
+    'UsedFrozensetConstant': 'frozenset-constant',
+    'UnusedFrozensetConstant': 'frozenset-constant',
 }
 
 # Structural rules are single-purpose fixtures (line-keyed). proximity_mutable_type locks in

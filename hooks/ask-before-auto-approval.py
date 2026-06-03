@@ -46,7 +46,7 @@ See: https://code.claude.com/docs/en/hooks#pretooluse
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Set
 
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import ClosedModel, SubsetModel
@@ -57,7 +57,7 @@ from cc_lib.schemas.hooks import (
 )
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
-GATE_DIR = get_claude_workspace_config_home_dir() / 'ask-before-auto-approval'
+DISABLE_DIR = get_claude_workspace_config_home_dir() / 'ask-before-auto-approval'
 
 boundary = ErrorBoundary(exit_code=2)
 
@@ -69,6 +69,8 @@ def main() -> int:
         return 0
     decision = AutoApprovalGate(payload.tool_name, payload.tool_input).decision
     if isinstance(decision, SkipPrompt):
+        return 0
+    if (DISABLE_DIR / f'disabled-{payload.session_id}').exists():
         return 0
     output = PreToolUseHookOutput(
         hook_specific_output=PreToolUseSpecificOutput(
@@ -89,60 +91,58 @@ class AutoApprovalGate:
 
     # Tools that gate regardless of arguments: built-in editors, non-Google-Workspace MCP
     # mutations, and single-purpose google-workspace writes / sensitive actions.
-    ALWAYS: frozenset[str] = frozenset(
-        {
-            'Edit',
-            'Write',
-            'mcp__google-workspace__append_table_rows',
-            'mcp__google-workspace__batch_modify_gmail_message_labels',
-            'mcp__google-workspace__batch_update_doc',
-            'mcp__google-workspace__batch_update_form',
-            'mcp__google-workspace__batch_update_presentation',
-            'mcp__google-workspace__copy_drive_file',
-            'mcp__google-workspace__create_calendar',
-            'mcp__google-workspace__create_doc',
-            'mcp__google-workspace__create_drive_file',
-            'mcp__google-workspace__create_drive_folder',
-            'mcp__google-workspace__create_form',
-            'mcp__google-workspace__create_presentation',
-            'mcp__google-workspace__create_reaction',
-            'mcp__google-workspace__create_script_project',
-            'mcp__google-workspace__create_sheet',
-            'mcp__google-workspace__create_spreadsheet',
-            'mcp__google-workspace__create_table_with_data',
-            'mcp__google-workspace__create_version',
-            'mcp__google-workspace__delete_calendar',
-            'mcp__google-workspace__delete_script_project',
-            'mcp__google-workspace__draft_gmail_message',
-            'mcp__google-workspace__export_doc_to_pdf',
-            'mcp__google-workspace__find_and_replace_doc',
-            'mcp__google-workspace__format_sheet_range',
-            'mcp__google-workspace__import_to_google_doc',
-            'mcp__google-workspace__import_to_google_sheets',
-            'mcp__google-workspace__import_to_google_slides',
-            'mcp__google-workspace__insert_doc_elements',
-            'mcp__google-workspace__insert_doc_image',
-            'mcp__google-workspace__modify_doc_text',
-            'mcp__google-workspace__modify_gmail_message_labels',
-            'mcp__google-workspace__modify_sheet_values',
-            'mcp__google-workspace__move_event',
-            'mcp__google-workspace__move_sheet_rows',
-            'mcp__google-workspace__resize_sheet_dimensions',
-            'mcp__google-workspace__run_script_function',
-            'mcp__google-workspace__send_gmail_message',
-            'mcp__google-workspace__send_message',
-            'mcp__google-workspace__set_drive_file_permissions',
-            'mcp__google-workspace__set_publish_settings',
-            'mcp__google-workspace__start_google_auth',
-            'mcp__google-workspace__update_calendar',
-            'mcp__google-workspace__update_doc_headers_footers',
-            'mcp__google-workspace__update_drive_file',
-            'mcp__google-workspace__update_paragraph_style',
-            'mcp__google-workspace__update_script_content',
-            'mcp__imessage-kit__send_message',
-            'mcp__selenium-browser__navigate_with_profile_state',
-        }
-    )
+    ALWAYS: Set[str] = {
+        'Edit',
+        'Write',
+        'mcp__google-workspace__append_table_rows',
+        'mcp__google-workspace__batch_modify_gmail_message_labels',
+        'mcp__google-workspace__batch_update_doc',
+        'mcp__google-workspace__batch_update_form',
+        'mcp__google-workspace__batch_update_presentation',
+        'mcp__google-workspace__copy_drive_file',
+        'mcp__google-workspace__create_calendar',
+        'mcp__google-workspace__create_doc',
+        'mcp__google-workspace__create_drive_file',
+        'mcp__google-workspace__create_drive_folder',
+        'mcp__google-workspace__create_form',
+        'mcp__google-workspace__create_presentation',
+        'mcp__google-workspace__create_reaction',
+        'mcp__google-workspace__create_script_project',
+        'mcp__google-workspace__create_sheet',
+        'mcp__google-workspace__create_spreadsheet',
+        'mcp__google-workspace__create_table_with_data',
+        'mcp__google-workspace__create_version',
+        'mcp__google-workspace__delete_calendar',
+        'mcp__google-workspace__delete_script_project',
+        'mcp__google-workspace__draft_gmail_message',
+        'mcp__google-workspace__export_doc_to_pdf',
+        'mcp__google-workspace__find_and_replace_doc',
+        'mcp__google-workspace__format_sheet_range',
+        'mcp__google-workspace__import_to_google_doc',
+        'mcp__google-workspace__import_to_google_sheets',
+        'mcp__google-workspace__import_to_google_slides',
+        'mcp__google-workspace__insert_doc_elements',
+        'mcp__google-workspace__insert_doc_image',
+        'mcp__google-workspace__modify_doc_text',
+        'mcp__google-workspace__modify_gmail_message_labels',
+        'mcp__google-workspace__modify_sheet_values',
+        'mcp__google-workspace__move_event',
+        'mcp__google-workspace__move_sheet_rows',
+        'mcp__google-workspace__resize_sheet_dimensions',
+        'mcp__google-workspace__run_script_function',
+        'mcp__google-workspace__send_gmail_message',
+        'mcp__google-workspace__send_message',
+        'mcp__google-workspace__set_drive_file_permissions',
+        'mcp__google-workspace__set_publish_settings',
+        'mcp__google-workspace__start_google_auth',
+        'mcp__google-workspace__update_calendar',
+        'mcp__google-workspace__update_doc_headers_footers',
+        'mcp__google-workspace__update_drive_file',
+        'mcp__google-workspace__update_paragraph_style',
+        'mcp__google-workspace__update_script_content',
+        'mcp__imessage-kit__send_message',
+        'mcp__selenium-browser__navigate_with_profile_state',
+    }
 
     def __init__(self, tool_name: str, tool_input: Mapping[str, object]) -> None:
         self.tool_name = tool_name
@@ -167,32 +167,30 @@ class GoogleWorkspaceGate:
 
     PREFIX = 'mcp__google-workspace__'
 
-    CONSOLIDATED: frozenset[str] = frozenset(
-        {
-            'manage_calendar_sharing',
-            'manage_conditional_formatting',
-            'manage_contact',
-            'manage_contact_group',
-            'manage_contacts_batch',
-            'manage_deployment',
-            'manage_doc_tab',
-            'manage_document_comment',
-            'manage_drive_access',
-            'manage_event',
-            'manage_focus_time',
-            'manage_gmail_filter',
-            'manage_gmail_label',
-            'manage_out_of_office',
-            'manage_presentation_comment',
-            'manage_spreadsheet_comment',
-            'manage_task',
-            'manage_task_list',
-        }
-    )
+    CONSOLIDATED: Set[str] = {
+        'manage_calendar_sharing',
+        'manage_conditional_formatting',
+        'manage_contact',
+        'manage_contact_group',
+        'manage_contacts_batch',
+        'manage_deployment',
+        'manage_doc_tab',
+        'manage_document_comment',
+        'manage_drive_access',
+        'manage_event',
+        'manage_focus_time',
+        'manage_gmail_filter',
+        'manage_gmail_label',
+        'manage_out_of_office',
+        'manage_presentation_comment',
+        'manage_spreadsheet_comment',
+        'manage_task',
+        'manage_task_list',
+    }
 
     # Read-only action verbs that may auto-approve. Only ``list`` occurs in the current toolset;
     # the rest are forward-looking.
-    READ_ACTIONS: frozenset[str] = frozenset({'get', 'list', 'query', 'read', 'search'})
+    READ_ACTIONS: Set[str] = {'get', 'list', 'query', 'read', 'search'}
 
     def __init__(self, tool_name: str, tool_input: Mapping[str, object]) -> None:
         self.tool_name = tool_name
