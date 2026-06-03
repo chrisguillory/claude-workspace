@@ -8774,6 +8774,45 @@
       "title": "SendMessageToolResult",
       "type": "object"
     },
+    "SendUserFileToolInput": {
+      "additionalProperties": true,
+      "description": "Input for the SendUserFile tool \u2014 delivers files to the user (Claude Code 2.1.142+).\n\nBinary inputSchema: {files: array(string).min(1) (required), status: enum[normal|proactive]\n(required), caption?}. Surfaces artifacts (screenshots, reports) \u2014 `proactive` pushes\nunprompted, `normal` accompanies a reply.",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "normal",
+            "proactive"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "caption": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        }
+      },
+      "required": [
+        "files",
+        "status"
+      ],
+      "title": "SendUserFileToolInput",
+      "type": "object"
+    },
     "ServerToolUse": {
       "additionalProperties": true,
       "description": "Server-side tool use tracking.",
@@ -10137,7 +10176,7 @@
     },
     "TaskUpdateToolInput": {
       "additionalProperties": true,
-      "description": "Input for TaskUpdate tool - updates an existing task.\n\nFields:\n    taskId: ID of the task to update (required)\n    status: New status (pending, in_progress, completed)\n    description: New description for the task\n    owner: Agent/worker name to assign the task to\n    addBlockedBy: Task IDs that block this task",
+      "description": "Input for TaskUpdate tool - updates an existing task.\n\nFields:\n    taskId: ID of the task to update (required)\n    status: New status (pending, in_progress, completed)\n    description: New description for the task\n    owner: Agent/worker name to assign the task to\n    addBlockedBy: Task IDs that block this task\n    metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()",
       "properties": {
         "taskId": {
           "title": "Taskid",
@@ -10238,6 +10277,19 @@
           ],
           "default": null,
           "title": "Addblockedby"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
         }
       },
       "required": [
@@ -10822,6 +10874,9 @@
             },
             {
               "$ref": "#/$defs/SendMessageLegacyToolInput"
+            },
+            {
+              "$ref": "#/$defs/SendUserFileToolInput"
             },
             {
               "$ref": "#/$defs/TaskToolInput"
@@ -12090,7 +12145,7 @@
     },
     "WorkflowToolInput": {
       "additionalProperties": true,
-      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nThe inline-script form (`script`) and the saved-workflow form (`name` + `args`) both appear\nin observed data; scriptPath/resumeFromRunId/description/title remain binary-only and\nunmodeled. `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.",
+      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nThe inline-script (`script`), on-disk-script (`scriptPath`), and saved-workflow (`name` + `args`)\nforms all appear in observed data; resumeFromRunId/description/title remain binary-only and\nunmodeled. `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.",
       "properties": {
         "script": {
           "anyOf": [
@@ -12126,6 +12181,18 @@
             }
           ],
           "default": null
+        },
+        "scriptPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scriptpath"
         }
       },
       "title": "WorkflowToolInput",

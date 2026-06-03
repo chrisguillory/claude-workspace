@@ -264,17 +264,22 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   run metadata + scripts — now round-trips through clone/move/restore/archive/delete
                   with agentId / sessionId / scriptPath remap. session-memory tombstoned (removed
                   upstream ~2.1.128). Extended CLAUDE_CODE_MAX_VERSION to 2.1.159.
-- Schema v0.2.40: Four additive, binary-confirmed gaps + Claude Code 2.1.160. BaseRecord.sessionKind
-                  (Literal['bg'] | None) — session origin kind from CLAUDE_CODE_SESSION_KIND;
-                  interactive sessions omit it, only 'bg' observed in JSONL (binary enum
-                  interactive|bg|daemon|daemon-worker). On BaseRecord, so it also resolves a
-                  union-cascade across system records (its absence bounced them to BaseRecord).
+- Schema v0.2.40: Cross-machine tool/record gaps + Claude Code 2.1.160, all binary-confirmed.
+                  BaseRecord.sessionKind (Literal['bg'] | None) — session origin kind from
+                  CLAUDE_CODE_SESSION_KIND; interactive sessions omit it, only 'bg' observed in JSONL
+                  (binary enum interactive|bg|daemon|daemon-worker). On BaseRecord, so it also resolves
+                  a union-cascade across system records (its absence bounced them to BaseRecord).
                   WorktreeSessionData.worktreeBranch -> optional (absent when EnterWorktree attaches to
                   an existing worktree — no branch created). StructuredOutputToolInput for the Workflow
                   structured-output built-in (binary inputSchema z.object({}).passthrough(); re-typed
                   from the permissive fallback so it reads as a built-in rather than MCP).
-                  WorkflowToolInput gained name + args (the saved-workflow form — run a registered
-                  workflow by name; args an arbitrary caller payload, typed pydantic.JsonValue). The
+                  WorkflowToolInput gained name/args/scriptPath (saved-workflow and on-disk-script
+                  forms; args an arbitrary caller payload, typed pydantic.JsonValue). New
+                  SendUserFileToolInput (deliver files to the user in remote environments, 2.1.142+).
+                  TaskUpdateToolInput gained metadata. Genuine tool-input hallucinations were
+                  data-cleaned, not modeled: SendMessage prompt->message; Grep string-typed
+                  -n/-C/head_limit coerced to bool/int (the binary preprocesses strings but stores the
+                  pre-coercion shape); Monitor stray run_in_background; an empty SendUserFile. The
                   2.1.159->2.1.160 release delta is record-surface-empty; watch item: DesignSync (new
                   first-party built-in tool, binary-confirmed, not yet in JSONL — needs a typed input
                   on first capture). Extended CLAUDE_CODE_MAX_VERSION to 2.1.160.
@@ -530,6 +535,7 @@ __all__ = [
     'SendMessageSimpleToolInput',
     'SendMessageToolInput',
     'SendMessageToolResult',
+    'SendUserFileToolInput',
     'ServerToolUse',
     'SessionAnalysis',
     'SessionMetadata',
@@ -964,6 +970,7 @@ class TaskUpdateToolInput(StrictModel):
         description: New description for the task
         owner: Agent/worker name to assign the task to
         addBlockedBy: Task IDs that block this task
+        metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()
     """
 
     taskId: str
@@ -974,6 +981,9 @@ class TaskUpdateToolInput(StrictModel):
     owner: str | None = None
     addBlocks: Sequence[str] | None = None  # Task IDs that this task blocks
     addBlockedBy: Sequence[str] | None = None
+    metadata: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — binary schema is v.record(v.string(), v.unknown()).optional()
+    )
 
 
 # -- TaskList Tool Input (Claude Code 2.1.17+) ---------------------------------
@@ -1147,14 +1157,15 @@ class WorkflowToolInput(StrictModel):
 
     Binary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,
     description?, title?} — all optional (a refine requires one of script/name/scriptPath).
-    The inline-script form (`script`) and the saved-workflow form (`name` + `args`) both appear
-    in observed data; scriptPath/resumeFromRunId/description/title remain binary-only and
+    The inline-script (`script`), on-disk-script (`scriptPath`), and saved-workflow (`name` + `args`)
+    forms all appear in observed data; resumeFromRunId/description/title remain binary-only and
     unmodeled. `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.
     """
 
     script: str | None = None
     name: str | None = None  # Saved-workflow name (the name+args form runs a registered workflow)
     args: pydantic.JsonValue | None = None  # Arbitrary caller-supplied input exposed to the workflow as `args`
+    scriptPath: str | None = None  # Path to a persisted workflow script on disk; takes precedence over script/name
 
 
 class RemoteTriggerToolInput(StrictModel):
@@ -1166,6 +1177,19 @@ class RemoteTriggerToolInput(StrictModel):
     """
 
     action: Literal['list', 'get', 'create', 'update', 'run']
+
+
+class SendUserFileToolInput(StrictModel):
+    """Input for the SendUserFile tool — delivers files to the user (Claude Code 2.1.142+).
+
+    Binary inputSchema: {files: array(string).min(1) (required), status: enum[normal|proactive]
+    (required), caption?}. Surfaces artifacts (screenshots, reports) — `proactive` pushes
+    unprompted, `normal` accompanies a reply.
+    """
+
+    files: Sequence[str]  # File paths (absolute or relative to cwd); binary requires >= 1
+    status: Literal['normal', 'proactive']
+    caption: str | None = None  # Optional short caption for the file(s)
 
 
 # -- ListMcpResourcesTool Input (5x occurrences) -------------------------------
@@ -1308,6 +1332,7 @@ ToolInput = Annotated[
     | SendMessageToolInput  # to, message, type, recipient, content required (backfilled wire shape)
     | SendMessageSimpleToolInput  # to, message required (2.1.81+)
     | SendMessageLegacyToolInput  # type, recipient, content required; no to/message (2.1.63 pre-refactor)
+    | SendUserFileToolInput  # files, status required (2.1.142+)
     | TaskToolInput  # prompt, description, subagent_type required
     | TaskCreateToolInput  # subject, description required (2.1.17+)
     | TeamCreateToolInput  # team_name, description required (2.1.63+)
