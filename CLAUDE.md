@@ -198,6 +198,8 @@ Empirical testing — running the system against real conditions — is the prim
 
 The asymmetry: a regression test specifically prevents re-introduction of a real failure mode (high value); a happy-path test re-proves what every empirical run already proves (low value, maintenance cost).
 
+See [`claude-docs/empirical-verification.md`](claude-docs/empirical-verification.md) for the verification loop, techniques, and lexicon; [`claude-docs/agentic-workflows.md`](claude-docs/agentic-workflows.md) for orchestrating multi-agent work (bake-offs, map→judge phasing).
+
 ## Python Specifics
 
 ### Strict Type Safety
@@ -614,9 +616,11 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 
 Reference docs in `claude-docs/` are not auto-loaded into context. Read them when the task lands in their domain.
 
-| Topic           | Doc                               |
-|-----------------|-----------------------------------|
-| Installing apps | `claude-docs/app-installation.md` |
+| Topic                  | Doc                                     |
+|------------------------|-----------------------------------------|
+| Agentic workflows      | `claude-docs/agentic-workflows.md`      |
+| Empirical verification | `claude-docs/empirical-verification.md` |
+| Installing apps        | `claude-docs/app-installation.md`       |
 
 ## Architecture
 
