@@ -14,7 +14,7 @@
  *      grace window, the scroll was a genuine no-op (already at the boundary,
  *      where scrollend never fires); resolve immediately. The window is wide
  *      enough that a real animation whose first paint is merely delayed is not
- *      misread as a no-op — the bug the old double-rAF early-exit caused.
+ *      misread as a no-op.
  *   3. scrollend (accelerator) — when it fires, settle on the next frame instead
  *      of waiting out the remaining stability frames.
  *   4. Timeout (TIMEOUT_MS) — hard safety net for pathologically long scrolls.
