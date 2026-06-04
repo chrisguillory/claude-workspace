@@ -55,10 +55,11 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
+from document_search.search_config import rerank_candidate_count
 from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
-from document_search.services.indexing import FILE_CHUNK_TIMEOUT_SECONDS, IndexingService
+from document_search.services.indexing import FILE_CHUNK_TIMEOUT_SECONDS, NUM_EMBED_WORKERS, IndexingService
 from document_search.services.reranker import RerankerService
 from document_search.services.sparse_embedding import SparseEmbeddingService
 
@@ -251,7 +252,7 @@ Returns:
         path: str | Sequence[str] = '.',
         respect_gitignore: bool | None = None,
         stop_after: StopAfterStage | None = None,
-        embed_workers: int = 64,
+        embed_workers: int = NUM_EMBED_WORKERS,
         chunk_timeout_seconds: int = FILE_CHUNK_TIMEOUT_SECONDS,
         include_timing: bool = False,
     ) -> IndexingResult:
@@ -418,7 +419,7 @@ Returns:
 
         # Fetch more candidates for reranking (3x over-fetch for quality, cap at 200)
         effective_limit = min(max(limit, 1), 100)
-        rerank_candidates = min(effective_limit * 3, 200)
+        rerank_candidates = rerank_candidate_count(effective_limit)
 
         # Build search query
         search_query = SearchQuery(

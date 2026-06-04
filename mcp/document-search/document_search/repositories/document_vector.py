@@ -32,6 +32,7 @@ from document_search.schemas.vectors import (
     StorageStats,
     VectorPoint,
 )
+from document_search.search_config import PATH_FILTER_OVERFETCH_FACTOR
 
 __all__ = [
     'DocumentVectorRepository',
@@ -133,7 +134,7 @@ class DocumentVectorRepository:
 
         # Request extra results if we'll be post-filtering by path prefixes
         has_path_filter = bool(query.source_path_prefixes) or bool(query.exclude_path_prefixes)
-        fetch_limit = query.limit * 3 if has_path_filter else query.limit
+        fetch_limit = query.limit * PATH_FILTER_OVERFETCH_FACTOR if has_path_filter else query.limit
 
         raw_results = await self._client.search(
             self._collection_name,

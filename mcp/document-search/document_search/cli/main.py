@@ -41,6 +41,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
+from document_search.search_config import rerank_candidate_count
 from document_search.search_path import (
     ResolvedPaths,
     resolve_filter_paths,
@@ -702,7 +703,7 @@ async def _search_async(
                 sparse_values = np_values.tolist()
 
             effective_limit = min(max(limit, 1), 100)
-            rerank_candidates = min(effective_limit * 3, 200)
+            rerank_candidates = rerank_candidate_count(effective_limit)
 
             search_query = SearchQuery(
                 search_type=search_type,
