@@ -38,7 +38,7 @@ Follow the repo's PR guidelines (CLAUDE.md → *PR Description Guidelines*):
 - **Description** — what changed and the key architectural decisions; old vs new behavior. The diff shows the *how* — don't relitigate it.
 - **Testing** — what was verified and how (automated + empirical).
 
-**Shape — write for an engineer skimming it for the first time** (Chris's recurring feedback):
+**Shape — write for an engineer skimming it for the first time:**
 
 - **TLDR-first, scannable, never imposing** — the gist in a ~20-second skim, no scrolling.
 - **`<details>` for depth** — collapse mechanism write-ups, evidence, and long lists; keep at most one high-impact item at top level.

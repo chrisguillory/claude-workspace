@@ -15,8 +15,8 @@
 
 Collects git/GitHub context and indexes the session transcript for semantic
 search, then emits structured text for the skill prompt. Tailored for
-chrisguillory/claude-workspace — no Linear ticket / no PR template; drafts
-follow the repo's CLAUDE.md PR guidelines.
+chrisguillory/claude-workspace; drafts follow the repo's CLAUDE.md PR
+guidelines.
 
 Usage: gather-pr-context.py [BASE_BRANCH]   (BASE_BRANCH defaults to 'main')
 """
