@@ -290,9 +290,12 @@ class TestModuleStructure:
 def in_tree_file(tmp_path_factory: pytest.TempPathFactory) -> Generator[InTreeFileFactory]:
     """Create a writable file inside the repo (scope-check requires in-tree)."""
     # Use a scratch dir under REPO_ROOT — the hook's scope check requires the file
-    # be under $CLAUDE_EXEC_LAUNCH_DIR.
-    scratch_dir = REPO_ROOT / '.test-scratch'
-    scratch_dir.mkdir(exist_ok=True)
+    # be under $CLAUDE_EXEC_LAUNCH_DIR. Namespace by xdist worker (PYTEST_XDIST_WORKER
+    # is 'gw0'/'gw1'/… under -n, unset serially) so concurrent workers reusing the same
+    # filenames (scratch.py, data.csv, …) can't clobber each other's files mid-test.
+    worker = os.environ.get('PYTEST_XDIST_WORKER', 'serial')
+    scratch_dir = REPO_ROOT / '.test-scratch' / worker
+    scratch_dir.mkdir(parents=True, exist_ok=True)
     files = []
 
     def make(name: str, content: bytes) -> Path:
@@ -304,10 +307,12 @@ def in_tree_file(tmp_path_factory: pytest.TempPathFactory) -> Generator[InTreeFi
     yield make
     for path in files:
         path.unlink(missing_ok=True)
-    try:
-        scratch_dir.rmdir()
-    except OSError:
-        pass
+    # rmdir the worker subdir, then the parent (no-op until the last worker empties it).
+    for directory in (scratch_dir, scratch_dir.parent):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
 
 
 class TestExtensionBlocklist:

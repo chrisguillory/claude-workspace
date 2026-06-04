@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    name: ci # required-status-check context — keep in sync with the branch ruleset
+  checks:
+    name: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -28,10 +28,44 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsnappy-dev zsh
       - name: Sync workspace
         run: uv sync --locked --all-packages --all-groups
+      - name: Restore mypy incremental cache
+        # mypy in pre-commit runs with no incremental cache by default — a full cold check
+        # (~150s) every run. Persisting .mypy_cache lets it re-check only changed files.
+        # Key rotates on uv.lock (mypy / pandas-stubs versions) or pyproject.toml ([tool.mypy]
+        # options); restore-keys guarantees a partial restore so mypy is never fully cold after
+        # the first successful run. .mypy_cache is self-validating, so a stale partial is safe.
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-py3.13-${{ hashFiles('uv.lock', 'pyproject.toml') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-py3.13-
       - name: Lint, format, type-check, custom linters (pre-commit)
         run: uv run pre-commit run --all-files --show-diff-on-failure
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: '3.13'
+          enable-cache: true
+      - name: System dependencies
+        # libsnappy-dev: python-snappy (selenium-browser -> dfindexeddb) builds from source on Linux.
+        # zsh: claude-remote-bash runs commands in /bin/zsh, exercised by the executor tests.
+        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev zsh
+      - name: Sync workspace
+        run: uv sync --locked --all-packages --all-groups
       - name: Tests
-        run: uv run pytest
+        # -n auto: one worker per CPU (2 on ubuntu-latest). Default --dist load spreads
+        # individual tests, which balances far better than loadscope's whole-module
+        # assignment when there are only 2 workers and a few heavy modules. Parallel
+        # safety: ephemeral-port (127.0.0.1:0) servers can't collide; session-scoped
+        # selenium fixtures spin up one headless Chrome per worker; the hooks suite's
+        # scratch dir is namespaced per PYTEST_XDIST_WORKER.
+        run: uv run pytest -n auto
 
   merge-gatekeeper:
     name: merge-gatekeeper # required-status-check context — keep in sync with the branch ruleset
