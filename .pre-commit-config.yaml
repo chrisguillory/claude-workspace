@@ -44,6 +44,14 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: pinact
+        name: pinact
+        description: SHA-pinned actions must carry a # vX.Y.Z version comment (offline presence check)
+        entry: pinact run --no-api -fix=false
+        language: system
+        files: ^\.github/(workflows|actions)/.*\.ya?ml$
+        pass_filenames: true
+
       - id: reexport-linter
         name: reexport-linter
         description: Check for re-exported symbols via __all__
