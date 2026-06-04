@@ -156,10 +156,6 @@ class IndexingResult(StrictModel):
     # Per-file-type breakdown (values are summary strings)
     by_file_type: Mapping[FileType, str] = {}
 
-    # Index state after operation
-    index_files: int = 0  # Total files in index
-    index_chunks: int = 0  # Total chunks in index
-
     # Timing and errors
     elapsed_seconds: float
     errors: Sequence[FileProcessingError]
