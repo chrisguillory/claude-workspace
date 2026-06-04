@@ -495,6 +495,8 @@ Run pre-commit hooks before committing to catch linting/formatting issues:
 uv run pre-commit run --all-files || uv run pre-commit run --all-files
 ```
 
+Most hooks run via `uv`; one needs a system binary — [`pinact`](https://github.com/suzuki-shunsuke/pinact) (the GitHub Actions SHA-pinning hook): `brew install pinact`.
+
 The `||` retry handles auto-fixers (ruff format, trailing whitespace) that modify files on the first run. The second run verifies clean. If the second run fails, it's a real error.
 
 If mypy fails with missing import errors for workspace member dependencies, sync all packages:
