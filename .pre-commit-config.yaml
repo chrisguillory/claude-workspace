@@ -50,6 +50,14 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: zizmor
+        name: zizmor
+        description: GitHub Actions static analysis (SHA-pin enforcement + workflow security)
+        entry: uv run zizmor .github/
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: strict-typing-linter
         name: strict-typing-linter
         description: Check for mutable/loose types in annotations
