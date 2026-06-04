@@ -17,7 +17,9 @@ jobs:
     name: checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: '3.13'
@@ -28,6 +30,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsnappy-dev zsh
       - name: Sync workspace
         run: uv sync --locked --all-packages --all-groups
+      - name: Install pinact
+        # Powers the action version-comment checks: the offline `pinact` pre-commit hook
+        # below, and the online verify step after pre-commit. Go is preinstalled on the runner.
+        run: |
+          go install github.com/suzuki-shunsuke/pinact/v4/cmd/pinact@v4.0.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Restore mypy incremental cache
         # mypy in pre-commit runs with no incremental cache by default — a full cold check
         # (~150s) every run. Persisting .mypy_cache lets it re-check only changed files.
@@ -42,12 +50,21 @@ jobs:
             mypy-${{ runner.os }}-py3.13-
       - name: Lint, format, type-check, custom linters (pre-commit)
         run: uv run pre-commit run --all-files --show-diff-on-failure
+      - name: Verify action version comments (pinact, online)
+        # Online half: confirms each SHA pin's # vX.Y.Z comment actually matches the SHA
+        # upstream (catches a stale/mislabeled pin + the fork-network spoof the offline
+        # pre-commit hook can't see). Uses the workflow's built-in token.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pinact run --verify-comment --check
 
   tests:
     name: tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: '3.13'
