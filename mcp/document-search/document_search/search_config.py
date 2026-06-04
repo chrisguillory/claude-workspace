@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 __all__ = [
+    'HYBRID_PREFETCH_FLOOR',
     'MAX_SEARCH_RESULTS',
     'PATH_FILTER_OVERFETCH_FACTOR',
     'RERANK_CANDIDATE_CAP',
@@ -20,6 +21,11 @@ RERANK_CANDIDATE_CAP = 200
 
 PATH_FILTER_OVERFETCH_FACTOR = 3
 """Extra Qdrant fetch multiplier when post-filtering by path prefix (Qdrant can't prefix-match)."""
+
+HYBRID_PREFETCH_FLOOR = 50
+"""Floor for each hybrid prefetch branch (dense, sparse) before RRF fusion. Prefetch scales
+with the requested candidate count but never drops below this, so small-N queries keep
+fusion depth while large-N queries can still reach the candidate cap."""
 
 MAX_SEARCH_RESULTS = 200
 """User-facing result cap — a product choice, bounded by ``RERANK_CANDIDATE_CAP`` (the

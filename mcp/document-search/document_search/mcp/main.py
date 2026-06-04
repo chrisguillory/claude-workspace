@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 import mcp.server.fastmcp
 import mcp.types
+import pydantic
 
 from document_search.clients import QdrantClient, create_embedding_client
 from document_search.clients.protocols import EmbeddingClient
@@ -55,7 +56,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
-from document_search.search_config import rerank_candidate_count
+from document_search.search_config import clamp_search_limit, format_snippet, rerank_candidate_count
 from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
@@ -321,7 +322,7 @@ Args:
         Use "**" for entire collection (no path filter).
         Accepts a single path string or a list of paths (matches files under ANY).
         "**" must be standalone — cannot be mixed with concrete paths.
-    limit: Maximum number of results to return (1-100).
+    limit: Maximum number of results to return (1-200).
     search_type: Search strategy:
         - 'hybrid' (default): Dense + sparse vectors with RRF fusion.
           Combines semantic similarity with keyword matching.
@@ -334,6 +335,8 @@ Args:
     min_score: Minimum cross-encoder relevance score. The reranker produces
         raw logits where negative = irrelevant, positive = relevant.
         Use 0.0 for "only relevant results", higher for stricter filtering.
+    snippet_chars: Truncate each hit's text to N characters (>= 1). Default
+        returns the full chunk text.
     search_timeout: Qdrant search timeout in seconds. Increase for large
         unfiltered collections (path="**"). Default uses client setting (30s).
 
@@ -359,6 +362,7 @@ Returns:
         file_types: Sequence[FileType] | None = None,
         exclude_paths: Sequence[str] = (),
         min_score: float | None = None,
+        snippet_chars: typing.Annotated[int, pydantic.Field(ge=1)] | None = None,
         search_timeout: int | None = None,
     ) -> SearchResult:
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
@@ -418,7 +422,7 @@ Returns:
             raise NotImplementedError
 
         # Fetch more candidates for reranking (3x over-fetch for quality, cap at 200)
-        effective_limit = min(max(limit, 1), 100)
+        effective_limit = clamp_search_limit(limit)
         rerank_candidates = rerank_candidate_count(effective_limit)
 
         # Build search query
@@ -447,6 +451,14 @@ Returns:
         if min_score is not None:
             filtered_hits = [h for h in result.hits if h.score >= min_score]
             result = SearchResult(hits=filtered_hits, total=len(filtered_hits))
+
+        if snippet_chars is not None:
+            result = SearchResult(
+                hits=[
+                    h.model_copy(update={'text': format_snippet(h.text, max_chars=snippet_chars)}) for h in result.hits
+                ],
+                total=result.total,
+            )
 
         logger.info('Found %s results (reranked top %s)', len(result.hits), effective_limit)
 

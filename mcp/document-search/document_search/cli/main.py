@@ -41,7 +41,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
-from document_search.search_config import rerank_candidate_count
+from document_search.search_config import MAX_SEARCH_RESULTS, clamp_search_limit, format_snippet, rerank_candidate_count
 from document_search.search_path import (
     ResolvedPaths,
     resolve_filter_paths,
@@ -338,13 +338,19 @@ def search(
             help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
     ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
-    limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
+    limit: Annotated[int, typer.Option('--limit', '-n', help=f'Max results (capped at {MAX_SEARCH_RESULTS}).')] = 10,
     search_type: Annotated[SearchType, typer.Option('--type', '-t', help='Search strategy.')] = 'hybrid',
     exclude_paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str], typer.Option('--exclude', '-x', help='Exclude files under these paths.')
     ] = [],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     min_score: Annotated[
         float | None, typer.Option('--min-score', help='Minimum relevance score (0.0 = relevant).')
+    ] = None,
+    snippet_chars: Annotated[
+        int | None,
+        typer.Option(
+            '--snippet-chars', min=1, help='Truncate each result snippet to N chars (default: full text, matching MCP).'
+        ),
     ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
@@ -360,7 +366,15 @@ def search(
     """
     asyncio.run(
         _search_async(
-            query, _resolve_collection(collection), paths, limit, search_type, exclude_paths, min_score, format
+            query,
+            _resolve_collection(collection),
+            paths,
+            limit,
+            search_type,
+            exclude_paths,
+            min_score,
+            snippet_chars,
+            format,
         )
     )
 
@@ -649,6 +663,7 @@ async def _search_async(
     search_type: SearchType,
     exclude_paths: Sequence[str],
     min_score: float | None,
+    snippet_chars: int | None,
     format: OutputFormat,
 ) -> None:
     source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
@@ -702,7 +717,7 @@ async def _search_async(
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
 
-            effective_limit = min(max(limit, 1), 100)
+            effective_limit = clamp_search_limit(limit)
             rerank_candidates = rerank_candidate_count(effective_limit)
 
             search_query = SearchQuery(
@@ -736,8 +751,9 @@ async def _search_async(
                 typer.secho(f'  {hit.score:.4f}  {hit.source_path}', bold=True)
                 if hit.heading_context:
                     typer.echo(f'         {hit.heading_context}')
-                snippet = hit.text[:200].replace('\n', ' ')
-                typer.echo(f'         {snippet}')
+                snippet = format_snippet(hit.text, max_chars=snippet_chars)
+                for line in snippet.split('\n'):
+                    typer.echo(f'         {line}')
                 typer.echo()
         finally:
             sparse_service.shutdown()
