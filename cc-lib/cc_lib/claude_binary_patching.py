@@ -138,97 +138,6 @@ Patches (alphabetical by name):
                     introduced this patch):
                     https://gist.github.com/chrisguillory/8d5d401ac356b47ec078940080726b83
 
-    inject-searching-past-context-prompt
-                    [feature] Inject the "## Searching past context"
-                    section into Claude's system prompt — explicit
-                    grep-paths for the user's auto-memory directory and
-                    project session transcripts. Without this section,
-                    Claude is told *when* to search memory but not
-                    *where*; with it, Claude has copy-paste-ready
-                    commands. Patch short-circuits the gate check
-                    inside ``buildSearchingPastContextSection`` (minified
-                    ``iLH``) so the section always renders.
-
-                    Verbatim prompt text injected (with paths resolved
-                    for the user's home + project)::
-
-                        ## Searching past context
-
-                        When looking for past context:
-                        1. Search topic files in your memory directory:
-                        ```
-                        Grep with pattern="<search term>" path="<autoMemDir>" glob="*.md"
-                        ```
-                        2. Session transcript logs (last resort — large files, slow):
-                        ```
-                        Grep with pattern="<search term>" path="<projectDir>/" glob="*.jsonl"
-                        ```
-                        Use narrow search terms (error messages, file paths, function names) rather than broad keywords.
-
-                    (In ant-internal builds and REPL mode, the Grep-tool
-                    invocations switch to raw ``grep -rn`` shell calls
-                    against the same paths.)
-
-                    Where this section sits in the broader memory prompt
-                    (Piebald-AI prompt-archive, v2.1.126 tag-pinned, MIT;
-                    shows the surrounding sections so you see what's
-                    above/below the gated insertion point):
-                    https://github.com/Piebald-AI/claude-code-system-prompts/blob/v2.1.126/system-prompts/system-prompt-memory-instructions.md#L24
-                    Note: that file shows the placeholder
-                    ``${SEARCHING_PAST_CONTEXT_INSTRUCTIONS}`` because
-                    Anthropic ships the gate at default-false — what's
-                    visible on most users' systems is the placeholder
-                    collapsing to empty.
-
-                    For the expanded body — the actual prompt strings
-                    Claude sees when the gate is open — see the builder
-                    function in the claude-code-best source mirror:
-                    https://github.com/claude-code-best/claude-code/blob/main/src/memdir/memdir.ts#L375-L407
-
-                    Statsig gate ``tengu_coral_fern``, default false in
-                    Anthropic upstream. Not publicly documented by
-                    Anthropic — official memory docs at
-                    https://code.claude.com/docs/en/memory describe the
-                    auto-memory feature but omit the search-prompt
-                    injection mechanism. The flag is invisible to users
-                    from official sources; visible only via the 2026-03-31
-                    source leak and downstream mirrors. Note:
-                    ``LOCAL_GATE_DEFAULTS`` in ``claude-code-best`` shows
-                    ``tengu_coral_fern: true`` — that's the mirror's
-                    override, not Anthropic's intent.
-
-                    Why users want this: github.com/anthropics/claude-code
-                    issue #51116 (open) — users asking for cross-session
-                    memory persistence, unaware it already exists behind
-                    this gate. Issues #48783 and #44820 surface adjacent
-                    auto-memory pain.
-
-                    Related layers (separate, NOT gated by this flag):
-                    - Auto-memory *writer* (extractMemories background
-                      agent) — gated by Statsig flag
-                      ``tengu_passport_quail`` (no env var override).
-                    - Whole auto-memory feature (read + write) — gated by
-                      ``isAutoMemoryEnabled()`` via env
-                      ``CLAUDE_CODE_DISABLE_AUTO_MEMORY`` (1/true → off,
-                      0/false → on; default on). This IS publicly
-                      documented.
-                    - ``/remember`` slash command — gates on
-                      ``isAutoMemoryEnabled()``, NOT on
-                      ``tengu_coral_fern``.
-
-                    Cache-override caveat: same as ``scratchpad`` — cached
-                    ``tengu_coral_fern: false`` in ``~/.claude.json`` overrides
-                    any default. The short-circuit makes the cache irrelevant.
-
-                    Requires: ``autoMemoryEnabled: true`` in ``~/.claude/settings.json``
-                    (top-level, not ``env`` block). Without it ``P4()``
-                    returns false and the patched ``iLH()`` is never
-                    called — the patch is applied but inert.
-
-                    Peer project: github.com/Piebald-AI/tweakcc has a UI
-                    for bypassing this and ``tengu_session_memory``.
-                    Flag introduced in 2.1.21 (last absent: 2.1.20).
-
     scratchpad      [feature] Enable session-scoped scratchpad directory. Creates
                     ``<data_dir>/<project>/<session>/scratchpad`` with auto-
                     permissions for reading and writing. Claude uses this
@@ -286,11 +195,6 @@ Patches (alphabetical by name):
                     https://github.com/anthropics/claude-code/issues/14511
                     https://github.com/anthropics/claude-code/issues/5974
 
-    statusline      [fix] Multi-line truncation (Ink wrap prop regression).
-                    Anchor: ``statusLine?.padding`` (stable since 2.0.0).
-                    Regression introduced in 2.1.51 (last clean: 2.1.50).
-                    https://github.com/anthropics/claude-code/issues/28750
-
 Version-Agnostic Patterns:
     Gate function names (``Tq``, ``lT``, ``Jq``) change per build. Patches
     match the stable argument list instead: ``("flag_name",!1)`` → ``!0``.
@@ -311,32 +215,6 @@ Anchor Presence Survey (2026-03-24, 22+ versions via CDN; extended 2026-04-29)::
     ask rule/safety check requires full permission pipeline  2.1.109         2.1.92
         (pre-diagnostic; scanned across 9 local originals)
 
-Site Count Evolution::
-
-    Tracks longitudinal site counts for the active multi-version-history
-    patch families. Single-version patches (e.g., show-subagent-prompt-tools-response
-    at 2.1.126) live in the Version Log below. Patches removed from the
-    codebase (sm-compact, mcp-array-content-to-string, reject-show-comment,
-    write-session-summary) are gone from this table; their byte-level
-    history lives in git.
-
-    Version   statusline   inject-searching-past-context-prompt
-    2.0.64    0            0
-    2.0.70    0            0
-    2.1.0     0            0
-    2.1.21    0            3
-    2.1.40    0            3
-    2.1.45    —            —
-    2.1.51    2            9
-    2.1.74    2            3
-    2.1.80    2            3
-    2.1.81    2            3
-    2.1.123   2            —
-    2.1.126   2            2
-    2.1.128   2            2
-    2.1.131   2            2
-    2.1.138   1            1
-
 Empirical verification on 2.1.128 (2026-05-06)::
 
     All applicable patches confirmed working in fresh sessions on patched
@@ -346,6 +224,26 @@ Empirical verification on 2.1.128 (2026-05-06)::
       original "Tool use rejected" bug no longer exists
 
 Version Log::
+
+    2.1.162 (2026-06-04)
+        Routine release train since 2.1.138 — the headline was the model jump
+        (Opus 4.7→4.8 at 2.1.154), not CC plumbing. Minified identifiers drifted.
+
+        Patch updates:
+        - force-429-retry-header / force-429-retry-status: re-derived. The
+          isClaudeAISubscriber/isEnterpriseSubscriber identifiers re-minified
+          Eq/gQ_ → Wq/odH. 1 site each, applied + verified.
+        - statusline: REMOVED (obsolete). The Ink wrap-truncation regression is
+          gone upstream — wrap config no longer sits beside statusLine?.padding and
+          truncation is no longer observed. It was one of the two columns in the
+          Site Count Evolution table; with inject also removed, that table is
+          dropped too (no active multi-version-history patches remain).
+        - inject-searching-past-context-prompt: REMOVED. The tengu_coral_fern gate
+          is gone from the binary (0 occurrences in 2.1.162) — nothing left to inject.
+        - scratchpad: DEFERRED. Anchor missing — the gate function was renamed and
+          there are now two tengu_scratch gates (Gl5, N7H) needing disambiguation.
+        - show-subagent-prompt-tools-response: DEFERRED. Anchor missing — React
+          module/component renamed (w8→F8, vu5→ciO); needs a JSX-block re-derive.
 
     2.1.138 (2026-05-09)
         Major architectural change: Anthropic removed the ``__BUN``
@@ -717,10 +615,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'_==="true"&&(!Eq()||gQ_())',
-        new=b'_==="true"&&(!0/*Eq||gQ*/)',
+        old=b'_==="true"&&(!Wq()||odH())',
+        new=b'_==="true"&&(!0/*Wq|odH*/)',
         window=200,
-        min_version=CCVersion('2.1.138'),
+        min_version=CCVersion('2.1.162'),
     ),
     PatchDef(
         name='force-429-retry-status',
@@ -735,10 +633,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'if(H.status===429)return!Eq()||gQ_();',
-        new=b'if(H.status===429)return!0;/*Eq||gQ*/',
+        old=b'if(H.status===429)return!Wq()||odH();',
+        new=b'if(H.status===429)return!0;/*Wq|odH*/',
         window=600,
-        min_version=CCVersion('2.1.138'),
+        min_version=CCVersion('2.1.162'),
     ),
     PatchDef(
         name='hook-ask-no-override',
@@ -749,27 +647,6 @@ PATCHES: Sequence[PatchDef] = (
         new=b'behavior==="xsk"',
         window=200,
         min_version=CCVersion('2.1.109'),
-    ),
-    PatchDef(
-        name='inject-searching-past-context-prompt',
-        description=(
-            'Inject the "## Searching past context" system-prompt section that tells Claude how to grep '
-            "the user's memory directory and session transcripts for past context"
-        ),
-        kind=PatchKind.FEATURE,
-        anchor=b'coral_fern',
-        old=b'if(!M_("tengu_coral_fern",!1))return[]',
-        new=b'if(0/*coral_fern_gate_check*/)return[]',
-        window=80,
-        min_version=CCVersion('2.1.138'),
-        required_setting=[
-            RequiredSetting(
-                key='autoMemoryEnabled',
-                expected_value=True,
-                default_value=True,
-                disable_env_vars=['CLAUDE_CODE_DISABLE_AUTO_MEMORY'],
-            ),
-        ],
     ),
     PatchDef(
         name='scratchpad',
@@ -806,15 +683,6 @@ PATCHES: Sequence[PatchDef] = (
         ),
         window=800,
         min_version=CCVersion('2.1.138'),
-    ),
-    PatchDef(
-        name='statusline',
-        description='Restore multi-line statusline wrapping (fix truncation)',
-        kind=PatchKind.FIX,
-        anchor=b'statusLine?.padding',
-        old=b'wrap:"truncate"',
-        new=b'wrap:"wrap"    ',
-        min_version=CCVersion('2.1.51'),
     ),
 )
 
